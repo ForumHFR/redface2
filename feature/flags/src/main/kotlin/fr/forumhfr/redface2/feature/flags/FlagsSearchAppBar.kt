@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.feature.flags
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -8,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.DropdownMenu
@@ -41,6 +44,10 @@ import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.R as CoreUiR
 
+// #665 — elevated translucency of the app bar container (mirrors RedfaceSearchAppBar's value): enough
+// to read the bar yet let the content be glimpsed gliding behind it.
+private const val FLAGS_APP_BAR_ELEVATED_ALPHA = 0.94f
+
 /** One selectable tab of the Drapeaux app bar picker. [label] already carries the « +lus » suffix. */
 data class FlagTabEntry(val tab: FlagTab, val label: String, val color: Color)
 
@@ -58,12 +65,15 @@ data class FlagTabEntry(val tab: FlagTab, val label: String, val color: Color)
  *   vision). The display-settings gear was retired (#603 polish) — the quick-config sheet is now
  *   opened by re-tapping the Drapeaux bottom-bar icon (#603 PR6), so a duplicate header trigger is gone.
  *
- * The scroll-coupled translucency (elevated app bar + content gliding underneath) is intentionally
- * NOT wired here: it belongs to the deferred scroll-chrome work (cf. the hide-on-scroll deferral),
- * so PR2 keeps the simple top-of-column layout and ships the structure + interactions first.
+ * #665 — the bar is now SUPERPOSED over the list (edge-to-edge « content under the bar »): [elevated]
+ * drives the scroll-coupled translucency exactly like [RedfaceSearchAppBar] — at rest it is opaque
+ * `surface` (continuous with the content), and once the list has scrolled under it the container turns
+ * to a lightly translucent `surfaceContainer` (the content is glimpsed gliding behind) with a 3dp shadow.
+ * The status-bar inset is owned here (the Surface fill extends behind the status bar), since the bar is
+ * no longer inside a Column that pads it.
  */
 @Composable
-@Suppress("LongParameterList") // App-bar API: state + 4 callbacks + the @Composable account slot + modifier.
+@Suppress("LongParameterList") // App-bar API: state + 4 callbacks + the @Composable account slot + modifier + elevated.
 fun FlagsSearchAppBar(
     state: FlagsAppBarState,
     onSelectTab: (FlagTab) -> Unit,
@@ -72,11 +82,33 @@ fun FlagsSearchAppBar(
     onOpenViewSettings: () -> Unit,
     accountMenu: @Composable () -> Unit,
     modifier: Modifier = Modifier,
+    elevated: Boolean = false,
 ) {
-    Surface(modifier = modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface) {
+    // #665 — same elevation idiom as RedfaceSearchAppBar: translucent surfaceContainer + shadow when the
+    // content scrolls under the bar, opaque surface at rest. The search pill keeps its own opaque tone.
+    val containerColor by animateColorAsState(
+        targetValue = if (elevated) {
+            MaterialTheme.colorScheme.surfaceContainer.copy(alpha = FLAGS_APP_BAR_ELEVATED_ALPHA)
+        } else {
+            MaterialTheme.colorScheme.surface
+        },
+        label = "flagsAppBarContainer",
+    )
+    val shadowElevation by animateDpAsState(
+        targetValue = if (elevated) 3.dp else 0.dp,
+        label = "flagsAppBarShadow",
+    )
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = containerColor,
+        shadowElevation = shadowElevation,
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                // #665 — the bar owns its status-bar inset now (was on the parent Column); the Surface
+                // fill thus extends behind the status bar for the edge-to-edge look.
+                .statusBarsPadding()
                 // Asymmetric vertical padding (#603, XaTriX preset D): the bottom is trimmed to 2.dp so
                 // the category band tucks up close under the search bar; the top keeps 8.dp of breathing
                 // room below the status bar.

@@ -1,16 +1,18 @@
 package fr.forumhfr.redface2.feature.flags
 
 import android.annotation.SuppressLint
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -19,8 +21,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -50,8 +52,10 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -61,7 +65,10 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
@@ -69,6 +76,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -123,12 +132,15 @@ import kotlinx.coroutines.launch
  *   ([requestRemoveFlag]) — see [RemovableFlagItem].
  */
 @OptIn(ExperimentalMaterial3Api::class)
-// Intentional: the Scaffold here only anchors the SnackbarHost above system bars; the inner
-// Column applies its own statusBars/navigationBars padding (see comment below). Suppression
+// Intentional: the Scaffold here only anchors the SnackbarHost above system bars; the #665 overlay Box
+// applies its own insets (navigationBars on the root, statusBars owned by the bar). Suppression
 // justified inline at the content lambda usage.
 @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
 @Composable
-@Suppress("LongParameterList") // Screen route: 4 host nav callbacks + the quick-config trigger + the account slot.
+// LongParameterList: screen route — 4 host nav callbacks + the quick-config trigger + the account slot.
+// CyclomaticComplexMethod: screen orchestrator (auth dispatch + overlay + effects), like TopicScreen /
+// SettingsScreen — the scroll/scrim/elevation branches are extracted (flagsBarElevated / FlagsBarScrim).
+@Suppress("LongParameterList", "CyclomaticComplexMethod")
 fun FlagsRoute(
     onOpenFlag: (Flag) -> Unit,
     onLoginRequested: () -> Unit,
@@ -197,6 +209,19 @@ fun FlagsRoute(
         tabUnreadFilter = tabUnreadFilter,
         listState = flagsListState,
     )
+
+    // #665 — the DT tab is a SEPARATE LazyColumn (Cyan/Red/Favorite share flagsListState); it needs its
+    // own hoisted scroll state so the overlay bar can elevate when the DT list scrolls under it.
+    val dtLazyListState = rememberLazyListState()
+    // #665 — overlay top bar (edge-to-edge « content under the bar »): the bar is superposed over the
+    // content, which glides behind it. Its measured height feeds the lists' top contentPadding. The bar
+    // elevates (translucent surfaceContainer + shadow) once the ACTIVE tab's list has scrolled under it
+    // — Super has no list, so it is never elevated.
+    var barHeightPx by remember { mutableIntStateOf(0) }
+    val density = LocalDensity.current
+    val barElevated by remember(flagsListState, dtLazyListState) {
+        derivedStateOf { flagsBarElevated(selectedTab, flagsListState, dtLazyListState) }
+    }
 
     // #546 — recall the list to the top after a LANDING auto-refresh (app open / tab switch /
     // resume): the refresh prepends freshly-surfaced flags and a held scroll position would leave
@@ -309,70 +334,32 @@ fun FlagsRoute(
         containerColor = MaterialTheme.colorScheme.surface,
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { _ ->
-        // The screen already manages its own status/navigation bars padding inside the
-        // Column ; the Scaffold is here purely to anchor the SnackbarHost above the system
-        // bars, so its content padding is intentionally not applied to the Column.
+        // #665 — edge-to-edge « content under the bar »: the Scaffold only anchors the SnackbarHost
+        // above the system bars. The screen owns its insets — navigationBarsPadding on the overlay root
+        // (bottom), the status-bar inset is owned by the bar itself.
         Surface(
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.surface,
         ) {
-            Column(
+            // The content fills the whole area and the search bar is SUPERPOSED on top (drawn last for
+            // z-order), so the list glides behind it. The bar's measured height becomes the content's
+            // top inset ([topContentPadding]).
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .statusBarsPadding()
                     .navigationBarsPadding(),
             ) {
-                FlagsSearchAppBar(
-                    state = FlagsAppBarState(
-                        currentTabColor = flagTabColor(selectedTab),
-                        tabs = flagAppBarTabs(
-                            authState = authState,
-                            showDtTab = showDtTab,
-                            cyanShowsRead = cyanShowsRead,
-                            dtShowsRead = dtShowsRead,
-                        ),
-                        searchEnabled = canConfigureView,
-                        query = searchQuery,
-                        searchActive = searchActive,
-                        // #661 — the picker dropdown surfaces a contextual « +lus » toggle (Cyan/DT) and
-                        // the display-settings sheet for discoverability.
-                        currentTab = selectedTab,
-                        readFilterShowsRead = flagsReadFilterShowsRead(
-                            tab = selectedTab,
-                            cyanShowsRead = cyanShowsRead,
-                            dtShowsRead = dtShowsRead,
-                        ),
-                    ),
-                    onSelectTab = viewModel::selectTab,
-                    onQueryChange = { searchQuery = it },
-                    onSearchActiveChange = { searchActive = it },
-                    // #661 — open the quick-config sheet from the picker (same sheet as the bottom-bar re-tap).
-                    onOpenViewSettings = { showViewSettingsSheet = true },
-                    accountMenu = { topBarActions?.invoke() },
-                )
+                val topContentPadding = with(density) { barHeightPx.toDp() }
 
-                // #603 — thin, flat (non-wavy) M3 progress bar under the app bar, shown during any load
-                // of the current tab: manual pull-to-refresh, auto-refresh AND the initial cold load —
-                // it is now the single loading cue (the central spinner was retired). ADR-017 decision 7.
-                FlagsLoadingBar(
-                    // Anonymous gate: when not authenticated, flagsState stays null and we must NOT show
-                    // the bar over the « Se connecter » prompt (Codex review #648) — short-circuit here
-                    // so the helper stays at 5 params (detekt LongParameterList).
-                    loading = authState is AuthState.Authenticated && flagsLoadingBarVisible(
-                        selectedTab = selectedTab,
-                        flagsState = flagsState,
-                        isRefreshing = isRefreshing,
-                        dtListState = dtListState,
-                        dtIsRefreshing = dtIsRefreshing,
-                    ),
-                )
-
-                // Render nothing while authState is null (cookie jar warming up). Same
-                // anti-flicker convention as PR #91; defaulting to "Anonymous" here would
-                // bring the cold-start "Se connecter" flash back.
+                // CONTENT (drawn first → under the bar). Render nothing while authState is null (cookie
+                // jar warming up) — same anti-flicker convention as PR #91; defaulting to "Anonymous"
+                // here would bring the cold-start "Se connecter" flash back.
                 authState?.let { state ->
                     when (state) {
-                        AuthState.Anonymous -> AnonymousBody(onLoginRequested)
+                        AuthState.Anonymous -> AnonymousBody(
+                            onLoginRequested = onLoginRequested,
+                            topContentPadding = topContentPadding,
+                        )
                         is AuthState.Authenticated -> CompositionLocalProvider(
                             // #603 — single-line topic titles when enabled (GLOBAL pref); the leaf
                             // ForumListRow reads this local, so no threading through list composables.
@@ -380,41 +367,105 @@ fun FlagsRoute(
                                 flagTitleMaxLines(flagsViewSettings.singleLineTitle),
                         ) {
                             AuthenticatedBody(
-                            state = FlagsBodyState(
-                                selectedTab = selectedTab,
-                                flagsState = flagsState,
-                                cyanShowsRead = cyanShowsRead,
-                                isRefreshing = isRefreshing,
-                                removeFlagState = removeFlagState,
-                                showDtTab = showDtTab,
-                                dtListState = dtListState,
-                                dtShowsRead = dtShowsRead,
-                                dtIsRefreshing = dtIsRefreshing,
-                                searchQuery = searchQuery,
-                                markerStyle = flagsViewSettings.markerStyle,
-                                categoryBandStyle = flagsViewSettings.categoryBandStyle,
-                            ),
-                            actions = AuthenticatedActions(
-                                onSelectTab = viewModel::selectTab,
-                                // #378 follow-up — record the read BEFORE navigating: returning
-                                // from this topic must bypass the auto-refresh throttle (the flag
-                                // state just changed), cf. FlagsViewModel.onFlagOpened.
-                                onOpenFlag = { flag ->
-                                    viewModel.onFlagOpened()
-                                    onOpenFlag(flag)
-                                },
-                                onRefresh = viewModel::refresh,
-                                onLoginRequested = onLoginRequested,
-                                onLongPressFlag = { sheetFlag = it },
-                                onOpenCategory = onOpenCategory,
-                                onOpenMultiMp = onOpenMultiMp,
-                                onRefreshDt = viewModel::refreshDt,
-                            ),
-                            listState = flagsListState,
+                                state = FlagsBodyState(
+                                    selectedTab = selectedTab,
+                                    flagsState = flagsState,
+                                    cyanShowsRead = cyanShowsRead,
+                                    isRefreshing = isRefreshing,
+                                    removeFlagState = removeFlagState,
+                                    showDtTab = showDtTab,
+                                    dtListState = dtListState,
+                                    dtShowsRead = dtShowsRead,
+                                    dtIsRefreshing = dtIsRefreshing,
+                                    searchQuery = searchQuery,
+                                    markerStyle = flagsViewSettings.markerStyle,
+                                    categoryBandStyle = flagsViewSettings.categoryBandStyle,
+                                    topContentPadding = topContentPadding,
+                                ),
+                                actions = AuthenticatedActions(
+                                    onSelectTab = viewModel::selectTab,
+                                    // #378 follow-up — record the read BEFORE navigating: returning
+                                    // from this topic must bypass the auto-refresh throttle (the flag
+                                    // state just changed), cf. FlagsViewModel.onFlagOpened.
+                                    onOpenFlag = { flag ->
+                                        viewModel.onFlagOpened()
+                                        onOpenFlag(flag)
+                                    },
+                                    onRefresh = viewModel::refresh,
+                                    onLoginRequested = onLoginRequested,
+                                    onLongPressFlag = { sheetFlag = it },
+                                    onOpenCategory = onOpenCategory,
+                                    onOpenMultiMp = onOpenMultiMp,
+                                    onRefreshDt = viewModel::refreshDt,
+                                ),
+                                listState = flagsListState,
+                                dtListLazyState = dtLazyListState,
                             )
                         }
                     }
                 }
+
+                // BAR UNIT (drawn on top), measured to feed [topContentPadding]. App bar + the thin
+                // loading-bar slot. The loading slot is a FIXED-height box (only the bar inside toggles),
+                // so the measurement is stable and a load never shifts the content.
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .onSizeChanged { barHeightPx = it.height },
+                ) {
+                    Column {
+                        FlagsSearchAppBar(
+                            state = FlagsAppBarState(
+                                currentTabColor = flagTabColor(selectedTab),
+                                tabs = flagAppBarTabs(
+                                    authState = authState,
+                                    showDtTab = showDtTab,
+                                    cyanShowsRead = cyanShowsRead,
+                                    dtShowsRead = dtShowsRead,
+                                ),
+                                searchEnabled = canConfigureView,
+                                query = searchQuery,
+                                searchActive = searchActive,
+                                // #661 — the picker dropdown surfaces a contextual « +lus » toggle
+                                // (Cyan/DT) and the display-settings sheet for discoverability.
+                                currentTab = selectedTab,
+                                readFilterShowsRead = flagsReadFilterShowsRead(
+                                    tab = selectedTab,
+                                    cyanShowsRead = cyanShowsRead,
+                                    dtShowsRead = dtShowsRead,
+                                ),
+                            ),
+                            onSelectTab = viewModel::selectTab,
+                            onQueryChange = { searchQuery = it },
+                            onSearchActiveChange = { searchActive = it },
+                            // #661 — open the quick-config sheet from the picker (same sheet as the
+                            // bottom-bar re-tap).
+                            onOpenViewSettings = { showViewSettingsSheet = true },
+                            accountMenu = { topBarActions?.invoke() },
+                            // #665 — elevate (translucent + shadow) once the active list scrolls under.
+                            elevated = barElevated,
+                        )
+
+                        // #603 — thin, flat (non-wavy) M3 progress bar under the app bar, shown during
+                        // any load of the current tab: manual pull-to-refresh, auto-refresh AND the
+                        // initial cold load — single loading cue (central spinner retired). ADR-017 dec.7.
+                        FlagsLoadingBar(
+                            // Anonymous gate: when not authenticated, flagsState stays null and we must
+                            // NOT show the bar over the « Se connecter » prompt (Codex review #648) —
+                            // short-circuit so the helper stays at 5 params (detekt LongParameterList).
+                            loading = authState is AuthState.Authenticated && flagsLoadingBarVisible(
+                                selectedTab = selectedTab,
+                                flagsState = flagsState,
+                                isRefreshing = isRefreshing,
+                                dtListState = dtListState,
+                                dtIsRefreshing = dtIsRefreshing,
+                            ),
+                        )
+                    }
+                }
+
+                // SCRIM just below the bar — extracted to keep FlagsRoute under the complexity budget.
+                FlagsBarScrim(elevated = barElevated, barHeightPx = barHeightPx)
             }
         }
     }
@@ -881,11 +932,13 @@ private fun FlagsLoadingBar(loading: Boolean) {
 // #603 PR2 — empty state of an active search with no match. Scrollable so the surrounding
 // PullToRefreshBox keeps a swipe target on this listless state (#229).
 @Composable
-private fun NoFlagsSearchResults(query: String) {
+private fun NoFlagsSearchResults(query: String, topContentPadding: Dp) {
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
+            // #665 — clear the overlay bar before the standard 24dp inset.
+            .padding(top = topContentPadding)
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -897,11 +950,52 @@ private fun NoFlagsSearchResults(query: String) {
     }
 }
 
+/**
+ * #665 — whether the overlay search bar is elevated for the ACTIVE tab: the bar lifts once that tab's
+ * list has scrolled under it. Super has no list (never elevated); Cyan/Red/Favorite share
+ * [flagsListState]; DT has its own [dtLazyListState]. Read inside a `derivedStateOf` so the
+ * `canScrollBackward` reads are observed. Extracted from [FlagsRoute] to keep it under the complexity
+ * budget.
+ */
+private fun flagsBarElevated(
+    selectedTab: FlagTab,
+    flagsListState: LazyListState,
+    dtLazyListState: LazyListState,
+): Boolean = when (selectedTab) {
+    FlagTab.Super -> false
+    FlagTab.Dt -> dtLazyListState.canScrollBackward
+    else -> flagsListState.canScrollBackward
+}
+
+/**
+ * #665 — the short surfaceContainer→transparent gradient drawn just below the overlay bar (at
+ * [barHeightPx]) that melts the content emerging from under it (no hard cut). Only visible while the
+ * bar is [elevated]. Extracted as a composable to keep [FlagsRoute] under the complexity budget.
+ */
 @Composable
-private fun AnonymousBody(onLoginRequested: () -> Unit) {
+private fun BoxScope.FlagsBarScrim(elevated: Boolean, barHeightPx: Int) {
+    val scrimAlpha by animateFloatAsState(
+        targetValue = if (elevated) 1f else 0f,
+        label = "flagsBarScrim",
+    )
+    val scrimTop = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = scrimAlpha)
+    Box(
+        modifier = Modifier
+            .align(Alignment.TopCenter)
+            .fillMaxWidth()
+            .offset { IntOffset(0, barHeightPx) }
+            .height(24.dp)
+            .background(Brush.verticalGradient(listOf(scrimTop, Color.Transparent))),
+    )
+}
+
+@Composable
+private fun AnonymousBody(onLoginRequested: () -> Unit, topContentPadding: Dp) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            // #665 — clear the overlay bar; the login prompt sits just below it.
+            .padding(top = topContentPadding)
             .padding(horizontal = 24.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -921,12 +1015,15 @@ private fun AnonymousBody(onLoginRequested: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ColumnScope.AuthenticatedBody(
+private fun AuthenticatedBody(
     state: FlagsBodyState,
     actions: AuthenticatedActions,
     // #385 — hoisted by FlagsRoute so the filter-flip effect can reset the scroll. One state
     // shared by the grouped and flat lists (only one is composed at a time).
     listState: LazyListState,
+    // #665 — separate hoisted scroll state for the DT LazyColumn, so the overlay bar can elevate on
+    // DT scroll. (No longer a ColumnScope: this body now fills the overlay Box, not a Column slot.)
+    dtListLazyState: LazyListState,
 ) {
     val selectedTab = state.selectedTab
     // #603 PR2 — the text PrimaryTabRow is gone: the app-bar flag picker (FlagsSearchAppBar) now
@@ -964,10 +1061,10 @@ private fun ColumnScope.AuthenticatedBody(
     }
     Box(
         modifier = Modifier
-            .fillMaxWidth()
-            // Without weight(1f) the box would not claim the remaining vertical space inside
-            // the parent Column, breaking the gesture areas on short lists.
-            .weight(1f)
+            // #665 — fills the overlay Box (was weight(1f) inside a Column). The swipe gesture covers
+            // the whole body, incl. the area under the translucent bar; the bar, drawn on top, consumes
+            // its own taps.
+            .fillMaxSize()
             .flagsTabSwipe(
                 currentIndex = { updatedSelectedIndex.value },
                 tabCount = { updatedTabs.value.size },
@@ -977,13 +1074,15 @@ private fun ColumnScope.AuthenticatedBody(
     ) {
         when (selectedTab) {
             // Super has no backend, no fetch, no pull-to-refresh (cf. its KDoc).
-            FlagTab.Super -> SuperPlaceholderBody()
+            FlagTab.Super -> SuperPlaceholderBody(topContentPadding = state.topContentPadding)
             // #6 — DT is a real list now: the user's MultiMP conversations, enriched best-effort
             // with the MPStorage reading positions.
             FlagTab.Dt -> DtListBody(
                 state = state.dtListState,
                 isRefreshing = state.dtIsRefreshing,
                 actions = actions,
+                lazyListState = dtListLazyState,
+                topContentPadding = state.topContentPadding,
             )
             else -> FlagListBody(state = state, actions = actions, listState = listState)
         }
@@ -1074,7 +1173,14 @@ private fun FlagListBody(
         onRefresh = actions.onRefresh,
         state = pullState,
         indicator = {
-            FlagsPullAmorce(pullState, state.isRefreshing, Modifier.align(Alignment.TopCenter))
+            // #665 — push the pull cue BELOW the overlay bar, else it draws behind the translucent bar.
+            FlagsPullAmorce(
+                pullState,
+                state.isRefreshing,
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = state.topContentPadding),
+            )
         },
         modifier = Modifier.fillMaxSize(),
     ) {
@@ -1095,6 +1201,8 @@ private fun FlagListBody(
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
+                    // #665 — clear the overlay bar before the standard 24dp inset.
+                    .padding(top = state.topContentPadding)
                     .padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -1135,7 +1243,10 @@ private fun FlagListBody(
                     current.content.filteredBy(state.searchQuery)
                 }
                 if (state.searchQuery.isNotBlank() && content.isEmpty()) {
-                    NoFlagsSearchResults(query = state.searchQuery)
+                    NoFlagsSearchResults(
+                        query = state.searchQuery,
+                        topContentPadding = state.topContentPadding,
+                    )
                 } else {
                     when (content) {
                         is FlagsContent.Grouped -> CategorySectionedFlagList(
@@ -1146,6 +1257,7 @@ private fun FlagListBody(
                             categoryBandStyle = state.categoryBandStyle,
                             actions = actions,
                             listState = listState,
+                            topContentPadding = state.topContentPadding,
                         )
 
                         is FlagsContent.Flat -> FlatFlagList(
@@ -1155,6 +1267,7 @@ private fun FlagListBody(
                             markerStyle = state.markerStyle,
                             actions = actions,
                             listState = listState,
+                            topContentPadding = state.topContentPadding,
                         )
                     }
                 }
@@ -1230,7 +1343,8 @@ private const val CONTENT_TYPE_DT_FOOTER = "dt_scan_note"
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-@Suppress("LongParameterList") // List composable: sections + tab + removal + marker + band + actions + listState.
+// List composable: sections + tab + removal + marker + band + actions + listState + topPad.
+@Suppress("LongParameterList")
 private fun CategorySectionedFlagList(
     sections: List<FlagCategorySection>,
     selectedTab: FlagTab,
@@ -1239,12 +1353,16 @@ private fun CategorySectionedFlagList(
     categoryBandStyle: CategoryBandStyle,
     actions: AuthenticatedActions,
     listState: LazyListState,
+    topContentPadding: Dp,
 ) {
     LazyColumn(
         state = listState,
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface),
+        // #665 — the list glides under the overlay bar: its first item (and the sticky category band)
+        // starts just below the bar, then scrolls behind it.
+        contentPadding = PaddingValues(top = topContentPadding),
     ) {
         // « Masquer les catégories sans non-lu » can filter every section out (no unread anywhere,
         // or all-read CYAN with « +lus » off). Without this guard the LazyColumn would render an
@@ -1522,7 +1640,7 @@ private fun emptySectionLabel(tab: FlagTab): Int = when (tab) {
  * and accessibility action behave identically to the grouped view.
  */
 @Composable
-@Suppress("LongParameterList") // List composable: flags + tab + removal flag + marker + actions + listState.
+@Suppress("LongParameterList") // List composable: flags + tab + removal flag + marker + actions + listState + topPad.
 private fun FlatFlagList(
     flags: List<Flag>,
     selectedTab: FlagTab,
@@ -1530,12 +1648,15 @@ private fun FlatFlagList(
     markerStyle: MarkerStyle,
     actions: AuthenticatedActions,
     listState: LazyListState,
+    topContentPadding: Dp,
 ) {
     LazyColumn(
         state = listState,
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface),
+        // #665 — first item starts just below the overlay bar, then scrolls behind it.
+        contentPadding = PaddingValues(top = topContentPadding),
     ) {
         if (flags.isEmpty()) {
             item(key = "flat-empty", contentType = CONTENT_TYPE_EMPTY) {
@@ -1660,10 +1781,12 @@ private fun RemovableFlagItem(
  * network call — just an explanatory message until the feature ships.
  */
 @Composable
-private fun SuperPlaceholderBody() {
+private fun SuperPlaceholderBody(topContentPadding: Dp) {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            // #665 — clear the overlay bar before the placeholder copy.
+            .padding(top = topContentPadding)
             .padding(horizontal = 24.dp, vertical = 32.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -1737,7 +1860,13 @@ private fun DtTabOpenEffect(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DtListBody(state: DtListUiState, isRefreshing: Boolean, actions: AuthenticatedActions) {
+private fun DtListBody(
+    state: DtListUiState,
+    isRefreshing: Boolean,
+    actions: AuthenticatedActions,
+    lazyListState: LazyListState,
+    topContentPadding: Dp,
+) {
     // #546 directive XaTriX — pull-to-refresh (swipe down) on the DT list, like the flag tabs. Wraps
     // the whole body (every branch) so the gesture has a target even on the listless states (#229).
     // #603 — « amorce seule » (XaTriX): pull cue while dragging, nothing during the refresh; the top
@@ -1748,11 +1877,23 @@ private fun DtListBody(state: DtListUiState, isRefreshing: Boolean, actions: Aut
         onRefresh = actions.onRefreshDt,
         state = pullState,
         indicator = {
-            FlagsPullAmorce(pullState, isRefreshing, Modifier.align(Alignment.TopCenter))
+            // #665 — push the pull cue below the overlay bar (else it draws behind it).
+            FlagsPullAmorce(
+                pullState,
+                isRefreshing,
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = topContentPadding),
+            )
         },
         modifier = Modifier.fillMaxSize(),
     ) {
-        DtListContent(state = state, actions = actions)
+        DtListContent(
+            state = state,
+            actions = actions,
+            lazyListState = lazyListState,
+            topContentPadding = topContentPadding,
+        )
     }
 }
 
@@ -1762,7 +1903,12 @@ private fun DtListBody(state: DtListUiState, isRefreshing: Boolean, actions: Aut
  * vertically scrollable so the surrounding `PullToRefreshBox` keeps a target (#229).
  */
 @Composable
-private fun DtListContent(state: DtListUiState, actions: AuthenticatedActions) {
+private fun DtListContent(
+    state: DtListUiState,
+    actions: AuthenticatedActions,
+    lazyListState: LazyListState,
+    topContentPadding: Dp,
+) {
     when (state) {
         DtListUiState.Loading -> Box(
             // #603 — central spinner retired (cf. FlagListBody); the top FlagsLoadingBar covers the DT
@@ -1772,18 +1918,28 @@ private fun DtListContent(state: DtListUiState, actions: AuthenticatedActions) {
                 .verticalScroll(rememberScrollState()),
         )
 
-        DtListUiState.Empty -> DtMessageBody(text = stringResource(R.string.flags_dt_empty))
+        DtListUiState.Empty -> DtMessageBody(
+            text = stringResource(R.string.flags_dt_empty),
+            topContentPadding = topContentPadding,
+        )
 
         // #546 — the union is non-empty but « non-lus uniquement » hid every row: a dedicated message
         // (not the « aucune conversation » empty copy). Re-tapping the DT tab reveals « +lus ».
-        DtListUiState.NoUnread -> DtNoUnreadBody()
+        DtListUiState.NoUnread -> DtNoUnreadBody(topContentPadding = topContentPadding)
 
-        is DtListUiState.Error -> DtErrorBody(cause = state.cause, actions = actions)
+        is DtListUiState.Error -> DtErrorBody(
+            cause = state.cause,
+            actions = actions,
+            topContentPadding = topContentPadding,
+        )
 
         is DtListUiState.Content -> LazyColumn(
+            state = lazyListState,
             modifier = Modifier
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.surface),
+            // #665 — DT list glides under the overlay bar like the flag lists.
+            contentPadding = PaddingValues(top = topContentPadding),
         ) {
             // DT now renders through the SAME row primitive + divider as the Cyan/Red/Favorite lists
             // (no Card, no contentPadding/spacing) so the four lists stay visually identical and a
@@ -1862,12 +2018,14 @@ internal fun dtRowWasUnread(item: DtListItem): Boolean = when (item) {
  * Scrollable so the surrounding `PullToRefreshBox` keeps a swipe target (#229).
  */
 @Composable
-private fun DtNoUnreadBody() {
+private fun DtNoUnreadBody(topContentPadding: Dp) {
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .background(MaterialTheme.colorScheme.surface)
+            // #665 — clear the overlay bar before the standard inset.
+            .padding(top = topContentPadding)
             .padding(horizontal = 24.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
@@ -1890,12 +2048,14 @@ private fun DtNoUnreadBody() {
  * non-scrollable body would give the pull-to-refresh gesture nothing to anchor on.
  */
 @Composable
-private fun DtMessageBody(text: String) {
+private fun DtMessageBody(text: String, topContentPadding: Dp) {
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
             .verticalScroll(rememberScrollState())
+            // #665 — clear the overlay bar before the standard 24dp inset.
+            .padding(top = topContentPadding)
             .padding(24.dp),
     ) {
         Text(
@@ -1912,11 +2072,13 @@ private fun DtMessageBody(text: String) {
  * best-effort) — only the inbox primary load.
  */
 @Composable
-private fun DtErrorBody(cause: Throwable, actions: AuthenticatedActions) {
+private fun DtErrorBody(cause: Throwable, actions: AuthenticatedActions, topContentPadding: Dp) {
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
+            // #665 — clear the overlay bar before the standard 24dp inset.
+            .padding(top = topContentPadding)
             .padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -2065,6 +2227,12 @@ private data class FlagsBodyState(
     val markerStyle: MarkerStyle = MarkerStyle.STRIPE,
     /** #603 — GLOBAL category band style for the grouped view (from FlagsViewSettings). */
     val categoryBandStyle: CategoryBandStyle = CategoryBandStyle.MINIMAL,
+    /**
+     * #665 — top inset for the overlay search bar: the lists glide UNDER the bar, so their first item
+     * starts this far down (= the bar's measured height). Applied as `contentPadding.top` on every
+     * LazyColumn and as a top padding on the listless states + the pull-to-refresh indicator.
+     */
+    val topContentPadding: Dp = 0.dp,
 )
 
 private data class AuthenticatedActions(
