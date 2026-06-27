@@ -1,5 +1,5 @@
-Redface 2 v0.17.16 — dev.
+Redface 2 v0.17.17 — dev.
 
 Vue Drapeaux :
-- Les sujets cyan d'une catégorie ajoutée récemment sur HFR (ex. « IA ») réapparaissent dans la liste.
-- La couleur du drapeau favori repasse au jaune (elle virait au vert).
+- La couleur du drapeau favori devient un jaune-ambre lisible aussi sur le thème clair.
+- Le défilement de chaque onglet (Mes sujets / Lu / Favoris) est indépendant : il ne saute plus d'un onglet à l'autre.
