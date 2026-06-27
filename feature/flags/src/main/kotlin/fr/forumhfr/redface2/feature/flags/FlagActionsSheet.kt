@@ -75,18 +75,22 @@ fun FlagActionsSheet(
                 .padding(bottom = 12.dp),
         ) {
             SheetHeader(flag = flag)
-            // #676 (mockup F2) — the actions live on a SINGLE row of icon buttons (they used to be a
-            // vertical list — « mal disposé »). « Retirer » is the 5th, error-tinted ; it still routes
-            // through the existing removal confirmation dialog (actions.onRemove), so a mis-tap is
-            // recoverable. The « catégorie · position » lives in the metadata block right below.
-            QuickActionsBar(
+            // #676 (retour XaTriX) — TWO surfaces over the SAME action model ([sheetActionItems]) so the
+            // row and the list can never drift: the quick-access icon ROW at the top (compact, fast) and
+            // the full-label vertical LIST at the bottom ([FlagActionsList]). The v194 version had dropped
+            // the list (the misunderstanding); both are restored. « Retirer » is last in each and still
+            // routes through the removal confirmation dialog, never a one-tap destruction.
+            val items = sheetActionItems(
                 isSuperFavorite = isSuperFavorite,
                 actions = actions,
                 onCopyLink = { copyTopicLink(context, flagTopicUrl(flag), linkCopied) },
                 onOpenBrowser = { openTopicInBrowser(context, flagTopicUrl(flag), browserFailed) },
             )
+            QuickActionsBar(items = items)
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             FlagMetadataBlock(flag = flag, categoryName = categoryName)
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            FlagActionsList(items = items)
         }
     }
 }
@@ -121,18 +125,81 @@ private fun SheetHeader(flag: Flag) {
 }
 
 /**
- * #676 (mockup F2) — the five topic actions on a single row of icon buttons (replaces the old vertical
- * list). « Retirer » is the last button, error-tinted: removal still goes through the existing
- * confirmation dialog ([FlagSheetActions.onRemove]), so its placement here is not a one-tap destruction.
- * Takes the whole [actions] bundle (rather than four separate lambdas) to stay under the parameter cap.
+ * #676 — single source of the five sheet actions (order + icon + callbacks + tint), consumed by BOTH
+ * the quick-access [QuickActionsBar] (short [quickLabel]) and the full-label [FlagActionsList]
+ * ([fullLabel]) so the two surfaces can never drift apart. [destructive] = « Retirer » (error tint, still
+ * gated by the removal confirmation dialog).
  */
+private class SheetActionItem(
+    @DrawableRes val iconRes: Int,
+    val quickLabel: String,
+    val fullLabel: String,
+    val onClick: () -> Unit,
+    val iconTint: Color,
+    val destructive: Boolean = false,
+)
+
 @Composable
-private fun QuickActionsBar(
+private fun sheetActionItems(
     isSuperFavorite: Boolean,
     actions: FlagSheetActions,
     onCopyLink: () -> Unit,
     onOpenBrowser: () -> Unit,
-) {
+): List<SheetActionItem> {
+    val variant = MaterialTheme.colorScheme.onSurfaceVariant
+    return listOf(
+        SheetActionItem(
+            iconRes = CoreUiR.drawable.ic_ms_forum,
+            quickLabel = stringResource(R.string.flags_sheet_quick_open),
+            fullLabel = stringResource(R.string.flags_sheet_action_open),
+            onClick = actions.onOpen,
+            iconTint = variant,
+        ),
+        SheetActionItem(
+            iconRes = CoreUiR.drawable.ic_ms_star,
+            quickLabel = stringResource(R.string.flags_sheet_quick_super_favorite),
+            fullLabel = stringResource(
+                if (isSuperFavorite) {
+                    R.string.flags_sheet_action_super_favorite_remove
+                } else {
+                    R.string.flags_sheet_action_super_favorite_add
+                },
+            ),
+            onClick = actions.onToggleSuperFavorite,
+            // Amber icon mirrors the « active » cue in both surfaces.
+            iconTint = if (isSuperFavorite) FlagPalette.Favorite else variant,
+        ),
+        SheetActionItem(
+            iconRes = CoreUiR.drawable.ic_ms_content_copy,
+            quickLabel = stringResource(R.string.flags_sheet_quick_copy),
+            fullLabel = stringResource(R.string.flags_sheet_action_copy),
+            onClick = onCopyLink,
+            iconTint = variant,
+        ),
+        SheetActionItem(
+            iconRes = CoreUiR.drawable.ic_ms_open_in_new,
+            quickLabel = stringResource(R.string.flags_sheet_quick_browser),
+            fullLabel = stringResource(R.string.flags_sheet_action_browser),
+            onClick = onOpenBrowser,
+            iconTint = variant,
+        ),
+        SheetActionItem(
+            iconRes = CoreUiR.drawable.ic_ms_delete,
+            quickLabel = stringResource(R.string.flags_sheet_quick_remove),
+            fullLabel = stringResource(R.string.flags_sheet_action_remove),
+            onClick = actions.onRemove,
+            iconTint = MaterialTheme.colorScheme.error,
+            destructive = true,
+        ),
+    )
+}
+
+/**
+ * #676 (mockup F2) — the quick-access ROW of icon buttons at the top of the sheet (short labels). The
+ * full-label [FlagActionsList] coexists at the bottom (retour XaTriX), both driven by [sheetActionItems].
+ */
+@Composable
+private fun QuickActionsBar(items: List<SheetActionItem>) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -142,38 +209,15 @@ private fun QuickActionsBar(
     ) {
         // Each button takes an equal share of the row (weight 1f) so the five fit edge-to-edge and never
         // clip on a narrow screen (~320dp), rather than a fixed width that could overflow.
-        QuickActionButton(
-            modifier = Modifier.weight(1f),
-            iconRes = CoreUiR.drawable.ic_ms_forum,
-            label = stringResource(R.string.flags_sheet_quick_open),
-            onClick = actions.onOpen,
-        )
-        QuickActionButton(
-            modifier = Modifier.weight(1f),
-            iconRes = CoreUiR.drawable.ic_ms_star,
-            label = stringResource(R.string.flags_sheet_quick_super_favorite),
-            onClick = actions.onToggleSuperFavorite,
-            tint = if (isSuperFavorite) FlagPalette.Favorite else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        QuickActionButton(
-            modifier = Modifier.weight(1f),
-            iconRes = CoreUiR.drawable.ic_ms_content_copy,
-            label = stringResource(R.string.flags_sheet_quick_copy),
-            onClick = onCopyLink,
-        )
-        QuickActionButton(
-            modifier = Modifier.weight(1f),
-            iconRes = CoreUiR.drawable.ic_ms_open_in_new,
-            label = stringResource(R.string.flags_sheet_quick_browser),
-            onClick = onOpenBrowser,
-        )
-        QuickActionButton(
-            modifier = Modifier.weight(1f),
-            iconRes = CoreUiR.drawable.ic_ms_delete,
-            label = stringResource(R.string.flags_sheet_quick_remove),
-            onClick = actions.onRemove,
-            tint = MaterialTheme.colorScheme.error,
-        )
+        items.forEach { item ->
+            QuickActionButton(
+                modifier = Modifier.weight(1f),
+                iconRes = item.iconRes,
+                label = item.quickLabel,
+                onClick = item.onClick,
+                tint = item.iconTint,
+            )
+        }
     }
 }
 
@@ -205,6 +249,54 @@ private fun QuickActionButton(
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+/**
+ * #676 (retour XaTriX) — the full-label vertical action list at the bottom of the sheet, coexisting with
+ * the quick-access [QuickActionsBar] row above (the row = fast icons, the list = explicit labels). Driven
+ * by the shared [sheetActionItems]; « Retirer » ([SheetActionItem.destructive]) is error-tinted and still
+ * routed through the removal confirmation dialog.
+ */
+@Composable
+private fun FlagActionsList(items: List<SheetActionItem>) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        items.forEach { item ->
+            FlagActionRow(
+                iconRes = item.iconRes,
+                label = item.fullLabel,
+                onClick = item.onClick,
+                iconTint = item.iconTint,
+                labelColor = if (item.destructive) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun FlagActionRow(
+    @DrawableRes iconRes: Int,
+    label: String,
+    onClick: () -> Unit,
+    iconTint: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    labelColor: Color = MaterialTheme.colorScheme.onSurface,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = 24.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(20.dp),
+    ) {
+        // The icon carries no contentDescription: the visible [label] is the row's accessible name
+        // (TalkBack reads the whole clickable Row, announced as a button via role).
+        RedfaceVectorIcon(resId = iconRes, contentDescription = null, tint = iconTint)
+        Text(text = label, style = MaterialTheme.typography.bodyLarge, color = labelColor)
     }
 }
 
