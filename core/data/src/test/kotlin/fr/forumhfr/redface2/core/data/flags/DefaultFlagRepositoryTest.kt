@@ -255,12 +255,61 @@ class DefaultFlagRepositoryTest {
     }
 
     @Test
+    fun `loadCategories takes a fresh catalogue so a newly added category's flags are fetched - 251`() = runTest {
+        // #251 — a category added to HFR after the 24h categories cache was warmed (e.g. cat 32
+        // « IA ») must still have its drapeaux fetched. The fan-out previously read
+        // observeCategories()'s STALE leading emission and silently skipped the new category, so
+        // its cyans were invisible. It now asks for a guaranteed-fresh catalogue.
+        // sampleCategories (13, 23) is the stale catalogue without cat 32; the fan-out must instead
+        // enumerate the FRESH catalogue returned by getCategories(forceRefreshIfStale = true).
+        val freshCatalogue = sampleCategories +
+            Category(id = 32, name = "Intelligence Artificielle", forceSubcat = false, subcategoryCount = 1)
+        val apiClient = mockk<HfrApiClient>()
+        val forumRepository = mockk<ForumRepository>()
+        coEvery { forumRepository.getCategories(forceRefreshIfStale = true) } returns
+            ForumResult.Success(freshCatalogue)
+        // Only the newly-added cat 32 carries a flagged topic; the rest are empty.
+        coEvery {
+            apiClient.getCategoryFlagTopics(
+                cat = 13, bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true,
+            )
+        } returns EMPTY_PAGE
+        coEvery {
+            apiClient.getCategoryFlagTopics(
+                cat = 23, bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true,
+            )
+        } returns EMPTY_PAGE
+        coEvery {
+            apiClient.getCategoryFlagTopics(
+                cat = 32, bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true,
+            )
+        } returns capturedParticipatedFixture
+        val repo = buildRepository(apiClient, forumRepository)
+
+        repo.observe(FlagType.CYAN).test {
+            assertEquals(FlagsResult.Loading, awaitItem())
+            val success = awaitItem() as FlagsResult.Success
+            assertEquals("the flag from the newly-added category must be present", 1, success.flags.size)
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify {
+            apiClient.getCategoryFlagTopics(
+                cat = 32, bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = 1, resultsPerPage = 50, useAuth = true,
+            )
+        }
+    }
+
+    @Test
     fun `observe emits Failure when categories cannot be loaded`() = runTest {
         val apiClient = mockk<HfrApiClient>(relaxed = true)
         val forumRepository = mockk<ForumRepository>()
-        coEvery { forumRepository.observeCategories() } returns flowOf(
-            ForumResult.Failure(IOException("HFR down")),
-        )
+        coEvery { forumRepository.getCategories(any()) } returns
+            ForumResult.Failure(IOException("HFR down"))
         val repo = buildRepository(apiClient, forumRepository)
 
         repo.observe(FlagType.CYAN).test {
@@ -875,6 +924,7 @@ class DefaultFlagRepositoryTest {
     private fun stubForumRepository(categories: List<Category>): ForumRepository {
         val repo = mockk<ForumRepository>()
         coEvery { repo.observeCategories() } returns flowOf(ForumResult.Success(categories))
+        coEvery { repo.getCategories(any()) } returns ForumResult.Success(categories)
         return repo
     }
 

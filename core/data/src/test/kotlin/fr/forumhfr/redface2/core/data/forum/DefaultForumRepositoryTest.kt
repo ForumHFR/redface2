@@ -192,6 +192,118 @@ class DefaultForumRepositoryTest {
     }
 
     @Test
+    fun `getCategories returns the fresh cache without a network fetch`() = runTest {
+        val apiClient = mockk<HfrApiClient> {
+            coEvery { getCategories(any()) } returns fixture("rest_categories.json")
+        }
+        val repo = repository(apiClient)
+
+        // Warm the cache (one network fetch).
+        repo.observeCategories().test {
+            awaitItem() // Loading
+            awaitItem() // Success
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        val forced = repo.getCategories(forceRefreshIfStale = true)
+        val unforced = repo.getCategories(forceRefreshIfStale = false)
+
+        // A fresh cache is served from memory regardless of the flag — same cached value, single fetch.
+        val cachedValue = (forced as ForumResult.Success).value
+        assertTrue("the cached categories must be non-empty", cachedValue.isNotEmpty())
+        assertEquals(cachedValue, (unforced as ForumResult.Success).value)
+        coVerify(exactly = 1) { apiClient.getCategories(any()) }
+    }
+
+    @Test
+    fun `getCategories degrades to the stale cache when the forced refresh fails`() = runTest {
+        // #251 follow-up (code review) — when the forced refresh hits a transient categories-endpoint
+        // failure but a stale cache exists, getCategories must DEGRADE to last-known-good rather than
+        // failing the caller (the flags fan-out would otherwise blank the whole Drapeaux screen on a
+        // momentary outage). A cold cache, having nothing to fall back to, still surfaces the Failure.
+        val apiClient = mockk<HfrApiClient> {
+            coEvery { getCategories(any()) } returns fixture("rest_categories.json") andThenThrows
+                java.io.IOException("offline")
+        }
+        val mutableClock = MutableClock(Instant.parse("2026-04-26T18:00:00Z"))
+        val repo = repository(apiClient, clock = mutableClock)
+
+        // Warm the cache (1st network call succeeds), then age it past the 24h TTL.
+        repo.observeCategories().test {
+            awaitItem() // Loading
+            awaitItem() // Success
+            cancelAndIgnoreRemainingEvents()
+        }
+        mutableClock.advance(java.time.Duration.ofHours(25))
+
+        // Forced refresh fires the 2nd network call which throws → degrade to the stale cache.
+        val result = repo.getCategories(forceRefreshIfStale = true)
+
+        assertTrue("expected degraded Success (last-known-good), got $result", result is ForumResult.Success)
+        assertTrue((result as ForumResult.Success).value.isNotEmpty())
+        coVerify(exactly = 2) { apiClient.getCategories(any()) }
+    }
+
+    @Test
+    fun `getCategories forces a network re-fetch when the cache is stale - 251`() = runTest {
+        val apiClient = mockk<HfrApiClient> {
+            coEvery { getCategories(any()) } returns fixture("rest_categories.json")
+        }
+        val mutableClock = MutableClock(Instant.parse("2026-04-26T18:00:00Z"))
+        val repo = repository(apiClient, clock = mutableClock)
+
+        // Warm the cache, then age it past the 24h categories TTL.
+        repo.observeCategories().test {
+            awaitItem() // Loading
+            awaitItem() // Success
+            cancelAndIgnoreRemainingEvents()
+        }
+        mutableClock.advance(java.time.Duration.ofHours(25))
+
+        val result = repo.getCategories(forceRefreshIfStale = true)
+
+        assertTrue("expected Success, got $result", result is ForumResult.Success)
+        // #251 — a stale catalogue must be re-fetched so a category added to HFR after the cache
+        // was warmed is enumerated. Two fetches total: the warm + this forced refresh.
+        coVerify(exactly = 2) { apiClient.getCategories(any()) }
+    }
+
+    @Test
+    fun `getCategories returns the stale cache without fetch when force is false`() = runTest {
+        val apiClient = mockk<HfrApiClient> {
+            coEvery { getCategories(any()) } returns fixture("rest_categories.json")
+        }
+        val mutableClock = MutableClock(Instant.parse("2026-04-26T18:00:00Z"))
+        val repo = repository(apiClient, clock = mutableClock)
+
+        repo.observeCategories().test {
+            awaitItem() // Loading
+            awaitItem() // Success
+            cancelAndIgnoreRemainingEvents()
+        }
+        mutableClock.advance(java.time.Duration.ofHours(25))
+
+        val result = repo.getCategories(forceRefreshIfStale = false)
+
+        assertTrue("expected Success, got $result", result is ForumResult.Success)
+        // Caller tolerated staleness — no extra round-trip beyond the warm.
+        coVerify(exactly = 1) { apiClient.getCategories(any()) }
+    }
+
+    @Test
+    fun `getCategories fetches on a cold cache`() = runTest {
+        val apiClient = mockk<HfrApiClient> {
+            coEvery { getCategories(any()) } returns fixture("rest_categories.json")
+        }
+        val repo = repository(apiClient)
+
+        val result = repo.getCategories(forceRefreshIfStale = false)
+
+        assertTrue("expected Success, got $result", result is ForumResult.Success)
+        coVerify(exactly = 1) { apiClient.getCategories(any()) }
+    }
+
+    @Test
     fun `observeTopicList wires the page to the apiClient call`() = runTest {
         val apiClient = mockk<HfrApiClient> {
             coEvery {

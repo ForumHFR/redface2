@@ -350,28 +350,29 @@ class DefaultFlagRepository @Inject constructor(
         FlagsResult.Failure(IllegalStateException("Flags require an authenticated HFR session"))
 
     /**
-     * Resolves the REST-callable category list. Reuses [ForumRepository.observeCategories]
-     * which keeps an in-memory cache per session, so tabbing back to drapeaux after
-     * the Forum tab has loaded is one round-trip cheaper.
+     * Resolves the REST-callable category list to FAN OUT over. Uses
+     * [ForumRepository.getCategories] with `forceRefreshIfStale = true` rather than
+     * `observeCategories().first { … }`.
      *
-     * Filters out categories whose [Category.id] is not strictly positive (defensive
-     * guard against a hypothetical `cat=0` modos space leaking through — the REST flag
-     * endpoint would 403 on it). Non-numeric pseudo-cats like `cat=prive` (MPs) cannot
-     * reach this method because `Category.id` is typed `Int`.
+     * **Why not `observeCategories().first`** (#251): the observe flow's stale path emits
+     * the still-cached (stale) value FIRST so the UI can paint last-known-good without a
+     * Loading flash, so `first { it !is Loading }` captured the STALE catalogue. A category
+     * added to HFR after the 24h categories cache was warmed (e.g. cat 32 « IA ») was then
+     * never enumerated here, and its drapeaux stayed invisible. The one-shot
+     * [ForumRepository.getCategories] returns a guaranteed-fresh list when stale (a fresh
+     * cache costs no round-trip), so the fan-out always sees the current catalogue. It never
+     * emits `Loading`.
      *
-     * The `first { !Loading }` waits for the first concrete result. A stalled `Loading`
-     * (network outage before the first fetch ever completes) is bounded by OkHttp's
-     * connect/read timeouts inside the underlying `getCategories` REST call — when that
-     * fails, `ForumRepository.observeCategories()` surfaces a `Failure` and `first` returns.
-     * We do not impose a separate `withTimeout` here because it would compete with
-     * coroutine test schedulers that don't share state with `Dispatchers.IO`.
+     * Filters out categories whose [Category.id] is not strictly positive (defensive guard
+     * against a hypothetical `cat=0` modos space leaking through — the REST flag endpoint
+     * would 403 on it). Non-numeric pseudo-cats like `cat=prive` (MPs) cannot reach this
+     * method because `Category.id` is typed `Int`.
      */
     private suspend fun loadCategories(): List<Category> {
-        val first = forumRepository.observeCategories().first { it !is ForumResult.Loading }
-        val all = when (first) {
-            is ForumResult.Success -> first.value
-            is ForumResult.Failure -> throw first.cause
-            ForumResult.Loading -> error("filtered above")
+        val all = when (val result = forumRepository.getCategories(forceRefreshIfStale = true)) {
+            is ForumResult.Success -> result.value
+            is ForumResult.Failure -> throw result.cause
+            ForumResult.Loading -> error("getCategories never emits Loading")
         }
         return all.filter { it.id > 0 }
     }

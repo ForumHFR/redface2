@@ -16,6 +16,25 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.17.16` — `internal` (dev) — 2026-06-27
+
+> Vue Drapeaux (#603), correctifs : les sujets cyan d'une catégorie ajoutée récemment sur HFR (ex. « IA »)
+> réapparaissent — le fan-out interrogeait une liste de catégories périmée et sautait silencieusement la
+> nouvelle catégorie (#251) ; et la couleur du drapeau favori repasse au jaune, elle virait au vert (#690).
+> Build dev ; versionCode au dispatch. versionName 0.17.15 → 0.17.16.
+
+**Drapeaux — vue (#603)**
+
+- **Cyan manquant d'une catégorie récente corrigé (#251)** : pour aller chercher les drapeaux, l'app
+  énumère les catégories du forum ; elle lisait la liste mise en cache 24 h via son émission « périmée
+  d'abord », donc une catégorie créée sur HFR après le dernier rafraîchissement (ex. cat 32 « IA ») n'était
+  jamais interrogée et ses sujets cyan restaient invisibles. Le fan-out demande désormais une liste de
+  catégories fraîche quand le cache est périmé (`ForumRepository.getCategories(forceRefreshIfStale = true)`,
+  une lecture en cache si frais, un appel réseau si périmé/froid).
+- **Couleur du drapeau favori repassée au jaune (#690)** : le marqueur favori était en Material Lime 500,
+  qui se lit vert à l'écran ; il passe en Material Yellow 600 (`#FDD835`), franchement jaune, sans dériver
+  vers l'ambre. Cyan et rouge inchangés.
+
 ## `0.17.15` — `internal` (dev) — 2026-06-27
 
 > Refonte de la vue Drapeaux (#603), polish : la barre du bas en mode icônes seules passe à 52 dp avec
