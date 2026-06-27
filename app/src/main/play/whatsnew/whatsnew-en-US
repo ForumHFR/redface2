@@ -1,5 +1,5 @@
-Redface 2 v0.17.15 — dev.
+Redface 2 v0.17.16 — dev.
 
 Flags view:
-- More compact bottom bar (52 dp) when labels are hidden, with the active tab indicator and tab names announced for accessibility.
-- Slightly roomier category bands (preset C).
+- Cyan topics from a recently added HFR category (e.g. "AI") show up again in the list.
+- The favorite flag colour is yellow again (it had drifted to green).

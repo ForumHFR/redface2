@@ -5,13 +5,17 @@ import fr.forumhfr.redface2.core.model.FlagType
 
 /**
  * Drapeau bucket palette. Material-toned colors that keep the HFR flag HUE family (cyan / red /
- * lime-yellow). The pure gif fills (`#00FFFF` / `#FF0000` / `#F0F83F`) read garish on screen, so we use
- * the matching Material tones — Cyan 500, Red 700, Lime 500 — which keep the bucket instantly
+ * yellow). The pure gif fills (`#00FFFF` / `#FF0000` / `#F0F83F`) read garish on screen, so we use
+ * the matching Material tones — Cyan 500, Red 700, Yellow 600 — which keep the bucket instantly
  * recognisable without the neon :
  *
  * - [FlagType.CYAN] → cyan, sujets participés
  * - [FlagType.RED] → rouge, lus uniquement
  * - [FlagType.FAVORITE] → jaune, favoris
+ *
+ * #690 — [FAVORITE] was Material Lime 500 (`#CDDC39`) but on screen it read GREEN, not yellow, so it
+ * moved to Material Yellow 600 (`#FDD835`) : unmistakably yellow without the amber drift (`#F9A825`)
+ * that loses the HFR favourite identity. Cyan/Red stay in their Material tones.
  *
  * Kept distinct from the Material 3 `error` / `tertiary` roles on purpose : mapping
  * the buckets to roles would either introduce ambiguity (red flag ↔ error state) or
@@ -23,7 +27,7 @@ object FlagPalette {
 
     val Cyan: Color = Color(0xFF00BCD4)
     val Red: Color = Color(0xFFD32F2F)
-    val Favorite: Color = Color(0xFFCDDC39)
+    val Favorite: Color = Color(0xFFFDD835)
 
     /**
      * #603 — the « DT » (MultiMP) bucket marker, in a Material-toned fuchsia (`#D500F9`, Material

@@ -86,6 +86,31 @@ class DefaultForumRepository @Inject constructor(
         emitAll(categoriesRefresh.asSharedFlow())
     }
 
+    override suspend fun getCategories(forceRefreshIfStale: Boolean): ForumResult<List<Category>> {
+        val now = clock.instant()
+        val cached = cachedCategories
+        return when {
+            // Fresh cache → return it, no network (same as observeCategories' fresh path).
+            cached != null && CachePolicy.isFresh(cached.fetchedAt, CachePolicy.categories, now) ->
+                ForumResult.Success(cached.value)
+            // Stale cache but the caller tolerates staleness → hand back last-known-good cheaply.
+            cached != null && !forceRefreshIfStale -> ForumResult.Success(cached.value)
+            // Stale-and-force, or cold cache → fetch fresh. Reuses the single-flight guard so a
+            // concurrent observeCategories() cold fetch is not duplicated. This is the #251 fix:
+            // the flags fan-out asks with forceRefreshIfStale = true so a category added after the
+            // 24h cache was warmed is enumerated and its drapeaux fetched.
+            else -> when (val fetched = fetchCategoriesSingleFlight(now)) {
+                // DEGRADE on a network failure when a stale cache exists: the flags fan-out (#251)
+                // prefers enumerating a slightly-stale catalogue to hard-failing the whole Drapeaux
+                // screen when only the categories endpoint is momentarily down (parity with the old
+                // observeCategories().first behaviour, which served last-known-good). A cold cache has
+                // nothing to fall back to, so its Failure still surfaces.
+                is ForumResult.Failure -> if (cached != null) ForumResult.Success(cached.value) else fetched
+                else -> fetched
+            }
+        }
+    }
+
     override suspend fun refreshCategories() {
         categoriesRefresh.emit(ForumResult.Loading)
         categoriesRefresh.emit(fetchCategories())
@@ -203,8 +228,13 @@ class DefaultForumRepository @Inject constructor(
      * (now fresh) cache and returns it without a second network call. A still-cold cache after
      * the lock (the previous fetch failed and left no entry) falls through to its own fetch.
      *
-     * Note: only the **cold** fetch path is serialised. [refreshCategories] deliberately
-     * bypasses this guard — it is an explicit user/forced refresh and must always re-hit HFR.
+     * Reached by the cold/stale path of both [observeCategories] and [getCategories] (the latter
+     * with `forceRefreshIfStale = true` on a stale cache, #251). The in-lock re-check is
+     * **freshness-based**, so a `forceRefreshIfStale = true` caller that loses the lock to another
+     * fetcher is served that fetcher's fresh result rather than issuing a second round-trip — the
+     * result is still current (the win is no duplicate network call), but this method is NOT a
+     * "always hit HFR" primitive. [refreshCategories] deliberately bypasses this guard — it is an
+     * explicit user refresh and must always re-hit HFR regardless of freshness.
      */
     private suspend fun fetchCategoriesSingleFlight(now: Instant): ForumResult<List<Category>> =
         categoriesFetchMutex.withLock {

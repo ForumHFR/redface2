@@ -2224,6 +2224,10 @@ class FlagsViewModelTest {
         override fun observeCategories(): Flow<ForumResult<List<Category>>> =
             categoriesFlow.asSharedFlow().onSubscription { observeCategoriesSubscriptions += 1 }
 
+        override suspend fun getCategories(forceRefreshIfStale: Boolean): ForumResult<List<Category>> =
+            categoriesFlow.replayCache.lastOrNull { it !is ForumResult.Loading }
+                ?: ForumResult.Success(emptyList())
+
         override suspend fun refreshCategories() {
             refreshCategoriesCalls += 1
         }
