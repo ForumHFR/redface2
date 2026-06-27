@@ -1,7 +1,9 @@
 package fr.forumhfr.redface2.feature.flags
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -49,5 +51,31 @@ class FlagsTabSwipeTest {
     @Test
     fun `an empty tab list has no swipe target`() {
         assertNull(swipeTargetIndex(currentIndex = 0, tabCount = 0, forward = true))
+    }
+
+    // #660 — Shared Axis X slide direction for the committed tab transition. A swipe carries an
+    // authoritative direction (handles the cyclic wrap, #663); a tap falls back to the tabs' order.
+
+    @Test
+    fun `a forward swipe slides forward even when it wraps last to first`() {
+        // Super (last) → Cyan (first) by a forward swipe: the index order alone (0 < 3) would read
+        // « backward » and bring the new tab in from the WRONG side — the original #660 bug. The
+        // gesture's own direction overrides it.
+        assertTrue(flagsTabSlideForward(fromIndex = 3, toIndex = 0, swipeForward = true))
+    }
+
+    @Test
+    fun `a backward swipe slides backward even when it wraps first to last`() {
+        assertFalse(flagsTabSlideForward(fromIndex = 0, toIndex = 3, swipeForward = false))
+    }
+
+    @Test
+    fun `a tap to a later tab slides forward`() {
+        assertTrue(flagsTabSlideForward(fromIndex = 0, toIndex = 2, swipeForward = null))
+    }
+
+    @Test
+    fun `a tap to an earlier tab slides backward`() {
+        assertFalse(flagsTabSlideForward(fromIndex = 2, toIndex = 0, swipeForward = null))
     }
 }

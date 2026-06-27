@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.flags
 
 import android.annotation.SuppressLint
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -51,6 +52,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -62,6 +64,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -202,7 +205,11 @@ fun FlagsRoute(
     // Cyan's scroll index onto Favori/Rouge when switching tabs. The current tab's state drives the
     // filter-flip reset (#385) and the landing recall-to-top (#546) below, both already scoped to the
     // active tab.
-    val flagsListState = rememberFlagTabListState(selectedTab.flagType)
+    // #660 — hoisted holder (all tabs' states) so the body's Shared Axis X AnimatedContent can resolve
+    // each pane's state during a transition. The active tab's state still drives the filter-flip reset
+    // (#385) and the landing recall-to-top (#546) below, both already scoped to the current tab.
+    val flagTabListStates = rememberFlagTabListStates()
+    val flagsListState = flagTabListStates.forType(selectedTab.flagType)
     val tabUnreadFilter by viewModel.tabUnreadFilter.collectAsStateWithLifecycle()
     FilterFlipScrollResetEffect(
         tabUnreadFilter = tabUnreadFilter,
@@ -426,7 +433,7 @@ fun FlagsRoute(
                                 onOpenMultiMp = onOpenMultiMp,
                                 onRefreshDt = viewModel::refreshDt,
                             ),
-                            listState = flagsListState,
+                            listStates = flagTabListStates,
                             )
                         }
                     }
@@ -951,9 +958,9 @@ private fun AnonymousBody(onLoginRequested: () -> Unit) {
 private fun ColumnScope.AuthenticatedBody(
     state: FlagsBodyState,
     actions: AuthenticatedActions,
-    // #385 — hoisted by FlagsRoute so the filter-flip effect can reset the scroll. One state
-    // shared by the grouped and flat lists (only one is composed at a time).
-    listState: LazyListState,
+    // #660 — hoisted holder: the Shared Axis X AnimatedContent below composes two panes during a
+    // transition, so each resolves its own tab's LazyListState (never recreated, #695 preserved).
+    listStates: FlagTabListStates,
 ) {
     val selectedTab = state.selectedTab
     // #603 PR2 — the text PrimaryTabRow is gone: the app-bar flag picker (FlagsSearchAppBar) now
@@ -980,21 +987,30 @@ private fun ColumnScope.AuthenticatedBody(
     val updatedTabs = rememberUpdatedState(tabs)
     val updatedSelectedIndex = rememberUpdatedState(selectedIndex)
     val updatedActions = rememberUpdatedState(actions)
+    // #660 — the swipe's direction for the NEXT committed transition (null = a tab tap, which falls
+    // back to the tabs' order). Reset after each tab change so a later tap never inherits a stale swipe
+    // direction. Set synchronously in the gesture handler, BEFORE the ViewModel emits the new tab, so
+    // the transitionSpec below reads it on the recomposition that starts the slide.
+    var pendingSwipeForward by remember { mutableStateOf<Boolean?>(null) }
     val swipeHandlers = remember(haptics) {
         FlagsTabSwipeHandlers(
             haptics = haptics,
-            onSelectTab = { index ->
+            onSelectTab = { index, forward ->
+                pendingSwipeForward = forward
                 updatedTabs.value.getOrNull(index)
                     ?.let { tab -> updatedActions.value.onSelectTab(tab) }
             },
         )
     }
+    LaunchedEffect(selectedTab) { pendingSwipeForward = null }
     Box(
         modifier = Modifier
             .fillMaxWidth()
             // Without weight(1f) the box would not claim the remaining vertical space inside
             // the parent Column, breaking the gesture areas on short lists.
             .weight(1f)
+            // #660 — clip so the outgoing/incoming panes don't draw past the viewport mid-slide.
+            .clipToBounds()
             .flagsTabSwipe(
                 currentIndex = { updatedSelectedIndex.value },
                 tabCount = { updatedTabs.value.size },
@@ -1002,18 +1018,40 @@ private fun ColumnScope.AuthenticatedBody(
                 handlers = swipeHandlers,
             ),
     ) {
-        when (selectedTab) {
-            // Super has no backend, no fetch, no pull-to-refresh (cf. its KDoc).
-            FlagTab.Super -> SuperPlaceholderBody(funny = state.funnyEmptyState)
-            // #6 — DT is a real list now: the user's MultiMP conversations, enriched best-effort
-            // with the MPStorage reading positions.
-            FlagTab.Dt -> DtListBody(
-                state = state.dtListState,
-                isRefreshing = state.dtIsRefreshing,
-                actions = actions,
-                funny = state.funnyEmptyState,
-            )
-            else -> FlagListBody(state = state, actions = actions, listState = listState)
+        // #660 — Material « Shared Axis X » on tab commit (styx42's pick). targetState is the WHOLE
+        // FlagsBodyState and the lambda renders from its PARAMETER (`bodyState`), never the captured
+        // outer `state`: per the AnimatedContent contract (official docs: « use targetCount, not
+        // count ») each pane composes with its own state value, so the OUTGOING pane keeps its tab's
+        // data while it slides out — no flash of the incoming tab's data. contentKey = selectedTab so
+        // only a tab change slides; a data refresh within the same tab updates in place.
+        AnimatedContent(
+            targetState = state,
+            transitionSpec = {
+                val from = tabs.indexOf(initialState.selectedTab)
+                val to = tabs.indexOf(targetState.selectedTab)
+                flagsTabSlide(flagsTabSlideForward(from, to, pendingSwipeForward))
+            },
+            contentKey = { it.selectedTab },
+            label = "flagsTabSwipe",
+            modifier = Modifier.fillMaxSize(),
+        ) { bodyState ->
+            when (bodyState.selectedTab) {
+                // Super has no backend, no fetch, no pull-to-refresh (cf. its KDoc).
+                FlagTab.Super -> SuperPlaceholderBody(funny = bodyState.funnyEmptyState)
+                // #6 — DT is a real list now: the user's MultiMP conversations, enriched best-effort
+                // with the MPStorage reading positions.
+                FlagTab.Dt -> DtListBody(
+                    state = bodyState.dtListState,
+                    isRefreshing = bodyState.dtIsRefreshing,
+                    actions = actions,
+                    funny = bodyState.funnyEmptyState,
+                )
+                else -> FlagListBody(
+                    state = bodyState,
+                    actions = actions,
+                    listState = listStates.forType(bodyState.selectedTab.flagType),
+                )
+            }
         }
     }
 }
@@ -1197,20 +1235,33 @@ private fun FlagListBody(
 /**
  * #695 — one [LazyListState] per flag tab so the scroll position of Mes sujets / Lu / Favoris does not
  * bleed across tabs (a single shared state carried one tab's index onto another). The three states are
- * remembered + saveable, so each tab keeps its own position across switches and rotation; the active
- * tab's state is returned. Super has no list — it reuses the Cyan state harmlessly (never rendered).
- * Extracted from [FlagsRoute] to keep its cyclomatic complexity under the detekt threshold.
+ * remembered + saveable, so each tab keeps its own position across switches and rotation.
+ *
+ * #660 — held as a HOISTED holder rather than resolving a single active state: the body's Shared Axis X
+ * [AnimatedContent] composes BOTH the outgoing and incoming panes during a transition, so each pane must
+ * read its own tab's state. Resolving (not recreating) per pane keeps every tab's scroll position intact
+ * — recreating a [LazyListState] inside the transition would lose it and reintroduce the cross-tab bleed.
  */
-@Composable
-private fun rememberFlagTabListState(flagType: FlagType?): LazyListState {
-    val cyanListState = rememberLazyListState()
-    val redListState = rememberLazyListState()
-    val favoriteListState = rememberLazyListState()
-    return when (flagType) {
-        FlagType.RED -> redListState
-        FlagType.FAVORITE -> favoriteListState
-        FlagType.CYAN, null -> cyanListState
+@Stable
+private class FlagTabListStates(
+    val cyan: LazyListState,
+    val red: LazyListState,
+    val favorite: LazyListState,
+) {
+    // Super/DT have no real flag list — they reuse the Cyan state harmlessly (never rendered as a list).
+    fun forType(flagType: FlagType?): LazyListState = when (flagType) {
+        FlagType.RED -> red
+        FlagType.FAVORITE -> favorite
+        FlagType.CYAN, null -> cyan
     }
+}
+
+@Composable
+private fun rememberFlagTabListStates(): FlagTabListStates {
+    val cyan = rememberLazyListState()
+    val red = rememberLazyListState()
+    val favorite = rememberLazyListState()
+    return remember(cyan, red, favorite) { FlagTabListStates(cyan, red, favorite) }
 }
 
 /**
