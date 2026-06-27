@@ -106,17 +106,29 @@
     <string name="flags_category_fallback">Catégorie %1$d</string>
     <!-- #414 — libellé d'action (a11y) du bandeau de catégorie cliquable. -->
     <string name="flags_category_open_label">Ouvrir la catégorie</string>
-    <!-- #179 follow-up — Vue à plat (legacy) : message quand la liste est vide. Sans le mot
-         « catégorie » (il n'y a pas de regroupement dans cette vue). -->
-    <string name="flags_list_empty_cyan">Aucun nouveau message</string>
-    <string name="flags_list_empty">Aucun drapeau à afficher</string>
-    <!-- #179 follow-up — Vue groupée AVEC « masquer les catégories sans non-lu » : quand aucune
-         catégorie n'a de message non lu, toutes les sections sont masquées. Message + item unique
-         pour ne pas laisser un corps blanc et garder une cible scrollable au pull-to-refresh (#229). -->
+    <!-- #662 — les états vides plein-onglet (vue groupée sans section, vue à plat sans drapeau) sont
+         désormais rendus par FlagsEmptyState (visuel + titre + sous-texte par onglet), cf. les chaînes
+         flags_empty_* plus bas. Les anciens libellés courts flags_list_empty* ont été retirés. Le
+         libellé per-section (flags_category_empty*) reste utilisé. -->
+    <!-- #662 (Codex) — vue groupée AVEC « masquer les catégories sans non-lu » : sections vides ≠
+         onglet vide (il peut rester des sujets lus, juste aucun non-lu). On garde donc un état vide
+         distinct, factuel, plutôt que le « Aucun favori » trompeur. -->
     <string name="flags_no_unread_category">Aucune catégorie avec un message non lu</string>
+    <string name="flags_no_unread_category_subtitle">Désactive « Masquer les catégories sans non-lu » pour revoir les sujets lus.</string>
     <string name="flags_error">Impossible de récupérer les drapeaux. Vérifie ta connexion ou réessaie.</string>
     <string name="flags_session_expired">Session HFR expirée. Reconnecte-toi pour recharger tes drapeaux.</string>
     <string name="flags_retry">Réessayer</string>
+
+    <!-- #662 — état vide visuel d'un onglet entièrement vide : un visuel (icône fine en défaut, ou un
+         smiley perso HFR si « états vides humoristiques » est activé) + un titre + un sous-texte propres
+         à l'onglet. Le texte porte tout le sens (le visuel est décoratif pour TalkBack). -->
+    <string name="flags_empty_title_cyan">Aucun sujet suivi</string>
+    <string name="flags_empty_subtitle_cyan">Les sujets où tu interviens apparaissent ici.</string>
+    <string name="flags_empty_title_red">Aucun sujet lu</string>
+    <string name="flags_empty_subtitle_red">Les sujets que tu as marqués comme lus apparaissent ici.</string>
+    <string name="flags_empty_title_favorite">Aucun favori</string>
+    <string name="flags_empty_subtitle_favorite">Touche l\'étoile sur un sujet pour le retrouver ici.</string>
+    <string name="flags_empty_title_generic">Rien à afficher</string>
 
 
     <!-- #309 — Menu d'affichage des drapeaux (bottom sheet M3 ouvert via re-tap de l'onglet

@@ -257,6 +257,10 @@
     <string name="settings_flags_auto_refresh_title">Actualisation automatique</string>
     <string name="settings_flags_auto_refresh_description">Rafraîchit la liste à l\'ouverture de l\'app et au retour d\'un sujet.</string>
     <string name="settings_flags_auto_refresh_persist_failed">Impossible de mémoriser l\'actualisation automatique. Réessayez.</string>
+    <!-- #662 — états vides humoristiques (smiley perso au lieu de l'icône sobre). Opt-in. -->
+    <string name="settings_flags_funny_empty_state_title">États vides humoristiques</string>
+    <string name="settings_flags_funny_empty_state_description">Affiche un smiley perso HFR quand un onglet est vide, au lieu de l\'icône sobre.</string>
+    <string name="settings_flags_funny_empty_state_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
 
     <!-- #286 — Thème. Sélecteur Clair/Système/Sombre (Système = suit l'OS) + thème AMOLED (vrai
          noir), persistés en DataStore et appliqués à toute l'app en direct. -->

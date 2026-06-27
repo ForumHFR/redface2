@@ -568,6 +568,20 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `FunnyEmptyStateChanged persists the flip and clears the updating flag`() = runTest {
+        // #662 — the smiley empty state is opt-in (default off); toggling persists and settles.
+        val viewModel = newViewModel()
+        assertFalse("sober empty state is the default", viewModel.state.value.funnyEmptyState)
+
+        viewModel.submit(SettingsIntent.FunnyEmptyStateChanged(true))
+
+        assertTrue(viewModel.state.value.funnyEmptyState)
+        assertFalse(viewModel.state.value.isUpdatingFunnyEmptyState)
+        assertFalse(viewModel.state.value.funnyEmptyStateError)
+        assertEquals(1, repository.funnyEmptyStateSetCalls)
+    }
+
+    @Test
     fun `hide-read categories switch is disabled while the flat flags view is selected`() = runTest {
         val viewModel = newViewModel()
         assertTrue(viewModel.state.value.canToggleFlagsHideReadCategories)
@@ -1896,6 +1910,21 @@ class SettingsViewModelTest {
 
         fun emitNavBarLabels(value: Boolean) {
             navBarLabels.value = value
+        }
+
+        private val funnyEmptyState = MutableStateFlow(false)
+        var funnyEmptyStateSetCalls: Int = 0
+            private set
+
+        override fun observeFunnyEmptyState(): Flow<Boolean> = funnyEmptyState
+
+        override suspend fun setFunnyEmptyState(enabled: Boolean) {
+            funnyEmptyStateSetCalls += 1
+            funnyEmptyState.value = enabled
+        }
+
+        fun emitFunnyEmptyState(value: Boolean) {
+            funnyEmptyState.value = value
         }
 
         // #458 — start screen lives on its own StartScreenSettingsViewModel; this fake only
