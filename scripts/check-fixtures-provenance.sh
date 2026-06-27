@@ -11,16 +11,20 @@ set -euo pipefail
 allowlist="config/fixtures-provenance-allowlist.txt"
 missing=0
 
+# NB : pas de `grep -q` / `grep -Fxq` en aval d'un pipe ici. Sous `set -o pipefail`, le `-q`
+# sort au premier match et ferme le pipe → SIGPIPE (exit 141) sur la commande amont, que pipefail
+# propage comme échec → faux négatif intermittent. On retire le `-q` (grep consomme alors toute son
+# entrée, l'amont finit proprement) et on jette la sortie via `>/dev/null`.
 is_allowed() {
   local path="$1"
   [[ -f "$allowlist" ]] &&
-    grep -vE '^[[:space:]]*(#|$)' "$allowlist" | grep -Fxq -- "$path"
+    grep -vE '^[[:space:]]*(#|$)' "$allowlist" | grep -Fx -- "$path" >/dev/null
 }
 
 has_header_provenance() {
   local file="$1"
   [[ "$(head -c 4 "$file")" == "<!--" ]] &&
-    head -n 40 "$file" | grep -Eiq 'Source|Provenance|Captured|Captur|Origine'
+    head -n 40 "$file" | grep -Ei 'Source|Provenance|Captured|Captur|Origine' >/dev/null
 }
 
 while IFS= read -r -d '' fixture; do
