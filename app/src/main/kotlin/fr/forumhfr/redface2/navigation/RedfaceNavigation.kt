@@ -19,13 +19,14 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.NavigationBarDefaults
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -40,19 +41,27 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -502,11 +511,19 @@ private fun navItemLabel(
 /**
  * #666 follow-up — height of the icon-only compact bottom bar. The adaptive
  * [NavigationSuiteType.ShortNavigationBarCompact] keeps reserving the label-row height (~64 dp) even with
- * labels hidden, so the bar looked needlessly tall in icon-only mode (« ça sert à rien », XaTriX). Dropping
- * to a label-less bar at this height reclaims that band while staying ≥ 48 dp (Material's minimum touch
- * target). Phone bottom-bar + labels-off only; rail / drawer / None layouts are untouched.
+ * labels hidden, so the bar looked needlessly tall in icon-only mode (« ça sert à rien », XaTriX).
+ *
+ * 52 dp (XaTriX, 2026-06-27) — a centered 24 dp icon then has 14 dp of breathing room above and below
+ * (mirrors the icon-to-top gap of the labelled bar). The bar is built from a custom item ([CompactBarItem]),
+ * NOT `NavigationBarItem`: the latter carries the standard 80 dp NavigationBar's internal metrics and would
+ * not compact to this height (Codex review). 52 dp keeps a ≥ 48 dp touch target (Material minimum).
  */
-private val CompactIconBarHeight = 56.dp
+private val CompactIconBarHeight = 52.dp
+
+// #666 follow-up — the M3 active-indicator pill behind the selected icon (matches the adaptive bar's
+// indicator). 32 dp tall fits inside the 52 dp bar; centering it leaves the icon's 14 dp top/bottom gap.
+private val CompactIndicatorWidth = 56.dp
+private val CompactIndicatorHeight = 32.dp
 
 /**
  * #666 follow-up — true only for the phone bottom-bar layout ([NavigationSuiteType.ShortNavigationBarCompact])
@@ -527,10 +544,11 @@ internal fun shouldUseCompactIconBar(
  * preserving the previous behaviour exactly. Extracted from [RedfaceApp] so the extra branch stays off that
  * composable's cyclomatic-complexity budget (it sits at detekt's ceiling).
  *
- * NB — the icon-only bar is built from the **stable** [NavigationBarItem] (not the expressive
- * `ShortNavigationBar`): in the compose-bom 2026.05.01 the whole `ExperimentalMaterial3ExpressiveApi`
- * surface is `internal`, so the expressive short bar cannot be opted into from app code (same gotcha as
- * `PullToRefreshDefaults.LoadingIndicator`). The labels-on branch keeps the adaptive suite's short bar.
+ * NB — the icon-only bar is built from a CUSTOM item ([CompactBarItem] in [IconOnlyBottomBar]), not
+ * `NavigationBarItem` (which keeps the 80 dp bar's internal metrics and would not compact) nor the expressive
+ * `ShortNavigationBar` (the whole `ExperimentalMaterial3ExpressiveApi` surface is `internal` in compose-bom
+ * 2026.05.01 — same gotcha as `PullToRefreshDefaults.LoadingIndicator`). The labels-on branch keeps the
+ * adaptive suite's short bar.
  */
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 @Composable
@@ -572,14 +590,14 @@ private fun RedfaceBottomNavigationSuite(
 }
 
 /**
- * #666 follow-up — the label-less compact bottom bar, [CompactIconBarHeight] tall. Phone + labels-off only.
- * Built from the stable [NavigationBarItem] laid out in a fixed-height [Row] (the standard
- * [androidx.compose.material3.NavigationBar] hard-codes its own ~80 dp height, and the expressive short bar
- * is `internal` in this bom — see [RedfaceBottomNavigationSuite]). Window-inset handling mirrors the
- * standard suite so #529 (no dark band) still holds: the [Surface] paints the container colour across the
- * whole region — including behind the system navigation bar — while the [Row] is pushed above the system
- * insets via [windowInsetsPadding] (bottom + horizontal: a landscape / multi-window side bar also reports a
- * horizontal inset). [selectableGroup] keeps the items a single a11y tab group (as the real nav bar does).
+ * #666 follow-up — the label-less compact bottom bar, [CompactIconBarHeight] (52 dp) tall. Phone + labels-off
+ * only. Built from a CUSTOM item ([CompactBarItem]), not `NavigationBarItem`: the latter carries the standard
+ * 80 dp NavigationBar's internal metrics and stays visually tall even inside a fixed-height [Row] (Codex
+ * review), and the expressive short bar is `internal` in this bom (see [RedfaceBottomNavigationSuite]).
+ * Window-inset handling mirrors the standard suite so #529 (no dark band) still holds: the [Surface] paints the
+ * container colour across the whole region — including behind the system navigation bar — while the [Row] is
+ * pushed above the system insets via [windowInsetsPadding] (bottom + horizontal: a landscape / multi-window
+ * side bar also reports a horizontal inset). [selectableGroup] keeps the items a single a11y tab group.
  */
 @Composable
 private fun IconOnlyBottomBar(
@@ -604,19 +622,55 @@ private fun IconOnlyBottomBar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             TopLevelDestination.entries.forEach { destination ->
-                NavigationBarItem(
+                CompactBarItem(
+                    destination = destination,
                     selected = currentDestination == destination,
+                    mpUnreadCount = mpUnreadCount,
                     onClick = { onItemClick(destination) },
-                    icon = {
-                        TopLevelDestinationIcon(
-                            destination = destination,
-                            mpUnreadCount = mpUnreadCount,
-                        )
-                    },
-                    label = null,
-                    modifier = Modifier.weight(1f),
                 )
             }
+        }
+    }
+}
+
+/**
+ * #666 follow-up — one item of [IconOnlyBottomBar]. Custom (not `NavigationBarItem`, which keeps the 80 dp
+ * bar's internal metrics — Codex review) so the bar can be a true [CompactIconBarHeight]: the 24 dp icon is
+ * centered in the 52 dp item (→ 14 dp top/bottom gap, the value XaTriX asked for), with the M3 active-indicator
+ * pill behind it when selected. A11y: [TopLevelDestinationIcon] carries no contentDescription, so the item
+ * itself supplies the accessible name + the tab role/selected state ([selectableGroup] groups them).
+ */
+@Composable
+private fun RowScope.CompactBarItem(
+    destination: TopLevelDestination,
+    selected: Boolean,
+    mpUnreadCount: Int?,
+    onClick: () -> Unit,
+) {
+    val label = stringResource(destination.labelRes)
+    val iconColor = if (selected) {
+        MaterialTheme.colorScheme.onSecondaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Box(
+        modifier = Modifier
+            .weight(1f)
+            .fillMaxHeight()
+            .selectable(selected = selected, role = Role.Tab, onClick = onClick)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (selected) {
+            Box(
+                modifier = Modifier
+                    .size(width = CompactIndicatorWidth, height = CompactIndicatorHeight)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.secondaryContainer),
+            )
+        }
+        CompositionLocalProvider(LocalContentColor provides iconColor) {
+            TopLevelDestinationIcon(destination = destination, mpUnreadCount = mpUnreadCount)
         }
     }
 }
