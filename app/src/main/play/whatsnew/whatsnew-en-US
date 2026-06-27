@@ -1,5 +1,5 @@
-Redface 2 v0.17.17 — dev.
+Redface 2 v0.17.18 — dev.
 
 Flags view:
-- The favorite flag colour is now an amber-yellow that stays legible on the light theme too.
-- Each tab (My topics / Read / Favorites) keeps its own scroll position instead of bleeding across tabs.
+- Empty tabs now show a real visual empty state (icon + per-tab message), with an optional "funny empty states" toggle that shows a HFR perso smiley instead.
+- Cyan flags on sticky topics of categories without a subcategory (e.g. "IA") show up again.

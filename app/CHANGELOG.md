@@ -16,6 +16,27 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.17.18` — `internal` (dev) — 2026-06-27
+
+> Vue Drapeaux (#603) : les onglets vides ont enfin un vrai état visuel (icône + message par onglet,
+> avec une option « états vides humoristiques » qui affiche un smiley perso HFR, #662), et les drapeaux
+> cyan des sujets épinglés des catégories sans sous-catégorie (ex. « IA ») réapparaissent (#251).
+> versionName 0.17.17 → 0.17.18.
+
+**Drapeaux — vue (#603)**
+
+- **États vides visuels (#662)** : un onglet sans élément n'affiche plus un simple libellé mais un état
+  vide visuel — icône fine + titre + sous-texte propre à l'onglet (Mes sujets / Lu / Favoris). Une
+  nouvelle option **« États vides humoristiques »** (Réglages › Drapeaux, désactivée par défaut)
+  remplace l'icône par un smiley perso HFR. Le texte porte tout le sens, donc TalkBack lit le même état
+  dans les deux cas. La vue groupée filtrée (« masquer les catégories sans non-lu ») garde un message
+  factuel distinct.
+- **Drapeaux cyan des sujets épinglés récupérés (#251)** : les endpoints REST des drapeaux excluaient
+  les sujets épinglés (sticky) flaggés dans les catégories **sans sous-catégorie** (ex. cat « IA ») —
+  un drapeau cyan posé sur le sujet épinglé des règles restait invisible. Un supplément REST-only
+  (lecture de la première page de `topics/last`, sans repli HTML) les récupère et les fusionne dans la
+  liste. Best-effort : un échec de cette lecture ne fait pas échouer tout l'écran.
+
 ## `0.17.17` — `internal` (dev) — 2026-06-27
 
 > Vue Drapeaux (#603) : la couleur du drapeau favori passe à un jaune-ambre lisible sur clair comme sur
