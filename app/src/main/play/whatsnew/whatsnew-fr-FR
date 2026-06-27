@@ -1,5 +1,5 @@
-Redface 2 v0.17.17 — dev.
+Redface 2 v0.17.18 — dev.
 
 Vue Drapeaux :
-- La couleur du drapeau favori devient un jaune-ambre lisible aussi sur le thème clair.
-- Le défilement de chaque onglet (Mes sujets / Lu / Favoris) est indépendant : il ne saute plus d'un onglet à l'autre.
+- Les onglets vides ont un vrai état visuel (icône + message par onglet), avec une option « états vides humoristiques » qui affiche un smiley perso HFR.
+- Les drapeaux cyan des sujets épinglés des catégories sans sous-catégorie (ex. « IA ») réapparaissent.
