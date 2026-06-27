@@ -247,9 +247,11 @@
     <string name="settings_flags_per_tab_override_description">Chaque onglet (Mes sujets, Lu, Favoris) garde son propre affichage ; les réglages ci-dessus servent de valeurs par défaut.</string>
     <string name="settings_flags_per_tab_override_persist_failed">Impossible de mémoriser le réglage par onglet. Réessayez.</string>
 
-    <!-- Onglet « DT » opt-in dans l'écran Drapeaux (placeholder, synchro MPStorage à venir, #6). -->
+    <!-- Onglet « DT » opt-in dans l'écran Drapeaux (#6). La description porte le caveat de balayage,
+         déplacé ici depuis la vue DT (#662, demande XaTriX : le texte explicatif vit au niveau du réglage
+         d'activation, pas dans la vue). -->
     <string name="settings_flags_show_dt_section_title">Section DT</string>
-    <string name="settings_flags_show_dt_section_description">Affiche un onglet « DT » dans l\'écran Drapeaux (contenu à venir).</string>
+    <string name="settings_flags_show_dt_section_description">Affiche un onglet « DT » dans l\'écran Drapeaux : vos discussions à interlocuteurs multiples (MultiMP). Seules les conversations de la première page de la boîte de réception et celles connues de la synchro DT sont listées — les pages plus anciennes ne sont pas balayées.</string>
     <string name="settings_flags_show_dt_section_persist_failed">Impossible de mémoriser la section DT. Réessayez.</string>
 
     <!-- #378 — auto-refresh des listes de drapeaux à l'arrivée sur l'écran (ouverture de l'app,

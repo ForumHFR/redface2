@@ -16,6 +16,20 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.17.20` — `internal` (dev) — 2026-06-27
+
+> Vue Drapeaux (#603) — le texte explicatif du balayage de la section DT quitte la vue (où il flottait
+> en bas de liste) pour rejoindre la **description du réglage « Section DT »**, au niveau de son
+> activation (#662, demande XaTriX). La vue DT reste épurée. versionName 0.17.19 → 0.17.20.
+
+**Drapeaux — vue (#603)**
+
+- **Texte explicatif DT déplacé vers les réglages (#662)** : l'avertissement « seule la première page de
+  la boîte de réception est balayée » n'apparaît plus dans la vue DT (ni en pied de liste, ni en
+  sous-texte d'état vide). Il est désormais porté par la **description du réglage « Section DT »**
+  (Réglages › Drapeaux), là où l'utilisateur active la section — l'explication est lue au bon moment et
+  la vue reste épurée.
+
 ## `0.17.19` — `internal` (dev) — 2026-06-27
 
 > Vue Drapeaux (#603) — finitions sur retour dogfood : les états vides visuels (#662) couvrent

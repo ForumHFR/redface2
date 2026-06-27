@@ -1,6 +1,4 @@
-Redface 2 v0.17.19 — dev.
+Redface 2 v0.17.20 — dev.
 
 Vue Drapeaux :
-- Les onglets DT et Super Favoris ont aussi un état vide visuel (icône/smiley + message).
-- Le smiley de l'option « états vides humoristiques » n'est plus pixelisé.
-- Nouvelle option « Contour du marqueur » : un fin liseré sombre autour de l'indicateur de couleur, pour mieux détacher l'ambre des favoris sur fond clair.
+- Le texte expliquant que seule la première page de la boîte est balayée a quitté la vue DT pour rejoindre la description du réglage « Section DT » (Réglages › Drapeaux). La vue reste épurée.

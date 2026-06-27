@@ -1,6 +1,4 @@
-Redface 2 v0.17.19 — dev.
+Redface 2 v0.17.20 — dev.
 
 Flags view:
-- DT and Super Favorites tabs now also show a visual empty state (icon/smiley + message).
-- The "funny empty states" smiley is no longer pixelated.
-- New "Marker outline" option: a thin dark border around the color indicator, so the amber favorite stands out on a light background.
+- The note explaining that only the inbox's first page is scanned has moved out of the DT view into the "DT section" setting description (Settings › Flags). The view stays uncluttered.
