@@ -1,6 +1,8 @@
-Redface 2 v0.17.13 — dev.
+Redface 2 v0.17.14 — dev.
 
-Barre de navigation :
-- Masquer les libellés (Réglages > Affichage) raccourcit maintenant vraiment la barre du bas, qui passe en icônes seules — sur téléphone.
+Vue Drapeaux :
+- Le menu du sélecteur d'onglet propose maintenant « Afficher/Masquer les lus » et les réglages d'affichage.
+- Re-taper l'onglet Drapeaux depuis un sujet revient à la liste.
+- Appui long sur un sujet : 5 actions sur une seule ligne.
 
 Bugs : via le canal dev ou GitHub.

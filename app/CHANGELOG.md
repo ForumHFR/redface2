@@ -16,6 +16,27 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.17.14` — `internal` (dev) — 2026-06-27
+
+> Refonte de la vue Drapeaux (#603), lot suivant : le menu déroulant du sélecteur d'onglet expose
+> maintenant le « +lus » et les réglages d'affichage (#661), le re-tap de l'onglet Drapeaux depuis un
+> sous-écran ramène à la racine (#679), et le sheet d'appui-long sur un sujet passe à 5 actions sur une
+> ligne (#676). Build dev ; versionCode au dispatch. versionName 0.17.13 → 0.17.14.
+
+**Drapeaux — vue (#603)**
+
+- **Menu du sélecteur d'onglet plus découvrable (#661)** : le menu déroulant (icône drapeau colorée en
+  haut à gauche) propose désormais, en plus du changement d'onglet, l'entrée contextuelle « Afficher /
+  Masquer les lus » (sur Cyan et DT) et « Réglages d'affichage » — deux actions auparavant atteignables
+  seulement par un re-tap d'onglet ou de la barre du bas.
+- **Re-tap de l'onglet Drapeaux = retour à la racine (#679)** : re-taper l'onglet Drapeaux alors qu'on
+  est dans un sous-écran (un sujet ouvert depuis un drapeau) revient à la liste des drapeaux, au lieu
+  d'armer par erreur le menu de configuration rapide.
+- **Sheet d'appui-long — 5 actions sur une ligne (#676, mockup F2)** : l'appui long sur un sujet présente
+  ses actions (Ouvrir / Super favori / Copier / Navigateur / Retirer) sur une seule rangée de boutons au
+  lieu d'une liste verticale ; « Retirer » reste rouge et passe toujours par la confirmation. Le
+  sous-titre redondant sous le titre du sujet a été retiré (l'info reste dans le bloc métadonnées).
+
 ## `0.17.13` — `internal` (dev) — 2026-06-27
 
 > Suite #666 : la barre du bas raccourcit réellement (icônes seules, 56 dp) quand les libellés sont
