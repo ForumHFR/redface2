@@ -701,6 +701,27 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `observeFunnyEmptyState defaults to false then persists true and false`() = runTest(dispatcher) {
+        // #662 — the sober style-A empty state is the default; the smiley wink is strictly opt-in.
+        repository.observeFunnyEmptyState().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setFunnyEmptyState(true)
+        repository.observeFunnyEmptyState().test {
+            assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setFunnyEmptyState(false)
+        repository.observeFunnyEmptyState().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `observeConfirmBeforePosting defaults to false then persists true and false`() = runTest(dispatcher) {
         // #312 — publishing stays one-tap by default; the guard is strictly opt-in.
         repository.observeConfirmBeforePosting().test {

@@ -125,6 +125,11 @@ class SettingsViewModel @Inject constructor(
             apply = { state, value -> state.copy(navBarLabels = value) },
         )
         hydratePreference(
+            read = { userPreferencesRepository.observeFunnyEmptyState().first() },
+            isLocked = { it.funnyEmptyStateTouchedLocally || it.isUpdatingFunnyEmptyState },
+            apply = { state, value -> state.copy(funnyEmptyState = value) },
+        )
+        hydratePreference(
             read = { userPreferencesRepository.observeHideSystemNavBar().first() },
             isLocked = { it.hideSystemNavBarTouchedLocally || it.isUpdatingHideSystemNavBar },
             apply = { state, value -> state.copy(hideSystemNavBar = value) },
@@ -262,6 +267,7 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.FoldLongQuotesChanged -> updateFoldLongQuotes(intent.enabled)
             is SettingsIntent.ShowScrollbarChanged -> updateShowScrollbar(intent.enabled)
             is SettingsIntent.NavBarLabelsChanged -> updateNavBarLabels(intent.enabled)
+            is SettingsIntent.FunnyEmptyStateChanged -> updateFunnyEmptyState(intent.enabled)
             is SettingsIntent.HideSystemNavBarChanged -> updateHideSystemNavBar(intent.enabled)
             is SettingsIntent.ImmersiveBackButtonChanged -> updateImmersiveBackButton(intent.enabled)
             is SettingsIntent.ImmersiveNavBarRevealChanged -> updateImmersiveNavBarReveal(intent.mode)
@@ -907,6 +913,33 @@ class SettingsViewModel @Inject constructor(
                 }
             },
             persist = userPreferencesRepository::setNavBarLabels,
+        )
+    }
+
+    private fun updateFunnyEmptyState(desired: Boolean) {
+        val previous = _state.value.funnyEmptyState
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    funnyEmptyState = desired,
+                    isUpdatingFunnyEmptyState = true,
+                    funnyEmptyStateError = false,
+                    funnyEmptyStateTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(funnyEmptyState = desired, isUpdatingFunnyEmptyState = false)
+                } else {
+                    state.copy(
+                        funnyEmptyState = previous,
+                        isUpdatingFunnyEmptyState = false,
+                        funnyEmptyStateError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setFunnyEmptyState,
         )
     }
 

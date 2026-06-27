@@ -296,6 +296,18 @@ interface UserPreferencesRepository {
     suspend fun setNavBarLabels(enabled: Boolean)
 
     /**
+     * #662 — « états vides humoristiques » on the Drapeaux screen. When `false` (default), an empty
+     * tab shows the sober style A visual empty state (a thin icon + contextual title + subtext). When
+     * `true`, the same contextual text is shown under a HFR perso smiley instead of the icon (style C,
+     * a light forum wink). Opt-in by design: TalkBack reads the same text either way, and the smiley
+     * is never imposed. Observed by `:feature:flags`, toggled in Settings > Affichage.
+     */
+    fun observeFunnyEmptyState(): Flow<Boolean>
+
+    /** Persists [observeFunnyEmptyState]. Default `false` until the first call. */
+    suspend fun setFunnyEmptyState(enabled: Boolean)
+
+    /**
      * #458 — which top-level tab (and optional Forum category) a cold start opens on. Default
      * [StartScreenChoice.FLAGS] (historical behaviour). The navigation reads the SYNCHRONOUS
      * [StartScreenBootstrapStore] mirror at cold start; this flow is the source of truth and

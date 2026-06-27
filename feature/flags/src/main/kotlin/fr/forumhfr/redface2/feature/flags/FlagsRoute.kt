@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -62,12 +63,15 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -75,6 +79,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil3.compose.AsyncImage
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
@@ -165,6 +170,8 @@ fun FlagsRoute(
 
     // Opt-in « DT » tab (Settings toggle). Its MultiMP list is fetched on tab open (#6).
     val showDtTab by viewModel.showDtTab.collectAsStateWithLifecycle()
+    // #662 — « états vides humoristiques » opt-in (smiley empty state).
+    val funnyEmptyState by viewModel.funnyEmptyState.collectAsStateWithLifecycle()
     // #546 directive XaTriX — the screen consumes the FILTERED DT state (dtDisplayState), not the raw
     // union: DT defaults to « non-lus uniquement » and a re-tap of the DT tab toggles « +lus ».
     val dtListState by viewModel.dtDisplayState.collectAsStateWithLifecycle()
@@ -397,6 +404,8 @@ fun FlagsRoute(
                                 searchQuery = searchQuery,
                                 markerStyle = flagsViewSettings.markerStyle,
                                 categoryBandStyle = flagsViewSettings.categoryBandStyle,
+                                funnyEmptyState = funnyEmptyState,
+                                hideReadActive = flagsViewSettings.hideReadCategories,
                             ),
                             actions = AuthenticatedActions(
                                 onSelectTab = viewModel::selectTab,
@@ -1148,6 +1157,8 @@ private fun FlagListBody(
                             removalInFlight = state.removeFlagState is RemoveFlagState.Removing,
                             markerStyle = state.markerStyle,
                             categoryBandStyle = state.categoryBandStyle,
+                            funnyEmptyState = state.funnyEmptyState,
+                            hideReadActive = state.hideReadActive,
                             actions = actions,
                             listState = listState,
                         )
@@ -1157,6 +1168,7 @@ private fun FlagListBody(
                             selectedTab = selectedTab,
                             removalInFlight = state.removeFlagState is RemoveFlagState.Removing,
                             markerStyle = state.markerStyle,
+                            funnyEmptyState = state.funnyEmptyState,
                             actions = actions,
                             listState = listState,
                         )
@@ -1253,13 +1265,16 @@ private const val CONTENT_TYPE_DT_FOOTER = "dt_scan_note"
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-@Suppress("LongParameterList") // List composable: sections + tab + removal + marker + band + actions + listState.
+// List composable: sections + tab + removal + marker + band + funny + hideRead + actions + listState.
+@Suppress("LongParameterList")
 private fun CategorySectionedFlagList(
     sections: List<FlagCategorySection>,
     selectedTab: FlagTab,
     removalInFlight: Boolean,
     markerStyle: MarkerStyle,
     categoryBandStyle: CategoryBandStyle,
+    funnyEmptyState: Boolean,
+    hideReadActive: Boolean,
     actions: AuthenticatedActions,
     listState: LazyListState,
 ) {
@@ -1272,15 +1287,27 @@ private fun CategorySectionedFlagList(
         // « Masquer les catégories sans non-lu » can filter every section out (no unread anywhere,
         // or all-read CYAN with « +lus » off). Without this guard the LazyColumn would render an
         // empty body — a blank screen with no scrollable target for the PullToRefreshBox (#229).
-        // A single placeholder item keeps the body informative and the pull gesture anchored.
+        // #662 — a real visual empty state (icon/smiley + contextual text) keeps the body informative
+        // and the pull gesture anchored (fillParentMaxSize centers it). When the hide-read filter is
+        // active, empty sections do NOT mean « no topic » (read topics may exist) — show a distinct,
+        // factual wording instead of the per-tab « aucun … » that would be misleading (#662 Codex).
         if (sections.isEmpty()) {
             item(key = "grouped-empty", contentType = CONTENT_TYPE_EMPTY) {
-                Text(
-                    text = stringResource(R.string.flags_no_unread_category),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
-                )
+                if (hideReadActive) {
+                    FlagsEmptyState(
+                        iconRes = fr.forumhfr.redface2.core.ui.R.drawable.ic_ms_flag,
+                        title = stringResource(R.string.flags_no_unread_category),
+                        subtitle = stringResource(R.string.flags_no_unread_category_subtitle),
+                        funny = funnyEmptyState,
+                        modifier = Modifier.fillParentMaxSize(),
+                    )
+                } else {
+                    FlagsTabEmptyState(
+                        tab = selectedTab,
+                        funny = funnyEmptyState,
+                        modifier = Modifier.fillParentMaxSize(),
+                    )
+                }
             }
         }
 
@@ -1546,12 +1573,13 @@ private fun emptySectionLabel(tab: FlagTab): Int = when (tab) {
  * and accessibility action behave identically to the grouped view.
  */
 @Composable
-@Suppress("LongParameterList") // List composable: flags + tab + removal flag + marker + actions + listState.
+@Suppress("LongParameterList") // List composable: flags + tab + removal flag + marker + funny + actions + listState.
 private fun FlatFlagList(
     flags: List<Flag>,
     selectedTab: FlagTab,
     removalInFlight: Boolean,
     markerStyle: MarkerStyle,
+    funnyEmptyState: Boolean,
     actions: AuthenticatedActions,
     listState: LazyListState,
 ) {
@@ -1563,11 +1591,12 @@ private fun FlatFlagList(
     ) {
         if (flags.isEmpty()) {
             item(key = "flat-empty", contentType = CONTENT_TYPE_EMPTY) {
-                Text(
-                    text = stringResource(flatEmptyLabel(selectedTab)),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+                // Flat view ignores « masquer les catégories sans non-lu », so an empty list always
+                // means the tab genuinely has no flag → the per-tab empty state is correct.
+                FlagsTabEmptyState(
+                    tab = selectedTab,
+                    funny = funnyEmptyState,
+                    modifier = Modifier.fillParentMaxSize(),
                 )
             }
         } else {
@@ -1591,14 +1620,113 @@ private fun FlatFlagList(
 }
 
 /**
- * Empty-list wording per tab for the FLAT view (#179 follow-up). Mirrors [emptySectionLabel] but
- * without the « catégorie » noun, which would be misleading in a flat list. Cyan keeps the « aucun
- * nouveau message » parity wording.
+ * #662 — per-tab visual empty state for a fully-empty Drapeaux tab. Resolves the tab's icon, title
+ * and subtitle, then delegates to [FlagsEmptyState]. Used for the genuinely-empty case (the tab has
+ * no flag at all). The grouped « masquer les catégories sans non-lu » case uses [FlagsEmptyState]
+ * directly with a distinct, factual wording (cf. #662 Codex review).
  */
-private fun flatEmptyLabel(tab: FlagTab): Int = when (tab) {
-    FlagTab.Cyan -> R.string.flags_list_empty_cyan
-    else -> R.string.flags_list_empty
+@Composable
+private fun FlagsTabEmptyState(
+    tab: FlagTab,
+    funny: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    FlagsEmptyState(
+        iconRes = emptyStateIcon(tab),
+        title = stringResource(emptyStateTitle(tab)),
+        subtitle = emptyStateSubtitle(tab)?.let { stringResource(it) },
+        funny = funny,
+        modifier = modifier,
+    )
 }
+
+/**
+ * #662 — visual empty state renderer for a fully-empty Drapeaux tab (grouped or flat). Default
+ * (style A) shows a thin icon; with the « états vides humoristiques » opt-in ([funny], style C) the
+ * same contextual text appears under a HFR perso smiley instead. The title + subtitle carry all the
+ * meaning, so TalkBack reads an identical state either way — the visual is decorative
+ * (`contentDescription = null`). Centered via [fillParentMaxSize] from the calling lazy item so the
+ * surrounding `PullToRefreshBox` keeps a swipe target (#229).
+ */
+@Composable
+private fun FlagsEmptyState(
+    iconRes: Int,
+    title: String,
+    subtitle: String?,
+    funny: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.padding(horizontal = 32.dp, vertical = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        if (funny) {
+            AsyncImage(
+                model = FUNNY_EMPTY_SMILEY_URL,
+                // Decorative: the title/subtitle below carry the meaning (a11y). FilterQuality.None
+                // keeps the pixel-art smiley crisp (same stance as the smiley picker, #236). The
+                // app-wide ImageLoader registers AnimatedImageDecoder, so the .gif animates.
+                contentDescription = null,
+                modifier = Modifier.size(72.dp),
+                contentScale = ContentScale.Fit,
+                filterQuality = FilterQuality.None,
+            )
+        } else {
+            RedfaceVectorIcon(
+                resId = iconRes,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                size = 48.dp,
+            )
+        }
+        Spacer(Modifier.height(16.dp))
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.Center,
+        )
+        if (subtitle != null) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
+
+/** #662 — per-tab style-A icon (local vector drawable; the project forbids Material `Icons.*`). */
+private fun emptyStateIcon(tab: FlagTab): Int = when (tab) {
+    FlagTab.Cyan -> fr.forumhfr.redface2.core.ui.R.drawable.ic_ms_forum
+    FlagTab.Red -> fr.forumhfr.redface2.core.ui.R.drawable.ic_ms_flag
+    FlagTab.Favorite -> fr.forumhfr.redface2.core.ui.R.drawable.ic_ms_star
+    else -> fr.forumhfr.redface2.core.ui.R.drawable.ic_ms_flag
+}
+
+/** #662 — per-tab empty-state title. */
+private fun emptyStateTitle(tab: FlagTab): Int = when (tab) {
+    FlagTab.Cyan -> R.string.flags_empty_title_cyan
+    FlagTab.Red -> R.string.flags_empty_title_red
+    FlagTab.Favorite -> R.string.flags_empty_title_favorite
+    else -> R.string.flags_empty_title_generic
+}
+
+/** #662 — per-tab empty-state subtitle (null = title only, e.g. the placeholder tabs). */
+private fun emptyStateSubtitle(tab: FlagTab): Int? = when (tab) {
+    FlagTab.Cyan -> R.string.flags_empty_subtitle_cyan
+    FlagTab.Red -> R.string.flags_empty_subtitle_red
+    FlagTab.Favorite -> R.string.flags_empty_subtitle_favorite
+    else -> null
+}
+
+// #662 — perso smiley for the « états vides humoristiques » opt-in (style C). The space in the HFR
+// perso filename is percent-encoded so the request URL is well-formed.
+private const val FUNNY_EMPTY_SMILEY_URL =
+    "https://forum-images.hardware.fr/images/perso/eric%20le%20looser.gif"
 
 // #603 PR5 — hosts the long-press actions sheet; the null-check lives here (not in FlagsRoute) to keep
 // the route's cyclomatic complexity in budget. `flag == null` ⇒ nothing composed (sheet closed).
@@ -2089,6 +2217,14 @@ private data class FlagsBodyState(
     val markerStyle: MarkerStyle = MarkerStyle.STRIPE,
     /** #603 — GLOBAL category band style for the grouped view (from FlagsViewSettings). */
     val categoryBandStyle: CategoryBandStyle = CategoryBandStyle.MINIMAL,
+    /** #662 — « états vides humoristiques » opt-in: smiley empty state instead of the sober icon. */
+    val funnyEmptyState: Boolean = false,
+    /**
+     * #662 (Codex) — whether « masquer les catégories sans non-lu » is active for the current tab.
+     * When true, an empty grouped list means « no category with unread », NOT « no topic », so the
+     * empty state uses a distinct factual wording instead of the per-tab « aucun … ».
+     */
+    val hideReadActive: Boolean = false,
 )
 
 private data class AuthenticatedActions(

@@ -445,6 +445,22 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeFunnyEmptyState(): Flow<Boolean> =
+        dataStore.data
+            // Default `false` (#662): the sober style-A empty state is the default; the smiley wink
+            // is an explicit opt-in.
+            .map { prefs -> prefs[KEY_FLAGS_FUNNY_EMPTY_STATE] ?: false }
+            .distinctUntilChanged()
+            .catch { emit(false) }
+
+    override suspend fun setFunnyEmptyState(enabled: Boolean) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_FLAGS_FUNNY_EMPTY_STATE] = enabled
+            }
+        }
+    }
+
     override fun observeStartScreen(): Flow<StartScreenPreference> =
         dataStore.data
             .map(::readStartScreen)
@@ -809,6 +825,8 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val KEY_FLAGS_SINGLE_LINE_TITLE = booleanPreferencesKey("flags_single_line_title")
         // #603 — GLOBAL grouped-view category band style (CategoryBandStyle.name, defensively parsed).
         val KEY_FLAGS_CATEGORY_BAND_STYLE = stringPreferencesKey("flags_category_band_style")
+        // #662 — « états vides humoristiques » opt-in (smiley empty state instead of the sober icon).
+        val KEY_FLAGS_FUNNY_EMPTY_STATE = booleanPreferencesKey("flags_funny_empty_state")
         // #309 — per-tab display override. The master switch plus one nullable key per FlagType for
         // each toggle; absence of a per-type key means « fall back to the global value ». Keys are
         // derived from the stable enum name (cyan/red/favorite), e.g. `flags_group_by_category_cyan`.

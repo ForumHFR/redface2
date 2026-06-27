@@ -330,6 +330,20 @@ class FlagsViewModelTest {
     }
 
     @Test
+    fun `funnyEmptyState reflects the persisted preference`() = runTest {
+        // #662 — the opt-in smiley empty state surfaces through an eager StateFlow; default is sober.
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+
+        val sober = viewModel(auth, flags, forum, FakeUserPreferencesRepository())
+        assertFalse("default empty state is sober", sober.funnyEmptyState.value)
+
+        val funny = viewModel(auth, flags, forum, FakeUserPreferencesRepository(funnyEmptyState = true))
+        assertTrue("opt-in surfaces the funny empty state", funny.funnyEmptyState.value)
+    }
+
+    @Test
     fun `an in-flight RED write never clobbers the CYAN re-tap shim`() = runTest {
         // #317 Codex review: the optimistic shim is CYAN-scoped, so a concurrent (or late-completing)
         // RED/FAVORITE write must never touch — let alone clear — CYAN's pending flip. Gate ONLY the
@@ -2269,10 +2283,12 @@ class FlagsViewModelTest {
         groupByCategory: Boolean = true,
         hideReadCategories: Boolean = false,
         perTabOverride: Boolean = false,
+        funnyEmptyState: Boolean = false,
     ) : UserPreferencesRepository {
         private val groupBy = MutableStateFlow(groupByCategory)
         private val hideRead = MutableStateFlow(hideReadCategories)
         private val perTab = MutableStateFlow(perTabOverride)
+        private val funnyEmpty = MutableStateFlow(funnyEmptyState)
         private val perTypeGroup: Map<FlagType, MutableStateFlow<Boolean?>> =
             FlagType.entries.associateWith { MutableStateFlow<Boolean?>(null) }
         private val perTypeHide: Map<FlagType, MutableStateFlow<Boolean?>> =
@@ -2410,6 +2426,11 @@ class FlagsViewModelTest {
         override suspend fun setShowScrollbar(enabled: Boolean) = Unit
 
         override fun observeNavBarLabels(): Flow<Boolean> = MutableStateFlow(true)
+
+        override fun observeFunnyEmptyState(): Flow<Boolean> = funnyEmpty
+        override suspend fun setFunnyEmptyState(enabled: Boolean) {
+            funnyEmpty.value = enabled
+        }
 
         override suspend fun setNavBarLabels(enabled: Boolean) = Unit
 

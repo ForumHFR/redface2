@@ -600,6 +600,10 @@ class TopicRepositoryImplTest {
 
         override suspend fun setNavBarLabels(enabled: Boolean) = Unit
 
+        override fun observeFunnyEmptyState(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setFunnyEmptyState(enabled: Boolean) = Unit
+
         override fun observeStartScreen(): Flow<StartScreenPreference> =
             MutableStateFlow(StartScreenPreference())
 

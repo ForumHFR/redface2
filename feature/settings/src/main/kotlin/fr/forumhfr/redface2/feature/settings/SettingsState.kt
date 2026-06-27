@@ -139,6 +139,12 @@ data class SettingsState(
     val isUpdatingNavBarLabels: Boolean = false,
     val navBarLabelsError: Boolean = false,
     val navBarLabelsTouchedLocally: Boolean = false,
+    // #662 — états vides humoristiques de la vue Drapeaux (smiley perso au lieu de l'icône sobre).
+    // Même machinerie optimistic-flip + garde de course. Default FALSE (opt-in).
+    val funnyEmptyState: Boolean = false,
+    val isUpdatingFunnyEmptyState: Boolean = false,
+    val funnyEmptyStateError: Boolean = false,
+    val funnyEmptyStateTouchedLocally: Boolean = false,
     // #518 — masquer la barre de navigation système Android (plein écran immersif). Même machinerie
     // optimistic-flip + garde de course. Default FALSE (opt-in).
     val hideSystemNavBar: Boolean = false,
@@ -289,6 +295,10 @@ data class SettingsState(
     val canToggleNavBarLabels: Boolean
         get() = !isUpdatingNavBarLabels
 
+    // #662 — the funny-empty-state toggle is gated only by its own write.
+    val canToggleFunnyEmptyState: Boolean
+        get() = !isUpdatingFunnyEmptyState
+
     // #518 — the hide-system-nav-bar toggle is gated only by its own write.
     val canToggleHideSystemNavBar: Boolean
         get() = !isUpdatingHideSystemNavBar
@@ -425,6 +435,9 @@ sealed interface SettingsIntent {
 
     /** #666 — afficher les libellés sous les icônes de la barre du bas. */
     data class NavBarLabelsChanged(val enabled: Boolean) : SettingsIntent
+
+    /** #662 — états vides humoristiques de la vue Drapeaux (smiley perso). */
+    data class FunnyEmptyStateChanged(val enabled: Boolean) : SettingsIntent
 
     /** #518 — masquer la barre de navigation système Android (plein écran immersif). */
     data class HideSystemNavBarChanged(val enabled: Boolean) : SettingsIntent

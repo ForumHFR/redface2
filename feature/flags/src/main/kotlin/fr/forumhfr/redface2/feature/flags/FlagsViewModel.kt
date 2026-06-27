@@ -107,6 +107,18 @@ class FlagsViewModel @Inject constructor(
         )
 
     /**
+     * #662 — « états vides humoristiques » opt-in. When `true`, an empty tab swaps the sober
+     * style-A icon for a HFR perso smiley (style C); the contextual text is unchanged. Eager so the
+     * empty state renders the right visual without a subscription warm-up flash.
+     */
+    val funnyEmptyState: StateFlow<Boolean> = userPreferencesRepository.observeFunnyEmptyState()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = false,
+        )
+
+    /**
      * #603 PR5 — local « super favori » topic ids (ADR-017 decision 5), a client-side pin distinct
      * from the server `isFavorite`. Eager so the long-press sheet reflects the current state without a
      * subscription warm-up. Backed by [SuperFavoriteRepository] (its own store, not user prefs).
