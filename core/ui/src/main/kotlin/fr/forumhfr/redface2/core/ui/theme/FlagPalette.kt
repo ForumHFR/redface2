@@ -13,9 +13,11 @@ import fr.forumhfr.redface2.core.model.FlagType
  * - [FlagType.RED] → rouge, lus uniquement
  * - [FlagType.FAVORITE] → jaune, favoris
  *
- * #690 — [FAVORITE] was Material Lime 500 (`#CDDC39`) but on screen it read GREEN, not yellow, so it
- * moved to Material Yellow 600 (`#FDD835`) : unmistakably yellow without the amber drift (`#F9A825`)
- * that loses the HFR favourite identity. Cyan/Red stay in their Material tones.
+ * #690 — [FAVORITE] history: Material Lime 500 (`#CDDC39`) read GREEN on screen; Material Yellow 600
+ * (`#FDD835`, v196) was unmistakably yellow on dark but washed out on the light theme's cream surface
+ * (~1.2:1, illegible). It is now Material Amber 600 (`#FFB300`) — a warm yellow-gold that holds on
+ * BOTH light and dark (community pick « D »), without going all the way to the amber (`#F9A825`) the
+ * team rejected as too far from the HFR favourite identity. Cyan/Red stay in their Material tones.
  *
  * Kept distinct from the Material 3 `error` / `tertiary` roles on purpose : mapping
  * the buckets to roles would either introduce ambiguity (red flag ↔ error state) or
@@ -27,7 +29,7 @@ object FlagPalette {
 
     val Cyan: Color = Color(0xFF00BCD4)
     val Red: Color = Color(0xFFD32F2F)
-    val Favorite: Color = Color(0xFFFDD835)
+    val Favorite: Color = Color(0xFFFFB300)
 
     /**
      * #603 — the « DT » (MultiMP) bucket marker, in a Material-toned fuchsia (`#D500F9`, Material

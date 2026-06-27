@@ -191,7 +191,11 @@ fun FlagsRoute(
 
     // #385 — hoisted list state + scroll-to-top when the unread filter flips (cf.
     // FilterFlipScrollResetEffect).
-    val flagsListState = rememberLazyListState()
+    // #695 — ONE LazyListState per flag tab (helper below) so a single shared state no longer carries
+    // Cyan's scroll index onto Favori/Rouge when switching tabs. The current tab's state drives the
+    // filter-flip reset (#385) and the landing recall-to-top (#546) below, both already scoped to the
+    // active tab.
+    val flagsListState = rememberFlagTabListState(selectedTab.flagType)
     val tabUnreadFilter by viewModel.tabUnreadFilter.collectAsStateWithLifecycle()
     FilterFlipScrollResetEffect(
         tabUnreadFilter = tabUnreadFilter,
@@ -1160,6 +1164,25 @@ private fun FlagListBody(
                 }
             }
         }
+    }
+}
+
+/**
+ * #695 — one [LazyListState] per flag tab so the scroll position of Mes sujets / Lu / Favoris does not
+ * bleed across tabs (a single shared state carried one tab's index onto another). The three states are
+ * remembered + saveable, so each tab keeps its own position across switches and rotation; the active
+ * tab's state is returned. Super has no list — it reuses the Cyan state harmlessly (never rendered).
+ * Extracted from [FlagsRoute] to keep its cyclomatic complexity under the detekt threshold.
+ */
+@Composable
+private fun rememberFlagTabListState(flagType: FlagType?): LazyListState {
+    val cyanListState = rememberLazyListState()
+    val redListState = rememberLazyListState()
+    val favoriteListState = rememberLazyListState()
+    return when (flagType) {
+        FlagType.RED -> redListState
+        FlagType.FAVORITE -> favoriteListState
+        FlagType.CYAN, null -> cyanListState
     }
 }
 

@@ -16,6 +16,22 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.17.17` — `internal` (dev) — 2026-06-27
+
+> Vue Drapeaux (#603) : la couleur du drapeau favori passe à un jaune-ambre lisible sur clair comme sur
+> sombre (#690, choix « D » des testeurs), et le défilement de chaque onglet (Mes sujets / Lu / Favoris)
+> est désormais indépendant — il ne « bave » plus d'un onglet à l'autre (#695). versionName 0.17.16 → 0.17.17.
+
+**Drapeaux — vue (#603)**
+
+- **Couleur du favori lisible sur fond clair (#690)** : le jaune Material Yellow 600 (`#FDD835`) se
+  noyait sur le thème clair (fond crème, contraste ~1,2:1). Il passe à Material Amber 600 (`#FFB300`),
+  un jaune-ambre qui tient sur clair comme sur sombre (choix « D » des testeurs CharLee/thibw/XaTriX),
+  sans aller jusqu'à l'ambre `#F9A825` jugé trop loin de l'identité du favori. Cyan et rouge inchangés.
+- **Défilement indépendant par onglet (#695)** : les onglets Mes sujets / Lu / Favoris partageaient un
+  seul état de liste, donc la position de défilement « bavait » d'un onglet à l'autre. Chaque onglet a
+  désormais son propre état de liste (préservé au changement d'onglet et à la rotation).
+
 ## `0.17.16` — `internal` (dev) — 2026-06-27
 
 > Vue Drapeaux (#603), correctifs : les sujets cyan d'une catégorie ajoutée récemment sur HFR (ex. « IA »)
