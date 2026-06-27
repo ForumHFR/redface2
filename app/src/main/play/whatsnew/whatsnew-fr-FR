@@ -1,4 +1,6 @@
-Redface 2 v0.17.20 — dev.
+Redface 2 v0.17.21 — dev.
 
 Vue Drapeaux :
-- Le texte expliquant que seule la première page de la boîte est balayée a quitté la vue DT pour rejoindre la description du réglage « Section DT » (Réglages › Drapeaux). La vue reste épurée.
+- Nouvelle barre du haut : deux containers arrondis, loupe rétractable, avatar, indicateur « +lus ».
+- Le swipe entre onglets glisse maintenant du bon côté (#660).
+- Sheet d'appui-long : liste d'actions complète + rangée d'accès rapide (#676).
