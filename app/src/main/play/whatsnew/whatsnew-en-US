@@ -1,4 +1,6 @@
-Redface 2 v0.17.20 — dev.
+Redface 2 v0.17.21 — dev.
 
 Flags view:
-- The note explaining that only the inbox's first page is scanned has moved out of the DT view into the "DT section" setting description (Settings › Flags). The view stays uncluttered.
+- New top bar: two rounded containers, a retractable search loupe, the account avatar, and an "also-read" indicator.
+- Tab swipe now slides in from the correct side (#660).
+- Long-press sheet: the full action list is back alongside the quick-access row (#676).

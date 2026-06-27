@@ -16,6 +16,26 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.17.21` — `internal` (dev) — 2026-06-28
+
+> Vue Drapeaux (#603) — **refonte de la top bar** (nouveau look : deux containers arrondis, loupe
+> rétractable, avatar, indicateur « +lus » en forme d'œil) + animation de **swipe entre onglets « slide
+> au commit »** (#660) + **sheet d'appui-long** avec liste d'actions complète ET rangée d'accès rapide
+> (#676). versionName 0.17.20 → 0.17.21.
+
+**Drapeaux — vue (#603)**
+
+- **Refonte de la top bar — nouveau look (#603)** : la barre plate laisse place à deux « containers »
+  arrondis flottant sur un centre transparent. À gauche, le sélecteur d'onglet (drapal de la section +
+  nom court + indicateur « +lus » en forme d'œil quand les lus sont affichés). À droite, une loupe
+  rétractable (qui s'ouvre en champ de recherche plein largeur) et l'avatar du compte. Les bascules
+  existantes (onglets, +lus, réglages d'affichage) restent dans le menu du container gauche. *(Suite à
+  venir : défilement du contenu sous la barre #665, loader « redface », option D/C de l'indicateur.)*
+- **Swipe entre onglets « slide au commit » (#660)** : le changement d'onglet par balayage glisse
+  désormais directionnellement du bon côté (Material Shared Axis X) au lieu d'apparaître brusquement.
+- **Sheet d'appui-long (#676)** : la liste verticale d'actions (libellés complets) revient et coexiste
+  avec la rangée d'accès rapide en icônes ; « Retirer » reste en dernier, toujours confirmé par dialog.
+
 ## `0.17.20` — `internal` (dev) — 2026-06-27
 
 > Vue Drapeaux (#603) — le texte explicatif du balayage de la section DT quitte la vue (où il flottait
