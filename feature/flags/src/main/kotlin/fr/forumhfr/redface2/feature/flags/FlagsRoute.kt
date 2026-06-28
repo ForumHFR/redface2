@@ -2,6 +2,8 @@ package fr.forumhfr.redface2.feature.flags
 
 import android.annotation.SuppressLint
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -9,7 +11,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -20,7 +21,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -56,6 +59,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -64,10 +69,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
@@ -76,6 +85,7 @@ import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -111,6 +121,15 @@ import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsChoiceGroup
 import fr.forumhfr.redface2.core.ui.theme.FlagPalette
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+
+/**
+ * #665 — top padding the scrollable bodies must reserve so their content sits below (and glides under)
+ * the overlaid translucent top bar. Provided once at the route root from the measured bar+loader height
+ * (incl. the status-bar inset); read by every flag/DT list ([contentPadding]) and listless state, in
+ * the same CompositionLocal style as [fr.forumhfr.redface2.core.ui.LocalFlagMarkerBorder] — avoids
+ * threading a `contentTopPadding` param through AuthenticatedBody → 3 lists + empty states.
+ */
+val LocalFlagsContentTopPadding = compositionLocalOf { 0.dp }
 
 /**
  * Home tab entry point.
@@ -333,19 +352,32 @@ fun FlagsRoute(
         containerColor = MaterialTheme.colorScheme.surface,
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { _ ->
-        // The screen already manages its own status/navigation bars padding inside the
-        // Column ; the Scaffold is here purely to anchor the SnackbarHost above the system
-        // bars, so its content padding is intentionally not applied to the Column.
+        // The Scaffold is here purely to anchor the SnackbarHost above the system bars; its content
+        // padding is intentionally not applied (the screen manages its own insets below).
         Surface(
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.surface,
         ) {
-            Column(
+            // #665 — OVERLAY layout: the body fills the whole area and SCROLLS UNDER the overlaid top
+            // bar, instead of a Column that pushed the body below the bar. The bar+loader height is
+            // measured (onSizeChanged) and exposed to every list/empty-state via
+            // LocalFlagsContentTopPadding, so the first item sits below the bar yet content glides under.
+            // statusBarsPadding moved from this root onto the bar Row (FlagsTopBar).
+            val density = LocalDensity.current
+            var barHeightPx by remember { mutableIntStateOf(with(density) { ESTIMATED_BAR_HEIGHT.roundToPx() }) }
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .statusBarsPadding()
                     .navigationBarsPadding(),
             ) {
+                // Top bar + thin loading bar — overlaid ON TOP (zIndex) and MEASURED to feed the body
+                // padding. Declared first but drawn/hit-tested above the body via zIndex(1f).
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .zIndex(1f)
+                        .onSizeChanged { barHeightPx = it.height },
+                ) {
                 FlagsTopBar(
                     state = FlagsAppBarState(
                         currentTabColor = flagTabColor(selectedTab),
@@ -394,10 +426,16 @@ fun FlagsRoute(
                         dtIsRefreshing = dtIsRefreshing,
                     ),
                 )
+                } // end overlaid top-bar Column
 
+                // BODY — fills the Box and scrolls UNDER the bar; the padding local reserves the bar
+                // height (incl. status bar) so the first item sits just below it.
                 // Render nothing while authState is null (cookie jar warming up). Same
                 // anti-flicker convention as PR #91; defaulting to "Anonymous" here would
                 // bring the cold-start "Se connecter" flash back.
+                CompositionLocalProvider(
+                    LocalFlagsContentTopPadding provides with(density) { barHeightPx.toDp() },
+                ) {
                 authState?.let { state ->
                     when (state) {
                         AuthState.Anonymous -> AnonymousBody(onLoginRequested)
@@ -449,6 +487,7 @@ fun FlagsRoute(
                         }
                     }
                 }
+                } // end LocalFlagsContentTopPadding provider
             }
         }
     }
@@ -1002,6 +1041,11 @@ private fun flagTitleMaxLines(singleLineTitle: Boolean): Int = if (singleLineTit
 // immediately, so the slot costs no visible gap when idle.
 private val LOADING_BAR_SLOT_HEIGHT = 4.dp
 
+// #665 — conservative initial guess for the overlaid bar+loader height (incl. status bar) used to seed
+// LocalFlagsContentTopPadding before the real onSizeChanged measure lands, so the first frame doesn't
+// flash the first list item under the bar. The measured value replaces it on the first layout pass.
+private val ESTIMATED_BAR_HEIGHT = 96.dp
+
 @Composable
 private fun FlagsLoadingBar(loading: Boolean) {
     // The SLOT is always laid out; only the bar inside is conditional → toggling never reflows the list.
@@ -1019,6 +1063,8 @@ private fun NoFlagsSearchResults(query: String) {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            // #665 — sit below the overlaid bar.
+            .padding(top = LocalFlagsContentTopPadding.current)
             .verticalScroll(rememberScrollState())
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1055,7 +1101,7 @@ private fun AnonymousBody(onLoginRequested: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ColumnScope.AuthenticatedBody(
+private fun AuthenticatedBody(
     state: FlagsBodyState,
     actions: AuthenticatedActions,
     // #660 — hoisted holder: the Shared Axis X AnimatedContent below composes two panes during a
@@ -1105,10 +1151,10 @@ private fun ColumnScope.AuthenticatedBody(
     LaunchedEffect(selectedTab) { pendingSwipeForward = null }
     Box(
         modifier = Modifier
-            .fillMaxWidth()
-            // Without weight(1f) the box would not claim the remaining vertical space inside
-            // the parent Column, breaking the gesture areas on short lists.
-            .weight(1f)
+            // #665 — the body now fills the overlay Box (it is no longer a weighted child of a Column);
+            // the list's contentPadding (LocalFlagsContentTopPadding) reserves the bar height so the
+            // first item sits below the bar while content glides under it.
+            .fillMaxSize()
             // #660 — clip so the outgoing/incoming panes don't draw past the viewport mid-slide.
             .clipToBounds()
             .flagsTabSwipe(
@@ -1227,6 +1273,9 @@ private fun FlagListBody(
     listState: LazyListState,
 ) {
     val selectedTab = state.selectedTab
+    // #665 — the PullToRefreshBox now fills the whole overlay (under the bar), so offset the pull amorce
+    // down by the bar height to keep it visible below the bar rather than behind it.
+    val barTop = LocalFlagsContentTopPadding.current
     // Pull-to-refresh (swipe down) replaces the legacy header « Actualiser » button, matching
     // feature/forum. It wraps the whole flag body so the indicator stays anchored over the
     // existing content during the refresh round-trip (Material 3 stable, cf. Context7).
@@ -1240,7 +1289,11 @@ private fun FlagListBody(
         onRefresh = actions.onRefresh,
         state = pullState,
         indicator = {
-            FlagsPullAmorce(pullState, state.isRefreshing, Modifier.align(Alignment.TopCenter))
+            FlagsPullAmorce(
+                pullState,
+                state.isRefreshing,
+                Modifier.align(Alignment.TopCenter).offset { IntOffset(0, barTop.roundToPx()) },
+            )
         },
         modifier = Modifier.fillMaxSize(),
     ) {
@@ -1260,6 +1313,8 @@ private fun FlagListBody(
                 // nothing to anchor on).
                 modifier = Modifier
                     .fillMaxSize()
+                    // #665 — sit below the overlaid bar.
+                    .padding(top = LocalFlagsContentTopPadding.current)
                     .verticalScroll(rememberScrollState())
                     .padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -1445,6 +1500,9 @@ private fun CategorySectionedFlagList(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface),
+        // #665 — reserve the overlaid bar height so the first item/band sits below it and content
+        // glides under the (translucent) bar. fillParentMaxSize empty items center within this padding.
+        contentPadding = PaddingValues(top = LocalFlagsContentTopPadding.current),
     ) {
         // « Masquer les catégories sans non-lu » can filter every section out (no unread anywhere,
         // or all-read CYAN with « +lus » off). Without this guard the LazyColumn would render an
@@ -1750,6 +1808,8 @@ private fun FlatFlagList(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface),
+        // #665 — reserve the overlaid bar height (content glides under the translucent bar).
+        contentPadding = PaddingValues(top = LocalFlagsContentTopPadding.current),
     ) {
         if (flags.isEmpty()) {
             item(key = "flat-empty", contentType = CONTENT_TYPE_EMPTY) {
@@ -1908,6 +1968,8 @@ private fun ScrollableFlagsEmptyState(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
+            // #665 — centre the empty state in the area below the overlaid bar.
+            .padding(top = LocalFlagsContentTopPadding.current)
             .verticalScroll(rememberScrollState()),
         contentAlignment = Alignment.Center,
     ) {
@@ -2081,13 +2143,19 @@ private fun DtListBody(
     // the whole body (every branch) so the gesture has a target even on the listless states (#229).
     // #603 — « amorce seule » (XaTriX): pull cue while dragging, nothing during the refresh; the top
     // FlagsLoadingBar (driven by dtIsRefreshing / DtListUiState.Loading) is the single loading cue.
+    // #665 — offset the pull amorce below the overlaid bar (the PullToRefreshBox fills the overlay).
+    val barTop = LocalFlagsContentTopPadding.current
     val pullState = rememberPullToRefreshState()
     PullToRefreshBox(
         isRefreshing = isRefreshing,
         onRefresh = actions.onRefreshDt,
         state = pullState,
         indicator = {
-            FlagsPullAmorce(pullState, isRefreshing, Modifier.align(Alignment.TopCenter))
+            FlagsPullAmorce(
+                pullState,
+                isRefreshing,
+                Modifier.align(Alignment.TopCenter).offset { IntOffset(0, barTop.roundToPx()) },
+            )
         },
         modifier = Modifier.fillMaxSize(),
     ) {
@@ -2136,6 +2204,8 @@ private fun DtListContent(state: DtListUiState, actions: AuthenticatedActions, f
             modifier = Modifier
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.surface),
+            // #665 — reserve the overlaid bar height (content glides under the translucent bar).
+            contentPadding = PaddingValues(top = LocalFlagsContentTopPadding.current),
         ) {
             // DT now renders through the SAME row primitive + divider as the Cyan/Red/Favorite lists
             // (no Card, no contentPadding/spacing) so the four lists stay visually identical and a
@@ -2212,6 +2282,8 @@ private fun DtErrorBody(cause: Throwable, actions: AuthenticatedActions) {
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
+            // #665 — clear the overlaid bar before the error copy.
+            .padding(top = LocalFlagsContentTopPadding.current)
             .padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
