@@ -4,11 +4,14 @@
     <string name="flags_login_cta">Se connecter à HFR</string>
 
     <string name="flags_tab_my_topics">Mes sujets</string>
-    <!-- #603/#665 — noms courts pour le container compact de la top bar. -->
-    <string name="flags_tab_my_topics_short">Mes</string>
+    <!-- #603/#665 — noms courts pour le container compact de la top bar (XaTriX : Cyan/Lurk/Fav/DT/Super). -->
+    <string name="flags_tab_my_topics_short">Cyan</string>
     <string name="flags_tab_read_only">Lu</string>
+    <string name="flags_tab_read_only_short">Lurk</string>
     <string name="flags_tab_favorite">Favoris</string>
     <string name="flags_tab_favorite_short">Fav</string>
+    <string name="flags_tab_dt_short">DT</string>
+    <string name="flags_tab_super_short">Super</string>
     <!-- Libellé du TYPE de drapeau RED, distinct du libellé d'onglet (« Lu », raccourci pour
          tenir sur le tab row). Utilisé hors tab row, ex. dans le dialog de confirmation de
          retrait (#99) où la place n'est pas contrainte et où « Lu » seul serait ambigu. -->
@@ -182,6 +185,12 @@
     <string name="flags_view_settings_glyph_description">Forme du repère du type de drapeau dans la barre du haut : l\'icône drapeau colorée ou une pastille. S\'applique à tous les onglets.</string>
     <string name="flags_view_settings_glyph_flag">Drapeau</string>
     <string name="flags_view_settings_glyph_dot">Pastille</string>
+    <!-- #718 — options avatar du compte (placeholders grisés, à venir) -->
+    <string name="flags_view_settings_avatar_section">Avatar du compte · à venir</string>
+    <string name="flags_view_settings_avatar_border_title">Bordure de l\'avatar</string>
+    <string name="flags_view_settings_avatar_border_description">Afficher un liseré autour de l\'avatar. Bientôt configurable (#718).</string>
+    <string name="flags_view_settings_avatar_transparent_title">Fond transparent</string>
+    <string name="flags_view_settings_avatar_transparent_description">Fond de l\'avatar transparent au lieu du fond du container. Bientôt configurable (#718).</string>
     <!-- #603 — Style de la bande de catégorie (vue groupée) : sous-titre sobre / bloc tonal /
          accent latéral / pastille en puce. Réglage GLOBAL (tous onglets), sans effet en vue à plat. -->
     <string name="flags_view_settings_band_title">Bande de catégorie</string>

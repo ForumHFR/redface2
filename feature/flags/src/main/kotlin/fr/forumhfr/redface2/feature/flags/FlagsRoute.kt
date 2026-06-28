@@ -33,6 +33,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.IconButton
@@ -784,6 +785,30 @@ private fun FlagsViewSettingsSheet(
                     enabled = settings.groupByCategory,
                 )
             }
+
+            // #603/#718 (XaTriX) — greyed placeholders for upcoming account-avatar options. Disabled on
+            // purpose (« ajoute des options grisées ») so the planned work is visible; the real toggles
+            // land with #718. No-op callbacks — these never flip while disabled.
+            HorizontalDivider()
+            Text(
+                text = stringResource(R.string.flags_view_settings_avatar_section),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            ViewSettingsSwitchRow(
+                title = stringResource(R.string.flags_view_settings_avatar_border_title),
+                description = stringResource(R.string.flags_view_settings_avatar_border_description),
+                checked = false,
+                enabled = false,
+                onCheckedChange = {},
+            )
+            ViewSettingsSwitchRow(
+                title = stringResource(R.string.flags_view_settings_avatar_transparent_title),
+                description = stringResource(R.string.flags_view_settings_avatar_transparent_description),
+                checked = false,
+                enabled = false,
+                onCheckedChange = {},
+            )
 
             TextButton(
                 // Animate the sheet out (M3 stable pattern) before removing it from composition,
