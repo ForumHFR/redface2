@@ -16,6 +16,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
+import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
@@ -542,6 +543,7 @@ class TopicRepositoryImplTest {
         override suspend fun setFlagsSingleLineTitle(enabled: Boolean) = Unit
         override suspend fun setFlagsCategoryBandStyle(style: CategoryBandStyle) = Unit
         override suspend fun setFlagsMarkerBorder(enabled: Boolean) = Unit
+        override suspend fun setFlagsPlusLusIndicatorStyle(style: PlusLusIndicatorStyle) = Unit
 
         // #286 — theme prefs are irrelevant to TopicRepositoryImpl; stubbed at their defaults.
         override fun observeThemeMode(): Flow<ThemeMode> = MutableStateFlow(ThemeMode.SYSTEM)

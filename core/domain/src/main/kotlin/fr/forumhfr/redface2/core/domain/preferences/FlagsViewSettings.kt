@@ -45,4 +45,8 @@ data class FlagsViewSettings(
     // (#FFB300) reads cleanly on a light background. Default false (no border). Not subject to the
     // per-tab override (like [markerStyle]). Carried on every resolution path.
     val markerBorder: Boolean = false,
+    // #661 — GLOBAL: shape of the « +lus » cue in the top-bar tab picker (eye glyph vs. coloured ring).
+    // Default EYE. Not subject to the per-tab override (like [markerStyle]). Carried on every
+    // resolution path.
+    val plusLusIndicatorStyle: PlusLusIndicatorStyle = PlusLusIndicatorStyle.Eye,
 )

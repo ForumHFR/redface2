@@ -15,6 +15,7 @@ import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
+import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenChoice
@@ -212,6 +213,15 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         persist {
             dataStore.edit { prefs ->
                 prefs[KEY_FLAGS_MARKER_BORDER] = enabled
+            }
+        }
+    }
+
+    override suspend fun setFlagsPlusLusIndicatorStyle(style: PlusLusIndicatorStyle) {
+        // #661 — GLOBAL: a single key, no per-type variant. Persisted by name, read defensively.
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_FLAGS_PLUS_LUS_INDICATOR_STYLE] = style.name
             }
         }
     }
@@ -765,6 +775,8 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val categoryBandStyle = readCategoryBandStyle(prefs)
         // #690 — GLOBAL « marker outline » toggle: resolved once, added to both return paths.
         val markerBorder = prefs[KEY_FLAGS_MARKER_BORDER] ?: false
+        // #661 — GLOBAL « +lus » indicator style: resolved once (defensively), added to both return paths.
+        val plusLusIndicatorStyle = readPlusLusIndicatorStyle(prefs)
         if (prefs[KEY_FLAGS_PER_TAB_OVERRIDE] != true) {
             return FlagsViewSettings(
                 groupByCategory = globalGroup,
@@ -774,6 +786,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
                 singleLineTitle = singleLineTitle,
                 categoryBandStyle = categoryBandStyle,
                 markerBorder = markerBorder,
+                plusLusIndicatorStyle = plusLusIndicatorStyle,
             )
         }
         return FlagsViewSettings(
@@ -784,6 +797,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             singleLineTitle = singleLineTitle,
             categoryBandStyle = categoryBandStyle,
             markerBorder = markerBorder,
+            plusLusIndicatorStyle = plusLusIndicatorStyle,
         )
     }
 
@@ -806,6 +820,16 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         prefs[KEY_FLAGS_CATEGORY_BAND_STYLE]
             ?.let { stored -> runCatching { CategoryBandStyle.valueOf(stored) }.getOrNull() }
             ?: CategoryBandStyle.MINIMAL
+
+    /**
+     * Reads [KEY_FLAGS_PLUS_LUS_INDICATOR_STYLE] defensively (#661): an unknown / corrupt stored value
+     * falls back to [PlusLusIndicatorStyle.Eye] instead of crashing on `PlusLusIndicatorStyle.valueOf`
+     * — same stance as [readMarkerStyle].
+     */
+    private fun readPlusLusIndicatorStyle(prefs: Preferences): PlusLusIndicatorStyle =
+        prefs[KEY_FLAGS_PLUS_LUS_INDICATOR_STYLE]
+            ?.let { stored -> runCatching { PlusLusIndicatorStyle.valueOf(stored) }.getOrNull() }
+            ?: PlusLusIndicatorStyle.Eye
 
     /**
      * Type-aware default for the #317 « non-lus uniquement » filter: CYAN (« Mes sujets ») shows the
@@ -840,6 +864,8 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val KEY_FLAGS_CATEGORY_BAND_STYLE = stringPreferencesKey("flags_category_band_style")
         // #690 — GLOBAL « marker outline » toggle (thin dark border around the marker).
         val KEY_FLAGS_MARKER_BORDER = booleanPreferencesKey("flags_marker_border")
+        // #661 — GLOBAL « +lus » indicator style (PlusLusIndicatorStyle.name, defensively parsed).
+        val KEY_FLAGS_PLUS_LUS_INDICATOR_STYLE = stringPreferencesKey("flags_plus_lus_indicator_style")
         // #662 — « états vides humoristiques » opt-in (smiley empty state instead of the sober icon).
         val KEY_FLAGS_FUNNY_EMPTY_STATE = booleanPreferencesKey("flags_funny_empty_state")
         // #309 — per-tab display override. The master switch plus one nullable key per FlagType for
