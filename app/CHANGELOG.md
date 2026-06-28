@@ -16,6 +16,29 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.17.23` — `internal` (dev) — 2026-06-28
+
+> Vue Drapeaux (#603) — passe de review top bar dogfood : **noms d'onglets courts** (Cyan/Lurk/Fav/DT/
+> Super), **option drapeau/pastille** du glyphe de type (#717), **avatar du compte** qui épouse le
+> container (fond du container, **sans bordure**), **« Réglages d'affichage » disponible sur tous les
+> onglets** (dont DT/Super), et **tap propre** des deux zones du container gauche. versionName
+> 0.17.22 → 0.17.23.
+
+**Drapeaux — vue (#603)**
+
+- **Option drapeau / pastille (#603/#665, #717)** : nouveau réglage « Repère du type actif » — le glyphe
+  du type dans la barre du haut est l'icône drapeau colorée (défaut) ou une pastille colorée.
+- **Noms d'onglets courts** : le container gauche affiche Cyan / Lurk / Fav / DT / Super.
+- **Avatar du compte** : le fond suit le container (`surfaceContainerHigh`) et la bordure est retirée —
+  le PP rond s'intègre proprement ; l'identité reste lisible via l'initiale teintée. Options bordure /
+  fond transparent à venir (#718, placeholders grisés dans le sheet).
+- **« Réglages d'affichage » sur tous les onglets** : l'entrée est désormais disponible sur DT et Super
+  (qui n'ont pas la loupe) — les réglages sont globaux et le menu n'existe que pour un compte connecté.
+- **Tap propre du container gauche** : chaque zone (drapeau / type) épouse son extrémité de pilule au
+  tap (demi-pilules), fini le rectangle arrondi flottant.
+
+---
+
 ## `0.17.22` — `internal` (dev) — 2026-06-28
 
 > Vue Drapeaux (#603) — finitions top bar + correctifs dogfood : **avatar du compte rond**, **ombre
