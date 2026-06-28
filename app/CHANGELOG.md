@@ -16,6 +16,25 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.17.25` — `internal` (dev) — 2026-06-28
+
+> Vue Drapeaux (#603/#665) — **top bar « overlay translucide »** : la barre du haut ne pousse plus la
+> liste vers le bas, elle la **survole**. Au scroll, le contenu **glisse sous la barre** avec un voile
+> dégradé (opaque derrière la status bar pour garder l'horloge lisible, transparent au bas pour laisser
+> le contenu apparaître en fondu sous le centre vide). versionName 0.17.24 → 0.17.25.
+
+**Drapeaux — vue (#603/#665)**
+
+- **Top bar en surimpression (#665)** : la liste remplit désormais tout l'espace et passe **sous** la
+  barre du haut au lieu d'être poussée dessous. Le premier élément reste calé juste sous la barre (la
+  hauteur de la barre est mesurée et réservée), mais au défilement le contenu glisse dessous.
+- **Voile translucide au scroll (#665)** : quand le contenu est défilé sous la barre, un **dégradé**
+  (couleur du fond de page, donc cohérent dans tous les thèmes y compris AMOLED) apparaît — opaque
+  derrière la barre d'état (horloge lisible) et **transparent au bas** pour que le contenu apparaisse en
+  fondu sous le centre vide. La barre reste transparente en haut de liste (rien à masquer).
+
+---
+
 ## `0.17.24` — `internal` (dev) — 2026-06-28
 
 > Vue Drapeaux (#603) — suite de la review dogfood : **repère « +lus » = anneau autour du drapeau**

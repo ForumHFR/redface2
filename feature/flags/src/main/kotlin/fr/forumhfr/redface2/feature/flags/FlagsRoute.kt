@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.feature.flags
 
 import android.annotation.SuppressLint
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -9,7 +10,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -20,7 +20,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -56,6 +58,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -64,10 +68,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
@@ -76,6 +84,7 @@ import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -111,6 +120,15 @@ import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsChoiceGroup
 import fr.forumhfr.redface2.core.ui.theme.FlagPalette
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+
+/**
+ * #665 — top padding the scrollable bodies must reserve so their content sits below (and glides under)
+ * the overlaid translucent top bar. Provided once at the route root from the measured bar+loader height
+ * (incl. the status-bar inset); read by every flag/DT list ([contentPadding]) and listless state, in
+ * the same CompositionLocal style as [fr.forumhfr.redface2.core.ui.LocalFlagMarkerBorder] — avoids
+ * threading a `contentTopPadding` param through AuthenticatedBody → 3 lists + empty states.
+ */
+private val LocalFlagsContentTopPadding = compositionLocalOf { 0.dp }
 
 /**
  * Home tab entry point.
@@ -216,6 +234,10 @@ fun FlagsRoute(
     // (#385) and the landing recall-to-top (#546) below, both already scoped to the current tab.
     val flagTabListStates = rememberFlagTabListStates()
     val flagsListState = flagTabListStates.forType(selectedTab.flagType)
+    // #665 — the overlay bar gains an opaque→transparent scrim only when content is actually scrolled
+    // under it. The active tab's list drives it; Super (no list) and empty/loading states report
+    // canScrollBackward = false, so the bar stays non-elevated without a special case (isTabScrolled).
+    val barElevated = flagTabListStates.isTabScrolled(selectedTab)
     val tabUnreadFilter by viewModel.tabUnreadFilter.collectAsStateWithLifecycle()
     FilterFlipScrollResetEffect(
         tabUnreadFilter = tabUnreadFilter,
@@ -228,24 +250,11 @@ fun FlagsRoute(
     // ViewModel signal (consumed once handled) rather than a replayable counter, so a rotation /
     // route recreation does not replay a stale scroll. Return-from-topic refreshes never raise it.
     val recallListToTop by viewModel.recallListToTop.collectAsStateWithLifecycle()
-    LaunchedEffect(recallListToTop) {
-        if (recallListToTop) {
-            // requestScrollToItem (not scrollToItem) pins index 0 on the next remeasure ignoring the
-            // key-based position restoration — without that, when the refresh prepends freshly-
-            // surfaced flags the old top row stays anchored and the new rows sit above the viewport
-            // (the original #546 bug). But the request is honoured per-remeasure and is NOT durable:
-            // the refreshed list can land a frame later (repository SharedFlow → combine/flatMapLatest
-            // defers the final emission), and a remeasure that ran first on the old list would consume
-            // the request before the prepend. So re-assert it across a few frames — the top then wins
-            // whichever frame the new list lands on. Bounded so a no-change landing still disarms the
-            // signal (no replay on rotation/recreation). Codex review #546.
-            repeat(RECALL_TO_TOP_FRAMES) {
-                flagsListState.requestScrollToItem(0)
-                withFrameNanos { }
-            }
-            viewModel.consumeRecallListToTop()
-        }
-    }
+    RecallListToTopEffect(
+        recall = recallListToTop,
+        listState = flagsListState,
+        onConsumed = viewModel::consumeRecallListToTop,
+    )
 
     // #309 — display-settings bottom sheet. Opened from the header « Affichage » action; the trigger
     // is only offered when there is a real list to configure (authenticated AND a real FlagType tab,
@@ -333,19 +342,34 @@ fun FlagsRoute(
         containerColor = MaterialTheme.colorScheme.surface,
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { _ ->
-        // The screen already manages its own status/navigation bars padding inside the
-        // Column ; the Scaffold is here purely to anchor the SnackbarHost above the system
-        // bars, so its content padding is intentionally not applied to the Column.
+        // The Scaffold is here purely to anchor the SnackbarHost above the system bars; its content
+        // padding is intentionally not applied (the screen manages its own insets below).
         Surface(
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.surface,
         ) {
-            Column(
+            // #665 — OVERLAY layout: the body fills the whole area and SCROLLS UNDER the overlaid top
+            // bar, instead of a Column that pushed the body below the bar. The bar+loader height is
+            // measured (onSizeChanged) and exposed to every list/empty-state via
+            // LocalFlagsContentTopPadding, so the first item sits below the bar yet content glides under.
+            // statusBarsPadding moved from this root onto the bar Row (FlagsTopBar).
+            val density = LocalDensity.current
+            var barHeightPx by remember { mutableIntStateOf(with(density) { ESTIMATED_BAR_HEIGHT.roundToPx() }) }
+            val barScrim = flagsBarScrimBrush(elevated = barElevated)
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .statusBarsPadding()
                     .navigationBarsPadding(),
             ) {
+                // Top bar + thin loading bar — overlaid ON TOP (zIndex) and MEASURED to feed the body
+                // padding. Declared first but drawn/hit-tested above the body via zIndex(1f).
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .zIndex(1f)
+                        .onSizeChanged { barHeightPx = it.height }
+                        .background(barScrim),
+                ) {
                 FlagsTopBar(
                     state = FlagsAppBarState(
                         currentTabColor = flagTabColor(selectedTab),
@@ -383,21 +407,31 @@ fun FlagsRoute(
                 // of the current tab: manual pull-to-refresh, auto-refresh AND the initial cold load —
                 // it is now the single loading cue (the central spinner was retired). ADR-017 decision 7.
                 FlagsLoadingBar(
-                    // Anonymous gate: when not authenticated, flagsState stays null and we must NOT show
-                    // the bar over the « Se connecter » prompt (Codex review #648) — short-circuit here
-                    // so the helper stays at 5 params (detekt LongParameterList).
-                    loading = authState is AuthState.Authenticated && flagsLoadingBarVisible(
-                        selectedTab = selectedTab,
-                        flagsState = flagsState,
-                        isRefreshing = isRefreshing,
-                        dtListState = dtListState,
-                        dtIsRefreshing = dtIsRefreshing,
-                    ),
+                    // Anonymous gate (barLoadingGated): when not authenticated, flagsState stays null and we
+                    // must NOT show the bar over the « Se connecter » prompt (Codex review #648). The `&&`
+                    // lives in the helper so it doesn't count against FlagsRoute's cyclomatic budget; the
+                    // visibility is a lambda so it is only evaluated (and only subscribes to its state)
+                    // when authenticated.
+                    loading = barLoadingGated(authState) {
+                        flagsLoadingBarVisible(
+                            selectedTab = selectedTab,
+                            flagsState = flagsState,
+                            isRefreshing = isRefreshing,
+                            dtListState = dtListState,
+                            dtIsRefreshing = dtIsRefreshing,
+                        )
+                    },
                 )
+                } // end overlaid top-bar Column
 
+                // BODY — fills the Box and scrolls UNDER the bar; the padding local reserves the bar
+                // height (incl. status bar) so the first item sits just below it.
                 // Render nothing while authState is null (cookie jar warming up). Same
                 // anti-flicker convention as PR #91; defaulting to "Anonymous" here would
                 // bring the cold-start "Se connecter" flash back.
+                CompositionLocalProvider(
+                    LocalFlagsContentTopPadding provides with(density) { barHeightPx.toDp() },
+                ) {
                 authState?.let { state ->
                     when (state) {
                         AuthState.Anonymous -> AnonymousBody(onLoginRequested)
@@ -449,6 +483,7 @@ fun FlagsRoute(
                         }
                     }
                 }
+                } // end LocalFlagsContentTopPadding provider
             }
         }
     }
@@ -992,6 +1027,13 @@ private fun flagsLoadingBarVisible(
     else -> isRefreshing || flagsState == null || flagsState == FlagsListUiState.Loading
 }
 
+// #648 — the anonymous gate, kept off FlagsRoute so the `&&` short-circuit no longer counts against its
+// cyclomatic budget (#665 pushed it over). When anonymous, flagsState stays null and the bar would
+// otherwise stay up forever over the « Se connecter » prompt. [barVisible] is a lambda so it is only
+// evaluated when authenticated — a genuine short-circuit (no useless state reads when anonymous).
+private inline fun barLoadingGated(authState: AuthState?, barVisible: () -> Boolean): Boolean =
+    authState is AuthState.Authenticated && barVisible()
+
 // #603 — extracted so the single-line-title branch doesn't count against FlagsRoute's cyclomatic budget.
 private fun flagTitleMaxLines(singleLineTitle: Boolean): Int = if (singleLineTitle) 1 else 2
 
@@ -1001,6 +1043,35 @@ private fun flagTitleMaxLines(singleLineTitle: Boolean): Int = if (singleLineTit
 // extra air (preset D, XaTriX): the bar sits flush at the top of the slot and the list/first band follow
 // immediately, so the slot costs no visible gap when idle.
 private val LOADING_BAR_SLOT_HEIGHT = 4.dp
+
+// #665 — conservative initial guess for the overlaid bar+loader height (incl. status bar) used to seed
+// LocalFlagsContentTopPadding before the real onSizeChanged measure lands, so the first frame doesn't
+// flash the first list item under the bar. The measured value replaces it on the first layout pass.
+private val ESTIMATED_BAR_HEIGHT = 96.dp
+
+/**
+ * #665 — the scrim that makes the overlaid bar « translucide » when content scrolls under it: opaque
+ * (page [androidx.compose.material3.ColorScheme.surface]) behind the status bar so the clock stays
+ * legible, fading to transparent at the bottom edge so content visibly glides under the empty centre.
+ * The colour is the page `surface` (the very background the list rows sit on), so a row melts seamlessly
+ * into the bar in every theme — incl. AMOLED, where surface is pure black. Fully transparent when not
+ * [elevated] (content is below the bar, nothing to cover); [animateFloatAsState] eases the transition on
+ * the scroll-off-top boundary and on tab switches. Extracted off FlagsRoute to keep it under the detekt
+ * cyclomatic-complexity threshold.
+ */
+@Composable
+private fun flagsBarScrimBrush(elevated: Boolean): Brush {
+    val scrimColor = MaterialTheme.colorScheme.surface
+    val scrimAlpha by animateFloatAsState(
+        targetValue = if (elevated) 1f else 0f,
+        label = "flagsBarScrim",
+    )
+    return Brush.verticalGradient(
+        0.0f to scrimColor.copy(alpha = scrimAlpha),
+        0.5f to scrimColor.copy(alpha = scrimAlpha),
+        1.0f to scrimColor.copy(alpha = 0f),
+    )
+}
 
 @Composable
 private fun FlagsLoadingBar(loading: Boolean) {
@@ -1019,6 +1090,8 @@ private fun NoFlagsSearchResults(query: String) {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            // #665 — sit below the overlaid bar.
+            .padding(top = LocalFlagsContentTopPadding.current)
             .verticalScroll(rememberScrollState())
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1055,7 +1128,7 @@ private fun AnonymousBody(onLoginRequested: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ColumnScope.AuthenticatedBody(
+private fun AuthenticatedBody(
     state: FlagsBodyState,
     actions: AuthenticatedActions,
     // #660 — hoisted holder: the Shared Axis X AnimatedContent below composes two panes during a
@@ -1105,10 +1178,10 @@ private fun ColumnScope.AuthenticatedBody(
     LaunchedEffect(selectedTab) { pendingSwipeForward = null }
     Box(
         modifier = Modifier
-            .fillMaxWidth()
-            // Without weight(1f) the box would not claim the remaining vertical space inside
-            // the parent Column, breaking the gesture areas on short lists.
-            .weight(1f)
+            // #665 — the body now fills the overlay Box (it is no longer a weighted child of a Column);
+            // the list's contentPadding (LocalFlagsContentTopPadding) reserves the bar height so the
+            // first item sits below the bar while content glides under it.
+            .fillMaxSize()
             // #660 — clip so the outgoing/incoming panes don't draw past the viewport mid-slide.
             .clipToBounds()
             .flagsTabSwipe(
@@ -1145,6 +1218,8 @@ private fun ColumnScope.AuthenticatedBody(
                     isRefreshing = bodyState.dtIsRefreshing,
                     actions = actions,
                     funny = bodyState.funnyEmptyState,
+                    // #665 — hoisted so the overlay scrim can read the DT scroll position.
+                    listState = listStates.dt,
                 )
                 else -> FlagListBody(
                     state = bodyState,
@@ -1227,6 +1302,9 @@ private fun FlagListBody(
     listState: LazyListState,
 ) {
     val selectedTab = state.selectedTab
+    // #665 — the PullToRefreshBox now fills the whole overlay (under the bar), so offset the pull amorce
+    // down by the bar height to keep it visible below the bar rather than behind it.
+    val barTop = LocalFlagsContentTopPadding.current
     // Pull-to-refresh (swipe down) replaces the legacy header « Actualiser » button, matching
     // feature/forum. It wraps the whole flag body so the indicator stays anchored over the
     // existing content during the refresh round-trip (Material 3 stable, cf. Context7).
@@ -1240,7 +1318,11 @@ private fun FlagListBody(
         onRefresh = actions.onRefresh,
         state = pullState,
         indicator = {
-            FlagsPullAmorce(pullState, state.isRefreshing, Modifier.align(Alignment.TopCenter))
+            FlagsPullAmorce(
+                pullState,
+                state.isRefreshing,
+                Modifier.align(Alignment.TopCenter).offset { IntOffset(0, barTop.roundToPx()) },
+            )
         },
         modifier = Modifier.fillMaxSize(),
     ) {
@@ -1260,6 +1342,8 @@ private fun FlagListBody(
                 // nothing to anchor on).
                 modifier = Modifier
                     .fillMaxSize()
+                    // #665 — sit below the overlaid bar.
+                    .padding(top = LocalFlagsContentTopPadding.current)
                     .verticalScroll(rememberScrollState())
                     .padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -1347,13 +1431,33 @@ private class FlagTabListStates(
     val cyan: LazyListState,
     val red: LazyListState,
     val favorite: LazyListState,
+    // #665 — the DT list now has its own hoisted state so the overlay scrim can read its scroll
+    // position (forTab below). It still feeds DtListContent's LazyColumn directly (no cross-tab bleed:
+    // DT is its own state, never the Cyan one).
+    val dt: LazyListState,
 ) {
-    // Super/DT have no real flag list — they reuse the Cyan state harmlessly (never rendered as a list).
+    // Super has no real flag list; it reuses the Cyan state harmlessly (never rendered as a list).
     fun forType(flagType: FlagType?): LazyListState = when (flagType) {
         FlagType.RED -> red
         FlagType.FAVORITE -> favorite
         FlagType.CYAN, null -> cyan
     }
+
+    // #665 — the active scrollable list per tab, for the overlay scrim's `elevated` state, or null when
+    // the tab has no list (Super placeholder). An empty/loading list reports canScrollBackward = false,
+    // so listless flag states keep the bar non-elevated without a special case.
+    fun forTab(tab: FlagTab): LazyListState? = when (tab) {
+        FlagTab.Cyan -> cyan
+        FlagTab.Red -> red
+        FlagTab.Favorite -> favorite
+        FlagTab.Dt -> dt
+        FlagTab.Super -> null
+    }
+
+    // #665 — whether the [tab]'s content is scrolled under the bar (drives the overlay scrim). Reading
+    // canScrollBackward here is a snapshot read, so the caller recomposes only when it flips. Extracted
+    // off FlagsRoute to keep that screen under the detekt cyclomatic-complexity threshold.
+    fun isTabScrolled(tab: FlagTab): Boolean = forTab(tab)?.canScrollBackward == true
 }
 
 @Composable
@@ -1361,7 +1465,8 @@ private fun rememberFlagTabListStates(): FlagTabListStates {
     val cyan = rememberLazyListState()
     val red = rememberLazyListState()
     val favorite = rememberLazyListState()
-    return remember(cyan, red, favorite) { FlagTabListStates(cyan, red, favorite) }
+    val dt = rememberLazyListState()
+    return remember(cyan, red, favorite, dt) { FlagTabListStates(cyan, red, favorite, dt) }
 }
 
 /**
@@ -1400,6 +1505,35 @@ private fun FilterFlipScrollResetEffect(
 // window covers the prepend whichever frame it arrives on. Three is generous for an in-memory emission
 // and the loop always terminates, so the one-shot signal is always consumed (no rotation replay).
 private const val RECALL_TO_TOP_FRAMES = 3
+
+/**
+ * #546 — recall the list to the top after a LANDING auto-refresh (app open / tab switch / resume): the
+ * refresh prepends freshly-surfaced flags and a held scroll position would leave them off-screen
+ * (« faut scroller vers le haut », tinc/Lt Ripley). Driven by a one-shot [recall] signal (consumed via
+ * [onConsumed] once handled) rather than a replayable counter, so a rotation / route recreation does not
+ * replay a stale scroll. Return-from-topic refreshes never raise it. Extracted off FlagsRoute (matching
+ * the other *Effect helpers) to keep that screen under the detekt cyclomatic-complexity threshold.
+ */
+@Composable
+private fun RecallListToTopEffect(recall: Boolean, listState: LazyListState, onConsumed: () -> Unit) {
+    LaunchedEffect(recall) {
+        if (recall) {
+            // requestScrollToItem (not scrollToItem) pins index 0 on the next remeasure ignoring the
+            // key-based position restoration — without that, when the refresh prepends freshly-surfaced
+            // flags the old top row stays anchored and the new rows sit above the viewport (the original
+            // #546 bug). But the request is honoured per-remeasure and is NOT durable: the refreshed list
+            // can land a frame later (repository SharedFlow → combine/flatMapLatest defers the final
+            // emission), and a remeasure that ran first on the old list would consume the request before
+            // the prepend. So re-assert it across a few frames — the top then wins whichever frame the new
+            // list lands on. Bounded so a no-change landing still disarms the signal. Codex review #546.
+            repeat(RECALL_TO_TOP_FRAMES) {
+                listState.requestScrollToItem(0)
+                withFrameNanos { }
+            }
+            onConsumed()
+        }
+    }
+}
 
 // LazyColumn contentType tags (#179 compose-perf): one reuse pool per structurally distinct slot
 // kind so Compose recycles like-for-like across the header→row→header alternation of the grouped
@@ -1445,6 +1579,9 @@ private fun CategorySectionedFlagList(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface),
+        // #665 — reserve the overlaid bar height so the first item/band sits below it and content
+        // glides under the (translucent) bar. fillParentMaxSize empty items center within this padding.
+        contentPadding = PaddingValues(top = LocalFlagsContentTopPadding.current),
     ) {
         // « Masquer les catégories sans non-lu » can filter every section out (no unread anywhere,
         // or all-read CYAN with « +lus » off). Without this guard the LazyColumn would render an
@@ -1750,6 +1887,8 @@ private fun FlatFlagList(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface),
+        // #665 — reserve the overlaid bar height (content glides under the translucent bar).
+        contentPadding = PaddingValues(top = LocalFlagsContentTopPadding.current),
     ) {
         if (flags.isEmpty()) {
             item(key = "flat-empty", contentType = CONTENT_TYPE_EMPTY) {
@@ -1908,6 +2047,8 @@ private fun ScrollableFlagsEmptyState(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
+            // #665 — centre the empty state in the area below the overlaid bar.
+            .padding(top = LocalFlagsContentTopPadding.current)
             .verticalScroll(rememberScrollState()),
         contentAlignment = Alignment.Center,
     ) {
@@ -2076,22 +2217,29 @@ private fun DtListBody(
     isRefreshing: Boolean,
     actions: AuthenticatedActions,
     funny: Boolean,
+    listState: LazyListState,
 ) {
     // #546 directive XaTriX — pull-to-refresh (swipe down) on the DT list, like the flag tabs. Wraps
     // the whole body (every branch) so the gesture has a target even on the listless states (#229).
     // #603 — « amorce seule » (XaTriX): pull cue while dragging, nothing during the refresh; the top
     // FlagsLoadingBar (driven by dtIsRefreshing / DtListUiState.Loading) is the single loading cue.
+    // #665 — offset the pull amorce below the overlaid bar (the PullToRefreshBox fills the overlay).
+    val barTop = LocalFlagsContentTopPadding.current
     val pullState = rememberPullToRefreshState()
     PullToRefreshBox(
         isRefreshing = isRefreshing,
         onRefresh = actions.onRefreshDt,
         state = pullState,
         indicator = {
-            FlagsPullAmorce(pullState, isRefreshing, Modifier.align(Alignment.TopCenter))
+            FlagsPullAmorce(
+                pullState,
+                isRefreshing,
+                Modifier.align(Alignment.TopCenter).offset { IntOffset(0, barTop.roundToPx()) },
+            )
         },
         modifier = Modifier.fillMaxSize(),
     ) {
-        DtListContent(state = state, actions = actions, funny = funny)
+        DtListContent(state = state, actions = actions, funny = funny, listState = listState)
     }
 }
 
@@ -2101,7 +2249,12 @@ private fun DtListBody(
  * vertically scrollable so the surrounding `PullToRefreshBox` keeps a target (#229).
  */
 @Composable
-private fun DtListContent(state: DtListUiState, actions: AuthenticatedActions, funny: Boolean) {
+private fun DtListContent(
+    state: DtListUiState,
+    actions: AuthenticatedActions,
+    funny: Boolean,
+    listState: LazyListState,
+) {
     when (state) {
         DtListUiState.Loading -> Box(
             // #603 — central spinner retired (cf. FlagListBody); the top FlagsLoadingBar covers the DT
@@ -2133,9 +2286,13 @@ private fun DtListContent(state: DtListUiState, actions: AuthenticatedActions, f
         is DtListUiState.Error -> DtErrorBody(cause = state.cause, actions = actions)
 
         is DtListUiState.Content -> LazyColumn(
+            // #665 — hoisted state so the overlay scrim can read the DT scroll position (forTab).
+            state = listState,
             modifier = Modifier
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.surface),
+            // #665 — reserve the overlaid bar height (content glides under the translucent bar).
+            contentPadding = PaddingValues(top = LocalFlagsContentTopPadding.current),
         ) {
             // DT now renders through the SAME row primitive + divider as the Cyan/Red/Favorite lists
             // (no Card, no contentPadding/spacing) so the four lists stay visually identical and a
@@ -2212,6 +2369,8 @@ private fun DtErrorBody(cause: Throwable, actions: AuthenticatedActions) {
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
+            // #665 — clear the overlaid bar before the error copy.
+            .padding(top = LocalFlagsContentTopPadding.current)
             .padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {

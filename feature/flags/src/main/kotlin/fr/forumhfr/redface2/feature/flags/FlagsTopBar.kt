@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -145,6 +146,9 @@ fun FlagsTopBar(
     Row(
         modifier = modifier
             .fillMaxWidth()
+            // #665 — the bar is now overlaid on the (edge-to-edge) content, so it owns the status-bar
+            // inset itself (the host no longer applies statusBarsPadding to the column root).
+            .statusBarsPadding()
             .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),

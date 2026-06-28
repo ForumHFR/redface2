@@ -1,6 +1,5 @@
-Redface 2 v0.17.24 — dev.
+Redface 2 v0.17.25 — dev.
 
 Vue Drapeaux :
-- Repère « +lus » : anneau autour du drapeau (nouveau défaut ; œil en option).
-- Avatar du compte à la taille standard d'une barre du haut (32 dp).
-- Appui long : « Aller à une page » (saisie du numéro) et « Poster un message » (réponse directe).
+- La barre du haut survole la liste : au défilement, le contenu glisse SOUS la barre.
+- Voile translucide au scroll : opaque derrière l'horloge, transparent en bas pour laisser le contenu apparaître en fondu. Barre transparente en haut de liste.
