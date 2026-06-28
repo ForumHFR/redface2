@@ -1,6 +1,9 @@
-Redface 2 v0.17.28 — dev.
+Redface 2 v0.17.29 — dev.
 
 Vue Drapeaux :
-- Loader « redface » repositionné : au tirer-pour-rafraîchir, il apparaît au niveau des deux pastilles du haut (centré entre elles), le contenu descend, puis revient à ras pendant le rafraîchissement. Correction d'un espace vide au rechargement automatique.
-- Nouveau réglage « Barre de chargement » (afficher/masquer la fine barre auto).
-- Avatar du compte : options bordure et fond transparent.
+- Fin du « petit saut » du contenu en fin de chargement (pull manuel et rechargement auto).
+- Plus de flash de la liste derrière la barre du haut au basculement « +lus ».
+- « Réglages d'affichage » retiré des onglets DT/Super (sans effet puis s'ouvrait au changement d'onglet).
+
+Avatar du compte :
+- Plus de fond blanc derrière un avatar transparent ; option « Fond transparent » (sans effet) retirée.

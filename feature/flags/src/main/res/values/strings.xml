@@ -202,8 +202,6 @@
     <string name="flags_view_settings_avatar_section">Avatar du compte</string>
     <string name="flags_view_settings_avatar_border_title">Bordure de l\'avatar</string>
     <string name="flags_view_settings_avatar_border_description">Affiche un fin liseré autour du badge avatar de la barre du haut. S\'applique à tous les écrans.</string>
-    <string name="flags_view_settings_avatar_transparent_title">Fond transparent</string>
-    <string name="flags_view_settings_avatar_transparent_description">Rend transparent le fond du badge avatar, au lieu du fond du container. S\'applique à tous les écrans.</string>
     <!-- #603 — Style de la bande de catégorie (vue groupée) : sous-titre sobre / bloc tonal /
          accent latéral / pastille en puce. Réglage GLOBAL (tous onglets), sans effet en vue à plat. -->
     <string name="flags_view_settings_band_title">Bande de catégorie</string>
