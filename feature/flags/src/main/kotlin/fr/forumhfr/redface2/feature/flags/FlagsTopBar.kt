@@ -411,17 +411,23 @@ private fun TabPickerDropdown(
                 },
             )
         }
-        // #603 (XaTriX) — « Réglages d'affichage » disponible sur TOUS les onglets : le picker
-        // n'existe que pour un compte authentifié, et les réglages sont GLOBAUX, donc pertinents même
-        // sur DT / Super (qui n'ont pas la loupe). Décorrélé de `searchEnabled` (la recherche).
-        HorizontalDivider()
-        DropdownMenuItem(
-            text = { Text(stringResource(R.string.flags_appbar_menu_display_settings)) },
-            onClick = {
-                onDismiss()
-                onOpenViewSettings()
-            },
-        )
+        // #603 — « Réglages d'affichage » UNIQUEMENT sur les onglets configurables (un vrai FlagType :
+        // Cyan / Lu / Favori), PAS sur DT / Super (`flagType == null`). Le sheet est fortement
+        // flagType-dépendant (scope par onglet, group/hide/marker…) et n'est rendu que si
+        // `canConfigureView` côté écran ; l'offrir sur DT/Super était une action morte qui armait un
+        // `showViewSettingsSheet=true` fantôme, lequel s'ouvrait au prochain onglet configurable (bug
+        // XaTriX : « tap réglages d'affichage sur DT/Super = rien, puis ça s'ouvre au changement
+        // d'onglet »). Codex : option 1 (cacher l'item) tant que global/par-type ne sont pas séparés.
+        if (state.currentTab.flagType != null) {
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.flags_appbar_menu_display_settings)) },
+                onClick = {
+                    onDismiss()
+                    onOpenViewSettings()
+                },
+            )
+        }
     }
 }
 

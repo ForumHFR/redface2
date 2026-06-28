@@ -6,7 +6,6 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import app.cash.turbine.test
-import fr.forumhfr.redface2.core.domain.preferences.AvatarBackground
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
@@ -471,25 +470,22 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
-    fun `avatar appearance defaults to borderless container on an empty store`() = runTest(dispatcher) {
-        // #718 GLOBAL: borderless + theme container by default (the #603/#665 look).
+    fun `avatar appearance defaults to borderless on an empty store`() = runTest(dispatcher) {
+        // #718 GLOBAL: borderless by default (the #603/#665 look).
         repository.observeAvatarAppearance().test {
             val appearance = awaitItem()
             assertEquals(false, appearance.border)
-            assertEquals(AvatarBackground.Container, appearance.background)
             cancelAndIgnoreRemainingEvents()
         }
     }
 
     @Test
-    fun `setAvatarBorder and setAvatarBackground persist and round-trip`() = runTest(dispatcher) {
-        // #718 GLOBAL: two independent keys, surfaced together as the bundled AvatarAppearance.
+    fun `setAvatarBorder persists and round-trips`() = runTest(dispatcher) {
+        // #718 GLOBAL: a single key, surfaced as the bundled AvatarAppearance (border only since #718).
         repository.setAvatarBorder(true)
-        repository.setAvatarBackground(AvatarBackground.Transparent)
         repository.observeAvatarAppearance().test {
             val appearance = awaitItem()
             assertEquals(true, appearance.border)
-            assertEquals(AvatarBackground.Transparent, appearance.background)
             cancelAndIgnoreRemainingEvents()
         }
     }

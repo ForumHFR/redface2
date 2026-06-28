@@ -11,7 +11,6 @@ import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
 import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
-import fr.forumhfr.redface2.core.domain.preferences.AvatarBackground
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
@@ -726,11 +725,6 @@ class FlagsViewModel @Inject constructor(
     /** Bottom-sheet write for the GLOBAL account-avatar border toggle (#718). */
     fun setAvatarBorder(enabled: Boolean) {
         viewModelScope.launch { userPreferencesRepository.setAvatarBorder(enabled) }
-    }
-
-    /** Bottom-sheet write for the GLOBAL account-avatar background (#718). */
-    fun setAvatarBackground(background: AvatarBackground) {
-        viewModelScope.launch { userPreferencesRepository.setAvatarBackground(background) }
     }
 
     /** Bottom-sheet write for the GLOBAL « +lus » indicator style (#661) — one value for every tab. */

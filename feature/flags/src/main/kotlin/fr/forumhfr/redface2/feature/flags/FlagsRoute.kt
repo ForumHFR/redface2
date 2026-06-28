@@ -99,7 +99,6 @@ import coil3.compose.AsyncImage
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
-import fr.forumhfr.redface2.core.domain.preferences.AvatarBackground
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
@@ -430,7 +429,14 @@ fun FlagsRoute(
                     onQueryChange = { searchQuery = it },
                     onSearchActiveChange = { searchActive = it },
                     // #661 — open the quick-config sheet from the picker (same sheet as the bottom-bar re-tap).
-                    onOpenViewSettings = { showViewSettingsSheet = true },
+                    // #603 — defensive set-guard (armViewSettingsSheet): only arm the sheet when the current
+                    // tab is configurable. The menu item is already hidden on DT/Super (TabPickerDropdown),
+                    // but guarding the SET too means a stale `showViewSettingsSheet=true` can never persist
+                    // under the `canConfigureView` render gate and pop on the next configurable tab (XaTriX
+                    // bug). The guard's `if` lives in the helper so it stays off FlagsRoute's cyclomatic budget.
+                    onOpenViewSettings = {
+                        armViewSettingsSheet(canConfigureView) { showViewSettingsSheet = true }
+                    },
                     accountMenu = { topBarActions?.invoke() },
                 )
 
@@ -547,7 +553,6 @@ fun FlagsRoute(
                 onGlyphStyleChange = viewModel::setFlagsGlyphStyle,
                 onShowLoadingBarChange = viewModel::setFlagsShowLoadingBar,
                 onAvatarBorderChange = viewModel::setAvatarBorder,
-                onAvatarBackgroundChange = viewModel::setAvatarBackground,
                 onDismiss = { showViewSettingsSheet = false },
             ),
         )
@@ -881,9 +886,11 @@ private fun FlagsViewSettingsSheet(
                 onCheckedChange = actions.onShowLoadingBarChange,
             )
 
-            // #718 (XaTriX) — GLOBAL account-avatar options (top-bar « PP » badge). Border = optional
-            // thin outline (default off); background = container vs. transparent. Both apply everywhere
-            // the badge shows (every screen's top bar) — this sheet is only the editing point.
+            // #718 (XaTriX) — GLOBAL account-avatar option (top-bar « PP » badge): an optional thin
+            // outline (default off). Applies everywhere the badge shows (every screen's top bar) — this
+            // sheet is only the editing point. The former « fond transparent » toggle was removed (#718):
+            // it was a no-op in the nested top-bar layout, and the badge now always sits on the container
+            // colour (which is what fixed the « avatar transparent → fond blanc » bug).
             HorizontalDivider()
             Text(
                 text = stringResource(R.string.flags_view_settings_avatar_section),
@@ -896,19 +903,6 @@ private fun FlagsViewSettingsSheet(
                 checked = avatarAppearance.border,
                 enabled = true,
                 onCheckedChange = actions.onAvatarBorderChange,
-            )
-            // The 2-value AvatarBackground enum is surfaced as a « fond transparent » toggle, matching
-            // the original placeholder phrasing: checked = Transparent, unchecked = Container.
-            ViewSettingsSwitchRow(
-                title = stringResource(R.string.flags_view_settings_avatar_transparent_title),
-                description = stringResource(R.string.flags_view_settings_avatar_transparent_description),
-                checked = avatarAppearance.background == AvatarBackground.Transparent,
-                enabled = true,
-                onCheckedChange = { transparent ->
-                    actions.onAvatarBackgroundChange(
-                        if (transparent) AvatarBackground.Transparent else AvatarBackground.Container,
-                    )
-                },
             )
 
             TextButton(
@@ -1109,6 +1103,15 @@ internal fun flagsSearchEnabled(authState: AuthState?, tab: FlagTab): Boolean =
 
 // #603 — extracted so the single-line-title branch doesn't count against FlagsRoute's cyclomatic budget.
 private fun flagTitleMaxLines(singleLineTitle: Boolean): Int = if (singleLineTitle) 1 else 2
+
+// #603 — arm the display-settings sheet only on a configurable tab. Extracted (like barLoadingGated) so
+// its `if` stays off FlagsRoute's cyclomatic budget (already at the detekt threshold of 15). Defensive
+// twin of the TabPickerDropdown gating: even if a setter is reached on DT/Super (flagType == null), the
+// `showViewSettingsSheet=true` is never armed, so it can't persist under the render gate and pop on the
+// next configurable tab.
+private inline fun armViewSettingsSheet(canConfigureView: Boolean, open: () -> Unit) {
+    if (canConfigureView) open()
+}
 
 // #603 — height of the always-present loading-bar SLOT. Reserving it unconditionally (rather than
 // rendering the bar with `if (loading)`) stops the list + sticky category bands from jumping by the
@@ -1375,43 +1378,44 @@ private fun pullPuckTopOffset(): Dp =
 
 // #728 — content-push release factor: 1f during the pull GESTURE, animating to 0f once the refresh
 // starts, so the content returns to flush while the puck spins up in the bar (no empty band under the
-// bar — the very « gap » XaTriX rejected; Codex framing #3). Returned as a draw-phase lambda so the body
-// reads it INSIDE its graphicsLayer (no recomposition on each animation frame). It is always multiplied
-// by the per-body distanceFraction (fresh-zero on a freshly-composed body), so an auto/cold refresh or a
-// tab switch never inherits a residual push regardless of this factor — leak-safe by construction.
+// bar — the very « gap » XaTriX rejected; Codex framing #3). HELD at 0f through the post-refresh
+// [settling] return-to-rest: M3 keeps `distanceFraction ≈ 1` for the whole refresh (incl. AUTO/cold
+// ones) then retracts it 1→0; without this guard `release` re-rose 0→1 while `distanceFraction` slid
+// 1→0 and their PRODUCT bumped the content down-then-up at end-of-load (the « petit saut en fin de
+// chargement » XaTriX reported on both manual AND auto reload). Holding `release=0` until the distance
+// has landed (`settling` clears at ~rest) kills the bump; the factor then re-rises with `distanceFraction
+// ≈ 0`, so no second bump. Returned as a draw-phase lambda so the body reads it INSIDE its graphicsLayer
+// (no recomposition per frame). Always multiplied by the per-body distanceFraction (fresh-zero on a
+// freshly-composed body), so an auto/cold refresh or a tab switch never inherits a residual push.
 @Composable
-private fun pullPushReleaseFactor(isRefreshing: Boolean): () -> Float {
+private fun pullPushReleaseFactor(isRefreshing: Boolean, settling: Boolean): () -> Float {
     val release = animateFloatAsState(
-        targetValue = if (isRefreshing) 0f else 1f,
+        targetValue = if (isRefreshing || settling) 0f else 1f,
         label = "flagPullPushRelease",
     )
     return { release.value }
 }
 
-/**
- * #728 — pull-to-refresh indicator: the contained « redface » puck ([RedfacePullPuck]) anchored just
- * under the top bar. It emerges + rolls while the user drags, then — for a MANUAL pull-refresh — stays
- * in view as the hero (frozen redface + spinning ring) until the refresh completes (M3 « keep the
- * indicator in view until the activity completes »). An AUTO / cold refresh shows nothing here (the
- * thin top [FlagsLoadingBar] is the single cue then — no double indicator). Shared by both surfaces.
- *
- * The [settling] state keeps the puck hidden through the post-refresh return-to-rest so it doesn't
- * re-pop while `distanceFraction` slides home (the « ça repop en fin de load » guard, XaTriX).
- */
+// #728 — the post-refresh settle guard, HOISTED to the body so a single source of truth feeds BOTH the
+// puck visibility ([FlagsPullIndicator]) AND the content-push release ([pullPushReleaseFactor]). Armed
+// SYNCHRONOUSLY the instant a refresh ends (the `wasRefreshing=true → isRefreshing=false` edge), so the
+// SAME composition that observes `isRefreshing=false` already sees `settling=true` and pins `release`'s
+// target at 0. This is a DELIBERATE same-frame visual-correctness tradeoff (a guarded edge-triggered
+// latch write during composition): deferring the arming to a `SideEffect` / `LaunchedEffect(isRefreshing)`
+// would run a frame LATER, leaving one frame where `release`'s target snaps back to 1 while
+// `distanceFraction` is still ≈1 — i.e. it REINTRODUCES the one-frame content nudge at end-of-load this
+// fix removes (Codex-confirmed; no clean Compose idiom gives latch + same-frame + no compose-time write,
+// since the state depends on history so `derivedStateOf` can't express it). The write is conditional and
+// idempotent within a frame, placed BEFORE any dependent read, so composition stabilises in one extra
+// pass. Disarmed once `distanceFraction` has animated home (or a new refresh starts). This is the
+// « rétraction post-refresh » signal, NOT a drag detector — false during a genuine drag, so the gesture
+// push is untouched.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun FlagsPullIndicator(
-    state: PullToRefreshState,
-    isRefreshing: Boolean,
-    manualRefresh: Boolean,
-    modifier: Modifier = Modifier,
-) {
+private fun rememberPullSettling(state: PullToRefreshState, isRefreshing: Boolean): Boolean {
     var settling by remember { mutableStateOf(false) }
-    // #728 — engage the settle guard SYNCHRONOUSLY the instant a refresh ends (before the LaunchedEffect
-    // coroutine runs a frame later), so a residual pull distance can't re-pop the puck for a frame (the
-    // « ça repop en fin de load » guard, XaTriX). prevRefreshing is a snapshot holder used only for the
-    // edge compare; writing the same value is a no-op so it costs nothing on steady frames.
     val prevRefreshing = remember { mutableStateOf(false) }
+    // Edge-triggered arm — see the function KDoc on why this synchronous compose-time write is intended.
     if (prevRefreshing.value && !isRefreshing) settling = true
     prevRefreshing.value = isRefreshing
     LaunchedEffect(isRefreshing, settling) {
@@ -1421,6 +1425,29 @@ private fun FlagsPullIndicator(
             settling = false
         }
     }
+    return settling
+}
+
+/**
+ * #728 — pull-to-refresh indicator: the contained « redface » puck ([RedfacePullPuck]) anchored just
+ * under the top bar. It emerges + rolls while the user drags, then — for a MANUAL pull-refresh — stays
+ * in view as the hero (frozen redface + spinning ring) until the refresh completes (M3 « keep the
+ * indicator in view until the activity completes »). An AUTO / cold refresh shows nothing here (the
+ * thin top [FlagsLoadingBar] is the single cue then — no double indicator). Shared by both surfaces.
+ *
+ * The [settling] state (hoisted to the body via [rememberPullSettling] and shared with the content-push)
+ * keeps the puck hidden through the post-refresh return-to-rest so it doesn't re-pop while
+ * `distanceFraction` slides home (the « ça repop en fin de load » guard, XaTriX).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FlagsPullIndicator(
+    state: PullToRefreshState,
+    isRefreshing: Boolean,
+    manualRefresh: Boolean,
+    settling: Boolean,
+    modifier: Modifier = Modifier,
+) {
     if (shouldShowPullIndicator(state.distanceFraction, isRefreshing, manualRefresh, settling)) {
         RedfacePullPuck(
             progress = state.distanceFraction,
@@ -1452,7 +1479,8 @@ private fun FlagListBody(
     // slides DOWN with the live pull distance. A MANUAL refresh keeps the puck in view as the hero;
     // an AUTO / cold refresh shows only the thin top FlagsLoadingBar (no double indicator).
     val pullState = rememberPullToRefreshState()
-    val pushRelease = pullPushReleaseFactor(state.isRefreshing)
+    val settling = rememberPullSettling(pullState, state.isRefreshing)
+    val pushRelease = pullPushReleaseFactor(state.isRefreshing, settling)
     PullToRefreshBox(
         isRefreshing = state.isRefreshing,
         // #728 — flag this refresh as MANUAL (gesture-driven): the rich contained indicator shows here
@@ -1468,6 +1496,7 @@ private fun FlagListBody(
                 pullState,
                 state.isRefreshing,
                 manualRefresh,
+                settling,
                 Modifier.align(Alignment.TopCenter).offset { IntOffset(0, puckTop.roundToPx()) },
             )
         },
@@ -1656,8 +1685,28 @@ private fun FilterFlipScrollResetEffect(
             previous.first == tabUnreadFilter.first &&
             previous.second != tabUnreadFilter.second
         ) {
-            listState.scrollToItem(0)
+            // #603 — pin the top across a few frames (NOT a single scrollToItem(0)): the « +lus » flip
+            // re-inserts read topics ABOVE the key-anchored visible item (#385), and the re-filtered list
+            // lands a frame after this effect runs (StateFlow → combine). A single, one-frame-late
+            // scrollToItem(0) let those re-inserted rows flash UNDER the translucent overlaid top bar
+            // before snapping home (« ça sursaute, une partie de la liste passe derrière la top bar »,
+            // XaTriX). Re-asserting requestScrollToItem(0) per remeasure pins index 0 whichever frame the
+            // new list arrives on — same robust path as the #546 tab-switch recall (Codex-confirmed).
+            listState.pinFirstItemAcrossFrames()
         }
+    }
+}
+
+// #603 — pin the first item to the top, re-asserting across [RECALL_TO_TOP_FRAMES] remeasures. Uses
+// requestScrollToItem (not scrollToItem): it instructs the NEXT remeasure to ignore the key-based
+// position restoration and place index 0 first, so it wins even when the list data lands a frame later
+// (repository SharedFlow → combine/flatMapLatest). The top contentPadding is still honoured by layout —
+// this is about timing + the key anchor, not the padding. Shared by the « +lus » filter flip
+// (FilterFlipScrollResetEffect) and the #546 landing recall (RecallListToTopEffect).
+private suspend fun LazyListState.pinFirstItemAcrossFrames() {
+    repeat(RECALL_TO_TOP_FRAMES) {
+        requestScrollToItem(0)
+        withFrameNanos { }
     }
 }
 
@@ -1680,18 +1729,11 @@ private const val RECALL_TO_TOP_FRAMES = 3
 private fun RecallListToTopEffect(recall: Boolean, listState: LazyListState, onConsumed: () -> Unit) {
     LaunchedEffect(recall) {
         if (recall) {
-            // requestScrollToItem (not scrollToItem) pins index 0 on the next remeasure ignoring the
-            // key-based position restoration — without that, when the refresh prepends freshly-surfaced
-            // flags the old top row stays anchored and the new rows sit above the viewport (the original
-            // #546 bug). But the request is honoured per-remeasure and is NOT durable: the refreshed list
-            // can land a frame later (repository SharedFlow → combine/flatMapLatest defers the final
-            // emission), and a remeasure that ran first on the old list would consume the request before
-            // the prepend. So re-assert it across a few frames — the top then wins whichever frame the new
-            // list lands on. Bounded so a no-change landing still disarms the signal. Codex review #546.
-            repeat(RECALL_TO_TOP_FRAMES) {
-                listState.requestScrollToItem(0)
-                withFrameNanos { }
-            }
+            // #546 — when the refresh prepends freshly-surfaced flags the old top row stays anchored and
+            // the new rows sit above the viewport; pinFirstItemAcrossFrames re-asserts requestScrollToItem(0)
+            // so the top wins whichever frame the new list lands on. Bounded so a no-change landing still
+            // disarms the signal. Codex review #546.
+            listState.pinFirstItemAcrossFrames()
             onConsumed()
         }
     }
@@ -2391,7 +2433,8 @@ private fun DtListBody(
     // (pullPuckTopOffset), the DT content sliding down with the LIVE pull distance during the gesture,
     // released to flush once the refresh starts (pullPushReleaseFactor).
     val pullState = rememberPullToRefreshState()
-    val pushRelease = pullPushReleaseFactor(isRefreshing)
+    val settling = rememberPullSettling(pullState, isRefreshing)
+    val pushRelease = pullPushReleaseFactor(isRefreshing, settling)
     PullToRefreshBox(
         isRefreshing = isRefreshing,
         onRefresh = {
@@ -2405,6 +2448,7 @@ private fun DtListBody(
                 pullState,
                 isRefreshing,
                 manualRefresh,
+                settling,
                 Modifier.align(Alignment.TopCenter).offset { IntOffset(0, puckTop.roundToPx()) },
             )
         },
@@ -2781,7 +2825,6 @@ private data class FlagsViewSettingsActions(
     val onGlyphStyleChange: (FlagGlyphStyle) -> Unit,
     val onShowLoadingBarChange: (Boolean) -> Unit,
     val onAvatarBorderChange: (Boolean) -> Unit,
-    val onAvatarBackgroundChange: (AvatarBackground) -> Unit,
     val onDismiss: () -> Unit,
 )
 

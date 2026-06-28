@@ -30,7 +30,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
-import fr.forumhfr.redface2.core.domain.preferences.AvatarBackground
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
@@ -160,12 +159,11 @@ private fun AccountBadge(
         AuthState.Anonymous -> "?"
         is AuthState.Authenticated -> authState.pseudo.firstOrNull()?.uppercaseChar()?.toString().orEmpty()
     }
-    // #603 (XaTriX) — the badge background FOLLOWS the top-bar container (surfaceContainerHigh) by
-    // default so the round « PP » blends into the right container (« il devrait être du fond du
-    // container »). #718 — the user can opt for a transparent background instead. The authenticated
-    // identity stays legible through the primary-tinted initial; anonymous / loading keep the muted
-    // variant tone — both robust on a transparent background too (Codex: don't force the container).
-    val containerColor = avatarBadgeContainerColor(appearance)
+    // #603 (XaTriX) — the badge background FOLLOWS the top-bar container (surfaceContainerHigh) so the
+    // round « PP » blends into the right container (« il devrait être du fond du container »). The
+    // authenticated identity stays legible through the primary-tinted initial; anonymous / loading keep
+    // the muted variant tone.
+    val containerColor = avatarBadgeContainerColor()
     val contentColor = when (authState) {
         is AuthState.Authenticated -> MaterialTheme.colorScheme.primary
         else -> MaterialTheme.colorScheme.onSurfaceVariant
@@ -225,10 +223,10 @@ private fun AvatarBadge(
     Surface(
         onClick = onClick,
         shape = CircleShape,
-        // #718 — same appearance options as the text badge: the photo seats on the container (default)
-        // or a transparent background, with an optional thin outline. Border on the parent Surface so it
-        // never shrinks the avatar (Codex); the inner [RedfaceUserAvatar] still clips the photo to a circle.
-        color = avatarBadgeContainerColor(appearance),
+        // #718 — same appearance as the text badge: the photo seats on the top-bar container, with an
+        // optional thin outline. Border on the parent Surface so it never shrinks the avatar (Codex);
+        // the inner [RedfaceUserAvatar] still clips the photo to a circle.
+        color = avatarBadgeContainerColor(),
         border = avatarBadgeBorder(appearance),
         modifier = Modifier
             .minimumInteractiveComponentSize()
@@ -267,16 +265,13 @@ private fun AccountStatusHeader(authState: AuthState?) {
     }
 }
 
-// #718 — container colour behind the account badge: the theme container by default, or fully
-// transparent when the user opts out. Applied to BOTH the photo and the text/initial branch so the
-// option is honest (Codex). The robust content colours are kept on the text branch, so the initial
-// stays legible on a transparent background in light / dark / AMOLED.
+// #718/#718 — container colour behind the account badge: ALWAYS the top-bar container colour
+// (`surfaceContainerHigh`). This is the fix for the « avatar transparent → fond blanc » bug: a bare
+// `Surface` defaulted to `surface` (near-white in light theme) and showed through a transparent PNG
+// avatar. The former configurable « fond transparent » was a no-op in the nested top-bar layout (the
+// badge sits inside a `surfaceContainerHigh` container, so transparent == container) and was removed.
 @Composable
-private fun avatarBadgeContainerColor(appearance: AvatarAppearance): Color =
-    when (appearance.background) {
-        AvatarBackground.Transparent -> Color.Transparent
-        AvatarBackground.Container -> MaterialTheme.colorScheme.surfaceContainerHigh
-    }
+private fun avatarBadgeContainerColor(): Color = MaterialTheme.colorScheme.surfaceContainerHigh
 
 // #718 — optional thin outline around the round badge (default off). A 1dp `outlineVariant` hairline:
 // discreet for a top-bar avatar (Codex: `outline` would be too present); purely decorative.

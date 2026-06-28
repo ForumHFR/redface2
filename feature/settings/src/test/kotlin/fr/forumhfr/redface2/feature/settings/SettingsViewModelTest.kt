@@ -6,7 +6,6 @@ import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
-import fr.forumhfr.redface2.core.domain.preferences.AvatarBackground
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
@@ -2080,7 +2079,6 @@ class SettingsViewModelTest {
         override suspend fun setFlagsShowLoadingBar(enabled: Boolean) = Unit
         override fun observeAvatarAppearance(): Flow<AvatarAppearance> = MutableStateFlow(AvatarAppearance())
         override suspend fun setAvatarBorder(enabled: Boolean) = Unit
-        override suspend fun setAvatarBackground(background: AvatarBackground) = Unit
         override suspend fun setFlagsPlusLusIndicatorStyle(style: PlusLusIndicatorStyle) = Unit
         override suspend fun setFlagsGlyphStyle(style: FlagGlyphStyle) = Unit
 

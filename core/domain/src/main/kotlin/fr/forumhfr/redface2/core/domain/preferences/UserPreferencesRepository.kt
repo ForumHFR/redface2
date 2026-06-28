@@ -170,18 +170,15 @@ interface UserPreferencesRepository {
 
     /**
      * GLOBAL appearance of the top-bar account avatar badge (#718): bundled [AvatarAppearance] (border
-     * + background). One value for the whole app — the badge shows on every main screen's top bar, so
+     * only since #718). One value for the whole app — the badge shows on every main screen's top bar, so
      * it must NOT depend on a [fr.forumhfr.redface2.core.model.FlagType]. Edited from the Drapeaux
      * « Réglages d'affichage » sheet but observed directly by the account ViewModel. Defaults to a
-     * borderless [AvatarBackground.Container] badge (the look shipped with #603/#665).
+     * borderless badge (the look shipped with #603/#665).
      */
     fun observeAvatarAppearance(): Flow<AvatarAppearance>
 
     /** Persists the GLOBAL avatar-border toggle (#718). Defaults to `false` (borderless) until set. */
     suspend fun setAvatarBorder(enabled: Boolean)
-
-    /** Persists the GLOBAL avatar background (#718). Defaults to [AvatarBackground.Container] until set. */
-    suspend fun setAvatarBackground(background: AvatarBackground)
 
     /**
      * App theme selection (#286): [ThemeMode.SYSTEM] (default) follows the OS dark-mode setting;

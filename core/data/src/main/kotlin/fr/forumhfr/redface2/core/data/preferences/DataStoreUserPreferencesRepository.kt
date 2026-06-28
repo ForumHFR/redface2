@@ -10,7 +10,6 @@ import fr.forumhfr.redface2.core.domain.coroutines.ApplicationScope
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
-import fr.forumhfr.redface2.core.domain.preferences.AvatarBackground
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
@@ -385,7 +384,6 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             .map { prefs ->
                 AvatarAppearance(
                     border = prefs[KEY_AVATAR_BORDER] ?: false,
-                    background = readAvatarBackground(prefs),
                 )
             }
             .distinctUntilChanged()
@@ -399,25 +397,6 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             }
         }
     }
-
-    override suspend fun setAvatarBackground(background: AvatarBackground) {
-        // #718 — GLOBAL: a single key, persisted by name, read defensively.
-        persist {
-            dataStore.edit { prefs ->
-                prefs[KEY_AVATAR_BACKGROUND] = background.name
-            }
-        }
-    }
-
-    /**
-     * Reads [KEY_AVATAR_BACKGROUND] defensively (#718): an unknown / corrupt stored value falls back to
-     * [AvatarBackground.Container] (the default) instead of crashing on `AvatarBackground.valueOf` —
-     * same stance as [readMarkerStyle].
-     */
-    private fun readAvatarBackground(prefs: Preferences): AvatarBackground =
-        prefs[KEY_AVATAR_BACKGROUND]
-            ?.let { stored -> runCatching { AvatarBackground.valueOf(stored) }.getOrNull() }
-            ?: AvatarBackground.Container
 
     override fun observeFlagsAutoRefresh(): Flow<Boolean> =
         dataStore.data
@@ -952,8 +931,6 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val KEY_FLAGS_SHOW_LOADING_BAR = booleanPreferencesKey("flags_show_loading_bar")
         // #718 — GLOBAL account-avatar border toggle (thin outline around the top-bar « PP » badge).
         val KEY_AVATAR_BORDER = booleanPreferencesKey("avatar_border")
-        // #718 — GLOBAL account-avatar background (AvatarBackground.name, defensively parsed).
-        val KEY_AVATAR_BACKGROUND = stringPreferencesKey("avatar_background")
         // #661 — GLOBAL « +lus » indicator style (PlusLusIndicatorStyle.name, defensively parsed).
         val KEY_FLAGS_PLUS_LUS_INDICATOR_STYLE = stringPreferencesKey("flags_plus_lus_indicator_style")
         // #603/#665 — GLOBAL left-container glyph style (FlagGlyphStyle.name, defensively parsed).
