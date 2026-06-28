@@ -11,6 +11,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.post.rememberAnimationsEnabled
@@ -58,6 +59,15 @@ fun RedfacePullPuck(
                 scaleY = puckScale
                 // Drops in from behind the bar during the pull; settled (0) once refreshing.
                 translationY = if (refreshing) 0f else -RISE.toPx() * (1f - pull)
+                // #603 (thibw dogfood) — without this, `alpha < 1f` (the pull fade-in) forces an
+                // OFFSCREEN RECTANGULAR layer at the 48 dp bounds; the Surface's unclipped elevation
+                // shadow (`clip = false`) then fills that rect and, scaled down at small `puckScale`,
+                // reads as a SQUIRCLE around the round redface (« le cercle rose tronqué dans un carré »).
+                // ModulateAlpha multiplies the alpha per draw op instead of compositing through that
+                // offscreen buffer, so the round shape + soft shadow are preserved (a hard circular clip
+                // would instead cut the shadow). The puck is opaque past pull≈0.71 (ALPHA_RAMP), so the
+                // per-op modulation only differs from group-alpha during the faint early pull.
+                compositingStrategy = CompositingStrategy.ModulateAlpha
             },
     ) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
