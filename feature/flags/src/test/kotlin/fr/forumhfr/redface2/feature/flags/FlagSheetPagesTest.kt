@@ -43,4 +43,28 @@ class FlagSheetPagesTest {
     fun `first unread stays at least 1 on an empty topic`() {
         assertEquals(1, flagFirstUnreadPage(lastReadPage = 0, totalPages = 0, hasUnread = true))
     }
+
+    // #15 — « Aller à une page » input parsing.
+
+    @Test
+    fun `page input accepts a valid in-range page`() {
+        assertEquals(12, parseTopicPageInput("12", totalPages = 35))
+        assertEquals(1, parseTopicPageInput(" 1 ", totalPages = 35))
+        assertEquals(35, parseTopicPageInput("35", totalPages = 35))
+    }
+
+    @Test
+    fun `page input rejects out-of-range, zero, empty and non-numeric`() {
+        assertEquals(null, parseTopicPageInput("36", totalPages = 35))
+        assertEquals(null, parseTopicPageInput("0", totalPages = 35))
+        assertEquals(null, parseTopicPageInput("-2", totalPages = 35))
+        assertEquals(null, parseTopicPageInput("", totalPages = 35))
+        assertEquals(null, parseTopicPageInput("abc", totalPages = 35))
+    }
+
+    @Test
+    fun `page input treats totalPages below 1 as a single page`() {
+        assertEquals(1, parseTopicPageInput("1", totalPages = 0))
+        assertEquals(null, parseTopicPageInput("2", totalPages = 0))
+    }
 }

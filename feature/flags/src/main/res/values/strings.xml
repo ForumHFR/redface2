@@ -52,9 +52,18 @@
     <!-- #676 v2 — LISTE verticale : actions secondaires / navigation / destructive, DISTINCTES de la
          rangée rapide. « Retirer » passe toujours par le dialog de confirmation de retrait. -->
     <string name="flags_sheet_action_last_page">Ouvrir à la dernière page</string>
+    <!-- #15 — aller à une page précise (dialog) + poster une réponse -->
+    <string name="flags_sheet_action_goto_page">Aller à une page</string>
+    <string name="flags_sheet_action_reply">Poster un message</string>
     <string name="flags_sheet_action_copy">Copier le lien</string>
     <string name="flags_sheet_action_browser">Ouvrir dans le navigateur</string>
     <string name="flags_sheet_action_remove">Retirer le drapeau</string>
+    <!-- #15 — dialog « aller à une page » -->
+    <string name="flags_sheet_goto_page_title">Aller à une page</string>
+    <string name="flags_sheet_goto_page_label">Numéro de page</string>
+    <string name="flags_sheet_goto_page_supporting">1 à %1$d</string>
+    <string name="flags_sheet_goto_page_confirm">Aller</string>
+    <string name="flags_sheet_goto_page_cancel">Annuler</string>
     <string name="flags_sheet_link_copied">Lien copié</string>
     <string name="flags_sheet_browser_failed">Aucune application pour ouvrir ce lien</string>
     <string name="flags_sheet_share_failed">Aucune application pour partager ce lien</string>

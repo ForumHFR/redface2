@@ -1914,6 +1914,20 @@ private fun RedfaceNavHost(
                             ),
                         )
                     },
+                    // #15 — long-press sheet « Poster un message » : open the reply editor. HFR appends
+                    // the reply at the END of the topic, so open on the last page (Codex), not the
+                    // last-read page. subcat carries the flag's sub-forum for the POST target.
+                    onReplyFlag = { flag ->
+                        backStack.add(
+                            PostEditorRoute(
+                                mode = PostEditorMode.Reply,
+                                cat = flag.cat,
+                                topicId = flag.topicId,
+                                page = flag.totalPages.coerceAtLeast(1),
+                                subcat = flag.subcat,
+                            ),
+                        )
+                    },
                     onLoginRequested = {
                         backStack.add(LoginRoute)
                     },

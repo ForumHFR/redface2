@@ -10,6 +10,9 @@ package fr.forumhfr.redface2.feature.flags
  */
 data class FlagSheetActions(
     val onOpen: (page: Int) -> Unit,
+    // #15 — open the reply editor for this topic (HFR appends at the end, so the host opens it on the
+    // last page). « Aller à une page » reuses [onOpen] with the page picked in the in-sheet dialog.
+    val onReply: () -> Unit,
     val onToggleSuperFavorite: () -> Unit,
     val onRemove: () -> Unit,
     val onDismiss: () -> Unit,
