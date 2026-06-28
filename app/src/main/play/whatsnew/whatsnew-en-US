@@ -1,9 +1,4 @@
-Redface 2 v0.17.29 — dev.
+Redface 2 v0.17.30 — dev.
 
 Flags view:
-- Fixed the small content "jump" at end-of-load (manual pull and auto-reload).
-- The list no longer flashes behind the top bar when toggling "+lus".
-- "Display settings" removed from the DT/Super tabs (it did nothing there, then opened on the next tab switch).
-
-Account avatar:
-- No more white background behind a transparent avatar; the no-op "transparent background" option was removed.
+- Pull-to-refresh loader fix: on a slow pull, the redface's container is round again (no longer a rounded square).

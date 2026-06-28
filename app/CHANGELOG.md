@@ -16,6 +16,23 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.17.30` — `internal` (dev) — 2026-06-29
+
+> Vue Drapeaux (#603) — **correctif du loader pull-to-refresh** : au tirer lent, la pastille du redface
+> se rend de nouveau en cercle (et non en carré à coins arrondis). versionName 0.17.29 → 0.17.30.
+
+**Drapeaux — vue (#603)**
+
+- **Pastille du loader ronde au tirer lent (#603)** : au tirer-pour-rafraîchir LENT, le fond du redface
+  s'affichait comme un carré à coins arrondis au lieu d'un cercle. Cause : le fondu d'apparition
+  (`alpha < 1`) forçait une couche offscreen RECTANGULAIRE (bornes 48 dp) qui rognait l'ombre non-clippée
+  de la pastille ; réduite à petite échelle, elle se lisait comme un squircle. Corrigé via
+  `CompositingStrategy.ModulateAlpha` (module l'alpha par opération de dessin au lieu d'un buffer
+  offscreen) — le cercle ET l'ombre douce sont préservés (un clip dur aurait coupé l'ombre). Signalé par
+  thibw au dogfood ; gaté Codex (cause + fix + diff) et vérifié émulateur (pull + refreshing).
+
+---
+
 ## `0.17.29` — `internal` (dev) — 2026-06-28
 
 > Vue Drapeaux (#603) — **quatre correctifs de finition** : le « petit saut » du contenu en fin de
