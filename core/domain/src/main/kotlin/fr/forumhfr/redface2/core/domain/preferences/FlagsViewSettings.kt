@@ -45,10 +45,10 @@ data class FlagsViewSettings(
     // (#FFB300) reads cleanly on a light background. Default false (no border). Not subject to the
     // per-tab override (like [markerStyle]). Carried on every resolution path.
     val markerBorder: Boolean = false,
-    // #661 — GLOBAL: shape of the « +lus » cue in the top-bar tab picker (eye glyph vs. coloured ring).
-    // Default EYE. Not subject to the per-tab override (like [markerStyle]). Carried on every
-    // resolution path.
-    val plusLusIndicatorStyle: PlusLusIndicatorStyle = PlusLusIndicatorStyle.Eye,
+    // #661 — GLOBAL: shape of the « +lus » cue (ring around the active glyph vs. eye capsule by the
+    // name). Default RING (#603/A, XaTriX: the cue lives ON the flag glyph). Not subject to the per-tab
+    // override (like [markerStyle]). Carried on every resolution path.
+    val plusLusIndicatorStyle: PlusLusIndicatorStyle = PlusLusIndicatorStyle.Ring,
     // #603/#665 — GLOBAL: shape of the active-type glyph in the top-bar left container (flag icon vs.
     // pastille dot). Default Flag. Not subject to the per-tab override (like [markerStyle]). Carried on
     // every resolution path.

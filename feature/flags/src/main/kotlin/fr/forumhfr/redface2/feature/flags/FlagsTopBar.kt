@@ -73,11 +73,11 @@ data class FlagsAppBarState(
      */
     val readFilterShowsRead: Boolean?,
     /**
-     * #661 — GLOBAL shape of the « +lus » cue: [PlusLusIndicatorStyle.Eye] (default, an eye glyph
-     * capsule) or [PlusLusIndicatorStyle.Ring] (the flag dot drawn as a hollow coloured ring instead
-     * of a filled disc). Only takes visual effect when [readFilterShowsRead] is `true`.
+     * #661/#603 — GLOBAL shape of the « +lus » cue: [PlusLusIndicatorStyle.Ring] (default — a coloured
+     * ring around the zone-1 glyph) or [PlusLusIndicatorStyle.Eye] (legacy — an eye capsule by the type
+     * name in zone 2). Only takes visual effect when [readFilterShowsRead] is `true`.
      */
-    val plusLusIndicatorStyle: PlusLusIndicatorStyle = PlusLusIndicatorStyle.Eye,
+    val plusLusIndicatorStyle: PlusLusIndicatorStyle = PlusLusIndicatorStyle.Ring,
     /**
      * #603/#665 — GLOBAL shape of the active-type glyph in the flag zone: [FlagGlyphStyle.Flag]
      * (default, the section's coloured flag icon — the « drapal » reprise) or [FlagGlyphStyle.Dot]
@@ -111,6 +111,9 @@ private val RightZoneShape = RoundedCornerShape(topEnd = 22.dp, bottomEnd = 22.d
 // search never changes the bar height (no content shift underneath, XaTriX dogfood).
 private val ContainerHeight = 44.dp
 private const val INDICATOR_BG_ALPHA = 0.18f
+// #661/A — diameter of the « +lus » ring drawn around the zone-1 glyph (20.dp flag / 14.dp dot). 30.dp
+// leaves breathing room (Codex: < 30.dp reads too tight around a 20.dp icon).
+private val GLYPH_RING_SIZE = 30.dp
 
 /**
  * Drapeaux top bar (#603 / #665 / #661, ADR-017) — two rounded « containers » floating over a
@@ -203,6 +206,11 @@ private fun LeftContainer(
                     color = state.currentTabColor,
                     enabled = hasPicker,
                     glyphStyle = state.flagGlyphStyle,
+                    // #661/A — when « +lus » is active and the Ring style is selected, the cue is a ring
+                    // AROUND this glyph (reprise of the original « anneau » idea, XaTriX). The Eye style
+                    // keeps its cue in the type zone instead.
+                    plusLusActive = state.readFilterShowsRead == true,
+                    indicatorStyle = state.plusLusIndicatorStyle,
                     fullTabName = flagFullTabName(state.currentTab),
                     onOpenMenu = { expanded = true },
                 )
@@ -232,17 +240,25 @@ private fun LeftContainer(
  * Material flag icon (default, the « drapal » reprise, XaTriX), [FlagGlyphStyle.Dot] = a minimal
  * filled pastille (legacy dot). When there is no picker (anonymous) it is a static, non-interactive
  * indicator.
+ *
+ * #661/A — when [plusLusActive] and [indicatorStyle] is [PlusLusIndicatorStyle.Ring] (the default),
+ * the glyph is wrapped in a coloured ring to signal « +lus » (the chosen design: the cue lives ON the
+ * glyph, not in the type zone). Works for both the flag and the dot. The Eye style draws nothing here.
  */
 @Composable
+@Suppress("LongParameterList") // Cohesive zone-1 rendering: glyph colour/style + the +lus ring state + a11y + click.
 private fun FlagGlyphZone(
     color: Color,
     enabled: Boolean,
     glyphStyle: FlagGlyphStyle,
+    plusLusActive: Boolean,
+    indicatorStyle: PlusLusIndicatorStyle,
     fullTabName: String,
     onOpenMenu: () -> Unit,
 ) {
     val openMenuLabel = stringResource(R.string.flags_appbar_open_menu)
     val description = stringResource(R.string.flags_appbar_current_tab, fullTabName)
+    val ringed = plusLusActive && indicatorStyle == PlusLusIndicatorStyle.Ring
     Box(
         modifier = Modifier
             .fillMaxHeight()
@@ -259,20 +275,29 @@ private fun FlagGlyphZone(
             .padding(horizontal = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
-        when (glyphStyle) {
-            FlagGlyphStyle.Flag -> RedfaceVectorIcon(
-                resId = CoreUiR.drawable.ic_ms_flag,
-                contentDescription = null,
-                tint = color,
-                size = 20.dp,
-            )
+        Box(
+            modifier = if (ringed) {
+                Modifier.size(GLYPH_RING_SIZE).border(width = 2.dp, color = color, shape = CircleShape)
+            } else {
+                Modifier
+            },
+            contentAlignment = Alignment.Center,
+        ) {
+            when (glyphStyle) {
+                FlagGlyphStyle.Flag -> RedfaceVectorIcon(
+                    resId = CoreUiR.drawable.ic_ms_flag,
+                    contentDescription = null,
+                    tint = color,
+                    size = 20.dp,
+                )
 
-            FlagGlyphStyle.Dot -> Box(
-                modifier = Modifier
-                    .size(14.dp)
-                    .clip(CircleShape)
-                    .background(color),
-            )
+                FlagGlyphStyle.Dot -> Box(
+                    modifier = Modifier
+                        .size(14.dp)
+                        .clip(CircleShape)
+                        .background(color),
+                )
+            }
         }
     }
 }
@@ -322,39 +347,33 @@ private fun TypePlusLusZone(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        if (showsRead == true) {
-            PlusLusIndicator(color = color, style = indicatorStyle)
+        // #661/A — the Eye style keeps its cue HERE (capsule, right of the name); the Ring style draws
+        // its cue around the glyph in zone 1 instead (no double marker, Codex).
+        if (showsRead == true && indicatorStyle == PlusLusIndicatorStyle.Eye) {
+            EyeChip(color = color)
         }
     }
 }
 
 /**
- * #661 — the « +lus » active cue, in zone 2 (Codex: the indicator lives here, not on the flag glyph):
- * [PlusLusIndicatorStyle.Eye] = an eye glyph in a tinted capsule (default), [PlusLusIndicatorStyle.Ring]
- * = a small hollow coloured ring.
+ * #661 — the « +lus » eye cue for the [PlusLusIndicatorStyle.Eye] (legacy) style: an eye glyph in a
+ * tinted capsule, right of the type name. The default [PlusLusIndicatorStyle.Ring] style draws its cue
+ * around the zone-1 glyph instead (see [FlagGlyphZone]).
  */
 @Composable
-private fun PlusLusIndicator(color: Color, style: PlusLusIndicatorStyle) {
-    when (style) {
-        PlusLusIndicatorStyle.Eye -> Box(
-            modifier = Modifier
-                .clip(CircleShape)
-                .background(color.copy(alpha = INDICATOR_BG_ALPHA))
-                .padding(horizontal = 6.dp, vertical = 3.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            RedfaceVectorIcon(
-                resId = CoreUiR.drawable.ic_ms_visibility,
-                contentDescription = null,
-                tint = color,
-                size = 16.dp,
-            )
-        }
-
-        PlusLusIndicatorStyle.Ring -> Box(
-            modifier = Modifier
-                .size(14.dp)
-                .border(width = 3.dp, color = color, shape = CircleShape),
+private fun EyeChip(color: Color) {
+    Box(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(color.copy(alpha = INDICATOR_BG_ALPHA))
+            .padding(horizontal = 6.dp, vertical = 3.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        RedfaceVectorIcon(
+            resId = CoreUiR.drawable.ic_ms_visibility,
+            contentDescription = null,
+            tint = color,
+            size = 16.dp,
         )
     }
 }

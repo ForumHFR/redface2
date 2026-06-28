@@ -446,9 +446,9 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
-    fun `plusLusIndicatorStyle defaults to Eye on an empty store`() = runTest(dispatcher) {
+    fun `plusLusIndicatorStyle defaults to Ring on an empty store`() = runTest(dispatcher) {
         repository.observeFlagsViewSettings(FlagType.CYAN).test {
-            assertEquals(PlusLusIndicatorStyle.Eye, awaitItem().plusLusIndicatorStyle)
+            assertEquals(PlusLusIndicatorStyle.Ring, awaitItem().plusLusIndicatorStyle)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -470,16 +470,16 @@ class DataStoreUserPreferencesRepositoryTest {
         }
 
     @Test
-    fun `corrupt flags_plus_lus_indicator_style value falls back to Eye instead of crashing`() =
+    fun `corrupt flags_plus_lus_indicator_style value falls back to Ring instead of crashing`() =
         runTest(dispatcher) {
             // An unknown value from an older build / manual edit must not crash
-            // observeFlagsViewSettings on PlusLusIndicatorStyle.valueOf — it degrades to Eye.
+            // observeFlagsViewSettings on PlusLusIndicatorStyle.valueOf — it degrades to Ring (default).
             dataStore.edit { prefs ->
                 prefs[stringPreferencesKey("flags_plus_lus_indicator_style")] = "STAR"
             }
 
             repository.observeFlagsViewSettings(FlagType.CYAN).test {
-                assertEquals(PlusLusIndicatorStyle.Eye, awaitItem().plusLusIndicatorStyle)
+                assertEquals(PlusLusIndicatorStyle.Ring, awaitItem().plusLusIndicatorStyle)
                 cancelAndIgnoreRemainingEvents()
             }
         }

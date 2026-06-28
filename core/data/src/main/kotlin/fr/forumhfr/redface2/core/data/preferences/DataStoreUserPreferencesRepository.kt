@@ -836,14 +836,14 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             ?: CategoryBandStyle.MINIMAL
 
     /**
-     * Reads [KEY_FLAGS_PLUS_LUS_INDICATOR_STYLE] defensively (#661): an unknown / corrupt stored value
-     * falls back to [PlusLusIndicatorStyle.Eye] instead of crashing on `PlusLusIndicatorStyle.valueOf`
-     * — same stance as [readMarkerStyle].
+     * Reads [KEY_FLAGS_PLUS_LUS_INDICATOR_STYLE] defensively (#661/#603): an unknown / corrupt stored
+     * value falls back to [PlusLusIndicatorStyle.Ring] (the default) instead of crashing on
+     * `PlusLusIndicatorStyle.valueOf` — same stance as [readMarkerStyle].
      */
     private fun readPlusLusIndicatorStyle(prefs: Preferences): PlusLusIndicatorStyle =
         prefs[KEY_FLAGS_PLUS_LUS_INDICATOR_STYLE]
             ?.let { stored -> runCatching { PlusLusIndicatorStyle.valueOf(stored) }.getOrNull() }
-            ?: PlusLusIndicatorStyle.Eye
+            ?: PlusLusIndicatorStyle.Ring
 
     /**
      * Reads [KEY_FLAGS_GLYPH_STYLE] defensively (#603/#665): an unknown / corrupt stored value falls
