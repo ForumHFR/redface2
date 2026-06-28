@@ -8,7 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -39,8 +39,9 @@ import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
  * `authState` from an `AppAccountViewModel` and routes the callbacks to the active back stack,
  * keeping the account-menu logic out of every feature ViewModel.
  *
- * Badge shape is **square with rounded corners** (not a circle), aligned with the convention
- * picked for [fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar].
+ * Badge shape is a **circle** (#603/#665, XaTriX top-bar redesign): the account « PP » reads as a
+ * round avatar. Post-header avatars keep the HFR-web rounded square via
+ * [fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar]'s default shape.
  *
  * Anti-flicker contract: when [authState] is `null` (cookie jar still warming up from
  * DataStore) we render a neutral badge with "…" — never an "Anonymous" state — so a cold start
@@ -175,7 +176,7 @@ private fun AccountBadge(
     // (`X` / `?` / `…`) as a separate node.
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(BADGE_CORNER_RADIUS),
+        shape = CircleShape,
         color = containerColor,
         contentColor = contentColor,
         // Subtle hairline so the badge reads as a distinct element against the app-bar surface.
@@ -210,7 +211,7 @@ private fun AvatarBadge(
     val accessibilityLabel = stringResource(R.string.account_menu_open_description)
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(BADGE_CORNER_RADIUS),
+        shape = CircleShape,
         // Subtle hairline so the avatar reads as a distinct element against the app-bar surface.
         border = BorderStroke(BADGE_BORDER_WIDTH, MaterialTheme.colorScheme.outlineVariant),
         modifier = Modifier
@@ -222,6 +223,8 @@ private fun AvatarBadge(
             avatarUrl = avatarUrl,
             author = pseudo,
             size = BADGE_SIZE,
+            // Round « PP » to match the circular badge (the post-header default stays rounded-square).
+            shape = CircleShape,
         )
     }
 }
@@ -253,6 +256,5 @@ private fun AccountStatusHeader(authState: AuthState?) {
 // 48dp minimum without changing the painted badge — `Surface(onClick = ...)` does NOT
 // inject that minimum on its own (cf. M3 docs, Codex rereview on PR #207).
 private val BADGE_SIZE = 40.dp
-private val BADGE_CORNER_RADIUS = 8.dp
 private val BADGE_BORDER_WIDTH = 1.dp
 private val HEADER_PADDING = PaddingValues(horizontal = 16.dp, vertical = 8.dp)

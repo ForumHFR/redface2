@@ -22,7 +22,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.pager.FLING_VELOCITY_THRESHOLD
 import fr.forumhfr.redface2.core.ui.pager.MIN_COMMIT_DISTANCE
 import fr.forumhfr.redface2.core.ui.pager.swipeArmed
@@ -75,13 +74,18 @@ internal fun Modifier.flagsTabSwipe(
     // deltas must be read in the untranslated coordinate space (inside the translated layer each
     // frame's `positionChange()` would be Δfinger − Δtranslation → halved tracking).
     .pointerInput(Unit) {
-        val commitDistancePx = swipeCommitDistancePx(size.width.toFloat(), MIN_COMMIT_DISTANCE.toPx())
-        val flingThresholdPx = FLING_VELOCITY_THRESHOLD.toPx()
         val release = Animatable(0f)
         coroutineScope {
             val animationScope = this
             var releaseJob: Job? = null
             awaitEachGesture {
+                // Codex audit: recompute the thresholds PER GESTURE, not once at `pointerInput(Unit)`
+                // start — the block is keyed on Unit and never restarts, so a one-shot `size.width`
+                // read goes stale on rotation / split-screen / density change. `size` and `.toPx()`
+                // are available on this gesture scope, so each gesture sizes to the current viewport.
+                val commitDistancePx =
+                    swipeCommitDistancePx(size.width.toFloat(), MIN_COMMIT_DISTANCE.toPx())
+                val flingThresholdPx = FLING_VELOCITY_THRESHOLD.toPx()
                 val down = awaitFirstDown(requireUnconsumed = false)
                 val velocityTracker = VelocityTracker()
                 velocityTracker.addPosition(down.uptimeMillis, down.position)
@@ -135,14 +139,14 @@ internal fun Modifier.flagsTabSwipe(
             }
         }
     }
-    // Draw-only translation + armed elevation lift, same draw-phase contract as the other swipe
-    // gestures (reads `dragOffset` without recomposition).
+    // Draw-only translation (reads `dragOffset` without recomposition), same draw-phase contract as
+    // the other swipe gestures. The armed `shadowElevation` lift was REMOVED (XaTriX dogfood): the
+    // swipe surface is a full-bleed, background-less viewport — not a card — so an elevation cast no
+    // real surface, only an ugly grey frame around the viewport bounds that travelled with the pane
+    // (« surlignage extérieur mal placé »). The arm threshold is still cued by the haptic above; the
+    // translationX follow + the Shared Axis X commit transition are the visual cues.
     .graphicsLayer {
-        val offset = dragOffset.floatValue
-        translationX = offset
-        val commitDistancePx = swipeCommitDistancePx(size.width, MIN_COMMIT_DISTANCE.toPx())
-        shadowElevation =
-            if (swipeArmed(offset, commitDistancePx)) TAB_COMMIT_SHADOW_ELEVATION_DP.dp.toPx() else 0f
+        translationX = dragOffset.floatValue
     }
 
 /**
@@ -210,8 +214,6 @@ internal fun flagsTabSlide(forward: Boolean): ContentTransform {
     return slideInHorizontally(spec) { fullWidth -> direction * fullWidth } togetherWith
         slideOutHorizontally(spec) { fullWidth -> -direction * fullWidth }
 }
-
-private const val TAB_COMMIT_SHADOW_ELEVATION_DP = 8f
 
 private val TAB_SPRING_BACK = spring<Float>(
     dampingRatio = Spring.DampingRatioNoBouncy,
