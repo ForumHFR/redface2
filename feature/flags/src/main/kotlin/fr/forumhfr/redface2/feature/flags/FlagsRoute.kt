@@ -121,6 +121,7 @@ import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsChoiceGroup
 import fr.forumhfr.redface2.core.ui.theme.FlagPalette
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * #665 — top padding the scrollable bodies must reserve so their content sits below (and glides under)
@@ -338,19 +339,21 @@ fun FlagsRoute(
     // query never carries silently from one tab to another.
     var searchQuery by remember { mutableStateOf("") }
     var searchActive by remember { mutableStateOf(false) }
+    // #728 — a MANUAL (gesture) pull-refresh is in flight: the rich contained redface indicator shows and
+    // the thin top loading bar is suppressed (no double indicator). Armed by the body's pull gesture.
+    var manualRefresh by remember { mutableStateOf(false) }
     LaunchedEffect(selectedTab) {
         searchQuery = ""
         searchActive = false
         sheetFlag = null
+        // #728 — disarm on tab change: the flag is route-global but the bodies are mutually exclusive, so
+        // a manual refresh on one surface must never suppress the other's thin bar.
+        manualRefresh = false
     }
-
-    // #728 — a MANUAL (gesture) pull-refresh is in flight: the rich contained redface indicator shows
-    // and the thin top loading bar is suppressed (no double indicator). Armed by the body's pull
-    // gesture; cleared once both lists are idle again (decision kept in a helper, off the cyclomatic
-    // budget — FlagsRoute is at the detekt threshold).
-    var manualRefresh by remember { mutableStateOf(false) }
-    LaunchedEffect(isRefreshing, dtIsRefreshing) {
-        manualRefresh = retainManualRefresh(manualRefresh, isRefreshing, dtIsRefreshing)
+    // #728 — manage the armed flag's lifecycle (grace + auto-disarm) off a helper so FlagsRoute keeps no
+    // extra decision points; keyed on the flag so re-arming restarts the lifecycle.
+    LaunchedEffect(manualRefresh) {
+        manualRefresh = trackManualRefresh(manualRefresh) { anyRefreshing(isRefreshing, dtIsRefreshing) }
     }
 
     Scaffold(
@@ -1284,13 +1287,28 @@ internal fun shouldShowPullIndicator(
     isRefreshing: Boolean,
     manualRefresh: Boolean,
     settling: Boolean,
-): Boolean = !settling && (distanceFraction > 0f || (isRefreshing && manualRefresh))
+): Boolean = !settling && ((distanceFraction > 0f && !isRefreshing) || (isRefreshing && manualRefresh))
 
-// #728 — keep `manualRefresh` armed only while a refresh is actually running; cleared once both the
-// flag list and the DT list are idle. Extracted so the `&&`/`||` stay off FlagsRoute's cyclomatic
-// budget (it is already at the detekt threshold of 15).
-internal fun retainManualRefresh(current: Boolean, isRefreshing: Boolean, dtIsRefreshing: Boolean): Boolean =
-    current && (isRefreshing || dtIsRefreshing)
+// #728 — true while either the flag list or the DT list is refreshing. Extracted so the `||` stays off
+// FlagsRoute's cyclomatic budget (it is already at the detekt threshold of 15).
+internal fun anyRefreshing(isRefreshing: Boolean, dtIsRefreshing: Boolean): Boolean =
+    isRefreshing || dtIsRefreshing
+
+// #728 — lifecycle of the gesture-armed `manualRefresh` flag: once armed, wait (briefly) for a refresh
+// to actually start — a pull can be throttled to a no-op — and, if it does, until it completes; then
+// disarm. The grace timeout guarantees the flag never stays stuck (so the thin bar is never suppressed
+// forever) when the pull triggers no real refresh. Returns the new flag value (false once it has run for
+// an armed flag, unchanged otherwise). [refreshing] reads the live refresh state via snapshotFlow. Kept
+// here (not inline) so its `if`s stay off FlagsRoute's cyclomatic budget.
+private const val MANUAL_REFRESH_GRACE_MS = 1500L
+private suspend fun trackManualRefresh(armed: Boolean, refreshing: () -> Boolean): Boolean {
+    if (!armed) return armed
+    val started = withTimeoutOrNull(MANUAL_REFRESH_GRACE_MS) {
+        snapshotFlow(refreshing).first { it }
+    } != null
+    if (started) snapshotFlow(refreshing).first { !it }
+    return false
+}
 
 // #728 — the content-push target fraction: 1f (held at max) while a manual refresh runs so the
 // indicator stays in view, else 0f (the live drag fraction drives the offset). Extracted to keep the
@@ -1322,15 +1340,16 @@ private fun FlagsPullIndicator(
     modifier: Modifier = Modifier,
 ) {
     var settling by remember { mutableStateOf(false) }
-    LaunchedEffect(isRefreshing) {
-        if (isRefreshing) {
-            // A refresh is running: show the puck (when manual) right away, no settle suppression.
-            settling = false
-        } else {
-            // Refresh ended (or never started): suppress until distanceFraction has animated home, so
-            // the puck doesn't re-pop while it slides back. On first composition df is already ~0 so
-            // this resolves immediately.
-            settling = true
+    // #728 — engage the settle guard SYNCHRONOUSLY the instant a refresh ends (before the LaunchedEffect
+    // coroutine runs a frame later), so a residual pull distance can't re-pop the puck for a frame (the
+    // « ça repop en fin de load » guard, XaTriX). prevRefreshing is a snapshot holder used only for the
+    // edge compare; writing the same value is a no-op so it costs nothing on steady frames.
+    val prevRefreshing = remember { mutableStateOf(false) }
+    if (prevRefreshing.value && !isRefreshing) settling = true
+    prevRefreshing.value = isRefreshing
+    LaunchedEffect(isRefreshing, settling) {
+        // Disarm once the post-refresh pull distance has animated home, so the next genuine pull shows.
+        if (!isRefreshing && settling) {
             snapshotFlow { state.distanceFraction }.first { it <= AMORCE_REST_EPSILON }
             settling = false
         }

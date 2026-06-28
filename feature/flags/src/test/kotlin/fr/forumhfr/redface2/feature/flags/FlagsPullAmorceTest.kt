@@ -51,10 +51,12 @@ class FlagsPullAmorceTest {
     }
 
     @Test
-    fun `hidden during an AUTO refresh (the thin top bar is the cue then)`() {
+    fun `hidden during an AUTO refresh even WITH leftover pull distance (no double indicator)`() {
+        // Must-fix (Codex): an auto/cold refresh that overlaps a residual drag must NOT show the puck —
+        // the thin top bar is the only cue then, never both.
         assertFalse(
             shouldShowPullIndicator(
-                distanceFraction = 0f,
+                distanceFraction = 0.5f,
                 isRefreshing = true,
                 manualRefresh = false,
                 settling = false,
@@ -77,12 +79,11 @@ class FlagsPullAmorceTest {
     }
 
     @Test
-    fun `retainManualRefresh stays armed while a list refreshes and clears when both are idle`() {
-        assertTrue(retainManualRefresh(current = true, isRefreshing = true, dtIsRefreshing = false))
-        assertTrue(retainManualRefresh(current = true, isRefreshing = false, dtIsRefreshing = true))
-        assertFalse(retainManualRefresh(current = true, isRefreshing = false, dtIsRefreshing = false))
-        // Never arms itself: a cleared flag stays cleared regardless of the refresh state.
-        assertFalse(retainManualRefresh(current = false, isRefreshing = true, dtIsRefreshing = true))
+    fun `anyRefreshing is true when either list refreshes`() {
+        assertTrue(anyRefreshing(isRefreshing = true, dtIsRefreshing = false))
+        assertTrue(anyRefreshing(isRefreshing = false, dtIsRefreshing = true))
+        assertTrue(anyRefreshing(isRefreshing = true, dtIsRefreshing = true))
+        assertFalse(anyRefreshing(isRefreshing = false, dtIsRefreshing = false))
     }
 
     @Test
