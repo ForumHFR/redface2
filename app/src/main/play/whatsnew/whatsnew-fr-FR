@@ -1,6 +1,7 @@
-Redface 2 v0.17.21 — dev.
+Redface 2 v0.17.22 — dev.
 
 Vue Drapeaux :
-- Nouvelle barre du haut : deux containers arrondis, loupe rétractable, avatar, indicateur « +lus ».
-- Le swipe entre onglets glisse maintenant du bon côté (#660).
-- Sheet d'appui-long : liste d'actions complète + rangée d'accès rapide (#676).
+- Avatar du compte rond ; ombre parasite au swipe entre onglets supprimée.
+- Barre du haut : container gauche en 2 zones (drapeau = menu, type = bascule « +lus »), menu rapide restylé (drapeaux à droite), recherche sans saut de hauteur.
+- Indicateur « +lus » configurable : œil ou anneau (#661).
+- Appui long : rangée rapide et liste d'actions désormais distinctes (#676).
