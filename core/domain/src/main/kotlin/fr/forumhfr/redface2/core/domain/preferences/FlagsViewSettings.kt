@@ -50,7 +50,7 @@ data class FlagsViewSettings(
     // resolution path.
     val plusLusIndicatorStyle: PlusLusIndicatorStyle = PlusLusIndicatorStyle.Eye,
     // #603/#665 — GLOBAL: shape of the active-type glyph in the top-bar left container (flag icon vs.
-    // pastille dot). Default FLAG. Not subject to the per-tab override (like [markerStyle]). Carried on
+    // pastille dot). Default Flag. Not subject to the per-tab override (like [markerStyle]). Carried on
     // every resolution path.
     val flagGlyphStyle: FlagGlyphStyle = FlagGlyphStyle.Flag,
 )
