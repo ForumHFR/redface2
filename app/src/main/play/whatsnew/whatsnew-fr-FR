@@ -1,5 +1,4 @@
-Redface 2 v0.17.25 — dev.
+Redface 2 v0.17.26 — dev.
 
 Vue Drapeaux :
-- La barre du haut survole la liste : au défilement, le contenu glisse SOUS la barre.
-- Voile translucide au scroll : opaque derrière l'horloge, transparent en bas pour laisser le contenu apparaître en fondu. Barre transparente en haut de liste.
+- La loupe de recherche revient sur l'onglet DT : elle filtre les discussions à interlocuteurs multiples par sujet, comme sur les onglets de drapeaux. L'onglet Super (sans liste) reste sans loupe.

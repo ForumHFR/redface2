@@ -2,10 +2,12 @@ package fr.forumhfr.redface2.feature.flags
 
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
+import fr.forumhfr.redface2.core.model.messages.PrivateMessageSummary
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.Instant
 
 /**
  * 100% coverage of the pure client-side Drapeaux search (#603, PR2). The flagged topics are already
@@ -144,6 +146,66 @@ class FlagSearchTest {
         assertEquals(emptyList<FlagCategorySection>(), (filtered as FlagsContent.Grouped).sections)
         assertTrue("all sections dropped → empty (the NoFlagsSearchResults path)", filtered.isEmpty())
     }
+
+    // --- filterDtItemsByQuery (#603 harmonisation — the loupe filters the DT list too) -------
+
+    @Test
+    fun `a blank DT query returns the list unchanged (orphans kept)`() {
+        val items = listOf(dtInbox(1, "RDNA4"), dtOrphan(9))
+        assertEquals(items, filterDtItemsByQuery(items, "  "))
+    }
+
+    @Test
+    fun `the DT query matches the conversation subject case-insensitively`() {
+        val items = listOf(dtInbox(1, "RDNA4 — AMD"), dtInbox(2, "Claviers mécaniques"))
+        assertEquals(
+            listOf(1),
+            filterDtItemsByQuery(items, "rdna").map { it.threadId },
+        )
+    }
+
+    @Test
+    fun `the DT query is trimmed before matching`() {
+        val items = listOf(dtInbox(1, "Claviers mécaniques"), dtInbox(2, "RDNA4"))
+        assertEquals(listOf(1), filterDtItemsByQuery(items, "  claviers  ").map { it.threadId })
+    }
+
+    @Test
+    fun `an active DT query drops storage-only orphans (no subject to match)`() {
+        val items = listOf(dtInbox(1, "RDNA4"), dtOrphan(9))
+        // The orphan has no subject; an active query keeps only the matching inbox row.
+        assertEquals(listOf(1), filterDtItemsByQuery(items, "rdna").map { it.threadId })
+    }
+
+    @Test
+    fun `a DT query matching nothing yields an empty list`() {
+        val items = listOf(dtInbox(1, "RDNA4"), dtInbox(2, "Claviers"))
+        assertEquals(emptyList<DtListItem>(), filterDtItemsByQuery(items, "zzz"))
+    }
+
+    @Test
+    fun `an active DT query over storage-only orphans only yields an empty list`() {
+        // Orphans carry no subject, so any active query empties the list (the NoFlagsSearchResults path).
+        val items = listOf(dtOrphan(7), dtOrphan(9))
+        assertEquals(emptyList<DtListItem>(), filterDtItemsByQuery(items, "anything"))
+    }
+
+    private fun dtInbox(threadId: Int, subject: String): DtListItem.InboxBacked =
+        DtListItem.InboxBacked(
+            conversation = PrivateMessageSummary(
+                threadId = threadId,
+                correspondent = "",
+                subject = subject,
+                date = Instant.parse("2026-06-28T12:00:00Z"),
+                hasUnread = true,
+                isMultiRecipient = true,
+                lastPage = 1,
+            ),
+            resumePage = null,
+        )
+
+    private fun dtOrphan(threadId: Int): DtListItem.StorageOnly =
+        DtListItem.StorageOnly(threadId = threadId, resumePage = 1, numreponse = null)
 
     private fun flag(title: String): Flag = Flag(
         cat = 1,

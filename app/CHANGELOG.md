@@ -16,6 +16,21 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.17.26` — `internal` (dev) — 2026-06-28
+
+> Vue Drapeaux (#603) — **la loupe de recherche revient sur l'onglet DT**. La barre du haut harmonisée
+> avait laissé la loupe réservée aux onglets de drapeaux ; elle filtre désormais aussi la liste des
+> discussions à interlocuteurs multiples (DT). versionName 0.17.25 → 0.17.26.
+
+**Drapeaux — vue (#603)**
+
+- **Recherche sur l'onglet DT** : la loupe « rechercher dans les drapeaux » est désormais offerte sur
+  l'onglet DT (comme sur les onglets de drapeaux) et filtre les conversations par sujet. L'onglet Super
+  (sans liste) reste sans loupe. Filtre client-side (sujet, insensible à la casse) avec un état « aucun
+  résultat » dédié.
+
+---
+
 ## `0.17.25` — `internal` (dev) — 2026-06-28
 
 > Vue Drapeaux (#603/#665) — **top bar « overlay translucide »** : la barre du haut ne pousse plus la

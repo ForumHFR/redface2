@@ -1,5 +1,4 @@
-Redface 2 v0.17.25 — dev.
+Redface 2 v0.17.26 — dev.
 
 Flags view:
-- The top bar now overlays the list: on scroll, content glides UNDER the bar.
-- Translucent scrim on scroll: opaque behind the clock, transparent at the bottom so content fades in underneath. Bar stays transparent at the top of the list.
+- The search loupe is back on the DT tab: it filters your multi-recipient conversations by subject, just like the flag tabs. The Super tab (no list) keeps no loupe.

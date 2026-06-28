@@ -263,6 +263,12 @@ fun FlagsRoute(
     // #603 PR5 — the flag whose long-press actions sheet is open (null = closed).
     var sheetFlag by remember { mutableStateOf<Flag?>(null) }
     val canConfigureView = authState is AuthState.Authenticated && selectedTab.flagType != null
+    // #603 harmonisation (demande XaTriX : « top bar similaire pour tous les onglets, donc la
+    // loupe/recherche ») — the search loupe is offered on every tab that holds a searchable list: the
+    // three flag tabs AND DT (its conversation list). Super is a placeholder with no list, so it keeps
+    // no loupe (nothing to search). Decoupled from canConfigureView (which gates the flag-only display
+    // settings sheet) and extracted to flagsSearchEnabled so the && / || stay off FlagsRoute's budget.
+    val searchEnabled = flagsSearchEnabled(authState, selectedTab)
 
     // If the screen stops being configurable while the sheet is open (session expired, or the user
     // lands on the Super tab), clear the flag so the sheet can't silently reappear on the next
@@ -379,7 +385,7 @@ fun FlagsRoute(
                             cyanShowsRead = cyanShowsRead,
                             dtShowsRead = dtShowsRead,
                         ),
-                        searchEnabled = canConfigureView,
+                        searchEnabled = searchEnabled,
                         query = searchQuery,
                         searchActive = searchActive,
                         // #661 — the picker dropdown surfaces a contextual « +lus » toggle (Cyan/DT) and
@@ -1034,6 +1040,13 @@ private fun flagsLoadingBarVisible(
 private inline fun barLoadingGated(authState: AuthState?, barVisible: () -> Boolean): Boolean =
     authState is AuthState.Authenticated && barVisible()
 
+// #603 harmonisation — the search loupe is offered on tabs that hold a searchable list: the three flag
+// tabs (flagType != null) AND DT (its conversation list). Super has no list, so no loupe. Extracted so
+// the && / || stay off FlagsRoute's cyclomatic budget; internal so the gating is unit-tested directly
+// (Codex review — guard against a future gating regression).
+internal fun flagsSearchEnabled(authState: AuthState?, tab: FlagTab): Boolean =
+    authState is AuthState.Authenticated && (tab.flagType != null || tab == FlagTab.Dt)
+
 // #603 — extracted so the single-line-title branch doesn't count against FlagsRoute's cyclomatic budget.
 private fun flagTitleMaxLines(singleLineTitle: Boolean): Int = if (singleLineTitle) 1 else 2
 
@@ -1214,10 +1227,8 @@ private fun AuthenticatedBody(
                 // #6 — DT is a real list now: the user's MultiMP conversations, enriched best-effort
                 // with the MPStorage reading positions.
                 FlagTab.Dt -> DtListBody(
-                    state = bodyState.dtListState,
-                    isRefreshing = bodyState.dtIsRefreshing,
+                    state = bodyState,
                     actions = actions,
-                    funny = bodyState.funnyEmptyState,
                     // #665 — hoisted so the overlay scrim can read the DT scroll position.
                     listState = listStates.dt,
                 )
@@ -2213,12 +2224,12 @@ private fun DtTabOpenEffect(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DtListBody(
-    state: DtListUiState,
-    isRefreshing: Boolean,
+    state: FlagsBodyState,
     actions: AuthenticatedActions,
-    funny: Boolean,
     listState: LazyListState,
 ) {
+    val dtState = state.dtListState
+    val isRefreshing = state.dtIsRefreshing
     // #546 directive XaTriX — pull-to-refresh (swipe down) on the DT list, like the flag tabs. Wraps
     // the whole body (every branch) so the gesture has a target even on the listless states (#229).
     // #603 — « amorce seule » (XaTriX): pull cue while dragging, nothing during the refresh; the top
@@ -2239,7 +2250,14 @@ private fun DtListBody(
         },
         modifier = Modifier.fillMaxSize(),
     ) {
-        DtListContent(state = state, actions = actions, funny = funny, listState = listState)
+        DtListContent(
+            state = dtState,
+            actions = actions,
+            funny = state.funnyEmptyState,
+            listState = listState,
+            // #603 harmonisation — the loupe now filters the DT conversation list too.
+            searchQuery = state.searchQuery,
+        )
     }
 }
 
@@ -2254,6 +2272,7 @@ private fun DtListContent(
     actions: AuthenticatedActions,
     funny: Boolean,
     listState: LazyListState,
+    searchQuery: String,
 ) {
     when (state) {
         DtListUiState.Loading -> Box(
@@ -2285,31 +2304,58 @@ private fun DtListContent(
 
         is DtListUiState.Error -> DtErrorBody(cause = state.cause, actions = actions)
 
-        is DtListUiState.Content -> LazyColumn(
-            // #665 — hoisted state so the overlay scrim can read the DT scroll position (forTab).
-            state = listState,
-            modifier = Modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.surface),
-            // #665 — reserve the overlaid bar height (content glides under the translucent bar).
-            contentPadding = PaddingValues(top = LocalFlagsContentTopPadding.current),
-        ) {
-            // DT now renders through the SAME row primitive + divider as the Cyan/Red/Favorite lists
-            // (no Card, no contentPadding/spacing) so the four lists stay visually identical and a
-            // row change propagates to all (arbitrage XaTriX 2026-06-19). The list is the union of
-            // inbox PAGE 1 MultiMP rows + orphan MPStorage entries (#6) — dispatched per variant.
-            items(
-                items = state.items,
-                key = { it.threadId },
-                contentType = { CONTENT_TYPE_ROW },
-            ) { item ->
-                DtRow(item = item, onOpenMultiMp = actions.onOpenMultiMp)
-                FlagItemDivider()
-            }
-            // #662 (demande XaTriX) — le caveat de balayage (« seule la page 1 est listée ») a quitté la
-            // vue : il vit désormais dans la description du réglage « Section DT » (settings), au niveau de
-            // l'activation. Plus de footer scan-note ici.
+        is DtListUiState.Content -> DtListContentRows(
+            items = state.items,
+            actions = actions,
+            listState = listState,
+            searchQuery = searchQuery,
+        )
+    }
+}
+
+/**
+ * The DT [DtListUiState.Content] rows, with the #603 client-side search applied. An active query that
+ * matches nothing shows the shared [NoFlagsSearchResults] empty state (scrollable, so the
+ * `PullToRefreshBox` keeps a target — #229). Extracted from [DtListContent] so the search branch does
+ * not push its `when` over the detekt cyclomatic-complexity budget.
+ */
+@Composable
+private fun DtListContentRows(
+    items: List<DtListItem>,
+    actions: AuthenticatedActions,
+    listState: LazyListState,
+    searchQuery: String,
+) {
+    val filtered = remember(items, searchQuery) { filterDtItemsByQuery(items, searchQuery) }
+    if (searchQuery.isNotBlank() && filtered.isEmpty()) {
+        NoFlagsSearchResults(query = searchQuery)
+        return
+    }
+    LazyColumn(
+        // #665 — hoisted state so the overlay scrim can read the DT scroll position (forTab).
+        state = listState,
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface),
+        // #665 — reserve the overlaid bar height (content glides under the translucent bar).
+        contentPadding = PaddingValues(top = LocalFlagsContentTopPadding.current),
+    ) {
+        // DT now renders through the SAME row primitive + divider as the Cyan/Red/Favorite lists
+        // (no Card, no contentPadding/spacing) so the four lists stay visually identical and a
+        // row change propagates to all (arbitrage XaTriX 2026-06-19). The list is the union of
+        // inbox PAGE 1 MultiMP rows + orphan MPStorage entries (#6) — dispatched per variant.
+        // #603 — `filtered` is the search-filtered view of the items (no-op on a blank query).
+        items(
+            items = filtered,
+            key = { it.threadId },
+            contentType = { CONTENT_TYPE_ROW },
+        ) { item ->
+            DtRow(item = item, onOpenMultiMp = actions.onOpenMultiMp)
+            FlagItemDivider()
         }
+        // #662 (demande XaTriX) — le caveat de balayage (« seule la page 1 est listée ») a quitté la
+        // vue : il vit désormais dans la description du réglage « Section DT » (settings), au niveau de
+        // l'activation. Plus de footer scan-note ici.
     }
 }
 
