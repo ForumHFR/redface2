@@ -16,6 +16,35 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.17.22` — `internal` (dev) — 2026-06-28
+
+> Vue Drapeaux (#603) — finitions top bar + correctifs dogfood : **avatar du compte rond**, **ombre
+> moche au swipe supprimée**, **container gauche en 2 zones** (drapeau → menu, type + « +lus » → toggle
+> direct), **menu rapide restylé** (drapeaux trailing à droite, « Afficher les lus » retiré),
+> **recherche sans saut de hauteur**, **indicateur « +lus » configurable** œil/anneau (#661), et
+> **sheet d'appui-long v2** (rangée rapide ≠ liste, #676). versionName 0.17.21 → 0.17.22.
+
+**Drapeaux — vue (#603)**
+
+- **Container gauche — 2 zones (#603/#665)** : le sélecteur devient deux zones distinctes — le drapeau
+  de la section (drapal-icône coloré) ouvre le menu rapide ; le nom du type + l'indicateur « +lus »
+  bascule directement le « +lus » au tap (Cyan/DT). L'indicateur « +lus » vit dans la zone type.
+- **Menu rapide restylé (#603)** : libellé à gauche, drapeau coloré du type à droite (trailing) ;
+  l'entrée « Afficher les lus » disparaît (le toggle est désormais direct sur la zone type).
+- **Recherche — hauteur constante (#603)** : ouvrir la recherche ne décale plus le contenu (le champ
+  adopte la hauteur des containers).
+- **Avatar du compte rond** : le badge compte (PP) devient circulaire (M3) pour épouser son container ;
+  les avatars d'en-tête de posts gardent le carré arrondi.
+- **Ombre de swipe supprimée (#660)** : le cadre gris d'élévation parasite autour du panneau pendant le
+  balayage entre onglets est retiré (le geste reste signalé par le retour haptique + la transition).
+- **Indicateur « +lus » configurable (#661)** : choix œil (défaut) ou anneau coloré, dans les réglages
+  d'affichage Drapeaux.
+- **Sheet d'appui-long v2 (#676)** : la rangée rapide (Ouvrir · 1er non-lu · Super favori · Partager)
+  et la liste (Ouvrir à la dernière page · Copier le lien · Ouvrir dans le navigateur · Retirer) portent
+  désormais des actions distinctes (fini le doublon).
+
+---
+
 ## `0.17.21` — `internal` (dev) — 2026-06-28
 
 > Vue Drapeaux (#603) — **refonte de la top bar** (nouveau look : deux containers arrondis, loupe

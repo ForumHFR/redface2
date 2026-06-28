@@ -1,6 +1,7 @@
-Redface 2 v0.17.21 — dev.
+Redface 2 v0.17.22 — dev.
 
 Flags view:
-- New top bar: two rounded containers, a retractable search loupe, the account avatar, and an "also-read" indicator.
-- Tab swipe now slides in from the correct side (#660).
-- Long-press sheet: the full action list is back alongside the quick-access row (#676).
+- Round account avatar; stray shadow during tab swipe removed.
+- Top bar: left container split into two zones (flag = menu, type = "+read" toggle), restyled quick menu (flags on the right), search no longer grows the bar.
+- "+read" indicator is now configurable: eye or coloured ring (#661).
+- Long-press: the quick row and the action list now carry distinct actions (#676).
