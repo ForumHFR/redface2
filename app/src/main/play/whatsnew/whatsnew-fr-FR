@@ -1,4 +1,6 @@
-Redface 2 v0.17.27 — dev.
+Redface 2 v0.17.28 — dev.
 
 Vue Drapeaux :
-- Nouveau loader « redface » : en tirant pour rafraîchir, une petite tête souriante apparaît sous la barre et roule sur elle-même. Elle disparaît dès le rafraîchissement (la fine barre du haut prend le relais). Respecte « réduire les animations ».
+- Loader « redface » repositionné : au tirer-pour-rafraîchir, il apparaît au niveau des deux pastilles du haut (centré entre elles), le contenu descend, puis revient à ras pendant le rafraîchissement. Correction d'un espace vide au rechargement automatique.
+- Nouveau réglage « Barre de chargement » (afficher/masquer la fine barre auto).
+- Avatar du compte : options bordure et fond transparent.

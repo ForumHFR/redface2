@@ -10,6 +10,8 @@ import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
+import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
+import fr.forumhfr.redface2.core.domain.preferences.AvatarBackground
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
@@ -301,6 +303,16 @@ class FlagsViewModel @Inject constructor(
             // (before observeFlagsViewSettings emits), instead of the data-class default `false`.
             // The « +lus » suffix and the re-tap read [cyanUnreadOnly], not this StateFlow.
             initialValue = FlagsViewSettings(unreadOnly = _selectedTab.value == FlagTab.Cyan),
+        )
+
+    // #718 — GLOBAL account-avatar appearance (border + background). Exposed here only so the Drapeaux
+    // « Réglages d'affichage » sheet (the EDITING point) reflects + writes it; the badge itself reads
+    // the same preference globally via AppAccountViewModel, independent of this screen.
+    val avatarAppearance: StateFlow<AvatarAppearance> = userPreferencesRepository.observeAvatarAppearance()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = AvatarAppearance(),
         )
 
     /**
@@ -704,6 +716,21 @@ class FlagsViewModel @Inject constructor(
     /** Bottom-sheet write for the GLOBAL « marker outline » toggle (#690) — one value for every tab. */
     fun setFlagsMarkerBorder(enabled: Boolean) {
         viewModelScope.launch { userPreferencesRepository.setFlagsMarkerBorder(enabled) }
+    }
+
+    /** Bottom-sheet write for the GLOBAL « afficher la barre de chargement » toggle (#728). */
+    fun setFlagsShowLoadingBar(enabled: Boolean) {
+        viewModelScope.launch { userPreferencesRepository.setFlagsShowLoadingBar(enabled) }
+    }
+
+    /** Bottom-sheet write for the GLOBAL account-avatar border toggle (#718). */
+    fun setAvatarBorder(enabled: Boolean) {
+        viewModelScope.launch { userPreferencesRepository.setAvatarBorder(enabled) }
+    }
+
+    /** Bottom-sheet write for the GLOBAL account-avatar background (#718). */
+    fun setAvatarBackground(background: AvatarBackground) {
+        viewModelScope.launch { userPreferencesRepository.setAvatarBackground(background) }
     }
 
     /** Bottom-sheet write for the GLOBAL « +lus » indicator style (#661) — one value for every tab. */

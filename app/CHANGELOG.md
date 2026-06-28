@@ -16,6 +16,27 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.17.28` — `internal` (dev) — 2026-06-28
+
+> Vue Drapeaux (#603) — **loader « redface » repositionné** au niveau des pastilles du top bar, plus deux
+> nouveaux réglages (barre de chargement, options avatar). versionName 0.17.27 → 0.17.28.
+
+**Drapeaux — vue (#603 / #728 / #718)**
+
+- **Loader repositionné (#728)** : le puck redface n'apparaît plus sous toute la barre mais sur la
+  **rangée des deux containers du top bar** (centré entre eux). Au tirer-pour-rafraîchir, le contenu
+  descend avec le geste ; pendant le rafraîchissement il **revient à ras** et le puck reste en place
+  (anneau de progression). Correction du **gap fantôme** qui réservait un espace vide au rechargement
+  automatique (un état d'animation résiduel fuyait au changement d'onglet). Vrai redface (asset vectoriel).
+- **Réglage « Barre de chargement » (#728)** : option GLOBALE pour afficher ou masquer la fine barre de
+  progression des rechargements automatiques. Le tirer-pour-rafraîchir reste signalé par le redface quoi
+  qu'il arrive. Dans « Réglages d'affichage ».
+- **Options avatar du compte (#718)** : **bordure** (liseré fin optionnel) et **fond transparent**,
+  configurables dans « Réglages d'affichage ». Appliquées au badge « PP » de la barre du haut sur tous
+  les écrans (préférence globale dédiée, lue par le menu compte).
+
+---
+
 ## `0.17.27` — `internal` (dev) — 2026-06-28
 
 > Vue Drapeaux (#603) — **le loader « redface »**. L'amorce de rafraîchissement (tirer vers le bas)

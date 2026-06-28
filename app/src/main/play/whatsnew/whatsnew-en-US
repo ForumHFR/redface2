@@ -1,4 +1,6 @@
-Redface 2 v0.17.27 — dev.
+Redface 2 v0.17.28 — dev.
 
 Flags view:
-- New "redface" loader: pull to refresh and a little grinning face appears under the bar and rolls on itself. It vanishes once the refresh starts (the thin top bar takes over). Honours the system "remove animations" setting.
+- "redface" loader repositioned: on pull-to-refresh it now appears level with the two top pills (centred between them), the content slides down, then settles back during the refresh. Fixed an empty gap that showed on auto-reload.
+- New "Loading bar" setting (show/hide the thin auto-refresh bar).
+- Account avatar: border and transparent-background options.
