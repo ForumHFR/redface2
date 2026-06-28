@@ -47,6 +47,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.R as CoreUiR
@@ -77,6 +78,12 @@ data class FlagsAppBarState(
      * of a filled disc). Only takes visual effect when [readFilterShowsRead] is `true`.
      */
     val plusLusIndicatorStyle: PlusLusIndicatorStyle = PlusLusIndicatorStyle.Eye,
+    /**
+     * #603/#665 — GLOBAL shape of the active-type glyph in the flag zone: [FlagGlyphStyle.Flag]
+     * (default, the section's coloured flag icon — the « drapal » reprise) or [FlagGlyphStyle.Dot]
+     * (a minimal coloured pastille). The colour comes from [currentTabColor] either way.
+     */
+    val flagGlyphStyle: FlagGlyphStyle = FlagGlyphStyle.Flag,
 )
 
 /**
@@ -190,6 +197,7 @@ private fun LeftContainer(
                 FlagGlyphZone(
                     color = state.currentTabColor,
                     enabled = hasPicker,
+                    glyphStyle = state.flagGlyphStyle,
                     fullTabName = flagFullTabName(state.currentTab),
                     onOpenMenu = { expanded = true },
                 )
@@ -214,14 +222,17 @@ private fun LeftContainer(
 }
 
 /**
- * Zone 1 — the section's flag glyph; a button that opens the quick menu. The glyph is the
- * Material flag icon tinted with the active type colour (the « drapal » reprise, XaTriX). When there
- * is no picker (anonymous) it is a static, non-interactive indicator.
+ * Zone 1 — the section's flag glyph; a button that opens the quick menu. The glyph is tinted with the
+ * active type colour and its shape follows [glyphStyle] (#603/#665): [FlagGlyphStyle.Flag] = the
+ * Material flag icon (default, the « drapal » reprise, XaTriX), [FlagGlyphStyle.Dot] = a minimal
+ * filled pastille (legacy dot). When there is no picker (anonymous) it is a static, non-interactive
+ * indicator.
  */
 @Composable
 private fun FlagGlyphZone(
     color: Color,
     enabled: Boolean,
+    glyphStyle: FlagGlyphStyle,
     fullTabName: String,
     onOpenMenu: () -> Unit,
 ) {
@@ -243,12 +254,21 @@ private fun FlagGlyphZone(
             .padding(horizontal = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
-        RedfaceVectorIcon(
-            resId = CoreUiR.drawable.ic_ms_flag,
-            contentDescription = null,
-            tint = color,
-            size = 20.dp,
-        )
+        when (glyphStyle) {
+            FlagGlyphStyle.Flag -> RedfaceVectorIcon(
+                resId = CoreUiR.drawable.ic_ms_flag,
+                contentDescription = null,
+                tint = color,
+                size = 20.dp,
+            )
+
+            FlagGlyphStyle.Dot -> Box(
+                modifier = Modifier
+                    .size(14.dp)
+                    .clip(CircleShape)
+                    .background(color),
+            )
+        }
     }
 }
 

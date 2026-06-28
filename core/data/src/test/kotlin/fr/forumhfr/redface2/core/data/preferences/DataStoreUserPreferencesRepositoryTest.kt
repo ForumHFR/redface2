@@ -12,6 +12,7 @@ import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
+import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenBootstrapStore
@@ -479,6 +480,45 @@ class DataStoreUserPreferencesRepositoryTest {
 
             repository.observeFlagsViewSettings(FlagType.CYAN).test {
                 assertEquals(PlusLusIndicatorStyle.Eye, awaitItem().plusLusIndicatorStyle)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `flagGlyphStyle defaults to Flag on an empty store`() = runTest(dispatcher) {
+        repository.observeFlagsViewSettings(FlagType.CYAN).test {
+            assertEquals(FlagGlyphStyle.Flag, awaitItem().flagGlyphStyle)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setFlagsGlyphStyle persists and round-trips Dot then Flag for every tab`() =
+        runTest(dispatcher) {
+            // #603/#665 GLOBAL: written once, observed on any tab type.
+            repository.setFlagsGlyphStyle(FlagGlyphStyle.Dot)
+            repository.observeFlagsViewSettings(FlagType.RED).test {
+                assertEquals(FlagGlyphStyle.Dot, awaitItem().flagGlyphStyle)
+                cancelAndIgnoreRemainingEvents()
+            }
+            repository.setFlagsGlyphStyle(FlagGlyphStyle.Flag)
+            repository.observeFlagsViewSettings(FlagType.FAVORITE).test {
+                assertEquals(FlagGlyphStyle.Flag, awaitItem().flagGlyphStyle)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `corrupt flags_glyph_style value falls back to Flag instead of crashing`() =
+        runTest(dispatcher) {
+            // An unknown value from an older build / manual edit must not crash
+            // observeFlagsViewSettings on FlagGlyphStyle.valueOf — it degrades to Flag.
+            dataStore.edit { prefs ->
+                prefs[stringPreferencesKey("flags_glyph_style")] = "SQUARE"
+            }
+
+            repository.observeFlagsViewSettings(FlagType.CYAN).test {
+                assertEquals(FlagGlyphStyle.Flag, awaitItem().flagGlyphStyle)
                 cancelAndIgnoreRemainingEvents()
             }
         }

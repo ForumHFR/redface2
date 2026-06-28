@@ -11,6 +11,7 @@ import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
+import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
@@ -708,6 +709,11 @@ class FlagsViewModel @Inject constructor(
     /** Bottom-sheet write for the GLOBAL « +lus » indicator style (#661) — one value for every tab. */
     fun setFlagsPlusLusIndicatorStyle(style: PlusLusIndicatorStyle) {
         viewModelScope.launch { userPreferencesRepository.setFlagsPlusLusIndicatorStyle(style) }
+    }
+
+    /** Bottom-sheet write for the GLOBAL left-container glyph style (#603/#665) — one value for every tab. */
+    fun setFlagsGlyphStyle(style: FlagGlyphStyle) {
+        viewModelScope.launch { userPreferencesRepository.setFlagsGlyphStyle(style) }
     }
 
     fun refresh() {

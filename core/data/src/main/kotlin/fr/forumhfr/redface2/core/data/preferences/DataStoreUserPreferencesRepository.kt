@@ -14,6 +14,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
+import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
@@ -222,6 +223,15 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         persist {
             dataStore.edit { prefs ->
                 prefs[KEY_FLAGS_PLUS_LUS_INDICATOR_STYLE] = style.name
+            }
+        }
+    }
+
+    override suspend fun setFlagsGlyphStyle(style: FlagGlyphStyle) {
+        // #603/#665 — GLOBAL: a single key, no per-type variant. Persisted by name, read defensively.
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_FLAGS_GLYPH_STYLE] = style.name
             }
         }
     }
@@ -777,6 +787,8 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val markerBorder = prefs[KEY_FLAGS_MARKER_BORDER] ?: false
         // #661 — GLOBAL « +lus » indicator style: resolved once (defensively), added to both return paths.
         val plusLusIndicatorStyle = readPlusLusIndicatorStyle(prefs)
+        // #603/#665 — GLOBAL left-container glyph style: resolved once (defensively), both return paths.
+        val flagGlyphStyle = readFlagGlyphStyle(prefs)
         if (prefs[KEY_FLAGS_PER_TAB_OVERRIDE] != true) {
             return FlagsViewSettings(
                 groupByCategory = globalGroup,
@@ -787,6 +799,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
                 categoryBandStyle = categoryBandStyle,
                 markerBorder = markerBorder,
                 plusLusIndicatorStyle = plusLusIndicatorStyle,
+                flagGlyphStyle = flagGlyphStyle,
             )
         }
         return FlagsViewSettings(
@@ -798,6 +811,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             categoryBandStyle = categoryBandStyle,
             markerBorder = markerBorder,
             plusLusIndicatorStyle = plusLusIndicatorStyle,
+            flagGlyphStyle = flagGlyphStyle,
         )
     }
 
@@ -830,6 +844,16 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         prefs[KEY_FLAGS_PLUS_LUS_INDICATOR_STYLE]
             ?.let { stored -> runCatching { PlusLusIndicatorStyle.valueOf(stored) }.getOrNull() }
             ?: PlusLusIndicatorStyle.Eye
+
+    /**
+     * Reads [KEY_FLAGS_GLYPH_STYLE] defensively (#603/#665): an unknown / corrupt stored value falls
+     * back to [FlagGlyphStyle.Flag] instead of crashing on `FlagGlyphStyle.valueOf` — same stance as
+     * [readMarkerStyle].
+     */
+    private fun readFlagGlyphStyle(prefs: Preferences): FlagGlyphStyle =
+        prefs[KEY_FLAGS_GLYPH_STYLE]
+            ?.let { stored -> runCatching { FlagGlyphStyle.valueOf(stored) }.getOrNull() }
+            ?: FlagGlyphStyle.Flag
 
     /**
      * Type-aware default for the #317 « non-lus uniquement » filter: CYAN (« Mes sujets ») shows the
@@ -866,6 +890,8 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val KEY_FLAGS_MARKER_BORDER = booleanPreferencesKey("flags_marker_border")
         // #661 — GLOBAL « +lus » indicator style (PlusLusIndicatorStyle.name, defensively parsed).
         val KEY_FLAGS_PLUS_LUS_INDICATOR_STYLE = stringPreferencesKey("flags_plus_lus_indicator_style")
+        // #603/#665 — GLOBAL left-container glyph style (FlagGlyphStyle.name, defensively parsed).
+        val KEY_FLAGS_GLYPH_STYLE = stringPreferencesKey("flags_glyph_style")
         // #662 — « états vides humoristiques » opt-in (smiley empty state instead of the sober icon).
         val KEY_FLAGS_FUNNY_EMPTY_STATE = booleanPreferencesKey("flags_funny_empty_state")
         // #309 — per-tab display override. The master switch plus one nullable key per FlagType for
