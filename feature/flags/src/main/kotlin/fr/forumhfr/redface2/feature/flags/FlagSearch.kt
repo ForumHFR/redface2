@@ -45,3 +45,21 @@ fun FlagsContent.isEmpty(): Boolean = when (this) {
     is FlagsContent.Flat -> flags.isEmpty()
     is FlagsContent.Grouped -> sections.all { it.topics.isEmpty() }
 }
+
+/**
+ * Pure client-side DT search (#603 harmonisation — the same « rechercher dans les drapeaux » loupe is
+ * now offered on the DT tab, applied to its conversation list). Keeps the [DtListItem.InboxBacked] rows
+ * whose conversation subject contains [query] (case-insensitive, trimmed). [DtListItem.StorageOnly]
+ * orphans carry no subject (only a threadId), so an active query drops them — they have nothing to match.
+ * A blank query is a no-op (returns [items] unchanged).
+ */
+fun filterDtItemsByQuery(items: List<DtListItem>, query: String): List<DtListItem> {
+    val q = query.trim()
+    if (q.isEmpty()) return items
+    return items.filter { item ->
+        when (item) {
+            is DtListItem.InboxBacked -> item.conversation.subject.contains(q, ignoreCase = true)
+            is DtListItem.StorageOnly -> false
+        }
+    }
+}
