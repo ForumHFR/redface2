@@ -25,6 +25,9 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -84,6 +87,7 @@ import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -94,6 +98,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
+import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
+import fr.forumhfr.redface2.core.domain.preferences.AvatarBackground
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
@@ -189,6 +195,8 @@ fun FlagsRoute(
     val removeFlagState by viewModel.removeFlagState.collectAsStateWithLifecycle()
     val removeFlagEvent by viewModel.removeFlagEvent.collectAsStateWithLifecycle()
     val flagsViewSettings by viewModel.flagsViewSettings.collectAsStateWithLifecycle()
+    // #718 — GLOBAL avatar appearance, surfaced in the « Réglages d'affichage » sheet (editing point).
+    val avatarAppearance by viewModel.avatarAppearance.collectAsStateWithLifecycle()
     val flagsPerTabOverride by viewModel.flagsPerTabOverride.collectAsStateWithLifecycle()
     val superFavoriteIds by viewModel.superFavoriteTopicIds.collectAsStateWithLifecycle()
 
@@ -435,7 +443,11 @@ fun FlagsRoute(
                     // lives in the helper so it doesn't count against FlagsRoute's cyclomatic budget; the
                     // visibility is a lambda so it is only evaluated (and only subscribes to its state)
                     // when authenticated.
-                    loading = barLoadingGated(authState, manualRefresh) {
+                    // #728 — GLOBAL opt-out: when « afficher la barre de chargement » is off, the thin bar
+                    // never shows (auto / cold loads), the redface puck stays the manual-pull cue. The
+                    // 4dp slot is still reserved so toggling never reflows the list. The `&&` lives in the
+                    // helper so it stays off FlagsRoute's cyclomatic budget (already at the detekt limit).
+                    loading = barLoadingGated(authState, manualRefresh, flagsViewSettings.showLoadingBar) {
                         flagsLoadingBarVisible(
                             selectedTab = selectedTab,
                             flagsState = flagsState,
@@ -521,6 +533,7 @@ fun FlagsRoute(
             selectedTab = selectedTab,
             settings = flagsViewSettings,
             perTabOverride = flagsPerTabOverride,
+            avatarAppearance = avatarAppearance,
             actions = FlagsViewSettingsActions(
                 onPerTabOverrideChange = viewModel::setFlagsPerTabOverride,
                 onGroupByCategoryChange = viewModel::setFlagsGroupByCategory,
@@ -532,6 +545,9 @@ fun FlagsRoute(
                 onCategoryBandStyleChange = viewModel::setFlagsCategoryBandStyle,
                 onPlusLusIndicatorStyleChange = viewModel::setFlagsPlusLusIndicatorStyle,
                 onGlyphStyleChange = viewModel::setFlagsGlyphStyle,
+                onShowLoadingBarChange = viewModel::setFlagsShowLoadingBar,
+                onAvatarBorderChange = viewModel::setAvatarBorder,
+                onAvatarBackgroundChange = viewModel::setAvatarBackground,
                 onDismiss = { showViewSettingsSheet = false },
             ),
         )
@@ -627,6 +643,7 @@ private fun FlagsViewSettingsSheet(
     selectedTab: FlagTab,
     settings: FlagsViewSettings,
     perTabOverride: Boolean,
+    avatarAppearance: AvatarAppearance,
     actions: FlagsViewSettingsActions,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -853,9 +870,20 @@ private fun FlagsViewSettingsSheet(
                 )
             }
 
-            // #603/#718 (XaTriX) — greyed placeholders for upcoming account-avatar options. Disabled on
-            // purpose (« ajoute des options grisées ») so the planned work is visible; the real toggles
-            // land with #718. No-op callbacks — these never flip while disabled.
+            // #728 — GLOBAL « afficher la barre de chargement » toggle (not per-tab, like the marker
+            // shape). When off, the thin top bar never shows on auto / cold loads; the redface puck stays
+            // the manual pull-to-refresh cue.
+            ViewSettingsSwitchRow(
+                title = stringResource(R.string.flags_view_settings_loading_bar_title),
+                description = stringResource(R.string.flags_view_settings_loading_bar_description),
+                checked = settings.showLoadingBar,
+                enabled = true,
+                onCheckedChange = actions.onShowLoadingBarChange,
+            )
+
+            // #718 (XaTriX) — GLOBAL account-avatar options (top-bar « PP » badge). Border = optional
+            // thin outline (default off); background = container vs. transparent. Both apply everywhere
+            // the badge shows (every screen's top bar) — this sheet is only the editing point.
             HorizontalDivider()
             Text(
                 text = stringResource(R.string.flags_view_settings_avatar_section),
@@ -865,16 +893,22 @@ private fun FlagsViewSettingsSheet(
             ViewSettingsSwitchRow(
                 title = stringResource(R.string.flags_view_settings_avatar_border_title),
                 description = stringResource(R.string.flags_view_settings_avatar_border_description),
-                checked = false,
-                enabled = false,
-                onCheckedChange = {},
+                checked = avatarAppearance.border,
+                enabled = true,
+                onCheckedChange = actions.onAvatarBorderChange,
             )
+            // The 2-value AvatarBackground enum is surfaced as a « fond transparent » toggle, matching
+            // the original placeholder phrasing: checked = Transparent, unchecked = Container.
             ViewSettingsSwitchRow(
                 title = stringResource(R.string.flags_view_settings_avatar_transparent_title),
                 description = stringResource(R.string.flags_view_settings_avatar_transparent_description),
-                checked = false,
-                enabled = false,
-                onCheckedChange = {},
+                checked = avatarAppearance.background == AvatarBackground.Transparent,
+                enabled = true,
+                onCheckedChange = { transparent ->
+                    actions.onAvatarBackgroundChange(
+                        if (transparent) AvatarBackground.Transparent else AvatarBackground.Container,
+                    )
+                },
             )
 
             TextButton(
@@ -1052,17 +1086,19 @@ private fun flagsLoadingBarVisible(
     else -> isRefreshing || flagsState == null || flagsState == FlagsListUiState.Loading
 }
 
-// #648/#728 — the anonymous + manual-refresh gate, kept off FlagsRoute so the `&&` short-circuit no
-// longer counts against its cyclomatic budget (#665 pushed it over). When anonymous, flagsState stays
-// null and the bar would otherwise stay up forever over the « Se connecter » prompt. When a MANUAL pull
-// refresh is in flight ([manualRefresh]) the rich contained indicator is the cue, so the thin bar is
-// suppressed (no double indicator). [barVisible] is a lambda so it is only evaluated when relevant — a
-// genuine short-circuit (no useless state reads when anonymous or during a manual pull).
+// #648/#728 — the GLOBAL opt-out + anonymous + manual-refresh gate, kept off FlagsRoute so the `&&`
+// short-circuit no longer counts against its cyclomatic budget (#665 pushed it over). [showLoadingBar] is
+// the user opt-out (#728): when off, the thin bar never shows. When anonymous, flagsState stays null and
+// the bar would otherwise stay up forever over the « Se connecter » prompt. When a MANUAL pull refresh is
+// in flight ([manualRefresh]) the rich contained indicator is the cue, so the thin bar is suppressed (no
+// double indicator). [barVisible] is a lambda so it is only evaluated when relevant — a genuine
+// short-circuit (no useless state reads when the bar is off, anonymous, or during a manual pull).
 private inline fun barLoadingGated(
     authState: AuthState?,
     manualRefresh: Boolean,
+    showLoadingBar: Boolean,
     barVisible: () -> Boolean,
-): Boolean = authState is AuthState.Authenticated && !manualRefresh && barVisible()
+): Boolean = showLoadingBar && authState is AuthState.Authenticated && !manualRefresh && barVisible()
 
 // #603 harmonisation — the search loupe is offered on tabs that hold a searchable list: the three flag
 // tabs (flagType != null) AND DT (its conversation list). Super has no list, so no loupe. Extracted so
@@ -1314,16 +1350,43 @@ internal suspend fun trackManualRefresh(armed: Boolean, refreshing: Flow<Boolean
     return false
 }
 
-// #728 — the content-push target fraction: 1f (held at max) while a manual refresh runs so the
-// indicator stays in view, else 0f (the live drag fraction drives the offset). Extracted to keep the
-// `if`/`&&` out of the body composables' cyclomatic budget.
-internal fun pullHoldTarget(manualRefresh: Boolean, isRefreshing: Boolean): Float =
-    if (manualRefresh && isRefreshing) 1f else 0f
-
-// #728 — how far the list content slides DOWN at full pull / during a manual refresh (M3 pull-to-refresh
-// choreography): the body is offset by `max(dragFraction, holdProgress) * MAX_PULL_PUSH` in a draw-phase
-// graphicsLayer, revealing the contained redface indicator just under the bar.
+// #728 — how far the list content slides DOWN with the pull (M3 pull-to-refresh choreography): the body
+// is offset by `distanceFraction * MAX_PULL_PUSH` in a draw-phase graphicsLayer. Driven PURELY by the
+// per-body pull distance (no manual-refresh « hold ») so it is fresh-zero on a freshly-composed body — an
+// AUTO / cold refresh or a tab switch can never inherit a residual offset (the « gap fantôme » reload-auto
+// bug: holdProgress leaked across an AnimatedContent tab switch because manualRefresh is route-global and
+// isRefreshing is shared, so a new body snapped its initial animateFloatAsState target to 1, XaTriX dogfood).
 private val MAX_PULL_PUSH = 48.dp
+
+// #728 — vertical offset (below the status bar) that centres the 48dp redface puck on the top-bar PILL
+// ROW, so the loader sits between the two containers AT THEIR LEVEL (XaTriX: « met le reload au niveau des
+// 2 containers top bar, entre les deux ») rather than floating below the whole bar: bar top padding (8dp) +
+// half a 44dp container (22dp) − half the 48dp puck (24dp) = 6dp. Kept in sync with FlagsTopBar's
+// ContainerHeight (44) + top padding (8) and RedfacePullPuck's PUCK_SIZE (48).
+private val PUCK_PILL_ROW_OFFSET = 6.dp
+
+// #728 — the puck's top offset from the screen top: the status-bar inset + [PUCK_PILL_ROW_OFFSET], so the
+// indicator (which lives in the body, drawn behind the overlaid bar's transparent CENTRE corridor) lands on
+// the pill row. The puck stays horizontally centred (Alignment.TopCenter) in the corridor between the two
+// containers, so it never falls behind their opaque Surfaces. Read in a @Composable context (WindowInsets).
+@Composable
+private fun pullPuckTopOffset(): Dp =
+    WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + PUCK_PILL_ROW_OFFSET
+
+// #728 — content-push release factor: 1f during the pull GESTURE, animating to 0f once the refresh
+// starts, so the content returns to flush while the puck spins up in the bar (no empty band under the
+// bar — the very « gap » XaTriX rejected; Codex framing #3). Returned as a draw-phase lambda so the body
+// reads it INSIDE its graphicsLayer (no recomposition on each animation frame). It is always multiplied
+// by the per-body distanceFraction (fresh-zero on a freshly-composed body), so an auto/cold refresh or a
+// tab switch never inherits a residual push regardless of this factor — leak-safe by construction.
+@Composable
+private fun pullPushReleaseFactor(isRefreshing: Boolean): () -> Float {
+    val release = animateFloatAsState(
+        targetValue = if (isRefreshing) 0f else 1f,
+        label = "flagPullPushRelease",
+    )
+    return { release.value }
+}
 
 /**
  * #728 — pull-to-refresh indicator: the contained « redface » puck ([RedfacePullPuck]) anchored just
@@ -1382,24 +1445,14 @@ private fun FlagListBody(
     onManualRefresh: () -> Unit,
 ) {
     val selectedTab = state.selectedTab
-    // #665 — the PullToRefreshBox now fills the whole overlay (under the bar), so offset the pull amorce
-    // down by the bar height to keep it visible below the bar rather than behind it.
-    val barTop = LocalFlagsContentTopPadding.current
     // Pull-to-refresh (swipe down) replaces the legacy header « Actualiser » button, matching
     // feature/forum. It wraps the whole flag body so the indicator stays anchored over the
     // existing content during the refresh round-trip (Material 3 stable, cf. Context7).
-    // #603 — « amorce seule » (XaTriX): a pull cue while dragging, then NOTHING during the refresh —
-    // the thin top FlagsLoadingBar is the single loading cue (manual, auto and initial loads), so no
-    // double indicator. The pull gesture still fires onRefresh; isRefreshing drives the box state so a
-    // pull mid-refresh doesn't double-trigger.
+    // #728 — the redface puck is anchored on the top-bar PILL ROW (pullPuckTopOffset), and the content
+    // slides DOWN with the live pull distance. A MANUAL refresh keeps the puck in view as the hero;
+    // an AUTO / cold refresh shows only the thin top FlagsLoadingBar (no double indicator).
     val pullState = rememberPullToRefreshState()
-    // #728 — the content slides DOWN with the pull (M3 choreography), held at max during a manual
-    // refresh so the contained indicator stays in view, then animates home at settle. Read inside the
-    // draw-phase graphicsLayer below so the offset never triggers recomposition.
-    val holdProgress by animateFloatAsState(
-        targetValue = pullHoldTarget(manualRefresh, state.isRefreshing),
-        label = "flagPullContentHold",
-    )
+    val pushRelease = pullPushReleaseFactor(state.isRefreshing)
     PullToRefreshBox(
         isRefreshing = state.isRefreshing,
         // #728 — flag this refresh as MANUAL (gesture-driven): the rich contained indicator shows here
@@ -1410,11 +1463,12 @@ private fun FlagListBody(
         },
         state = pullState,
         indicator = {
+            val puckTop = pullPuckTopOffset()
             FlagsPullIndicator(
                 pullState,
                 state.isRefreshing,
                 manualRefresh,
-                Modifier.align(Alignment.TopCenter).offset { IntOffset(0, barTop.roundToPx()) },
+                Modifier.align(Alignment.TopCenter).offset { IntOffset(0, puckTop.roundToPx()) },
             )
         },
         modifier = Modifier.fillMaxSize(),
@@ -1422,8 +1476,14 @@ private fun FlagListBody(
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                // #728 — content slides down with the LIVE pull distance during the GESTURE, then is
+                // released back to flush once the refresh starts (pushRelease → 0): the puck has moved up
+                // into the bar, so holding the content down would leave an empty band under it (the very
+                // « gap » XaTriX rejected). Multiplied by the per-body distanceFraction (fresh-zero on a
+                // new body) so an auto/cold refresh or tab switch never inherits a residual push. Read in
+                // the draw phase, no recompose.
                 .graphicsLayer {
-                    translationY = maxOf(pullState.distanceFraction.coerceIn(0f, 1f), holdProgress) *
+                    translationY = pullState.distanceFraction.coerceIn(0f, 1f) * pushRelease() *
                         MAX_PULL_PUSH.toPx()
                 },
         ) {
@@ -2327,15 +2387,11 @@ private fun DtListBody(
     // the whole body (every branch) so the gesture has a target even on the listless states (#229).
     // #603 — « amorce seule » (XaTriX): pull cue while dragging, nothing during the refresh; the top
     // FlagsLoadingBar (driven by dtIsRefreshing / DtListUiState.Loading) is the single loading cue.
-    // #665 — offset the pull amorce below the overlaid bar (the PullToRefreshBox fills the overlay).
-    val barTop = LocalFlagsContentTopPadding.current
+    // #728 — same M3 choreography as the flag list: the redface puck anchored on the top-bar pill row
+    // (pullPuckTopOffset), the DT content sliding down with the LIVE pull distance during the gesture,
+    // released to flush once the refresh starts (pullPushReleaseFactor).
     val pullState = rememberPullToRefreshState()
-    // #728 — same M3 choreography as the flag list: the DT content slides down with the pull, held
-    // during a manual refresh, animated home at settle (draw-phase graphicsLayer, no recomposition).
-    val holdProgress by animateFloatAsState(
-        targetValue = pullHoldTarget(manualRefresh, isRefreshing),
-        label = "dtPullContentHold",
-    )
+    val pushRelease = pullPushReleaseFactor(isRefreshing)
     PullToRefreshBox(
         isRefreshing = isRefreshing,
         onRefresh = {
@@ -2344,11 +2400,12 @@ private fun DtListBody(
         },
         state = pullState,
         indicator = {
+            val puckTop = pullPuckTopOffset()
             FlagsPullIndicator(
                 pullState,
                 isRefreshing,
                 manualRefresh,
-                Modifier.align(Alignment.TopCenter).offset { IntOffset(0, barTop.roundToPx()) },
+                Modifier.align(Alignment.TopCenter).offset { IntOffset(0, puckTop.roundToPx()) },
             )
         },
         modifier = Modifier.fillMaxSize(),
@@ -2356,8 +2413,11 @@ private fun DtListBody(
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                // #728 — content slides with the GESTURE then releases to flush during the refresh (see
+                // pullPushReleaseFactor); multiplied by the per-body distanceFraction so an auto/cold
+                // refresh or a tab switch never inherits a residual push. Draw-phase read, no recompose.
                 .graphicsLayer {
-                    translationY = maxOf(pullState.distanceFraction.coerceIn(0f, 1f), holdProgress) *
+                    translationY = pullState.distanceFraction.coerceIn(0f, 1f) * pushRelease() *
                         MAX_PULL_PUSH.toPx()
                 },
         ) {
@@ -2719,6 +2779,9 @@ private data class FlagsViewSettingsActions(
     val onCategoryBandStyleChange: (CategoryBandStyle) -> Unit,
     val onPlusLusIndicatorStyleChange: (PlusLusIndicatorStyle) -> Unit,
     val onGlyphStyleChange: (FlagGlyphStyle) -> Unit,
+    val onShowLoadingBarChange: (Boolean) -> Unit,
+    val onAvatarBorderChange: (Boolean) -> Unit,
+    val onAvatarBackgroundChange: (AvatarBackground) -> Unit,
     val onDismiss: () -> Unit,
 )
 

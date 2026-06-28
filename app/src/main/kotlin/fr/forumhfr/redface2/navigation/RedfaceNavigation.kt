@@ -1009,6 +1009,8 @@ fun RedfaceApp(intent: Intent?) {
         val authState by accountViewModel.authState.collectAsStateWithLifecycle()
         // #479 — avatar of the connected user for the top-bar account badge (null → pseudo initial).
         val accountAvatarUrl by accountViewModel.avatarUrl.collectAsStateWithLifecycle()
+        // #718 — GLOBAL avatar appearance (border + background) for the top-bar account badge.
+        val accountAvatarAppearance by accountViewModel.avatarAppearance.collectAsStateWithLifecycle()
         // #313 — unread-MP badge on the « Messages » nav item. Same shared-instance logic as the
         // account ViewModel above. The ON_START hook refreshes the count when the app comes back
         // to the foreground (MPs received while backgrounded) ; the first start is skipped by the
@@ -1202,6 +1204,7 @@ fun RedfaceApp(intent: Intent?) {
                                 startReportEmail(context, reportEmailSubject, reportNoEmailClient)
                             },
                             avatarUrl = accountAvatarUrl,
+                            avatarAppearance = accountAvatarAppearance,
                         )
                     }
                     RedfaceNavHost(

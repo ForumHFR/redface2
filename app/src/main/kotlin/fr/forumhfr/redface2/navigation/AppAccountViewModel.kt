@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
+import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
+import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.profile.ProfileRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import javax.inject.Inject
@@ -41,6 +43,7 @@ class AppAccountViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val flagRepository: FlagRepository,
     private val profileRepository: ProfileRepository,
+    private val userPreferencesRepository: UserPreferencesRepository,
 ) : ViewModel() {
 
     val authState: StateFlow<AuthState?> = authRepository.observeAuthState()
@@ -77,6 +80,19 @@ class AppAccountViewModel @Inject constructor(
             scope = viewModelScope,
             started = SharingStarted.Eagerly,
             initialValue = null,
+        )
+
+    /**
+     * #718 — GLOBAL appearance of the top-bar account avatar badge (border + background). Observed
+     * directly from the user preferences (NOT routed through the Drapeaux sheet, which is only an
+     * editing point) so the badge looks the same on every main screen's top bar. Bundled so
+     * [RedfaceAccountMenu] reads ONE value and never flickers between two independently-observed flows.
+     */
+    val avatarAppearance: StateFlow<AvatarAppearance> = userPreferencesRepository.observeAvatarAppearance()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = AvatarAppearance(),
         )
 
     init {

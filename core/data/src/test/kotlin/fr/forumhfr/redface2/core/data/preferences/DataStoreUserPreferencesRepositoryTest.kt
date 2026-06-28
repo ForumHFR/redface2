@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import app.cash.turbine.test
+import fr.forumhfr.redface2.core.domain.preferences.AvatarBackground
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
@@ -441,6 +442,54 @@ class DataStoreUserPreferencesRepositoryTest {
         repository.setFlagsMarkerBorder(false)
         repository.observeFlagsViewSettings(FlagType.FAVORITE).test {
             assertEquals(false, awaitItem().markerBorder)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `showLoadingBar defaults to true on an empty store`() = runTest(dispatcher) {
+        // #728 GLOBAL: the thin top loading bar is shown by default (opt-out).
+        repository.observeFlagsViewSettings(FlagType.CYAN).test {
+            assertEquals(true, awaitItem().showLoadingBar)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setFlagsShowLoadingBar persists and round-trips for every tab`() = runTest(dispatcher) {
+        // #728 GLOBAL: written once, observed on any tab type.
+        repository.setFlagsShowLoadingBar(false)
+        repository.observeFlagsViewSettings(FlagType.RED).test {
+            assertEquals(false, awaitItem().showLoadingBar)
+            cancelAndIgnoreRemainingEvents()
+        }
+        repository.setFlagsShowLoadingBar(true)
+        repository.observeFlagsViewSettings(FlagType.FAVORITE).test {
+            assertEquals(true, awaitItem().showLoadingBar)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `avatar appearance defaults to borderless container on an empty store`() = runTest(dispatcher) {
+        // #718 GLOBAL: borderless + theme container by default (the #603/#665 look).
+        repository.observeAvatarAppearance().test {
+            val appearance = awaitItem()
+            assertEquals(false, appearance.border)
+            assertEquals(AvatarBackground.Container, appearance.background)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setAvatarBorder and setAvatarBackground persist and round-trip`() = runTest(dispatcher) {
+        // #718 GLOBAL: two independent keys, surfaced together as the bundled AvatarAppearance.
+        repository.setAvatarBorder(true)
+        repository.setAvatarBackground(AvatarBackground.Transparent)
+        repository.observeAvatarAppearance().test {
+            val appearance = awaitItem()
+            assertEquals(true, appearance.border)
+            assertEquals(AvatarBackground.Transparent, appearance.background)
             cancelAndIgnoreRemainingEvents()
         }
     }

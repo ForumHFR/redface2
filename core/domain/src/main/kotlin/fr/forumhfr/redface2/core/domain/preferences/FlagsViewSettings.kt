@@ -53,4 +53,8 @@ data class FlagsViewSettings(
     // pastille dot). Default Flag. Not subject to the per-tab override (like [markerStyle]). Carried on
     // every resolution path.
     val flagGlyphStyle: FlagGlyphStyle = FlagGlyphStyle.Flag,
+    // #728 — GLOBAL: show the thin top loading bar during auto / cold refreshes (the manual pull is
+    // always signalled by the redface puck regardless). Default true (keep the bar). Not subject to the
+    // per-tab override (like [markerStyle]). Carried on every resolution path.
+    val showLoadingBar: Boolean = true,
 )

@@ -4,15 +4,20 @@ import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.LoginError
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
+import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
+import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.profile.ProfileRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.UserProfile
+import io.mockk.every
+import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -58,11 +63,19 @@ class AppAccountViewModelTest {
         Dispatchers.resetMain()
     }
 
+    // #718 — the avatar appearance is irrelevant to the logout/avatar-URL contracts under test here;
+    // a relaxed mock returning the default appearance keeps the constructor satisfied without a full
+    // hand-written UserPreferencesRepository fake (~85 methods). Fresh per call so tests stay isolated.
+    private fun fakeUserPrefs(): UserPreferencesRepository =
+        mockk(relaxed = true) {
+            every { observeAvatarAppearance() } returns flowOf(AvatarAppearance())
+        }
+
     @Test
     fun `logout clears the private flags cache exactly once before resetting auth state`() = runTest {
         val flags = FakeFlagRepository()
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
-        val vm = AppAccountViewModel(auth, flags, FakeProfileRepository())
+        val vm = AppAccountViewModel(auth, flags, FakeProfileRepository(), fakeUserPrefs())
 
         val clearsBeforeLogout = flags.clearSessionCacheCallCount
 
@@ -85,7 +98,7 @@ class AppAccountViewModelTest {
     fun `authState mirrors the AuthRepository observation across login and logout transitions`() = runTest {
         val flags = FakeFlagRepository()
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
-        val vm = AppAccountViewModel(auth, flags, FakeProfileRepository())
+        val vm = AppAccountViewModel(auth, flags, FakeProfileRepository(), fakeUserPrefs())
 
         // SharingStarted.Eagerly + initialValue = null. The first upstream emission lands
         // synchronously through Dispatchers.Main.immediate (= UnconfinedTestDispatcher in
@@ -106,7 +119,7 @@ class AppAccountViewModelTest {
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat", userId = 42), flagRepository = flags)
         val profiles = FakeProfileRepository(avatarByUserId = mapOf(42 to "https://img/42.png"))
 
-        val vm = AppAccountViewModel(auth, flags, profiles)
+        val vm = AppAccountViewModel(auth, flags, profiles, fakeUserPrefs())
 
         assertEquals("https://img/42.png", vm.avatarUrl.value)
         assertEquals("the avatar is fetched exactly once", 1, profiles.getProfileCallCount)
@@ -118,7 +131,7 @@ class AppAccountViewModelTest {
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat", userId = null), flagRepository = flags)
         val profiles = FakeProfileRepository()
 
-        val vm = AppAccountViewModel(auth, flags, profiles)
+        val vm = AppAccountViewModel(auth, flags, profiles, fakeUserPrefs())
 
         assertNull(vm.avatarUrl.value)
         assertEquals("no userId → no profile fetch", 0, profiles.getProfileCallCount)
@@ -131,7 +144,7 @@ class AppAccountViewModelTest {
         // userId present but the profile resolves to no avatar (HFR rendered no img) → fall back.
         val profiles = FakeProfileRepository(avatarByUserId = mapOf(42 to null))
 
-        val vm = AppAccountViewModel(auth, flags, profiles)
+        val vm = AppAccountViewModel(auth, flags, profiles, fakeUserPrefs())
 
         assertNull(vm.avatarUrl.value)
     }

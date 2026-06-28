@@ -9,6 +9,8 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import fr.forumhfr.redface2.core.domain.coroutines.ApplicationScope
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
+import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
+import fr.forumhfr.redface2.core.domain.preferences.AvatarBackground
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
@@ -41,6 +43,12 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 
+// LargeClass — this is THE single DataStore-backed implementation of [UserPreferencesRepository]: every
+// app preference (theme, display, flags view, avatar #718, proxy, start screen…) is co-located here by
+// design, one observe/set pair per key. Splitting it by feature would fragment the DataStore wiring for
+// no real gain. Same stance as the project's other intentionally-large classes (PostEditorViewModel,
+// SettingsViewModel). Crossed the threshold when #718 added the avatar appearance.
+@Suppress("LargeClass")
 @Singleton
 class DataStoreUserPreferencesRepository @Inject constructor(
     @param:UserPreferencesDataStore private val dataStore: DataStore<Preferences>,
@@ -218,6 +226,15 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override suspend fun setFlagsShowLoadingBar(enabled: Boolean) {
+        // #728 — GLOBAL toggle, a single key (mirrors the marker outline toggle).
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_FLAGS_SHOW_LOADING_BAR] = enabled
+            }
+        }
+    }
+
     override suspend fun setFlagsPlusLusIndicatorStyle(style: PlusLusIndicatorStyle) {
         // #661 — GLOBAL: a single key, no per-type variant. Persisted by name, read defensively.
         persist {
@@ -362,6 +379,45 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             }
         }
     }
+
+    override fun observeAvatarAppearance(): Flow<AvatarAppearance> =
+        dataStore.data
+            .map { prefs ->
+                AvatarAppearance(
+                    border = prefs[KEY_AVATAR_BORDER] ?: false,
+                    background = readAvatarBackground(prefs),
+                )
+            }
+            .distinctUntilChanged()
+            .catch { emit(AvatarAppearance()) }
+
+    override suspend fun setAvatarBorder(enabled: Boolean) {
+        // #718 — GLOBAL toggle, a single key (mirrors the marker outline toggle).
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_AVATAR_BORDER] = enabled
+            }
+        }
+    }
+
+    override suspend fun setAvatarBackground(background: AvatarBackground) {
+        // #718 — GLOBAL: a single key, persisted by name, read defensively.
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_AVATAR_BACKGROUND] = background.name
+            }
+        }
+    }
+
+    /**
+     * Reads [KEY_AVATAR_BACKGROUND] defensively (#718): an unknown / corrupt stored value falls back to
+     * [AvatarBackground.Container] (the default) instead of crashing on `AvatarBackground.valueOf` —
+     * same stance as [readMarkerStyle].
+     */
+    private fun readAvatarBackground(prefs: Preferences): AvatarBackground =
+        prefs[KEY_AVATAR_BACKGROUND]
+            ?.let { stored -> runCatching { AvatarBackground.valueOf(stored) }.getOrNull() }
+            ?: AvatarBackground.Container
 
     override fun observeFlagsAutoRefresh(): Flow<Boolean> =
         dataStore.data
@@ -789,6 +845,8 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val plusLusIndicatorStyle = readPlusLusIndicatorStyle(prefs)
         // #603/#665 — GLOBAL left-container glyph style: resolved once (defensively), both return paths.
         val flagGlyphStyle = readFlagGlyphStyle(prefs)
+        // #728 — GLOBAL « afficher la barre de chargement » toggle: resolved once, added to both paths.
+        val showLoadingBar = prefs[KEY_FLAGS_SHOW_LOADING_BAR] ?: true
         if (prefs[KEY_FLAGS_PER_TAB_OVERRIDE] != true) {
             return FlagsViewSettings(
                 groupByCategory = globalGroup,
@@ -800,6 +858,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
                 markerBorder = markerBorder,
                 plusLusIndicatorStyle = plusLusIndicatorStyle,
                 flagGlyphStyle = flagGlyphStyle,
+                showLoadingBar = showLoadingBar,
             )
         }
         return FlagsViewSettings(
@@ -812,6 +871,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             markerBorder = markerBorder,
             plusLusIndicatorStyle = plusLusIndicatorStyle,
             flagGlyphStyle = flagGlyphStyle,
+            showLoadingBar = showLoadingBar,
         )
     }
 
@@ -888,6 +948,12 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val KEY_FLAGS_CATEGORY_BAND_STYLE = stringPreferencesKey("flags_category_band_style")
         // #690 — GLOBAL « marker outline » toggle (thin dark border around the marker).
         val KEY_FLAGS_MARKER_BORDER = booleanPreferencesKey("flags_marker_border")
+        // #728 — GLOBAL « afficher la barre de chargement » toggle (thin top bar on auto / cold loads).
+        val KEY_FLAGS_SHOW_LOADING_BAR = booleanPreferencesKey("flags_show_loading_bar")
+        // #718 — GLOBAL account-avatar border toggle (thin outline around the top-bar « PP » badge).
+        val KEY_AVATAR_BORDER = booleanPreferencesKey("avatar_border")
+        // #718 — GLOBAL account-avatar background (AvatarBackground.name, defensively parsed).
+        val KEY_AVATAR_BACKGROUND = stringPreferencesKey("avatar_background")
         // #661 — GLOBAL « +lus » indicator style (PlusLusIndicatorStyle.name, defensively parsed).
         val KEY_FLAGS_PLUS_LUS_INDICATOR_STYLE = stringPreferencesKey("flags_plus_lus_indicator_style")
         // #603/#665 — GLOBAL left-container glyph style (FlagGlyphStyle.name, defensively parsed).

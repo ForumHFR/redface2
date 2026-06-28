@@ -160,6 +160,30 @@ interface UserPreferencesRepository {
     suspend fun setFlagsGlyphStyle(style: FlagGlyphStyle)
 
     /**
+     * Persists the GLOBAL « afficher la barre de chargement » toggle (#728): the thin top loading bar
+     * shown during auto / cold refreshes. The manual pull-to-refresh is always signalled by the redface
+     * puck regardless of this toggle. Like [setFlagsMarkerStyle] it is NOT subject to
+     * [observeFlagsPerTabOverride]; surfaced through [observeFlagsViewSettings]
+     * ([FlagsViewSettings.showLoadingBar]). Defaults to `true` (bar shown) until the first call.
+     */
+    suspend fun setFlagsShowLoadingBar(enabled: Boolean)
+
+    /**
+     * GLOBAL appearance of the top-bar account avatar badge (#718): bundled [AvatarAppearance] (border
+     * + background). One value for the whole app — the badge shows on every main screen's top bar, so
+     * it must NOT depend on a [fr.forumhfr.redface2.core.model.FlagType]. Edited from the Drapeaux
+     * « Réglages d'affichage » sheet but observed directly by the account ViewModel. Defaults to a
+     * borderless [AvatarBackground.Container] badge (the look shipped with #603/#665).
+     */
+    fun observeAvatarAppearance(): Flow<AvatarAppearance>
+
+    /** Persists the GLOBAL avatar-border toggle (#718). Defaults to `false` (borderless) until set. */
+    suspend fun setAvatarBorder(enabled: Boolean)
+
+    /** Persists the GLOBAL avatar background (#718). Defaults to [AvatarBackground.Container] until set. */
+    suspend fun setAvatarBackground(background: AvatarBackground)
+
+    /**
      * App theme selection (#286): [ThemeMode.SYSTEM] (default) follows the OS dark-mode setting;
      * [ThemeMode.LIGHT] / [ThemeMode.DARK] force the app theme regardless of the OS. Observed at the
      * app root ([fr.forumhfr.redface2.navigation.RedfaceApp]) to compute the effective dark theme
