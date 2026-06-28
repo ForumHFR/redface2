@@ -27,7 +27,7 @@
     <!-- a11y du container gauche : état (onglet courant + « +lus ») via contentDescription, action via onClickLabel. %1$s = nom complet de l'onglet. -->
     <string name="flags_appbar_current_tab">Onglet : %1$s</string>
     <string name="flags_appbar_current_tab_pluslus">Onglet : %1$s, messages lus affichés</string>
-    <string name="flags_appbar_change_tab">Changer d\'onglet</string>
+    <string name="flags_appbar_open_menu">Ouvrir le menu des drapeaux</string>
     <!-- #661 — entrées de découvrabilité du menu déroulant du sélecteur d'onglet. -->
     <string name="flags_appbar_menu_display_settings">Réglages d\'affichage</string>
     <string name="flags_appbar_menu_show_read">Afficher les lus</string>

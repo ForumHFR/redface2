@@ -8,9 +8,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -93,6 +95,9 @@ internal fun flagsReadFilterShowsRead(
 }
 
 private val ContainerShape = RoundedCornerShape(22.dp)
+// #603/#665 — shared height of every top-bar container AND the expanded search field, so entering
+// search never changes the bar height (no content shift underneath, XaTriX dogfood).
+private val ContainerHeight = 44.dp
 private const val INDICATOR_BG_ALPHA = 0.18f
 
 /**
@@ -157,6 +162,14 @@ fun FlagsTopBar(
     }
 }
 
+/**
+ * #603/#665 contract (XaTriX) — the left container is ONE visual Surface holding TWO distinct
+ * interactive zones (no parent click, Codex):
+ *
+ * - **flag zone** (the section's coloured flag glyph) opens the quick menu — « which type + change it ».
+ * - **type zone** (short type name + the « +lus » indicator) toggles « +lus » directly on a tap, for
+ *   the tabs that have it (Cyan / DT). For the others it is plain, non-interactive text.
+ */
 @Composable
 private fun LeftContainer(
     state: FlagsAppBarState,
@@ -167,53 +180,27 @@ private fun LeftContainer(
     val hasPicker = state.tabs.isNotEmpty()
     // Close the picker if the tab list vanishes (e.g. sign-out) while it is open (Codex nit).
     LaunchedEffect(hasPicker) { if (!hasPicker) expanded = false }
-    // a11y (Codex) — announce the WHOLE pill: the current tab's FULL name + its « +lus » state, so
-    // TalkBack states what the short visible label abbreviates. The « change tab » affordance rides on
-    // onClickLabel, so it is offered ONLY when the picker exists (anonymous = a static indicator).
-    val tabContentDescription = if (state.readFilterShowsRead == true) {
-        stringResource(R.string.flags_appbar_current_tab_pluslus, flagFullTabName(state.currentTab))
-    } else {
-        stringResource(R.string.flags_appbar_current_tab, flagFullTabName(state.currentTab))
-    }
-    val changeTabLabel = stringResource(R.string.flags_appbar_change_tab)
     Box {
         Surface(
             shape = ContainerShape,
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.height(44.dp),
+            modifier = Modifier.height(ContainerHeight),
         ) {
-            Row(
-                modifier = Modifier
-                    .clip(ContainerShape)
-                    .then(
-                        if (hasPicker) {
-                            Modifier.clickable(role = Role.Button, onClickLabel = changeTabLabel) {
-                                expanded = true
-                            }
-                        } else {
-                            Modifier
-                        },
-                    )
-                    .semantics { contentDescription = tabContentDescription }
-                    .padding(horizontal = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                // #661 — in « Ring » mode, the dot itself becomes a hollow coloured ring while « +lus »
-                // is active (no extra glyph); in « Eye » mode it stays filled and the eye capsule shows.
-                val showsRead = state.readFilterShowsRead == true
-                val ringCue = showsRead && state.plusLusIndicatorStyle == PlusLusIndicatorStyle.Ring
-                FlagDot(state.currentTabColor, ring = ringCue)
-                Text(
-                    text = flagShortTabName(state.currentTab),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                FlagGlyphZone(
+                    color = state.currentTabColor,
+                    enabled = hasPicker,
+                    fullTabName = flagFullTabName(state.currentTab),
+                    onOpenMenu = { expanded = true },
                 )
-                if (showsRead && state.plusLusIndicatorStyle == PlusLusIndicatorStyle.Eye) {
-                    PlusLusIndicator(state.currentTabColor)
-                }
+                TypePlusLusZone(
+                    tab = state.currentTab,
+                    color = state.currentTabColor,
+                    showsRead = state.readFilterShowsRead,
+                    indicatorStyle = state.plusLusIndicatorStyle,
+                    // « +lus » toggle = re-select the active Cyan/DT tab (same path as the legacy re-tap).
+                    onToggle = { onSelectTab(state.currentTab) },
+                )
             }
         }
         TabPickerDropdown(
@@ -227,39 +214,122 @@ private fun LeftContainer(
 }
 
 /**
- * The section's flag « drapal ». Normally a filled disc; when [ring] is true (#661 « Ring » +lus cue)
- * it is drawn as a hollow coloured ring, so the dot itself carries the read-items state.
+ * Zone 1 — the section's flag glyph; a button that opens the quick menu. The glyph is the
+ * Material flag icon tinted with the active type colour (the « drapal » reprise, XaTriX). When there
+ * is no picker (anonymous) it is a static, non-interactive indicator.
  */
 @Composable
-private fun FlagDot(color: Color, ring: Boolean = false) {
+private fun FlagGlyphZone(
+    color: Color,
+    enabled: Boolean,
+    fullTabName: String,
+    onOpenMenu: () -> Unit,
+) {
+    val openMenuLabel = stringResource(R.string.flags_appbar_open_menu)
+    val description = stringResource(R.string.flags_appbar_current_tab, fullTabName)
     Box(
         modifier = Modifier
-            .size(14.dp)
+            .fillMaxHeight()
+            .widthIn(min = 48.dp)
+            .clip(ContainerShape)
             .then(
-                if (ring) {
-                    Modifier.border(width = 3.dp, color = color, shape = CircleShape)
+                if (enabled) {
+                    Modifier.clickable(role = Role.Button, onClickLabel = openMenuLabel, onClick = onOpenMenu)
                 } else {
-                    Modifier.clip(CircleShape).background(color)
+                    Modifier
                 },
-            ),
-    )
-}
-
-/** #661 — « +lus » active cue: an eye glyph in a tinted capsule (variant D, the default indicator). */
-@Composable
-private fun PlusLusIndicator(color: Color) {
-    Box(
-        modifier = Modifier
-            .clip(CircleShape)
-            .background(color.copy(alpha = INDICATOR_BG_ALPHA))
-            .padding(horizontal = 6.dp, vertical = 3.dp),
+            )
+            .semantics { contentDescription = description }
+            .padding(horizontal = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
         RedfaceVectorIcon(
-            resId = CoreUiR.drawable.ic_ms_visibility,
+            resId = CoreUiR.drawable.ic_ms_flag,
             contentDescription = null,
             tint = color,
-            size = 16.dp,
+            size = 20.dp,
+        )
+    }
+}
+
+/**
+ * Zone 2 — the active type's short name plus the « +lus » indicator. A tap toggles « +lus » directly
+ * for the tabs that support it ([showsRead] non-null = Cyan / DT); for the others ([showsRead] null:
+ * Lu / Favori / Super) it is plain text with no action, no indicator (Codex: « pas d'action morte »).
+ */
+@Composable
+private fun TypePlusLusZone(
+    tab: FlagTab,
+    color: Color,
+    showsRead: Boolean?,
+    indicatorStyle: PlusLusIndicatorStyle,
+    onToggle: () -> Unit,
+) {
+    val togglable = showsRead != null
+    val toggleLabel = stringResource(
+        if (showsRead == true) R.string.flags_appbar_menu_hide_read else R.string.flags_appbar_menu_show_read,
+    )
+    val description = if (showsRead == true) {
+        stringResource(R.string.flags_appbar_current_tab_pluslus, flagFullTabName(tab))
+    } else {
+        stringResource(R.string.flags_appbar_current_tab, flagFullTabName(tab))
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxHeight()
+            .clip(ContainerShape)
+            .then(
+                if (togglable) {
+                    Modifier.clickable(role = Role.Button, onClickLabel = toggleLabel, onClick = onToggle)
+                } else {
+                    Modifier
+                },
+            )
+            .semantics { contentDescription = description }
+            .padding(start = 4.dp, end = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = flagShortTabName(tab),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (showsRead == true) {
+            PlusLusIndicator(color = color, style = indicatorStyle)
+        }
+    }
+}
+
+/**
+ * #661 — the « +lus » active cue, in zone 2 (Codex: the indicator lives here, not on the flag glyph):
+ * [PlusLusIndicatorStyle.Eye] = an eye glyph in a tinted capsule (default), [PlusLusIndicatorStyle.Ring]
+ * = a small hollow coloured ring.
+ */
+@Composable
+private fun PlusLusIndicator(color: Color, style: PlusLusIndicatorStyle) {
+    when (style) {
+        PlusLusIndicatorStyle.Eye -> Box(
+            modifier = Modifier
+                .clip(CircleShape)
+                .background(color.copy(alpha = INDICATOR_BG_ALPHA))
+                .padding(horizontal = 6.dp, vertical = 3.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            RedfaceVectorIcon(
+                resId = CoreUiR.drawable.ic_ms_visibility,
+                contentDescription = null,
+                tint = color,
+                size = 16.dp,
+            )
+        }
+
+        PlusLusIndicatorStyle.Ring -> Box(
+            modifier = Modifier
+                .size(14.dp)
+                .border(width = 3.dp, color = color, shape = CircleShape),
         )
     }
 }
@@ -273,43 +343,28 @@ private fun TabPickerDropdown(
     onOpenViewSettings: () -> Unit,
 ) {
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        // #603 (XaTriX) restyle — label on the LEFT, the type's coloured flag glyph TRAILING on the
+        // right (cleaner « modern menu » look). The « Afficher les lus » entry was removed: the toggle
+        // now lives directly on the left container's type zone, so a menu entry would just duplicate it.
         state.tabs.forEach { entry ->
             DropdownMenuItem(
                 text = { Text(entry.label) },
-                leadingIcon = { FlagDotSmall(entry.color) },
+                trailingIcon = {
+                    RedfaceVectorIcon(
+                        resId = CoreUiR.drawable.ic_ms_flag,
+                        contentDescription = null,
+                        tint = entry.color,
+                        size = 18.dp,
+                    )
+                },
                 onClick = {
                     onDismiss()
                     onSelectTab(entry.tab)
                 },
             )
         }
-        // #661 — discoverability: the « +lus » toggle (otherwise only reachable by re-tapping a tab) and
-        // the display-settings sheet (otherwise only via the bottom-bar re-tap) get explicit entries.
-        val showsRead = state.readFilterShowsRead
-        if (showsRead != null || state.searchEnabled) {
-            HorizontalDivider()
-        }
-        if (showsRead != null) {
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        stringResource(
-                            if (showsRead) {
-                                R.string.flags_appbar_menu_hide_read
-                            } else {
-                                R.string.flags_appbar_menu_show_read
-                            },
-                        ),
-                    )
-                },
-                // Re-selecting the active Cyan/DT tab toggles its « +lus » filter — same path as a re-tap.
-                onClick = {
-                    onDismiss()
-                    onSelectTab(state.currentTab)
-                },
-            )
-        }
         if (state.searchEnabled) {
+            HorizontalDivider()
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.flags_appbar_menu_display_settings)) },
                 onClick = {
@@ -322,16 +377,6 @@ private fun TabPickerDropdown(
 }
 
 @Composable
-private fun FlagDotSmall(color: Color) {
-    Box(
-        modifier = Modifier
-            .size(12.dp)
-            .clip(CircleShape)
-            .background(color),
-    )
-}
-
-@Composable
 private fun RightContainer(
     searchEnabled: Boolean,
     onOpenSearch: () -> Unit,
@@ -340,7 +385,7 @@ private fun RightContainer(
     Surface(
         shape = ContainerShape,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        modifier = Modifier.height(44.dp),
+        modifier = Modifier.height(ContainerHeight),
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 2.dp),
@@ -369,7 +414,8 @@ private fun ExpandedSearchContainer(
 ) {
     val clearLabel = stringResource(R.string.flags_search_clear)
     Surface(
-        modifier = modifier.height(48.dp),
+        // Same height as the containers so opening search never grows the bar (no shift below, #603).
+        modifier = modifier.height(ContainerHeight),
         shape = ContainerShape,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
