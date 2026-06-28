@@ -139,7 +139,7 @@ import kotlinx.coroutines.launch
 @Composable
 @Suppress("LongParameterList") // Screen route: 4 host nav callbacks + the quick-config trigger + the account slot.
 fun FlagsRoute(
-    onOpenFlag: (Flag) -> Unit,
+    onOpenFlag: (flag: Flag, page: Int) -> Unit,
     onLoginRequested: () -> Unit,
     onOpenCategory: (Int) -> Unit = {},
     // #6 — open a DT (MultiMP) conversation : the host pushes the existing PrivateMessageThread
@@ -427,7 +427,8 @@ fun FlagsRoute(
                                 // state just changed), cf. FlagsViewModel.onFlagOpened.
                                 onOpenFlag = { flag ->
                                     viewModel.onFlagOpened()
-                                    onOpenFlag(flag)
+                                    // Row tap resumes at the last-read page; the sheet picks other pages.
+                                    onOpenFlag(flag, flag.lastReadPage)
                                 },
                                 onRefresh = viewModel::refresh,
                                 onLoginRequested = onLoginRequested,
@@ -473,10 +474,10 @@ fun FlagsRoute(
     FlagActionsSheetHost(
         flag = sheetFlag,
         superFavoriteIds = superFavoriteIds,
-        onOpen = {
+        onOpen = { flag, page ->
             sheetFlag = null
             viewModel.onFlagOpened()
-            onOpenFlag(it)
+            onOpenFlag(flag, page)
         },
         onToggleSuperFavorite = viewModel::toggleSuperFavorite,
         onRemove = {
@@ -1855,7 +1856,7 @@ private fun ScrollableFlagsEmptyState(
 private fun FlagActionsSheetHost(
     flag: Flag?,
     superFavoriteIds: Set<Int>,
-    onOpen: (Flag) -> Unit,
+    onOpen: (flag: Flag, page: Int) -> Unit,
     onToggleSuperFavorite: (Flag) -> Unit,
     onRemove: (Flag) -> Unit,
     onDismiss: () -> Unit,
@@ -1866,7 +1867,8 @@ private fun FlagActionsSheetHost(
         categoryName = flagCategoryName(flag.cat),
         isSuperFavorite = flag.topicId in superFavoriteIds,
         actions = FlagSheetActions(
-            onOpen = { onOpen(flag) },
+            // #676 v2 — the sheet decides which page (resume / first-unread / last); the host just navigates.
+            onOpen = { page -> onOpen(flag, page) },
             onToggleSuperFavorite = { onToggleSuperFavorite(flag) },
             onRemove = { onRemove(flag) },
             onDismiss = onDismiss,

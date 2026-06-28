@@ -1890,22 +1890,23 @@ private fun RedfaceNavHost(
         entryProvider = entryProvider {
             entry<FlagsListRoute> {
                 FlagsRoute(
-                    onOpenFlag = { flag ->
+                    // #676 v2 — [page] is chosen by the caller: row tap + sheet « Ouvrir » resume at
+                    // lastReadPage, « 1er non-lu » jumps to lastReadPage+1, « dernière page » to totalPages.
+                    onOpenFlag = { flag, page ->
                         backStack.add(
                             TopicRoute(
                                 cat = flag.cat,
                                 post = flag.topicId,
-                                page = flag.lastReadPage,
-                                // REST `last_post_read_id` is the LAST post the user
-                                // read (not the first unread). Re-anchoring the reader
-                                // there is close enough to the legacy "where I stopped"
-                                // UX without claiming a first-unread we cannot prove
-                                // from the REST flag payload. HFR numreponse fits in
-                                // Int (largest observed ~10M), so the toInt() narrowing
-                                // is safe in practice. null = no anchor available.
+                                page = page,
+                                // REST `last_post_read_id` is the LAST post the user read. Anchoring the
+                                // reader there only makes sense when RESUMING at the last-read page; for
+                                // « 1er non-lu » / « dernière page » we want the top of that other page,
+                                // so the anchor is dropped unless page == lastReadPage. HFR numreponse
+                                // fits in Int (largest observed ~10M), so the toInt() narrowing is safe.
                                 scrollTo = flag.lastPostReadId
                                     ?.takeIf { it in 1L..Int.MAX_VALUE.toLong() }
-                                    ?.toInt(),
+                                    ?.toInt()
+                                    ?.takeIf { page == flag.lastReadPage },
                                 // #231 — a flag open means « catch up on new posts » → refresh
                                 // past the 60s snappy-cache TTL (the cached page is still shown
                                 // instantly first). Avoids landing on a stale followed topic.
