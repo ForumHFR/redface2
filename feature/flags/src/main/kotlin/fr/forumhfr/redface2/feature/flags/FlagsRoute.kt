@@ -119,6 +119,7 @@ import fr.forumhfr.redface2.core.ui.icon.categoryIcon
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsChoice
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsChoiceGroup
 import fr.forumhfr.redface2.core.ui.theme.FlagPalette
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -353,7 +354,10 @@ fun FlagsRoute(
     // #728 — manage the armed flag's lifecycle (grace + auto-disarm) off a helper so FlagsRoute keeps no
     // extra decision points; keyed on the flag so re-arming restarts the lifecycle.
     LaunchedEffect(manualRefresh) {
-        manualRefresh = trackManualRefresh(manualRefresh) { anyRefreshing(isRefreshing, dtIsRefreshing) }
+        manualRefresh = trackManualRefresh(
+            manualRefresh,
+            snapshotFlow { anyRefreshing(isRefreshing, dtIsRefreshing) },
+        )
     }
 
     Scaffold(
@@ -1298,15 +1302,15 @@ internal fun anyRefreshing(isRefreshing: Boolean, dtIsRefreshing: Boolean): Bool
 // to actually start — a pull can be throttled to a no-op — and, if it does, until it completes; then
 // disarm. The grace timeout guarantees the flag never stays stuck (so the thin bar is never suppressed
 // forever) when the pull triggers no real refresh. Returns the new flag value (false once it has run for
-// an armed flag, unchanged otherwise). [refreshing] reads the live refresh state via snapshotFlow. Kept
-// here (not inline) so its `if`s stay off FlagsRoute's cyclomatic budget.
-private const val MANUAL_REFRESH_GRACE_MS = 1500L
-private suspend fun trackManualRefresh(armed: Boolean, refreshing: () -> Boolean): Boolean {
+// an armed flag, unchanged otherwise). [refreshing] is the LIVE refresh-state stream (a snapshotFlow over
+// the VM flags at the call site), so the `false→true→false` transitions are always observed. `internal`
+// + Flow param (rather than a State-reading lambda) so the lifecycle is unit-testable with a plain
+// MutableStateFlow, and its `if`s stay off FlagsRoute's cyclomatic budget.
+internal const val MANUAL_REFRESH_GRACE_MS = 1500L
+internal suspend fun trackManualRefresh(armed: Boolean, refreshing: Flow<Boolean>): Boolean {
     if (!armed) return armed
-    val started = withTimeoutOrNull(MANUAL_REFRESH_GRACE_MS) {
-        snapshotFlow(refreshing).first { it }
-    } != null
-    if (started) snapshotFlow(refreshing).first { !it }
+    val started = withTimeoutOrNull(MANUAL_REFRESH_GRACE_MS) { refreshing.first { it } } != null
+    if (started) refreshing.first { !it }
     return false
 }
 

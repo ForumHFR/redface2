@@ -1,5 +1,9 @@
 package fr.forumhfr.redface2.feature.flags
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -91,5 +95,30 @@ class FlagsPullAmorceTest {
         assertEquals(1f, pullHoldTarget(manualRefresh = true, isRefreshing = true), 0f)
         assertEquals(0f, pullHoldTarget(manualRefresh = true, isRefreshing = false), 0f)
         assertEquals(0f, pullHoldTarget(manualRefresh = false, isRefreshing = true), 0f)
+    }
+
+    @Test
+    fun `trackManualRefresh is a no-op when not armed`() = runTest {
+        assertFalse(trackManualRefresh(armed = false, refreshing = MutableStateFlow(true)))
+    }
+
+    @Test
+    fun `trackManualRefresh stays armed through the refresh then disarms on completion`() = runTest {
+        val refreshing = MutableStateFlow(false)
+        val tracked = async { trackManualRefresh(armed = true, refreshing = refreshing) }
+        runCurrent()
+        refreshing.value = true // the manual refresh actually starts
+        runCurrent()
+        assertTrue("still armed while the refresh is running", tracked.isActive)
+        refreshing.value = false // the refresh completes
+        assertFalse(tracked.await()) // disarmed once it lands
+    }
+
+    @Test
+    fun `trackManualRefresh disarms after the grace when the pull is a no-op`() = runTest {
+        // The pull is throttled to a no-op (no refresh ever starts): the grace timeout must disarm the
+        // flag so the thin top bar is never suppressed forever. runTest auto-advances the virtual clock
+        // past MANUAL_REFRESH_GRACE_MS.
+        assertFalse(trackManualRefresh(armed = true, refreshing = MutableStateFlow(false)))
     }
 }
