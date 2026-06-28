@@ -252,9 +252,11 @@ private fun AccountStatusHeader(authState: AuthState?) {
     }
 }
 
-// 40dp visual size. The explicit `Modifier.minimumInteractiveComponentSize()` applied on
-// `AccountBadge` (before `.size(BADGE_SIZE)`) expands the touch target to the Material 3
-// 48dp minimum without changing the painted badge — `Surface(onClick = ...)` does NOT
-// inject that minimum on its own (cf. M3 docs, Codex rereview on PR #207).
-private val BADGE_SIZE = 40.dp
+// 32dp visual size — the standard top-bar account-avatar size (Gmail/Google ≈ 30dp), distinct from
+// the 40dp M3 *list* avatar; in the 44dp top-bar container it leaves breathing room rather than nearly
+// filling it (#603, XaTriX). The explicit `Modifier.minimumInteractiveComponentSize()` applied on
+// `AccountBadge` (before `.size(BADGE_SIZE)`) still expands the touch target to the Material 3 48dp
+// minimum without changing the painted badge — `Surface(onClick = ...)` does NOT inject that minimum
+// on its own (cf. M3 docs, Codex rereview on PR #207).
+private val BADGE_SIZE = 32.dp
 private val HEADER_PADDING = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
