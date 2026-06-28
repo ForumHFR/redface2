@@ -16,6 +16,22 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.17.27` — `internal` (dev) — 2026-06-28
+
+> Vue Drapeaux (#603) — **le loader « redface »**. L'amorce de rafraîchissement (tirer vers le bas)
+> n'est plus l'indicateur Material standard : c'est une petite tête « redface » qui émerge sous la barre
+> et **roule sur elle-même** au fil du tirage. versionName 0.17.26 → 0.17.27.
+
+**Drapeaux — vue (#603)**
+
+- **Loader « redface » à l'amorce du pull** : en tirant vers le bas pour rafraîchir, une tête ronde
+  souriante (dessinée, pas le GIF HFR) apparaît dans une pastille sous la barre et tourne sur elle-même
+  selon la distance de tirage. « Amorce seule » : dès que le rafraîchissement démarre, elle disparaît et
+  la fine barre du haut reste le seul repère de chargement (pas de double indicateur). La rotation
+  respecte le réglage système « réduire les animations ». S'applique aux deux listes (drapeaux + DT).
+
+---
+
 ## `0.17.26` — `internal` (dev) — 2026-06-28
 
 > Vue Drapeaux (#603) — **la loupe de recherche revient sur l'onglet DT**. La barre du haut harmonisée

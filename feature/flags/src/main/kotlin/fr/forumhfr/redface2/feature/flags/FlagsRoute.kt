@@ -48,7 +48,6 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
-import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshState
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -113,6 +112,7 @@ import fr.forumhfr.redface2.core.ui.LocalForumRowTitleMaxLines
 import fr.forumhfr.redface2.core.ui.R as CoreUiR
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.formatLastReplyTimestamp
+import fr.forumhfr.redface2.core.ui.loader.RedfacePullPuck
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.icon.categoryIcon
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsChoice
@@ -1260,16 +1260,16 @@ internal fun shouldShowPullAmorce(
 ): Boolean = !isRefreshing && !settling && distanceFraction > 0f
 
 /**
- * #603 (XaTriX) — « amorce seule » pull-to-refresh cue: the standard [PullToRefreshDefaults.Indicator]
+ * #603/#7 (XaTriX) — « amorce seule » pull-to-refresh cue: the « redface » loader puck ([RedfacePullPuck])
  * shown ONLY while the user is actively pulling, then NOTHING once the refresh starts so the thin top
  * [FlagsLoadingBar] is the single loading cue (no double indicator). The whole wrapper is gated, not
  * just the content, per Codex (an indicator left with empty content can keep its container visible).
  * Shared by both pull-to-refresh surfaces.
  *
  * The [settling] state keeps the indicator hidden through the post-refresh return-to-rest (see
- * [shouldShowPullAmorce]). Passing `isRefreshing = false` keeps the indicator in its determinate pull
- * state — it never reaches the persistent circular spin here (the M3-expressive `LoadingIndicator` is
- * `internal` in this BOM, so the determinate default Indicator is the amorce visual).
+ * [shouldShowPullAmorce]). The redface emerges + rolls as a pure function of `state.distanceFraction`
+ * during the PULL; it never reaches a persistent refresh spin here (amorce-only, XaTriX's pick — the
+ * M3-expressive indeterminate `LoadingIndicator` is `internal` in this BOM anyway).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1292,11 +1292,7 @@ private fun FlagsPullAmorce(
         }
     }
     if (shouldShowPullAmorce(isRefreshing, state.distanceFraction, settling)) {
-        PullToRefreshDefaults.Indicator(
-            state = state,
-            isRefreshing = false,
-            modifier = modifier,
-        )
+        RedfacePullPuck(progress = state.distanceFraction, modifier = modifier)
     }
 }
 
