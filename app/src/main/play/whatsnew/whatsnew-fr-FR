@@ -1,4 +1,4 @@
-Redface 2 v0.17.26 — dev.
+Redface 2 v0.17.27 — dev.
 
 Vue Drapeaux :
-- La loupe de recherche revient sur l'onglet DT : elle filtre les discussions à interlocuteurs multiples par sujet, comme sur les onglets de drapeaux. L'onglet Super (sans liste) reste sans loupe.
+- Nouveau loader « redface » : en tirant pour rafraîchir, une petite tête souriante apparaît sous la barre et roule sur elle-même. Elle disparaît dès le rafraîchissement (la fine barre du haut prend le relais). Respecte « réduire les animations ».
