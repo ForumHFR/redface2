@@ -1,7 +1,8 @@
-Redface 2 v0.17.22 — dev.
+Redface 2 v0.17.23 — dev.
 
-Vue Drapeaux :
-- Avatar du compte rond ; ombre parasite au swipe entre onglets supprimée.
-- Barre du haut : container gauche en 2 zones (drapeau = menu, type = bascule « +lus »), menu rapide restylé (drapeaux à droite), recherche sans saut de hauteur.
-- Indicateur « +lus » configurable : œil ou anneau (#661).
-- Appui long : rangée rapide et liste d'actions désormais distinctes (#676).
+Vue Drapeaux (passe top bar) :
+- Noms d'onglets courts : Cyan, Lurk, Fav, DT, Super.
+- Nouveau réglage « Repère du type actif » : icône drapeau ou pastille (#717).
+- Avatar du compte : fond du container, sans bordure ; options à venir (#718).
+- « Réglages d'affichage » désormais disponible sur tous les onglets (dont DT/Super).
+- Tap plus propre des deux zones du container gauche.

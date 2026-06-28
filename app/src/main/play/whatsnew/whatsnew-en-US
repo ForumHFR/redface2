@@ -1,7 +1,8 @@
-Redface 2 v0.17.22 — dev.
+Redface 2 v0.17.23 — dev.
 
-Flags view:
-- Round account avatar; stray shadow during tab swipe removed.
-- Top bar: left container split into two zones (flag = menu, type = "+read" toggle), restyled quick menu (flags on the right), search no longer grows the bar.
-- "+read" indicator is now configurable: eye or coloured ring (#661).
-- Long-press: the quick row and the action list now carry distinct actions (#676).
+Flags view (top bar pass):
+- Short tab names: Cyan, Lurk, Fav, DT, Super.
+- New "Active type marker" setting: flag icon or dot (#717).
+- Account avatar: container background, borderless; more options coming (#718).
+- "Display settings" is now available on every tab (incl. DT/Super).
+- Cleaner tap on the left container's two zones.
