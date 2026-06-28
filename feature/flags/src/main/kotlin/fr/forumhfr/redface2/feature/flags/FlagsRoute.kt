@@ -85,6 +85,7 @@ import coil3.compose.AsyncImage
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
+import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
@@ -363,6 +364,8 @@ fun FlagsRoute(
                         ),
                         // #661 — GLOBAL « +lus » cue shape (eye glyph vs. coloured flag ring).
                         plusLusIndicatorStyle = flagsViewSettings.plusLusIndicatorStyle,
+                        // #603/#665 — GLOBAL left-container glyph shape (flag icon vs. pastille dot).
+                        flagGlyphStyle = flagsViewSettings.flagGlyphStyle,
                     ),
                     onSelectTab = viewModel::selectTab,
                     onQueryChange = { searchQuery = it },
@@ -464,6 +467,7 @@ fun FlagsRoute(
                 onSingleLineTitleChange = viewModel::setFlagsSingleLineTitle,
                 onCategoryBandStyleChange = viewModel::setFlagsCategoryBandStyle,
                 onPlusLusIndicatorStyleChange = viewModel::setFlagsPlusLusIndicatorStyle,
+                onGlyphStyleChange = viewModel::setFlagsGlyphStyle,
                 onDismiss = { showViewSettingsSheet = false },
             ),
         )
@@ -700,6 +704,36 @@ private fun FlagsViewSettingsSheet(
                     ),
                     selected = settings.plusLusIndicatorStyle,
                     onSelected = actions.onPlusLusIndicatorStyleChange,
+                )
+            }
+
+            // #603/#665 — GLOBAL left-container glyph style selector (segmented). The shape of the
+            // active-type glyph in the top-bar flag zone: the section's coloured flag icon (default) or
+            // a minimal coloured pastille dot.
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = stringResource(R.string.flags_view_settings_glyph_title),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = stringResource(R.string.flags_view_settings_glyph_description),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                RedfaceSettingsChoiceGroup(
+                    options = listOf(
+                        RedfaceSettingsChoice(
+                            FlagGlyphStyle.Flag,
+                            stringResource(R.string.flags_view_settings_glyph_flag),
+                        ),
+                        RedfaceSettingsChoice(
+                            FlagGlyphStyle.Dot,
+                            stringResource(R.string.flags_view_settings_glyph_dot),
+                        ),
+                    ),
+                    selected = settings.flagGlyphStyle,
+                    onSelected = actions.onGlyphStyleChange,
                 )
             }
 
@@ -2333,6 +2367,7 @@ private data class FlagsViewSettingsActions(
     val onSingleLineTitleChange: (Boolean) -> Unit,
     val onCategoryBandStyleChange: (CategoryBandStyle) -> Unit,
     val onPlusLusIndicatorStyleChange: (PlusLusIndicatorStyle) -> Unit,
+    val onGlyphStyleChange: (FlagGlyphStyle) -> Unit,
     val onDismiss: () -> Unit,
 )
 

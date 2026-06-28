@@ -177,6 +177,11 @@
     <string name="flags_view_settings_pluslus_description">Forme du repère affiché dans le sélecteur d\'onglet quand les sujets lus sont visibles. S\'applique à tous les onglets.</string>
     <string name="flags_view_settings_pluslus_eye">Œil</string>
     <string name="flags_view_settings_pluslus_ring">Anneau</string>
+    <!-- #603/#665 — Forme du repère de type actif dans le container gauche de la top bar : drapeau / pastille -->
+    <string name="flags_view_settings_glyph_title">Repère du type actif</string>
+    <string name="flags_view_settings_glyph_description">Forme du repère du type de drapeau dans la barre du haut : l\'icône drapeau colorée ou une pastille. S\'applique à tous les onglets.</string>
+    <string name="flags_view_settings_glyph_flag">Drapeau</string>
+    <string name="flags_view_settings_glyph_dot">Pastille</string>
     <!-- #603 — Style de la bande de catégorie (vue groupée) : sous-titre sobre / bloc tonal /
          accent latéral / pastille en puce. Réglage GLOBAL (tous onglets), sans effet en vue à plat. -->
     <string name="flags_view_settings_band_title">Bande de catégorie</string>
