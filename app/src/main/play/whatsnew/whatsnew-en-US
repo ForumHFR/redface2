@@ -1,8 +1,6 @@
-Redface 2 v0.17.23 — dev.
+Redface 2 v0.17.24 — dev.
 
-Flags view (top bar pass):
-- Short tab names: Cyan, Lurk, Fav, DT, Super.
-- New "Active type marker" setting: flag icon or dot (#717).
-- Account avatar: container background, borderless; more options coming (#718).
-- "Display settings" is now available on every tab (incl. DT/Super).
-- Cleaner tap on the left container's two zones.
+Flags view:
+- "+read" cue: a ring around the flag (new default; eye still available).
+- Account avatar at the standard top-bar size (32 dp).
+- Long-press: "Go to a page" (number input) and "Post a message" (direct reply).
