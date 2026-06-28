@@ -16,6 +16,28 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.17.24` — `internal` (dev) — 2026-06-28
+
+> Vue Drapeaux (#603) — suite de la review dogfood : **repère « +lus » = anneau autour du drapeau**
+> (variante A choisie par XaTriX, défaut ; œil en option), **avatar du compte à la taille standard**
+> (32 dp, validé Codex), et **sheet d'appui-long enrichi** (« Aller à une page » + « Poster un
+> message »). versionName 0.17.23 → 0.17.24.
+
+**Drapeaux — vue (#603)**
+
+- **Repère « +lus » sur l'icône (#661/#603)** : quand les sujets lus sont visibles, le glyphe de type
+  (drapeau ou pastille) est entouré d'un **anneau** coloré (nouveau défaut). L'**œil** à droite du nom
+  reste disponible en option dans les réglages d'affichage. Plus de double repère.
+- **Avatar du compte — taille standard (32 dp)** : l'avatar de la barre du haut passe de 40 dp (taille
+  d'avatar de *liste*) à 32 dp, la taille usuelle d'un avatar de *barre du haut* (validé Codex). Cible
+  tactile 48 dp inchangée.
+- **Sheet d'appui-long — « Aller à une page » (#15)** : nouvelle action qui ouvre un champ de saisie
+  (validé 1…N) pour ouvrir le sujet directement à une page précise. Masquée pour les sujets d'une page.
+- **Sheet d'appui-long — « Poster un message » (#15)** : nouvelle action qui ouvre directement
+  l'éditeur de réponse du sujet (sur la dernière page, là où HFR ajoute le message).
+
+---
+
 ## `0.17.23` — `internal` (dev) — 2026-06-28
 
 > Vue Drapeaux (#603) — passe de review top bar dogfood : **noms d'onglets courts** (Cyan/Lurk/Fav/DT/
