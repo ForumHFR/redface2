@@ -142,6 +142,9 @@ import kotlinx.coroutines.launch
 @Suppress("LongParameterList") // Screen route: 4 host nav callbacks + the quick-config trigger + the account slot.
 fun FlagsRoute(
     onOpenFlag: (flag: Flag, page: Int) -> Unit,
+    // #15 — open the reply editor for a topic (long-press sheet « Poster un message »). Defaulted so
+    // existing call sites / previews compile; the real host wires it to a PostEditorRoute(Reply).
+    onReplyFlag: (flag: Flag) -> Unit = {},
     onLoginRequested: () -> Unit,
     onOpenCategory: (Int) -> Unit = {},
     // #6 — open a DT (MultiMP) conversation : the host pushes the existing PrivateMessageThread
@@ -483,6 +486,10 @@ fun FlagsRoute(
             sheetFlag = null
             viewModel.onFlagOpened()
             onOpenFlag(flag, page)
+        },
+        onReply = { flag ->
+            sheetFlag = null
+            onReplyFlag(flag)
         },
         onToggleSuperFavorite = viewModel::toggleSuperFavorite,
         onRemove = {
@@ -1911,11 +1918,12 @@ private fun ScrollableFlagsEmptyState(
 // #603 PR5 — hosts the long-press actions sheet; the null-check lives here (not in FlagsRoute) to keep
 // the route's cyclomatic complexity in budget. `flag == null` ⇒ nothing composed (sheet closed).
 @Composable
-@Suppress("LongParameterList") // host: the sheet flag + super-favorite set + 4 action callbacks.
+@Suppress("LongParameterList") // host: the sheet flag + super-favorite set + 5 action callbacks.
 private fun FlagActionsSheetHost(
     flag: Flag?,
     superFavoriteIds: Set<Int>,
     onOpen: (flag: Flag, page: Int) -> Unit,
+    onReply: (Flag) -> Unit,
     onToggleSuperFavorite: (Flag) -> Unit,
     onRemove: (Flag) -> Unit,
     onDismiss: () -> Unit,
@@ -1928,6 +1936,7 @@ private fun FlagActionsSheetHost(
         actions = FlagSheetActions(
             // #676 v2 — the sheet decides which page (resume / first-unread / last); the host just navigates.
             onOpen = { page -> onOpen(flag, page) },
+            onReply = { onReply(flag) },
             onToggleSuperFavorite = { onToggleSuperFavorite(flag) },
             onRemove = { onRemove(flag) },
             onDismiss = onDismiss,

@@ -16,13 +16,22 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -30,6 +39,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -67,6 +78,21 @@ fun FlagActionsSheet(
     val linkCopied = stringResource(R.string.flags_sheet_link_copied)
     val browserFailed = stringResource(R.string.flags_sheet_browser_failed)
     val shareFailed = stringResource(R.string.flags_sheet_share_failed)
+    // #15 — the « Aller à une page » dialog state is hoisted here, above the sheet content (Codex), so
+    // Back closes the dialog before the sheet and the input survives recompositions.
+    var showPageDialog by remember { mutableStateOf(false) }
+
+    if (showPageDialog) {
+        PageInputDialog(
+            totalPages = flag.totalPages,
+            onConfirm = { page ->
+                showPageDialog = false
+                // onOpen closes the sheet (host clears sheetFlag) then navigates — no double-modal.
+                actions.onOpen(page)
+            },
+            onDismiss = { showPageDialog = false },
+        )
+    }
 
     ModalBottomSheet(onDismissRequest = actions.onDismiss, sheetState = sheetState) {
         Column(
@@ -98,6 +124,7 @@ fun FlagActionsSheet(
                 items = menuActions(
                     flag = flag,
                     actions = actions,
+                    onGoToPage = { showPageDialog = true },
                     onCopyLink = { copyTopicLink(context, flagTopicUrl(flag), linkCopied) },
                     onOpenBrowser = { openTopicInBrowser(context, flagTopicUrl(flag), browserFailed) },
                 ),
@@ -213,44 +240,85 @@ private fun quickActions(
 }
 
 /**
- * #676 v2 — the full-label MENU list: secondary, navigational and destructive actions. Distinct from
- * [quickActions]: open the last page, copy the link, open in the browser, remove the flag.
+ * #676 v2 / #15 — the full-label MENU list: secondary, navigational and destructive actions. Distinct
+ * from [quickActions]: open the last page, jump to a specific page (dialog), reply, copy the link, open
+ * in the browser, remove the flag. Order follows Codex: navigation → reply → utilities → destructive.
+ *
+ * [onGoToPage] opens the in-sheet page-number dialog ([PageInputDialog]); the « Aller à une page » row
+ * is omitted for single-page topics (nothing to choose). [actions.onReply] opens the reply editor.
  */
 @Composable
 private fun menuActions(
     flag: Flag,
     actions: FlagSheetActions,
+    onGoToPage: () -> Unit,
     onCopyLink: () -> Unit,
     onOpenBrowser: () -> Unit,
 ): List<SheetActionItem> {
     val variant = MaterialTheme.colorScheme.onSurfaceVariant
-    return listOf(
-        SheetActionItem(
-            iconRes = CoreUiR.drawable.ic_ms_last_page,
-            label = stringResource(R.string.flags_sheet_action_last_page),
-            onClick = { actions.onOpen(flagLastPage(flag.totalPages)) },
-            iconTint = variant,
-        ),
-        SheetActionItem(
-            iconRes = CoreUiR.drawable.ic_ms_content_copy,
-            label = stringResource(R.string.flags_sheet_action_copy),
-            onClick = onCopyLink,
-            iconTint = variant,
-        ),
-        SheetActionItem(
-            iconRes = CoreUiR.drawable.ic_ms_open_in_new,
-            label = stringResource(R.string.flags_sheet_action_browser),
-            onClick = onOpenBrowser,
-            iconTint = variant,
-        ),
-        SheetActionItem(
-            iconRes = CoreUiR.drawable.ic_ms_delete,
-            label = stringResource(R.string.flags_sheet_action_remove),
-            onClick = actions.onRemove,
-            iconTint = MaterialTheme.colorScheme.error,
-            destructive = true,
-        ),
-    )
+    return buildList {
+        add(
+            SheetActionItem(
+                iconRes = CoreUiR.drawable.ic_ms_last_page,
+                label = stringResource(R.string.flags_sheet_action_last_page),
+                onClick = { actions.onOpen(flagLastPage(flag.totalPages)) },
+                iconTint = variant,
+            ),
+        )
+        // « Aller à une page » only makes sense when there is more than one page (Codex).
+        if (flag.totalPages > 1) {
+            add(
+                SheetActionItem(
+                    iconRes = CoreUiR.drawable.ic_ms_article,
+                    label = stringResource(R.string.flags_sheet_action_goto_page),
+                    onClick = onGoToPage,
+                    iconTint = variant,
+                ),
+            )
+        }
+        add(
+            SheetActionItem(
+                iconRes = CoreUiR.drawable.ic_ms_edit_square,
+                label = stringResource(R.string.flags_sheet_action_reply),
+                onClick = actions.onReply,
+                iconTint = variant,
+            ),
+        )
+        add(
+            SheetActionItem(
+                iconRes = CoreUiR.drawable.ic_ms_content_copy,
+                label = stringResource(R.string.flags_sheet_action_copy),
+                onClick = onCopyLink,
+                iconTint = variant,
+            ),
+        )
+        add(
+            SheetActionItem(
+                iconRes = CoreUiR.drawable.ic_ms_open_in_new,
+                label = stringResource(R.string.flags_sheet_action_browser),
+                onClick = onOpenBrowser,
+                iconTint = variant,
+            ),
+        )
+        add(
+            SheetActionItem(
+                iconRes = CoreUiR.drawable.ic_ms_delete,
+                label = stringResource(R.string.flags_sheet_action_remove),
+                onClick = actions.onRemove,
+                iconTint = MaterialTheme.colorScheme.error,
+                destructive = true,
+            ),
+        )
+    }
+}
+
+/**
+ * #15 — clamps a raw page-number input to a valid topic page, or `null` when it is not a usable page.
+ * Trims, rejects non-digits / empty / out-of-range (`1..totalPages`). Pure → unit-tested.
+ */
+internal fun parseTopicPageInput(input: String, totalPages: Int): Int? {
+    val page = input.trim().toIntOrNull() ?: return null
+    return page.takeIf { it in 1..flagLastPage(totalPages) }
 }
 
 /**
@@ -417,6 +485,50 @@ private fun MetaRow(key: String, value: String) {
     }
 }
 
+/**
+ * #15 — « Aller à une page » dialog (Codex reco: AlertDialog + numeric field, no slider). Validates the
+ * input against `1..totalPages` ([parseTopicPageInput]); « Aller » is disabled while invalid and the
+ * IME action fires only on a valid value — the dialog never silently corrects an out-of-range entry.
+ */
+@Composable
+private fun PageInputDialog(
+    totalPages: Int,
+    onConfirm: (page: Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var input by remember { mutableStateOf("") }
+    val page = parseTopicPageInput(input, totalPages)
+    val confirm = { page?.let(onConfirm) ?: Unit }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.flags_sheet_goto_page_title)) },
+        text = {
+            OutlinedTextField(
+                value = input,
+                onValueChange = { new -> input = new.filter(Char::isDigit).take(MAX_PAGE_DIGITS) },
+                singleLine = true,
+                label = { Text(stringResource(R.string.flags_sheet_goto_page_label)) },
+                supportingText = { Text(stringResource(R.string.flags_sheet_goto_page_supporting, totalPages)) },
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Number,
+                    imeAction = ImeAction.Go,
+                ),
+                keyboardActions = KeyboardActions(onGo = { confirm() }),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = confirm, enabled = page != null) {
+                Text(stringResource(R.string.flags_sheet_goto_page_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.flags_sheet_goto_page_cancel))
+            }
+        },
+    )
+}
+
 /** Copies [url] to the clipboard; on pre-Android-13 (no system confirmation) shows a [feedback] toast. */
 private fun copyTopicLink(context: Context, url: String, feedback: String) {
     val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return
@@ -445,3 +557,6 @@ private fun shareTopic(context: Context, url: String, title: String, failureFeed
 
 /** Dimming applied to a disabled quick action (#676 v2). */
 private const val DISABLED_ALPHA = 0.38f
+
+/** #15 — cap on the page-number field length (HFR topics stay well under 100k pages). */
+private const val MAX_PAGE_DIGITS = 6
