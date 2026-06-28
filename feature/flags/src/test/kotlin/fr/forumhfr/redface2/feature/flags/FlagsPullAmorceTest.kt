@@ -1,42 +1,94 @@
 package fr.forumhfr.redface2.feature.flags
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * #603 (XaTriX dogfood) — visibility rule of the pull « amorce » indicator, including the
- * post-refresh « settling » guard that fixes the « ça repop en fin de load » bug.
+ * #728 — visibility rule of the pull indicator (the redface puck) and the pull-refresh choreography
+ * helpers: the « settling » guard (« ça repop en fin de load », XaTriX), the manual-refresh persistence
+ * (M3 « keep the indicator in view until the activity completes »), and the content-push hold.
  */
 class FlagsPullAmorceTest {
 
     @Test
     fun `shown while actively pulling`() {
         assertTrue(
-            shouldShowPullAmorce(isRefreshing = false, distanceFraction = 0.5f, settling = false),
+            shouldShowPullIndicator(
+                distanceFraction = 0.5f,
+                isRefreshing = false,
+                manualRefresh = false,
+                settling = false,
+            ),
         )
     }
 
     @Test
     fun `hidden at rest`() {
         assertFalse(
-            shouldShowPullAmorce(isRefreshing = false, distanceFraction = 0f, settling = false),
+            shouldShowPullIndicator(
+                distanceFraction = 0f,
+                isRefreshing = false,
+                manualRefresh = false,
+                settling = false,
+            ),
         )
     }
 
     @Test
-    fun `hidden during refresh`() {
+    fun `shown during a MANUAL refresh as the hero, even with no pull distance`() {
+        // M3 « keep the indicator in view until the activity completes » — the puck persists through a
+        // gesture-driven refresh.
+        assertTrue(
+            shouldShowPullIndicator(
+                distanceFraction = 0f,
+                isRefreshing = true,
+                manualRefresh = true,
+                settling = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `hidden during an AUTO refresh (the thin top bar is the cue then)`() {
         assertFalse(
-            shouldShowPullAmorce(isRefreshing = true, distanceFraction = 0.5f, settling = false),
+            shouldShowPullIndicator(
+                distanceFraction = 0f,
+                isRefreshing = true,
+                manualRefresh = false,
+                settling = false,
+            ),
         )
     }
 
     @Test
     fun `hidden while settling after refresh even with leftover pull distance`() {
-        // The bug: after a refresh, isRefreshing clears while distanceFraction is still animating back
-        // to 0. Without the settling guard the indicator re-pops for those frames.
+        // After a refresh, isRefreshing clears while distanceFraction is still animating back to 0.
+        // Without the settling guard the puck re-pops for those frames.
         assertFalse(
-            shouldShowPullAmorce(isRefreshing = false, distanceFraction = 0.5f, settling = true),
+            shouldShowPullIndicator(
+                distanceFraction = 0.5f,
+                isRefreshing = false,
+                manualRefresh = false,
+                settling = true,
+            ),
         )
+    }
+
+    @Test
+    fun `retainManualRefresh stays armed while a list refreshes and clears when both are idle`() {
+        assertTrue(retainManualRefresh(current = true, isRefreshing = true, dtIsRefreshing = false))
+        assertTrue(retainManualRefresh(current = true, isRefreshing = false, dtIsRefreshing = true))
+        assertFalse(retainManualRefresh(current = true, isRefreshing = false, dtIsRefreshing = false))
+        // Never arms itself: a cleared flag stays cleared regardless of the refresh state.
+        assertFalse(retainManualRefresh(current = false, isRefreshing = true, dtIsRefreshing = true))
+    }
+
+    @Test
+    fun `pullHoldTarget holds the content down only during a manual refresh`() {
+        assertEquals(1f, pullHoldTarget(manualRefresh = true, isRefreshing = true), 0f)
+        assertEquals(0f, pullHoldTarget(manualRefresh = true, isRefreshing = false), 0f)
+        assertEquals(0f, pullHoldTarget(manualRefresh = false, isRefreshing = true), 0f)
     }
 }

@@ -72,6 +72,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -343,6 +344,15 @@ fun FlagsRoute(
         sheetFlag = null
     }
 
+    // #728 — a MANUAL (gesture) pull-refresh is in flight: the rich contained redface indicator shows
+    // and the thin top loading bar is suppressed (no double indicator). Armed by the body's pull
+    // gesture; cleared once both lists are idle again (decision kept in a helper, off the cyclomatic
+    // budget — FlagsRoute is at the detekt threshold).
+    var manualRefresh by remember { mutableStateOf(false) }
+    LaunchedEffect(isRefreshing, dtIsRefreshing) {
+        manualRefresh = retainManualRefresh(manualRefresh, isRefreshing, dtIsRefreshing)
+    }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.surface,
@@ -418,7 +428,7 @@ fun FlagsRoute(
                     // lives in the helper so it doesn't count against FlagsRoute's cyclomatic budget; the
                     // visibility is a lambda so it is only evaluated (and only subscribes to its state)
                     // when authenticated.
-                    loading = barLoadingGated(authState) {
+                    loading = barLoadingGated(authState, manualRefresh) {
                         flagsLoadingBarVisible(
                             selectedTab = selectedTab,
                             flagsState = flagsState,
@@ -485,6 +495,8 @@ fun FlagsRoute(
                                 onRefreshDt = viewModel::refreshDt,
                             ),
                             listStates = flagTabListStates,
+                            manualRefresh = manualRefresh,
+                            onManualRefresh = { manualRefresh = true },
                             )
                         }
                     }
@@ -1033,12 +1045,17 @@ private fun flagsLoadingBarVisible(
     else -> isRefreshing || flagsState == null || flagsState == FlagsListUiState.Loading
 }
 
-// #648 — the anonymous gate, kept off FlagsRoute so the `&&` short-circuit no longer counts against its
-// cyclomatic budget (#665 pushed it over). When anonymous, flagsState stays null and the bar would
-// otherwise stay up forever over the « Se connecter » prompt. [barVisible] is a lambda so it is only
-// evaluated when authenticated — a genuine short-circuit (no useless state reads when anonymous).
-private inline fun barLoadingGated(authState: AuthState?, barVisible: () -> Boolean): Boolean =
-    authState is AuthState.Authenticated && barVisible()
+// #648/#728 — the anonymous + manual-refresh gate, kept off FlagsRoute so the `&&` short-circuit no
+// longer counts against its cyclomatic budget (#665 pushed it over). When anonymous, flagsState stays
+// null and the bar would otherwise stay up forever over the « Se connecter » prompt. When a MANUAL pull
+// refresh is in flight ([manualRefresh]) the rich contained indicator is the cue, so the thin bar is
+// suppressed (no double indicator). [barVisible] is a lambda so it is only evaluated when relevant — a
+// genuine short-circuit (no useless state reads when anonymous or during a manual pull).
+private inline fun barLoadingGated(
+    authState: AuthState?,
+    manualRefresh: Boolean,
+    barVisible: () -> Boolean,
+): Boolean = authState is AuthState.Authenticated && !manualRefresh && barVisible()
 
 // #603 harmonisation — the search loupe is offered on tabs that hold a searchable list: the three flag
 // tabs (flagType != null) AND DT (its conversation list). Super has no list, so no loupe. Extracted so
@@ -1147,6 +1164,10 @@ private fun AuthenticatedBody(
     // #660 — hoisted holder: the Shared Axis X AnimatedContent below composes two panes during a
     // transition, so each resolves its own tab's LazyListState (never recreated, #695 preserved).
     listStates: FlagTabListStates,
+    // #728 — pull-refresh « manual » state, hoisted to the route so the thin top bar can be suppressed
+    // while the rich contained indicator shows; the bodies arm it from their pull gesture.
+    manualRefresh: Boolean,
+    onManualRefresh: () -> Unit,
 ) {
     val selectedTab = state.selectedTab
     // #603 PR2 — the text PrimaryTabRow is gone: the app-bar flag picker (FlagsTopBar) now
@@ -1231,11 +1252,15 @@ private fun AuthenticatedBody(
                     actions = actions,
                     // #665 — hoisted so the overlay scrim can read the DT scroll position.
                     listState = listStates.dt,
+                    manualRefresh = manualRefresh,
+                    onManualRefresh = onManualRefresh,
                 )
                 else -> FlagListBody(
                     state = bodyState,
                     actions = actions,
                     listState = listStates.forType(bodyState.selectedTab.flagType),
+                    manualRefresh = manualRefresh,
+                    onManualRefresh = onManualRefresh,
                 )
             }
         }
@@ -1247,52 +1272,75 @@ private fun AuthenticatedBody(
 private const val AMORCE_REST_EPSILON = 0.001f
 
 /**
- * Pure visibility predicate for the pull « amorce ». Shows the indicator ONLY while the user is
- * actively pulling (`!isRefreshing && distanceFraction > 0`) AND not in the post-refresh settle
- * ([settling]). The [settling] guard fixes the « ça repop en fin de load » bug (XaTriX): when a
- * refresh ends, `isRefreshing` clears while `distanceFraction` is still animating back to 0, which
- * without the guard re-pops the indicator for a frame before it dismisses.
+ * #728 — pure visibility predicate for the pull indicator (the redface puck). Shown while the user is
+ * actively pulling (`distanceFraction > 0`) OR while a MANUAL pull-refresh is in flight
+ * (`isRefreshing && manualRefresh`), so the puck persists through the whole refresh per the M3 rule
+ * « keep the indicator in view until the activity completes ». Hidden during an AUTO / cold refresh
+ * (no pull → `distanceFraction == 0` and `manualRefresh == false`; the thin top bar covers those) and
+ * through the post-refresh settle ([settling], the « ça repop en fin de load » guard, XaTriX).
  */
-internal fun shouldShowPullAmorce(
-    isRefreshing: Boolean,
+internal fun shouldShowPullIndicator(
     distanceFraction: Float,
+    isRefreshing: Boolean,
+    manualRefresh: Boolean,
     settling: Boolean,
-): Boolean = !isRefreshing && !settling && distanceFraction > 0f
+): Boolean = !settling && (distanceFraction > 0f || (isRefreshing && manualRefresh))
+
+// #728 — keep `manualRefresh` armed only while a refresh is actually running; cleared once both the
+// flag list and the DT list are idle. Extracted so the `&&`/`||` stay off FlagsRoute's cyclomatic
+// budget (it is already at the detekt threshold of 15).
+internal fun retainManualRefresh(current: Boolean, isRefreshing: Boolean, dtIsRefreshing: Boolean): Boolean =
+    current && (isRefreshing || dtIsRefreshing)
+
+// #728 — the content-push target fraction: 1f (held at max) while a manual refresh runs so the
+// indicator stays in view, else 0f (the live drag fraction drives the offset). Extracted to keep the
+// `if`/`&&` out of the body composables' cyclomatic budget.
+internal fun pullHoldTarget(manualRefresh: Boolean, isRefreshing: Boolean): Float =
+    if (manualRefresh && isRefreshing) 1f else 0f
+
+// #728 — how far the list content slides DOWN at full pull / during a manual refresh (M3 pull-to-refresh
+// choreography): the body is offset by `max(dragFraction, holdProgress) * MAX_PULL_PUSH` in a draw-phase
+// graphicsLayer, revealing the contained redface indicator just under the bar.
+private val MAX_PULL_PUSH = 48.dp
 
 /**
- * #603/#7 (XaTriX) — « amorce seule » pull-to-refresh cue: the « redface » loader puck ([RedfacePullPuck])
- * shown ONLY while the user is actively pulling, then NOTHING once the refresh starts so the thin top
- * [FlagsLoadingBar] is the single loading cue (no double indicator). The whole wrapper is gated, not
- * just the content, per Codex (an indicator left with empty content can keep its container visible).
- * Shared by both pull-to-refresh surfaces.
+ * #728 — pull-to-refresh indicator: the contained « redface » puck ([RedfacePullPuck]) anchored just
+ * under the top bar. It emerges + rolls while the user drags, then — for a MANUAL pull-refresh — stays
+ * in view as the hero (frozen redface + spinning ring) until the refresh completes (M3 « keep the
+ * indicator in view until the activity completes »). An AUTO / cold refresh shows nothing here (the
+ * thin top [FlagsLoadingBar] is the single cue then — no double indicator). Shared by both surfaces.
  *
- * The [settling] state keeps the indicator hidden through the post-refresh return-to-rest (see
- * [shouldShowPullAmorce]). The redface emerges + rolls as a pure function of `state.distanceFraction`
- * during the PULL; it never reaches a persistent refresh spin here (amorce-only, XaTriX's pick — the
- * M3-expressive indeterminate `LoadingIndicator` is `internal` in this BOM anyway).
+ * The [settling] state keeps the puck hidden through the post-refresh return-to-rest so it doesn't
+ * re-pop while `distanceFraction` slides home (the « ça repop en fin de load » guard, XaTriX).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun FlagsPullAmorce(
+private fun FlagsPullIndicator(
     state: PullToRefreshState,
     isRefreshing: Boolean,
+    manualRefresh: Boolean,
     modifier: Modifier = Modifier,
 ) {
     var settling by remember { mutableStateOf(false) }
     LaunchedEffect(isRefreshing) {
         if (isRefreshing) {
-            // A refresh started: suppress the amorce until the pull settles back to rest.
-            settling = true
+            // A refresh is running: show the puck (when manual) right away, no settle suppression.
+            settling = false
         } else {
-            // Refresh ended (or never started): re-arm only once distanceFraction has animated home,
-            // so the indicator doesn't re-pop while it slides back. On first composition df is already
-            // ~0 so this resolves immediately.
+            // Refresh ended (or never started): suppress until distanceFraction has animated home, so
+            // the puck doesn't re-pop while it slides back. On first composition df is already ~0 so
+            // this resolves immediately.
+            settling = true
             snapshotFlow { state.distanceFraction }.first { it <= AMORCE_REST_EPSILON }
             settling = false
         }
     }
-    if (shouldShowPullAmorce(isRefreshing, state.distanceFraction, settling)) {
-        RedfacePullPuck(progress = state.distanceFraction, modifier = modifier)
+    if (shouldShowPullIndicator(state.distanceFraction, isRefreshing, manualRefresh, settling)) {
+        RedfacePullPuck(
+            progress = state.distanceFraction,
+            refreshing = isRefreshing && manualRefresh,
+            modifier = modifier,
+        )
     }
 }
 
@@ -1307,6 +1355,8 @@ private fun FlagListBody(
     state: FlagsBodyState,
     actions: AuthenticatedActions,
     listState: LazyListState,
+    manualRefresh: Boolean,
+    onManualRefresh: () -> Unit,
 ) {
     val selectedTab = state.selectedTab
     // #665 — the PullToRefreshBox now fills the whole overlay (under the bar), so offset the pull amorce
@@ -1320,19 +1370,40 @@ private fun FlagListBody(
     // double indicator. The pull gesture still fires onRefresh; isRefreshing drives the box state so a
     // pull mid-refresh doesn't double-trigger.
     val pullState = rememberPullToRefreshState()
+    // #728 — the content slides DOWN with the pull (M3 choreography), held at max during a manual
+    // refresh so the contained indicator stays in view, then animates home at settle. Read inside the
+    // draw-phase graphicsLayer below so the offset never triggers recomposition.
+    val holdProgress by animateFloatAsState(
+        targetValue = pullHoldTarget(manualRefresh, state.isRefreshing),
+        label = "flagPullContentHold",
+    )
     PullToRefreshBox(
         isRefreshing = state.isRefreshing,
-        onRefresh = actions.onRefresh,
+        // #728 — flag this refresh as MANUAL (gesture-driven): the rich contained indicator shows here
+        // and the thin top bar is suppressed. Auto / cold refreshes never go through this lambda.
+        onRefresh = {
+            onManualRefresh()
+            actions.onRefresh()
+        },
         state = pullState,
         indicator = {
-            FlagsPullAmorce(
+            FlagsPullIndicator(
                 pullState,
                 state.isRefreshing,
+                manualRefresh,
                 Modifier.align(Alignment.TopCenter).offset { IntOffset(0, barTop.roundToPx()) },
             )
         },
         modifier = Modifier.fillMaxSize(),
     ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    translationY = maxOf(pullState.distanceFraction.coerceIn(0f, 1f), holdProgress) *
+                        MAX_PULL_PUSH.toPx()
+                },
+        ) {
         when (val current = state.flagsState) {
             null, FlagsListUiState.Loading -> Box(
                 // #603 — central spinner retired: the top FlagsLoadingBar is now the single loading cue
@@ -1419,6 +1490,7 @@ private fun FlagListBody(
                     }
                 }
             }
+        }
         }
     }
 }
@@ -2223,6 +2295,8 @@ private fun DtListBody(
     state: FlagsBodyState,
     actions: AuthenticatedActions,
     listState: LazyListState,
+    manualRefresh: Boolean,
+    onManualRefresh: () -> Unit,
 ) {
     val dtState = state.dtListState
     val isRefreshing = state.dtIsRefreshing
@@ -2233,27 +2307,46 @@ private fun DtListBody(
     // #665 — offset the pull amorce below the overlaid bar (the PullToRefreshBox fills the overlay).
     val barTop = LocalFlagsContentTopPadding.current
     val pullState = rememberPullToRefreshState()
+    // #728 — same M3 choreography as the flag list: the DT content slides down with the pull, held
+    // during a manual refresh, animated home at settle (draw-phase graphicsLayer, no recomposition).
+    val holdProgress by animateFloatAsState(
+        targetValue = pullHoldTarget(manualRefresh, isRefreshing),
+        label = "dtPullContentHold",
+    )
     PullToRefreshBox(
         isRefreshing = isRefreshing,
-        onRefresh = actions.onRefreshDt,
+        onRefresh = {
+            onManualRefresh()
+            actions.onRefreshDt()
+        },
         state = pullState,
         indicator = {
-            FlagsPullAmorce(
+            FlagsPullIndicator(
                 pullState,
                 isRefreshing,
+                manualRefresh,
                 Modifier.align(Alignment.TopCenter).offset { IntOffset(0, barTop.roundToPx()) },
             )
         },
         modifier = Modifier.fillMaxSize(),
     ) {
-        DtListContent(
-            state = dtState,
-            actions = actions,
-            funny = state.funnyEmptyState,
-            listState = listState,
-            // #603 harmonisation — the loupe now filters the DT conversation list too.
-            searchQuery = state.searchQuery,
-        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    translationY = maxOf(pullState.distanceFraction.coerceIn(0f, 1f), holdProgress) *
+                        MAX_PULL_PUSH.toPx()
+                },
+        ) {
+            DtListContent(
+                state = dtState,
+                actions = actions,
+                funny = state.funnyEmptyState,
+                listState = listState,
+                // #603 harmonisation — the loupe now filters the DT conversation list too.
+                searchQuery = state.searchQuery,
+            )
+        }
     }
 }
 
