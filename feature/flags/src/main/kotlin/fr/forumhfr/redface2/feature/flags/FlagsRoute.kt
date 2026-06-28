@@ -695,12 +695,12 @@ private fun FlagsViewSettingsSheet(
                 RedfaceSettingsChoiceGroup(
                     options = listOf(
                         RedfaceSettingsChoice(
-                            PlusLusIndicatorStyle.Eye,
-                            stringResource(R.string.flags_view_settings_pluslus_eye),
-                        ),
-                        RedfaceSettingsChoice(
                             PlusLusIndicatorStyle.Ring,
                             stringResource(R.string.flags_view_settings_pluslus_ring),
+                        ),
+                        RedfaceSettingsChoice(
+                            PlusLusIndicatorStyle.Eye,
+                            stringResource(R.string.flags_view_settings_pluslus_eye),
                         ),
                     ),
                     selected = settings.plusLusIndicatorStyle,

@@ -177,7 +177,7 @@
     <!-- #661 — Style de l\'indicateur « +lus » dans le sélecteur d\'onglet de la barre du haut :
          œil (par défaut) ou drapal dessiné en anneau coloré. Réglage GLOBAL (tous onglets). -->
     <string name="flags_view_settings_pluslus_title">Indicateur « +lus »</string>
-    <string name="flags_view_settings_pluslus_description">Forme du repère affiché dans le sélecteur d\'onglet quand les sujets lus sont visibles. S\'applique à tous les onglets.</string>
+    <string name="flags_view_settings_pluslus_description">Repère affiché quand les sujets lus sont visibles : un anneau autour du drapeau, ou un œil à droite du nom. S\'applique à tous les onglets.</string>
     <string name="flags_view_settings_pluslus_eye">Œil</string>
     <string name="flags_view_settings_pluslus_ring">Anneau</string>
     <!-- #603/#665 — Forme du repère de type actif dans le container gauche de la top bar : drapeau / pastille -->

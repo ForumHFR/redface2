@@ -141,12 +141,12 @@ interface UserPreferencesRepository {
     suspend fun setFlagsMarkerBorder(enabled: Boolean)
 
     /**
-     * Persists the GLOBAL « +lus » indicator style (#661): the shape of the read-items cue in the
-     * Drapeaux top-bar tab picker — [PlusLusIndicatorStyle.Eye] (default, an eye glyph) or
-     * [PlusLusIndicatorStyle.Ring] (the flag dot drawn as a coloured ring). Like
-     * [setFlagsMarkerStyle] it is NOT subject to [observeFlagsPerTabOverride]; surfaced through
-     * [observeFlagsViewSettings] ([FlagsViewSettings.plusLusIndicatorStyle]). Defaults to
-     * [PlusLusIndicatorStyle.Eye] until the first call.
+     * Persists the GLOBAL « +lus » indicator style (#661/#603): the shape and place of the read-items
+     * cue in the Drapeaux top bar — [PlusLusIndicatorStyle.Ring] (default, a coloured ring around the
+     * active-type glyph in zone 1) or [PlusLusIndicatorStyle.Eye] (legacy, an eye capsule by the type
+     * name in zone 2). Like [setFlagsMarkerStyle] it is NOT subject to [observeFlagsPerTabOverride];
+     * surfaced through [observeFlagsViewSettings] ([FlagsViewSettings.plusLusIndicatorStyle]). Defaults
+     * to [PlusLusIndicatorStyle.Ring] until the first call.
      */
     suspend fun setFlagsPlusLusIndicatorStyle(style: PlusLusIndicatorStyle)
 
