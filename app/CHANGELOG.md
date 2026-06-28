@@ -16,6 +16,42 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.17.29` — `internal` (dev) — 2026-06-28
+
+> Vue Drapeaux (#603) — **quatre correctifs de finition** : le « petit saut » du contenu en fin de
+> chargement, le flash de la liste derrière la top bar au basculement « +lus », le menu « Réglages
+> d'affichage » fantôme sur DT/Super, et le fond blanc derrière un avatar transparent.
+> versionName 0.17.28 → 0.17.29.
+
+**Drapeaux — vue (#603 / #728)**
+
+- **Fin du « petit saut » en fin de chargement (#728)** : le contenu ne descend plus puis remonte
+  juste après l'animation redface, ni en tirer-pour-rafraîchir manuel ni en rechargement automatique. Le
+  « content-push » reste désormais relâché pendant TOUTE la rétraction post-refresh (le facteur de
+  relâche est tenu à zéro tant que la distance de pull n'est pas revenue au repos), au lieu de remonter
+  vers 1 pendant que la distance redescend — c'est leur produit qui produisait le rebond. Le guard de
+  rétraction est mutualisé entre le puck et le content-push (une seule source de vérité).
+- **Fin du sursaut « +lus » derrière la top bar (#603)** : en basculant « +lus » (re-tap de la pill
+  Cyan/DT), les sujets lus réapparaissant au-dessus de l'ancre ne flashent plus brièvement derrière la
+  barre du haut translucide avant de se replacer. Le recentrage en haut utilise désormais le même
+  mécanisme robuste que le rappel au top du changement d'onglet (`requestScrollToItem` réasséné sur
+  quelques frames, au lieu d'un `scrollToItem` unique exécuté une frame trop tard).
+- **« Réglages d'affichage » sur DT/Super (#603)** : l'entrée n'est plus proposée sur les onglets DT et
+  Super (qui n'ont pas de réglages d'affichage propres). Avant, l'y taper ne faisait rien sur le moment
+  puis ouvrait le panneau au prochain changement d'onglet (à la place de la liste). L'entrée reste sur
+  les onglets de drapeaux (Mes sujets / Lu / Favoris).
+
+**Compte — avatar (#718)**
+
+- **Plus de fond blanc derrière un avatar transparent (#718)** : le badge du compte suit désormais
+  TOUJOURS la couleur du container de la barre du haut (`surfaceContainerHigh`). Un avatar PNG à fond
+  transparent ne laisse plus apparaître le fond `surface` quasi-blanc du thème clair.
+- **Retrait de l'option « Fond transparent » (#718)** : sans effet réel dans la barre du haut (le badge
+  est imbriqué dans un container, transparent == container), elle est supprimée. L'option **bordure**
+  est conservée.
+
+---
+
 ## `0.17.28` — `internal` (dev) — 2026-06-28
 
 > Vue Drapeaux (#603) — **loader « redface » repositionné** au niveau des pastilles du top bar, plus deux
