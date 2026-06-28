@@ -1,6 +1,5 @@
 package fr.forumhfr.redface2.core.ui.account
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -151,12 +150,13 @@ private fun AccountBadge(
         AuthState.Anonymous -> "?"
         is AuthState.Authenticated -> authState.pseudo.firstOrNull()?.uppercaseChar()?.toString().orEmpty()
     }
-    val containerColor = when (authState) {
-        is AuthState.Authenticated -> MaterialTheme.colorScheme.primaryContainer
-        else -> MaterialTheme.colorScheme.surfaceContainerHighest
-    }
+    // #603 (XaTriX) — the badge background now FOLLOWS the top-bar container (surfaceContainerHigh)
+    // instead of a distinct primaryContainer tint, so the round « PP » blends into the right
+    // container (« il devrait être du fond du container »). The authenticated identity stays legible
+    // through the primary-tinted initial; anonymous / loading keep the muted variant tone.
+    val containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
     val contentColor = when (authState) {
-        is AuthState.Authenticated -> MaterialTheme.colorScheme.onPrimaryContainer
+        is AuthState.Authenticated -> MaterialTheme.colorScheme.primary
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     val accessibilityLabel = stringResource(R.string.account_menu_open_description)
@@ -179,8 +179,9 @@ private fun AccountBadge(
         shape = CircleShape,
         color = containerColor,
         contentColor = contentColor,
-        // Subtle hairline so the badge reads as a distinct element against the app-bar surface.
-        border = BorderStroke(BADGE_BORDER_WIDTH, MaterialTheme.colorScheme.outlineVariant),
+        // #603 (XaTriX) — borderless: the M3 round avatar reads cleanly without the hairline, and the
+        // matching container background already seats it. (A « show avatar border » toggle is a noted
+        // follow-up, cf. #718.)
         modifier = Modifier
             .minimumInteractiveComponentSize()
             .size(BADGE_SIZE)
@@ -212,8 +213,8 @@ private fun AvatarBadge(
     Surface(
         onClick = onClick,
         shape = CircleShape,
-        // Subtle hairline so the avatar reads as a distinct element against the app-bar surface.
-        border = BorderStroke(BADGE_BORDER_WIDTH, MaterialTheme.colorScheme.outlineVariant),
+        // #603 (XaTriX) — borderless round avatar (see [AccountBadge]); the photo seats on the
+        // matching container background. (« show avatar border » toggle = follow-up #718.)
         modifier = Modifier
             .minimumInteractiveComponentSize()
             .size(BADGE_SIZE)
@@ -256,5 +257,4 @@ private fun AccountStatusHeader(authState: AuthState?) {
 // 48dp minimum without changing the painted badge — `Surface(onClick = ...)` does NOT
 // inject that minimum on its own (cf. M3 docs, Codex rereview on PR #207).
 private val BADGE_SIZE = 40.dp
-private val BADGE_BORDER_WIDTH = 1.dp
 private val HEADER_PADDING = PaddingValues(horizontal = 16.dp, vertical = 8.dp)

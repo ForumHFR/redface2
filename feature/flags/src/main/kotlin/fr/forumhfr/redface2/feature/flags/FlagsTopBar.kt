@@ -102,6 +102,11 @@ internal fun flagsReadFilterShowsRead(
 }
 
 private val ContainerShape = RoundedCornerShape(22.dp)
+// #603 — split-pill clips for the left container's two tap zones so each ripple hugs the matching
+// pill end and the two meet on a clean straight seam (XaTriX: « au tap ce n'est pas propre »). A full
+// ContainerShape clip per zone made the ripple a rounded rectangle floating inside the pill.
+private val LeftZoneShape = RoundedCornerShape(topStart = 22.dp, bottomStart = 22.dp)
+private val RightZoneShape = RoundedCornerShape(topEnd = 22.dp, bottomEnd = 22.dp)
 // #603/#665 — shared height of every top-bar container AND the expanded search field, so entering
 // search never changes the bar height (no content shift underneath, XaTriX dogfood).
 private val ContainerHeight = 44.dp
@@ -242,7 +247,7 @@ private fun FlagGlyphZone(
         modifier = Modifier
             .fillMaxHeight()
             .widthIn(min = 48.dp)
-            .clip(ContainerShape)
+            .clip(LeftZoneShape)
             .then(
                 if (enabled) {
                     Modifier.clickable(role = Role.Button, onClickLabel = openMenuLabel, onClick = onOpenMenu)
@@ -297,7 +302,7 @@ private fun TypePlusLusZone(
     Row(
         modifier = Modifier
             .fillMaxHeight()
-            .clip(ContainerShape)
+            .clip(RightZoneShape)
             .then(
                 if (togglable) {
                     Modifier.clickable(role = Role.Button, onClickLabel = toggleLabel, onClick = onToggle)
@@ -383,16 +388,17 @@ private fun TabPickerDropdown(
                 },
             )
         }
-        if (state.searchEnabled) {
-            HorizontalDivider()
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.flags_appbar_menu_display_settings)) },
-                onClick = {
-                    onDismiss()
-                    onOpenViewSettings()
-                },
-            )
-        }
+        // #603 (XaTriX) — « Réglages d'affichage » disponible sur TOUS les onglets : le picker
+        // n'existe que pour un compte authentifié, et les réglages sont GLOBAUX, donc pertinents même
+        // sur DT / Super (qui n'ont pas la loupe). Décorrélé de `searchEnabled` (la recherche).
+        HorizontalDivider()
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.flags_appbar_menu_display_settings)) },
+            onClick = {
+                onDismiss()
+                onOpenViewSettings()
+            },
+        )
     }
 }
 
@@ -474,15 +480,15 @@ private fun ExpandedSearchContainer(
     }
 }
 
-/** Short tab name for the compact left container (« Mes sujets » → « Mes », « Favoris » → « Fav »). */
+/** Short tab name for the compact left container (XaTriX : Cyan / Lurk / Fav / DT / Super). */
 @Composable
 private fun flagShortTabName(tab: FlagTab): String = stringResource(
     when (tab) {
         FlagTab.Cyan -> R.string.flags_tab_my_topics_short
-        FlagTab.Red -> R.string.flags_tab_read_only
+        FlagTab.Red -> R.string.flags_tab_read_only_short
         FlagTab.Favorite -> R.string.flags_tab_favorite_short
-        FlagTab.Dt -> R.string.flags_tab_dt
-        FlagTab.Super -> R.string.flags_tab_super
+        FlagTab.Dt -> R.string.flags_tab_dt_short
+        FlagTab.Super -> R.string.flags_tab_super_short
     },
 )
 
