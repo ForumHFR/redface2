@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.flags
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -44,6 +45,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.R as CoreUiR
 
@@ -67,6 +69,12 @@ data class FlagsAppBarState(
      * eye indicator in the left container.
      */
     val readFilterShowsRead: Boolean?,
+    /**
+     * #661 — GLOBAL shape of the « +lus » cue: [PlusLusIndicatorStyle.Eye] (default, an eye glyph
+     * capsule) or [PlusLusIndicatorStyle.Ring] (the flag dot drawn as a hollow coloured ring instead
+     * of a filled disc). Only takes visual effect when [readFilterShowsRead] is `true`.
+     */
+    val plusLusIndicatorStyle: PlusLusIndicatorStyle = PlusLusIndicatorStyle.Eye,
 )
 
 /**
@@ -191,7 +199,11 @@ private fun LeftContainer(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                FlagDot(state.currentTabColor)
+                // #661 — in « Ring » mode, the dot itself becomes a hollow coloured ring while « +lus »
+                // is active (no extra glyph); in « Eye » mode it stays filled and the eye capsule shows.
+                val showsRead = state.readFilterShowsRead == true
+                val ringCue = showsRead && state.plusLusIndicatorStyle == PlusLusIndicatorStyle.Ring
+                FlagDot(state.currentTabColor, ring = ringCue)
                 Text(
                     text = flagShortTabName(state.currentTab),
                     style = MaterialTheme.typography.labelLarge,
@@ -199,7 +211,7 @@ private fun LeftContainer(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (state.readFilterShowsRead == true) {
+                if (showsRead && state.plusLusIndicatorStyle == PlusLusIndicatorStyle.Eye) {
                     PlusLusIndicator(state.currentTabColor)
                 }
             }
@@ -214,13 +226,22 @@ private fun LeftContainer(
     }
 }
 
+/**
+ * The section's flag « drapal ». Normally a filled disc; when [ring] is true (#661 « Ring » +lus cue)
+ * it is drawn as a hollow coloured ring, so the dot itself carries the read-items state.
+ */
 @Composable
-private fun FlagDot(color: Color) {
+private fun FlagDot(color: Color, ring: Boolean = false) {
     Box(
         modifier = Modifier
             .size(14.dp)
-            .clip(CircleShape)
-            .background(color),
+            .then(
+                if (ring) {
+                    Modifier.border(width = 3.dp, color = color, shape = CircleShape)
+                } else {
+                    Modifier.clip(CircleShape).background(color)
+                },
+            ),
     )
 }
 

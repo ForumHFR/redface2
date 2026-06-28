@@ -87,6 +87,7 @@ import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
+import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
@@ -360,6 +361,8 @@ fun FlagsRoute(
                             cyanShowsRead = cyanShowsRead,
                             dtShowsRead = dtShowsRead,
                         ),
+                        // #661 — GLOBAL « +lus » cue shape (eye glyph vs. coloured flag ring).
+                        plusLusIndicatorStyle = flagsViewSettings.plusLusIndicatorStyle,
                     ),
                     onSelectTab = viewModel::selectTab,
                     onQueryChange = { searchQuery = it },
@@ -459,6 +462,7 @@ fun FlagsRoute(
                 onMarkerBorderChange = viewModel::setFlagsMarkerBorder,
                 onSingleLineTitleChange = viewModel::setFlagsSingleLineTitle,
                 onCategoryBandStyleChange = viewModel::setFlagsCategoryBandStyle,
+                onPlusLusIndicatorStyleChange = viewModel::setFlagsPlusLusIndicatorStyle,
                 onDismiss = { showViewSettingsSheet = false },
             ),
         )
@@ -668,6 +672,35 @@ private fun FlagsViewSettingsSheet(
                 enabled = true,
                 onCheckedChange = actions.onMarkerBorderChange,
             )
+
+            // #661 — GLOBAL « +lus » indicator style selector (segmented). The shape of the read-items
+            // cue in the top-bar tab picker: an eye glyph (default) or the flag dot drawn as a ring.
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = stringResource(R.string.flags_view_settings_pluslus_title),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = stringResource(R.string.flags_view_settings_pluslus_description),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                RedfaceSettingsChoiceGroup(
+                    options = listOf(
+                        RedfaceSettingsChoice(
+                            PlusLusIndicatorStyle.Eye,
+                            stringResource(R.string.flags_view_settings_pluslus_eye),
+                        ),
+                        RedfaceSettingsChoice(
+                            PlusLusIndicatorStyle.Ring,
+                            stringResource(R.string.flags_view_settings_pluslus_ring),
+                        ),
+                    ),
+                    selected = settings.plusLusIndicatorStyle,
+                    onSelected = actions.onPlusLusIndicatorStyleChange,
+                )
+            }
 
             // #603 — GLOBAL « single-line topic titles » toggle (not per-tab, like the marker shape).
             ViewSettingsSwitchRow(
@@ -2297,6 +2330,7 @@ private data class FlagsViewSettingsActions(
     val onMarkerBorderChange: (Boolean) -> Unit,
     val onSingleLineTitleChange: (Boolean) -> Unit,
     val onCategoryBandStyleChange: (CategoryBandStyle) -> Unit,
+    val onPlusLusIndicatorStyleChange: (PlusLusIndicatorStyle) -> Unit,
     val onDismiss: () -> Unit,
 )
 

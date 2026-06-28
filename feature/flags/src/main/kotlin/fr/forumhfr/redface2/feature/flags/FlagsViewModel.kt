@@ -13,6 +13,7 @@ import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
+import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.SuperFavoriteRepository
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.model.AuthState
@@ -702,6 +703,11 @@ class FlagsViewModel @Inject constructor(
     /** Bottom-sheet write for the GLOBAL « marker outline » toggle (#690) — one value for every tab. */
     fun setFlagsMarkerBorder(enabled: Boolean) {
         viewModelScope.launch { userPreferencesRepository.setFlagsMarkerBorder(enabled) }
+    }
+
+    /** Bottom-sheet write for the GLOBAL « +lus » indicator style (#661) — one value for every tab. */
+    fun setFlagsPlusLusIndicatorStyle(style: PlusLusIndicatorStyle) {
+        viewModelScope.launch { userPreferencesRepository.setFlagsPlusLusIndicatorStyle(style) }
     }
 
     fun refresh() {

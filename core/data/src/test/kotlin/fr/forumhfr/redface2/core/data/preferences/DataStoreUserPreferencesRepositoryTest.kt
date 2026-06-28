@@ -12,6 +12,7 @@ import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
+import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenChoice
@@ -442,6 +443,45 @@ class DataStoreUserPreferencesRepositoryTest {
             cancelAndIgnoreRemainingEvents()
         }
     }
+
+    @Test
+    fun `plusLusIndicatorStyle defaults to Eye on an empty store`() = runTest(dispatcher) {
+        repository.observeFlagsViewSettings(FlagType.CYAN).test {
+            assertEquals(PlusLusIndicatorStyle.Eye, awaitItem().plusLusIndicatorStyle)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setFlagsPlusLusIndicatorStyle persists and round-trips Ring then Eye for every tab`() =
+        runTest(dispatcher) {
+            // #661 GLOBAL: written once, observed on any tab type.
+            repository.setFlagsPlusLusIndicatorStyle(PlusLusIndicatorStyle.Ring)
+            repository.observeFlagsViewSettings(FlagType.RED).test {
+                assertEquals(PlusLusIndicatorStyle.Ring, awaitItem().plusLusIndicatorStyle)
+                cancelAndIgnoreRemainingEvents()
+            }
+            repository.setFlagsPlusLusIndicatorStyle(PlusLusIndicatorStyle.Eye)
+            repository.observeFlagsViewSettings(FlagType.FAVORITE).test {
+                assertEquals(PlusLusIndicatorStyle.Eye, awaitItem().plusLusIndicatorStyle)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `corrupt flags_plus_lus_indicator_style value falls back to Eye instead of crashing`() =
+        runTest(dispatcher) {
+            // An unknown value from an older build / manual edit must not crash
+            // observeFlagsViewSettings on PlusLusIndicatorStyle.valueOf — it degrades to Eye.
+            dataStore.edit { prefs ->
+                prefs[stringPreferencesKey("flags_plus_lus_indicator_style")] = "STAR"
+            }
+
+            repository.observeFlagsViewSettings(FlagType.CYAN).test {
+                assertEquals(PlusLusIndicatorStyle.Eye, awaitItem().plusLusIndicatorStyle)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
 
     @Test
     fun `categoryBandStyle defaults to MINIMAL on an empty store`() = runTest(dispatcher) {

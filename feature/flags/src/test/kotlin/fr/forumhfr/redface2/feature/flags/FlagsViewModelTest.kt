@@ -22,6 +22,7 @@ import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
+import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.SuperFavoriteRepository
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
@@ -2388,6 +2389,7 @@ class FlagsViewModelTest {
         override suspend fun setFlagsSingleLineTitle(enabled: Boolean) = Unit
         override suspend fun setFlagsCategoryBandStyle(style: CategoryBandStyle) = Unit
         override suspend fun setFlagsMarkerBorder(enabled: Boolean) = Unit
+        override suspend fun setFlagsPlusLusIndicatorStyle(style: PlusLusIndicatorStyle) = Unit
 
         // #286 — theme prefs are irrelevant to FlagsViewModel; stubbed at their defaults.
         override fun observeThemeMode(): Flow<ThemeMode> = MutableStateFlow(ThemeMode.SYSTEM)

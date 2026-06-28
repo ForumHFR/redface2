@@ -141,6 +141,16 @@ interface UserPreferencesRepository {
     suspend fun setFlagsMarkerBorder(enabled: Boolean)
 
     /**
+     * Persists the GLOBAL « +lus » indicator style (#661): the shape of the read-items cue in the
+     * Drapeaux top-bar tab picker — [PlusLusIndicatorStyle.Eye] (default, an eye glyph) or
+     * [PlusLusIndicatorStyle.Ring] (the flag dot drawn as a coloured ring). Like
+     * [setFlagsMarkerStyle] it is NOT subject to [observeFlagsPerTabOverride]; surfaced through
+     * [observeFlagsViewSettings] ([FlagsViewSettings.plusLusIndicatorStyle]). Defaults to
+     * [PlusLusIndicatorStyle.Eye] until the first call.
+     */
+    suspend fun setFlagsPlusLusIndicatorStyle(style: PlusLusIndicatorStyle)
+
+    /**
      * App theme selection (#286): [ThemeMode.SYSTEM] (default) follows the OS dark-mode setting;
      * [ThemeMode.LIGHT] / [ThemeMode.DARK] force the app theme regardless of the OS. Observed at the
      * app root ([fr.forumhfr.redface2.navigation.RedfaceApp]) to compute the effective dark theme

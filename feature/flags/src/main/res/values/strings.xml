@@ -173,6 +173,12 @@
          des favoris ressorte mieux sur fond clair. -->
     <string name="flags_view_settings_marker_border_title">Contour du marqueur</string>
     <string name="flags_view_settings_marker_border_description">Ajoute un fin liseré sombre autour de l\'indicateur de couleur, pour mieux le détacher du fond clair. S\'applique à tous les onglets.</string>
+    <!-- #661 — Style de l\'indicateur « +lus » dans le sélecteur d\'onglet de la barre du haut :
+         œil (par défaut) ou drapal dessiné en anneau coloré. Réglage GLOBAL (tous onglets). -->
+    <string name="flags_view_settings_pluslus_title">Indicateur « +lus »</string>
+    <string name="flags_view_settings_pluslus_description">Forme du repère affiché dans le sélecteur d\'onglet quand les sujets lus sont visibles. S\'applique à tous les onglets.</string>
+    <string name="flags_view_settings_pluslus_eye">Œil</string>
+    <string name="flags_view_settings_pluslus_ring">Anneau</string>
     <!-- #603 — Style de la bande de catégorie (vue groupée) : sous-titre sobre / bloc tonal /
          accent latéral / pastille en puce. Réglage GLOBAL (tous onglets), sans effet en vue à plat. -->
     <string name="flags_view_settings_band_title">Bande de catégorie</string>
