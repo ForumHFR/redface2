@@ -507,6 +507,9 @@ private fun PageInputDialog(
                 value = input,
                 onValueChange = { new -> input = new.filter(Char::isDigit).take(MAX_PAGE_DIGITS) },
                 singleLine = true,
+                // Codex polish: flag a non-empty out-of-range entry as an error (TalkBack + visual) rather
+                // than only greying « Aller ». Empty stays neutral (nothing typed yet).
+                isError = input.isNotBlank() && page == null,
                 label = { Text(stringResource(R.string.flags_sheet_goto_page_label)) },
                 supportingText = { Text(stringResource(R.string.flags_sheet_goto_page_supporting, totalPages)) },
                 keyboardOptions = KeyboardOptions(
