@@ -479,6 +479,8 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
 
 `NavigationSuiteScaffold` (Material 3 Adaptive) commute la `currentDestination` (état `rememberSaveable`) et passe le back stack actif à `RedfaceNavHost`. Les autres back stacks restent en mémoire — quand l'utilisateur revient sur l'onglet Forum, il retombe à l'écran où il l'a quitté.
 
+**Retour à la racine d'un onglet (#667)** : à la racine d'un onglet **secondaire** (≠ Drapeaux, back stack de taille 1), le `BackHandler` interne de `NavDisplay` est désactivé et le retour fermait l'application (bug #667). `RedfaceApp` intercepte ce cas via un `BackHandler` parent (`enabled = currentDestination != Flags && activeBackStack.size == 1`) qui **revient à l'onglet précédemment visité**, à défaut Drapeaux. L'historique d'onglets est un **MRU** (`tabHistory`, `rememberSaveable`) alimenté par un point d'entrée unique (`switchTab`, partagé par le tap de barre, le deep link et le retour-racine) ; les helpers purs `tabHistoryOnSwitch` / `tabBackTarget` (testés, `TabBackStackTest`) garantissent l'absence d'oscillation (le retour **dépile** sans réempiler). À la racine de **Drapeaux** (accueil), le retour garde le comportement par défaut (quitter/mettre en arrière-plan). `RedfaceNavHost.onRootBack` double le mécanisme par sécurité si une future version de nav3 invoquait `onBack` à la racine. Le FAB de retour immersif (#518) passe par le même `OnBackPressedDispatcher`, donc il est couvert.
+
 **Avantages Nav 3 vs Nav 2.x pour Redface 2** :
 - Le back stack est du **state observable standard** — facile à persister/restaurer, à inspecter pour debug, à manipuler dans des tests
 - Plusieurs back stacks indépendants (un par onglet) sans avoir à hiérarchiser un nav graph

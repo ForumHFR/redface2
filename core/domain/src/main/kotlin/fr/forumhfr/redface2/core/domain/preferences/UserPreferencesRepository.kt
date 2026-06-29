@@ -109,6 +109,78 @@ interface UserPreferencesRepository {
     suspend fun setFlagsUnreadOnlyForType(type: FlagType, enabled: Boolean)
 
     /**
+     * Persists the GLOBAL Drapeaux marker shape (#603 PR6). Unlike the #309 layout toggles this is
+     * NOT subject to [observeFlagsPerTabOverride] — one shape for every tab. Surfaced through
+     * [observeFlagsViewSettings] ([FlagsViewSettings.markerStyle]) so the list re-renders without a
+     * refetch. Defaults to [MarkerStyle.STRIPE] until the first call.
+     */
+    suspend fun setFlagsMarkerStyle(style: MarkerStyle)
+
+    /**
+     * Persists the GLOBAL « single-line topic titles » toggle (#603). Like [setFlagsMarkerStyle] it is
+     * NOT subject to [observeFlagsPerTabOverride]; surfaced through [observeFlagsViewSettings]
+     * ([FlagsViewSettings.singleLineTitle]). Defaults to `false` (2-line wrap) until the first call.
+     */
+    suspend fun setFlagsSingleLineTitle(enabled: Boolean)
+
+    /**
+     * Persists the GLOBAL grouped-view category band style (#603). Like [setFlagsMarkerStyle] it is
+     * NOT subject to [observeFlagsPerTabOverride]; surfaced through [observeFlagsViewSettings]
+     * ([FlagsViewSettings.categoryBandStyle]). Defaults to [CategoryBandStyle.MINIMAL] until the
+     * first call.
+     */
+    suspend fun setFlagsCategoryBandStyle(style: CategoryBandStyle)
+
+    /**
+     * Persists the GLOBAL « marker outline » toggle (#690): a thin 0.5 dp dark border around the
+     * Drapeaux marker so the amber FAVORITE colour reads cleanly on a light background. Like
+     * [setFlagsMarkerStyle] it is NOT subject to [observeFlagsPerTabOverride]; surfaced through
+     * [observeFlagsViewSettings] ([FlagsViewSettings.markerBorder]). Defaults to `false` (no border)
+     * until the first call.
+     */
+    suspend fun setFlagsMarkerBorder(enabled: Boolean)
+
+    /**
+     * Persists the GLOBAL « +lus » indicator style (#661/#603): the shape and place of the read-items
+     * cue in the Drapeaux top bar — [PlusLusIndicatorStyle.Ring] (default, a coloured ring around the
+     * active-type glyph in zone 1) or [PlusLusIndicatorStyle.Eye] (legacy, an eye capsule by the type
+     * name in zone 2). Like [setFlagsMarkerStyle] it is NOT subject to [observeFlagsPerTabOverride];
+     * surfaced through [observeFlagsViewSettings] ([FlagsViewSettings.plusLusIndicatorStyle]). Defaults
+     * to [PlusLusIndicatorStyle.Ring] until the first call.
+     */
+    suspend fun setFlagsPlusLusIndicatorStyle(style: PlusLusIndicatorStyle)
+
+    /**
+     * Persists the GLOBAL Drapeaux left-container glyph style (#603/#665): the active-type cue in the
+     * top bar is the section's flag icon ([FlagGlyphStyle.Flag], default) or a pastille dot
+     * ([FlagGlyphStyle.Dot]). Like [setFlagsMarkerStyle] it is NOT subject to
+     * [observeFlagsPerTabOverride]; surfaced through [observeFlagsViewSettings]
+     * ([FlagsViewSettings.flagGlyphStyle]). Defaults to [FlagGlyphStyle.Flag] until the first call.
+     */
+    suspend fun setFlagsGlyphStyle(style: FlagGlyphStyle)
+
+    /**
+     * Persists the GLOBAL « afficher la barre de chargement » toggle (#728): the thin top loading bar
+     * shown during auto / cold refreshes. The manual pull-to-refresh is always signalled by the redface
+     * puck regardless of this toggle. Like [setFlagsMarkerStyle] it is NOT subject to
+     * [observeFlagsPerTabOverride]; surfaced through [observeFlagsViewSettings]
+     * ([FlagsViewSettings.showLoadingBar]). Defaults to `true` (bar shown) until the first call.
+     */
+    suspend fun setFlagsShowLoadingBar(enabled: Boolean)
+
+    /**
+     * GLOBAL appearance of the top-bar account avatar badge (#718): bundled [AvatarAppearance] (border
+     * only since #718). One value for the whole app — the badge shows on every main screen's top bar, so
+     * it must NOT depend on a [fr.forumhfr.redface2.core.model.FlagType]. Edited from the Drapeaux
+     * « Réglages d'affichage » sheet but observed directly by the account ViewModel. Defaults to a
+     * borderless badge (the look shipped with #603/#665).
+     */
+    fun observeAvatarAppearance(): Flow<AvatarAppearance>
+
+    /** Persists the GLOBAL avatar-border toggle (#718). Defaults to `false` (borderless) until set. */
+    suspend fun setAvatarBorder(enabled: Boolean)
+
+    /**
      * App theme selection (#286): [ThemeMode.SYSTEM] (default) follows the OS dark-mode setting;
      * [ThemeMode.LIGHT] / [ThemeMode.DARK] force the app theme regardless of the OS. Observed at the
      * app root ([fr.forumhfr.redface2.navigation.RedfaceApp]) to compute the effective dark theme
@@ -262,6 +334,27 @@ interface UserPreferencesRepository {
 
     /** Persists [observeShowScrollbar]. Default `true` until the first call. */
     suspend fun setShowScrollbar(enabled: Boolean)
+
+    /**
+     * #666 — show the text labels under the bottom navigation bar icons. Default `true` (labels shown,
+     * the historical Material 3 behaviour); the toggle is the opt-out to an icon-only bar.
+     */
+    fun observeNavBarLabels(): Flow<Boolean>
+
+    /** Persists [observeNavBarLabels]. Default `true` until the first call. */
+    suspend fun setNavBarLabels(enabled: Boolean)
+
+    /**
+     * #662 — « états vides humoristiques » on the Drapeaux screen. When `false` (default), an empty
+     * tab shows the sober style A visual empty state (a thin icon + contextual title + subtext). When
+     * `true`, the same contextual text is shown under a HFR perso smiley instead of the icon (style C,
+     * a light forum wink). Opt-in by design: TalkBack reads the same text either way, and the smiley
+     * is never imposed. Observed by `:feature:flags`, toggled in Settings > Affichage.
+     */
+    fun observeFunnyEmptyState(): Flow<Boolean>
+
+    /** Persists [observeFunnyEmptyState]. Default `false` until the first call. */
+    suspend fun setFunnyEmptyState(enabled: Boolean)
 
     /**
      * #458 — which top-level tab (and optional Forum category) a cold start opens on. Default

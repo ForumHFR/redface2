@@ -15,6 +15,9 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.kotlinx.coroutines.android)
+    // #662 — AsyncImage for the opt-in perso-smiley empty state. The network fetcher
+    // (coil-network-okhttp) is provided app-wide via :core:ui; same direct dep pattern as :feature:editor.
+    implementation(libs.coil.compose)
 
     testImplementation(libs.junit4)
     testImplementation(libs.mockk)

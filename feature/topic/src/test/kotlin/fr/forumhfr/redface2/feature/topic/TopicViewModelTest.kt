@@ -7,6 +7,9 @@ import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
+import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
+import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
+import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
@@ -14,6 +17,8 @@ import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
+import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
+import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.topic.NoTopicSearchResultsException
 import fr.forumhfr.redface2.core.domain.topic.TopicRepository
@@ -2044,6 +2049,15 @@ private class FakeUserPreferencesRepository(
     override suspend fun setFlagsHideReadCategoriesForType(type: FlagType, enabled: Boolean) = Unit
 
     override suspend fun setFlagsUnreadOnlyForType(type: FlagType, enabled: Boolean) = Unit
+    override suspend fun setFlagsMarkerStyle(style: MarkerStyle) = Unit
+    override suspend fun setFlagsSingleLineTitle(enabled: Boolean) = Unit
+    override suspend fun setFlagsCategoryBandStyle(style: CategoryBandStyle) = Unit
+    override suspend fun setFlagsMarkerBorder(enabled: Boolean) = Unit
+    override suspend fun setFlagsShowLoadingBar(enabled: Boolean) = Unit
+    override fun observeAvatarAppearance(): Flow<AvatarAppearance> = MutableStateFlow(AvatarAppearance())
+    override suspend fun setAvatarBorder(enabled: Boolean) = Unit
+    override suspend fun setFlagsPlusLusIndicatorStyle(style: PlusLusIndicatorStyle) = Unit
+    override suspend fun setFlagsGlyphStyle(style: FlagGlyphStyle) = Unit
 
     override fun observeThemeMode(): Flow<ThemeMode> = MutableStateFlow(ThemeMode.SYSTEM)
 
@@ -2097,6 +2111,14 @@ private class FakeUserPreferencesRepository(
     override fun observeShowScrollbar(): Flow<Boolean> = MutableStateFlow(true)
 
     override suspend fun setShowScrollbar(enabled: Boolean) = Unit
+
+    override fun observeNavBarLabels(): Flow<Boolean> = MutableStateFlow(true)
+
+    override suspend fun setNavBarLabels(enabled: Boolean) = Unit
+
+    override fun observeFunnyEmptyState(): Flow<Boolean> = MutableStateFlow(false)
+
+    override suspend fun setFunnyEmptyState(enabled: Boolean) = Unit
 
     override fun observeStartScreen(): Flow<StartScreenPreference> =
         MutableStateFlow(StartScreenPreference())

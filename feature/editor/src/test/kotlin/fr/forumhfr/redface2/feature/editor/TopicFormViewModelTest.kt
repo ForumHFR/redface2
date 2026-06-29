@@ -10,6 +10,9 @@ import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
+import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
+import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
+import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
@@ -17,6 +20,8 @@ import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
+import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
+import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
@@ -1361,6 +1366,15 @@ class TopicFormViewModelTest {
         override suspend fun setFlagsGroupByCategoryForType(type: FlagType, enabled: Boolean) = Unit
         override suspend fun setFlagsHideReadCategoriesForType(type: FlagType, enabled: Boolean) = Unit
         override suspend fun setFlagsUnreadOnlyForType(type: FlagType, enabled: Boolean) = Unit
+        override suspend fun setFlagsMarkerStyle(style: MarkerStyle) = Unit
+        override suspend fun setFlagsSingleLineTitle(enabled: Boolean) = Unit
+        override suspend fun setFlagsCategoryBandStyle(style: CategoryBandStyle) = Unit
+        override suspend fun setFlagsMarkerBorder(enabled: Boolean) = Unit
+        override suspend fun setFlagsShowLoadingBar(enabled: Boolean) = Unit
+        override fun observeAvatarAppearance(): Flow<AvatarAppearance> = MutableStateFlow(AvatarAppearance())
+        override suspend fun setAvatarBorder(enabled: Boolean) = Unit
+        override suspend fun setFlagsPlusLusIndicatorStyle(style: PlusLusIndicatorStyle) = Unit
+        override suspend fun setFlagsGlyphStyle(style: FlagGlyphStyle) = Unit
         override fun observeThemeMode(): Flow<ThemeMode> = MutableStateFlow(ThemeMode.SYSTEM)
         override suspend fun setThemeMode(mode: ThemeMode) = Unit
         override fun observeAmoledEnabled(): Flow<Boolean> = MutableStateFlow(false)
@@ -1407,6 +1421,14 @@ class TopicFormViewModelTest {
         override fun observeShowScrollbar(): Flow<Boolean> = MutableStateFlow(true)
 
         override suspend fun setShowScrollbar(enabled: Boolean) = Unit
+
+        override fun observeNavBarLabels(): Flow<Boolean> = MutableStateFlow(true)
+
+        override suspend fun setNavBarLabels(enabled: Boolean) = Unit
+
+        override fun observeFunnyEmptyState(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setFunnyEmptyState(enabled: Boolean) = Unit
 
         override fun observeStartScreen(): Flow<StartScreenPreference> =
             MutableStateFlow(StartScreenPreference())

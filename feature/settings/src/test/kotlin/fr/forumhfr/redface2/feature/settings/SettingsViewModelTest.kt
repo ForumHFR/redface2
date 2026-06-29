@@ -3,6 +3,9 @@ package fr.forumhfr.redface2.feature.settings
 import fr.forumhfr.redface2.core.domain.cache.ImageCacheMaintenance
 import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
+import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
+import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
+import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
@@ -10,6 +13,8 @@ import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
+import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
+import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
@@ -563,6 +568,49 @@ class SettingsViewModelTest {
         assertFalse(viewModel.state.value.isUpdatingFlagsGroupByCategory)
         assertFalse(viewModel.state.value.flagsGroupByCategoryError)
         assertEquals(1, repository.flagsGroupByCategorySetCalls)
+    }
+
+    @Test
+    fun `FunnyEmptyStateChanged persists the flip and clears the updating flag`() = runTest {
+        // #662 — the smiley empty state is opt-in (default off); toggling persists and settles.
+        val viewModel = newViewModel()
+        assertFalse("sober empty state is the default", viewModel.state.value.funnyEmptyState)
+
+        viewModel.submit(SettingsIntent.FunnyEmptyStateChanged(true))
+
+        assertTrue(viewModel.state.value.funnyEmptyState)
+        assertFalse(viewModel.state.value.isUpdatingFunnyEmptyState)
+        assertFalse(viewModel.state.value.funnyEmptyStateError)
+        assertEquals(1, repository.funnyEmptyStateSetCalls)
+    }
+
+    @Test
+    fun `NavBarLabelsChanged persists the flip and clears the updating flag`() = runTest {
+        // #666 — bottom-nav labels are shown by default; hiding them is the opt-out. Toggling
+        // persists and settles (same optimistic-flip seam as FunnyEmptyState).
+        val viewModel = newViewModel()
+        assertTrue("nav-bar labels are shown by default", viewModel.state.value.navBarLabels)
+
+        viewModel.submit(SettingsIntent.NavBarLabelsChanged(false))
+
+        assertFalse(viewModel.state.value.navBarLabels)
+        assertFalse(viewModel.state.value.isUpdatingNavBarLabels)
+        assertFalse(viewModel.state.value.navBarLabelsError)
+        assertEquals(1, repository.navBarLabelsSetCalls)
+    }
+
+    @Test
+    fun `NavBarLabelsChanged reverts and raises the error flag on persist failure`() = runTest {
+        // The optimistic flip must roll back to the previous value and surface the error flag when
+        // the DataStore write fails (mirror of the FlagsGroupByCategory failure path).
+        repository.failOnNavBarLabelsSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.NavBarLabelsChanged(false))
+
+        assertTrue("must revert to the previous value on failure", viewModel.state.value.navBarLabels)
+        assertFalse(viewModel.state.value.isUpdatingNavBarLabels)
+        assertTrue(viewModel.state.value.navBarLabelsError)
     }
 
     @Test
@@ -1878,6 +1926,39 @@ class SettingsViewModelTest {
             showScrollbar.value = value
         }
 
+        // #666 — afficher les libellés de la barre du bas. Même seam optimistic-flip ; default TRUE.
+        private val navBarLabels = MutableStateFlow(true)
+        var navBarLabelsSetCalls: Int = 0
+            private set
+        var failOnNavBarLabelsSet: Boolean = false
+
+        override fun observeNavBarLabels(): Flow<Boolean> = navBarLabels
+
+        override suspend fun setNavBarLabels(enabled: Boolean) {
+            navBarLabelsSetCalls += 1
+            check(!failOnNavBarLabelsSet) { "boom" }
+            navBarLabels.value = enabled
+        }
+
+        fun emitNavBarLabels(value: Boolean) {
+            navBarLabels.value = value
+        }
+
+        private val funnyEmptyState = MutableStateFlow(false)
+        var funnyEmptyStateSetCalls: Int = 0
+            private set
+
+        override fun observeFunnyEmptyState(): Flow<Boolean> = funnyEmptyState
+
+        override suspend fun setFunnyEmptyState(enabled: Boolean) {
+            funnyEmptyStateSetCalls += 1
+            funnyEmptyState.value = enabled
+        }
+
+        fun emitFunnyEmptyState(value: Boolean) {
+            funnyEmptyState.value = value
+        }
+
         // #458 — start screen lives on its own StartScreenSettingsViewModel; this fake only
         // satisfies the interface for the main Settings ViewModel under test.
         override fun observeStartScreen(): Flow<StartScreenPreference> =
@@ -2020,6 +2101,15 @@ class SettingsViewModelTest {
         override suspend fun setFlagsHideReadCategoriesForType(type: FlagType, enabled: Boolean) = Unit
 
         override suspend fun setFlagsUnreadOnlyForType(type: FlagType, enabled: Boolean) = Unit
+        override suspend fun setFlagsMarkerStyle(style: MarkerStyle) = Unit
+        override suspend fun setFlagsSingleLineTitle(enabled: Boolean) = Unit
+        override suspend fun setFlagsCategoryBandStyle(style: CategoryBandStyle) = Unit
+        override suspend fun setFlagsMarkerBorder(enabled: Boolean) = Unit
+        override suspend fun setFlagsShowLoadingBar(enabled: Boolean) = Unit
+        override fun observeAvatarAppearance(): Flow<AvatarAppearance> = MutableStateFlow(AvatarAppearance())
+        override suspend fun setAvatarBorder(enabled: Boolean) = Unit
+        override suspend fun setFlagsPlusLusIndicatorStyle(style: PlusLusIndicatorStyle) = Unit
+        override suspend fun setFlagsGlyphStyle(style: FlagGlyphStyle) = Unit
 
         fun emit(value: ProxyConfig) {
             config.value = value

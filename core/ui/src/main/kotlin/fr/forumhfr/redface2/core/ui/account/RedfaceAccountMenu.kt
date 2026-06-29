@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.ui.account
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -7,7 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -22,11 +23,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
@@ -38,8 +42,9 @@ import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
  * `authState` from an `AppAccountViewModel` and routes the callbacks to the active back stack,
  * keeping the account-menu logic out of every feature ViewModel.
  *
- * Badge shape is **square with rounded corners** (not a circle), aligned with the convention
- * picked for [fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar].
+ * Badge shape is a **circle** (#603/#665, XaTriX top-bar redesign): the account « PP » reads as a
+ * round avatar. Post-header avatars keep the HFR-web rounded square via
+ * [fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar]'s default shape.
  *
  * Anti-flicker contract: when [authState] is `null` (cookie jar still warming up from
  * DataStore) we render a neutral badge with "…" — never an "Anonymous" state — so a cold start
@@ -60,6 +65,9 @@ fun RedfaceAccountMenu(
     // falls back to the pseudo-initial badge. The host (RedfaceNavHost) resolves it from the
     // connected user's profile via AppAccountViewModel.
     avatarUrl: String? = null,
+    // #718 — GLOBAL avatar appearance (border + background). Fed by AppAccountViewModel so the badge
+    // looks the same on every screen's top bar; defaulted so previews / other call sites still compile.
+    avatarAppearance: AvatarAppearance = AvatarAppearance(),
 ) {
     var expanded by remember { mutableStateOf(false) }
 
@@ -67,6 +75,7 @@ fun RedfaceAccountMenu(
         AccountBadge(
             authState = authState,
             avatarUrl = avatarUrl,
+            appearance = avatarAppearance,
             onClick = { expanded = true },
         )
         DropdownMenu(
@@ -129,6 +138,7 @@ fun RedfaceAccountMenu(
 private fun AccountBadge(
     authState: AuthState?,
     avatarUrl: String?,
+    appearance: AvatarAppearance,
     onClick: () -> Unit,
 ) {
     // #479 — when the connected user has a resolved avatar, show it instead of the initial. The
@@ -139,6 +149,7 @@ private fun AccountBadge(
         AvatarBadge(
             avatarUrl = avatarUrl,
             pseudo = authenticated.pseudo,
+            appearance = appearance,
             onClick = onClick,
         )
         return
@@ -149,12 +160,13 @@ private fun AccountBadge(
         AuthState.Anonymous -> "?"
         is AuthState.Authenticated -> authState.pseudo.firstOrNull()?.uppercaseChar()?.toString().orEmpty()
     }
-    val containerColor = when (authState) {
-        is AuthState.Authenticated -> MaterialTheme.colorScheme.primaryContainer
-        else -> MaterialTheme.colorScheme.surfaceContainerHighest
-    }
+    // #603 (XaTriX) — the badge background FOLLOWS the top-bar container (surfaceContainerHigh) so the
+    // round « PP » blends into the right container (« il devrait être du fond du container »). The
+    // authenticated identity stays legible through the primary-tinted initial; anonymous / loading keep
+    // the muted variant tone.
+    val containerColor = avatarBadgeContainerColor()
     val contentColor = when (authState) {
-        is AuthState.Authenticated -> MaterialTheme.colorScheme.onPrimaryContainer
+        is AuthState.Authenticated -> MaterialTheme.colorScheme.primary
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     val accessibilityLabel = stringResource(R.string.account_menu_open_description)
@@ -174,9 +186,12 @@ private fun AccountBadge(
     // (`X` / `?` / `…`) as a separate node.
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(BADGE_CORNER_RADIUS),
+        shape = CircleShape,
         color = containerColor,
         contentColor = contentColor,
+        // #718 — optional thin outline (default off, the #603/#665 borderless look). Decorative, not a
+        // contrast guarantee (Codex); a 1dp outlineVariant hairline that doesn't shrink the 32dp visual.
+        border = avatarBadgeBorder(appearance),
         modifier = Modifier
             .minimumInteractiveComponentSize()
             .size(BADGE_SIZE)
@@ -196,6 +211,7 @@ private fun AccountBadge(
 private fun AvatarBadge(
     avatarUrl: String,
     pseudo: String,
+    appearance: AvatarAppearance,
     onClick: () -> Unit,
 ) {
     // #479 — same interaction contract as the text [AccountBadge]: a clickable M3 `Surface`
@@ -207,7 +223,12 @@ private fun AvatarBadge(
     val accessibilityLabel = stringResource(R.string.account_menu_open_description)
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(BADGE_CORNER_RADIUS),
+        shape = CircleShape,
+        // #718 — same appearance as the text badge: the photo seats on the top-bar container, with an
+        // optional thin outline. Border on the parent Surface so it never shrinks the avatar (Codex);
+        // the inner [RedfaceUserAvatar] still clips the photo to a circle.
+        color = avatarBadgeContainerColor(),
+        border = avatarBadgeBorder(appearance),
         modifier = Modifier
             .minimumInteractiveComponentSize()
             .size(BADGE_SIZE)
@@ -217,6 +238,14 @@ private fun AvatarBadge(
             avatarUrl = avatarUrl,
             author = pseudo,
             size = BADGE_SIZE,
+            // Round « PP » to match the circular badge (the post-header default stays rounded-square).
+            shape = CircleShape,
+            // Audit #2 — make the inner avatar PURELY decorative for TalkBack. The parent Surface already
+            // owns the single action label « Ouvrir le menu compte »; `RedfaceUserAvatar` otherwise emits
+            // its own "Avatar de <pseudo>" contentDescription on the loaded-image branch, so the badge
+            // risked announcing TWO descriptions for one target. `clearAndSetSemantics {}` drops the
+            // avatar's subtree semantics so only the parent's action/label is read.
+            modifier = Modifier.clearAndSetSemantics {},
         )
     }
 }
@@ -243,10 +272,27 @@ private fun AccountStatusHeader(authState: AuthState?) {
     }
 }
 
-// 40dp visual size. The explicit `Modifier.minimumInteractiveComponentSize()` applied on
-// `AccountBadge` (before `.size(BADGE_SIZE)`) expands the touch target to the Material 3
-// 48dp minimum without changing the painted badge — `Surface(onClick = ...)` does NOT
-// inject that minimum on its own (cf. M3 docs, Codex rereview on PR #207).
-private val BADGE_SIZE = 40.dp
-private val BADGE_CORNER_RADIUS = 8.dp
+// #718/#718 — container colour behind the account badge: ALWAYS the top-bar container colour
+// (`surfaceContainerHigh`). This is the fix for the « avatar transparent → fond blanc » bug: a bare
+// `Surface` defaulted to `surface` (near-white in light theme) and showed through a transparent PNG
+// avatar. The former configurable « fond transparent » was a no-op in the nested top-bar layout (the
+// badge sits inside a `surfaceContainerHigh` container, so transparent == container) and was removed.
+@Composable
+private fun avatarBadgeContainerColor(): Color = MaterialTheme.colorScheme.surfaceContainerHigh
+
+// #718 — optional thin outline around the round badge (default off). A 1dp `outlineVariant` hairline:
+// discreet for a top-bar avatar (Codex: `outline` would be too present); purely decorative.
+@Composable
+private fun avatarBadgeBorder(appearance: AvatarAppearance): BorderStroke? =
+    if (appearance.border) BorderStroke(AVATAR_BORDER_WIDTH, MaterialTheme.colorScheme.outlineVariant) else null
+
+private val AVATAR_BORDER_WIDTH = 1.dp
+
+// 32dp visual size — the standard top-bar account-avatar size (Gmail/Google ≈ 30dp), distinct from
+// the 40dp M3 *list* avatar; in the 44dp top-bar container it leaves breathing room rather than nearly
+// filling it (#603, XaTriX). The explicit `Modifier.minimumInteractiveComponentSize()` applied on
+// `AccountBadge` (before `.size(BADGE_SIZE)`) still expands the touch target to the Material 3 48dp
+// minimum without changing the painted badge — `Surface(onClick = ...)` does NOT inject that minimum
+// on its own (cf. M3 docs, Codex rereview on PR #207).
+private val BADGE_SIZE = 32.dp
 private val HEADER_PADDING = PaddingValues(horizontal = 16.dp, vertical = 8.dp)

@@ -16,13 +16,578 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
-## v177 — `0.16.0` — `local` (beta) — 2026-06-20
+## `0.18.0` — `open` (beta) — 2026-06-29
 
-> Le `v177` est indicatif : le `versionCode` réel est alloué au dispatch par le registre de tags git
-> (`max(app-v*) + 1`). Statut `local` jusqu'au ship beta (→ `open`). versionName bumpé 0.15.0 → 0.16.0.
+**Promotion bêta — clôture de la phase « refonte de la vue Drapeaux » (#603)** (cumul des dev 0.17.0 → 0.17.30 + audit de clôture multi-agent Claude Opus + Codex gpt-5.5).
 
-Bêta **0.16.0** (open testing) — consolide le dev depuis la bêta 0.15.0 (`v174`). Revue 4-flavor
-(code-review + review holistique + superpowers + Codex, seuil >60, **0 bloquant**) avant le cut.
+### Vue Drapeaux — refonte
+- Nouvelle top bar : conteneur gauche (drapeau du type + nom court + indicateur « +lus ») et conteneur droit (loupe rétractable + avatar rond), recherche à hauteur constante.
+- Barre translucide : la liste glisse sous la barre avec un dégradé au défilement (#665).
+- Loader « redface » au tirer-pour-rafraîchir, repositionné sur la rangée des pastilles, pastille ronde (#728).
+- Indicateur « +lus » configurable (œil / anneau coloré), option d'avatar (bordure), glyphe drapeau/pastille (#661/#717/#718).
+- Appui-long : actions rapides distinctes de la liste ; aller à une page ; poster un message (#676/#729) ; recherche sur l'onglet DT.
+- Cyan sticky récupéré (#251), états vides homogénéisés (#662), couleur favori ambre (#690), scroll indépendant par onglet (#695), swipe directionnel (#660), bandes catégorie, barre du bas compacte (#666/#671).
+
+### Corrections d'audit (clôture)
+- Les réglages d'affichage GLOBAUX (glyphe, « +lus », barre de chargement) sont conservés sur les onglets DT/Super.
+- Recherche : le retour système referme la loupe ; champ avec libellé et action clavier ; cible tactile et icône conformes.
+- Préservation du défilement par onglet ; accessibilité (TalkBack) renforcée sur la barre, le loader, les pastilles et l'avatar ; libellés au pluriel corrects.
+
+## `0.17.30` — `internal` (dev) — 2026-06-29
+
+> Vue Drapeaux (#603) — **correctif du loader pull-to-refresh** : au tirer lent, la pastille du redface
+> se rend de nouveau en cercle (et non en carré à coins arrondis). versionName 0.17.29 → 0.17.30.
+
+**Drapeaux — vue (#603)**
+
+- **Pastille du loader ronde au tirer lent (#603)** : au tirer-pour-rafraîchir LENT, le fond du redface
+  s'affichait comme un carré à coins arrondis au lieu d'un cercle. Cause : le fondu d'apparition
+  (`alpha < 1`) forçait une couche offscreen RECTANGULAIRE (bornes 48 dp) qui rognait l'ombre non-clippée
+  de la pastille ; réduite à petite échelle, elle se lisait comme un squircle. Corrigé via
+  `CompositingStrategy.ModulateAlpha` (module l'alpha par opération de dessin au lieu d'un buffer
+  offscreen) — le cercle ET l'ombre douce sont préservés (un clip dur aurait coupé l'ombre). Signalé par
+  thibw au dogfood ; gaté Codex (cause + fix + diff) et vérifié émulateur (pull + refreshing).
+
+---
+
+## `0.17.29` — `internal` (dev) — 2026-06-28
+
+> Vue Drapeaux (#603) — **quatre correctifs de finition** : le « petit saut » du contenu en fin de
+> chargement, le flash de la liste derrière la top bar au basculement « +lus », le menu « Réglages
+> d'affichage » fantôme sur DT/Super, et le fond blanc derrière un avatar transparent.
+> versionName 0.17.28 → 0.17.29.
+
+**Drapeaux — vue (#603 / #728)**
+
+- **Fin du « petit saut » en fin de chargement (#728)** : le contenu ne descend plus puis remonte
+  juste après l'animation redface, ni en tirer-pour-rafraîchir manuel ni en rechargement automatique. Le
+  « content-push » reste désormais relâché pendant TOUTE la rétraction post-refresh (le facteur de
+  relâche est tenu à zéro tant que la distance de pull n'est pas revenue au repos), au lieu de remonter
+  vers 1 pendant que la distance redescend — c'est leur produit qui produisait le rebond. Le guard de
+  rétraction est mutualisé entre le puck et le content-push (une seule source de vérité).
+- **Fin du sursaut « +lus » derrière la top bar (#603)** : en basculant « +lus » (re-tap de la pill
+  Cyan/DT), les sujets lus réapparaissant au-dessus de l'ancre ne flashent plus brièvement derrière la
+  barre du haut translucide avant de se replacer. Le recentrage en haut utilise désormais le même
+  mécanisme robuste que le rappel au top du changement d'onglet (`requestScrollToItem` réasséné sur
+  quelques frames, au lieu d'un `scrollToItem` unique exécuté une frame trop tard).
+- **« Réglages d'affichage » sur DT/Super (#603)** : l'entrée n'est plus proposée sur les onglets DT et
+  Super (qui n'ont pas de réglages d'affichage propres). Avant, l'y taper ne faisait rien sur le moment
+  puis ouvrait le panneau au prochain changement d'onglet (à la place de la liste). L'entrée reste sur
+  les onglets de drapeaux (Mes sujets / Lu / Favoris).
+
+**Compte — avatar (#718)**
+
+- **Plus de fond blanc derrière un avatar transparent (#718)** : le badge du compte suit désormais
+  TOUJOURS la couleur du container de la barre du haut (`surfaceContainerHigh`). Un avatar PNG à fond
+  transparent ne laisse plus apparaître le fond `surface` quasi-blanc du thème clair.
+- **Retrait de l'option « Fond transparent » (#718)** : sans effet réel dans la barre du haut (le badge
+  est imbriqué dans un container, transparent == container), elle est supprimée. L'option **bordure**
+  est conservée.
+
+---
+
+## `0.17.28` — `internal` (dev) — 2026-06-28
+
+> Vue Drapeaux (#603) — **loader « redface » repositionné** au niveau des pastilles du top bar, plus deux
+> nouveaux réglages (barre de chargement, options avatar). versionName 0.17.27 → 0.17.28.
+
+**Drapeaux — vue (#603 / #728 / #718)**
+
+- **Loader repositionné (#728)** : le puck redface n'apparaît plus sous toute la barre mais sur la
+  **rangée des deux containers du top bar** (centré entre eux). Au tirer-pour-rafraîchir, le contenu
+  descend avec le geste ; pendant le rafraîchissement il **revient à ras** et le puck reste en place
+  (anneau de progression). Correction du **gap fantôme** qui réservait un espace vide au rechargement
+  automatique (un état d'animation résiduel fuyait au changement d'onglet). Vrai redface (asset vectoriel).
+- **Réglage « Barre de chargement » (#728)** : option GLOBALE pour afficher ou masquer la fine barre de
+  progression des rechargements automatiques. Le tirer-pour-rafraîchir reste signalé par le redface quoi
+  qu'il arrive. Dans « Réglages d'affichage ».
+- **Options avatar du compte (#718)** : **bordure** (liseré fin optionnel) et **fond transparent**,
+  configurables dans « Réglages d'affichage ». Appliquées au badge « PP » de la barre du haut sur tous
+  les écrans (préférence globale dédiée, lue par le menu compte).
+
+---
+
+## `0.17.27` — `internal` (dev) — 2026-06-28
+
+> Vue Drapeaux (#603) — **le loader « redface »**. L'amorce de rafraîchissement (tirer vers le bas)
+> n'est plus l'indicateur Material standard : c'est une petite tête « redface » qui émerge sous la barre
+> et **roule sur elle-même** au fil du tirage. versionName 0.17.26 → 0.17.27.
+
+**Drapeaux — vue (#603)**
+
+- **Loader « redface » à l'amorce du pull** : en tirant vers le bas pour rafraîchir, une tête ronde
+  souriante (dessinée, pas le GIF HFR) apparaît dans une pastille sous la barre et tourne sur elle-même
+  selon la distance de tirage. « Amorce seule » : dès que le rafraîchissement démarre, elle disparaît et
+  la fine barre du haut reste le seul repère de chargement (pas de double indicateur). La rotation
+  respecte le réglage système « réduire les animations ». S'applique aux deux listes (drapeaux + DT).
+
+---
+
+## `0.17.26` — `internal` (dev) — 2026-06-28
+
+> Vue Drapeaux (#603) — **la loupe de recherche revient sur l'onglet DT**. La barre du haut harmonisée
+> avait laissé la loupe réservée aux onglets de drapeaux ; elle filtre désormais aussi la liste des
+> discussions à interlocuteurs multiples (DT). versionName 0.17.25 → 0.17.26.
+
+**Drapeaux — vue (#603)**
+
+- **Recherche sur l'onglet DT** : la loupe « rechercher dans les drapeaux » est désormais offerte sur
+  l'onglet DT (comme sur les onglets de drapeaux) et filtre les conversations par sujet. L'onglet Super
+  (sans liste) reste sans loupe. Filtre client-side (sujet, insensible à la casse) avec un état « aucun
+  résultat » dédié.
+
+---
+
+## `0.17.25` — `internal` (dev) — 2026-06-28
+
+> Vue Drapeaux (#603/#665) — **top bar « overlay translucide »** : la barre du haut ne pousse plus la
+> liste vers le bas, elle la **survole**. Au scroll, le contenu **glisse sous la barre** avec un voile
+> dégradé (opaque derrière la status bar pour garder l'horloge lisible, transparent au bas pour laisser
+> le contenu apparaître en fondu sous le centre vide). versionName 0.17.24 → 0.17.25.
+
+**Drapeaux — vue (#603/#665)**
+
+- **Top bar en surimpression (#665)** : la liste remplit désormais tout l'espace et passe **sous** la
+  barre du haut au lieu d'être poussée dessous. Le premier élément reste calé juste sous la barre (la
+  hauteur de la barre est mesurée et réservée), mais au défilement le contenu glisse dessous.
+- **Voile translucide au scroll (#665)** : quand le contenu est défilé sous la barre, un **dégradé**
+  (couleur du fond de page, donc cohérent dans tous les thèmes y compris AMOLED) apparaît — opaque
+  derrière la barre d'état (horloge lisible) et **transparent au bas** pour que le contenu apparaisse en
+  fondu sous le centre vide. La barre reste transparente en haut de liste (rien à masquer).
+
+---
+
+## `0.17.24` — `internal` (dev) — 2026-06-28
+
+> Vue Drapeaux (#603) — suite de la review dogfood : **repère « +lus » = anneau autour du drapeau**
+> (variante A choisie par XaTriX, défaut ; œil en option), **avatar du compte à la taille standard**
+> (32 dp, validé Codex), et **sheet d'appui-long enrichi** (« Aller à une page » + « Poster un
+> message »). versionName 0.17.23 → 0.17.24.
+
+**Drapeaux — vue (#603)**
+
+- **Repère « +lus » sur l'icône (#661/#603)** : quand les sujets lus sont visibles, le glyphe de type
+  (drapeau ou pastille) est entouré d'un **anneau** coloré (nouveau défaut). L'**œil** à droite du nom
+  reste disponible en option dans les réglages d'affichage. Plus de double repère.
+- **Avatar du compte — taille standard (32 dp)** : l'avatar de la barre du haut passe de 40 dp (taille
+  d'avatar de *liste*) à 32 dp, la taille usuelle d'un avatar de *barre du haut* (validé Codex). Cible
+  tactile 48 dp inchangée.
+- **Sheet d'appui-long — « Aller à une page » (#15)** : nouvelle action qui ouvre un champ de saisie
+  (validé 1…N) pour ouvrir le sujet directement à une page précise. Masquée pour les sujets d'une page.
+- **Sheet d'appui-long — « Poster un message » (#15)** : nouvelle action qui ouvre directement
+  l'éditeur de réponse du sujet (sur la dernière page, là où HFR ajoute le message).
+
+---
+
+## `0.17.23` — `internal` (dev) — 2026-06-28
+
+> Vue Drapeaux (#603) — passe de review top bar dogfood : **noms d'onglets courts** (Cyan/Lurk/Fav/DT/
+> Super), **option drapeau/pastille** du glyphe de type (#717), **avatar du compte** qui épouse le
+> container (fond du container, **sans bordure**), **« Réglages d'affichage » disponible sur tous les
+> onglets** (dont DT/Super), et **tap propre** des deux zones du container gauche. versionName
+> 0.17.22 → 0.17.23.
+
+**Drapeaux — vue (#603)**
+
+- **Option drapeau / pastille (#603/#665, #717)** : nouveau réglage « Repère du type actif » — le glyphe
+  du type dans la barre du haut est l'icône drapeau colorée (défaut) ou une pastille colorée.
+- **Noms d'onglets courts** : le container gauche affiche Cyan / Lurk / Fav / DT / Super.
+- **Avatar du compte** : le fond suit le container (`surfaceContainerHigh`) et la bordure est retirée —
+  le PP rond s'intègre proprement ; l'identité reste lisible via l'initiale teintée. Options bordure /
+  fond transparent à venir (#718, placeholders grisés dans le sheet).
+- **« Réglages d'affichage » sur tous les onglets** : l'entrée est désormais disponible sur DT et Super
+  (qui n'ont pas la loupe) — les réglages sont globaux et le menu n'existe que pour un compte connecté.
+- **Tap propre du container gauche** : chaque zone (drapeau / type) épouse son extrémité de pilule au
+  tap (demi-pilules), fini le rectangle arrondi flottant.
+
+---
+
+## `0.17.22` — `internal` (dev) — 2026-06-28
+
+> Vue Drapeaux (#603) — finitions top bar + correctifs dogfood : **avatar du compte rond**, **ombre
+> moche au swipe supprimée**, **container gauche en 2 zones** (drapeau → menu, type + « +lus » → toggle
+> direct), **menu rapide restylé** (drapeaux trailing à droite, « Afficher les lus » retiré),
+> **recherche sans saut de hauteur**, **indicateur « +lus » configurable** œil/anneau (#661), et
+> **sheet d'appui-long v2** (rangée rapide ≠ liste, #676). versionName 0.17.21 → 0.17.22.
+
+**Drapeaux — vue (#603)**
+
+- **Container gauche — 2 zones (#603/#665)** : le sélecteur devient deux zones distinctes — le drapeau
+  de la section (drapal-icône coloré) ouvre le menu rapide ; le nom du type + l'indicateur « +lus »
+  bascule directement le « +lus » au tap (Cyan/DT). L'indicateur « +lus » vit dans la zone type.
+- **Menu rapide restylé (#603)** : libellé à gauche, drapeau coloré du type à droite (trailing) ;
+  l'entrée « Afficher les lus » disparaît (le toggle est désormais direct sur la zone type).
+- **Recherche — hauteur constante (#603)** : ouvrir la recherche ne décale plus le contenu (le champ
+  adopte la hauteur des containers).
+- **Avatar du compte rond** : le badge compte (PP) devient circulaire (M3) pour épouser son container ;
+  les avatars d'en-tête de posts gardent le carré arrondi.
+- **Ombre de swipe supprimée (#660)** : le cadre gris d'élévation parasite autour du panneau pendant le
+  balayage entre onglets est retiré (le geste reste signalé par le retour haptique + la transition).
+- **Indicateur « +lus » configurable (#661)** : choix œil (défaut) ou anneau coloré, dans les réglages
+  d'affichage Drapeaux.
+- **Sheet d'appui-long v2 (#676)** : la rangée rapide (Ouvrir · 1er non-lu · Super favori · Partager)
+  et la liste (Ouvrir à la dernière page · Copier le lien · Ouvrir dans le navigateur · Retirer) portent
+  désormais des actions distinctes (fini le doublon).
+
+---
+
+## `0.17.21` — `internal` (dev) — 2026-06-28
+
+> Vue Drapeaux (#603) — **refonte de la top bar** (nouveau look : deux containers arrondis, loupe
+> rétractable, avatar, indicateur « +lus » en forme d'œil) + animation de **swipe entre onglets « slide
+> au commit »** (#660) + **sheet d'appui-long** avec liste d'actions complète ET rangée d'accès rapide
+> (#676). versionName 0.17.20 → 0.17.21.
+
+**Drapeaux — vue (#603)**
+
+- **Refonte de la top bar — nouveau look (#603)** : la barre plate laisse place à deux « containers »
+  arrondis flottant sur un centre transparent. À gauche, le sélecteur d'onglet (drapal de la section +
+  nom court + indicateur « +lus » en forme d'œil quand les lus sont affichés). À droite, une loupe
+  rétractable (qui s'ouvre en champ de recherche plein largeur) et l'avatar du compte. Les bascules
+  existantes (onglets, +lus, réglages d'affichage) restent dans le menu du container gauche. *(Suite à
+  venir : défilement du contenu sous la barre #665, loader « redface », option D/C de l'indicateur.)*
+- **Swipe entre onglets « slide au commit » (#660)** : le changement d'onglet par balayage glisse
+  désormais directionnellement du bon côté (Material Shared Axis X) au lieu d'apparaître brusquement.
+- **Sheet d'appui-long (#676)** : la liste verticale d'actions (libellés complets) revient et coexiste
+  avec la rangée d'accès rapide en icônes ; « Retirer » reste en dernier, toujours confirmé par dialog.
+
+## `0.17.20` — `internal` (dev) — 2026-06-27
+
+> Vue Drapeaux (#603) — le texte explicatif du balayage de la section DT quitte la vue (où il flottait
+> en bas de liste) pour rejoindre la **description du réglage « Section DT »**, au niveau de son
+> activation (#662, demande XaTriX). La vue DT reste épurée. versionName 0.17.19 → 0.17.20.
+
+**Drapeaux — vue (#603)**
+
+- **Texte explicatif DT déplacé vers les réglages (#662)** : l'avertissement « seule la première page de
+  la boîte de réception est balayée » n'apparaît plus dans la vue DT (ni en pied de liste, ni en
+  sous-texte d'état vide). Il est désormais porté par la **description du réglage « Section DT »**
+  (Réglages › Drapeaux), là où l'utilisateur active la section — l'explication est lue au bon moment et
+  la vue reste épurée.
+
+## `0.17.19` — `internal` (dev) — 2026-06-27
+
+> Vue Drapeaux (#603) — finitions sur retour dogfood : les états vides visuels (#662) couvrent
+> maintenant aussi les onglets **DT** et **Super Favoris**, le smiley de l'option humoristique n'est
+> plus pixelisé (#662), et le drapeau favori ambre (#690) gagne une **option de contour** (fin liseré
+> sombre) pour mieux ressortir sur fond clair. versionName 0.17.18 → 0.17.19.
+
+**Drapeaux — vue (#603)**
+
+- **États vides DT & Super Favoris (#662)** : les onglets DT et Super Favoris affichent désormais le
+  même état vide visuel (icône/smiley + titre + sous-texte) que les onglets de drapeaux, au lieu d'un
+  simple libellé. L'état DT « aucune non-lue » conserve le caveat de balayage (seules les conversations
+  récentes sont listées) en sous-texte.
+- **Smiley de l'option humoristique dé-pixelisé (#662)** : le smiley perso `[:eric le looser]` est une
+  petite photo (~47×50 px), pas du pixel-art — l'agrandissement « net » précédent le transformait en
+  blocs. Filtrage lissé + taille réduite : il reste propre.
+- **Option « Contour du marqueur » (#690)** : nouvelle bascule GLOBALE (réglages d'affichage des
+  Drapeaux, désactivée par défaut) qui dessine un fin liseré sombre (0,5 dp) autour de l'indicateur de
+  couleur, pour mieux détacher l'ambre des favoris sur fond clair. S'applique à toutes les formes de
+  marqueur (barre / pastille / point) et à tous les onglets.
+
+## `0.17.18` — `internal` (dev) — 2026-06-27
+
+> Vue Drapeaux (#603) : les onglets vides ont enfin un vrai état visuel (icône + message par onglet,
+> avec une option « états vides humoristiques » qui affiche un smiley perso HFR, #662), et les drapeaux
+> cyan des sujets épinglés des catégories sans sous-catégorie (ex. « IA ») réapparaissent (#251).
+> versionName 0.17.17 → 0.17.18.
+
+**Drapeaux — vue (#603)**
+
+- **États vides visuels (#662)** : un onglet sans élément n'affiche plus un simple libellé mais un état
+  vide visuel — icône fine + titre + sous-texte propre à l'onglet (Mes sujets / Lu / Favoris). Une
+  nouvelle option **« États vides humoristiques »** (Réglages › Drapeaux, désactivée par défaut)
+  remplace l'icône par un smiley perso HFR. Le texte porte tout le sens, donc TalkBack lit le même état
+  dans les deux cas. La vue groupée filtrée (« masquer les catégories sans non-lu ») garde un message
+  factuel distinct.
+- **Drapeaux cyan des sujets épinglés récupérés (#251)** : les endpoints REST des drapeaux excluaient
+  les sujets épinglés (sticky) flaggés dans les catégories **sans sous-catégorie** (ex. cat « IA ») —
+  un drapeau cyan posé sur le sujet épinglé des règles restait invisible. Un supplément REST-only
+  (lecture de la première page de `topics/last`, sans repli HTML) les récupère et les fusionne dans la
+  liste. Best-effort : un échec de cette lecture ne fait pas échouer tout l'écran.
+
+## `0.17.17` — `internal` (dev) — 2026-06-27
+
+> Vue Drapeaux (#603) : la couleur du drapeau favori passe à un jaune-ambre lisible sur clair comme sur
+> sombre (#690, choix « D » des testeurs), et le défilement de chaque onglet (Mes sujets / Lu / Favoris)
+> est désormais indépendant — il ne « bave » plus d'un onglet à l'autre (#695). versionName 0.17.16 → 0.17.17.
+
+**Drapeaux — vue (#603)**
+
+- **Couleur du favori lisible sur fond clair (#690)** : le jaune Material Yellow 600 (`#FDD835`) se
+  noyait sur le thème clair (fond crème, contraste ~1,2:1). Il passe à Material Amber 600 (`#FFB300`),
+  un jaune-ambre qui tient sur clair comme sur sombre (choix « D » des testeurs CharLee/thibw/XaTriX),
+  sans aller jusqu'à l'ambre `#F9A825` jugé trop loin de l'identité du favori. Cyan et rouge inchangés.
+- **Défilement indépendant par onglet (#695)** : les onglets Mes sujets / Lu / Favoris partageaient un
+  seul état de liste, donc la position de défilement « bavait » d'un onglet à l'autre. Chaque onglet a
+  désormais son propre état de liste (préservé au changement d'onglet et à la rotation).
+
+## `0.17.16` — `internal` (dev) — 2026-06-27
+
+> Vue Drapeaux (#603), correctifs : les sujets cyan d'une catégorie ajoutée récemment sur HFR (ex. « IA »)
+> réapparaissent — le fan-out interrogeait une liste de catégories périmée et sautait silencieusement la
+> nouvelle catégorie (#251) ; et la couleur du drapeau favori repasse au jaune, elle virait au vert (#690).
+> Build dev ; versionCode au dispatch. versionName 0.17.15 → 0.17.16.
+
+**Drapeaux — vue (#603)**
+
+- **Cyan manquant d'une catégorie récente corrigé (#251)** : pour aller chercher les drapeaux, l'app
+  énumère les catégories du forum ; elle lisait la liste mise en cache 24 h via son émission « périmée
+  d'abord », donc une catégorie créée sur HFR après le dernier rafraîchissement (ex. cat 32 « IA ») n'était
+  jamais interrogée et ses sujets cyan restaient invisibles. Le fan-out demande désormais une liste de
+  catégories fraîche quand le cache est périmé (`ForumRepository.getCategories(forceRefreshIfStale = true)`,
+  une lecture en cache si frais, un appel réseau si périmé/froid).
+- **Couleur du drapeau favori repassée au jaune (#690)** : le marqueur favori était en Material Lime 500,
+  qui se lit vert à l'écran ; il passe en Material Yellow 600 (`#FDD835`), franchement jaune, sans dériver
+  vers l'ambre. Cyan et rouge inchangés.
+
+## `0.17.15` — `internal` (dev) — 2026-06-27
+
+> Refonte de la vue Drapeaux (#603), polish : la barre du bas en mode icônes seules passe à 52 dp avec
+> un item dédié (14 dp d'air autour de l'icône, indicateur M3 actif, nom accessible des onglets corrigé),
+> et l'espacement des bandes de catégorie passe du preset D au preset C (les bandes paraissaient trop
+> serrées) (#671). Build dev ; versionCode au dispatch. versionName 0.17.14 → 0.17.15.
+
+**Drapeaux — vue (#603)**
+
+- **Barre du bas icônes seules à 52 dp (suite #666)** : quand les libellés sont masqués, la barre du bas
+  passe de 56 à 52 dp, construite à partir d'un item dédié — l'icône 24 dp est centrée avec 14 dp d'air
+  au-dessus et en dessous, l'indicateur actif (pilule M3) revient derrière l'icône sélectionnée. Corrige
+  au passage un manque d'accessibilité : en mode icônes seules les onglets n'avaient pas de nom annoncé.
+- **Espacement des bandes de catégorie — preset C (#671)** : l'air autour des bandes de catégorie passe
+  du preset D (trop serré pour la hauteur des bandes) au preset C ; un réglage utilisateur dédié arrivera
+  plus tard.
+
+## `0.17.14` — `internal` (dev) — 2026-06-27
+
+> Refonte de la vue Drapeaux (#603), lot suivant : le menu déroulant du sélecteur d'onglet expose
+> maintenant le « +lus » et les réglages d'affichage (#661), le re-tap de l'onglet Drapeaux depuis un
+> sous-écran ramène à la racine (#679), et le sheet d'appui-long sur un sujet passe à 5 actions sur une
+> ligne (#676). Build dev ; versionCode au dispatch. versionName 0.17.13 → 0.17.14.
+
+**Drapeaux — vue (#603)**
+
+- **Menu du sélecteur d'onglet plus découvrable (#661)** : le menu déroulant (icône drapeau colorée en
+  haut à gauche) propose désormais, en plus du changement d'onglet, l'entrée contextuelle « Afficher /
+  Masquer les lus » (sur Cyan et DT) et « Réglages d'affichage » — deux actions auparavant atteignables
+  seulement par un re-tap d'onglet ou de la barre du bas.
+- **Re-tap de l'onglet Drapeaux = retour à la racine (#679)** : re-taper l'onglet Drapeaux alors qu'on
+  est dans un sous-écran (un sujet ouvert depuis un drapeau) revient à la liste des drapeaux, au lieu
+  d'armer par erreur le menu de configuration rapide.
+- **Sheet d'appui-long — 5 actions sur une ligne (#676, mockup F2)** : l'appui long sur un sujet présente
+  ses actions (Ouvrir / Super favori / Copier / Navigateur / Retirer) sur une seule rangée de boutons au
+  lieu d'une liste verticale ; « Retirer » reste rouge et passe toujours par la confirmation. Le
+  sous-titre redondant sous le titre du sujet a été retiré (l'info reste dans le bloc métadonnées).
+
+## `0.17.13` — `internal` (dev) — 2026-06-27
+
+> Suite #666 : la barre du bas raccourcit réellement (icônes seules, 56 dp) quand les libellés sont
+> masqués — auparavant elle conservait la hauteur réservée aux libellés. Build dev ; versionCode au
+> dispatch. versionName 0.17.12 → 0.17.13.
+
+**Réglages / Navigation (#666)**
+
+- **Barre du bas plus courte sans les libellés** : libellés masqués (*Réglages > Affichage > Barre de
+  navigation*), la barre du bas passe à 56 dp en icônes seules au lieu de garder les ~64 dp réservés à la
+  rangée de libellés (téléphone uniquement ; rail / tiroir des écrans larges inchangés). Cible tactile
+  conservée ≥ 48 dp. Le « short bar » expressif Material 3 étant `internal` dans le BOM courant, la barre
+  compacte est bâtie sur le `NavigationBarItem` stable. Signalé par XaTriX.
+
+## `0.17.12` — `internal` (dev) — 2026-06-26
+
+> Fix dogfood : l'amorce du pull-to-refresh ne « repop » plus en fin de chargement. Build dev ;
+> versionCode au dispatch. versionName 0.17.11 → 0.17.12.
+
+**Drapeaux (#603)**
+
+- **Amorce pull-to-refresh — plus de re-pop en fin de load** : à la fin d'un rechargement, l'indicateur
+  rond réapparaissait brièvement (puis disparaissait) pendant que la liste revenait à sa position de
+  repos — `isRefreshing` repassait à `false` alors que la distance de tirage n'était pas encore revenue
+  à 0. Une garde « settling » masque l'amorce jusqu'au retour complet au repos (signalé par XaTriX).
+
+## `0.17.11` — `internal` (dev) — 2026-06-26
+
+> Polish dogfood : retour visuel au tirage du swipe-to-refresh. Build dev ; versionCode au dispatch.
+> versionName 0.17.10 → 0.17.11.
+
+**Drapeaux (#603)**
+
+- **Amorce au pull-to-refresh** : tirer la liste vers le bas affiche de nouveau un indicateur pendant
+  le geste (il avait été retiré), puis il s'efface dès que le rechargement démarre — la fine barre du
+  haut prend le relais (plus de double indicateur). Vaut pour les onglets de drapeaux et la liste DT.
+
+## `0.17.10` — `internal` (dev) — 2026-06-26
+
+> Lot 1 dogfood (4 sur 4) : le réglage des libellés de la barre du bas, dernier item du lot. Build dev ;
+> versionCode au dispatch. versionName 0.17.9 → 0.17.10.
+
+**Réglages / Navigation (#666)**
+
+- **Afficher / masquer les libellés de la barre du bas** : nouveau réglage dans *Réglages > Affichage >
+  Barre de navigation* (activé par défaut). Désactivé, la barre du bas n'affiche que les icônes (plus
+  compacte). Réglage global, persistant.
+
+## `0.17.9` — `internal` (dev) — 2026-06-26
+
+> Lot 1 dogfood (3 sur 4) : bugs swipe + navigation et icône de catégorie. Le réglage des libellés de
+> la barre du bas (#666) suivra dans une release dédiée. Build dev ; versionCode au dispatch.
+> versionName 0.17.8 → 0.17.9.
+
+**Drapeaux (#603)**
+
+- **Swipe entre onglets — animation du bon côté (#660)** : au changement d'onglet validé, le nouvel
+  onglet apparaît centré net au lieu de glisser depuis le mauvais côté.
+- **Swipe cyclique (#663)** : balayer au-delà du dernier onglet revient au premier (et inversement).
+- **Icône Intelligence Artificielle (#664)** : la catégorie IA (nouvelle sur HFR) a enfin son icône au
+  lieu du glyphe générique.
+
+**Navigation (#667)**
+
+- **Retour depuis un onglet secondaire** : à la racine des Réglages (ou Forum/Recherche/Messages), le
+  bouton retour revient à l'onglet précédent au lieu de fermer l'application.
+
+## `0.17.8` — `internal` (dev) — 2026-06-26
+
+> Polish dogfood : resserrage de l'espacement entre la barre de recherche et les bandes de catégorie
+> (preset D « minimal » validé par XaTriX sur l'inspecteur d'espacement). Build dev ; versionCode au
+> dispatch. versionName 0.17.7 → 0.17.8.
+
+**Drapeaux (#603)**
+
+- **Espacement resserré (vue groupée)** : l'air au-dessus et autour des bandes de catégorie était jugé
+  trop grand. Slot de la barre de chargement 10 → 4 dp, marge basse de la barre de recherche 8 → 2 dp
+  (la bande remonte sous la barre), hauteur min des bandes 44 → 34 dp et padding vertical → 4 dp.
+  La cible tactile de la bande passe sous la reco Material 48 dp / WCAG AAA 44 dp mais reste au-dessus
+  du plancher WCAG 2.2 AA (24 dp) — compromis densité assumé.
+
+## `0.17.7` — `internal` (dev) — 2026-06-26
+
+> Hotfix dogfood : le menu de réglages rapides ne défilait pas, rendant le sélecteur de style de bande
+> inaccessible. Build dev ; versionCode au dispatch. versionName 0.17.6 → 0.17.7.
+
+**Drapeaux (#603, #673)**
+
+- **Menu de réglages rapides scrollable** : le bottom sheet a grossi (marqueur, titre 1 ligne, style de
+  bande…) et débordait sans défiler — les options du bas (dont le style de bande) étaient injoignables sur
+  petits écrans. Le contenu défile désormais ; tout reste accessible.
+
+## `0.17.6` — `internal` (dev) — 2026-06-26
+
+> Suite dogfood : la barre de chargement décalait le contenu, et les états vides étaient hétérogènes.
+> Build dev ; versionCode au dispatch. versionName 0.17.5 → 0.17.6.
+
+**Drapeaux (#603)**
+
+- **Barre de chargement** (#671) : un slot de hauteur fixe lui est réservé sous la barre du haut — elle
+  n'apparaît/disparaît plus en décalant la liste et les bandes de catégorie. Le slot fait aussi office
+  d'espace dédié entre la search bar et le début de la liste.
+- **Messages d'état vide homogénéisés** (#662) : forme courte uniforme (« Aucun(e)… », sans point ni
+  instruction collée) ; le « Aucune conversation non lue » du DT ne traîne plus son rappel « re-tape ».
+
+## `0.17.5` — `internal` (dev) — 2026-06-26
+
+> Suite dogfood v184 : le rond de chargement persistait sur le pull-to-refresh manuel. Build dev ;
+> versionCode au dispatch. versionName 0.17.4 → 0.17.5. Codex GO + CI verte.
+
+**Drapeaux (#603, #659)**
+
+- **Plus aucun rond de chargement** : l'indicateur circulaire du pull-to-refresh est retiré
+  (`indicator = {}`) sur les onglets drapeaux ET DT. La fine barre de progression en haut devient
+  l'unique repère de chargement (manuel, auto et initial). Le geste swipe-down déclenche toujours le
+  refresh. Retrait du flag `isManualRefreshing` introduit en v184 (devenu inutile).
+
+## `0.17.4` — `internal` (dev) — 2026-06-26
+
+> Vue Drapeaux : 4 styles de bande de catégorie au choix (#656) + correction du rond de chargement à
+> l'auto-refresh (#657). Build dev ; versionCode au dispatch. versionName 0.17.3 → 0.17.4. Codex GO + CI verte.
+
+**Drapeaux (#603)**
+
+- **Styles de bande de catégorie au choix** (menu d'affichage, vue groupée) : Sobre (défaut, = l'actuel),
+  Bloc (bloc tonal), Accent (barre latérale + icône teintée), Puce (nom dans une pastille). Réglage global ;
+  les 2 styles d'origine transparents sont opacifiés pour le sticky header.
+- **Bug corrigé** : le rond de chargement (pull-to-refresh) ne s'affiche plus pendant l'auto-refresh
+  (atterrissage / changement d'onglet / retour) — seule la barre du haut reste. Le geste manuel garde son rond.
+
+## `0.17.3` — `internal` (dev) — 2026-06-25
+
+> Suite du dogfood 0.17.2 (#653 + #654). Build dev ; versionCode au dispatch. versionName 0.17.2 → 0.17.3.
+
+**Finitions (#653, #654)**
+
+- **Option « titre sur une seule ligne »** dans le menu d'affichage des Drapeaux : tronque le titre des
+  sujets à une ligne au lieu de deux (réglage global, via CompositionLocal).
+- **Bande de catégorie allégée** (vue groupée « par catégorie ») : sous-titre minimal (nom en capitales
+  espacées + filet fin) au lieu du bloc plein `surfaceVariant`, moins lourd.
+
+## `0.17.2` — `internal` (dev) — 2026-06-25
+
+> Polish #2 de la vue Drapeaux suite au dogfood 0.17.1 (#651). Build dev ; versionCode au dispatch.
+> versionName 0.17.1 → 0.17.2. Bug du menu rapide analysé + corrigé (Codex). CI verte.
+
+**Finitions (#651)**
+
+- **Couleurs retonées** (les valeurs HFR pures étaient criardes) : favori → vert-lime `#CDDC39`, DT →
+  fuchsia `#D500F9`, cyan/rouge reviennent aux tons Material.
+- **Icône du menu Drapeaux** : retour au glyphe propre (le drapeau pixel-art était trop brut à petite taille).
+- **Bug corrigé** : le menu de config rapide s'ouvrait tout seul en changeant de catégorie ou au retour.
+- « +lus » : libellé nettoyé (plus de point médian).
+- Liseré discret autour de l'avatar du compte.
+- Bandes de catégorie un peu moins hautes ; flèche « › » de catégorie à la bonne taille (était un bug).
+
+## `0.17.1` — `internal` (dev) — 2026-06-25
+
+> Polish de la vue Drapeaux suite au dogfood (#648). Build dev ; versionCode alloué au dispatch.
+> versionName bumpé 0.17.0 → 0.17.1 (évite le doublon F-Droid). Codex GO + CI verte.
+
+**Finitions (#648)**
+
+- **Couleurs des drapeaux** alignées sur les valeurs exactes des gifs HFR : cyan `#00FFFF`, rouge
+  `#FF0000`, favori `#F0F83F` (jaune-lime) ; nouveau **DT en fuchsia** `#FF00FF`.
+- **Icône d'ouverture du menu Drapeaux** = le drapeau de Redface 2 (vectorisé, teinté selon l'onglet),
+  à la place du glyphe Material générique.
+- **Barre de recherche sur une seule ligne** (plus de retour à la ligne du contenu).
+- **Suppression du bouton d'affichage en double** dans l'app bar — le menu s'ouvre en re-tapant
+  l'onglet Drapeaux de la barre du bas.
+- **Suppression du rond de chargement central** : la barre fine du haut couvre désormais aussi le
+  chargement initial.
+- La **barre de couleur épouse la hauteur de la ligne** (correct sur les titres 2 lignes).
+
+## `0.17.0` — `internal` (dev) — 2026-06-25
+
+> Build dev (Play internal « Redface 2 dev » + F-Droid .dev) ; versionCode alloué au dispatch par le
+> registre de tags git. versionName bumpé 0.16.0 → 0.17.0. Chaque PR du payload : review Codex + CI
+> verte ; passe de revue à 4 agents (opus) sur le code mergé, corrections appliquées (#643).
+
+Refonte complète de la **vue Drapeaux** (#603, ADR-017) — 8 PRs.
+
+**Nouveautés**
+
+- **Search app bar** « façon Réglages » : icône drapeau de l'onglet courant (sélecteur d'onglet),
+  barre de recherche (filtre client des drapeaux), photo de profil. Remplace l'ancien header + tab row.
+- **Liste refondue** : marqueur gauche configurable (**barre de couleur** par défaut, pastille à icône,
+  ou point), pastille « pages à lire », en-têtes de catégorie à vraies icônes Material Symbols.
+- **Appui long** sur un drapeau → **bottom sheet** : métadonnées du sujet (créateur, dernier répondant,
+  dates, position, réponses, catégorie), actions (ouvrir, copier le lien, navigateur), **super-favori
+  local**, retrait. Plus de choix de couleur.
+- **Barre de progression** M3 fine sous l'app bar pendant un chargement (manuel **et** auto-refresh).
+- **Menu de config rapide** : re-tap de l'onglet Drapeaux de la barre du bas → réglages d'affichage
+  (groupement, masquer lus, non-lus, **forme du marqueur**).
+
+**Interne** : modèle de présentation pur testé en `:core:model` ; ADR-017 + rapport des 4 spikes.
+
+**Différé** : hide-on-scroll, onglets configurables, densités avancées, indicateur « cité » (aucune
+source serveur — jamais simulé).
+
+## v179 — `0.16.0` — `open` (beta) — 2026-06-21
+
+> Shippé en bêta (Play open testing « committed » + F-Droid .beta) le 2026-06-21, tag `app-v179`.
+> versionName bumpé 0.15.0 → 0.16.0 ; versionCode alloué au dispatch par le registre de tags git.
+
+Bêta **0.16.0** (open testing) — consolide le dev depuis la bêta 0.15.0 (`v174`). Double review
+pré-promotion (Codex + workflow multi-flavors, 2 passes, **3 MAJOR corrigés**) ; chaque PR du payload
+déjà review Codex + CI verte.
 
 **Nouveautés**
 

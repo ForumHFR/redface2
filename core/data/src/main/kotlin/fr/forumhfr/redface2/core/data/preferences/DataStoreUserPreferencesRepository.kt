@@ -9,10 +9,15 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import fr.forumhfr.redface2.core.domain.coroutines.ApplicationScope
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
+import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
+import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
+import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
+import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
+import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenChoice
@@ -37,6 +42,12 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 
+// LargeClass — this is THE single DataStore-backed implementation of [UserPreferencesRepository]: every
+// app preference (theme, display, flags view, avatar #718, proxy, start screen…) is co-located here by
+// design, one observe/set pair per key. Splitting it by feature would fragment the DataStore wiring for
+// no real gain. Same stance as the project's other intentionally-large classes (PostEditorViewModel,
+// SettingsViewModel). Crossed the threshold when #718 added the avatar appearance.
+@Suppress("LargeClass")
 @Singleton
 class DataStoreUserPreferencesRepository @Inject constructor(
     @param:UserPreferencesDataStore private val dataStore: DataStore<Preferences>,
@@ -178,6 +189,69 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override suspend fun setFlagsMarkerStyle(style: MarkerStyle) {
+        // #603 PR6 — GLOBAL: a single key, no per-type variant. Persisted by name, read defensively.
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_FLAGS_MARKER_STYLE] = style.name
+            }
+        }
+    }
+
+    override suspend fun setFlagsSingleLineTitle(enabled: Boolean) {
+        // #603 — GLOBAL toggle, a single key (mirrors the marker shape).
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_FLAGS_SINGLE_LINE_TITLE] = enabled
+            }
+        }
+    }
+
+    override suspend fun setFlagsCategoryBandStyle(style: CategoryBandStyle) {
+        // #603 — GLOBAL: a single key, no per-type variant. Persisted by name, read defensively.
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_FLAGS_CATEGORY_BAND_STYLE] = style.name
+            }
+        }
+    }
+
+    override suspend fun setFlagsMarkerBorder(enabled: Boolean) {
+        // #690 — GLOBAL toggle, a single key (mirrors the marker shape).
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_FLAGS_MARKER_BORDER] = enabled
+            }
+        }
+    }
+
+    override suspend fun setFlagsShowLoadingBar(enabled: Boolean) {
+        // #728 — GLOBAL toggle, a single key (mirrors the marker outline toggle).
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_FLAGS_SHOW_LOADING_BAR] = enabled
+            }
+        }
+    }
+
+    override suspend fun setFlagsPlusLusIndicatorStyle(style: PlusLusIndicatorStyle) {
+        // #661 — GLOBAL: a single key, no per-type variant. Persisted by name, read defensively.
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_FLAGS_PLUS_LUS_INDICATOR_STYLE] = style.name
+            }
+        }
+    }
+
+    override suspend fun setFlagsGlyphStyle(style: FlagGlyphStyle) {
+        // #603/#665 — GLOBAL: a single key, no per-type variant. Persisted by name, read defensively.
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_FLAGS_GLYPH_STYLE] = style.name
+            }
+        }
+    }
+
     override fun observeThemeMode(): Flow<ThemeMode> =
         dataStore.data
             // Default SYSTEM: follow the OS dark-mode setting unless the user picked otherwise (#286).
@@ -305,6 +379,25 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeAvatarAppearance(): Flow<AvatarAppearance> =
+        dataStore.data
+            .map { prefs ->
+                AvatarAppearance(
+                    border = prefs[KEY_AVATAR_BORDER] ?: false,
+                )
+            }
+            .distinctUntilChanged()
+            .catch { emit(AvatarAppearance()) }
+
+    override suspend fun setAvatarBorder(enabled: Boolean) {
+        // #718 — GLOBAL toggle, a single key (mirrors the marker outline toggle).
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_AVATAR_BORDER] = enabled
+            }
+        }
+    }
+
     override fun observeFlagsAutoRefresh(): Flow<Boolean> =
         dataStore.data
             // Default `true`: the lists going stale is the #378 complaint — the toggle is an
@@ -396,6 +489,38 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         persist {
             dataStore.edit { prefs ->
                 prefs[KEY_SHOW_SCROLLBAR] = enabled
+            }
+        }
+    }
+
+    override fun observeNavBarLabels(): Flow<Boolean> =
+        dataStore.data
+            // Default `true` (#666): labels under the bottom-nav icons are the historical M3
+            // behaviour; hiding them is the opt-out to an icon-only bar.
+            .map { prefs -> prefs[KEY_NAV_BAR_LABELS] ?: true }
+            .distinctUntilChanged()
+            .catch { emit(true) }
+
+    override suspend fun setNavBarLabels(enabled: Boolean) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_NAV_BAR_LABELS] = enabled
+            }
+        }
+    }
+
+    override fun observeFunnyEmptyState(): Flow<Boolean> =
+        dataStore.data
+            // Default `false` (#662): the sober style-A empty state is the default; the smiley wink
+            // is an explicit opt-in.
+            .map { prefs -> prefs[KEY_FLAGS_FUNNY_EMPTY_STATE] ?: false }
+            .distinctUntilChanged()
+            .catch { emit(false) }
+
+    override suspend fun setFunnyEmptyState(enabled: Boolean) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_FLAGS_FUNNY_EMPTY_STATE] = enabled
             }
         }
     }
@@ -686,19 +811,88 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val globalHide = prefs[KEY_FLAGS_HIDE_READ_CATEGORIES] ?: false
         // #317 — unreadOnly is always per-type with a type-aware default (CYAN actionable by default).
         val unreadOnly = prefs[flagsUnreadOnlyKey(type)] ?: defaultUnreadOnly(type)
+        // #603 PR6 — marker shape is GLOBAL: resolved once, added to both return paths regardless of
+        // the per-tab override.
+        val markerStyle = readMarkerStyle(prefs)
+        // #603 — GLOBAL « single-line titles » toggle: resolved once, added to both return paths.
+        val singleLineTitle = prefs[KEY_FLAGS_SINGLE_LINE_TITLE] ?: false
+        // #603 — GLOBAL category band style: resolved once (defensively), added to both return paths.
+        val categoryBandStyle = readCategoryBandStyle(prefs)
+        // #690 — GLOBAL « marker outline » toggle: resolved once, added to both return paths.
+        val markerBorder = prefs[KEY_FLAGS_MARKER_BORDER] ?: false
+        // #661 — GLOBAL « +lus » indicator style: resolved once (defensively), added to both return paths.
+        val plusLusIndicatorStyle = readPlusLusIndicatorStyle(prefs)
+        // #603/#665 — GLOBAL left-container glyph style: resolved once (defensively), both return paths.
+        val flagGlyphStyle = readFlagGlyphStyle(prefs)
+        // #728 — GLOBAL « afficher la barre de chargement » toggle: resolved once, added to both paths.
+        val showLoadingBar = prefs[KEY_FLAGS_SHOW_LOADING_BAR] ?: true
         if (prefs[KEY_FLAGS_PER_TAB_OVERRIDE] != true) {
             return FlagsViewSettings(
                 groupByCategory = globalGroup,
                 hideReadCategories = globalHide,
                 unreadOnly = unreadOnly,
+                markerStyle = markerStyle,
+                singleLineTitle = singleLineTitle,
+                categoryBandStyle = categoryBandStyle,
+                markerBorder = markerBorder,
+                plusLusIndicatorStyle = plusLusIndicatorStyle,
+                flagGlyphStyle = flagGlyphStyle,
+                showLoadingBar = showLoadingBar,
             )
         }
         return FlagsViewSettings(
             groupByCategory = prefs[flagsGroupByCategoryKey(type)] ?: globalGroup,
             hideReadCategories = prefs[flagsHideReadCategoriesKey(type)] ?: globalHide,
             unreadOnly = unreadOnly,
+            markerStyle = markerStyle,
+            singleLineTitle = singleLineTitle,
+            categoryBandStyle = categoryBandStyle,
+            markerBorder = markerBorder,
+            plusLusIndicatorStyle = plusLusIndicatorStyle,
+            flagGlyphStyle = flagGlyphStyle,
+            showLoadingBar = showLoadingBar,
         )
     }
+
+    /**
+     * Reads [KEY_FLAGS_MARKER_STYLE] defensively (#603 PR6): an unknown / corrupt stored value falls
+     * back to [MarkerStyle.STRIPE] instead of crashing on `MarkerStyle.valueOf` — same stance as the
+     * theme / density / accent enum reads.
+     */
+    private fun readMarkerStyle(prefs: Preferences): MarkerStyle =
+        prefs[KEY_FLAGS_MARKER_STYLE]
+            ?.let { stored -> runCatching { MarkerStyle.valueOf(stored) }.getOrNull() }
+            ?: MarkerStyle.STRIPE
+
+    /**
+     * Reads [KEY_FLAGS_CATEGORY_BAND_STYLE] defensively (#603): an unknown / corrupt stored value
+     * falls back to [CategoryBandStyle.MINIMAL] instead of crashing on `CategoryBandStyle.valueOf` —
+     * same stance as [readMarkerStyle].
+     */
+    private fun readCategoryBandStyle(prefs: Preferences): CategoryBandStyle =
+        prefs[KEY_FLAGS_CATEGORY_BAND_STYLE]
+            ?.let { stored -> runCatching { CategoryBandStyle.valueOf(stored) }.getOrNull() }
+            ?: CategoryBandStyle.MINIMAL
+
+    /**
+     * Reads [KEY_FLAGS_PLUS_LUS_INDICATOR_STYLE] defensively (#661/#603): an unknown / corrupt stored
+     * value falls back to [PlusLusIndicatorStyle.Ring] (the default) instead of crashing on
+     * `PlusLusIndicatorStyle.valueOf` — same stance as [readMarkerStyle].
+     */
+    private fun readPlusLusIndicatorStyle(prefs: Preferences): PlusLusIndicatorStyle =
+        prefs[KEY_FLAGS_PLUS_LUS_INDICATOR_STYLE]
+            ?.let { stored -> runCatching { PlusLusIndicatorStyle.valueOf(stored) }.getOrNull() }
+            ?: PlusLusIndicatorStyle.Ring
+
+    /**
+     * Reads [KEY_FLAGS_GLYPH_STYLE] defensively (#603/#665): an unknown / corrupt stored value falls
+     * back to [FlagGlyphStyle.Flag] instead of crashing on `FlagGlyphStyle.valueOf` — same stance as
+     * [readMarkerStyle].
+     */
+    private fun readFlagGlyphStyle(prefs: Preferences): FlagGlyphStyle =
+        prefs[KEY_FLAGS_GLYPH_STYLE]
+            ?.let { stored -> runCatching { FlagGlyphStyle.valueOf(stored) }.getOrNull() }
+            ?: FlagGlyphStyle.Flag
 
     /**
      * Type-aware default for the #317 « non-lus uniquement » filter: CYAN (« Mes sujets ») shows the
@@ -724,6 +918,25 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val KEY_IGNORE_TOPIC_CACHE = booleanPreferencesKey("ignore_topic_cache")
         val KEY_FLAGS_GROUP_BY_CATEGORY = booleanPreferencesKey("flags_group_by_category")
         val KEY_FLAGS_HIDE_READ_CATEGORIES = booleanPreferencesKey("flags_hide_read_categories")
+        // #603 PR6 — GLOBAL Drapeaux marker shape (MarkerStyle.name, defensively parsed). No per-type
+        // variant: one shape for every tab, independent of the #309 per-tab override.
+        val KEY_FLAGS_MARKER_STYLE = stringPreferencesKey("flags_marker_style")
+        // #603 — GLOBAL « single-line topic titles » toggle (one for every tab).
+        val KEY_FLAGS_SINGLE_LINE_TITLE = booleanPreferencesKey("flags_single_line_title")
+        // #603 — GLOBAL grouped-view category band style (CategoryBandStyle.name, defensively parsed).
+        val KEY_FLAGS_CATEGORY_BAND_STYLE = stringPreferencesKey("flags_category_band_style")
+        // #690 — GLOBAL « marker outline » toggle (thin dark border around the marker).
+        val KEY_FLAGS_MARKER_BORDER = booleanPreferencesKey("flags_marker_border")
+        // #728 — GLOBAL « afficher la barre de chargement » toggle (thin top bar on auto / cold loads).
+        val KEY_FLAGS_SHOW_LOADING_BAR = booleanPreferencesKey("flags_show_loading_bar")
+        // #718 — GLOBAL account-avatar border toggle (thin outline around the top-bar « PP » badge).
+        val KEY_AVATAR_BORDER = booleanPreferencesKey("avatar_border")
+        // #661 — GLOBAL « +lus » indicator style (PlusLusIndicatorStyle.name, defensively parsed).
+        val KEY_FLAGS_PLUS_LUS_INDICATOR_STYLE = stringPreferencesKey("flags_plus_lus_indicator_style")
+        // #603/#665 — GLOBAL left-container glyph style (FlagGlyphStyle.name, defensively parsed).
+        val KEY_FLAGS_GLYPH_STYLE = stringPreferencesKey("flags_glyph_style")
+        // #662 — « états vides humoristiques » opt-in (smiley empty state instead of the sober icon).
+        val KEY_FLAGS_FUNNY_EMPTY_STATE = booleanPreferencesKey("flags_funny_empty_state")
         // #309 — per-tab display override. The master switch plus one nullable key per FlagType for
         // each toggle; absence of a per-type key means « fall back to the global value ». Keys are
         // derived from the stable enum name (cyan/red/favorite), e.g. `flags_group_by_category_cyan`.
@@ -773,6 +986,9 @@ class DataStoreUserPreferencesRepository @Inject constructor(
 
         // #105 — show the intra-page reading scrollbar (default true = historical; opt-out).
         val KEY_SHOW_SCROLLBAR = booleanPreferencesKey("show_scrollbar")
+
+        // #666 — show the labels under the bottom-nav icons (default true = historical; opt-out).
+        val KEY_NAV_BAR_LABELS = booleanPreferencesKey("nav_bar_labels")
 
         // #458 — cold-start tab (StartScreenChoice.name, defensively parsed) + optional Forum
         // category id (absent unless screen == FORUM and a category was picked).

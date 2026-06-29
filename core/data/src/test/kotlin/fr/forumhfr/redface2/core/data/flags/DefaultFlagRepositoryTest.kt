@@ -255,12 +255,164 @@ class DefaultFlagRepositoryTest {
     }
 
     @Test
+    fun `loadCategories takes a fresh catalogue so a newly added category's flags are fetched - 251`() = runTest {
+        // #251 — a category added to HFR after the 24h categories cache was warmed (e.g. cat 32
+        // « IA ») must still have its drapeaux fetched. The fan-out previously read
+        // observeCategories()'s STALE leading emission and silently skipped the new category, so
+        // its cyans were invisible. It now asks for a guaranteed-fresh catalogue.
+        // sampleCategories (13, 23) is the stale catalogue without cat 32; the fan-out must instead
+        // enumerate the FRESH catalogue returned by getCategories(forceRefreshIfStale = true).
+        val freshCatalogue = sampleCategories +
+            Category(id = 32, name = "Intelligence Artificielle", forceSubcat = false, subcategoryCount = 1)
+        val apiClient = mockk<HfrApiClient>()
+        val forumRepository = mockk<ForumRepository>()
+        coEvery { forumRepository.getCategories(forceRefreshIfStale = true) } returns
+            ForumResult.Success(freshCatalogue)
+        // Only the newly-added cat 32 carries a flagged topic; the rest are empty.
+        coEvery {
+            apiClient.getCategoryFlagTopics(
+                cat = 13, bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true,
+            )
+        } returns EMPTY_PAGE
+        coEvery {
+            apiClient.getCategoryFlagTopics(
+                cat = 23, bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true,
+            )
+        } returns EMPTY_PAGE
+        coEvery {
+            apiClient.getCategoryFlagTopics(
+                cat = 32, bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true,
+            )
+        } returns capturedParticipatedFixture
+        val repo = buildRepository(apiClient, forumRepository)
+
+        repo.observe(FlagType.CYAN).test {
+            assertEquals(FlagsResult.Loading, awaitItem())
+            val success = awaitItem() as FlagsResult.Success
+            assertEquals("the flag from the newly-added category must be present", 1, success.flags.size)
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify {
+            apiClient.getCategoryFlagTopics(
+                cat = 32, bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = 1, resultsPerPage = 50, useAuth = true,
+            )
+        }
+    }
+
+    @Test
+    fun `a flagged sticky dropped by the bucket is recovered from topics-last - 251`() = runTest {
+        // #251 — cat 32 « IA » has no subcategory; the REST flag bucket OMITS its flagged STICKY
+        // topic (the « Règles » sticky carries a cyan flag yet is absent from topics/participated/).
+        // The topics/last supplement must recover it (fixture: sticky id=1, flag_owntopic=1, unread).
+        val catalogue = listOf(
+            Category(id = 32, name = "Intelligence Artificielle", forceSubcat = false, subcategoryCount = 0),
+        )
+        val apiClient = mockk<HfrApiClient>()
+        coEvery {
+            apiClient.getCategoryFlagTopics(
+                cat = 32, bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true,
+            )
+        } returns EMPTY_PAGE
+        coEvery {
+            apiClient.getTopicList(cat = 32, subcat = null, page = any(), resultsPerPage = any(), useAuth = true)
+        } returns fixture("rest_cat32_topics_last_sticky.json")
+        val repo = buildRepository(apiClient, stubForumRepository(catalogue))
+
+        repo.observe(FlagType.CYAN).test {
+            assertEquals(FlagsResult.Loading, awaitItem())
+            val success = awaitItem() as FlagsResult.Success
+            val sticky = success.flags.single { it.cat == 32 && it.topicId == 1 }
+            assertEquals(FlagType.CYAN, sticky.type)
+            assertTrue("is_read=false ⇒ the recovered sticky is unread", sticky.hasUnread)
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify {
+            apiClient.getTopicList(cat = 32, subcat = null, page = 1, resultsPerPage = 50, useAuth = true)
+        }
+    }
+
+    @Test
+    fun `a sticky already returned by the bucket is not duplicated by the supplement - 251`() = runTest {
+        // #251 — dedup by (cat, topicId): if a no-subcat cat's bucket DID return the sticky, the
+        // topics/last supplement must not add a second copy.
+        val catalogue = listOf(
+            Category(id = 32, name = "Intelligence Artificielle", forceSubcat = false, subcategoryCount = 0),
+        )
+        val apiClient = mockk<HfrApiClient>()
+        coEvery {
+            apiClient.getCategoryFlagTopics(
+                cat = 32, bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true,
+            )
+        } returns CAT32_STICKY_BUCKET_PAGE
+        coEvery {
+            apiClient.getTopicList(cat = 32, subcat = null, page = any(), resultsPerPage = any(), useAuth = true)
+        } returns fixture("rest_cat32_topics_last_sticky.json")
+        val repo = buildRepository(apiClient, stubForumRepository(catalogue))
+
+        repo.observe(FlagType.CYAN).test {
+            assertEquals(FlagsResult.Loading, awaitItem())
+            val success = awaitItem() as FlagsResult.Success
+            assertEquals(
+                "the sticky must appear exactly once (bucket + supplement deduped)",
+                1,
+                success.flags.count { it.cat == 32 && it.topicId == 1 },
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a topics-last failure in the supplement does not fail the whole refresh - 251`() = runTest {
+        // #251 — the supplement is best-effort and OUTSIDE the bucket fan-out's fail-all contract:
+        // a topics/last failure for a no-subcat cat must NOT turn the screen into a "Réessayer" error;
+        // the bucket results still surface.
+        val catalogue = listOf(
+            Category(id = 23, name = "Technologies Mobiles", forceSubcat = true, subcategoryCount = 10),
+            Category(id = 32, name = "Intelligence Artificielle", forceSubcat = false, subcategoryCount = 0),
+        )
+        val apiClient = mockk<HfrApiClient>()
+        coEvery {
+            apiClient.getCategoryFlagTopics(
+                cat = 23, bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true,
+            )
+        } returns capturedParticipatedFixture
+        coEvery {
+            apiClient.getCategoryFlagTopics(
+                cat = 32, bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true,
+            )
+        } returns EMPTY_PAGE
+        coEvery {
+            apiClient.getTopicList(cat = 32, subcat = null, page = any(), resultsPerPage = any(), useAuth = true)
+        } throws RuntimeException("topics/last boom")
+        val repo = buildRepository(apiClient, stubForumRepository(catalogue))
+
+        repo.observe(FlagType.CYAN).test {
+            assertEquals(FlagsResult.Loading, awaitItem())
+            val success = awaitItem() as FlagsResult.Success
+            assertTrue(
+                "the bucket flag from cat 23 survives the supplement failure",
+                success.flags.any { it.cat == 23 },
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `observe emits Failure when categories cannot be loaded`() = runTest {
         val apiClient = mockk<HfrApiClient>(relaxed = true)
         val forumRepository = mockk<ForumRepository>()
-        coEvery { forumRepository.observeCategories() } returns flowOf(
-            ForumResult.Failure(IOException("HFR down")),
-        )
+        coEvery { forumRepository.getCategories(any()) } returns
+            ForumResult.Failure(IOException("HFR down"))
         val repo = buildRepository(apiClient, forumRepository)
 
         repo.observe(FlagType.CYAN).test {
@@ -875,6 +1027,7 @@ class DefaultFlagRepositoryTest {
     private fun stubForumRepository(categories: List<Category>): ForumRepository {
         val repo = mockk<ForumRepository>()
         coEvery { repo.observeCategories() } returns flowOf(ForumResult.Success(categories))
+        coEvery { repo.getCategories(any()) } returns ForumResult.Success(categories)
         return repo
     }
 
@@ -975,6 +1128,29 @@ class DefaultFlagRepositoryTest {
                 "results_count": 0,
                 "results_per_page": 50,
                 "resources": []
+              }
+            }
+        """
+
+        // #251 dedup test — a participated-bucket page that DOES contain the cat 32 sticky (id=1), so
+        // the (cat, topicId) dedup must drop the topics/last supplement's copy. Test stub (same kind
+        // as EMPTY_PAGE), not a captured fixture: the real bucket drops this sticky (that's the bug).
+        const val CAT32_STICKY_BUCKET_PAGE = """
+            {
+              "resource": {
+                "page": 1,
+                "results_count": 1,
+                "results_per_page": 50,
+                "resources": [
+                  {
+                    "id": 1,
+                    "title": "[Règles de la catégorie IA]",
+                    "is_sticky": true,
+                    "is_read": false,
+                    "flag_owntopic": 1,
+                    "links": {}
+                  }
+                ]
               }
             }
         """

@@ -9,7 +9,11 @@ import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
+import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
+import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
+import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
+import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenChoice
@@ -384,6 +388,246 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `markerStyle defaults to STRIPE on an empty store`() = runTest(dispatcher) {
+        repository.observeFlagsViewSettings(FlagType.CYAN).test {
+            assertEquals(MarkerStyle.STRIPE, awaitItem().markerStyle)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setFlagsMarkerStyle persists and round-trips PASTILLE then DOT for every tab`() = runTest(dispatcher) {
+        // GLOBAL: written once, observed on any tab type.
+        repository.setFlagsMarkerStyle(MarkerStyle.PASTILLE)
+        repository.observeFlagsViewSettings(FlagType.RED).test {
+            assertEquals(MarkerStyle.PASTILLE, awaitItem().markerStyle)
+            cancelAndIgnoreRemainingEvents()
+        }
+        repository.setFlagsMarkerStyle(MarkerStyle.DOT)
+        repository.observeFlagsViewSettings(FlagType.FAVORITE).test {
+            assertEquals(MarkerStyle.DOT, awaitItem().markerStyle)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `corrupt flags_marker_style value falls back to STRIPE instead of crashing`() = runTest(dispatcher) {
+        // A value from an older build / manual edit that no longer maps to a MarkerStyle must not
+        // crash observeFlagsViewSettings on MarkerStyle.valueOf — it degrades to STRIPE.
+        dataStore.edit { prefs -> prefs[stringPreferencesKey("flags_marker_style")] = "WAVY" }
+
+        repository.observeFlagsViewSettings(FlagType.CYAN).test {
+            assertEquals(MarkerStyle.STRIPE, awaitItem().markerStyle)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `markerBorder defaults to false on an empty store`() = runTest(dispatcher) {
+        repository.observeFlagsViewSettings(FlagType.CYAN).test {
+            assertEquals(false, awaitItem().markerBorder)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setFlagsMarkerBorder persists and round-trips for every tab`() = runTest(dispatcher) {
+        // #690 GLOBAL: written once, observed on any tab type.
+        repository.setFlagsMarkerBorder(true)
+        repository.observeFlagsViewSettings(FlagType.RED).test {
+            assertEquals(true, awaitItem().markerBorder)
+            cancelAndIgnoreRemainingEvents()
+        }
+        repository.setFlagsMarkerBorder(false)
+        repository.observeFlagsViewSettings(FlagType.FAVORITE).test {
+            assertEquals(false, awaitItem().markerBorder)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `singleLineTitle defaults to false on an empty store`() = runTest(dispatcher) {
+        // #603 GLOBAL: titles wrap to 2 lines by default; the single-line ellipsis is the opt-in.
+        repository.observeFlagsViewSettings(FlagType.CYAN).test {
+            assertEquals(false, awaitItem().singleLineTitle)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setFlagsSingleLineTitle persists and round-trips for every tab`() = runTest(dispatcher) {
+        // #603 GLOBAL: written once, observed on any tab type.
+        repository.setFlagsSingleLineTitle(true)
+        repository.observeFlagsViewSettings(FlagType.RED).test {
+            assertEquals(true, awaitItem().singleLineTitle)
+            cancelAndIgnoreRemainingEvents()
+        }
+        repository.setFlagsSingleLineTitle(false)
+        repository.observeFlagsViewSettings(FlagType.FAVORITE).test {
+            assertEquals(false, awaitItem().singleLineTitle)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `showLoadingBar defaults to true on an empty store`() = runTest(dispatcher) {
+        // #728 GLOBAL: the thin top loading bar is shown by default (opt-out).
+        repository.observeFlagsViewSettings(FlagType.CYAN).test {
+            assertEquals(true, awaitItem().showLoadingBar)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setFlagsShowLoadingBar persists and round-trips for every tab`() = runTest(dispatcher) {
+        // #728 GLOBAL: written once, observed on any tab type.
+        repository.setFlagsShowLoadingBar(false)
+        repository.observeFlagsViewSettings(FlagType.RED).test {
+            assertEquals(false, awaitItem().showLoadingBar)
+            cancelAndIgnoreRemainingEvents()
+        }
+        repository.setFlagsShowLoadingBar(true)
+        repository.observeFlagsViewSettings(FlagType.FAVORITE).test {
+            assertEquals(true, awaitItem().showLoadingBar)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `avatar appearance defaults to borderless on an empty store`() = runTest(dispatcher) {
+        // #718 GLOBAL: borderless by default (the #603/#665 look).
+        repository.observeAvatarAppearance().test {
+            val appearance = awaitItem()
+            assertEquals(false, appearance.border)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setAvatarBorder persists and round-trips`() = runTest(dispatcher) {
+        // #718 GLOBAL: a single key, surfaced as the bundled AvatarAppearance (border only since #718).
+        repository.setAvatarBorder(true)
+        repository.observeAvatarAppearance().test {
+            val appearance = awaitItem()
+            assertEquals(true, appearance.border)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `plusLusIndicatorStyle defaults to Ring on an empty store`() = runTest(dispatcher) {
+        repository.observeFlagsViewSettings(FlagType.CYAN).test {
+            assertEquals(PlusLusIndicatorStyle.Ring, awaitItem().plusLusIndicatorStyle)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setFlagsPlusLusIndicatorStyle persists and round-trips Ring then Eye for every tab`() =
+        runTest(dispatcher) {
+            // #661 GLOBAL: written once, observed on any tab type.
+            repository.setFlagsPlusLusIndicatorStyle(PlusLusIndicatorStyle.Ring)
+            repository.observeFlagsViewSettings(FlagType.RED).test {
+                assertEquals(PlusLusIndicatorStyle.Ring, awaitItem().plusLusIndicatorStyle)
+                cancelAndIgnoreRemainingEvents()
+            }
+            repository.setFlagsPlusLusIndicatorStyle(PlusLusIndicatorStyle.Eye)
+            repository.observeFlagsViewSettings(FlagType.FAVORITE).test {
+                assertEquals(PlusLusIndicatorStyle.Eye, awaitItem().plusLusIndicatorStyle)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `corrupt flags_plus_lus_indicator_style value falls back to Ring instead of crashing`() =
+        runTest(dispatcher) {
+            // An unknown value from an older build / manual edit must not crash
+            // observeFlagsViewSettings on PlusLusIndicatorStyle.valueOf — it degrades to Ring (default).
+            dataStore.edit { prefs ->
+                prefs[stringPreferencesKey("flags_plus_lus_indicator_style")] = "STAR"
+            }
+
+            repository.observeFlagsViewSettings(FlagType.CYAN).test {
+                assertEquals(PlusLusIndicatorStyle.Ring, awaitItem().plusLusIndicatorStyle)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `flagGlyphStyle defaults to Flag on an empty store`() = runTest(dispatcher) {
+        repository.observeFlagsViewSettings(FlagType.CYAN).test {
+            assertEquals(FlagGlyphStyle.Flag, awaitItem().flagGlyphStyle)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setFlagsGlyphStyle persists and round-trips Dot then Flag for every tab`() =
+        runTest(dispatcher) {
+            // #603/#665 GLOBAL: written once, observed on any tab type.
+            repository.setFlagsGlyphStyle(FlagGlyphStyle.Dot)
+            repository.observeFlagsViewSettings(FlagType.RED).test {
+                assertEquals(FlagGlyphStyle.Dot, awaitItem().flagGlyphStyle)
+                cancelAndIgnoreRemainingEvents()
+            }
+            repository.setFlagsGlyphStyle(FlagGlyphStyle.Flag)
+            repository.observeFlagsViewSettings(FlagType.FAVORITE).test {
+                assertEquals(FlagGlyphStyle.Flag, awaitItem().flagGlyphStyle)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `corrupt flags_glyph_style value falls back to Flag instead of crashing`() =
+        runTest(dispatcher) {
+            // An unknown value from an older build / manual edit must not crash
+            // observeFlagsViewSettings on FlagGlyphStyle.valueOf — it degrades to Flag.
+            dataStore.edit { prefs ->
+                prefs[stringPreferencesKey("flags_glyph_style")] = "SQUARE"
+            }
+
+            repository.observeFlagsViewSettings(FlagType.CYAN).test {
+                assertEquals(FlagGlyphStyle.Flag, awaitItem().flagGlyphStyle)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `categoryBandStyle defaults to MINIMAL on an empty store`() = runTest(dispatcher) {
+        repository.observeFlagsViewSettings(FlagType.CYAN).test {
+            assertEquals(CategoryBandStyle.MINIMAL, awaitItem().categoryBandStyle)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setFlagsCategoryBandStyle persists and round-trips SOFT then BULLET for every tab`() = runTest(dispatcher) {
+        // GLOBAL: written once, observed on any tab type.
+        repository.setFlagsCategoryBandStyle(CategoryBandStyle.SOFT)
+        repository.observeFlagsViewSettings(FlagType.RED).test {
+            assertEquals(CategoryBandStyle.SOFT, awaitItem().categoryBandStyle)
+            cancelAndIgnoreRemainingEvents()
+        }
+        repository.setFlagsCategoryBandStyle(CategoryBandStyle.BULLET)
+        repository.observeFlagsViewSettings(FlagType.FAVORITE).test {
+            assertEquals(CategoryBandStyle.BULLET, awaitItem().categoryBandStyle)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `corrupt flags_category_band_style value falls back to MINIMAL instead of crashing`() = runTest(dispatcher) {
+        // A value from an older build / manual edit that no longer maps to a CategoryBandStyle must
+        // not crash observeFlagsViewSettings on CategoryBandStyle.valueOf — it degrades to MINIMAL.
+        dataStore.edit { prefs -> prefs[stringPreferencesKey("flags_category_band_style")] = "RAINBOW" }
+
+        repository.observeFlagsViewSettings(FlagType.CYAN).test {
+            assertEquals(CategoryBandStyle.MINIMAL, awaitItem().categoryBandStyle)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `observeThemeMode defaults to SYSTEM on an empty store`() = runTest(dispatcher) {
         // #286 — SYSTEM is the default (follow the OS), never the enum's first ordinal.
         repository.observeThemeMode().test {
@@ -603,6 +847,48 @@ class DataStoreUserPreferencesRepositoryTest {
         repository.setShowScrollbar(true)
         repository.observeShowScrollbar().test {
             assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observeNavBarLabels defaults to true then persists false and true`() = runTest(dispatcher) {
+        // #666 — labels under the bottom-nav icons are the historical M3 behaviour; hiding them is the opt-out.
+        repository.observeNavBarLabels().test {
+            assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setNavBarLabels(false)
+        repository.observeNavBarLabels().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setNavBarLabels(true)
+        repository.observeNavBarLabels().test {
+            assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observeFunnyEmptyState defaults to false then persists true and false`() = runTest(dispatcher) {
+        // #662 — the sober style-A empty state is the default; the smiley wink is strictly opt-in.
+        repository.observeFunnyEmptyState().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setFunnyEmptyState(true)
+        repository.observeFunnyEmptyState().test {
+            assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setFunnyEmptyState(false)
+        repository.observeFunnyEmptyState().test {
+            assertFalse(awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
     }

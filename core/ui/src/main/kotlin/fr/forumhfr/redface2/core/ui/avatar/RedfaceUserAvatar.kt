@@ -40,6 +40,7 @@ import coil3.request.ImageRequest
  * use this component.
  */
 @Composable
+@Suppress("LongParameterList") // Shared avatar component: each optional has a distinct call-site need.
 fun RedfaceUserAvatar(
     avatarUrl: String?,
     author: String,
@@ -50,8 +51,11 @@ fun RedfaceUserAvatar(
     // "Interlocuteurs multiples" and "Avatar de Interlocuteurs multiples" would read wrong.
     // `null` keeps the default "Avatar de <author>" derivation.
     contentDescriptionOverride: String? = null,
+    // #603/#665 — shape of the avatar. Defaults to the HFR-web rounded square used in post headers;
+    // the global account badge (top-bar « PP ») passes [androidx.compose.foundation.shape.CircleShape]
+    // so the profile picture reads as a round avatar (XaTriX, top-bar redesign vision).
+    shape: Shape = RoundedCornerShape(AVATAR_CORNER_RADIUS),
 ) {
-    val shape = RoundedCornerShape(AVATAR_CORNER_RADIUS)
     val initial = author.firstOrNull()?.uppercaseChar()?.toString().orEmpty()
     // Same localized "Avatar de <pseudo>" string for both branches so TalkBack reads the
     // same sentence whether the avatar URL was provided or not (Codex rereview on PR #207

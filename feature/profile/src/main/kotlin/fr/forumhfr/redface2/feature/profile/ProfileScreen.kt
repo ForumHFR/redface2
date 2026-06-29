@@ -46,10 +46,9 @@ import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
  * A [ProfileViewModel] is created via Hilt AssistedInject with a custom factory that
  * receives these arguments at construction time.
  *
- * TODO(profile): the sheet ↔ full-page transition currently builds two ProfileViewModel
- *  instances and fires two network calls — see KDoc on [fr.forumhfr.redface2.navigation
- *  .ProfileFullRoute]. A caching follow-up will land after this work (no issue opened yet
- *  to keep this PR focused).
+ * Known limitation (tracked by #625): the sheet ↔ full-page transition currently builds two
+ *  ProfileViewModel instances and fires two network calls — see KDoc on [fr.forumhfr.redface2
+ *  .navigation.ProfileFullRoute]. A caching follow-up will land after this work.
  *
  * @param onBack  Navigation callback — pops back to the previous screen.
  * @param onShowUserPosts  Navigation callback for « Derniers messages » — pushes the

@@ -216,7 +216,45 @@ fun SettingsDisplayScreen(
             if (state.immersiveNavBarRevealError) {
                 PreferencePersistError(R.string.settings_display_nav_bar_reveal_persist_failed)
             }
+
+            // #666 — bottom navigation bar labels. Extracted to keep SettingsDisplayScreen under
+            // detekt's cyclomatic-complexity budget (same rationale as AccentColorSetting).
+            NavBarLabelsSetting(
+                checked = state.navBarLabels,
+                enabled = state.canToggleNavBarLabels,
+                error = state.navBarLabelsError,
+                onCheckedChange = { viewModel.submit(SettingsIntent.NavBarLabelsChanged(it)) },
+            )
         }
+    }
+}
+
+/**
+ * #666 — bottom navigation bar labels toggle. Extracted from [SettingsDisplayScreen] so the host stays
+ * under detekt's cyclomatic-complexity budget; emits a section title, the toggle and the persist-error
+ * line into the caller's Column.
+ */
+@Composable
+private fun NavBarLabelsSetting(
+    checked: Boolean,
+    enabled: Boolean,
+    error: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Text(
+        text = stringResource(R.string.settings_display_nav_bar_section_title),
+        style = MaterialTheme.typography.titleMedium,
+        color = MaterialTheme.colorScheme.onSurface,
+    )
+    DisplayToggleRow(
+        title = stringResource(R.string.settings_display_nav_bar_labels_title),
+        description = stringResource(R.string.settings_display_nav_bar_labels_description),
+        checked = checked,
+        enabled = enabled,
+        onCheckedChange = onCheckedChange,
+    )
+    if (error) {
+        PreferencePersistError(R.string.settings_display_nav_bar_labels_persist_failed)
     }
 }
 

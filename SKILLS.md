@@ -20,6 +20,10 @@ Le source of truth des règles projet est [`AGENTS.md`](AGENTS.md).
 | `preflight` | Vérifie l'environnement de l'agent (MCP, comptes, CLI, repo) avant une session structurante | Toute phase | [.agents/skills/preflight/SKILL.md](.agents/skills/preflight/SKILL.md) |
 | `radar` | Scanne issues/PRs/branches/CI/roadmap et produit un rapport en 4 buckets (urgent / court terme / roadmap / gros chantiers). Modes collecte (objectif) ou score (subjectif). | Toute phase | [.agents/skills/radar/SKILL.md](.agents/skills/radar/SKILL.md) |
 | `spec-reality` | Vérifie l'alignement specs + ADR ↔ code réel (modules Gradle, libs.versions.toml, modèles Kotlin, dépréciations). Sortie par sévérité. | Avant bump version, refacto structurelle | [.agents/skills/spec-reality/SKILL.md](.agents/skills/spec-reality/SKILL.md) |
+| `validate` | Validation locale canonique (reproduit la CI, env Docker) + rapport ; interdit `:app:testDevDebugUnitTest` seul | Avant PR / gate | [.agents/skills/validate/SKILL.md](.agents/skills/validate/SKILL.md) |
+| `techno-check` | Vérifie une API/lib (existe/dépréciée/version stable) via Context7/Docfork + rapport décision/ADR | Avant code/snippet sur API incertaine | [.agents/skills/techno-check/SKILL.md](.agents/skills/techno-check/SKILL.md) |
+| `roborazzi` | Capture (record-only) + inspection du rendu Compose en JVM, sans device | Changement de rendu / refonte écran | [.agents/skills/roborazzi/SKILL.md](.agents/skills/roborazzi/SKILL.md) |
+| `codex-review` | Cadrage/relecture/gate par un agent distinct (Codex) hors-bande ; dégradation gracieuse si pas de Codex | Chantier non-trivial / avant merge | [.agents/skills/codex-review/SKILL.md](.agents/skills/codex-review/SKILL.md) |
 
 ---
 

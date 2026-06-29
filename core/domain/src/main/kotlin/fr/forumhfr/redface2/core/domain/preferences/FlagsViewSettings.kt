@@ -31,4 +31,30 @@ data class FlagsViewSettings(
     val groupByCategory: Boolean = true,
     val hideReadCategories: Boolean = false,
     val unreadOnly: Boolean = false,
+    // #603 PR6 — left-marker shape. GLOBAL (not subject to the per-tab override): one shape for every
+    // tab. Default STRIPE (ADR-017, soberest option). Carried on every resolution path.
+    val markerStyle: MarkerStyle = MarkerStyle.STRIPE,
+    // #603 — GLOBAL: keep topic titles on a single (ellipsised) line instead of wrapping to 2. Default
+    // false = the historical 2-line wrap. Not subject to the per-tab override (like [markerStyle]).
+    val singleLineTitle: Boolean = false,
+    // #603 — GLOBAL: visual treatment of the grouped-view category band. Default MINIMAL (the look
+    // shipped in 0.17.3). Not subject to the per-tab override (like [markerStyle]). Carried on every
+    // resolution path.
+    val categoryBandStyle: CategoryBandStyle = CategoryBandStyle.MINIMAL,
+    // #690 — GLOBAL: draw a thin (0.5 dp) dark outline around the colored marker so the amber FAVORITE
+    // (#FFB300) reads cleanly on a light background. Default false (no border). Not subject to the
+    // per-tab override (like [markerStyle]). Carried on every resolution path.
+    val markerBorder: Boolean = false,
+    // #661 — GLOBAL: shape of the « +lus » cue (ring around the active glyph vs. eye capsule by the
+    // name). Default RING (#603/A, XaTriX: the cue lives ON the flag glyph). Not subject to the per-tab
+    // override (like [markerStyle]). Carried on every resolution path.
+    val plusLusIndicatorStyle: PlusLusIndicatorStyle = PlusLusIndicatorStyle.Ring,
+    // #603/#665 — GLOBAL: shape of the active-type glyph in the top-bar left container (flag icon vs.
+    // pastille dot). Default Flag. Not subject to the per-tab override (like [markerStyle]). Carried on
+    // every resolution path.
+    val flagGlyphStyle: FlagGlyphStyle = FlagGlyphStyle.Flag,
+    // #728 — GLOBAL: show the thin top loading bar during auto / cold refreshes (the manual pull is
+    // always signalled by the redface puck regardless). Default true (keep the bar). Not subject to the
+    // per-tab override (like [markerStyle]). Carried on every resolution path.
+    val showLoadingBar: Boolean = true,
 )

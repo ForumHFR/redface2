@@ -13,15 +13,16 @@ Comment participer au projet.
 
 ---
 
-## Phase actuelle : Phase 1 — Core lecture
+## Phase actuelle : Phase 4 — UI & extensions
 
-Phase 0 (bootstrap Gradle multi-modules, CI, thème M3, navigation, Hilt) est livrée. Phase 1 — lecture du forum (drapeaux, topics, forum, deep links, `PostRenderer` Compose) est en cours, voir [roadmap]({{ site.baseurl }}/specs/roadmap). Les contributions utiles maintenant :
+Phases 0 à 3 sont livrées (bootstrap ; lecture du forum ; écriture : poster/citer/`[img]`/upload ; messages : MP + DT/MultiMP), bêta **0.16.0** publiée (Play open testing + F-Droid). Phase 4 en cours : refontes UI (vue Drapeaux [#603](https://github.com/ForumHFR/redface2/issues/603), vue Topic [#604](https://github.com/ForumHFR/redface2/issues/604)), aide & réglages, et architecture d'extensions ([#6](https://github.com/ForumHFR/redface2/issues/6), [#7](https://github.com/ForumHFR/redface2/issues/7)). Voir [roadmap]({{ site.baseurl }}/specs/roadmap). Les contributions utiles maintenant :
 
-- **Implémenter une issue Phase 1** ouverte (drapeaux, login HFR, écran forum, cache Room…)
+- **Implémenter une issue Phase 4** ouverte (refonte Drapeaux/Topic, extensions, polish UX)
 - **Proposer des features** : ouvrir une issue avec le label `feature`
 - **Signaler des oublis ou divergences spec/code** : skill `/spec-reality` ou commentaire d'issue
 - **Capturer des fixtures HFR réelles** via `hfr-mcp` (skill `/parse-fixture`)
-- **Proposer un nom** d'app : voir la [page nommage]({{ site.baseurl }}/guides/naming)
+
+> Ce guide est la **source canonique du workflow opérationnel** (environnement, tests, rendu visuel, Git). La *méthode* (quoi spécifier / prototyper / TDD) vit dans [methodology.md]({{ site.baseurl }}/specs/methodology) ; la *promotion / release* dans [release.md]({{ site.baseurl }}/guides/release). Ne pas dupliquer le cycle ailleurs.
 
 ---
 
@@ -54,6 +55,22 @@ Exemples :
 ```
 
 Le script monte le repo dans `/workspace`, persiste les caches Gradle / Android dans `.gradle-user/` et exécute le container avec l'UID/GID de l'utilisateur hôte pour éviter les fichiers root-owned sur Linux. En rootless Podman, `--userns keep-id` est ajouté automatiquement pour garder le mapping d'identité.
+
+#### Signature debug canonique et `adb install -r`
+
+Les builds **debug** sont signés par une clé canonique committée (`config/signing/redface2-debug.keystore` — debug-only, password `android`, alias `androiddebugkey`), câblée sur `buildTypes.debug` dans `app/build.gradle.kts`. Objectif : **tout** build debug — CLI, Docker (n'importe quel UID), Android Studio, CI — signe à l'identique, donc `adb install -r` fonctionne entre environnements.
+
+Sans cette clé, AGP génère un `debug.keystore` par `ANDROID_USER_HOME` : un APK debug buildé sous un environnement (ex. Docker UID 1000) ne peut pas remplacer (`-r`) une install signée ailleurs → `INSTALL_FAILED_UPDATE_INCOMPATIBLE`.
+
+Empreintes : `SHA-1 E2:C6:9D:12:DC:99:D2:06:B9:E3:7D:15:EA:B6:80:44:C1:A5:DC:22`, `SHA-256 55:E9:56:A9:BD:1C:99:E8:F0:C4:55:C3:C5:8B:7C:55:C0:7A:B9:D9:7C:D8:22:CF:62:0E:F8:A3:26:73:2A:26` (vérif : `keytool -list -v -keystore config/signing/redface2-debug.keystore -storepass android`).
+
+**Migration unique** : si `fr.forumhfr.redface2.debug` est déjà installé avec une ancienne clé, le désinstaller une fois avant le premier `install -r` :
+
+```bash
+adb uninstall fr.forumhfr.redface2.debug
+```
+
+⚠️ Clé **debug uniquement** (insecure by design, package suffixé `.debug`) — jamais acceptée par Play/F-Droid pour publier. La signature release/upload est séparée (secrets CI `UPLOAD_*` + `.gradle-user/signing/`), non concernée par ce changement.
 
 #### Dogfood : installer en parallèle d'une release Play
 
@@ -210,13 +227,13 @@ Cette page décrit **comment** contribuer ; elle ne redéfinit pas la méthode d
 
 **Enforcement au build (Phase 0) :**
 - **Konsist** — règles d'architecture (imports inter-modules, `:core:extension` limité à `topic/editor`, tokens M3 centralisés dans `:core:ui`). Voir [architecture.md]({{ site.baseurl }}/specs/architecture) pour les règles. La règle `@AnonymousClient` sur prefetch sera activée dès que le code réseau/prefetch existera réellement.
-- **Detekt** — style Kotlin + deprecations (`runBlocking`, `GlobalScope`, `LiveData`, imports dépréciés).
-- **Android Lint** — a11y + i18n + correctness. `MissingContentDescription`, `TouchTargetSizeCheck`, `HardcodedText` en `error` (abort build). Config `lintOptions` dans `build.gradle.kts`.
+- **Detekt** — style Kotlin + imports interdits (`ForbiddenImport` : `GlobalScope`, `LiveData`, `material.*`). NB : `runBlocking` n'est **pas** attrapé par Detekt aujourd'hui. L'interdiction de **nouveaux** `runBlocking` en prod (allow-list des 2 sites existants : `DataStoreUserPreferencesRepository.kt`, `PersistentCookieJar.kt`) est une garde dédiée à ajouter, pas un défaut Detekt.
+- **Android Lint** — a11y + i18n + correctness. Lint tourne avec `abortOnError = true` (convention plugin dans `build-logic/`). NB : `MissingContentDescription`/`TouchTargetSizeCheck`/`HardcodedText` restent à leur **sévérité par défaut (warning)** — ils ne font pas échouer le build tant qu'ils ne sont pas promus en `error` (`lint { error += listOf(...) }`), ce qui n'est pas le cas actuellement.
 
 **CI Phase 0 :**
 - workflow GitHub Actions sur push `main` et PR
 - exécution dans le même env Docker de référence, épinglé par digest
-- pipeline actuelle : `detektAll`, `lintDebug`, `testDebugUnitTest` (inclut les checks Konsist), `:app:assembleDebug`
+- pipeline actuelle (CI) : `detektAll`, `lintDebug` + `:app:lintProdDebug`, `test` + `testDebugUnitTest` (inclut les checks Konsist), `:app:assembleProdDebug` — le `:app:assembleDebug` **non flavoré ne résout plus** (variantes `dev`/`prod`, [#233](https://github.com/ForumHFR/redface2/issues/233))
 - **Dependabot** configuré pour `gradle` et `github-actions`
 
 **Couverture (hybride différenciée) :**
@@ -227,11 +244,21 @@ Cette page décrit **comment** contribuer ; elle ne redéfinit pas la méthode d
 **Stratégie :**
 - **TDD sélectif** sur fonctions pures (parser, PostContent AST, ViewModels, helpers, mappers) — red → green → refactor
 - **Test-after** sur intégrations (repositories cache/network, deep linking)
-- **Pas de TDD** sur UI Compose (Compose Preview + review visuelle suffisent ; Roborazzi non retenu en MVP, à reconsidérer Phase 4+ si régressions visuelles multi-features)
+- **Pas de TDD red-green** sur UI Compose, mais **rendu visuel Roborazzi adopté en Phase 4** (cf. sous-section ci-dessous + [ADR-016]({{ site.baseurl }}/adr/016-roborazzi-screenshot-testing)) : Compose Preview pour le design, Roborazzi pour **capturer et inspecter** le rendu sans device.
 
-**Smoke test mensuel HFR (Phase 1 fin) :**
+**Rendu visuel (Roborazzi) :**
 
-Workflow GitHub Actions (`cron: '0 2 1 * *'`, 1er du mois, 2h UTC) qui vérifie contre HFR réel :
+Screenshot testing **JVM** (sur Robolectric, sans device) via Roborazzi 1.63, consommé comme artefact de test simple (pas le plugin Gradle), avec `roborazzi.test.record=true` forcé.
+
+- **Mode `record`** (par défaut ici) : un test `captureRoboImage` génère un PNG dans `<module>/build/outputs/roborazzi/` (non versionné) → **inspection visuelle** rapide (~40 s). Lancer via l'env Docker, ex. `./scripts/docker-dev.sh ./gradlew :core:ui:testDebugUnitTest`. (Il n'existe **pas** de tâche `recordRoborazzi` : le plugin Gradle Roborazzi n'est pas appliqué — record forcé via `roborazzi.test.record=true`.)
+- **Quand l'utiliser** : `record` est réservé aux **changements de rendu intentionnels** (PostRenderer, écrans refondus) — on régénère puis on regarde l'image. `verifyRoborazzi` (compare) existe mais les **baselines ne sont pas versionnées** en V1 (elles bougeraient à chaque itération des refontes #603/#604).
+- **Statut** : **recommandé** pour tout changement de rendu UI structurant, **pas encore un gate CI dur**. Le passage en `verify` + baselines committées + gate fera l'objet d'une décision dédiée une fois les refontes UI stabilisées.
+- **Couverture actuelle** : `:core:ui` (PostRenderer — code, smiley, citation) + `:feature:topic` + coquille réglages. Elle s'étend au cas par cas — **pas** d'obligation « tout écran doit avoir un snapshot ».
+- Décision et rationale : [ADR-016]({{ site.baseurl }}/adr/016-roborazzi-screenshot-testing).
+
+**Smoke test mensuel HFR (fin de phase de lecture) :**
+
+**Prévu — pas encore implémenté** (aucun workflow `cron` n'existe à ce jour dans `.github/workflows/`). Conception : un workflow GitHub Actions (`cron: '0 2 1 * *'`, 1er du mois, 2h UTC) qui vérifierait, **sans authentification** (cf. règle prefetch non-authentifié), contre HFR réel :
 
 - Sélecteurs CSS critiques (`HfrSelectors`) matchent toujours
 - Liste catégories + sous-catégories (`HfrCategories.ALL` hardcodée) matche le HTML de la page d'accueil — détecte les ajouts/renommages HFR rares mais impactants
@@ -354,7 +381,7 @@ Mêmes règles que les fixtures HTML : capturées live, **jamais inventées**, n
 - Exception contrôlée : les pseudos et profils des comptes de test dédiés publics (`XaTelitte` / `xatelitte`, profil HFR `1214571`) peuvent rester en clair pour conserver la fidélité parser. Ne jamais appliquer cette exception à un compte personnel non dédié.
 - Ne pas reformatter les fixtures HTML : elles doivent rester proches de la réponse HFR. Un nettoyage minimal des fins de ligne/trailing whitespace est acceptable pour satisfaire `git diff --check`, sans modifier la structure DOM.
 - Quand un bug de parsing est corrigé, le HTML problématique est ajouté aux fixtures avec un test de non-régression.
-- Un **smoke test CI mensuel** (cf. cron `0 2 1 * *` ci-dessus) vérifie que les sélecteurs CSS critiques matchent toujours sur une vraie page HFR publique.
+- Un **smoke test CI mensuel** (cf. cron `0 2 1 * *` ci-dessus, **prévu**) vérifiera que les sélecteurs CSS critiques matchent toujours sur une vraie page HFR publique.
 
 ---
 

@@ -164,6 +164,10 @@ class ForumViewModelTest {
         override fun observeCategories(): Flow<ForumResult<List<Category>>> =
             categories.asSharedFlow()
 
+        override suspend fun getCategories(forceRefreshIfStale: Boolean): ForumResult<List<Category>> =
+            categories.replayCache.lastOrNull { it !is ForumResult.Loading }
+                ?: ForumResult.Success(emptyList())
+
         override suspend fun refreshCategories() {
             refreshCategoriesCalled = true
             suspendRefreshCategoriesUntil?.await()

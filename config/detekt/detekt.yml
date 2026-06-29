@@ -28,3 +28,17 @@ style:
       - androidx.compose.material.*
       - kotlinx.coroutines.GlobalScope
       - androidx.lifecycle.LiveData
+  # Pas de marqueur TODO/FIXME/STOPSHIP en code de PRODUCTION (cf. contributing.md) — ouvrir/lier
+  # une issue à la place. Scopé src/main : tests, fixtures et docs ne sont pas concernés. Redéfinir
+  # `comments:` remplace la liste par défaut, donc on répète STOPSHIP.
+  ForbiddenComment:
+    active: true
+    includes:
+      - '**/src/main/**'
+    comments:
+      - reason: 'TODO interdit en prod — ouvrir/lier une issue (cf. contributing.md).'
+        value: '\bTODO\s*(?:\(|:)'
+      - reason: 'FIXME interdit en prod — ouvrir/lier une issue (cf. contributing.md).'
+        value: '\bFIXME\b'
+      - reason: 'STOPSHIP interdit.'
+        value: '\bSTOPSHIP\b'

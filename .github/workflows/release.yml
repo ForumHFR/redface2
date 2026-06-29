@@ -101,12 +101,20 @@ jobs:
                 echo "::error::channel=beta must build from 'main' (effective ref='${effective_ref}'). Dispatch with --ref main (and no 'ref' override, or ref=main)."
                 exit 1
               fi
+              build_ref="$DISPATCH_REF"
               channel=beta
               app_label="Redface 2 β"
               play_upload=true; play_track=beta; play_status=completed
               fdroid_flavor=Beta; fdroid_dir=beta; fdroid_package=fr.forumhfr.redface2.beta; fdroid_channel=beta
               ;;
             dev)
+              # dev ships from `dev` ONLY. An explicit ref override pointing elsewhere is refused so a
+              # `channel=dev` dispatch never silently builds `main` (the `--ref dev` trap, app-v105).
+              if [[ -n "${DISPATCH_REF:-}" && "$DISPATCH_REF" != "dev" && "$DISPATCH_REF" != "refs/heads/dev" ]]; then
+                echo "::error::channel=dev must build from 'dev' (got ref override '${DISPATCH_REF}'). Dispatch with no ref override, or ref=dev."
+                exit 1
+              fi
+              build_ref="${DISPATCH_REF:-dev}"
               channel=dev
               app_label="Redface 2 dev"
               play_upload=true; play_track=internal; play_status=completed
@@ -128,7 +136,7 @@ jobs:
             echo "fdroid_dir=$fdroid_dir"
             echo "fdroid_package=$fdroid_package"
             echo "fdroid_channel=$fdroid_channel"
-            echo "build_ref=$DISPATCH_REF"
+            echo "build_ref=$build_ref"
           } >> "$GITHUB_OUTPUT"
           echo "::notice title=Release target::channel=$channel label='${app_label}' play=$play_upload track=$play_track fdroid=$fdroid_channel/$fdroid_package ref=${DISPATCH_REF:-<current>}"
 
@@ -250,6 +258,17 @@ jobs:
             echo "release_tag=$release_tag"
           } >> "$GITHUB_OUTPUT"
           echo "::notice title=Build::channel=${CHANNEL} versionCode=${version_code} (ledger=${ledger_code} floor=${base_code}) versionName=${version_name} tag=${release_tag} sha=${short_sha} label='${APP_LABEL:-<default>}'"
+
+      - name: Release readiness guards (changelog + whatsnew)
+        shell: bash
+        env:
+          VERSION_NAME: ${{ steps.meta.outputs.version_name }}
+        run: |
+          set -euo pipefail
+          # [enforced] fail-closed AVANT tout side-effect (build / tag-ledger / upload Play+F-Droid) :
+          # changelog applicatif à jour pour ce versionName + whatsnew frais & sous la limite Play.
+          bash scripts/check-changelog-entry.sh "$VERSION_NAME"
+          bash scripts/check-whatsnew.sh "$VERSION_NAME"
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v5

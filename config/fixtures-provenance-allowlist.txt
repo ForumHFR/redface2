@@ -1,0 +1,12 @@
+# Fixtures legacy sans provenance machine-détectable — backfill suivi par #630.
+# La charte interdit de fabriquer une provenance ; ces entrées sont tolérées
+# temporairement et doivent disparaître (sidecar .source.txt réel) à la clôture de #630.
+# Chemins repo exacts (pas de glob). Le script scripts/check-fixtures-provenance.sh les ignore.
+core/data/src/test/resources/fixtures/mp_storage_inbox_hit.html
+core/data/src/test/resources/fixtures/mp_storage_inbox_no_hit.html
+core/data/src/test/resources/fixtures/mp_storage_inbox_p1_nohit.html
+core/data/src/test/resources/fixtures/mp_storage_inbox_p2_hit.html
+core/data/src/test/resources/fixtures/mp_storage_thread_empty.html
+core/data/src/test/resources/fixtures/private_message_dt_owner_reply_form.html
+core/parser/src/test/resources/fixtures/private_message_dt_owner_reply_form.html
+core/parser/src/test/resources/fixtures/smileys_top100_roger21.json

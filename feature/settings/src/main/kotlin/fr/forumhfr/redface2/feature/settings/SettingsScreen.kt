@@ -463,6 +463,16 @@ internal fun buildSettingsCatalogue(
                     .takeIf { state.flagsAutoRefreshError },
                 onCheckedChange = { onIntent(SettingsIntent.FlagsAutoRefreshChanged(it)) },
             ),
+            toggleRow(
+                id = "flags_funny_empty_state",
+                title = stringResource(R.string.settings_flags_funny_empty_state_title),
+                description = stringResource(R.string.settings_flags_funny_empty_state_description),
+                checked = state.funnyEmptyState,
+                enabled = state.canToggleFunnyEmptyState,
+                errorRes = R.string.settings_flags_funny_empty_state_persist_failed
+                    .takeIf { state.funnyEmptyStateError },
+                onCheckedChange = { onIntent(SettingsIntent.FunnyEmptyStateChanged(it)) },
+            ),
             futureRow(
                 id = "future_flags_sort",
                 title = stringResource(R.string.settings_future_flags_sort),

@@ -10,7 +10,13 @@ import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
+import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
+import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
+import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
+import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
+import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
+import fr.forumhfr.redface2.core.domain.preferences.SuperFavoriteRepository
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Category
@@ -60,6 +66,7 @@ class FlagsViewModel @Inject constructor(
     private val flagRepository: FlagRepository,
     private val forumRepository: ForumRepository,
     private val userPreferencesRepository: UserPreferencesRepository,
+    private val superFavoriteRepository: SuperFavoriteRepository,
     private val messagesRepository: MessagesRepository,
     private val mpStorageRepository: MpStorageRepository,
     private val clock: Clock,
@@ -101,6 +108,37 @@ class FlagsViewModel @Inject constructor(
             started = SharingStarted.Eagerly,
             initialValue = false,
         )
+
+    /**
+     * #662 — « états vides humoristiques » opt-in. When `true`, an empty tab swaps the sober
+     * style-A icon for a HFR perso smiley (style C); the contextual text is unchanged. Eager so the
+     * empty state renders the right visual without a subscription warm-up flash.
+     */
+    val funnyEmptyState: StateFlow<Boolean> = userPreferencesRepository.observeFunnyEmptyState()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = false,
+        )
+
+    /**
+     * #603 PR5 — local « super favori » topic ids (ADR-017 decision 5), a client-side pin distinct
+     * from the server `isFavorite`. Eager so the long-press sheet reflects the current state without a
+     * subscription warm-up. Backed by [SuperFavoriteRepository] (its own store, not user prefs).
+     */
+    val superFavoriteTopicIds: StateFlow<Set<Int>> =
+        superFavoriteRepository.observeSuperFavoriteTopicIds()
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.Eagerly,
+                initialValue = emptySet(),
+            )
+
+    /** Toggles the local super-favorite mark of [flag] (long-press sheet). */
+    fun toggleSuperFavorite(flag: Flag) {
+        val enabled = flag.topicId !in superFavoriteTopicIds.value
+        viewModelScope.launch { superFavoriteRepository.setSuperFavorite(flag.topicId, enabled) }
+    }
 
     /**
      * #6 — UI state for the « DT » tab: the user's MultiMP conversations (inbox `cat=prive`,
@@ -243,16 +281,31 @@ class FlagsViewModel @Inject constructor(
     /**
      * Display-settings bottom sheet state (#309). Tracks the RESOLVED view settings for the
      * currently selected tab so the sheet's two switches reflect what the list is actually using
-     * (global, or this tab's override). The [FlagTab.Super] placeholder has no real [FlagType], so
-     * it falls back to the global pair — the trigger is hidden there anyway (no list to configure).
+     * (global, or this tab's override). The DT and [FlagTab.Super] placeholders have no real
+     * [FlagType], so they resolve the GLOBAL appearance fields (via the CYAN path) plus the global
+     * group/hide pair — the per-list sheet trigger is hidden there anyway (no list to configure).
      */
     val flagsViewSettings: StateFlow<FlagsViewSettings> = selectedTab
         .flatMapLatest { tab ->
             when (val type = tab.flagType) {
+                // #603 audit fix — DT/Super (no real FlagType) must KEEP the 7 GLOBAL appearance
+                // fields (markerStyle, flagGlyphStyle, plusLusIndicatorStyle, showLoadingBar,
+                // markerBorder, singleLineTitle, categoryBandStyle). Resolving via CYAN carries them
+                // verbatim (they are type-agnostic on every resolution path); the per-type triplet
+                // is then overwritten with the GLOBAL group/hide and an inert unreadOnly. Without
+                // this, a user who turned the loading bar OFF (#728) or picked glyph=Dot / +lus=Eye
+                // saw the bar reappear and the glyph/indicator reset to defaults on DT/Super.
                 null -> combine(
+                    userPreferencesRepository.observeFlagsViewSettings(FlagType.CYAN),
                     userPreferencesRepository.observeFlagsGroupByCategory(),
                     userPreferencesRepository.observeFlagsHideReadCategories(),
-                ) { group, hide -> FlagsViewSettings(group, hide) }
+                ) { resolved, group, hide ->
+                    resolved.copy(
+                        groupByCategory = group,
+                        hideReadCategories = hide,
+                        unreadOnly = false,
+                    )
+                }.distinctUntilChanged()
                 else -> userPreferencesRepository.observeFlagsViewSettings(type)
             }
         }
@@ -264,6 +317,16 @@ class FlagsViewModel @Inject constructor(
             // (before observeFlagsViewSettings emits), instead of the data-class default `false`.
             // The « +lus » suffix and the re-tap read [cyanUnreadOnly], not this StateFlow.
             initialValue = FlagsViewSettings(unreadOnly = _selectedTab.value == FlagTab.Cyan),
+        )
+
+    // #718 — GLOBAL account-avatar appearance (border + background). Exposed here only so the Drapeaux
+    // « Réglages d'affichage » sheet (the EDITING point) reflects + writes it; the badge itself reads
+    // the same preference globally via AppAccountViewModel, independent of this screen.
+    val avatarAppearance: StateFlow<AvatarAppearance> = userPreferencesRepository.observeAvatarAppearance()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = AvatarAppearance(),
         )
 
     /**
@@ -466,9 +529,11 @@ class FlagsViewModel @Inject constructor(
     val removeFlagEvent: StateFlow<RemoveFlagEvent?> = _removeFlagEvent.asStateFlow()
 
     /**
-     * Toggled around the user-driven [refresh] round-trip so the Material 3
-     * `PullToRefreshBox` indicator can stay anchored over the existing list instead of
-     * blanking it back to a cold spinner. Same pattern as `ForumViewModel.isRefreshing`.
+     * Toggled around ANY refresh round-trip of a flag tab — manual [refresh] AND auto
+     * [maybeAutoRefresh]. Drives the top [FlagsLoadingBar], which is the SINGLE loading cue
+     * (#603/#648): the central spinner was retired and the circular `PullToRefreshBox` indicator is
+     * hidden (`indicator = {}`), so the thin top bar is the only cue for manual, auto and initial
+     * loads. Same pattern as `ForumViewModel.isRefreshing`.
      */
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
@@ -556,14 +621,21 @@ class FlagsViewModel @Inject constructor(
         val flag = confirming.flag
         _removeFlagState.value = RemoveFlagState.Removing(flag)
         viewModelScope.launch {
-            val result = flagRepository.removeFlag(flag)
-            _removeFlagState.value = RemoveFlagState.Idle
-            _removeFlagEvent.update {
-                if (result.isSuccess) {
-                    RemoveFlagEvent.Success(flag.title)
-                } else {
-                    RemoveFlagEvent.Failure(flag.title)
+            try {
+                val result = flagRepository.removeFlag(flag)
+                _removeFlagEvent.update {
+                    if (result.isSuccess) {
+                        RemoveFlagEvent.Success(flag.title)
+                    } else {
+                        RemoveFlagEvent.Failure(flag.title)
+                    }
                 }
+            } finally {
+                // #603 audit fix (fork #5) — always release the Removing lock, even if removeFlag
+                // throws an error not wrapped in its Result (or the coroutine is cancelled).
+                // Otherwise the state stays Removing forever and the anti-double-tap guard in
+                // [requestRemoveFlag] permanently blocks any further removal until the VM is recreated.
+                _removeFlagState.value = RemoveFlagState.Idle
             }
         }
     }
@@ -644,6 +716,47 @@ class FlagsViewModel @Inject constructor(
             userPreferencesRepository.setFlagsPerTabOverride(enabled)
             pendingPerTabOverride.compareAndSet(expect = enabled, update = null)
         }
+    }
+
+    /** Bottom-sheet write for the GLOBAL marker shape (#603 PR6) — one shape for every tab, so no
+     *  per-tab routing (ignores [flagsPerTabOverride]). */
+    fun setFlagsMarkerStyle(style: MarkerStyle) {
+        viewModelScope.launch { userPreferencesRepository.setFlagsMarkerStyle(style) }
+    }
+
+    /** Bottom-sheet write for the GLOBAL « single-line topic titles » toggle (#603). */
+    fun setFlagsSingleLineTitle(enabled: Boolean) {
+        viewModelScope.launch { userPreferencesRepository.setFlagsSingleLineTitle(enabled) }
+    }
+
+    /** Bottom-sheet write for the GLOBAL grouped-view category band style (#603). */
+    fun setFlagsCategoryBandStyle(style: CategoryBandStyle) {
+        viewModelScope.launch { userPreferencesRepository.setFlagsCategoryBandStyle(style) }
+    }
+
+    /** Bottom-sheet write for the GLOBAL « marker outline » toggle (#690) — one value for every tab. */
+    fun setFlagsMarkerBorder(enabled: Boolean) {
+        viewModelScope.launch { userPreferencesRepository.setFlagsMarkerBorder(enabled) }
+    }
+
+    /** Bottom-sheet write for the GLOBAL « afficher la barre de chargement » toggle (#728). */
+    fun setFlagsShowLoadingBar(enabled: Boolean) {
+        viewModelScope.launch { userPreferencesRepository.setFlagsShowLoadingBar(enabled) }
+    }
+
+    /** Bottom-sheet write for the GLOBAL account-avatar border toggle (#718). */
+    fun setAvatarBorder(enabled: Boolean) {
+        viewModelScope.launch { userPreferencesRepository.setAvatarBorder(enabled) }
+    }
+
+    /** Bottom-sheet write for the GLOBAL « +lus » indicator style (#661) — one value for every tab. */
+    fun setFlagsPlusLusIndicatorStyle(style: PlusLusIndicatorStyle) {
+        viewModelScope.launch { userPreferencesRepository.setFlagsPlusLusIndicatorStyle(style) }
+    }
+
+    /** Bottom-sheet write for the GLOBAL left-container glyph style (#603/#665) — one value for every tab. */
+    fun setFlagsGlyphStyle(style: FlagGlyphStyle) {
+        viewModelScope.launch { userPreferencesRepository.setFlagsGlyphStyle(style) }
     }
 
     fun refresh() {
@@ -775,8 +888,9 @@ class FlagsViewModel @Inject constructor(
      *
      * [DtListUiState.Empty] iff the inbox PAGE 1 has no MultiMP AND MPStorage has no orphan entry.
      * Scope (#6): only inbox PAGE 1 is scanned + whatever MPStorage already knows ; a full multi-page
-     * inbox sweep stays DEFERRED, so older pages are not covered — the UI carries a scan note footer
-     * (`flags_dt_scan_note`) and the empty-state copy (`flags_dt_empty`) assumes that semantics.
+     * inbox sweep stays DEFERRED, so older pages are not covered — the scan caveat lives in the « Section
+     * DT » settings toggle description (`settings_flags_show_dt_section_description`, #662), and the
+     * empty-state copy (`flags_dt_empty_subtitle`) assumes that semantics.
      */
     private fun loadDt(isRefresh: Boolean) {
         dtFetchStarted = true
@@ -1141,7 +1255,7 @@ sealed interface DtListUiState {
     /**
      * The DT union: inbox PAGE 1 MultiMP rows ∪ orphan MPStorage entries, deduplicated by
      * `threadId` and ordered inbox-first then `mpFlags.list` order (#6). The multi-page inbox limit
-     * remains — surfaced by the scan-note footer (`flags_dt_scan_note`).
+     * remains — surfaced in the « Section DT » settings toggle description (#662).
      */
     data class Content(val items: List<DtListItem>) : DtListUiState
 

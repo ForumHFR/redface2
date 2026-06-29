@@ -1,10 +1,9 @@
-Redface 2 v0.16.0 — bêta.
+Redface 2 v0.18.0 — bêta.
 
-Nouveautés :
-- DT/MultiMP : le créateur peut ajouter ou retirer des participants (via une réponse).
-- DT : liste des participants (bouton « Participants »).
-- Synchro de la position de lecture des DT vers MPStorage (en option, désactivée par défaut).
-
-Correctif : les emojis qui tronquaient un message à l'envoi.
-
-Bugs : via la bêta ou GitHub.
+Refonte de la vue Drapeaux :
+- Nouvelle barre du haut (drapeau + nom court + « +lus », loupe rétractable, avatar rond).
+- Barre translucide : la liste défile dessous.
+- Loader « redface » au tirer-pour-rafraîchir.
+- « +lus », avatar et glyphe configurables ; recherche sur l'onglet DT.
+- Appui-long : actions rapides, aller à une page, poster.
+- Accessibilité et préservation du défilement par onglet améliorées.

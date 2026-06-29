@@ -19,11 +19,14 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SmallFloatingActionButton
+import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -38,23 +41,38 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
-import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuite
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldDefaults
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldLayout
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.core.net.toUri
 import androidx.core.view.WindowCompat
@@ -199,7 +217,7 @@ private fun NavKey?.hidesNavigationSuite(): Boolean =
         this is PrivateMessageComposeRoute
 
 /**
- * #494 — type de barre de navigation à passer au [NavigationSuiteScaffold]. Sur téléphone l'adaptatif
+ * #494 — type de barre de navigation à passer au [NavigationSuiteScaffoldLayout]. Sur téléphone l'adaptatif
  * renvoie `NavigationBar` (80dp) ; on lui substitue `ShortNavigationBarCompact` (M3 Expressive, ~64dp,
  * icône au-dessus du label, labels conservés, cible tactile ≥48dp). Les autres formes (rail/drawer sur
  * largeur medium/expanded) restent telles quelles ; la navigation est masquée (`None`) sur les routes
@@ -217,7 +235,7 @@ private fun resolveNavLayoutType(
 }
 
 /**
- * #529 — modifier appliqué au CONTENU du [NavigationSuiteScaffold]. Quand la suite est une barre du
+ * #529 — modifier appliqué au CONTENU du [NavigationSuiteScaffoldLayout]. Quand la suite est une barre du
  * BAS (téléphone), cette barre possède déjà `WindowInsets.navigationBars` : on consomme l'inset pour
  * le sous-arbre de contenu, de sorte que les `.navigationBarsPadding()` des écrans (toujours requis
  * pour les dispositions rail/drawer, où la suite est sur le côté et laisse l'inset bas) se résolvent
@@ -411,8 +429,7 @@ data class SettingsCategoryRoute(val categoryId: String) : RedfaceNavKey
  * the accepted MVP trade-off; no shared ViewModel or caching across the two entry points
  * is implemented yet.
  *
- * TODO(profile): caching follow-up — open a dedicated issue (none filed yet to keep this
- * PR scope-bound) and link it here. Candidate approaches: (a) shared `Singleton` Room-
+ * Caching follow-up (tracked by #625). Candidate approaches: (a) shared `Singleton` Room-
  * backed cache keyed by `userId`, (b) repository-level in-memory `Cache<Int, UserProfile>`
  * with a short TTL, (c) hoisting the ViewModel to a `LocalViewModelStoreOwner` shared by
  * the sheet and the page.
@@ -444,6 +461,272 @@ private fun StartScreenChoice.toTopLevelDestination(): TopLevelDestination = whe
     StartScreenChoice.FLAGS -> TopLevelDestination.Flags
     StartScreenChoice.FORUM -> TopLevelDestination.Forum
     StartScreenChoice.MESSAGES -> TopLevelDestination.Messages
+}
+
+// #603 PR6 / #679 — what a bottom-bar tap should do, given the tapped tab, the current tab and the
+// Drapeaux stack depth. Pure (no callbacks → no LongParameterList, fully testable); the host maps the
+// result to an action via [runTopLevelTap].
+internal enum class TopLevelTapAction { ReselectFlags, PopFlagsToRoot, Switch }
+
+// A tap on a DIFFERENT tab switches. A re-tap of the already-selected Drapeaux tab depends on its stack:
+//   - at the tab ROOT ([flagsAtRoot]) → open the quick-config sheet (ReselectFlags) ;
+//   - from a SUB-SCREEN (a topic opened from the list) → pop the tab back to its root (PopFlagsToRoot),
+//     NOT arm the sheet. #679: arming from a sub-screen made the sheet pop open on return to the list.
+// A re-tap of any other already-selected tab is a plain Switch (no special-case).
+internal fun topLevelTapAction(
+    tapped: TopLevelDestination,
+    current: TopLevelDestination,
+    flagsAtRoot: Boolean,
+): TopLevelTapAction {
+    val reselectFlags = current == tapped && tapped == TopLevelDestination.Flags
+    return when {
+        reselectFlags && flagsAtRoot -> TopLevelTapAction.ReselectFlags
+        reselectFlags -> TopLevelTapAction.PopFlagsToRoot
+        else -> TopLevelTapAction.Switch
+    }
+}
+
+// #679 — dispatch a [topLevelTapAction] to the host's side effects. Kept out of RedfaceApp's body so the
+// `when` does not count against its cyclomatic-complexity budget (at detekt's ceiling).
+private fun runTopLevelTap(
+    action: TopLevelTapAction,
+    onReselectFlags: () -> Unit,
+    onPopFlagsToRoot: () -> Unit,
+    onSwitch: () -> Unit,
+) = when (action) {
+    TopLevelTapAction.ReselectFlags -> onReselectFlags()
+    TopLevelTapAction.PopFlagsToRoot -> onPopFlagsToRoot()
+    TopLevelTapAction.Switch -> onSwitch()
+}
+
+/**
+ * #666 — the bottom-nav item label, or null (icon-only) when the user turned labels off. A plain
+ * helper (not in [RedfaceApp]) so the toggle adds no branch to the host's cyclomatic-complexity budget.
+ */
+private fun navItemLabel(
+    show: Boolean,
+    content: @Composable () -> Unit,
+): (@Composable () -> Unit)? = content.takeIf { show }
+
+/**
+ * #666 follow-up — height of the icon-only compact bottom bar. The adaptive
+ * [NavigationSuiteType.ShortNavigationBarCompact] keeps reserving the label-row height (~64 dp) even with
+ * labels hidden, so the bar looked needlessly tall in icon-only mode (« ça sert à rien », XaTriX).
+ *
+ * 52 dp (XaTriX, 2026-06-27) — a centered 24 dp icon then has 14 dp of breathing room above and below
+ * (mirrors the icon-to-top gap of the labelled bar). The bar is built from a custom item ([CompactBarItem]),
+ * NOT `NavigationBarItem`: the latter carries the standard 80 dp NavigationBar's internal metrics and would
+ * not compact to this height (Codex review). 52 dp keeps a ≥ 48 dp touch target (Material minimum).
+ */
+private val CompactIconBarHeight = 52.dp
+
+// #666 follow-up — the M3 active-indicator pill behind the selected icon (matches the adaptive bar's
+// indicator). 32 dp tall fits inside the 52 dp bar; centering it leaves the icon's 14 dp top/bottom gap.
+private val CompactIndicatorWidth = 56.dp
+private val CompactIndicatorHeight = 32.dp
+
+/**
+ * #666 follow-up — true only for the phone bottom-bar layout ([NavigationSuiteType.ShortNavigationBarCompact])
+ * with the labels hidden; that is the single case where the suite is swapped for the shorter icon-only bar.
+ * Every other layout (rail / drawer on wide windows, or labels still on) keeps the adaptive suite. Pure →
+ * unit-tested (`ShouldUseCompactIconBarTest`).
+ */
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
+internal fun shouldUseCompactIconBar(
+    navBarLabels: Boolean,
+    navLayoutType: NavigationSuiteType,
+): Boolean = !navBarLabels && navLayoutType == NavigationSuiteType.ShortNavigationBarCompact
+
+/**
+ * #666 follow-up — the bottom navigation suite slot. When the phone bottom-bar layout has its labels turned
+ * off (see [shouldUseCompactIconBar]) it renders the shorter icon-only [IconOnlyBottomBar]; every other case defers to
+ * the adaptive [NavigationSuite] (bottom bar with labels on phones, rail / drawer on wider windows),
+ * preserving the previous behaviour exactly. Extracted from [RedfaceApp] so the extra branch stays off that
+ * composable's cyclomatic-complexity budget (it sits at detekt's ceiling).
+ *
+ * NB — the icon-only bar is built from a CUSTOM item ([CompactBarItem] in [IconOnlyBottomBar]), not
+ * `NavigationBarItem` (which keeps the 80 dp bar's internal metrics and would not compact) nor the expressive
+ * `ShortNavigationBar` (the whole `ExperimentalMaterial3ExpressiveApi` surface is `internal` in compose-bom
+ * 2026.05.01 — same gotcha as `PullToRefreshDefaults.LoadingIndicator`). The labels-on branch keeps the
+ * adaptive suite's short bar.
+ */
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
+@Composable
+private fun RedfaceBottomNavigationSuite(
+    navLayoutType: NavigationSuiteType,
+    navBarLabels: Boolean,
+    currentDestination: TopLevelDestination,
+    mpUnreadCount: Int?,
+    onItemClick: (TopLevelDestination) -> Unit,
+) {
+    val compactIconOnly = shouldUseCompactIconBar(navBarLabels, navLayoutType)
+    if (compactIconOnly) {
+        IconOnlyBottomBar(
+            currentDestination = currentDestination,
+            mpUnreadCount = mpUnreadCount,
+            onItemClick = onItemClick,
+        )
+    } else {
+        NavigationSuite(layoutType = navLayoutType) {
+            TopLevelDestination.entries.forEach { destination ->
+                item(
+                    selected = currentDestination == destination,
+                    onClick = { onItemClick(destination) },
+                    icon = {
+                        TopLevelDestinationIcon(
+                            destination = destination,
+                            mpUnreadCount = mpUnreadCount,
+                        )
+                    },
+                    // #666 — null label = icon-only items when labels are off (helper keeps this off
+                    // RedfaceApp's cyclomatic-complexity budget via takeIf).
+                    label = navItemLabel(navBarLabels) {
+                        Text(text = stringResource(destination.labelRes))
+                    },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * #666 follow-up — the label-less compact bottom bar, [CompactIconBarHeight] (52 dp) tall. Phone + labels-off
+ * only. Built from a CUSTOM item ([CompactBarItem]), not `NavigationBarItem`: the latter carries the standard
+ * 80 dp NavigationBar's internal metrics and stays visually tall even inside a fixed-height [Row] (Codex
+ * review), and the expressive short bar is `internal` in this bom (see [RedfaceBottomNavigationSuite]).
+ * Window-inset handling mirrors the standard suite so #529 (no dark band) still holds: the [Surface] paints the
+ * container colour across the whole region — including behind the system navigation bar — while the [Row] is
+ * pushed above the system insets via [windowInsetsPadding] (bottom + horizontal: a landscape / multi-window
+ * side bar also reports a horizontal inset). [selectableGroup] keeps the items a single a11y tab group.
+ */
+@Composable
+private fun IconOnlyBottomBar(
+    currentDestination: TopLevelDestination,
+    mpUnreadCount: Int?,
+    onItemClick: (TopLevelDestination) -> Unit,
+) {
+    Surface(
+        color = NavigationBarDefaults.containerColor,
+        tonalElevation = NavigationBarDefaults.Elevation,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .windowInsetsPadding(
+                    WindowInsets.navigationBars.only(
+                        WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom,
+                    ),
+                )
+                .height(CompactIconBarHeight)
+                .selectableGroup(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TopLevelDestination.entries.forEach { destination ->
+                CompactBarItem(
+                    destination = destination,
+                    selected = currentDestination == destination,
+                    mpUnreadCount = mpUnreadCount,
+                    onClick = { onItemClick(destination) },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * #666 follow-up — one item of [IconOnlyBottomBar]. Custom (not `NavigationBarItem`, which keeps the 80 dp
+ * bar's internal metrics — Codex review) so the bar can be a true [CompactIconBarHeight]: the 24 dp icon is
+ * centered in the 52 dp item (→ 14 dp top/bottom gap, the value XaTriX asked for), with the M3 active-indicator
+ * pill behind it when selected. A11y: [TopLevelDestinationIcon] carries no contentDescription, so the item
+ * itself supplies the accessible name + the tab role/selected state ([selectableGroup] groups them).
+ */
+@Composable
+private fun RowScope.CompactBarItem(
+    destination: TopLevelDestination,
+    selected: Boolean,
+    mpUnreadCount: Int?,
+    onClick: () -> Unit,
+) {
+    val label = stringResource(destination.labelRes)
+    val iconColor = if (selected) {
+        MaterialTheme.colorScheme.onSecondaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Box(
+        modifier = Modifier
+            .weight(1f)
+            .fillMaxHeight()
+            .selectable(selected = selected, role = Role.Tab, onClick = onClick)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (selected) {
+            Box(
+                modifier = Modifier
+                    .size(width = CompactIndicatorWidth, height = CompactIndicatorHeight)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.secondaryContainer),
+            )
+        }
+        CompositionLocalProvider(LocalContentColor provides iconColor) {
+            TopLevelDestinationIcon(destination = destination, mpUnreadCount = mpUnreadCount)
+        }
+    }
+}
+
+/** #667 — target tab + remaining history when back is pressed at a secondary tab's root. */
+internal data class TabBackResult(
+    val target: TopLevelDestination,
+    val history: List<TopLevelDestination>,
+)
+
+/**
+ * #667 — visited-tab history (MRU stack of top-level tabs, most-recently-left LAST, excluding the
+ * current tab). New history after switching the active tab from [current] to [target]: a reselect
+ * (target == current) is a no-op; otherwise the left tab becomes the most-recent previous and any
+ * stale occurrence of either tab is dropped so the history stays a deduplicated MRU. Pure → tested.
+ */
+internal fun tabHistoryOnSwitch(
+    history: List<TopLevelDestination>,
+    current: TopLevelDestination,
+    target: TopLevelDestination,
+): List<TopLevelDestination> =
+    if (target == current) {
+        history
+    } else {
+        history.filterNot { it == current || it == target } + current
+    }
+
+/**
+ * #667 — target + remaining history when back is pressed at a secondary tab's root: pop the
+ * most-recent visited tab (the popped tab is NOT re-pushed — back is a pop, not a forward nav, which
+ * is what avoids the ping-pong Codex flagged), or [fallback] (Flags) when the history is empty.
+ */
+internal fun tabBackTarget(
+    history: List<TopLevelDestination>,
+    fallback: TopLevelDestination,
+): TabBackResult =
+    if (history.isEmpty()) {
+        TabBackResult(fallback, emptyList())
+    } else {
+        TabBackResult(history.last(), history.dropLast(1))
+    }
+
+/**
+ * #667 — back at a secondary tab's root returns to the previous tab instead of letting the system
+ * finish the Activity. Extracted from [RedfaceApp] to keep it under detekt's complexity threshold.
+ * Enabled only at the ROOT (size == 1) of a tab other than the home Flags tab.
+ */
+@Composable
+private fun TabRootBackHandler(
+    currentDestination: TopLevelDestination,
+    activeBackStackSize: Int,
+    onRootBack: () -> Unit,
+) {
+    BackHandler(
+        enabled = currentDestination != TopLevelDestination.Flags && activeBackStackSize == 1,
+    ) { onRootBack() }
 }
 
 /** #313 — badge cap : beyond this the badge shows « 9+ » (page-1 proxy, cf. MpUnreadBadgeViewModel). */
@@ -550,6 +833,8 @@ fun RedfaceApp(intent: Intent?) {
     val foldLongQuotes by themeViewModel.foldLongQuotes.collectAsStateWithLifecycle()
     // #105 — « afficher l'ascenseur » reading preference, provided to the reading scrollbar via RedfaceTheme.
     val showScrollbar by themeViewModel.showScrollbar.collectAsStateWithLifecycle()
+    // #666 — show/hide the labels under the bottom-nav icons (resolved at the shell for the suite below).
+    val navBarLabels by themeViewModel.navBarLabels.collectAsStateWithLifecycle()
     // #445 — debug bounds overlay preference (the dev-channel gate + render live in
     // [DevDebugBoundsOverlay], emitted last so it paints over everything; off by default).
     val debugBoundsOverlay by themeViewModel.debugBoundsOverlay.collectAsStateWithLifecycle()
@@ -649,6 +934,25 @@ fun RedfaceApp(intent: Intent?) {
             mutableStateOf(startScreen.screen.toTopLevelDestination())
         }
 
+        // #667 — visited-tab history (MRU) so back at a secondary tab's root returns to the previously
+        // visited tab instead of falling through to the system (which closed the app). Saveable across
+        // rotation/process death; stored as enum names.
+        var tabHistory by rememberSaveable(
+            stateSaver = listSaver(
+                save = { it.map(TopLevelDestination::name) },
+                // Defensive restore (Codex review): drop names that no longer resolve so a renamed/removed
+                // tab in a future version cannot crash the process-death restore.
+                restore = { names -> names.mapNotNull { runCatching { TopLevelDestination.valueOf(it) }.getOrNull() } },
+            ),
+        ) { mutableStateOf(emptyList<TopLevelDestination>()) }
+
+        // #603 PR6 — re-tap of the already-selected Drapeaux tab raises this counter; threaded to
+        // FlagsRoute, which opens its quick-config sheet on each increment. Deliberately a plain
+        // `remember` (NOT rememberSaveable): a saved non-zero counter would re-open the sheet after a
+        // config change without a new tap (Codex review). Resetting to 0 on recreation is the safe
+        // event semantics — a tap mid-rotation is a negligible loss.
+        var flagsQuickConfigRequest by remember { mutableStateOf(0) }
+
         // Phase 2 finish (#208) — profile bottom sheet state, hoisted to `:app` so that
         // `:feature:topic` never depends on `:feature:profile`. The sheet is opened from
         // any TopicScreen tap on an avatar/author with a non-null profileId.
@@ -674,9 +978,23 @@ fun RedfaceApp(intent: Intent?) {
             )
         }
 
+        // #667 — single entry point for every tab change (tap, deep link, root-back) so the visited-tab
+        // history stays consistent. A reselect of the current tab leaves the history untouched.
+        val switchTab: (TopLevelDestination) -> Unit = { target ->
+            tabHistory = tabHistoryOnSwitch(tabHistory, currentDestination, target)
+            currentDestination = target
+        }
+        // #667 — back at a secondary tab's root: pop the most-recent visited tab (fallback Flags). A pop,
+        // NOT a forward switch (no re-push), so successive backs walk the history out without oscillating.
+        val onRootTabBack: () -> Unit = {
+            val result = tabBackTarget(tabHistory, TopLevelDestination.Flags)
+            tabHistory = result.history
+            currentDestination = result.target
+        }
+
         LaunchedEffect(intent) {
             val parsed = intent?.data?.let(::parseHfrDeepLink) ?: return@LaunchedEffect
-            currentDestination = parsed.destination
+            switchTab(parsed.destination)
             resetStack(
                 backStack = backStacks.getValue(parsed.destination),
                 root = parsed.destination.rootRoute,
@@ -691,6 +1009,8 @@ fun RedfaceApp(intent: Intent?) {
         val authState by accountViewModel.authState.collectAsStateWithLifecycle()
         // #479 — avatar of the connected user for the top-bar account badge (null → pseudo initial).
         val accountAvatarUrl by accountViewModel.avatarUrl.collectAsStateWithLifecycle()
+        // #718 — GLOBAL avatar appearance (border + background) for the top-bar account badge.
+        val accountAvatarAppearance by accountViewModel.avatarAppearance.collectAsStateWithLifecycle()
         // #313 — unread-MP badge on the « Messages » nav item. Same shared-instance logic as the
         // account ViewModel above. The ON_START hook refreshes the count when the app comes back
         // to the foreground (MPs received while backgrounded) ; the first start is skipped by the
@@ -822,23 +1142,36 @@ fun RedfaceApp(intent: Intent?) {
         // (see navSuiteContentInsetModifier). Read in composable scope, branch lives in the helper.
         val contentInsetModifier = navSuiteContentInsetModifier(navLayoutType, WindowInsets.navigationBars)
 
-        NavigationSuiteScaffold(
-            layoutType = navLayoutType,
-            navigationSuiteItems = {
-                TopLevelDestination.entries.forEach { destination ->
-                    item(
-                        selected = currentDestination == destination,
-                        onClick = { currentDestination = destination },
-                        icon = {
-                            TopLevelDestinationIcon(
-                                destination = destination,
-                                mpUnreadCount = mpUnreadCount,
-                            )
-                        },
-                        label = { Text(text = stringResource(destination.labelRes)) },
-                    )
-                }
+        // #603 PR6 / #679 — bottom-bar tap routing (see [topLevelTapAction]). Hoisted to a val so the per-item
+        // onClick in RedfaceBottomNavigationSuite carries no extra branch and RedfaceApp stays under detekt's
+        // ceiling. `flagsAtRoot` is read at tap time (current stack depth), so a re-tap from a sub-screen
+        // pops the tab to its root instead of arming the quick-config sheet (#679).
+        val onNavItemClick: (TopLevelDestination) -> Unit = { destination ->
+            runTopLevelTap(
+                action = topLevelTapAction(
+                    tapped = destination,
+                    current = currentDestination,
+                    flagsAtRoot = flagsBackStack.size <= 1,
+                ),
+                onReselectFlags = { flagsQuickConfigRequest++ },
+                onPopFlagsToRoot = { popToRoot(flagsBackStack) },
+                onSwitch = { switchTab(destination) },
+            )
+        }
+        // #666 follow-up — NavigationSuiteScaffoldLayout (not the higher-level NavigationSuiteScaffold) so
+        // the navigationSuite slot can swap a shorter icon-only bar in when labels are off (Option A). The
+        // content slot below is unchanged (#529 content-inset handling stays put).
+        NavigationSuiteScaffoldLayout(
+            navigationSuite = {
+                RedfaceBottomNavigationSuite(
+                    navLayoutType = navLayoutType,
+                    navBarLabels = navBarLabels,
+                    currentDestination = currentDestination,
+                    mpUnreadCount = mpUnreadCount,
+                    onItemClick = onNavItemClick,
+                )
             },
+            layoutType = navLayoutType,
         ) {
             // #398 — no global side gutter here. Each screen owns its own lateral rhythm
             // (listings keep their 16/24 dp content padding, readers compensate explicitly),
@@ -846,6 +1179,17 @@ fun RedfaceApp(intent: Intent?) {
             // for the theme background/elevation; only its horizontal padding was removed.
             // #529 — consumes the bottom nav-bar inset under a bottom-bar layout (no-op otherwise).
             val activeBackStack = backStacks.getValue(currentDestination)
+            // #667 — at a secondary tab's ROOT, NavDisplay's own back handler is disabled (size == 1)
+            // and the back would finish the Activity (bug). Intercept here to return to the previous
+            // tab instead; Flags (home) keeps the default exit. Composed ABOVE NavDisplay, so NavDisplay
+            // still wins while it can pop (size > 1); the immersive back FAB (#518) routes through the
+            // same dispatcher, so it is covered. RedfaceNavHost.onRootBack is a belt-and-suspenders for a
+            // future nav3 that might invoke onBack at the root.
+            TabRootBackHandler(
+                currentDestination = currentDestination,
+                activeBackStackSize = activeBackStack.size,
+                onRootBack = onRootTabBack,
+            )
             Box(modifier = Modifier.fillMaxSize()) {
                 Surface(modifier = contentInsetModifier) {
                     val accountMenu: @Composable () -> Unit = {
@@ -860,11 +1204,19 @@ fun RedfaceApp(intent: Intent?) {
                                 startReportEmail(context, reportEmailSubject, reportNoEmailClient)
                             },
                             avatarUrl = accountAvatarUrl,
+                            avatarAppearance = accountAvatarAppearance,
                         )
                     }
                     RedfaceNavHost(
                         backStack = activeBackStack,
+                        // #667 — invoked if NavDisplay ever calls onBack at the root (defensive; the
+                        // parent BackHandler above handles it in the current nav3 where it does not).
+                        onRootBack = onRootTabBack,
                         accountMenu = accountMenu,
+                        flagsQuickConfigRequest = flagsQuickConfigRequest,
+                        // #603 bug fix — reset the counter once FlagsRoute handled it, so a re-mount
+                        // (return from a category/topic) does not replay the sheet open (Codex review).
+                        onFlagsQuickConfigConsumed = { flagsQuickConfigRequest = 0 },
                         onReportContent = {
                             startReportEmail(context, reportEmailSubject, reportNoEmailClient)
                         },
@@ -1488,7 +1840,16 @@ internal fun Map<TopicTitleKey, String>.withTitle(key: TopicTitleKey, title: Str
 // without reducing complexity. Param count: each nav-state bundle has a distinct owner/call-site.
 private fun RedfaceNavHost(
     backStack: NavBackStack<NavKey>,
+    // #667 — called when back is pressed at the active tab's root (size == 1). Defensive: in the current
+    // nav3 NavDisplay disables its own back handler at the root, so RedfaceApp's parent BackHandler
+    // fires instead; this keeps the behaviour correct if a future nav3 invokes onBack at the root.
+    onRootBack: () -> Unit,
     accountMenu: @Composable () -> Unit,
+    // #603 PR6 — increments on each Drapeaux-tab re-tap; FlagsRoute opens its quick-config sheet on change.
+    flagsQuickConfigRequest: Int,
+    // #603 bug fix — FlagsRoute calls this once it has handled a request, resetting the counter to 0 so a
+    // re-mount under the back stack does not re-open the sheet with a stale value (Codex review).
+    onFlagsQuickConfigConsumed: () -> Unit,
     // #494 — the « Signaler un contenu » row of the settings Account/About sub-page reuses the same
     // report-email flow as the account menu (which owns `context` + the report strings).
     onReportContent: () -> Unit,
@@ -1511,6 +1872,8 @@ private fun RedfaceNavHost(
         onBack = {
             if (backStack.size > 1) {
                 backStack.removeAt(backStack.lastIndex)
+            } else {
+                onRootBack()
             }
         },
         // Transitions (Claude + Codex, remplace le crossfade 700 ms global) : shared-axis X léger pour le
@@ -1530,26 +1893,41 @@ private fun RedfaceNavHost(
         entryProvider = entryProvider {
             entry<FlagsListRoute> {
                 FlagsRoute(
-                    onOpenFlag = { flag ->
+                    // #676 v2 — [page] is chosen by the caller: row tap + sheet « Ouvrir » resume at
+                    // lastReadPage, « 1er non-lu » jumps to lastReadPage+1, « dernière page » to totalPages.
+                    onOpenFlag = { flag, page ->
                         backStack.add(
                             TopicRoute(
                                 cat = flag.cat,
                                 post = flag.topicId,
-                                page = flag.lastReadPage,
-                                // REST `last_post_read_id` is the LAST post the user
-                                // read (not the first unread). Re-anchoring the reader
-                                // there is close enough to the legacy "where I stopped"
-                                // UX without claiming a first-unread we cannot prove
-                                // from the REST flag payload. HFR numreponse fits in
-                                // Int (largest observed ~10M), so the toInt() narrowing
-                                // is safe in practice. null = no anchor available.
+                                page = page,
+                                // REST `last_post_read_id` is the LAST post the user read. Anchoring the
+                                // reader there only makes sense when RESUMING at the last-read page; for
+                                // « 1er non-lu » / « dernière page » we want the top of that other page,
+                                // so the anchor is dropped unless page == lastReadPage. HFR numreponse
+                                // fits in Int (largest observed ~10M), so the toInt() narrowing is safe.
                                 scrollTo = flag.lastPostReadId
                                     ?.takeIf { it in 1L..Int.MAX_VALUE.toLong() }
-                                    ?.toInt(),
+                                    ?.toInt()
+                                    ?.takeIf { page == flag.lastReadPage },
                                 // #231 — a flag open means « catch up on new posts » → refresh
                                 // past the 60s snappy-cache TTL (the cached page is still shown
                                 // instantly first). Avoids landing on a stale followed topic.
                                 forceRefresh = true,
+                            ),
+                        )
+                    },
+                    // #15 — long-press sheet « Poster un message » : open the reply editor. HFR appends
+                    // the reply at the END of the topic, so open on the last page (Codex), not the
+                    // last-read page. subcat carries the flag's sub-forum for the POST target.
+                    onReplyFlag = { flag ->
+                        backStack.add(
+                            PostEditorRoute(
+                                mode = PostEditorMode.Reply,
+                                cat = flag.cat,
+                                topicId = flag.topicId,
+                                page = flag.totalPages.coerceAtLeast(1),
+                                subcat = flag.subcat,
                             ),
                         )
                     },
@@ -1575,6 +1953,8 @@ private fun RedfaceNavHost(
                         }
                         backStack.add(PrivateMessageThreadRoute(threadId = threadId, page = page))
                     },
+                    quickConfigRequest = flagsQuickConfigRequest,
+                    onQuickConfigConsumed = onFlagsQuickConfigConsumed,
                     topBarActions = accountMenu,
                 )
             }
@@ -2354,6 +2734,15 @@ private fun resetStack(
     backStack.add(root)
     if (route != root) {
         backStack.add(route)
+    }
+}
+
+// #679 — pop a tab's back stack down to its root, KEEPING the root entry instance (so its state is not
+// lost, unlike [resetStack] which clears and re-adds a fresh root). Removes from the top, the same idiom
+// the host uses for a single back-pop ([NavBackStack.removeAt] at lastIndex).
+private fun popToRoot(backStack: NavBackStack<NavKey>) {
+    while (backStack.size > 1) {
+        backStack.removeAt(backStack.lastIndex)
     }
 }
 

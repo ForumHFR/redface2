@@ -17,7 +17,7 @@ Voir SKILLS.md à la racine pour l'index humain des skills.
 
 ## Projet
 
-- Phase actuelle : **Phase 1 — Core lecture** ([roadmap](docs/specs/roadmap.md)). Phase 0 bootstrap livrée (Gradle multi-modules, CI, thème M3, navigation, Hilt). Slice topic fixe + AST `PostContent` + `PostRenderer` Compose en cours d'intégration.
+- Phase actuelle : **Phase 4 — UI & hygiène + Extensions** ([roadmap](docs/specs/roadmap.md)). Phases 0 à 3 livrées (bootstrap ; lecture du forum ; écriture poster/citer/upload ; messages MP + DT/MultiMP), bêta **0.16.0** publiée (Play open testing + F-Droid). En cours : refontes UI (vue Drapeaux #603, vue Topic #604), aide & réglages, architecture d'extensions (#6 MPStorage, #7).
 - Licence : GPL-3.0-only
 - Documentation : GitHub Pages via `docs/` (Jekyll + just-the-docs)
 - Langue : code en anglais, issues et docs en francais
@@ -26,7 +26,8 @@ Voir SKILLS.md à la racine pour l'index humain des skills.
 
 ```bash
 # Build applicatif local — image Docker pin (cf. .devcontainer/devcontainer.json)
-./gradlew :app:assembleDebug
+# Variantes dev/prod (#233) : le :app:assembleDebug non flavoré ne résout plus.
+./gradlew :app:assembleProdDebug
 
 # Preview Jekyll (necessite Ruby + Bundler)
 cd docs && bundle install && bundle exec jekyll serve
@@ -75,10 +76,42 @@ Strategie complete (TDD/spec/prototype par sous-chantier, fixtures, couverture d
 
 - Issues et commentaires : toujours mentionner qui a demande l'action si generee par IA
 - Conventional Commits : `feat:`, `fix:`, `docs:`, `chore:`, `test:`
-- Branche principale : `main`
+- Branche principale : `main` (branche de **release**). **Branche d'intégration : `dev`** — les branches de feature partent de `origin/dev` (fraîchement pull) et y sont mergées ; promotion `dev → main` à la release. Ne jamais brancher depuis une branche feature locale non squashée.
 - **Pas de push direct sur `main`** : toute modification (code, doc, skill, ADR, fixture) passe par une **pull request** avec CI verte avant merge. Cette règle vaut aussi pour les changements jugés triviaux (typo, ajout d'une ligne dans une table) : la PR donne un point d'historique reviewable et fait tourner la CI. La branch protection actuelle n'enforce pas techniquement cette règle (`enforce_admins: false` pour garder un échappatoire d'urgence), c'est une discipline de projet. Toute exception (revert critique, hotfix bloquant, ou absence prolongée de reviewer humain) doit être : (1) justifiée dans le message du commit ou du merge, et (2) tracée dans une issue post-mortem ouverte le jour même si l'exception devient récurrente.
 - **Review en mono-maintainer** : si le maintainer principal opère sous deux comptes GitHub (alias dédié au projet + autre compte) **et que les deux comptes sont publiquement associables sans fuite d'information personnelle**, les PR du compte projet peuvent être approuvées depuis l'autre compte pour satisfaire la règle "1 review approuvée + CI verte" sans bloquer le workflow. **Si l'autre compte porte une identité que le maintainer ne souhaite pas publiquement lier au projet** (typiquement un projet sous pseudonyme), ne **jamais** l'utiliser pour une review, un commentaire ou tout artefact public sur ce repo — la trace est immuable côté GitHub. Si aucun reviewer "sûr" n'est disponible (autre compte du maintainer associable, ou contributeur communautaire), le merge `--admin` est acceptable comme exception au sens du point précédent ; il vaut mieux un `--admin` justifié dans le message de merge qu'une review qui crée un lien d'identité non voulu.
 - **Modifier un skill = tester avant la PR** : toute modification d'un skill `.agents/skills/<name>/SKILL.md` doit être exécutée dans la session courante (dry-run) pour valider que les commandes documentées marchent et que le rapport produit colle aux checks. Le rapport (ou le bug trouvé) est mentionné dans la description de la PR. Voir `SKILLS.md` § "Créer ou modifier un skill".
+
+---
+
+## Cadence de validation & pipeline
+
+> **Méta-règle : AGENTS.md = la loi, la CI = la police.** Une règle « stricte » est soit
+> `[enforced]` (garde machine bloquante : CI / Konsist / Detekt / lint / hook), soit
+> `[advisory]` (discipline, au mieux rappelée par le template PR). **Ne jamais présenter une
+> règle comme `[enforced]` sans garde réelle** — le statut de chaque garde vit dans
+> `docs/guides/contributing.md`.
+
+### Cadence Codex `[advisory]`
+
+Codex n'a pas de runner CI : c'est une **discipline**, signalée (pas imposée) par le template PR
+(case « review Codex », label `codex-reviewed`).
+- **Cadrage** — avant un chantier non-trivial (nouvelle archi, changement cross-cutting, design à
+  forks réels), faire cadrer l'approche par Codex *avant* d'implémenter (`NE MODIFIE RIEN` ;
+  lecture du repo autorisée).
+- **Review** — après chaque diff non-trivial, faire relire le diff par Codex.
+- **Gate** — Codex en bout de chaîne avant merge / release.
+- **Exception** — edit purement mécanique (typo, rename, bump de version).
+- **Validation séparée** (cf. § Charte anti-derive) : Codex est le validateur distinct par défaut ;
+  ses verdicts se recoupent au code, ils ne font pas autorité seuls.
+
+### Pipeline de développement
+
+Le pipeline canonique (`choix techno → … → review`, `[advisory]`) est défini dans
+**`docs/specs/methodology.md` § Pipeline de développement** (source canonique) — `AGENTS.md` ne le
+redéfinit pas. Conséquences opérationnelles pour les agents :
+- **Validation** = reproduire la CI via le skill **`/validate`** ; **jamais `:app:testDevDebugUnitTest`
+  seul** (il compile mais n'exécute pas les tests des modules `feature`/`core`).
+- **Review** = Codex (cf. § Cadence Codex ci-dessus) + `/code-review`.
 
 ---
 

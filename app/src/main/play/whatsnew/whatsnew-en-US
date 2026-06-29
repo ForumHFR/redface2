@@ -1,10 +1,9 @@
-Redface 2 v0.16.0 — beta.
+Redface 2 v0.18.0 — beta.
 
-New:
-- DT/MultiMP: the creator can add or remove participants (via a reply).
-- DT: participant list ("Participants" button).
-- Sync DT reading position to MPStorage (optional, off by default).
-
-Fix: emojis that truncated a message on send.
-
-Bugs: via the beta or GitHub.
+Flags view redesign:
+- New top bar (flag + short name + "+read", retractable search, round avatar).
+- Translucent bar: the list scrolls underneath.
+- "redface" pull-to-refresh loader.
+- Configurable "+read" cue, avatar and glyph; search on the DT tab.
+- Long-press: quick actions, go to page, post a message.
+- Improved accessibility and per-tab scroll preservation.

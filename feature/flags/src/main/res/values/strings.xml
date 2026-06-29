@@ -4,8 +4,14 @@
     <string name="flags_login_cta">Se connecter à HFR</string>
 
     <string name="flags_tab_my_topics">Mes sujets</string>
+    <!-- #603/#665 — noms courts pour le container compact de la top bar (XaTriX : Cyan/Lurk/Fav/DT/Super). -->
+    <string name="flags_tab_my_topics_short">Cyan</string>
     <string name="flags_tab_read_only">Lu</string>
+    <string name="flags_tab_read_only_short">Lurk</string>
     <string name="flags_tab_favorite">Favoris</string>
+    <string name="flags_tab_favorite_short">Fav</string>
+    <string name="flags_tab_dt_short">DT</string>
+    <string name="flags_tab_super_short">Super</string>
     <!-- Libellé du TYPE de drapeau RED, distinct du libellé d'onglet (« Lu », raccourci pour
          tenir sur le tab row). Utilisé hors tab row, ex. dans le dialog de confirmation de
          retrait (#99) où la place n'est pas contrainte et où « Lu » seul serait ambigu. -->
@@ -15,7 +21,64 @@
 
     <!-- Indicateur discret sur l'onglet Cyan : suffixe ajouté au libellé quand les cyans
          déjà lus sont affichés (re-tap de l'onglet Cyan déjà sélectionné). -->
-    <string name="flags_tab_cyan_read_shown_suffix"> · +lus</string>
+    <string name="flags_tab_cyan_read_shown_suffix"> (+lus)</string>
+
+    <!-- #603 PR2 — search app bar (façon Réglages) qui remplace l'ancien header + le tab row texte. -->
+    <string name="flags_search_placeholder">Rechercher dans les drapeaux</string>
+    <!-- #603/#665 — a11y de la loupe rétractable de la top bar. -->
+    <string name="flags_search_open">Rechercher</string>
+    <!-- a11y du container gauche : état (onglet courant + « +lus ») via contentDescription, action via onClickLabel. %1$s = nom complet de l'onglet. -->
+    <string name="flags_appbar_current_tab">Onglet : %1$s</string>
+    <string name="flags_appbar_current_tab_pluslus">Onglet : %1$s, messages lus affichés</string>
+    <string name="flags_appbar_open_menu">Ouvrir le menu des drapeaux</string>
+    <!-- #661 — entrées de découvrabilité du menu déroulant du sélecteur d'onglet. -->
+    <string name="flags_appbar_menu_display_settings">Réglages d\'affichage</string>
+    <string name="flags_appbar_menu_show_read">Afficher les lus</string>
+    <string name="flags_appbar_menu_hide_read">Masquer les lus</string>
+    <!-- a11y : action d'effacement du champ de recherche. -->
+    <string name="flags_search_clear">Effacer la recherche</string>
+    <!-- État vide d'une recherche sans résultat. %1$s = la requête saisie. -->
+    <string name="flags_search_no_results">Aucun drapeau ne correspond à « %1$s »</string>
+
+    <!-- #603 PR5 — bottom sheet d'appui-long sur un drapeau (métadonnées + actions + super-favori). -->
+    <!-- Libellé a11y / long-press de la ligne : ouvre le sheet d'actions (remplace le « Retirer » direct). -->
+    <string name="flags_row_actions_label">Actions du sujet</string>
+    <!-- #676 v2 (mockup F2 v2) — RANGÉE rapide (icône + label) : actions primaires fréquentes, DISTINCTES
+         de la liste verticale ci-dessous. « 1er non-lu » est grisé quand il n'y a rien de non-lu. -->
+    <string name="flags_sheet_quick_open">Ouvrir</string>
+    <string name="flags_sheet_quick_first_unread">1er non-lu</string>
+    <string name="flags_sheet_quick_super_favorite">Super favori</string>
+    <string name="flags_sheet_quick_share">Partager</string>
+    <!-- #676 v2 — LISTE verticale : actions secondaires / navigation / destructive, DISTINCTES de la
+         rangée rapide. « Retirer » passe toujours par le dialog de confirmation de retrait. -->
+    <string name="flags_sheet_action_last_page">Ouvrir à la dernière page</string>
+    <!-- #15 — aller à une page précise (dialog) + poster une réponse -->
+    <string name="flags_sheet_action_goto_page">Aller à une page</string>
+    <string name="flags_sheet_action_reply">Poster un message</string>
+    <string name="flags_sheet_action_copy">Copier le lien</string>
+    <string name="flags_sheet_action_browser">Ouvrir dans le navigateur</string>
+    <string name="flags_sheet_action_remove">Retirer le drapeau</string>
+    <!-- #15 — dialog « aller à une page » -->
+    <string name="flags_sheet_goto_page_title">Aller à une page</string>
+    <string name="flags_sheet_goto_page_label">Numéro de page</string>
+    <string name="flags_sheet_goto_page_supporting">1 à %1$d</string>
+    <string name="flags_sheet_goto_page_confirm">Aller</string>
+    <string name="flags_sheet_goto_page_cancel">Annuler</string>
+    <string name="flags_sheet_link_copied">Lien copié</string>
+    <string name="flags_sheet_browser_failed">Aucune application pour ouvrir ce lien</string>
+    <string name="flags_sheet_share_failed">Aucune application pour partager ce lien</string>
+    <!-- Bloc métadonnées (clés). -->
+    <string name="flags_sheet_meta_category">Catégorie</string>
+    <string name="flags_sheet_meta_author">Créé par</string>
+    <string name="flags_sheet_meta_last_reply">Dernier message</string>
+    <string name="flags_sheet_meta_position">Position</string>
+    <string name="flags_sheet_meta_replies">Réponses</string>
+    <!-- Valeurs métadonnées. %1$s auteur · %2$s date. -->
+    <string name="flags_sheet_meta_last_reply_value">%1$s — %2$s</string>
+    <!-- %1$d page lue · %2$d total. -->
+    <string name="flags_sheet_meta_position_value">page %1$d / %2$d</string>
+    <!-- Suffixe pages à lire, %1$d = nb. -->
+    <string name="flags_sheet_meta_pages_to_read">+%1$d à lire</string>
 
     <!-- Onglet « Super » : écran placeholder M3, futurs super favoris. Pas de fetch réseau. -->
     <string name="flags_super_placeholder_title">Super favoris — à venir</string>
@@ -28,15 +91,18 @@
     <!-- Badge discret de reprise de lecture, alimenté par MPStorage (mpFlags). %1$d = page de reprise.
          C'est une POSITION de lecture, PAS un état lu/non-lu (le point non-lu vient de l'inbox). -->
     <string name="flags_dt_resume_badge">reprise p.%1$d</string>
-    <!-- État vide DT. La liste = PAGE 1 de la boîte de réception (les conversations les plus
-         récentes) ∪ entrées connues de la synchro DT (MPStorage) — un balayage multi-pages est
-         différé (cf. DT_INBOX_PAGE). Le wording assume « récente » pour ne pas affirmer qu'AUCUNE
-         MultiMP n'existe ailleurs (ni en page 1, ni connue de la synchro DT). -->
-    <string name="flags_dt_empty">Aucune conversation multi-destinataires récente.</string>
+    <!-- État vide DT (#662 — état vide visuel : titre + sous-texte). La liste = PAGE 1 de la boîte de
+         réception (les conversations les plus récentes) ∪ entrées connues de la synchro DT (MPStorage)
+         — un balayage multi-pages est différé (cf. DT_INBOX_PAGE). Le sous-texte assume « récente »
+         pour ne pas affirmer qu'AUCUNE MultiMP n'existe ailleurs. -->
+    <string name="flags_dt_empty_title">Aucune conversation</string>
+    <string name="flags_dt_empty_subtitle">Aucune discussion à interlocuteurs multiples récente.</string>
     <!-- #546 — état « non-lus uniquement » actif mais aucune conversation non lue (l'union n'est pas
          vide, juste filtrée). Re-taper l'onglet DT affiche aussi les lues (« +lus »). Distinct de
-         flags_dt_empty (aucune conversation du tout). -->
-    <string name="flags_dt_no_unread">Aucune conversation non lue. Re-tape l\'onglet DT pour afficher aussi les lues.</string>
+         flags_dt_empty (aucune conversation du tout). #662 — wording aligné sur les autres états vides
+         (forme courte « Aucun(e)… », sans sous-texte : le caveat de balayage vit désormais dans la
+         description du réglage « Section DT », pas dans la vue — demande XaTriX). -->
+    <string name="flags_dt_no_unread">Aucune conversation non lue</string>
     <!-- Description a11y d'une ligne DT : état lu/non-lu, annoncé par TalkBack (le point coloré
          est purement décoratif). %1$s = sujet de la conversation. -->
     <string name="flags_dt_row_unread">Non lu : %1$s</string>
@@ -48,9 +114,6 @@
     <!-- #6 — Description a11y d'une ligne DT orpheline (hors inbox) : l'état lu/non-lu est INCONNU,
          on n'annonce donc ni « Lu » ni « Non lu ». %1$s = titre placeholder de la conversation. -->
     <string name="flags_dt_row_state_unknown">État inconnu : %1$s</string>
-    <!-- #6 — Note de bas de liste DT : la liste ne couvre que la page 1 de la boîte + ce que la
-         synchro DT connaît ; les pages plus anciennes ne sont pas balayées (balayage différé). -->
-    <string name="flags_dt_scan_note">Seules les conversations de la première page de la boîte et celles connues de la synchro DT sont listées. Les pages plus anciennes ne sont pas balayées.</string>
     <!-- Échec du chargement de la liste DT (boîte de réception). La lecture MPStorage, best-effort,
          n'atteint jamais cet état (elle se dégrade en « pas de badge »). -->
     <string name="flags_dt_error">Impossible de charger les conversations. Vérifie ta connexion ou réessaie.</string>
@@ -66,31 +129,33 @@
     <string name="flags_category_fallback">Catégorie %1$d</string>
     <!-- #414 — libellé d'action (a11y) du bandeau de catégorie cliquable. -->
     <string name="flags_category_open_label">Ouvrir la catégorie</string>
-    <!-- #179 follow-up — Vue à plat (legacy) : message quand la liste est vide. Sans le mot
-         « catégorie » (il n'y a pas de regroupement dans cette vue). -->
-    <string name="flags_list_empty_cyan">Aucun nouveau message</string>
-    <string name="flags_list_empty">Aucun drapeau à afficher</string>
-    <!-- #179 follow-up — Vue groupée AVEC « masquer les catégories sans non-lu » : quand aucune
-         catégorie n'a de message non lu, toutes les sections sont masquées. Message + item unique
-         pour ne pas laisser un corps blanc et garder une cible scrollable au pull-to-refresh (#229). -->
+    <!-- #662 — les états vides plein-onglet (vue groupée sans section, vue à plat sans drapeau) sont
+         désormais rendus par FlagsEmptyState (visuel + titre + sous-texte par onglet), cf. les chaînes
+         flags_empty_* plus bas. Les anciens libellés courts flags_list_empty* ont été retirés. Le
+         libellé per-section (flags_category_empty*) reste utilisé. -->
+    <!-- #662 (Codex) — vue groupée AVEC « masquer les catégories sans non-lu » : sections vides ≠
+         onglet vide (il peut rester des sujets lus, juste aucun non-lu). On garde donc un état vide
+         distinct, factuel, plutôt que le « Aucun favori » trompeur. -->
     <string name="flags_no_unread_category">Aucune catégorie avec un message non lu</string>
+    <string name="flags_no_unread_category_subtitle">Désactive « Masquer les catégories sans non-lu » pour revoir les sujets lus.</string>
     <string name="flags_error">Impossible de récupérer les drapeaux. Vérifie ta connexion ou réessaie.</string>
     <string name="flags_session_expired">Session HFR expirée. Reconnecte-toi pour recharger tes drapeaux.</string>
     <string name="flags_retry">Réessayer</string>
 
-    <!-- Footer metadata formats. The `*_at` variants (#325) carry the last-reply timestamp
-         already formatted web-style by :core:ui (`01-05-2026 à 17:07`), placed LAST so that
-         on narrow screens the ellipsis eats the added data first and never the pre-existing
-         read-progress « p.X/Y » (review #325):
-         "Shaad · 69017 rép. · p.1725/1726 · 01-05-2026 à 17:07". The timestamp-less variants
-         remain as fallbacks when REST omits `last_post_date`. Without author (HFR returns no
-         last replier on brand new topics): "69017 rép. · p.1/1". -->
-    <string name="flags_item_metadata_with_author">%1$s · p.%2$d/%3$d</string>
-    <string name="flags_item_metadata_no_author">p.%1$d/%2$d</string>
+    <!-- #662 — état vide visuel d'un onglet entièrement vide : un visuel (icône fine en défaut, ou un
+         smiley perso HFR si « états vides humoristiques » est activé) + un titre + un sous-texte propres
+         à l'onglet. Le texte porte tout le sens (le visuel est décoratif pour TalkBack). -->
+    <string name="flags_empty_title_cyan">Aucun sujet suivi</string>
+    <string name="flags_empty_subtitle_cyan">Les sujets où tu interviens apparaissent ici.</string>
+    <string name="flags_empty_title_red">Aucun sujet lu</string>
+    <string name="flags_empty_subtitle_red">Les sujets que tu as marqués comme lus apparaissent ici.</string>
+    <string name="flags_empty_title_favorite">Aucun favori</string>
+    <string name="flags_empty_subtitle_favorite">Touche l\'étoile sur un sujet pour le retrouver ici.</string>
+    <string name="flags_empty_title_generic">Rien à afficher</string>
 
-    <!-- #309 — Menu d'affichage des drapeaux (bottom sheet M3 ouvert depuis l'en-tête). Reflète et
-         modifie les réglages d'affichage de l'onglet courant (ou globaux selon « par onglet »). -->
-    <string name="flags_view_settings_action">Affichage</string>
+
+    <!-- #309 — Menu d'affichage des drapeaux (bottom sheet M3 ouvert via re-tap de l'onglet
+         Drapeaux de la barre du bas, #603 PR6). -->
     <string name="flags_view_settings_title">Affichage des drapeaux</string>
     <!-- Portée affichée sous le titre : globale, ou onglet courant. %1$s = libellé de l'onglet. -->
     <string name="flags_view_settings_scope_global">S\'applique à tous les onglets</string>
@@ -105,11 +170,50 @@
          onglet » ci-dessus). Activé par défaut sur « Mes sujets », désactivé sur Lu et Favoris. -->
     <string name="flags_view_settings_unread_only_title">Non-lus uniquement</string>
     <string name="flags_view_settings_unread_only_description">N\'affiche que les sujets avec un message non lu. Propre à cet onglet.</string>
+    <!-- #603 PR6 — Forme du marqueur de gauche (barre / pastille / point). Réglage GLOBAL (tous onglets). -->
+    <string name="flags_view_settings_marker_title">Marqueur</string>
+    <string name="flags_view_settings_marker_description">Forme de l\'indicateur de couleur à gauche de chaque drapeau. S\'applique à tous les onglets.</string>
+    <!-- #603 — bascule GLOBALE : titre des sujets sur une seule ligne (tronqué) plutôt que deux. -->
+    <string name="flags_view_settings_single_line_title_title">Titre sur une seule ligne</string>
+    <string name="flags_view_settings_single_line_title_description">Tronque le titre des sujets à une ligne au lieu de deux. S\'applique à tous les onglets.</string>
+    <string name="flags_view_settings_marker_stripe">Barre</string>
+    <string name="flags_view_settings_marker_pastille">Pastille</string>
+    <string name="flags_view_settings_marker_dot">Point</string>
+    <!-- #690 — bascule GLOBALE : fin contour sombre (0,5 dp) autour du marqueur, pour que l\'ambre
+         des favoris ressorte mieux sur fond clair. -->
+    <string name="flags_view_settings_marker_border_title">Contour du marqueur</string>
+    <string name="flags_view_settings_marker_border_description">Ajoute un fin liseré sombre autour de l\'indicateur de couleur, pour mieux le détacher du fond clair. S\'applique à tous les onglets.</string>
+    <!-- #728 — bascule GLOBALE : afficher la fine barre de chargement en haut lors des rechargements
+         automatiques. Le pull-to-refresh manuel reste signalé par le redface quoi qu\'il arrive. -->
+    <string name="flags_view_settings_loading_bar_title">Barre de chargement</string>
+    <string name="flags_view_settings_loading_bar_description">Affiche la fine barre de progression en haut lors des rechargements automatiques. Le tirer-pour-rafraîchir reste signalé par le redface. S\'applique à tous les onglets.</string>
+    <!-- #661 — Style de l\'indicateur « +lus » dans le sélecteur d\'onglet de la barre du haut :
+         œil (par défaut) ou drapal dessiné en anneau coloré. Réglage GLOBAL (tous onglets). -->
+    <string name="flags_view_settings_pluslus_title">Indicateur « +lus »</string>
+    <string name="flags_view_settings_pluslus_description">Repère affiché quand les sujets lus sont visibles : un anneau autour du drapeau, ou un œil à droite du nom. S\'applique à tous les onglets.</string>
+    <string name="flags_view_settings_pluslus_eye">Œil</string>
+    <string name="flags_view_settings_pluslus_ring">Anneau</string>
+    <!-- #603/#665 — Forme du repère de type actif dans le container gauche de la top bar : drapeau / pastille -->
+    <string name="flags_view_settings_glyph_title">Repère du type actif</string>
+    <string name="flags_view_settings_glyph_description">Forme du repère du type de drapeau dans la barre du haut : l\'icône drapeau colorée ou une pastille. S\'applique à tous les onglets.</string>
+    <string name="flags_view_settings_glyph_flag">Drapeau</string>
+    <string name="flags_view_settings_glyph_dot">Pastille</string>
+    <!-- #718 — options GLOBALES de l'avatar du compte (badge « PP » de la barre du haut, tous écrans) -->
+    <string name="flags_view_settings_avatar_section">Avatar du compte</string>
+    <string name="flags_view_settings_avatar_border_title">Bordure de l\'avatar</string>
+    <string name="flags_view_settings_avatar_border_description">Affiche un fin liseré autour du badge avatar de la barre du haut. S\'applique à tous les écrans.</string>
+    <!-- #603 — Style de la bande de catégorie (vue groupée) : sous-titre sobre / bloc tonal /
+         accent latéral / pastille en puce. Réglage GLOBAL (tous onglets), sans effet en vue à plat. -->
+    <string name="flags_view_settings_band_title">Bande de catégorie</string>
+    <string name="flags_view_settings_band_description">Style de l\'en-tête de catégorie dans la vue groupée. S\'applique à tous les onglets.</string>
+    <string name="flags_view_settings_band_minimal">Sobre</string>
+    <string name="flags_view_settings_band_soft">Bloc</string>
+    <string name="flags_view_settings_band_accent">Accent</string>
+    <string name="flags_view_settings_band_bullet">Puce</string>
     <string name="flags_view_settings_done">Fermer</string>
 
-    <!-- #99 — Retirer un drapeau (delflag). Action sur chaque ligne + dialog de confirmation
-         obligatoire avant l'appel réseau, puis snackbar de résultat. -->
-    <string name="flags_remove_action">Retirer</string>
+    <!-- #99 — Retirer un drapeau (delflag) : action du sheet d'appui-long (#603 PR5) + dialog de
+         confirmation obligatoire avant l'appel réseau, puis snackbar de résultat. -->
     <string name="flags_remove_dialog_title">Retirer le drapeau ?</string>
     <!-- %1$s = titre du topic, %2$s = libellé du type de drapeau (Mes sujets / Lus uniquement / Favoris). -->
     <string name="flags_remove_dialog_message">Retirer le drapeau « %2$s » sur « %1$s » ? Cette action est définitive depuis l\'app.</string>

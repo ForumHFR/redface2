@@ -15,12 +15,18 @@ import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
+import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
+import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
+import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
+import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
+import fr.forumhfr.redface2.core.domain.preferences.SuperFavoriteRepository
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
@@ -219,6 +225,24 @@ class FlagsViewModelTest {
     }
 
     @Test
+    fun `maybeAutoRefresh raises isRefreshing for the round-trip then clears it`() = runTest {
+        // #603 — isRefreshing is the SINGLE loading cue (it drives the top bar; the PullToRefreshBox
+        // circular indicator is hidden via indicator = {}). An auto-refresh must raise it during the
+        // round-trip and clear it after, exactly like a manual refresh.
+        val flags = FakeFlagRepository()
+        flags.refreshGate = kotlinx.coroutines.CompletableDeferred()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = viewModel(auth, flags, FakeForumRepository())
+
+        vm.maybeAutoRefresh()
+        // Suspended at the gate: the loading cue (top bar) is up.
+        assertEquals(true, vm.isRefreshing.value)
+
+        flags.refreshGate!!.complete(Unit)
+        assertEquals(false, vm.isRefreshing.value)
+    }
+
+    @Test
     fun `selecting the Super tab is a placeholder with no fetch and null state`() = runTest {
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository(catIds = listOf(1))
@@ -306,6 +330,20 @@ class FlagsViewModelTest {
             true,
             vm.flagsViewSettings.value.unreadOnly,
         )
+    }
+
+    @Test
+    fun `funnyEmptyState reflects the persisted preference`() = runTest {
+        // #662 — the opt-in smiley empty state surfaces through an eager StateFlow; default is sober.
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+
+        val sober = viewModel(auth, flags, forum, FakeUserPreferencesRepository())
+        assertFalse("default empty state is sober", sober.funnyEmptyState.value)
+
+        val funny = viewModel(auth, flags, forum, FakeUserPreferencesRepository(funnyEmptyState = true))
+        assertTrue("opt-in surfaces the funny empty state", funny.funnyEmptyState.value)
     }
 
     @Test
@@ -1074,6 +1112,56 @@ class FlagsViewModelTest {
             cancelAndIgnoreRemainingEvents()
         }
     }
+
+    @Test
+    fun `DT and Super keep the GLOBAL appearance prefs instead of resetting to the defaults (#603 audit)`() =
+        runTest {
+            // #603 audit regression — DT and Super carry no real FlagType, so the OLD resolution built a
+            // bare FlagsViewSettings(group, hide) and let every GLOBAL appearance field fall back to its
+            // data-class default. A user who picked glyph = Dot (#603/#665) and turned the loading bar OFF
+            // (#728) then saw the flag glyph and the bar reappear the moment they landed on DT/Super. The
+            // fix resolves the appearance fields via observeFlagsViewSettings(CYAN) and only overwrites the
+            // group/hide pair + an inert unreadOnly. This pins that the 7 globals (here: flagGlyphStyle +
+            // showLoadingBar) survive, while group/hide mirror the globals and unreadOnly is false.
+            val flags = FakeFlagRepository()
+            val forum = FakeForumRepository(catIds = listOf(1))
+            val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+            // Non-default globals: glyph = Dot, loading bar OFF, flat (group off), hide-read ON.
+            val prefs = FakeUserPreferencesRepository(
+                groupByCategory = false,
+                hideReadCategories = true,
+                flagGlyphStyle = FlagGlyphStyle.Dot,
+                showLoadingBar = false,
+            )
+            val vm = viewModel(auth, flags, forum, prefs)
+
+            // Read the RESOLVED current value after the scheduler settles rather than awaiting
+            // separate Turbine emissions: DT and Super (both flagType == null) resolve to an
+            // IDENTICAL FlagsViewSettings, which the StateFlow conflates — so a per-tab awaitItem for
+            // Super would never arrive. The .value read is deterministic and conflation-proof.
+            advanceUntilIdle()
+            val cyan = vm.flagsViewSettings.value
+            assertEquals(FlagGlyphStyle.Dot, cyan.flagGlyphStyle)
+            assertEquals(false, cyan.showLoadingBar)
+
+            vm.selectTab(FlagTab.Dt)
+            advanceUntilIdle()
+            val dt = vm.flagsViewSettings.value
+            assertEquals("DT must keep glyph = Dot, not reset to Flag", FlagGlyphStyle.Dot, dt.flagGlyphStyle)
+            assertEquals("DT must keep the loading bar OFF, not reappear", false, dt.showLoadingBar)
+            assertFalse("DT mirrors the global flat layout", dt.groupByCategory)
+            assertTrue("DT mirrors the global hide-read", dt.hideReadCategories)
+            assertFalse("DT carries an inert unreadOnly (no list to filter)", dt.unreadOnly)
+
+            vm.selectTab(FlagTab.Super)
+            advanceUntilIdle()
+            val sup = vm.flagsViewSettings.value
+            assertEquals("Super must keep glyph = Dot", FlagGlyphStyle.Dot, sup.flagGlyphStyle)
+            assertEquals("Super must keep the loading bar OFF", false, sup.showLoadingBar)
+            assertFalse("Super mirrors the global flat layout", sup.groupByCategory)
+            assertTrue("Super mirrors the global hide-read", sup.hideReadCategories)
+            assertFalse("Super carries an inert unreadOnly", sup.unreadOnly)
+        }
 
     @Test
     fun `setFlagsHideReadCategories writes the global scope when the override is off`() = runTest {
@@ -1994,6 +2082,23 @@ class FlagsViewModelTest {
         override fun instant(): Instant = now
     }
 
+    @Test
+    fun `toggleSuperFavorite adds then removes the topic in the local store`() = runTest {
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository()
+        val auth = FakeAuthRepository(AuthState.Anonymous, flagRepository = flags)
+        val vm = viewModel(auth, flags, forum)
+        val flag = stubFlag(42, FlagType.CYAN)
+
+        vm.toggleSuperFavorite(flag)
+        advanceUntilIdle()
+        assertTrue(42 in vm.superFavoriteTopicIds.value)
+
+        vm.toggleSuperFavorite(flag)
+        advanceUntilIdle()
+        assertFalse(42 in vm.superFavoriteTopicIds.value)
+    }
+
     @Suppress("LongParameterList") // test fake-builder: each repo fake is an independent collaborator
     private fun viewModel(
         auth: FakeAuthRepository,
@@ -2002,7 +2107,8 @@ class FlagsViewModelTest {
         prefs: FakeUserPreferencesRepository = FakeUserPreferencesRepository(),
         messages: FakeMessagesRepository = FakeMessagesRepository(),
         mpStorage: FakeMpStorageRepository = FakeMpStorageRepository(),
-    ): FlagsViewModel = FlagsViewModel(auth, flags, forum, prefs, messages, mpStorage, fixedClock)
+        superFavorite: SuperFavoriteRepository = FakeSuperFavoriteRepository(),
+    ): FlagsViewModel = FlagsViewModel(auth, flags, forum, prefs, superFavorite, messages, mpStorage, fixedClock)
 
     /** Builds a ViewModel with a custom [clock] for the #378 throttle tests; everything else is a
      * fresh default fake. */
@@ -2015,10 +2121,20 @@ class FlagsViewModelTest {
         flags,
         FakeForumRepository(),
         FakeUserPreferencesRepository(),
+        FakeSuperFavoriteRepository(),
         FakeMessagesRepository(),
         FakeMpStorageRepository(),
         clock,
     )
+
+    /** In-memory [SuperFavoriteRepository] (#603 PR5) — the local super-favorite set. */
+    private class FakeSuperFavoriteRepository : SuperFavoriteRepository {
+        private val ids = MutableStateFlow<Set<Int>>(emptySet())
+        override fun observeSuperFavoriteTopicIds(): Flow<Set<Int>> = ids.asStateFlow()
+        override suspend fun setSuperFavorite(topicId: Int, enabled: Boolean) {
+            ids.value = if (enabled) ids.value + topicId else ids.value - topicId
+        }
+    }
 
     /** Flattens whatever content shape into the topics order for assertions on flag content. */
     private fun flatTopics(state: FlagsListUiState.Success): List<Flag> =
@@ -2110,8 +2226,16 @@ class FlagsViewModelTest {
         override fun observe(type: FlagType): Flow<FlagsResult> =
             perType.getValue(type).asSharedFlow()
 
+        /**
+         * Optional gate to suspend a [refresh] round-trip so a test can assert the intermediate
+         * `isRefreshing` state before the call resolves. Null = the refresh returns immediately (the
+         * default for every test that doesn't need the gate).
+         */
+        var refreshGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+
         override suspend fun refresh(type: FlagType) {
             refreshCalls = refreshCalls + type
+            refreshGate?.await()
         }
 
         override fun clearSessionCache() {
@@ -2167,6 +2291,10 @@ class FlagsViewModelTest {
         override fun observeCategories(): Flow<ForumResult<List<Category>>> =
             categoriesFlow.asSharedFlow().onSubscription { observeCategoriesSubscriptions += 1 }
 
+        override suspend fun getCategories(forceRefreshIfStale: Boolean): ForumResult<List<Category>> =
+            categoriesFlow.replayCache.lastOrNull { it !is ForumResult.Loading }
+                ?: ForumResult.Success(emptyList())
+
         override suspend fun refreshCategories() {
             refreshCategoriesCalls += 1
         }
@@ -2208,10 +2336,19 @@ class FlagsViewModelTest {
         groupByCategory: Boolean = true,
         hideReadCategories: Boolean = false,
         perTabOverride: Boolean = false,
+        funnyEmptyState: Boolean = false,
+        // #603 audit — GLOBAL appearance fields configurable so a test can prove they survive the
+        // DT/Super resolution path (tab.flagType == null). They are surfaced verbatim by
+        // observeFlagsViewSettings on every type, mirroring the real DataStore impl.
+        flagGlyphStyle: FlagGlyphStyle = FlagGlyphStyle.Flag,
+        showLoadingBar: Boolean = true,
     ) : UserPreferencesRepository {
         private val groupBy = MutableStateFlow(groupByCategory)
         private val hideRead = MutableStateFlow(hideReadCategories)
         private val perTab = MutableStateFlow(perTabOverride)
+        private val funnyEmpty = MutableStateFlow(funnyEmptyState)
+        private val glyphStyle = MutableStateFlow(flagGlyphStyle)
+        private val loadingBar = MutableStateFlow(showLoadingBar)
         private val perTypeGroup: Map<FlagType, MutableStateFlow<Boolean?>> =
             FlagType.entries.associateWith { MutableStateFlow<Boolean?>(null) }
         private val perTypeHide: Map<FlagType, MutableStateFlow<Boolean?>> =
@@ -2219,6 +2356,8 @@ class FlagsViewModelTest {
         // #317 — per-type « non-lus uniquement », null = unset → type-aware default applied at read.
         private val perTypeUnread: Map<FlagType, MutableStateFlow<Boolean?>> =
             FlagType.entries.associateWith { MutableStateFlow<Boolean?>(null) }
+        // #603 PR6 — GLOBAL marker shape (not per-type), surfaced through observeFlagsViewSettings.
+        private val markerStyle = MutableStateFlow(MarkerStyle.STRIPE)
 
         /** When set, holds the persisted master write so a test can prove routing uses the
          * OPTIMISTIC value (the persisted `perTab` never updates while gated). */
@@ -2268,8 +2407,23 @@ class FlagsViewModelTest {
                     global to globalHide
                 }
             }
-            return combine(layout, perTypeUnread.getValue(type)) { (group, hide), unread ->
-                FlagsViewSettings(group, hide, unread ?: defaultUnreadOnly(type))
+            // #603 audit — fold in the GLOBAL appearance fields the DT/Super path must preserve.
+            val appearance = combine(markerStyle, glyphStyle, loadingBar) { marker, glyph, bar ->
+                Triple(marker, glyph, bar)
+            }
+            return combine(
+                layout,
+                perTypeUnread.getValue(type),
+                appearance,
+            ) { (group, hide), unread, (marker, glyph, bar) ->
+                FlagsViewSettings(
+                    groupByCategory = group,
+                    hideReadCategories = hide,
+                    unreadOnly = unread ?: defaultUnreadOnly(type),
+                    markerStyle = marker,
+                    flagGlyphStyle = glyph,
+                    showLoadingBar = bar,
+                )
             }
         }
 
@@ -2296,6 +2450,23 @@ class FlagsViewModelTest {
                 blockUnreadOnlySetUntil?.await()
             }
             perTypeUnread.getValue(type).value = enabled
+        }
+
+        override suspend fun setFlagsMarkerStyle(style: MarkerStyle) {
+            markerStyle.value = style
+        }
+
+        override suspend fun setFlagsSingleLineTitle(enabled: Boolean) = Unit
+        override suspend fun setFlagsCategoryBandStyle(style: CategoryBandStyle) = Unit
+        override suspend fun setFlagsMarkerBorder(enabled: Boolean) = Unit
+        override suspend fun setFlagsShowLoadingBar(enabled: Boolean) {
+            loadingBar.value = enabled
+        }
+        override fun observeAvatarAppearance(): Flow<AvatarAppearance> = MutableStateFlow(AvatarAppearance())
+        override suspend fun setAvatarBorder(enabled: Boolean) = Unit
+        override suspend fun setFlagsPlusLusIndicatorStyle(style: PlusLusIndicatorStyle) = Unit
+        override suspend fun setFlagsGlyphStyle(style: FlagGlyphStyle) {
+            glyphStyle.value = style
         }
 
         // #286 — theme prefs are irrelevant to FlagsViewModel; stubbed at their defaults.
@@ -2334,6 +2505,15 @@ class FlagsViewModelTest {
         override fun observeShowScrollbar(): Flow<Boolean> = MutableStateFlow(true)
 
         override suspend fun setShowScrollbar(enabled: Boolean) = Unit
+
+        override fun observeNavBarLabels(): Flow<Boolean> = MutableStateFlow(true)
+
+        override fun observeFunnyEmptyState(): Flow<Boolean> = funnyEmpty
+        override suspend fun setFunnyEmptyState(enabled: Boolean) {
+            funnyEmpty.value = enabled
+        }
+
+        override suspend fun setNavBarLabels(enabled: Boolean) = Unit
 
         override fun observeStartScreen(): Flow<StartScreenPreference> =
             MutableStateFlow(StartScreenPreference())

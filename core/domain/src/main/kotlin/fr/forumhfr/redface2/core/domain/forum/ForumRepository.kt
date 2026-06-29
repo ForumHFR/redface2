@@ -21,6 +21,30 @@ interface ForumRepository {
 
     fun observeCategories(): Flow<ForumResult<List<Category>>>
 
+    /**
+     * One-shot categories read for callers that ENUMERATE the catalogue (the flags
+     * per-category fan-out, #251) rather than render it reactively. [observeCategories]'s
+     * stale path emits the still-cached (stale) value FIRST so the UI can paint
+     * last-known-good without flashing Loading; a caller doing `.first { it !is Loading }`
+     * therefore captures the STALE list. When a category was added to HFR after the 24h
+     * categories cache was warmed (e.g. cat 32 « IA »), the flags fan-out then never
+     * enumerated it and its drapeaux stayed invisible (#251).
+     *
+     * This returns a list guaranteed fresh when [forceRefreshIfStale] is true: a fresh
+     * cache is returned as-is, a stale or cold cache triggers a network fetch and returns
+     * its result. With [forceRefreshIfStale] false a stale cache is returned without a
+     * network round-trip (cheap path for callers that tolerate staleness). Never emits
+     * [ForumResult.Loading].
+     *
+     * Bound: "fresh" is the categories TTL, so a category added to HFR while the cache is
+     * still within its TTL is only discovered once that window elapses — acceptable because
+     * the categories cache is in-memory (cold on every process restart), so a relaunch
+     * re-enumerates the live catalogue. A fetch failure with a stale cache present degrades
+     * to last-known-good (the caller gets the stale list, not a Failure); only a cold cache
+     * surfaces the Failure.
+     */
+    suspend fun getCategories(forceRefreshIfStale: Boolean = false): ForumResult<List<Category>>
+
     suspend fun refreshCategories()
 
     fun observeSubcategories(cat: Int): Flow<ForumResult<List<SubCategory>>>
