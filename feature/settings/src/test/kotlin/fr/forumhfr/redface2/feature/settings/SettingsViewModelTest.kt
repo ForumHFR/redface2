@@ -585,6 +585,35 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `NavBarLabelsChanged persists the flip and clears the updating flag`() = runTest {
+        // #666 — bottom-nav labels are shown by default; hiding them is the opt-out. Toggling
+        // persists and settles (same optimistic-flip seam as FunnyEmptyState).
+        val viewModel = newViewModel()
+        assertTrue("nav-bar labels are shown by default", viewModel.state.value.navBarLabels)
+
+        viewModel.submit(SettingsIntent.NavBarLabelsChanged(false))
+
+        assertFalse(viewModel.state.value.navBarLabels)
+        assertFalse(viewModel.state.value.isUpdatingNavBarLabels)
+        assertFalse(viewModel.state.value.navBarLabelsError)
+        assertEquals(1, repository.navBarLabelsSetCalls)
+    }
+
+    @Test
+    fun `NavBarLabelsChanged reverts and raises the error flag on persist failure`() = runTest {
+        // The optimistic flip must roll back to the previous value and surface the error flag when
+        // the DataStore write fails (mirror of the FlagsGroupByCategory failure path).
+        repository.failOnNavBarLabelsSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.NavBarLabelsChanged(false))
+
+        assertTrue("must revert to the previous value on failure", viewModel.state.value.navBarLabels)
+        assertFalse(viewModel.state.value.isUpdatingNavBarLabels)
+        assertTrue(viewModel.state.value.navBarLabelsError)
+    }
+
+    @Test
     fun `hide-read categories switch is disabled while the flat flags view is selected`() = runTest {
         val viewModel = newViewModel()
         assertTrue(viewModel.state.value.canToggleFlagsHideReadCategories)

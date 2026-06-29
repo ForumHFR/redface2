@@ -91,9 +91,15 @@ stable par catégorie** (clé = identité catégorie, pas un index fragile).
 
 ### 5. Persistance : extension de `FlagsViewSettings` + super-favori local
 
-- `FlagsViewSettings` est **étendu** (DataStore, champs versionnés, **defaults conservateurs**) avec
-  au moins : `markerStyle` (défaut **STRIPE**) et `density` (défaut **BALANCED/Standard**). Les
-  champs existants (`groupByCategory`, `hideReadCategories`, `unreadOnly`) sont conservés.
+- `FlagsViewSettings` est **étendu** (DataStore, champs versionnés, **defaults conservateurs**). Champs
+  GLOBAUX réellement livrés (#603, non soumis à l'override per-onglet) : `markerStyle` (défaut
+  **STRIPE**), `singleLineTitle`, `categoryBandStyle` (défaut **MINIMAL**), `markerBorder`,
+  `plusLusIndicatorStyle` (défaut **Ring**, cf. #661/#721), `flagGlyphStyle` (défaut **Flag**) et
+  `showLoadingBar` (défaut **on**, cf. #728). Les champs existants (`groupByCategory`,
+  `hideReadCategories`, `unreadOnly`) sont conservés.
+- **Note (audit 2026-06-29)** : la **densité** d'affichage envisagée initialement ici n'a finalement
+  **pas** été intégrée à `FlagsViewSettings` ; elle vit comme préférence **globale séparée**
+  (`DisplayDensity`) et n'est pas (encore) consommée par la vue Drapeaux.
 - **Super-favori** : nouvelle notion **purement locale** (ensemble de `topicId` persisté en
   DataStore), **distincte** de `isFavorite` (qui reflète `flag_owntopic == 3` côté serveur). Pas de
   mutation serveur. L'action vit dans le bottom sheet d'appui-long (cf. décision 6). L'onglet

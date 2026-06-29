@@ -73,4 +73,13 @@
     <string name="editor_smiley_search_empty">Aucun smiley trouvé.</string>
     <string name="editor_smiley_search_error">Erreur réseau. Réessaie dans un instant.</string>
     <string name="editor_smiley_insert_description">Insérer %1$s</string>
+    <!-- a11y (#603 audit): the pull-to-refresh redface loader announces refresh progress to TalkBack;
+         on a manual pull the thin top bar is suppressed, so the puck is the SOLE activity indicator. -->
+    <string name="loader_pull_refreshing">Actualisation en cours</string>
+    <!-- a11y (#603 audit): the "+N" pages-to-read pill announces a full sentence instead of « plus N »;
+         the plural form fixes the « 1 pages » grammar bug for a single page. -->
+    <plurals name="flag_pages_to_read_a11y">
+        <item quantity="one">%1$d page à lire</item>
+        <item quantity="other">%1$d pages à lire</item>
+    </plurals>
 </resources>

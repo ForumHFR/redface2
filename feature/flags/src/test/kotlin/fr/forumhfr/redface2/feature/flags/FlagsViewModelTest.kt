@@ -1114,6 +1114,56 @@ class FlagsViewModelTest {
     }
 
     @Test
+    fun `DT and Super keep the GLOBAL appearance prefs instead of resetting to the defaults (#603 audit)`() =
+        runTest {
+            // #603 audit regression — DT and Super carry no real FlagType, so the OLD resolution built a
+            // bare FlagsViewSettings(group, hide) and let every GLOBAL appearance field fall back to its
+            // data-class default. A user who picked glyph = Dot (#603/#665) and turned the loading bar OFF
+            // (#728) then saw the flag glyph and the bar reappear the moment they landed on DT/Super. The
+            // fix resolves the appearance fields via observeFlagsViewSettings(CYAN) and only overwrites the
+            // group/hide pair + an inert unreadOnly. This pins that the 7 globals (here: flagGlyphStyle +
+            // showLoadingBar) survive, while group/hide mirror the globals and unreadOnly is false.
+            val flags = FakeFlagRepository()
+            val forum = FakeForumRepository(catIds = listOf(1))
+            val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+            // Non-default globals: glyph = Dot, loading bar OFF, flat (group off), hide-read ON.
+            val prefs = FakeUserPreferencesRepository(
+                groupByCategory = false,
+                hideReadCategories = true,
+                flagGlyphStyle = FlagGlyphStyle.Dot,
+                showLoadingBar = false,
+            )
+            val vm = viewModel(auth, flags, forum, prefs)
+
+            // Read the RESOLVED current value after the scheduler settles rather than awaiting
+            // separate Turbine emissions: DT and Super (both flagType == null) resolve to an
+            // IDENTICAL FlagsViewSettings, which the StateFlow conflates — so a per-tab awaitItem for
+            // Super would never arrive. The .value read is deterministic and conflation-proof.
+            advanceUntilIdle()
+            val cyan = vm.flagsViewSettings.value
+            assertEquals(FlagGlyphStyle.Dot, cyan.flagGlyphStyle)
+            assertEquals(false, cyan.showLoadingBar)
+
+            vm.selectTab(FlagTab.Dt)
+            advanceUntilIdle()
+            val dt = vm.flagsViewSettings.value
+            assertEquals("DT must keep glyph = Dot, not reset to Flag", FlagGlyphStyle.Dot, dt.flagGlyphStyle)
+            assertEquals("DT must keep the loading bar OFF, not reappear", false, dt.showLoadingBar)
+            assertFalse("DT mirrors the global flat layout", dt.groupByCategory)
+            assertTrue("DT mirrors the global hide-read", dt.hideReadCategories)
+            assertFalse("DT carries an inert unreadOnly (no list to filter)", dt.unreadOnly)
+
+            vm.selectTab(FlagTab.Super)
+            advanceUntilIdle()
+            val sup = vm.flagsViewSettings.value
+            assertEquals("Super must keep glyph = Dot", FlagGlyphStyle.Dot, sup.flagGlyphStyle)
+            assertEquals("Super must keep the loading bar OFF", false, sup.showLoadingBar)
+            assertFalse("Super mirrors the global flat layout", sup.groupByCategory)
+            assertTrue("Super mirrors the global hide-read", sup.hideReadCategories)
+            assertFalse("Super carries an inert unreadOnly", sup.unreadOnly)
+        }
+
+    @Test
     fun `setFlagsHideReadCategories writes the global scope when the override is off`() = runTest {
         // hide-read routing mirror of the group-by tests; asserted via flagsViewSettings.value since
         // the cross-tab value is identical (global), which a StateFlow would dedup out of a turbine.
@@ -2287,11 +2337,18 @@ class FlagsViewModelTest {
         hideReadCategories: Boolean = false,
         perTabOverride: Boolean = false,
         funnyEmptyState: Boolean = false,
+        // #603 audit — GLOBAL appearance fields configurable so a test can prove they survive the
+        // DT/Super resolution path (tab.flagType == null). They are surfaced verbatim by
+        // observeFlagsViewSettings on every type, mirroring the real DataStore impl.
+        flagGlyphStyle: FlagGlyphStyle = FlagGlyphStyle.Flag,
+        showLoadingBar: Boolean = true,
     ) : UserPreferencesRepository {
         private val groupBy = MutableStateFlow(groupByCategory)
         private val hideRead = MutableStateFlow(hideReadCategories)
         private val perTab = MutableStateFlow(perTabOverride)
         private val funnyEmpty = MutableStateFlow(funnyEmptyState)
+        private val glyphStyle = MutableStateFlow(flagGlyphStyle)
+        private val loadingBar = MutableStateFlow(showLoadingBar)
         private val perTypeGroup: Map<FlagType, MutableStateFlow<Boolean?>> =
             FlagType.entries.associateWith { MutableStateFlow<Boolean?>(null) }
         private val perTypeHide: Map<FlagType, MutableStateFlow<Boolean?>> =
@@ -2350,12 +2407,23 @@ class FlagsViewModelTest {
                     global to globalHide
                 }
             }
+            // #603 audit — fold in the GLOBAL appearance fields the DT/Super path must preserve.
+            val appearance = combine(markerStyle, glyphStyle, loadingBar) { marker, glyph, bar ->
+                Triple(marker, glyph, bar)
+            }
             return combine(
                 layout,
                 perTypeUnread.getValue(type),
-                markerStyle,
-            ) { (group, hide), unread, marker ->
-                FlagsViewSettings(group, hide, unread ?: defaultUnreadOnly(type), marker)
+                appearance,
+            ) { (group, hide), unread, (marker, glyph, bar) ->
+                FlagsViewSettings(
+                    groupByCategory = group,
+                    hideReadCategories = hide,
+                    unreadOnly = unread ?: defaultUnreadOnly(type),
+                    markerStyle = marker,
+                    flagGlyphStyle = glyph,
+                    showLoadingBar = bar,
+                )
             }
         }
 
@@ -2391,11 +2459,15 @@ class FlagsViewModelTest {
         override suspend fun setFlagsSingleLineTitle(enabled: Boolean) = Unit
         override suspend fun setFlagsCategoryBandStyle(style: CategoryBandStyle) = Unit
         override suspend fun setFlagsMarkerBorder(enabled: Boolean) = Unit
-        override suspend fun setFlagsShowLoadingBar(enabled: Boolean) = Unit
+        override suspend fun setFlagsShowLoadingBar(enabled: Boolean) {
+            loadingBar.value = enabled
+        }
         override fun observeAvatarAppearance(): Flow<AvatarAppearance> = MutableStateFlow(AvatarAppearance())
         override suspend fun setAvatarBorder(enabled: Boolean) = Unit
         override suspend fun setFlagsPlusLusIndicatorStyle(style: PlusLusIndicatorStyle) = Unit
-        override suspend fun setFlagsGlyphStyle(style: FlagGlyphStyle) = Unit
+        override suspend fun setFlagsGlyphStyle(style: FlagGlyphStyle) {
+            glyphStyle.value = style
+        }
 
         // #286 — theme prefs are irrelevant to FlagsViewModel; stubbed at their defaults.
         override fun observeThemeMode(): Flow<ThemeMode> = MutableStateFlow(ThemeMode.SYSTEM)

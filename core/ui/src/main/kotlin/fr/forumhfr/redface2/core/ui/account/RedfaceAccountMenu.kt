@@ -25,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -239,6 +240,12 @@ private fun AvatarBadge(
             size = BADGE_SIZE,
             // Round « PP » to match the circular badge (the post-header default stays rounded-square).
             shape = CircleShape,
+            // Audit #2 — make the inner avatar PURELY decorative for TalkBack. The parent Surface already
+            // owns the single action label « Ouvrir le menu compte »; `RedfaceUserAvatar` otherwise emits
+            // its own "Avatar de <pseudo>" contentDescription on the loaded-image branch, so the badge
+            // risked announcing TWO descriptions for one target. `clearAndSetSemantics {}` drops the
+            // avatar's subtree semantics so only the parent's action/label is read.
+            modifier = Modifier.clearAndSetSemantics {},
         )
     }
 }

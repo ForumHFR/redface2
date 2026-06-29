@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -42,7 +43,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
@@ -334,12 +337,19 @@ private fun TypePlusLusZone(
             .clip(RightZoneShape)
             .then(
                 if (togglable) {
-                    Modifier.clickable(role = Role.Button, onClickLabel = toggleLabel, onClick = onToggle)
-                } else {
+                    // Togglable (Cyan/DT): a real « +lus » toggle — keep the descriptive
+                    // contentDescription + click label so the action and its state are announced.
                     Modifier
+                        .clickable(role = Role.Button, onClickLabel = toggleLabel, onClick = onToggle)
+                        .semantics { contentDescription = description }
+                } else {
+                    // #603 audit fix — non-togglable (Lu/Favori/Super): plain text, no action.
+                    // FlagGlyphZone (zone 1) already announces « Onglet actuel : X »; tagging this
+                    // zone with the SAME label made TalkBack read the tab name twice. Make it
+                    // decorative so the left container announces the current tab exactly once.
+                    Modifier.clearAndSetSemantics {}
                 },
             )
-            .semantics { contentDescription = description }
             .padding(start = 4.dp, end = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -485,7 +495,13 @@ private fun ExpandedSearchContainer(
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             val focusRequester = remember { FocusRequester() }
+            val focusManager = LocalFocusManager.current
             LaunchedEffect(Unit) { focusRequester.requestFocus() }
+            // #603 audit fix — give the field an accessible name (TalkBack had none), a real visible
+            // placeholder (the flags_search_placeholder string existed but was never wired into the
+            // BasicTextField), and a keyboard « Search » action handler (imeAction was set but did
+            // nothing — the IME Search key was inert).
+            val searchHint = stringResource(R.string.flags_search_placeholder)
             BasicTextField(
                 value = query,
                 onValueChange = onQueryChange,
@@ -493,17 +509,34 @@ private fun ExpandedSearchContainer(
                 textStyle = LocalTextStyle.current.copy(color = MaterialTheme.colorScheme.onSurface),
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
                 modifier = Modifier
                     .weight(1f)
-                    .focusRequester(focusRequester),
+                    .focusRequester(focusRequester)
+                    .semantics { contentDescription = searchHint },
+                decorationBox = { innerTextField ->
+                    if (query.isEmpty()) {
+                        Text(
+                            text = searchHint,
+                            style = LocalTextStyle.current,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                    }
+                    innerTextField()
+                },
             )
             IconButton(
+                // #603 audit fix — default 48dp touch target (was forced to 24dp, below the a11y
+                // minimum) and a real vector icon instead of a « ✕ » text glyph (project convention).
                 onClick = onClose,
-                modifier = Modifier
-                    .size(24.dp)
-                    .semantics { contentDescription = clearLabel },
+                modifier = Modifier.semantics { contentDescription = clearLabel },
             ) {
-                Text(text = "✕", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(
+                    painter = painterResource(CoreUiR.drawable.ic_close),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
