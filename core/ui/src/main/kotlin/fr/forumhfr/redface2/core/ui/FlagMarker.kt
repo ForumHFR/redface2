@@ -18,6 +18,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
@@ -122,11 +126,16 @@ private fun Modifier.markerOutline(enabled: Boolean, color: Color, shape: Shape)
  */
 @Composable
 fun PagesToReadPill(count: Int, accent: Color, modifier: Modifier = Modifier) {
+    // Audit #3 — the "+N" glyph alone reads as « plus 3 » with no context in TalkBack. Carry a clear,
+    // localized, PLURAL-AWARE label on the container and mark the inner Text decorative so the pill
+    // announces a single meaningful sentence (« 1 page à lire » vs « N pages à lire »).
+    val pagesToReadDescription = pluralStringResource(R.plurals.flag_pages_to_read_a11y, count, count)
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(7.dp))
             .background(accent.copy(alpha = 0.20f))
-            .padding(horizontal = 7.dp, vertical = 1.dp),
+            .padding(horizontal = 7.dp, vertical = 1.dp)
+            .semantics { contentDescription = pagesToReadDescription },
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -134,6 +143,8 @@ fun PagesToReadPill(count: Int, accent: Color, modifier: Modifier = Modifier) {
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.SemiBold,
             color = accent,
+            // Decorative — the container's contentDescription owns the announcement.
+            modifier = Modifier.clearAndSetSemantics {},
         )
     }
 }

@@ -13,7 +13,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.core.ui.post.rememberAnimationsEnabled
 
 /**
@@ -47,11 +53,26 @@ fun RedfacePullPuck(
     val rollDegrees =
         if (refreshing || !animationsEnabled) 0f else progress.coerceAtLeast(0f) * MAX_ROLL_DEGREES
 
+    // Audit #4 — announce the refresh to TalkBack. During a MANUAL refresh the thin top loading bar is
+    // suppressed, so this puck is the SOLE activity indicator (the face has no contentDescription and the
+    // ring carries no label). Only annotate while [refreshing]; staying silent during the pull gesture
+    // avoids spamming the live region for every progress frame.
+    val refreshingDescription = stringResource(R.string.loader_pull_refreshing)
+    val refreshSemantics = if (refreshing) {
+        Modifier.semantics {
+            liveRegion = LiveRegionMode.Polite
+            contentDescription = refreshingDescription
+        }
+    } else {
+        Modifier
+    }
+
     Surface(
         shape = CircleShape,
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
         shadowElevation = PUCK_ELEVATION,
         modifier = modifier
+            .then(refreshSemantics)
             .size(PUCK_SIZE)
             .graphicsLayer {
                 alpha = puckAlpha

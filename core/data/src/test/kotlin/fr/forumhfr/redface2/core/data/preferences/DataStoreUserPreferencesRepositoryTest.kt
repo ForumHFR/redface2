@@ -446,6 +446,30 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `singleLineTitle defaults to false on an empty store`() = runTest(dispatcher) {
+        // #603 GLOBAL: titles wrap to 2 lines by default; the single-line ellipsis is the opt-in.
+        repository.observeFlagsViewSettings(FlagType.CYAN).test {
+            assertEquals(false, awaitItem().singleLineTitle)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setFlagsSingleLineTitle persists and round-trips for every tab`() = runTest(dispatcher) {
+        // #603 GLOBAL: written once, observed on any tab type.
+        repository.setFlagsSingleLineTitle(true)
+        repository.observeFlagsViewSettings(FlagType.RED).test {
+            assertEquals(true, awaitItem().singleLineTitle)
+            cancelAndIgnoreRemainingEvents()
+        }
+        repository.setFlagsSingleLineTitle(false)
+        repository.observeFlagsViewSettings(FlagType.FAVORITE).test {
+            assertEquals(false, awaitItem().singleLineTitle)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `showLoadingBar defaults to true on an empty store`() = runTest(dispatcher) {
         // #728 GLOBAL: the thin top loading bar is shown by default (opt-out).
         repository.observeFlagsViewSettings(FlagType.CYAN).test {

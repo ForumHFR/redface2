@@ -4,10 +4,12 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringSetPreferencesKey
+import android.util.Log
 import fr.forumhfr.redface2.core.domain.coroutines.ApplicationScope
 import fr.forumhfr.redface2.core.domain.preferences.SuperFavoriteRepository
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
@@ -30,7 +32,15 @@ class DataStoreSuperFavoriteRepository @Inject constructor(
         dataStore.data
             .map { prefs -> prefs[KEY].orEmpty().mapNotNull(String::toIntOrNull).toSet() }
             .distinctUntilChanged()
-            .catch { emit(emptySet()) }
+            // Audit #1 — rethrow CancellationException before degrading: a bare `catch { emit(...) }`
+            // swallows ALL throwables, including the cooperative cancellation that structured
+            // concurrency relies on (mirrors DefaultFlagRepository.fetchStickyFlagSupplement). Only a
+            // genuine DataStore read error degrades to an empty set (e.g. corrupt prefs file).
+            .catch { e ->
+                if (e is CancellationException) throw e
+                Log.w(TAG, "Could not read super-favorite topic ids; degrading to empty set", e)
+                emit(emptySet())
+            }
 
     override suspend fun setSuperFavorite(topicId: Int, enabled: Boolean) {
         // Parented to the process-lifetime scope (cf. DataStoreUserPreferencesRepository.persist) so a
@@ -45,6 +55,7 @@ class DataStoreSuperFavoriteRepository @Inject constructor(
     }
 
     private companion object {
+        const val TAG = "SuperFavoriteRepo"
         val KEY = stringSetPreferencesKey("super_favorite_topic_ids")
     }
 }

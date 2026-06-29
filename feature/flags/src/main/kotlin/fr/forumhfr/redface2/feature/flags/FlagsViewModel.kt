@@ -281,16 +281,31 @@ class FlagsViewModel @Inject constructor(
     /**
      * Display-settings bottom sheet state (#309). Tracks the RESOLVED view settings for the
      * currently selected tab so the sheet's two switches reflect what the list is actually using
-     * (global, or this tab's override). The [FlagTab.Super] placeholder has no real [FlagType], so
-     * it falls back to the global pair — the trigger is hidden there anyway (no list to configure).
+     * (global, or this tab's override). The DT and [FlagTab.Super] placeholders have no real
+     * [FlagType], so they resolve the GLOBAL appearance fields (via the CYAN path) plus the global
+     * group/hide pair — the per-list sheet trigger is hidden there anyway (no list to configure).
      */
     val flagsViewSettings: StateFlow<FlagsViewSettings> = selectedTab
         .flatMapLatest { tab ->
             when (val type = tab.flagType) {
+                // #603 audit fix — DT/Super (no real FlagType) must KEEP the 7 GLOBAL appearance
+                // fields (markerStyle, flagGlyphStyle, plusLusIndicatorStyle, showLoadingBar,
+                // markerBorder, singleLineTitle, categoryBandStyle). Resolving via CYAN carries them
+                // verbatim (they are type-agnostic on every resolution path); the per-type triplet
+                // is then overwritten with the GLOBAL group/hide and an inert unreadOnly. Without
+                // this, a user who turned the loading bar OFF (#728) or picked glyph=Dot / +lus=Eye
+                // saw the bar reappear and the glyph/indicator reset to defaults on DT/Super.
                 null -> combine(
+                    userPreferencesRepository.observeFlagsViewSettings(FlagType.CYAN),
                     userPreferencesRepository.observeFlagsGroupByCategory(),
                     userPreferencesRepository.observeFlagsHideReadCategories(),
-                ) { group, hide -> FlagsViewSettings(group, hide) }
+                ) { resolved, group, hide ->
+                    resolved.copy(
+                        groupByCategory = group,
+                        hideReadCategories = hide,
+                        unreadOnly = false,
+                    )
+                }.distinctUntilChanged()
                 else -> userPreferencesRepository.observeFlagsViewSettings(type)
             }
         }
@@ -606,14 +621,21 @@ class FlagsViewModel @Inject constructor(
         val flag = confirming.flag
         _removeFlagState.value = RemoveFlagState.Removing(flag)
         viewModelScope.launch {
-            val result = flagRepository.removeFlag(flag)
-            _removeFlagState.value = RemoveFlagState.Idle
-            _removeFlagEvent.update {
-                if (result.isSuccess) {
-                    RemoveFlagEvent.Success(flag.title)
-                } else {
-                    RemoveFlagEvent.Failure(flag.title)
+            try {
+                val result = flagRepository.removeFlag(flag)
+                _removeFlagEvent.update {
+                    if (result.isSuccess) {
+                        RemoveFlagEvent.Success(flag.title)
+                    } else {
+                        RemoveFlagEvent.Failure(flag.title)
+                    }
                 }
+            } finally {
+                // #603 audit fix (fork #5) — always release the Removing lock, even if removeFlag
+                // throws an error not wrapped in its Result (or the coroutine is cancelled).
+                // Otherwise the state stays Removing forever and the anti-double-tap guard in
+                // [requestRemoveFlag] permanently blocks any further removal until the VM is recreated.
+                _removeFlagState.value = RemoveFlagState.Idle
             }
         }
     }

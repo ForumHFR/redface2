@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.flags
 
 import android.annotation.SuppressLint
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -66,6 +67,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
@@ -124,6 +126,7 @@ import fr.forumhfr.redface2.core.ui.icon.categoryIcon
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsChoice
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsChoiceGroup
 import fr.forumhfr.redface2.core.ui.theme.FlagPalette
+import java.util.Locale
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -243,27 +246,25 @@ fun FlagsRoute(
     // each pane's state during a transition. The active tab's state still drives the filter-flip reset
     // (#385) and the landing recall-to-top (#546) below, both already scoped to the current tab.
     val flagTabListStates = rememberFlagTabListStates()
-    val flagsListState = flagTabListStates.forType(selectedTab.flagType)
+    // #603 audit fix — key the scroll effects on the SELECTED TAB's own list (forTab), NOT
+    // forType(flagType): DT and Super both have flagType == null, so forType(null)==cyan made the
+    // recall/filter-reset fire on the hidden CYAN list (eroding the per-tab scroll of #695) and
+    // never reach the real DT list. forTab returns null for Super (no list) → effects skipped.
+    val flagsListState: LazyListState? = flagTabListStates.forTab(selectedTab)
     // #665 — the overlay bar gains an opaque→transparent scrim only when content is actually scrolled
     // under it. The active tab's list drives it; Super (no list) and empty/loading states report
     // canScrollBackward = false, so the bar stays non-elevated without a special case (isTabScrolled).
     val barElevated = flagTabListStates.isTabScrolled(selectedTab)
     val tabUnreadFilter by viewModel.tabUnreadFilter.collectAsStateWithLifecycle()
-    FilterFlipScrollResetEffect(
-        tabUnreadFilter = tabUnreadFilter,
-        listState = flagsListState,
-    )
-
-    // #546 — recall the list to the top after a LANDING auto-refresh (app open / tab switch /
-    // resume): the refresh prepends freshly-surfaced flags and a held scroll position would leave
-    // them off-screen (« faut scroller vers le haut », tinc/Lt Ripley). Driven by a one-shot
-    // ViewModel signal (consumed once handled) rather than a replayable counter, so a rotation /
-    // route recreation does not replay a stale scroll. Return-from-topic refreshes never raise it.
     val recallListToTop by viewModel.recallListToTop.collectAsStateWithLifecycle()
-    RecallListToTopEffect(
-        recall = recallListToTop,
+    // #603 audit fix — wires the filter-flip reset (#385) + landing recall-to-top (#546) to the
+    // SELECTED TAB's own list. Extracted to a helper so its null-guard / branches stay off
+    // FlagsRoute's cyclomatic budget (detekt limit 15).
+    FlagScrollEffects(
         listState = flagsListState,
-        onConsumed = viewModel::consumeRecallListToTop,
+        tabUnreadFilter = tabUnreadFilter,
+        recallListToTop = recallListToTop,
+        onRecallConsumed = viewModel::consumeRecallListToTop,
     )
 
     // #309 — display-settings bottom sheet. Opened from the header « Affichage » action; the trigger
@@ -345,8 +346,10 @@ fun FlagsRoute(
     // #603 PR2 — client-side search over the loaded flags + the app-bar tab picker. The query is
     // hoisted here (the app bar edits it, the body filters with it) and reset on a tab change so a
     // query never carries silently from one tab to another.
-    var searchQuery by remember { mutableStateOf("") }
-    var searchActive by remember { mutableStateOf(false) }
+    // #603 audit fix — rememberSaveable so an in-progress search (query + open field) survives a
+    // rotation / process-death restore instead of being silently dropped (the list already restores).
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var searchActive by rememberSaveable { mutableStateOf(false) }
     // #728 — a MANUAL (gesture) pull-refresh is in flight: the rich contained redface indicator shows and
     // the thin top loading bar is suppressed (no double indicator). Armed by the body's pull gesture.
     var manualRefresh by remember { mutableStateOf(false) }
@@ -366,6 +369,18 @@ fun FlagsRoute(
             snapshotFlow { anyRefreshing(isRefreshing, dtIsRefreshing) },
         )
     }
+
+    // #603 audit fix — collapse an open search on system back (mirror of SettingsScreen) and when
+    // the screen stops being searchable on the same tab (session expiry). Extracted to a helper so
+    // its branches stay off FlagsRoute's cyclomatic budget (detekt limit 15).
+    FlagsSearchBackHandler(
+        searchActive = searchActive,
+        searchEnabled = searchEnabled,
+        onCollapseSearch = {
+            searchQuery = ""
+            searchActive = false
+        },
+    )
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -1185,6 +1200,9 @@ private fun AnonymousBody(onLoginRequested: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            // #603 audit fix — reserve the overlay bar height like every other body, otherwise the
+            // translucent top bar (#665, always drawn) covers the top of the « Se connecter » intro.
+            .padding(top = LocalFlagsContentTopPadding.current)
             .padding(horizontal = 24.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -1739,6 +1757,52 @@ private fun RecallListToTopEffect(recall: Boolean, listState: LazyListState, onC
     }
 }
 
+/**
+ * #603 audit fix — drives the per-tab scroll effects (filter-flip reset #385 + landing recall #546)
+ * for the SELECTED tab's own list. [listState] is null for the Super placeholder (no list): the two
+ * effects are skipped, but a raised [recallListToTop] is still consumed so the one-shot signal never
+ * stays armed and later fires on the next real-list tab. Keying these effects on the tab's own list
+ * (forTab) rather than forType(flagType) stops DT/Super (both flagType==null → cyan) from recalling
+ * the hidden Cyan list and eroding the per-tab scroll preservation (#695). Extracted from FlagsRoute
+ * so its null-guard / branches stay off the cyclomatic budget (detekt limit 15).
+ */
+@Composable
+private fun FlagScrollEffects(
+    listState: LazyListState?,
+    tabUnreadFilter: Pair<FlagTab, Boolean>,
+    recallListToTop: Boolean,
+    onRecallConsumed: () -> Unit,
+) {
+    listState?.let { state ->
+        FilterFlipScrollResetEffect(tabUnreadFilter = tabUnreadFilter, listState = state)
+        RecallListToTopEffect(recall = recallListToTop, listState = state, onConsumed = onRecallConsumed)
+    }
+    LaunchedEffect(recallListToTop, listState) {
+        if (recallListToTop && listState == null) onRecallConsumed()
+    }
+}
+
+/**
+ * #603 audit fix — collapses an open search: the system back gesture restores the normal top bar
+ * first (mirrors SettingsScreen) instead of leaving the screen, and the search is also cleared when
+ * the screen stops being searchable on the same tab (e.g. session expiry). Extracted from FlagsRoute
+ * so the back-enable predicate / branches stay off its cyclomatic budget (detekt limit 15).
+ */
+@Composable
+private fun FlagsSearchBackHandler(
+    searchActive: Boolean,
+    searchEnabled: Boolean,
+    onCollapseSearch: () -> Unit,
+) {
+    // enabled = searchActive ALONE (not && searchEnabled): if the screen stops being searchable while
+    // a search is open (session expiry), back must still collapse the loupe rather than leave the
+    // screen during the brief window before the LaunchedEffect below clears it (Codex gate review).
+    BackHandler(enabled = searchActive) { onCollapseSearch() }
+    LaunchedEffect(searchEnabled) {
+        if (!searchEnabled) onCollapseSearch()
+    }
+}
+
 // LazyColumn contentType tags (#179 compose-perf): one reuse pool per structurally distinct slot
 // kind so Compose recycles like-for-like across the header→row→header alternation of the grouped
 // list. Plain strings (the contentType is only ever compared for equality).
@@ -1919,7 +1983,9 @@ private fun CategoryBandMinimal(catId: Int, label: String, onClick: () -> Unit) 
                 modifier = Modifier.padding(end = 10.dp),
             )
             Text(
-                text = label.uppercase(),
+                // #603 audit fix — explicit Locale.ROOT: an implicit-locale uppercase() mangles
+                // category names under a Turkish locale (i → İ) and trips Android lint DefaultLocale.
+                text = label.uppercase(Locale.ROOT),
                 style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 0.08.em),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f),
@@ -1996,7 +2062,9 @@ private fun CategoryBandAccent(catId: Int, label: String, onClick: () -> Unit) {
                     modifier = Modifier.padding(end = 10.dp),
                 )
                 Text(
-                    text = label.uppercase(),
+                    // #603 audit fix — explicit Locale.ROOT: an implicit-locale uppercase() mangles
+                    // category names under a Turkish locale (i → İ) and trips Android lint DefaultLocale.
+                    text = label.uppercase(Locale.ROOT),
                     style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 0.08.em),
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.weight(1f),
@@ -2355,7 +2423,11 @@ private fun SuperPlaceholderBody(funny: Boolean) {
         title = stringResource(R.string.flags_super_placeholder_title),
         subtitle = stringResource(R.string.flags_super_placeholder_body),
         funny = funny,
-        modifier = Modifier.fillMaxSize(),
+        // #603 audit fix — reserve the overlay bar height (consistent with every other body) so the
+        // centered placeholder is centered in the VISIBLE area, not behind the translucent top bar.
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(top = LocalFlagsContentTopPadding.current),
     )
 }
 
