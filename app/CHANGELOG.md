@@ -16,6 +16,23 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.18.0` — `open` (beta) — 2026-06-29
+
+**Promotion bêta — clôture de la phase « refonte de la vue Drapeaux » (#603)** (cumul des dev 0.17.0 → 0.17.30 + audit de clôture multi-agent Claude Opus + Codex gpt-5.5).
+
+### Vue Drapeaux — refonte
+- Nouvelle top bar : conteneur gauche (drapeau du type + nom court + indicateur « +lus ») et conteneur droit (loupe rétractable + avatar rond), recherche à hauteur constante.
+- Barre translucide : la liste glisse sous la barre avec un dégradé au défilement (#665).
+- Loader « redface » au tirer-pour-rafraîchir, repositionné sur la rangée des pastilles, pastille ronde (#728).
+- Indicateur « +lus » configurable (œil / anneau coloré), option d'avatar (bordure), glyphe drapeau/pastille (#661/#717/#718).
+- Appui-long : actions rapides distinctes de la liste ; aller à une page ; poster un message (#676/#729) ; recherche sur l'onglet DT.
+- Cyan sticky récupéré (#251), états vides homogénéisés (#662), couleur favori ambre (#690), scroll indépendant par onglet (#695), swipe directionnel (#660), bandes catégorie, barre du bas compacte (#666/#671).
+
+### Corrections d'audit (clôture)
+- Les réglages d'affichage GLOBAUX (glyphe, « +lus », barre de chargement) sont conservés sur les onglets DT/Super.
+- Recherche : le retour système referme la loupe ; champ avec libellé et action clavier ; cible tactile et icône conformes.
+- Préservation du défilement par onglet ; accessibilité (TalkBack) renforcée sur la barre, le loader, les pastilles et l'avatar ; libellés au pluriel corrects.
+
 ## `0.17.30` — `internal` (dev) — 2026-06-29
 
 > Vue Drapeaux (#603) — **correctif du loader pull-to-refresh** : au tirer lent, la pastille du redface
