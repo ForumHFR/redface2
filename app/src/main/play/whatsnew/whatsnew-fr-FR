@@ -1,4 +1,9 @@
-Redface 2 v0.17.30 — dev.
+Redface 2 v0.18.0 — bêta.
 
-Vue Drapeaux :
-- Correctif du loader « redface » : au tirer-pour-rafraîchir lent, sa pastille s'affiche de nouveau en cercle (et non en carré à coins arrondis).
+Refonte de la vue Drapeaux :
+- Nouvelle barre du haut (drapeau + nom court + « +lus », loupe rétractable, avatar rond).
+- Barre translucide : la liste défile dessous.
+- Loader « redface » au tirer-pour-rafraîchir.
+- « +lus », avatar et glyphe configurables ; recherche sur l'onglet DT.
+- Appui-long : actions rapides, aller à une page, poster.
+- Accessibilité et préservation du défilement par onglet améliorées.

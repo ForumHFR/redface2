@@ -1,4 +1,9 @@
-Redface 2 v0.17.30 — dev.
+Redface 2 v0.18.0 — beta.
 
-Flags view:
-- Pull-to-refresh loader fix: on a slow pull, the redface's container is round again (no longer a rounded square).
+Flags view redesign:
+- New top bar (flag + short name + "+read", retractable search, round avatar).
+- Translucent bar: the list scrolls underneath.
+- "redface" pull-to-refresh loader.
+- Configurable "+read" cue, avatar and glyph; search on the DT tab.
+- Long-press: quick actions, go to page, post a message.
+- Improved accessibility and per-tab scroll preservation.
