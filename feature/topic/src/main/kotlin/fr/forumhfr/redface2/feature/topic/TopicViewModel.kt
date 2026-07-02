@@ -12,6 +12,7 @@ import fr.forumhfr.redface2.core.domain.blacklist.BlacklistRepository
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.search.SearchRepository
 import fr.forumhfr.redface2.core.domain.topic.NoTopicSearchResultsException
 import fr.forumhfr.redface2.core.domain.topic.TopicRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicSearchRepository
@@ -36,6 +37,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Phase 1D-2 (#107) ViewModel for `:feature:topic`. Holds the cache-aside collection
@@ -51,13 +53,18 @@ import kotlinx.coroutines.launch
 @HiltViewModel(assistedFactory = TopicViewModel.Factory::class)
 @Suppress("LongParameterList") // ViewModel aggregates its injected repositories; one per concern.
 class TopicViewModel @AssistedInject constructor(
-    @Assisted private val request: TopicRequest,
+    // #750 — `var`, not `val`: when [TopicRequest.resolveScrollToPage] is set the real target page
+    // is only known after the resolution probe; the resolved request then REPLACES this one (and
+    // `state.request`) so every later read — loads, retry, refresh, page indicator, highlight —
+    // sees the actual page. Mutated in exactly one place ([resolveScrollToPageThenLoad]).
+    @Assisted private var request: TopicRequest,
     private val topicRepository: TopicRepository,
     private val authRepository: AuthRepository,
     private val userPreferencesRepository: UserPreferencesRepository,
     private val deletePostRepository: DeletePostRepository,
     private val blacklistRepository: BlacklistRepository,
     private val topicSearchRepository: TopicSearchRepository,
+    private val searchRepository: SearchRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(TopicUiState.initial(request))
@@ -130,6 +137,7 @@ class TopicViewModel @AssistedInject constructor(
         // contract) seeds [blockedCanonicals] before the load below computes the initial hidden set —
         // a blocked post therefore never flashes before it is hidden, even on the force-refresh path.
         observeBlockedCanonicals()
+        val untrustedPageTarget = request.resolveScrollToPage && request.scrollTo != null
         if (request.submitSignal != null) {
             // Issue #200 — the user just published a reply / quote / edit / edit-FP and the
             // navigation host signalled us to skip the cache so the freshly-published post
@@ -137,6 +145,9 @@ class TopicViewModel @AssistedInject constructor(
             // emit a stale cached page that doesn't contain the new post (it was created
             // server-side after the cache was populated).
             forceRefreshCurrentPage()
+        } else if (untrustedPageTarget) {
+            // #750 — email deep link: `page` is a lie (always 1), resolve the real one first.
+            resolveScrollToPageThenLoad()
         } else {
             loadCurrentPage()
         }
@@ -320,6 +331,39 @@ class TopicViewModel @AssistedInject constructor(
         if (firstContentInFlight) {
             Trace.endAsyncSection(FIRST_CONTENT_SECTION, firstContentCookie)
             firstContentInFlight = false
+        }
+    }
+
+    /**
+     * #750 — resolves the REAL page of [TopicRequest.scrollTo] through HFR's server-side redirect
+     * (same probe + timeout + fallback contract as the search results, #277:
+     * [SearchRepository.resolveSearchResultPage]) BEFORE the first load, while the screen shows the
+     * loading skeleton. On success the resolved request replaces [request] AND `state.request`, so
+     * the page becomes the real target everywhere (loads, retry, page indicator, highlight) — not a
+     * presentational patch. On timeout / failure the untrusted page loads as-is: the pre-#750
+     * behaviour, never worse. Runs at most once (init-only branch); a config change keeps the
+     * ViewModel, a route replace builds a fresh one without the flag.
+     */
+    private fun resolveScrollToPageThenLoad() {
+        val scrollTo = requireNotNull(request.scrollTo) { "resolveScrollToPageThenLoad requires scrollTo" }
+        _state.update { it.copy(mode = TopicUiState.Mode.Loading) }
+        viewModelScope.launch {
+            val outcome = runCatching {
+                withTimeoutOrNull(RESOLVE_TIMEOUT_MS) {
+                    searchRepository.resolveSearchResultPage(
+                        cat = request.cat,
+                        post = request.post,
+                        numreponse = scrollTo,
+                    )
+                }
+            }
+            (outcome.exceptionOrNull() as? CancellationException)?.let { throw it }
+            val resolved = outcome.getOrNull()
+            if (resolved != null && resolved != request.page) {
+                request = request.copy(page = resolved)
+                _state.update { it.copy(request = request) }
+            }
+            loadCurrentPage()
         }
     }
 
@@ -991,5 +1035,10 @@ class TopicViewModel @AssistedInject constructor(
         // under #117 follow-up) keeps matching after refactors.
         private const val FIRST_CONTENT_SECTION = "rf2.topic.first_content"
         private const val LOG_TAG = "TopicViewModel"
+
+        // #750 — cap on the page-resolution probe, same rationale and value as
+        // SearchViewModel.RESOLVE_TIMEOUT_MS (#277): degrade to the untrusted page
+        // rather than hold the first load hostage on a degraded network.
+        private const val RESOLVE_TIMEOUT_MS: Long = 3_000
     }
 }

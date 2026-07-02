@@ -70,6 +70,7 @@ class HfrDeepLinkTest {
 
         val parsed = parseHfrDeepLink(uri)
 
+        // page > 1 is explicit and trusted — no resolution probe on arrival.
         val expectedRoute = TopicRoute(cat = 23, post = 35395, page = 12, scrollTo = 12_345)
         assertEquals(expectedRoute, parsed?.route)
         assertEquals(TopLevelDestination.Flags, parsed?.destination)
@@ -83,6 +84,49 @@ class HfrDeepLinkTest {
 
         assertEquals(
             TopicRoute(cat = 23, post = 35395, page = 1, scrollTo = null),
+            parsed?.route,
+        )
+    }
+
+    @Test
+    fun `forum2 php email link with page 1 and an anchor marks the page for resolution (#750)`() {
+        // Real-world email-notification shape (issue #750): page=1 is a lie, the target
+        // travels both as the `numreponse` query param and the `#t` fragment.
+        val uri = Uri.parse(
+            "https://forum.hardware.fr/forum2.php?config=hfr.inc&cat=23&subcat=550&post=35395" +
+                "&page=1&p=1&sondage=0&owntopic=0&numreponse=2789981&nojs=0#t2789981",
+        )
+
+        val parsed = parseHfrDeepLink(uri)
+
+        assertEquals(
+            TopicRoute(cat = 23, post = 35395, page = 1, scrollTo = 2_789_981, resolveScrollToPage = true),
+            parsed?.route,
+        )
+    }
+
+    @Test
+    fun `forum2 php numreponse query param is the scrollTo fallback when the fragment is stripped (#750)`() {
+        val uri = Uri.parse(
+            "https://forum.hardware.fr/forum2.php?cat=23&post=35395&page=1&numreponse=2789981",
+        )
+
+        val parsed = parseHfrDeepLink(uri)
+
+        assertEquals(
+            TopicRoute(cat = 23, post = 35395, page = 1, scrollTo = 2_789_981, resolveScrollToPage = true),
+            parsed?.route,
+        )
+    }
+
+    @Test
+    fun `forum2 php explicit page with anchor is trusted, no resolution (#750)`() {
+        val uri = Uri.parse("https://forum.hardware.fr/forum2.php?cat=23&post=35395&page=7#t999")
+
+        val parsed = parseHfrDeepLink(uri)
+
+        assertEquals(
+            TopicRoute(cat = 23, post = 35395, page = 7, scrollTo = 999, resolveScrollToPage = false),
             parsed?.route,
         )
     }

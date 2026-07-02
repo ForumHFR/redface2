@@ -152,6 +152,13 @@ fun TopicScreen(
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
     /**
+     * #699 — jump to the post a quote header cites: `(page, numreponse)` parsed from the citation
+     * href. `:app` wires it to the same in-place `TopicRoute` replace as [onOpenPage], but with
+     * `scrollTo = numreponse` so the landing scrolls to and highlights the cited post (the #200
+     * deep-link mechanism) — one uniform path whether the target is on this page or another.
+     */
+    onGoToPost: (page: Int, numreponse: Int) -> Unit,
+    /**
      * #285 — leave the topic and go back to the screen that opened it (topic list / flags).
      * Wired to a back-stack pop in `:app`. Surfaced as an explicit back arrow in the top app
      * bar so the user never has to rely on the system / gesture back to exit a topic.
@@ -437,6 +444,7 @@ fun TopicScreen(
         onEdit = onEdit,
         onEditFirstPost = onEditFirstPost,
         onOpenPage = onOpenPage,
+        onGoToPost = onGoToPost,
         onOpenProfile = onOpenProfile,
         onDeleteRequest = { numreponse -> deleteCandidate = numreponse },
         multiQuoteSelection = multiQuoteSelection,
@@ -664,6 +672,8 @@ internal fun TopicContent(
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
+    // #699 — quote-header tap, threaded down to the post cards (cf. TopicScreen KDoc).
+    onGoToPost: (page: Int, numreponse: Int) -> Unit = { _, _ -> },
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
     // #292 — a per-post « Supprimer » tap; the screen owns the confirmation dialog, so this only
     // requests it (carrying the post's numreponse). Never invoked for the first post (excluded).
@@ -822,6 +832,7 @@ internal fun TopicContent(
                             onEdit = onEdit,
                             onEditFirstPost = onEditFirstPost,
                             onOpenPage = onOpenPage,
+                            onGoToPost = onGoToPost,
                             onOpenProfile = onOpenProfile,
                             onDeleteRequest = onDeleteRequest,
                             onDoubleTapRefresh = { onIntent(TopicIntent.Refresh) },
@@ -1081,6 +1092,8 @@ private fun TopicLoadedContent(
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
+    // #699 — quote-header tap, forwarded into each TopicPostCard's PostRenderer.
+    onGoToPost: (page: Int, numreponse: Int) -> Unit = { _, _ -> },
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
     onDeleteRequest: (numreponse: Int) -> Unit = {},
     /** #382 — double-tap anywhere on the list refreshes the current page (RF1 parity). */
@@ -1294,6 +1307,8 @@ private fun TopicLoadedContent(
                     post = post,
                     highlighted = highlight == post.numreponse,
                     citedCount = citationCounts[post.numreponse] ?: 0,
+                    // #699 — makes sourced quote headers tappable (jump to the cited post).
+                    onGoToCitedPost = onGoToPost,
                     // #330 — render the author signature beneath the body when the reading preference
                     // is on (the signature is always parsed/cached on the Post; this is render-only).
                     showSignature = state.showSignatures,
@@ -1812,6 +1827,11 @@ internal fun TopicPostCard(
      * here, the border, and the pill — one source of truth, they can never desynchronise.
      */
     onToggleMultiQuote: (() -> Unit)? = null,
+    /**
+     * #699 — forwarded to [PostRenderer] so a sourced quote's header can jump to the cited post.
+     * Null keeps the headers inert (previews/tests that render a card without navigation).
+     */
+    onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
 ) {
     // #287 — structural spacing from the active density preset (Comfort = the historical rhythm).
     val m = LocalDisplayMetrics.current
@@ -1884,7 +1904,7 @@ internal fun TopicPostCard(
                 verticalArrangement = Arrangement.spacedBy(m.postSpacing),
             ) {
                 // #281 — topic posts are selectable/copyable (opt-in; default is OFF in PostRenderer).
-                PostRenderer(content = post.content, selectable = true)
+                PostRenderer(content = post.content, selectable = true, onGoToCitedPost = onGoToCitedPost)
                 // #330 — the author signature (web parity), gated by the reading preference. Rendered
                 // with the shared PostRenderer (the signature is BBCode/HTML like the body) but in a
                 // subdued style: a divider separates it from the body and a reduced alpha makes it
