@@ -1,8 +1,4 @@
-Redface 2 v0.19.1 — dev.
+Redface 2 v0.19.2 — dev.
 
-Topic view (wave 2):
-- Tap a quote to jump to the cited post.
-- Email links open at the right post.
-- Title shown instantly when opening from a list.
-- Editors: keyboard raised on entry, smiley search focused.
-- Image upload in the new-topic composer.
+- Image upload in both private-message composers (reply and new message): multi-select, one image per line.
+- Completes Topic view wave 2 (0.19.1): tappable quotes, fixed email links, editor auto-focus.

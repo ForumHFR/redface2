@@ -16,6 +16,13 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.19.2` — `internal` (dev) — 2026-07-03
+
+**Phase « Vue Topic » (#604) — fin de la vague 2 : #459 complet** (PR #768, gate Codex gpt-5.5).
+
+### Éditeurs
+- #459 (2/2) : **upload d'images dans les deux composeurs MP** (réponse et nouvelle conversation) — bouton Uploader, sélection multiple (max 10), un `[img]` par image dans l'ordre, compteur n/N, erreurs typées ; le vocabulaire d'upload (erreurs, progression) est promu dans `:core:ui`, partagé par toutes les surfaces d'édition.
+
 ## `0.19.1` — `internal` (dev) — 2026-07-02
 
 **Phase « Vue Topic » (#604) — vague 2 : quick wins navigation & éditeurs** (PRs #763, #764, #765, #766 — cadrage + gates Codex gpt-5.5).
