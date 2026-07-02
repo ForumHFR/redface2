@@ -1896,6 +1896,10 @@ private fun RedfaceNavHost(
                     // #676 v2 — [page] is chosen by the caller: row tap + sheet « Ouvrir » resume at
                     // lastReadPage, « 1er non-lu » jumps to lastReadPage+1, « dernière page » to totalPages.
                     onOpenFlag = { flag, page ->
+                        // #762 — seed the title cache from the row so the topic's top bar shows
+                        // the real title during the very first load (the cache was otherwise only
+                        // fed by onTitleLoaded AFTER a page parse, i.e. from the second page on).
+                        topicTitleNavState.onTitleLoaded(flag.cat, flag.topicId, flag.title)
                         backStack.add(
                             TopicRoute(
                                 cat = flag.cat,
@@ -2277,6 +2281,9 @@ private fun RedfaceNavHost(
                         highlightTitle = route.highlightTitle,
                     ),
                     onOpenTopic = { topic ->
+                        // #762 — same seeding as onOpenFlag: the listing row already knows the
+                        // title, show it in the top bar from the first frame of the load.
+                        topicTitleNavState.onTitleLoaded(topic.cat, topic.topicId, topic.title)
                         backStack.add(
                             TopicRoute(
                                 cat = topic.cat,
