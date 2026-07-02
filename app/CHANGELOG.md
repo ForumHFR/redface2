@@ -16,6 +16,14 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.19.0` — `internal` (dev) — 2026-07-02
+
+**Phase « Vue Topic » (#604) — vague 1 : écran de chargement** (mockup « Chargement A » arbitré sur le fil DEV, cadrage + gate Codex gpt-5.5).
+
+### Vue Topic
+- Chargement d'une page : loader centré + « Chargement de la page demandée » + cartes squelettes animées (fini le spinner nu en haut à gauche). Nouvelle primitive partagée `SkeletonBox` dans `:core:ui` (le shimmer d'images #249 y délègue) ; l'animation respecte le réglage système « réduire les animations ».
+- #622 : le compteur de la barre du haut affiche « Chargement… » tant que la page n'est pas parsée — plus jamais un total périmé d'une navigation précédente (« 3 / 10 » corrigé en « 3 / 20 » à l'arrivée). Le contexte du chemin d'erreur (grille des pages connues) est conservé.
+
 ## `0.18.0` — `open` (beta) — 2026-06-29
 
 **Promotion bêta — clôture de la phase « refonte de la vue Drapeaux » (#603)** (cumul des dev 0.17.0 → 0.17.30 + audit de clôture multi-agent Claude Opus + Codex gpt-5.5).
