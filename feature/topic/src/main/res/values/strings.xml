@@ -1,6 +1,4 @@
 <resources>
-    <string name="topic_scroll_to">Scroll ciblé demandé vers le post %1$d.</string>
-    <string name="topic_reply">Répondre depuis ce topic</string>
     <!-- #283 — bottom floating action cluster: reach reply + page change without scrolling to the header. -->
     <string name="topic_fab_reply">Répondre</string>
     <string name="topic_fab_previous_page">Page précédente</string>
@@ -41,7 +39,6 @@
     <string name="topic_search_results_end">Aucun résultat suivant</string>
     <string name="topic_error_title">Erreur de chargement</string>
     <string name="topic_error_body">Impossible d’ouvrir la page %1$d.\n\n%2$s</string>
-    <string name="topic_caption">post %1$d • page %2$d / %3$d</string>
     <string name="topic_post_index_prefix">#%1$d • </string>
     <!-- #362 — per-post contextual menu (post number, permalink copy, edit marker, citations). -->
     <!-- #436 — pastille de la bande d'identité quand le post est au panier multi-quote (#291). -->
@@ -105,4 +102,7 @@
     <string name="topic_post_delete_failed_login">Vous devez être connecté pour supprimer ce message.</string>
     <string name="topic_post_delete_failed_locked">Ce sujet est fermé : suppression impossible.</string>
     <string name="topic_post_delete_failed_generic">La suppression a échoué. Réessayez.</string>
+    <!-- Vague 3 (#604) : pilule page de la top bar + feuille de navigation. -->
+    <string name="topic_page_picker_open">Changer de page</string>
+    <string name="topic_page_picker_title">Aller à une page</string>
 </resources>
