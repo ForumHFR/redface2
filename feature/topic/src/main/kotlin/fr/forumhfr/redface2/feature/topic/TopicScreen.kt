@@ -11,12 +11,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -733,42 +735,15 @@ internal fun TopicContent(
             )
         },
         floatingActionButton = {
-            // #283 + bonus — quick access to "poster" and page-change without scrolling back to the
-            // header. Only in Loaded mode (needs subcat/page/canReply). The Scaffold applies the
-            // navigation-bar insets to this slot, so no manual padding here. Coexists with the #300
-            // scrollbar (right edge, auto-hiding) — a slight bottom-right overlap is acceptable.
-            val current = loaded
-            if (current != null) {
-                // #411 — tuck the cluster away while reading down, reveal it on the first upward
-                // scroll. AnimatedVisibility in the Scaffold's FAB slot simply collapses to nothing
-                // when hidden; the slide/fade mirrors the collapsible top bar (#286/#338).
-                AnimatedVisibility(
-                    visible = bottomActionsVisible,
-                    enter = fadeIn() + slideInVertically { it },
-                    exit = fadeOut() + slideOutVertically { it },
-                ) {
-                    TopicBottomActions(
-                        showReply = shouldEnableReply(current.topic, state.isAuthenticated),
-                        showPageFabs = state.showPageFabs,
-                        canGoPrevious = state.canGoPrevious,
-                        canGoNext = state.canGoNext,
-                        // #291 — the « Citer N » FAB shares the reply gate: quoting IS replying.
-                        multiQuoteCount = effectiveMultiQuoteCount(
-                            current.topic,
-                            state.isAuthenticated,
-                            multiQuoteSelection,
-                        ),
-                        // Clamp to [1, totalPages]: `canGoPrevious/Next` are derived from `request.page`
-                        // while the target is computed from the parsed `topic.page`; if those ever desync
-                        // (HFR clamps an out-of-range page to the last one), the clamp keeps navigation in
-                        // bounds — same robustness as the header guard and the swipe (#282).
-                        onPreviousPage = { onOpenPage((current.topic.page - 1).coerceAtLeast(1)) },
-                        onNextPage = { onOpenPage((current.topic.page + 1).coerceAtMost(current.topic.totalPages)) },
-                        onReply = { onReply(current.topic.subcat, current.topic.page) },
-                        onMultiQuote = { onMultiQuote(current.topic.subcat, current.topic.page) },
-                    )
-                }
-            }
+            TopicBottomActionsHost(
+                state = state,
+                loaded = loaded,
+                bottomActionsVisible = bottomActionsVisible,
+                multiQuoteSelection = multiQuoteSelection,
+                onOpenPage = onOpenPage,
+                onReply = onReply,
+                onMultiQuote = onMultiQuote,
+            )
         },
     ) { innerPadding ->
         Surface(
@@ -2380,11 +2355,73 @@ private fun ImmersiveNavBarScrollReporter(
 }
 
 /**
+ * #283/#599 — Scaffold-slot host of the bottom cluster. Extracted from [TopicContent] for the
+ * detekt cyclomatic-complexity budget. The Scaffold applies the navigation-bar insets to its FAB
+ * slot, so no manual padding here; coexists with the #300 scrollbar (slight bottom-right overlap
+ * accepted).
+ *
+ * #599 (vague 3) — composed in EVERY mode, not just Loaded: the slots reserve their geometry from
+ * the skeleton on (all invisible while loading), so an affordance that materialises after the
+ * parse (« Répondre » needs canReply+auth) lands in its final position instead of shifting the
+ * ‹/› page FABs sideways (misclics, dev feedback antiseptiqueIncolore). The null guards on the
+ * callbacks are unreachable while a slot is invisible — belt-and-braces.
+ */
+@Composable
+@Suppress("LongParameterList") // hoisted Scaffold-slot host, mirrors the other hosts in this file.
+private fun TopicBottomActionsHost(
+    state: TopicUiState,
+    loaded: TopicUiState.Mode.Loaded?,
+    bottomActionsVisible: Boolean,
+    multiQuoteSelection: List<Int>,
+    onOpenPage: (Int) -> Unit,
+    onReply: (subcat: Int, page: Int) -> Unit,
+    onMultiQuote: (subcat: Int, page: Int) -> Unit,
+) {
+    // #411 — tuck the cluster away while reading down, reveal it on the first upward scroll.
+    // AnimatedVisibility in the Scaffold's FAB slot simply collapses to nothing when hidden;
+    // the slide/fade mirrors the collapsible top bar (#286/#338).
+    AnimatedVisibility(
+        visible = bottomActionsVisible,
+        enter = fadeIn() + slideInVertically { it },
+        exit = fadeOut() + slideOutVertically { it },
+    ) {
+        TopicBottomActions(
+            showReply = loaded != null && shouldEnableReply(loaded.topic, state.isAuthenticated),
+            showPageFabs = state.showPageFabs,
+            canGoPrevious = loaded != null && state.canGoPrevious,
+            canGoNext = loaded != null && state.canGoNext,
+            // #291 — the « Citer N » FAB shares the reply gate: quoting IS replying.
+            multiQuoteCount = loaded?.let {
+                effectiveMultiQuoteCount(it.topic, state.isAuthenticated, multiQuoteSelection)
+            } ?: 0,
+            // Clamp to [1, totalPages]: `canGoPrevious/Next` are derived from `request.page` while
+            // the target is computed from the parsed `topic.page`; if those ever desync (HFR clamps
+            // an out-of-range page to the last one), the clamp keeps navigation in bounds — same
+            // robustness as the header guard and the swipe (#282).
+            onPreviousPage = { loaded?.let { onOpenPage((it.topic.page - 1).coerceAtLeast(1)) } },
+            onNextPage = { loaded?.let { onOpenPage((it.topic.page + 1).coerceAtMost(it.topic.totalPages)) } },
+            onReply = { loaded?.let { onReply(it.topic.subcat, it.topic.page) } },
+            onMultiQuote = { loaded?.let { onMultiQuote(it.topic.subcat, it.topic.page) } },
+        )
+    }
+}
+
+/**
  * #283 + bonus — the floating bottom-action cluster: previous/next page mini-FABs and a « Répondre »
  * extended FAB, so posting and page-change are reachable without scrolling back up to the header. Pure
  * presentation: each affordance is gated on the same flags the header already uses, and reuses the
- * existing `onReply`/`onOpenPage` callbacks. Renders nothing when nothing is available (anon + single
- * page), so the Scaffold reserves no FAB space.
+ * existing `onReply`/`onOpenPage` callbacks.
+ *
+ * #599 (vague 3 Lecture) — FIXED-slot geometry: every affordance owns a reserved [FabSlot] of the
+ * small-FAB footprint, empty-but-measured while unavailable, so nothing ever shifts sideways when an
+ * affordance (dis)appears — page 1 hides ‹ without moving ›, and « Répondre » materialising after
+ * the parse no longer displaces the page FABs under the user's finger (misclics,
+ * dev feedback antiseptiqueIncolore). Two deliberate exceptions:
+ *  - the #383 « FABs de page » preference OFF drops the ‹/› SLOTS entirely (the user opted out of
+ *    page navigation here; there is nothing to keep stable);
+ *  - the « ❝N » multi-quote slot is reserved like the others (its arming is a user action, but its
+ *    appearance must not shift « Répondre »).
+ * An empty slot renders nothing and carries no semantics — invisible to TalkBack.
  */
 @Composable
 @Suppress("LongParameterList") // hoisted action cluster, mirrors other hoisted composables in this file
@@ -2401,42 +2438,59 @@ private fun TopicBottomActions(
 ) {
     val previousLabel = stringResource(R.string.topic_fab_previous_page)
     val nextLabel = stringResource(R.string.topic_fab_next_page)
-    // #383 — the preference only governs the ‹/› page FABs; « Répondre » keeps its own gate.
-    val showPrevious = showPageFabs && canGoPrevious
-    val showNext = showPageFabs && canGoNext
-    // #291 — appears as soon as the basket holds one post of this topic (call-site zeroes the
-    // count when quoting is unavailable). NOT governed by the #383 page-FABs preference: it is
-    // a write affordance the user explicitly armed, not page navigation.
-    val showMultiQuote = multiQuoteCount > 0
-    val showAnyAction = showReply || showPrevious || showNext || showMultiQuote
-    if (showAnyAction) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (showPrevious) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // #291/#599 — the « ❝N » multi-quote slot sits at the FAR LEFT of the cluster: arming the
+        // basket materialises it without shifting ‹ › ✎ (nothing is to its left), and while empty
+        // its reserved footprint reads as leading whitespace instead of a hole inside the cluster.
+        // NOT governed by the #383 page-FABs preference: it is a write affordance the user
+        // explicitly armed, not page navigation (call-site zeroes the count when quoting is
+        // unavailable).
+        FabSlot(visible = multiQuoteCount > 0) {
+            MultiQuoteFab(count = multiQuoteCount, onClick = onMultiQuote)
+        }
+        // #383 — the preference only governs the ‹/› page FABs; « Répondre » keeps its own gate.
+        if (showPageFabs) {
+            FabSlot(visible = canGoPrevious) {
                 PageFab(
                     description = previousLabel,
                     iconRes = fr.forumhfr.redface2.core.ui.R.drawable.ic_chevron_left,
                     onClick = onPreviousPage,
                 )
             }
-            if (showNext) {
+            FabSlot(visible = canGoNext) {
                 PageFab(
                     description = nextLabel,
                     iconRes = fr.forumhfr.redface2.core.ui.R.drawable.ic_chevron_right,
                     onClick = onNextPage,
                 )
             }
-            if (showMultiQuote) {
-                MultiQuoteFab(count = multiQuoteCount, onClick = onMultiQuote)
-            }
-            if (showReply) {
-                ReplyFab(onClick = onReply)
-            }
+        }
+        FabSlot(visible = showReply) {
+            ReplyFab(onClick = onReply)
         }
     }
 }
+
+/**
+ * #599 — one reserved position of the bottom cluster: the small-FAB footprint is ALWAYS measured
+ * (min-sized empty Box) so sibling slots never shift when this affordance (dis)appears. The « ❝N »
+ * slot may grow past the minimum for a two-digit count — the rare 9→10 growth is accepted.
+ */
+@Composable
+private fun FabSlot(visible: Boolean, content: @Composable () -> Unit) {
+    Box(
+        modifier = Modifier.sizeIn(minWidth = FAB_SLOT_SIZE, minHeight = FAB_SLOT_SIZE),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (visible) content()
+    }
+}
+
+/** #599 — M3 small-FAB container footprint, the reserved geometry of every [FabSlot]. */
+private val FAB_SLOT_SIZE = 40.dp
 
 @Composable
 private fun MultiQuoteFab(count: Int, onClick: () -> Unit) {
