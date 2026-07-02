@@ -57,7 +57,7 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
 import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
 
 /** Upload multi-images — cap on how many images one pick can queue, passed to the photo picker. */
-private const val MAX_IMAGES_PER_UPLOAD = 10
+internal const val MAX_IMAGES_PER_UPLOAD = 10
 
 /**
  * Multi-image upload — « n/N » counter shown under the toolbar while a batch is in flight. Extracted
@@ -65,7 +65,7 @@ private const val MAX_IMAGES_PER_UPLOAD = 10
  * image (null progress), which only flips the toolbar spinner.
  */
 @Composable
-private fun UploadProgressLabel(progress: UploadProgress?) {
+internal fun UploadProgressLabel(progress: UploadProgress?) {
     if (progress == null) return
     Text(
         text = stringResource(R.string.editor_upload_progress, progress.completed, progress.total),
@@ -534,7 +534,7 @@ private val PostEditorMode.titleResId: Int
  * rather than a plain `@StringRes Int` — the others stay argument-free.
  */
 @Composable
-private fun UploadError.bannerText(): String = when (this) {
+internal fun UploadError.bannerText(): String = when (this) {
     UploadError.TooLarge -> stringResource(R.string.editor_upload_error_too_large)
     UploadError.UnsupportedType -> stringResource(R.string.editor_upload_error_unsupported_type)
     is UploadError.Server ->

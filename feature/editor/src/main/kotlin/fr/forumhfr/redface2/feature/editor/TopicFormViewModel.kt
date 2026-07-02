@@ -10,6 +10,7 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
+import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
@@ -17,7 +18,11 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
+import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
+import fr.forumhfr.redface2.core.domain.upload.UploadException
+import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
+import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.write.EditFirstPostContext
@@ -72,6 +77,12 @@ class TopicFormViewModel @AssistedInject constructor(
     private val userPreferencesRepository: UserPreferencesRepository,
     private val draftStore: EditorDraftStore,
     private val diagnostics: DiagnosticsLog,
+    // #459 — image upload wiring, same trio as PostEditorViewModel: auth scopes the upload to the
+    // active HFR session, the reader turns a picked Uri into bytes, the repository posts to the
+    // host of the current preference.
+    private val authRepository: AuthRepository,
+    private val uploadRepository: UploadRepository,
+    private val imageUploadReader: ImageUploadReader,
 ) : ViewModel() {
 
     private val _state: MutableStateFlow<TopicFormState> = MutableStateFlow(
@@ -120,6 +131,17 @@ class TopicFormViewModel @AssistedInject constructor(
     private var autosaveJob: Job? = null
 
     /**
+     * #459 — lowercased pseudo of the authenticated session, or null when anonymous. The upload
+     * providers require an HFR session for the trace ; an anonymous pick is silently ignored
+     * (the submit-time anonymous guard already surfaces the login requirement). Mirrors
+     * `PostEditorViewModel.activeUserId`.
+     */
+    private var activeUserId: String? = null
+
+    /** #459 — in-flight image upload job ; one at a time, cancelled on [onCleared]. */
+    private var uploadJob: Job? = null
+
+    /**
      * #405 — account that owned this editor when it opened, snapshotted from [draftStore] so a
      * mid-edit account switch can't write this session's draft under another account (Codex beta
      * review). Captured in [restoreDraftIfAny]; null until then / for an anonymous session.
@@ -150,6 +172,23 @@ class TopicFormViewModel @AssistedInject constructor(
         viewModelScope.launch {
             userPreferencesRepository.observeEditorImageInsert().collect { mode ->
                 imageInsertMode = mode
+            }
+        }
+        viewModelScope.launch {
+            authRepository.observeAuthState().collect { authState ->
+                val newUserId = when (authState) {
+                    AuthState.Anonymous -> null
+                    is AuthState.Authenticated -> authState.pseudo.lowercase()
+                }
+                // #459 — account switched / logged out mid-session: cancel any in-flight upload
+                // and pending autosave so this session's image URL / draft is never attributed to
+                // the new account (same Codex-reviewed rule as PostEditorViewModel).
+                if (activeUserId != null && newUserId != activeUserId) {
+                    uploadJob?.cancel()
+                    autosaveJob?.cancel()
+                    _state.update { it.copy(isUploading = false, uploadProgress = null) }
+                }
+                activeUserId = newUserId
             }
         }
         restoreDraftIfAny()
@@ -226,6 +265,8 @@ class TopicFormViewModel @AssistedInject constructor(
             is TopicFormIntent.SmileySearchQueryChanged -> onSmileySearchQueryChanged(intent.query)
             is TopicFormIntent.SmileySelected -> onSmileySelected(intent.token)
             is TopicFormIntent.ImageUrlInserted -> onImageUrlInserted(intent.url)
+            is TopicFormIntent.ImagesPicked -> onImagesPicked(intent.uris)
+            TopicFormIntent.UploadErrorDismissed -> _state.update { it.copy(uploadError = null) }
             TopicFormIntent.DraftRestoreRequested -> onDraftRestoreRequested()
             TopicFormIntent.DraftDiscardRequested -> onDraftDiscardRequested()
         }
@@ -382,9 +423,24 @@ class TopicFormViewModel @AssistedInject constructor(
      */
     private fun onImageUrlInserted(url: String) {
         val token = imageInsertBbcodeOrNull(fullUrl = url, mode = imageInsertMode) ?: return
+        insertImageBbcodeAtCaret(token, leadingNewline = false)
+        scheduleAutosave()
+    }
+
+    /**
+     * #459 — inserts an already-built image BBCode fragment at the caret. Same cursor contract as
+     * the smiley path ([insertBbcodeToken] preserves the selection, the preview is refreshed),
+     * WITHOUT surrounding spaces (an image is self-contained). [leadingNewline] prefixes a newline
+     * when the caret is not already at a line start, so consecutive uploads land on their own lines.
+     * Mirrors `PostEditorViewModel.insertImageBbcodeAtCaret`.
+     */
+    private fun insertImageBbcodeAtCaret(bbcode: String, leadingNewline: Boolean) {
         _state.update { current ->
             val draft = current.draft
             val selection = draft.selection
+            val caret = selection.start.coerceIn(0, draft.text.length)
+            val needsNewline = leadingNewline && caret > 0 && draft.text[caret - 1] != '\n'
+            val token = if (needsNewline) "\n$bbcode" else bbcode
             val outcome = insertBbcodeToken(
                 token = token,
                 text = draft.text,
@@ -403,7 +459,85 @@ class TopicFormViewModel @AssistedInject constructor(
                 withDraft
             }
         }
-        scheduleAutosave()
+    }
+
+    /**
+     * #459 — pick→read→upload→insert for the topic composer, copied from the proven
+     * `PostEditorViewModel.onImagesPicked` contract (multi-image #490): the picked [uris] are read
+     * and uploaded sequentially (one in-flight at a time), each success inserts its `[img]` at the
+     * caret in pick order (with a leading newline from the second image on) and autosaves, and the
+     * batch stops at the first failure — the already-inserted images stay, the typed [UploadError]
+     * is surfaced. A blank list, an anonymous session (no [activeUserId]) or an upload already in
+     * flight are ignored. [TopicFormState.uploadProgress] carries « n/N » when the batch has more
+     * than one image.
+     */
+    private fun onImagesPicked(uris: List<String>) {
+        val userId = activeUserId
+        val targets = uris.filter { it.isNotBlank() }
+        // One guard (ReturnCount): nothing in flight already, an authenticated owner, a non-empty pick.
+        if (uploadJob?.isActive == true || userId == null || targets.isEmpty()) return
+        val multiple = targets.size > 1
+        _state.update {
+            it.copy(
+                isUploading = true,
+                uploadError = null,
+                uploadProgress = if (multiple) UploadProgress(completed = 0, total = targets.size) else null,
+            )
+        }
+        uploadJob = viewModelScope.launch {
+            // Snapshot the cached preference once at batch start so all N inserts use a consistent
+            // mode even if the user flips the setting mid-upload.
+            val mode = imageInsertMode
+            var completed = 0
+            for (uri in targets) {
+                val outcome = runCatching {
+                    val image = imageUploadReader.read(uri)
+                    uploadRepository.uploadWithCurrentProvider(image, userId)
+                }
+                val uploaded = outcome.getOrElse { error ->
+                    handleUploadFailure(error)
+                    return@launch
+                }
+                val bbcode = imageInsertBbcodeOrNull(
+                    fullUrl = uploaded.imageUrl,
+                    displayUrl = uploaded.resizedUrl ?: uploaded.imageUrl,
+                    mode = mode,
+                )
+                if (bbcode != null) {
+                    insertImageBbcodeAtCaret(bbcode, leadingNewline = completed > 0)
+                    // Persist after EACH insert: a later image failing must not lose the images
+                    // already inserted into the draft (Codex review #490).
+                    scheduleAutosave()
+                }
+                completed += 1
+                if (multiple) {
+                    _state.update { it.copy(uploadProgress = UploadProgress(completed, targets.size)) }
+                }
+            }
+            _state.update { it.copy(isUploading = false, uploadError = null, uploadProgress = null) }
+        }
+    }
+
+    private fun handleUploadFailure(error: Throwable) {
+        if (error is CancellationException) {
+            _state.update { it.copy(isUploading = false, uploadProgress = null) }
+            throw error
+        }
+        val mapped = when (error) {
+            is UploadException.TooLarge -> UploadError.TooLarge
+            is UploadException.UnsupportedType -> UploadError.UnsupportedType
+            is UploadException.Server -> UploadError.Server(code = error.code, providerId = error.providerId)
+            is UploadException.Malformed -> UploadError.Malformed(providerId = error.providerId)
+            is UploadException.Configuration -> UploadError.Configuration
+            is UploadException.Network -> UploadError.Network
+            else -> UploadError.Network
+        }
+        diagnostics.record(
+            DiagnosticsLog.Level.WARN,
+            LOG_TAG_VM,
+            "image upload failed: ${error::class.simpleName} → ${mapped::class.simpleName}",
+        )
+        _state.update { it.copy(isUploading = false, uploadError = mapped, uploadProgress = null) }
     }
 
     private fun onSubjectChanged(value: TextFieldValue) {
@@ -855,6 +989,16 @@ class TopicFormViewModel @AssistedInject constructor(
                 submitError
             },
         )
+    }
+
+    /**
+     * #459 — belt-and-braces upload cancellation on ViewModel death (viewModelScope is already
+     * cancelled by the lifecycle; this makes the « one upload, no leak » contract explicit).
+     * Mirrors `PostEditorViewModel.onCleared`.
+     */
+    override fun onCleared() {
+        uploadJob?.cancel()
+        super.onCleared()
     }
 
     @AssistedFactory
