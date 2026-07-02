@@ -1,4 +1,7 @@
 package fr.forumhfr.redface2.feature.editor
+import fr.forumhfr.redface2.core.ui.editor.MAX_IMAGES_PER_UPLOAD
+import fr.forumhfr.redface2.core.ui.editor.UploadProgressLabel
+import fr.forumhfr.redface2.core.ui.editor.bannerText
 
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet

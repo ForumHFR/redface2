@@ -1,4 +1,9 @@
 package fr.forumhfr.redface2.feature.editor
+import fr.forumhfr.redface2.core.ui.editor.MAX_IMAGES_PER_UPLOAD
+import fr.forumhfr.redface2.core.ui.editor.UploadError
+import fr.forumhfr.redface2.core.ui.editor.UploadProgress
+import fr.forumhfr.redface2.core.ui.editor.UploadProgressLabel
+import fr.forumhfr.redface2.core.ui.editor.bannerText
 
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
@@ -56,23 +61,6 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
 import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
 import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
 
-/** Upload multi-images — cap on how many images one pick can queue, passed to the photo picker. */
-internal const val MAX_IMAGES_PER_UPLOAD = 10
-
-/**
- * Multi-image upload — « n/N » counter shown under the toolbar while a batch is in flight. Extracted
- * so [PostEditorContent] stays under the cyclomatic-complexity budget. Emits nothing for a single
- * image (null progress), which only flips the toolbar spinner.
- */
-@Composable
-internal fun UploadProgressLabel(progress: UploadProgress?) {
-    if (progress == null) return
-    Text(
-        text = stringResource(R.string.editor_upload_progress, progress.completed, progress.total),
-        style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-}
 
 /**
  * Post-level editor screen. Phase 2C (#145) adds a Submit button that posts the
@@ -527,30 +515,6 @@ private val PostEditorMode.titleResId: Int
         PostEditorMode.Reply -> R.string.editor_post_reply_title
         PostEditorMode.Edit -> R.string.editor_post_edit_title
     }
-
-/**
- * #474 — resolves the upload-error banner text. [UploadError.Server] / [UploadError.Malformed] carry
- * the host (and the HTTP code for Server), so they need string args and a `@Composable` resolver
- * rather than a plain `@StringRes Int` — the others stay argument-free.
- */
-@Composable
-internal fun UploadError.bannerText(): String = when (this) {
-    UploadError.TooLarge -> stringResource(R.string.editor_upload_error_too_large)
-    UploadError.UnsupportedType -> stringResource(R.string.editor_upload_error_unsupported_type)
-    is UploadError.Server ->
-        stringResource(R.string.editor_upload_error_server, providerId.displayName(), code)
-    is UploadError.Malformed ->
-        stringResource(R.string.editor_upload_error_malformed, providerId.displayName())
-    UploadError.Configuration -> stringResource(R.string.editor_upload_error_configuration)
-    UploadError.Network -> stringResource(R.string.editor_upload_error_network)
-}
-
-/** French display name of an image host, for the upload-error banner (#474). */
-@Composable
-private fun UploadProviderId.displayName(): String = when (this) {
-    UploadProviderId.DIBERIE -> stringResource(R.string.editor_upload_provider_diberie)
-    UploadProviderId.IMGUR -> stringResource(R.string.editor_upload_provider_imgur)
-}
 
 private val SubmitError.bannerResId: Int
     get() = when (this) {

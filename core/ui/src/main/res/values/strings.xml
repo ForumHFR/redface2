@@ -84,4 +84,15 @@
         <item quantity="one">%1$d page à lire</item>
         <item quantity="other">%1$d pages à lire</item>
     </plurals>
+
+    <!-- #459 - vocabulaire upload partage des editeurs BBCode (promu de :feature:editor). -->
+    <string name="editor_upload_error_too_large">Image trop volumineuse pour cet hébergeur. Choisissez une image plus légère.</string>
+    <string name="editor_upload_error_unsupported_type">Type d\'image non accepté par l\'hébergeur.</string>
+    <string name="editor_upload_error_server">L\'hébergeur %1$s a refusé l\'image (HTTP %2$d). Réessayez ou changez d\'hébergeur dans les réglages.</string>
+    <string name="editor_upload_error_malformed">Réponse illisible de l\'hébergeur %1$s. Réessayez ou changez d\'hébergeur dans les réglages.</string>
+    <string name="editor_upload_error_configuration">Hébergeur d\'images non configuré. Renseignez le Client-ID dans les réglages avant d\'envoyer une image.</string>
+    <string name="editor_upload_error_network">Erreur réseau pendant l\'upload. Vérifiez votre connexion et réessayez.</string>
+    <string name="editor_upload_progress">Envoi %1$d/%2$d…</string>
+    <string name="editor_upload_provider_diberie">diberie</string>
+    <string name="editor_upload_provider_imgur">imgur</string>
 </resources>

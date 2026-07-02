@@ -1,4 +1,6 @@
 package fr.forumhfr.redface2.feature.editor
+import fr.forumhfr.redface2.core.ui.editor.UploadError
+import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 
 import fr.forumhfr.redface2.core.ui.editor.WikiSearchState
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
