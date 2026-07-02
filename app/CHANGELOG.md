@@ -16,6 +16,20 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.19.1` — `internal` (dev) — 2026-07-02
+
+**Phase « Vue Topic » (#604) — vague 2 : quick wins navigation & éditeurs** (PRs #763, #764, #765, #766 — cadrage + gates Codex gpt-5.5).
+
+### Vue Topic
+- #699 : l'en-tête d'une citation sourcée (« Citation de X ») devient cliquable (teinté couleur primaire) — tap = saut vers le message cité, avec scroll et surbrillance à l'arrivée, même s'il est sur une autre page. Chaînable de citation en citation.
+- #750 : un lien de notification **email** ouvre enfin le sujet au bon message — HFR met toujours `page=1` dans ces liens ; la vraie page est résolue via le redirect serveur (mécanisme #277 de la recherche) pendant que le squelette s'affiche. Échec réseau = comportement d'avant, jamais pire.
+- #762 : le titre du sujet s'affiche désormais réellement dès la première frame quand on ouvre depuis la liste Drapeaux ou un listing de forum (le cache de titres n'était alimenté qu'après un premier chargement — l'annonce 0.19.0 est maintenant vraie).
+
+### Éditeurs
+- #555 : ouvrir un éditeur (répondre, citer, **éditer un long message**) lève le clavier immédiatement, champ déjà focus — plus besoin de taper dans le champ pour commencer.
+- #250 : l'onglet Wiki du sélecteur de smileys donne le focus à la recherche dès l'ouverture — on tape directement.
+- #459 (1/2) : **upload d'images dans le composeur « nouveau sujet »** — bouton Uploader, sélection multiple (max 10), un `[img]` par image dans l'ordre, compteur n/N, erreurs typées ; même moteur que l'éditeur de réponse. (Reste : le composeur MP.)
+
 ## `0.19.0` — `internal` (dev) — 2026-07-02
 
 **Phase « Vue Topic » (#604) — vague 1 : écran de chargement** (mockup « Chargement A » arbitré sur le fil DEV, cadrage + gate Codex gpt-5.5).

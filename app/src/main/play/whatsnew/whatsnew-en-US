@@ -1,5 +1,8 @@
-Redface 2 v0.19.0 — dev.
+Redface 2 v0.19.1 — dev.
 
-Topic view (redesign begins):
-- Reworked page loading: title shown immediately, centered indicator and skeleton content preview.
-- Reliable page counter while loading (no more stale total).
+Topic view (wave 2):
+- Tap a quote to jump to the cited post.
+- Email links open at the right post.
+- Title shown instantly when opening from a list.
+- Editors: keyboard raised on entry, smiley search focused.
+- Image upload in the new-topic composer.
