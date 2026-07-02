@@ -78,6 +78,7 @@ import coil3.request.ImageRequest
 import coil3.request.crossfade
 import coil3.size.Precision
 import coil3.size.Scale
+import fr.forumhfr.redface2.core.ui.motion.rememberAnimationsEnabled
 import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.core.ui.theme.LocalFoldLongQuotes
 import fr.forumhfr.redface2.core.ui.theme.LocalIgnoreInlineColors

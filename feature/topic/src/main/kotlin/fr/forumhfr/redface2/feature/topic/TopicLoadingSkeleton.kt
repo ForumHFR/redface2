@@ -20,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.loading.SkeletonBox
 
@@ -86,7 +87,7 @@ private fun SkeletonPostCard() {
 }
 
 @Composable
-private fun SkeletonLine(widthFraction: Float, height: androidx.compose.ui.unit.Dp) {
+private fun SkeletonLine(widthFraction: Float, height: Dp) {
     SkeletonBox(
         modifier = Modifier
             .fillMaxWidth(widthFraction)

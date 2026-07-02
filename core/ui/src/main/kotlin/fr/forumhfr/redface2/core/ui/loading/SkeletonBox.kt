@@ -15,7 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
-import fr.forumhfr.redface2.core.ui.post.rememberAnimationsEnabled
+import fr.forumhfr.redface2.core.ui.motion.rememberAnimationsEnabled
 
 /**
  * #604 — shared skeleton/shimmer primitive: a tinted box swept by a diagonal highlight band, read as
