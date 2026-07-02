@@ -179,6 +179,10 @@ private fun PostEditorContent(
                     // Multi-image upload — lock editing during a batch so the user can't move the
                     // caret between two programmatic [img] insertions (keeps them in pick order).
                     readOnly = state.isUploading,
+                    // #555 — the editor opens ready to type: focus + IME on entry. Critical in edit
+                    // mode (field hydrated with a long post: nothing set the focus, keyboard closed,
+                    // #447 caret-follow inert) ; for a reply it is the expected behaviour anyway.
+                    autoFocus = true,
                 )
 
                 Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
