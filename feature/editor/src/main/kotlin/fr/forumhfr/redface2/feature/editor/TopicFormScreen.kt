@@ -3,6 +3,9 @@ package fr.forumhfr.redface2.feature.editor
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -127,6 +130,13 @@ internal fun TopicFormContent(
 ) {
     var imageUrlDialogOpen by remember { mutableStateOf(false) }
     var optionsSheetOpen by remember { mutableStateOf(false) }
+    // #459 — modern photo picker (no runtime permission), same contract as PostEditorContent:
+    // multi-select returns a (possibly empty) List<Uri>, handed to the VM as Uri strings.
+    val pickImagesLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickMultipleVisualMedia(MAX_IMAGES_PER_UPLOAD),
+    ) { uris ->
+        if (uris.isNotEmpty()) onIntent(TopicFormIntent.ImagesPicked(uris.map { it.toString() }))
+    }
     Surface(
         modifier = modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.surface,
@@ -171,12 +181,24 @@ internal fun TopicFormContent(
                 BbcodeToolbar(
                     onAction = { onIntent(TopicFormIntent.ToolbarActionClicked(it)) },
                     onImageUrlRequested = { imageUrlDialogOpen = true },
+                    // #459 — upload wiring, same affordance as the reply editor.
+                    onImageUploadRequested = {
+                        pickImagesLauncher.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                        )
+                    },
+                    uploading = state.isUploading,
                 )
+                // #459 — « n/N » batch counter while a multi-image upload is in flight.
+                UploadProgressLabel(state.uploadProgress)
                 BbcodeTextField(
                     value = state.draft,
                     onValueChange = { onIntent(TopicFormIntent.ContentChanged(it)) },
                     label = stringResource(R.string.editor_field_label),
                     modifier = Modifier.fillMaxWidth(),
+                    // #459 — lock editing during a batch so the caret cannot move between two
+                    // programmatic [img] insertions (keeps them in pick order).
+                    readOnly = state.isUploading,
                 )
                 TextButton(onClick = { onIntent(TopicFormIntent.TogglePreview) }) {
                     Text(
@@ -205,16 +227,7 @@ internal fun TopicFormContent(
                         onDiscard = { onIntent(TopicFormIntent.DraftDiscardRequested) },
                     )
                 }
-                state.submitError?.let { error ->
-                    Text(
-                        text = stringResource(error.bannerResId),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                    TextButton(onClick = { onIntent(TopicFormIntent.ErrorDismissed) }) {
-                        Text(text = stringResource(R.string.editor_error_dismiss))
-                    }
-                }
+                TopicFormErrorBanners(state = state, onIntent = onIntent)
             }
             // Send-button accessibility — pin « Envoyer » to the bottom, above the IME, so the user
             // never has to dismiss the keyboard to submit a new topic / first-post edit (shared
@@ -256,6 +269,39 @@ internal fun TopicFormContent(
             onDismiss = { imageUrlDialogOpen = false },
             onInsert = { url -> onIntent(TopicFormIntent.ImageUrlInserted(url)) },
         )
+    }
+}
+
+/**
+ * Dismissible error banners of the topic composer: the submit failure (typed [SubmitError]) and the
+ * #459 upload failure (typed `UploadError`, same rendering as `PostEditorContent`). Extracted so
+ * [TopicFormContent] stays under detekt's cyclomatic-complexity budget (same rationale as
+ * `UploadProgressLabel`).
+ */
+@Composable
+private fun TopicFormErrorBanners(
+    state: TopicFormState,
+    onIntent: (TopicFormIntent) -> Unit,
+) {
+    state.submitError?.let { error ->
+        Text(
+            text = stringResource(error.bannerResId),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.error,
+        )
+        TextButton(onClick = { onIntent(TopicFormIntent.ErrorDismissed) }) {
+            Text(text = stringResource(R.string.editor_error_dismiss))
+        }
+    }
+    state.uploadError?.let { error ->
+        Text(
+            text = error.bannerText(),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.error,
+        )
+        TextButton(onClick = { onIntent(TopicFormIntent.UploadErrorDismissed) }) {
+            Text(text = stringResource(R.string.editor_error_dismiss))
+        }
     }
 }
 

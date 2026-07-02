@@ -23,8 +23,16 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
+import fr.forumhfr.redface2.core.domain.upload.ImageUpload
+import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
+import fr.forumhfr.redface2.core.domain.upload.UploadException
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
+import fr.forumhfr.redface2.core.domain.upload.UploadRepository
+import fr.forumhfr.redface2.core.domain.upload.UploadedImage
+import fr.forumhfr.redface2.core.domain.upload.UploadedImageRecord
+import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
 import fr.forumhfr.redface2.core.model.EditorSmiley
@@ -1100,11 +1108,85 @@ class TopicFormViewModelTest {
         assertTrue("a saved FP must drop its draft", draftStore.deletedKeys.contains(key))
     }
 
+    // ──────────────────────────────────────────────────────────────────────
+    // #459 — image upload wiring on the topic composer (pattern copied from PostEditorViewModel;
+    // the batch semantics themselves are pinned by PostEditorViewModelTest — here we prove the
+    // topic-form copy is actually wired: authenticated pick uploads + inserts, anonymous is inert).
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `picked images upload and insert one img per success, in pick order (#459)`() = runTest {
+        val uploads = FakeUploadRepository()
+        val reader = FakeImageUploadReader()
+        val viewModel = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT,
+            uploadRepository = uploads,
+            imageUploadReader = reader,
+        )
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(TopicFormIntent.ImagesPicked(listOf("content://pick/1", "content://pick/2")))
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(listOf("content://pick/1", "content://pick/2"), reader.readUris)
+        assertEquals(2, uploads.uploadCalls)
+        val state = viewModel.state.value
+        assertEquals(2, Regex("\\[img]").findAll(state.draft.text).count())
+        assertFalse(state.isUploading)
+        assertEquals(null, state.uploadError)
+        assertEquals(null, state.uploadProgress)
+    }
+
+    @Test
+    fun `an anonymous session ignores the pick entirely (#459)`() = runTest {
+        val uploads = FakeUploadRepository()
+        val viewModel = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+            uploadRepository = uploads,
+        )
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(TopicFormIntent.ImagesPicked(listOf("content://pick/1")))
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(0, uploads.uploadCalls)
+        assertFalse(viewModel.state.value.isUploading)
+    }
+
+    @Test
+    fun `a failed upload surfaces a typed banner and stops the batch (#459)`() = runTest {
+        val uploads = FakeUploadRepository().apply {
+            uploadException = UploadException.TooLarge(maxBytes = 1)
+        }
+        val viewModel = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT,
+            uploadRepository = uploads,
+        )
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(TopicFormIntent.ImagesPicked(listOf("content://pick/1", "content://pick/2")))
+        testScheduler.advanceUntilIdle()
+
+        val state = viewModel.state.value
+        assertEquals(UploadError.TooLarge, state.uploadError)
+        assertFalse(state.isUploading)
+        assertEquals(1, uploads.uploadCalls)
+        assertEquals("", state.draft.text)
+
+        viewModel.submit(TopicFormIntent.UploadErrorDismissed)
+        assertEquals(null, viewModel.state.value.uploadError)
+    }
+
+    @Suppress("LongParameterList") // test factory mirroring the ViewModel's injected dependencies.
     private fun newTopicViewModel(
         entrySubcat: Int?,
         cat: Int = SAMPLE_CAT,
         diagnostics: DiagnosticsLog = DiagnosticsLog(),
         userPreferencesRepository: UserPreferencesRepository = FakeUserPreferencesRepository(),
+        authRepository: AuthRepository = FakeAuthRepository(),
+        uploadRepository: UploadRepository = FakeUploadRepository(),
+        imageUploadReader: ImageUploadReader = FakeImageUploadReader(),
     ): TopicFormViewModel = TopicFormViewModel(
         request = TopicFormRequest(
             mode = TopicFormMode.New,
@@ -1120,6 +1202,9 @@ class TopicFormViewModelTest {
         userPreferencesRepository = userPreferencesRepository,
         draftStore = draftStore,
         diagnostics = diagnostics,
+        authRepository = authRepository,
+        uploadRepository = uploadRepository,
+        imageUploadReader = imageUploadReader,
     )
 
     private suspend fun app.cash.turbine.ReceiveTurbine<TopicFormState>.awaitHydratedState(): TopicFormState {
@@ -1151,7 +1236,58 @@ class TopicFormViewModelTest {
         userPreferencesRepository = userPreferencesRepository,
         draftStore = draftStore,
         diagnostics = diagnostics,
+        authRepository = FakeAuthRepository(),
+        uploadRepository = FakeUploadRepository(),
+        imageUploadReader = FakeImageUploadReader(),
     )
+
+    /** #459 — canned [ImageUploadReader] (1-byte PNG), records the picked uris in call order. */
+    private class FakeImageUploadReader : ImageUploadReader {
+        val readUris: MutableList<String> = mutableListOf()
+
+        override suspend fun read(uri: String): ImageUpload {
+            readUris += uri
+            return ImageUpload(bytes = byteArrayOf(0), mimeType = "image/png", displayName = null)
+        }
+    }
+
+    /** #459 — fake [UploadRepository] ; only [uploadWithCurrentProvider] matters here. */
+    private class FakeUploadRepository : UploadRepository {
+        var uploadException: Throwable? = null
+        var uploadCalls: Int = 0
+            private set
+
+        override suspend fun uploadWithCurrentProvider(image: ImageUpload, userId: String): UploadedImage {
+            uploadCalls += 1
+            uploadException?.let { throw it }
+            return UploadedImage(
+                provider = UploadProviderId.DIBERIE,
+                imageUrl = "https://rehost.diberie.com/Picture/Get/f/1",
+                thumbnailUrl = null,
+                resizedUrl = null,
+                deleteHandle = null,
+                expiresAt = null,
+            )
+        }
+
+        override fun observeUploads(userId: String): kotlinx.coroutines.flow.Flow<List<UploadedImageRecord>> =
+            kotlinx.coroutines.flow.MutableStateFlow(emptyList())
+
+        override suspend fun delete(record: UploadedImageRecord, userId: String): Boolean = false
+    }
+
+    /** #459 — fixed [AuthState] so the VM resolves (or not) an upload `userId`. */
+    private class FakeAuthRepository(
+        private val authState: AuthState = AuthState.Authenticated("alice"),
+    ) : AuthRepository {
+        override fun observeAuthState(): kotlinx.coroutines.flow.Flow<AuthState> =
+            kotlinx.coroutines.flow.MutableStateFlow(authState)
+
+        override suspend fun login(pseudo: String, password: String): Result<AuthState.Authenticated> =
+            Result.success(AuthState.Authenticated(pseudo))
+
+        override suspend fun logout() = Unit
+    }
 
     private class FakePreviewParser : BbcodePreviewParser {
         override fun parsePreview(bbcode: String): PostContent = PostContent(
