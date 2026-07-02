@@ -1474,7 +1474,11 @@ private fun EndOfTopicCard() {
 @Composable
 private fun PageBoundaryCard(donePage: Int, onNextPage: () -> Unit) {
     val nextPageLabel = stringResource(R.string.topic_page_boundary_next, donePage + 1)
+    // Card(onClick) over an inner Row.clickable (gate Codex) : the whole surface is declared as
+    // ONE interactive Material component, and the action's wording is already the card's visible
+    // subtitle — TalkBack reads it as content, no custom onClickLabel needed.
     Card(
+        onClick = onNextPage,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.primaryContainer,
             contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -1484,7 +1488,6 @@ private fun PageBoundaryCard(donePage: Int, onNextPage: () -> Unit) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(onClickLabel = nextPageLabel) { onNextPage() }
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
