@@ -1381,6 +1381,30 @@ class TopicViewModelTest {
         assertEquals(1, repository.calls.single().third)
     }
 
+    @Test
+    fun `resolveScrollToPage times out on a hung probe and falls back to the link page (#750)`() = runTest {
+        val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 39)) }))
+        val hungSearch = object : SearchRepository {
+            override suspend fun search(request: SearchRequest): SearchResultPage =
+                throw UnsupportedOperationException("TopicViewModel never searches")
+
+            override suspend fun resolveSearchResultPage(cat: Int, post: Int, numreponse: Int): Int? {
+                // Degraded network: the probe never answers. withTimeoutOrNull(3 s) must cut it
+                // (instantaneous under runTest's virtual clock) and degrade to the link page.
+                kotlinx.coroutines.awaitCancellation()
+            }
+        }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1, scrollTo = 4242, resolveScrollToPage = true),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+            searchRepository = hungSearch,
+        )
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, repository.calls.single().third)
+        assertEquals(1, viewModel.state.value.request.page)
+    }
+
     // ──────────────────────────────────────────────────────────────────────
     // Issue #200 — post-submit force refresh path
     // ──────────────────────────────────────────────────────────────────────
