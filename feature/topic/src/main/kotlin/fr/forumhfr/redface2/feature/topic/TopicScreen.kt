@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
@@ -35,6 +36,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -732,6 +734,8 @@ internal fun TopicContent(
                 scrollBehavior = scrollBehavior,
                 onBack = onBack,
                 onIntent = onIntent,
+                loaded = loaded,
+                onOpenPage = onOpenPage,
             )
         },
         floatingActionButton = {
@@ -802,7 +806,6 @@ internal fun TopicContent(
                             state = state,
                             topic = mode.topic,
                             hiddenNumreponses = mode.hiddenNumreponses,
-                            onReply = onReply,
                             onQuote = onQuote,
                             onEdit = onEdit,
                             onEditFirstPost = onEditFirstPost,
@@ -860,7 +863,7 @@ private fun topicBarPageIndicator(state: TopicUiState, loaded: TopicUiState.Mode
  */
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
-@Suppress("LongParameterList") // hoisted bar : title/page/back inputs + the search intent sink.
+@Suppress("LongParameterList") // hoisted bar : title/page/back inputs + search sink + page picker.
 private fun TopicTopBar(
     state: TopicUiState,
     barTitle: String,
@@ -869,8 +872,16 @@ private fun TopicTopBar(
     scrollBehavior: androidx.compose.material3.TopAppBarScrollBehavior?,
     onBack: () -> Unit,
     onIntent: (TopicIntent) -> Unit,
+    // Vague 3 (#604) — the loaded page (null while loading / on error). Non-null makes the page
+    // indicator a tappable pill opening the page-picker sheet — the header card's page navigation
+    // (jump field + range row) now lives HERE, the reading surface's single page-change home
+    // besides the ‹/› FABs and the horizontal swipe (#282).
+    loaded: TopicUiState.Mode.Loaded? = null,
+    onOpenPage: (Int) -> Unit = {},
 ) {
     val searchLabel = stringResource(R.string.topic_search_open)
+    var pagePickerOpen by remember { mutableStateOf(false) }
+    val pagePickerLabel = stringResource(R.string.topic_page_picker_open)
     Column {
         TopAppBar(
             title = {
@@ -884,7 +895,16 @@ private fun TopicTopBar(
                     Text(
                         text = barPageIndicator,
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (loaded != null) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        modifier = if (loaded != null) {
+                            Modifier.clickable(onClickLabel = pagePickerLabel) { pagePickerOpen = true }
+                        } else {
+                            Modifier
+                        },
                     )
                 }
             },
@@ -916,6 +936,37 @@ private fun TopicTopBar(
         )
         if (state.search.isActive) {
             TopicSearchBar(search = state.search, onIntent = onIntent)
+        }
+    }
+    // Vague 3 (#604) — page-picker sheet: the dissolved header card's TopicPageNavigation
+    // (prev/next + jump field + compact range row), verbatim, in a bottom sheet anchored to the
+    // top-bar pill. The Error path keeps its own inline TopicPageNavigation — recovery navigation
+    // must not hide behind a sheet (cadrage Codex vague 3).
+    if (pagePickerOpen && loaded != null) {
+        ModalBottomSheet(onDismissRequest = { pagePickerOpen = false }) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .navigationBarsPadding(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.topic_page_picker_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                TopicPageNavigation(
+                    currentPage = loaded.topic.page,
+                    availablePages = state.availablePages,
+                    canGoPrevious = state.canGoPrevious,
+                    canGoNext = state.canGoNext,
+                    onOpenPage = { target ->
+                        pagePickerOpen = false
+                        onOpenPage(target)
+                    },
+                )
+            }
         }
     }
 }
@@ -1062,7 +1113,8 @@ private fun TopicLoadedContent(
     // #509 — `numreponse` of posts whose author is blacklisted; rendered as a collapsed
     // "post masqué" placeholder instead of the full card (the post stays in the list).
     hiddenNumreponses: Set<Int> = emptySet(),
-    onReply: (subcat: Int, page: Int) -> Unit,
+    // Vague 3 (#604) — onReply dropped: the dissolved header card was its only consumer here
+    // (the bottom FAB cluster replies from TopicContent's own callback).
     onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int?) -> Unit,
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
@@ -1199,36 +1251,23 @@ private fun TopicLoadedContent(
             },
     ) {
         item {
-            // Phase 2D #148 — the « Modifier le premier message » action is
-            // exposed only when (a) we are on page 1 (FP lives there by
-            // definition), (b) HFR rendered the FP edit link in the toolbar
-            // (`Topic.isFirstPostOwner`, parsed from the first post on the
-            // page) and (c) the topic is postable WITH a real sub-category.
-            // #213 — unlike Reply/Quote/Edit-post (gated on `canReply` alone,
-            // subcat=0 OK for a category without sub-category), FP edit also
-            // requires `subcat > 0`: the FP recategorise flow
-            // (TopicFormViewModel/TopicFormState) is NOT relaxed for subcat=0
-            // (its sub-category dropdown contract for a 0-subcat category is not
-            // captured yet), so offering it on an IA-style topic would open an
-            // editor that fails with MissingSubcat. Kept strict to avoid a
-            // button-shows-but-submit-fails regression (FP-in-0-subcat = #213 follow-up).
-            // `numreponse` of the FP comes from the first post, not `topic.post`.
-            // #220 — the gate (incl. the auth clause) is the testable `shouldShowEditFirstPost`.
-            val editFirstPostAction: (() -> Unit)? =
-                if (shouldShowEditFirstPost(topic, state.isAuthenticated)) {
-                    { onEditFirstPost(topic.subcat, topic.page, topic.posts.first().numreponse) }
-                } else {
-                    null
-                }
-            TopicHeaderCard(
-                topic = topic,
-                state = state,
-                onReply = onReply,
-                onEditFirstPost = editFirstPostAction,
-                onOpenPage = onOpenPage,
-                pollManualExpanded = pollManualExpanded,
-                onPollExpansionChanged = onPollExpansionChanged,
-            )
+            // Vague 3 (#604, mockup « Lecture A ») — the header card is DISSOLVED: title and page
+            // indicator live in the top app bar (tappable page pill → picker sheet), « Répondre »
+            // in the bottom FAB cluster (#283), « Modifier le premier message » in the first
+            // post's « … » menu (Phase 2D #148 gates unchanged), and the scrollTo indicator is
+            // gone (the amber highlight on arrival is the affordance). This LEAD slot must keep
+            // occupying index 0 unconditionally: every index-based scroll computation
+            // (ScrollToPost's `index + 1`, end-of-page `posts.size`, saved anchors #307, the
+            // re-anchor steps #412) assumes exactly one item before the posts — a poll-less topic
+            // renders it zero-size instead of dropping it.
+            topic.poll?.let { poll ->
+                TopicPollCard(
+                    poll = poll,
+                    expandedDefault = state.pollsExpandedDefault,
+                    manualExpanded = pollManualExpanded,
+                    onExpansionChanged = onPollExpansionChanged,
+                )
+            }
         }
         items(
             items = topic.posts,
@@ -1339,6 +1378,18 @@ private fun TopicLoadedContent(
         } else {
             null
         }
+        // Vague 3 (#604) — « Modifier le premier message » migrated here from the dissolved
+        // header card (Phase 2D #148, gates unchanged incl. the strict `subcat > 0` of #213 —
+        // cf. shouldShowEditFirstPost): the action acts on the topic through its FIRST post,
+        // so its natural home is that post's contextual menu.
+        val menuEditFirstPostAction: (() -> Unit)? = if (
+            isFirstPostOfTopic(topic, post) &&
+            shouldShowEditFirstPost(topic, state.isAuthenticated)
+        ) {
+            { onEditFirstPost(topic.subcat, topic.page, topic.posts.first().numreponse) }
+        } else {
+            null
+        }
         PostMenuSheet(
             post = post,
             permalink = buildPostPermalink(
@@ -1350,6 +1401,7 @@ private fun TopicLoadedContent(
             citedCount = citationCounts[post.numreponse] ?: 0,
             onDismiss = { menuPost = null },
             onDelete = menuDeleteAction,
+            onEditFirstPost = menuEditFirstPostAction,
             // #395 — same profileId gate as the post card (#208): Publicité rows and
             // anonymous reads expose no profile link, the hero stays inert.
             onOpenProfile = post.profileId?.let { profileId ->
@@ -1433,87 +1485,6 @@ private fun MorePagesFooter() {
             modifier = Modifier.weight(1f),
             color = MaterialTheme.colorScheme.outlineVariant,
         )
-    }
-}
-
-@Composable
-@Suppress("LongParameterList") // state-hoisted Composable : each param has a distinct call-site.
-private fun TopicHeaderCard(
-    topic: Topic,
-    state: TopicUiState,
-    onReply: (subcat: Int, page: Int) -> Unit,
-    onEditFirstPost: (() -> Unit)?,
-    onOpenPage: (Int) -> Unit,
-    // #465 — manual poll choice (null = follow the global default) + its toggle callback, both
-    // owned by :app so the expand/collapse choice survives the per-page TopicRoute swap.
-    pollManualExpanded: Boolean? = null,
-    onPollExpansionChanged: (Boolean) -> Unit = {},
-) {
-    Card {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
-                text = topic.title,
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = stringResource(
-                    R.string.topic_caption,
-                    topic.post,
-                    topic.page,
-                    topic.totalPages,
-                ),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            state.request.scrollTo?.let { target ->
-                Text(
-                    text = stringResource(R.string.topic_scroll_to, target),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-            TopicPageNavigation(
-                currentPage = topic.page,
-                availablePages = state.availablePages,
-                canGoPrevious = state.canGoPrevious,
-                canGoNext = state.canGoNext,
-                onOpenPage = onOpenPage,
-            )
-            topic.poll?.let { poll ->
-                TopicPollCard(
-                    poll = poll,
-                    expandedDefault = state.pollsExpandedDefault,
-                    manualExpanded = pollManualExpanded,
-                    onExpansionChanged = onPollExpansionChanged,
-                )
-            }
-            Button(
-                onClick = { onReply(topic.subcat, topic.page) },
-                // #213 — enabled only when HFR rendered the `bddpost` reply form
-                // (authenticated, non-locked topic → `canReply`). #220 — also gated on the
-                // live auth state so a stale cached `canReply = true` row (the topic cache is
-                // not purged on logout) never offers Reply to a logged-out user. `subcat = 0`
-                // (cat without sub-category, e.g. IA) is a valid postable value and is forwarded.
-                enabled = shouldEnableReply(topic, state.isAuthenticated),
-            ) {
-                Text(text = stringResource(R.string.topic_reply))
-            }
-            // Phase 2D #148 — « Modifier le premier message » lives in the header
-            // card because it acts on the topic, not on a single post. We render
-            // it as an OutlinedButton to stay visually subordinate to the primary
-            // « Répondre » action above.
-            if (onEditFirstPost != null) {
-                OutlinedButton(onClick = onEditFirstPost) {
-                    Text(text = stringResource(R.string.topic_edit_first_post))
-                }
-            }
-        }
     }
 }
 

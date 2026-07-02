@@ -84,6 +84,13 @@ internal fun PostMenuSheet(
      */
     onDelete: (() -> Unit)? = null,
     /**
+     * Vague 3 (#604) — « Modifier le premier message », migrated here from the dissolved header
+     * card (Phase 2D #148). Non-null ONLY on the topic's first post when the FP edit gates hold
+     * (`shouldShowEditFirstPost`: page 1, owner toolbar link, postable topic with a real
+     * sub-category — #213). Null hides the entry.
+     */
+    onEditFirstPost: (() -> Unit)? = null,
+    /**
      * #395 — opens the author's profile from the hero row (avatar + pseudo), parity with
      * the #208 tap on the post card. Null keeps the hero inert — same gate as the card
      * (`Post.profileId == null` : Publicité rows, anonymous reads). The sheet plays its
@@ -193,6 +200,21 @@ internal fun PostMenuSheet(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(stringResource(R.string.topic_post_menu_open_in_browser))
+            }
+
+            if (onEditFirstPost != null) {
+                Spacer(Modifier.height(8.dp))
+                // Vague 3 (#604) — topic-level edit, first post only (Phase 2D #148). The sheet
+                // closes first so the editor never opens under a still-visible menu.
+                OutlinedButton(
+                    onClick = {
+                        onEditFirstPost()
+                        hideThenDismiss(coroutineScope, sheetState, onDismiss)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.topic_edit_first_post))
+                }
             }
 
             if (onToggleMultiQuote != null) {
