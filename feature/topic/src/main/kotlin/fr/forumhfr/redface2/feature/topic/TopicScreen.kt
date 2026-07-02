@@ -38,6 +38,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SmallFloatingActionButton
@@ -1349,14 +1350,20 @@ private fun TopicLoadedContent(
         // correct for a stateless sentinel.
         if (topic.page == topic.totalPages) {
             item {
-                EndOfTopicFooter()
+                EndOfTopicCard()
             }
         } else if (topic.page < topic.totalPages) {
-            // #110 (nicko) — symmetric marker on an intermediate page: « Suite à la page suivante »,
-            // purely informative (navigation lives in the page controls / swipe #282). Same no-key
-            // sentinel rationale as EndOfTopicFooter above.
+            // Vague 3 (#604) — the #110 hairline marker becomes an actionable boundary card
+            // (beta feedback by thibw & styx42 : the divider read too weak, and an intermediate
+            // page's end was indistinguishable from the topic's). Tapping opens the next page
+            // through the SAME onOpenPage as the › FAB / swipe (#282) — a strict « page + 1 »
+            // step never arms the #412 bottom landing, so the reader lands at the top of the
+            // next page, which is the natural continuation. Same no-key sentinel rationale.
             item {
-                MorePagesFooter()
+                PageBoundaryCard(
+                    donePage = topic.page,
+                    onNextPage = { onOpenPage(topic.page + 1) },
+                )
             }
         }
     }
@@ -1429,62 +1436,74 @@ private fun TopicLoadedContent(
 }
 
 /**
- * #379 — sober end-of-topic marker: a centred label between two hairlines, rendered as the
- * LAST LazyColumn item of the topic's last page only. Pure presentation — the condition
- * (`topic.page == topic.totalPages`) lives at the call site.
+ * #379 → vague 3 (#604) — calm end-of-topic endcard: an outlined card with a centred title and
+ * the #379 caption, rendered as the LAST LazyColumn item of the topic's last page only. Visually
+ * OPPOSITE to [PageBoundaryCard] (outline vs filled primaryContainer) so an intermediate page's
+ * end and the topic's end can never be confused again (beta feedback by thibw & styx42). Pure
+ * presentation — the condition (`topic.page == topic.totalPages`) lives at the call site.
  */
 @Composable
-private fun EndOfTopicFooter() {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        HorizontalDivider(
-            modifier = Modifier.weight(1f),
-            color = MaterialTheme.colorScheme.outlineVariant,
-        )
-        Text(
-            text = stringResource(R.string.topic_end_of_topic),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        HorizontalDivider(
-            modifier = Modifier.weight(1f),
-            color = MaterialTheme.colorScheme.outlineVariant,
-        )
+private fun EndOfTopicCard() {
+    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = stringResource(R.string.topic_end_of_topic_title),
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Text(
+                text = stringResource(R.string.topic_end_of_topic),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
 /**
- * #110 (nicko) — symmetric « more pages below » marker, mirroring [EndOfTopicFooter] but rendered as the
- * LAST LazyColumn item of an INTERMEDIATE page (`topic.page < topic.totalPages`, condition at the call
- * site). Informative only — no tap action (navigation is the page controls / swipe #282). Same style.
+ * #110 → vague 3 (#604) — actionable page-boundary card on an INTERMEDIATE page
+ * (`topic.page < topic.totalPages`, condition at the call site): « Page N terminée » plus a
+ * « continue » affordance, the whole card tappable (mockup « Lecture A », arbitré fil DEV).
+ * [onNextPage] delegates to the caller's onOpenPage — the same in-place route replace as the
+ * › FAB and the horizontal swipe (#282), so scroll restoration semantics stay uniform.
  */
 @Composable
-private fun MorePagesFooter() {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+private fun PageBoundaryCard(donePage: Int, onNextPage: () -> Unit) {
+    val nextPageLabel = stringResource(R.string.topic_page_boundary_next, donePage + 1)
+    // Card(onClick) over an inner Row.clickable (gate Codex) : the whole surface is declared as
+    // ONE interactive Material component, and the action's wording is already the card's visible
+    // subtitle — TalkBack reads it as content, no custom onClickLabel needed.
+    Card(
+        onClick = onNextPage,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        ),
+        modifier = Modifier.fillMaxWidth(),
     ) {
-        HorizontalDivider(
-            modifier = Modifier.weight(1f),
-            color = MaterialTheme.colorScheme.outlineVariant,
-        )
-        Text(
-            text = stringResource(R.string.topic_more_pages),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        HorizontalDivider(
-            modifier = Modifier.weight(1f),
-            color = MaterialTheme.colorScheme.outlineVariant,
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.topic_page_boundary_done, donePage),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    text = nextPageLabel,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            RedfaceVectorIcon(resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_chevron_right)
+        }
     }
 }
 
