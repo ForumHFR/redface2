@@ -1,8 +1,4 @@
-Redface 2 v0.19.1 — dev.
+Redface 2 v0.19.2 — dev.
 
-Vue Topic (vague 2) :
-- Tap sur une citation = saut vers le message cité.
-- Les liens email ouvrent au bon message.
-- Titre affiché dès l'ouverture depuis une liste.
-- Éditeurs : clavier levé d'office, recherche smileys focus.
-- Upload d'images dans « nouveau sujet ».
+- Upload d'images dans les composeurs MP (réponse et nouveau message) : sélection multiple, une image par ligne.
+- Complète la vague 2 Vue Topic (0.19.1) : citations cliquables, liens email corrigés, éditeurs auto-focus.
