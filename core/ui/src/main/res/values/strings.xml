@@ -2,6 +2,8 @@
 <resources>
     <string name="post_quote_author">Citation de %1$s</string>
     <string name="post_quote_bare">Citation</string>
+    <!-- #699 : libellé a11y du tap sur l'en-tête d'une citation sourcée (aller au message cité). -->
+    <string name="post_quote_go_to">Aller au message cité</string>
     <string name="post_quote_collapsed">Citation imbriquée repliée</string>
     <string name="post_quote_collapsed_revealed">Citations imbriquées</string>
     <string name="post_quote_show">Afficher</string>

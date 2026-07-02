@@ -20,11 +20,14 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.search.SearchRepository
 import fr.forumhfr.redface2.core.domain.topic.NoTopicSearchResultsException
 import fr.forumhfr.redface2.core.domain.topic.TopicRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicSearchRepository
 import fr.forumhfr.redface2.core.model.TopicSearchForm
 import fr.forumhfr.redface2.core.model.TopicSearchRequest
+import fr.forumhfr.redface2.core.model.search.SearchRequest
+import fr.forumhfr.redface2.core.model.search.SearchResultPage
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
@@ -1299,6 +1302,7 @@ class TopicViewModelTest {
         deletePostRepository: DeletePostRepository = FakeDeletePostRepository(),
         blacklistRepository: BlacklistRepository = FakeBlacklistRepository(),
         topicSearchRepository: TopicSearchRepository = FakeTopicSearchRepository(),
+        searchRepository: SearchRepository = FakeSearchRepository(),
     ): TopicViewModel = TopicViewModel(
         request = request,
         topicRepository = topicRepository,
@@ -1307,6 +1311,7 @@ class TopicViewModelTest {
         deletePostRepository = deletePostRepository,
         blacklistRepository = blacklistRepository,
         topicSearchRepository = topicSearchRepository,
+        searchRepository = searchRepository,
     )
 
     private fun topicRequest(
@@ -1314,6 +1319,7 @@ class TopicViewModelTest {
         scrollTo: Int? = null,
         submitSignal: Long? = null,
         postSubmitOverflowLanding: Boolean = false,
+        resolveScrollToPage: Boolean = false,
     ): TopicRequest = TopicRequest(
         cat = SAMPLE_CAT,
         post = SAMPLE_POST,
@@ -1321,7 +1327,59 @@ class TopicViewModelTest {
         scrollTo = scrollTo,
         submitSignal = submitSignal,
         postSubmitOverflowLanding = postSubmitOverflowLanding,
+        resolveScrollToPage = resolveScrollToPage,
     )
+
+    // ──────────────────────────────────────────────────────────────────────
+    // #750 — untrusted-page resolution before the first load (email deep links)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `resolveScrollToPage resolves the real page before the first load (#750)`() = runTest {
+        val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(37, 39)) }))
+        val search = FakeSearchRepository(pageToResolve = 37)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1, scrollTo = 4242, resolveScrollToPage = true),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+            searchRepository = search,
+        )
+        // The probe must carry the full (cat, post, numreponse) tuple (numreponse is per-category).
+        assertEquals(listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 4242)), search.resolveCalls)
+        // The load targets the RESOLVED page, never the untrusted page=1 from the email link…
+        assertEquals(37, repository.calls.single().third)
+        // …and the resolved page becomes the real request everywhere (indicator, retry, highlight).
+        assertEquals(37, viewModel.state.value.request.page)
+        assertEquals(4242, viewModel.state.value.request.scrollTo)
+    }
+
+    @Test
+    fun `resolveScrollToPage falls back to the link page when the probe fails (#750)`() = runTest {
+        val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 39)) }))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1, scrollTo = 4242, resolveScrollToPage = true),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+            searchRepository = FakeSearchRepository(pageToResolve = null),
+        )
+        // Failed probe (null) → pre-#750 behaviour: the link's own page loads, nothing worse.
+        assertEquals(1, repository.calls.single().third)
+        assertEquals(1, viewModel.state.value.request.page)
+    }
+
+    @Test
+    fun `resolveScrollToPage without scrollTo is a plain load, no probe (#750)`() = runTest {
+        val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) }))
+        val search = FakeSearchRepository(pageToResolve = 5)
+        topicViewModel(
+            request = topicRequest(page = 1, resolveScrollToPage = true),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+            searchRepository = search,
+        )
+        assertEquals(emptyList<Triple<Int, Int, Int>>(), search.resolveCalls)
+        assertEquals(1, repository.calls.single().third)
+    }
 
     // ──────────────────────────────────────────────────────────────────────
     // Issue #200 — post-submit force refresh path
@@ -1848,6 +1906,25 @@ class TopicViewModelTest {
         private const val SAMPLE_POST = 84_540
         private const val SAMPLE_SUBCAT = 432
         private const val CANCEL_TIMEOUT_MS = 2_000L
+    }
+}
+
+/**
+ * #750 — canned page-resolution probe. [pageToResolve] null simulates a failed probe (network
+ * error / timeout / unparsable redirect); [resolveCalls] records the exact tuples asked for.
+ * `search` is unused by TopicViewModel and fails loudly if something starts calling it.
+ */
+private class FakeSearchRepository(
+    private val pageToResolve: Int? = null,
+) : SearchRepository {
+    val resolveCalls: MutableList<Triple<Int, Int, Int>> = mutableListOf()
+
+    override suspend fun search(request: SearchRequest): SearchResultPage =
+        throw UnsupportedOperationException("TopicViewModel never searches")
+
+    override suspend fun resolveSearchResultPage(cat: Int, post: Int, numreponse: Int): Int? {
+        resolveCalls += Triple(cat, post, numreponse)
+        return pageToResolve
     }
 }
 

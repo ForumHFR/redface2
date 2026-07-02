@@ -40,4 +40,13 @@ data class TopicRequest(
      * is the route allowed to redirect once.
      */
     val postSubmitOverflowLanding: Boolean = false,
+    /**
+     * #750 — `true` when [page] is NOT trusted to contain [scrollTo]: HFR email-notification links
+     * always serialise `page=1` while carrying the real target as `numreponse`. Before the first
+     * load the ViewModel resolves the actual page through HFR's server-side redirect (same probe
+     * as the search results, #277) and adopts it as the REAL target page — timeout / failure falls
+     * back to [page], never worse than before. `false` on every in-app navigation (quote taps and
+     * search results already carry a trusted page).
+     */
+    val resolveScrollToPage: Boolean = false,
 )
