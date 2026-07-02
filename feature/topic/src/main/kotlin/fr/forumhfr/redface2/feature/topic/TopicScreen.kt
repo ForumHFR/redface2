@@ -29,7 +29,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
@@ -680,8 +679,9 @@ internal fun TopicContent(
     onPollExpansionChanged: (Boolean) -> Unit = {},
 ) {
     // #285 — the topic title and #284 — the page counter live in a persistent top app bar so they
-    // stay visible while the user scrolls (the in-card title/caption scrolls away). When the page
-    // is still loading / errored, fall back to a generic title and the requested page.
+    // stay visible while the user scrolls (the in-card title/caption scrolls away). While loading,
+    // the title falls back to the cached hint (or a generic label) and the counter to « Chargement… »
+    // — never a page total that has not been parsed yet (#622).
     val loaded = state.mode as? TopicUiState.Mode.Loaded
     // #411 — bottom action cluster hides on scroll-down, re-appears on scroll-up (RF1 parity).
     val bottomActionsVisible = rememberBottomActionsVisible(listState)
@@ -694,10 +694,7 @@ internal fun TopicContent(
     } else {
         state.request.titleHint?.takeIf { it.isNotBlank() } ?: fallbackTitle
     }
-    val barCurrentPage = loaded?.topic?.page ?: state.request.page
-    val barTotalPages = loaded?.topic?.totalPages
-        ?: state.availablePages.lastOrNull()
-        ?: state.request.page
+    val barPageIndicator = topicBarPageIndicator(state, loaded)
     val backLabel = stringResource(R.string.topic_back)
     // Build 89 follow-up — when the user opted into auto-hide, give the top bar an `enterAlways`
     // scroll behaviour (collapses on scroll-down, snaps back on the first scroll-up). Otherwise
@@ -718,8 +715,7 @@ internal fun TopicContent(
             TopicTopBar(
                 state = state,
                 barTitle = barTitle,
-                barCurrentPage = barCurrentPage,
-                barTotalPages = barTotalPages,
+                barPageIndicator = barPageIndicator,
                 backLabel = backLabel,
                 scrollBehavior = scrollBehavior,
                 onBack = onBack,
@@ -773,18 +769,9 @@ internal fun TopicContent(
         ) {
             when (val mode = state.mode) {
                 TopicUiState.Mode.Loading -> {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(24.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                    ) {
-                        CircularProgressIndicator()
-                        Text(
-                            text = stringResource(R.string.topic_loading),
-                            style = MaterialTheme.typography.bodyLarge,
-                        )
-                    }
+                    // #604 — skeleton loading (mockup « Chargement A ») : loader centré + cartes
+                    // fantômes, à la place de l'ancien spinner nu aligné en haut à gauche.
+                    TopicLoadingSkeleton()
                 }
 
                 is TopicUiState.Mode.Error -> {
@@ -855,6 +842,31 @@ internal fun TopicContent(
 }
 
 /**
+ * #622 — subtitle of the persistent top bar. « page X / N » only once the response is PARSED: the
+ * previous fallback chain used `availablePages.lastOrNull()` during Loading, which can be stale from
+ * an earlier navigation (a wrong total displayed while the spinner runs, corrected on arrival).
+ * `availablePages` itself stays untouched — the Error path deliberately keeps the last-known page
+ * grid as context (see the ViewModel), so Error shows the requested page over that last-known total
+ * while Loading shows a plain « Chargement… ».
+ */
+@Composable
+private fun topicBarPageIndicator(state: TopicUiState, loaded: TopicUiState.Mode.Loaded?): String = when {
+    loaded != null -> stringResource(
+        R.string.topic_page_indicator,
+        loaded.topic.page,
+        loaded.topic.totalPages,
+    )
+
+    state.mode is TopicUiState.Mode.Error -> stringResource(
+        R.string.topic_page_indicator,
+        state.request.page,
+        state.availablePages.lastOrNull() ?: state.request.page,
+    )
+
+    else -> stringResource(R.string.topic_loading)
+}
+
+/**
  * #285/#284 + Chantier C (#546) — the topic top app bar (title + page counter + back) plus the
  * intra-topic search affordance : a search icon in `actions` (only when the loaded page exposes a
  * usable, authenticated transsearch form) that opens the [TopicSearchBar] directly beneath the bar.
@@ -866,8 +878,7 @@ internal fun TopicContent(
 private fun TopicTopBar(
     state: TopicUiState,
     barTitle: String,
-    barCurrentPage: Int,
-    barTotalPages: Int,
+    barPageIndicator: String,
     backLabel: String,
     scrollBehavior: androidx.compose.material3.TopAppBarScrollBehavior?,
     onBack: () -> Unit,
@@ -885,7 +896,7 @@ private fun TopicTopBar(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text = stringResource(R.string.topic_page_indicator, barCurrentPage, barTotalPages),
+                        text = barPageIndicator,
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
