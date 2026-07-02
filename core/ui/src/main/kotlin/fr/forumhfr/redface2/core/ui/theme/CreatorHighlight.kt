@@ -13,7 +13,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
-import fr.forumhfr.redface2.core.ui.post.rememberAnimationsEnabled
+import fr.forumhfr.redface2.core.ui.motion.rememberAnimationsEnabled
 
 /**
  * #221 — the gold "sheen" [Brush] applied to a Redface 2 creator's pseudo (see
