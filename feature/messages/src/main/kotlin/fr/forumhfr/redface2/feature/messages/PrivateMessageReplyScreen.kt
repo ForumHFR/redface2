@@ -1,5 +1,8 @@
 package fr.forumhfr.redface2.feature.messages
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,6 +31,9 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.ui.editor.MAX_IMAGES_PER_UPLOAD
+import fr.forumhfr.redface2.core.ui.editor.UploadProgressLabel
+import fr.forumhfr.redface2.core.ui.editor.bannerText
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.BbcodePreview
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
@@ -81,6 +87,8 @@ fun PrivateMessageReplyScreen(
         onRetryFormLoad = viewModel::retryFormLoad,
         onDraftRestore = viewModel::onDraftRestoreRequested,
         onDraftDiscard = viewModel::onDraftDiscardRequested,
+        onImagesPicked = viewModel::onImagesPicked,
+        onUploadErrorDismissed = viewModel::onUploadErrorDismissed,
         onAddRecipient = viewModel::onAddRecipient,
         onRemoveRecipient = viewModel::onRemoveRecipient,
         smileyPicker = viewModel.smileyPicker,
@@ -108,6 +116,9 @@ private fun PrivateMessageReplyContent(
     onRetryFormLoad: () -> Unit,
     onDraftRestore: () -> Unit,
     onDraftDiscard: () -> Unit,
+    // #459 — image upload wiring (photo picker launcher lives in the body composable).
+    onImagesPicked: (List<String>) -> Unit,
+    onUploadErrorDismissed: () -> Unit,
     onAddRecipient: (String) -> Unit,
     onRemoveRecipient: (String) -> Unit,
     smileyPicker: SmileyPickerController,
@@ -144,6 +155,8 @@ private fun PrivateMessageReplyContent(
                         onErrorDismissed = onErrorDismissed,
                         onDraftRestore = onDraftRestore,
                         onDraftDiscard = onDraftDiscard,
+                        onImagesPicked = onImagesPicked,
+                        onUploadErrorDismissed = onUploadErrorDismissed,
                         onManageRecipients = { recipientManagerOpen = true },
                         modifier = Modifier.weight(1f),
                     )
@@ -209,9 +222,17 @@ private fun ReplyEditorBody(
     onErrorDismissed: () -> Unit,
     onDraftRestore: () -> Unit,
     onDraftDiscard: () -> Unit,
+    onImagesPicked: (List<String>) -> Unit,
+    onUploadErrorDismissed: () -> Unit,
     onManageRecipients: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // #459 — modern photo picker (no runtime permission), same contract as the topic-side editors.
+    val pickImagesLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickMultipleVisualMedia(MAX_IMAGES_PER_UPLOAD),
+    ) { uris ->
+        if (uris.isNotEmpty()) onImagesPicked(uris.map { it.toString() })
+    }
     // No outer scroll : the draft field is weighted so it stretches down to the bar (same
     // extensible-field design as the post editor) ; long content scrolls in the field's own
     // fillViewport column (#275/#410) and inside the preview pane.
@@ -233,7 +254,18 @@ private fun ReplyEditorBody(
             HorizontalDivider()
         }
 
-        BbcodeToolbar(onAction = onToolbarAction)
+        BbcodeToolbar(
+            onAction = onToolbarAction,
+            // #459 — upload wiring, same affordance as the topic-side editors.
+            onImageUploadRequested = {
+                pickImagesLauncher.launch(
+                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                )
+            },
+            uploading = state.isUploading,
+        )
+        // #459 — « n/N » batch counter while a multi-image upload is in flight.
+        UploadProgressLabel(state.uploadProgress)
 
         BbcodeTextField(
             value = state.draft,
@@ -244,6 +276,8 @@ private fun ReplyEditorBody(
             // #275/#410 — grow-with-content field in its own scrollable viewport so the
             // cursor stays visible under the IME (typing AND refocus after the preview).
             fillViewport = true,
+            // #459 — lock editing during a batch (caret must not move between two insertions).
+            readOnly = state.isUploading,
         )
 
         Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
@@ -283,6 +317,18 @@ private fun ReplyEditorBody(
                 color = MaterialTheme.colorScheme.error,
             )
             TextButton(onClick = onErrorDismissed) {
+                Text(text = stringResource(R.string.messages_reply_error_dismiss))
+            }
+        }
+
+        // #459 — dismissible upload-error banner (shared :core:ui wording).
+        state.uploadError?.let { error ->
+            Text(
+                text = error.bannerText(),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+            TextButton(onClick = onUploadErrorDismissed) {
                 Text(text = stringResource(R.string.messages_reply_error_dismiss))
             }
         }

@@ -2,6 +2,10 @@ package fr.forumhfr.redface2.feature.messages
 
 import androidx.compose.ui.text.input.TextFieldValue
 import app.cash.turbine.test
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
+import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
@@ -50,6 +54,8 @@ class PrivateMessageComposeViewModelTest {
     private fun userPreferences(confirmBeforePosting: Boolean = false): UserPreferencesRepository =
         mockk {
             every { observeConfirmBeforePosting() } returns MutableStateFlow(confirmBeforePosting)
+            // #459 — the composer now mirrors the image-insert preference on init.
+            every { observeEditorImageInsert() } returns MutableStateFlow(EditorImageInsert.REDUCED)
         }
 
     /** Mirrors the standalone composer's parsed shape (fixture `mp_compose_form.html`). */
@@ -77,19 +83,44 @@ class PrivateMessageComposeViewModelTest {
 
     private val draftStore = FakeEditorDraftStore()
 
+    @Suppress("LongParameterList") // test factory mirroring the ViewModel's injected dependencies.
     private fun viewModel(
         repository: PrivateMessageWriteRepository,
         initialRecipient: String? = null,
         confirmBeforePosting: Boolean = false,
         smileyRepository: SmileyRepository = mockk(relaxed = true),
+        uploadRepository: UploadRepository = FakeUploadRepository(),
+        imageUploadReader: ImageUploadReader = FakeImageUploadReader(),
     ): PrivateMessageComposeViewModel = PrivateMessageComposeViewModel(
         initialRecipient = initialRecipient,
         repository = repository,
         previewParser = previewParser,
         userPreferencesRepository = userPreferences(confirmBeforePosting),
         draftStore = draftStore,
+        authRepository = FakeAuthRepository(),
+        uploadRepository = uploadRepository,
+        imageUploadReader = imageUploadReader,
+        diagnostics = DiagnosticsLog(),
         smileyRepository = smileyRepository,
     )
+
+    @Test
+    fun `picked images upload and insert one img per success (#459)`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val uploads = FakeUploadRepository()
+        val reader = FakeImageUploadReader()
+        val vm = viewModel(repository, uploadRepository = uploads, imageUploadReader = reader)
+        advanceUntilIdle()
+
+        vm.onImagesPicked(listOf("content://pick/1", "content://pick/2"))
+        advanceUntilIdle()
+
+        assertEquals(listOf("content://pick/1", "content://pick/2"), reader.readUris)
+        assertEquals(2, uploads.uploadCalls)
+        assertEquals(2, Regex("\\[img]").findAll(vm.state.value.draft.text).count())
+        assertFalse(vm.state.value.isUploading)
+    }
 
     @Test
     fun `the wiki search carries the loaded form's userId (#440)`() = runTest {
