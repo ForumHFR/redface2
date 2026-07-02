@@ -204,12 +204,15 @@ internal fun PostMenuSheet(
 
             if (onEditFirstPost != null) {
                 Spacer(Modifier.height(8.dp))
-                // Vague 3 (#604) — topic-level edit, first post only (Phase 2D #148). The sheet
-                // closes first so the editor never opens under a still-visible menu.
+                // Vague 3 (#604) — topic-level edit, first post only (Phase 2D #148). Hide first,
+                // then dismiss AND navigate (same order as the profile hero above) — the editor
+                // must not open under a still-visible menu sheet.
                 OutlinedButton(
                     onClick = {
-                        onEditFirstPost()
-                        hideThenDismiss(coroutineScope, sheetState, onDismiss)
+                        hideThenDismiss(coroutineScope, sheetState) {
+                            onDismiss()
+                            onEditFirstPost()
+                        }
                     },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
