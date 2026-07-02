@@ -1,5 +1,8 @@
-Redface 2 v0.19.0 — dev.
+Redface 2 v0.19.1 — dev.
 
-Vue Topic (début de la refonte) :
-- Chargement d'une page repensé : titre affiché immédiatement, indicateur centré et aperçu squelette du contenu.
-- Compteur de pages fiable pendant le chargement (plus de total erroné).
+Vue Topic (vague 2) :
+- Tap sur une citation = saut vers le message cité.
+- Les liens email ouvrent au bon message.
+- Titre affiché dès l'ouverture depuis une liste.
+- Éditeurs : clavier levé d'office, recherche smileys focus.
+- Upload d'images dans « nouveau sujet ».
