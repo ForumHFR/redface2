@@ -17,9 +17,14 @@
     <string name="topic_loading">Chargement…</string>
     <!-- #604 — libellé du skeleton de chargement (mockup « Chargement A »), sous le loader centré. -->
     <string name="topic_loading_body">Chargement de la page demandée</string>
-    <!-- #379 — marqueur explicite de fin de sujet, rendu après le dernier post de la DERNIÈRE page. -->
+    <!-- #379 → vague 3 (#604) — endcard calme de fin de sujet (titre + légende #379), rendue après
+         le dernier post de la DERNIÈRE page. -->
+    <string name="topic_end_of_topic_title">Fin du sujet</string>
     <string name="topic_end_of_topic">Dernier message du sujet</string>
-    <string name="topic_more_pages">Suite à la page suivante</string>
+    <!-- #110 → vague 3 (#604) — carte de frontière de page actionnable en fin de page intermédiaire
+         (mockup « Lecture A ») : titre + libellé d'action (aussi onClickLabel TalkBack). -->
+    <string name="topic_page_boundary_done">Page %1$d terminée</string>
+    <string name="topic_page_boundary_next">Continuer vers la page %1$d</string>
     <!-- #285 — top app bar : back affordance (content description) + fallback title shown while
          the topic page has not loaded yet (or errored), so the bar never reads blank. -->
     <string name="topic_back">Retour</string>
