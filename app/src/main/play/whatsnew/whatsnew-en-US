@@ -1,4 +1,4 @@
-Redface 2 v0.22.0 — dev.
+Redface 2 v0.23.0 — dev.
 
-- Quick reply: "Quote" now adds quote cards (reorderable, removable); send and the full-screen switch honour the order.
-- Quick reply: switching to full screen now carries the text automatically.
+- Full-screen editor: quotes are now compact cards (reorderable, removable, "Clear all") — no more BBCode wall in the field.
+- "Quote N": 1-2 quotes open the quick reply, 3+ the full-screen editor.

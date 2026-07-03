@@ -16,6 +16,14 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.23.0` — `internal` (dev) — 2026-07-03
+
+**Phase « Vue Topic » (#604) — vague 4 « Postage », lot 3** (PRs #800 #801 — cadrage Codex 8 forks, gates GO-avec-réserves/GO, dogfood émulateur).
+
+### Vue Topic
+- **Citations en cartes dans l'éditeur plein écran** (mockup P3) : fini le pavé de BBCode `[quotemsg]` dans le champ — les citations s'affichent en cartes compactes au-dessus (réordonnables ↑/↓, supprimables ✕, « Tout vider » #436), le champ ne contient que votre texte, le BBCode est assemblé à l'envoi (un échec ne perd rien). La bascule réponse rapide → plein écran transporte les cartes.
+- **Le panier multi-citations (« Citer N ») choisit sa surface** : 1 ou 2 citations ouvrent la réponse rapide avec les cartes pré-armées ; 3 et plus filent directement en plein écran.
+
 ## `0.22.0` — `internal` (dev) — 2026-07-03
 
 **Phase « Vue Topic » (#604) — vague 4 « Postage », lot 2** (PRs #797 #798 — cadrage 9 forks + gates Codex gpt-5.5, dogfood émulateur).

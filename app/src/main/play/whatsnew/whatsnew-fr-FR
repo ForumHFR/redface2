@@ -1,4 +1,4 @@
-Redface 2 v0.22.0 — dev.
+Redface 2 v0.23.0 — dev.
 
-- Réponse rapide : « Citer » y ajoute des cartes de citation (réordonnables, supprimables) ; l'envoi et la bascule plein écran respectent l'ordre.
-- Réponse rapide : la bascule plein écran reprend le texte automatiquement.
+- Éditeur plein écran : les citations deviennent des cartes compactes (réordonnables, supprimables, « Tout vider ») — plus de pavé BBCode dans le champ.
+- « Citer N » : 1-2 citations ouvrent la réponse rapide, 3+ l'éditeur plein écran.
