@@ -97,6 +97,7 @@ import fr.forumhfr.redface2.BuildConfig
 import fr.forumhfr.redface2.R
 import fr.forumhfr.redface2.core.ui.R as CoreUiR
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageSummary
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.shouldRevealNavBar
@@ -1312,8 +1313,8 @@ fun RedfaceApp(intent: Intent?) {
                         ),
                         multiQuoteNavState = MultiQuoteNavState(
                             basket = multiQuoteBasket,
-                            onToggle = { cat, post, numreponse ->
-                                multiQuoteBasket = multiQuoteBasket.toggled(cat, post, numreponse)
+                            onToggle = { cat, post, preview ->
+                                multiQuoteBasket = multiQuoteBasket.toggled(cat, post, preview)
                             },
                             onClear = { multiQuoteBasket = null },
                         ),
@@ -1705,7 +1706,7 @@ private data class TopicScrollNavState(
  */
 private data class MultiQuoteNavState(
     val basket: MultiQuoteBasket?,
-    val onToggle: (cat: Int, post: Int, numreponse: Int) -> Unit,
+    val onToggle: (cat: Int, post: Int, preview: QuotedPostPreview) -> Unit,
     val onClear: () -> Unit,
 )
 
@@ -1782,31 +1783,37 @@ private fun ResetNavBarScrollOffTopic(topRoute: NavKey?, onReset: () -> Unit) {
 /**
  * #291 — multi-quote selection, hoisted to RedfaceApp (same survival rationale as
  * [TopicScrollNavState]: a page change replaces the TopicRoute entry, so any state owned by the
- * topic screen dies with it). [numreponses] keeps SELECTION ORDER — the quotes are concatenated
- * in the order the user tapped them, not post order.
+ * topic screen dies with it). [selections] keeps SELECTION ORDER — the quotes are concatenated
+ * in the order the user tapped them, not post order. #604 lot 2 enriched the entries from bare
+ * numreponses to [QuotedPostPreview]s (author + excerpt captured at selection time) so the quote
+ * cards never re-parse a post ; uniqueness stays keyed on the numreponse alone.
  */
 internal data class MultiQuoteBasket(
     val cat: Int,
     val post: Int,
-    val numreponses: List<Int>,
+    val selections: List<QuotedPostPreview>,
 ) {
+    val numreponses: List<Int> get() = selections.map { it.numreponse }
+
     fun matches(cat: Int, post: Int): Boolean = this.cat == cat && this.post == post
 }
 
 /**
- * Toggles [numreponse] in the basket for topic ([cat], [post]). Selecting in a DIFFERENT topic
- * replaces the basket (one quoting act at a time); removing the last entry clears it to null so
- * the « Citer N » affordance disappears instead of advertising an empty selection.
+ * Toggles [preview] in the basket for topic ([cat], [post]) — presence is keyed on the
+ * numreponse, so re-tapping a selected post removes it whatever snapshot the caller rebuilt.
+ * Selecting in a DIFFERENT topic replaces the basket (one quoting act at a time); removing the
+ * last entry clears it to null so the « Citer N » affordance disappears instead of advertising
+ * an empty selection.
  */
-internal fun MultiQuoteBasket?.toggled(cat: Int, post: Int, numreponse: Int): MultiQuoteBasket? {
+internal fun MultiQuoteBasket?.toggled(cat: Int, post: Int, preview: QuotedPostPreview): MultiQuoteBasket? {
     val current = this?.takeIf { it.matches(cat, post) }
-        ?: return MultiQuoteBasket(cat, post, listOf(numreponse))
-    val next = if (numreponse in current.numreponses) {
-        current.numreponses - numreponse
+        ?: return MultiQuoteBasket(cat, post, listOf(preview))
+    val next = if (current.selections.any { it.numreponse == preview.numreponse }) {
+        current.selections.filterNot { it.numreponse == preview.numreponse }
     } else {
-        current.numreponses + numreponse
+        current.selections + preview
     }
-    return if (next.isEmpty()) null else current.copy(numreponses = next)
+    return if (next.isEmpty()) null else current.copy(selections = next)
 }
 
 /**
@@ -2442,8 +2449,8 @@ private fun RedfaceNavHost(
                         ?.takeIf { it.matches(route.cat, route.post) }
                         ?.numreponses
                         .orEmpty(),
-                    onToggleMultiQuote = { numreponse ->
-                        multiQuoteNavState.onToggle(route.cat, route.post, numreponse)
+                    onToggleMultiQuote = { preview ->
+                        multiQuoteNavState.onToggle(route.cat, route.post, preview)
                     },
                     // #465 — the topic's saved manual poll choice (null = follow the global
                     // default), and the callback recording a tap on the poll card. Hoisted to
