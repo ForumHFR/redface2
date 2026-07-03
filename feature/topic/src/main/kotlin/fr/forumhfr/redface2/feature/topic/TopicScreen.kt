@@ -896,9 +896,10 @@ internal fun TopicTopBar(
     var pagePickerOpen by remember { mutableStateOf(false) }
     val pagePickerLabel = stringResource(R.string.topic_page_picker_open)
     // #772 — tap on the title reveals it in full (2 lines max), tap again folds it back. Transient
-    // by design (arbitrage XaTriX) : plain `remember`, so a page change (route replace) or leaving
-    // the screen resets it — unlike the hoisted poll expansion (#465), which must survive swaps.
-    var titleExpanded by remember { mutableStateOf(false) }
+    // by design (arbitrage XaTriX) : a page change (route replace → fresh composition, the very
+    // loss the hoisted poll expansion #465 works around) or leaving the screen resets it. The
+    // post/page key is a safety net should a refactor ever reuse the composition across pages.
+    var titleExpanded by remember(state.request.post, state.request.page) { mutableStateOf(false) }
     val titleToggleLabel = stringResource(
         if (titleExpanded) R.string.topic_title_collapse else R.string.topic_title_expand,
     )
