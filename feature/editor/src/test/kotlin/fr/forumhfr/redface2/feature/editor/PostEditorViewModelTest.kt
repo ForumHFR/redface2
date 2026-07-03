@@ -1905,6 +1905,50 @@ class PostEditorViewModelTest {
         assertTrue("an emptied editor must not leave a stale row", draftStore.deletedKeys.contains(key))
     }
 
+    @Test
+    fun `CloseRequested during an in-flight submit is ignored (gate #803)`() = runTest {
+        val submitGate = CompletableDeferred<Unit>()
+        replyRepository.formResult = Result.success(authenticatedForm())
+        replyRepository.submitResult = ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+        replyRepository.submitGate = submitGate
+        val viewModel = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("en vol")))
+        viewModel.submit(PostEditorIntent.SubmitClicked)
+        // Back pressed while the POST is in flight — must be inert (parity with the sheet, #788).
+        viewModel.submit(PostEditorIntent.CloseRequested)
+        submitGate.complete(Unit)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.effects.test {
+            assertTrue(
+                "the submit outcome must be the ONLY effect — no CloseCommitted",
+                awaitItem() is PostEditorEffect.SubmitSucceeded,
+            )
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a second CloseRequested is a no-op (gate #803)`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val viewModel = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.CloseRequested)
+        viewModel.submit(PostEditorIntent.CloseRequested)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.effects.test {
+            assertEquals(PostEditorEffect.CloseCommitted, awaitItem())
+            // A double back must never yield a second pop (it would remove the screen BELOW).
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
     /** #604 lot 3 — quote-card snapshot, as the topic surface would build it at selection time. */
     private fun card(numreponse: Int, author: String = "auteur$numreponse"): QuotedPostPreview =
         QuotedPostPreview(numreponse = numreponse, author = author, excerpt = "extrait $numreponse")

@@ -266,13 +266,26 @@ class PostEditorViewModel @AssistedInject constructor(
         }
     }
 
+    /** #604 lot 4a — one-shot latch : a committed close is never re-emitted (gate #803). */
+    private var closeRequested = false
+
     /**
      * #604 lot 4a — dirty close : flush the pending debounce so the last keystrokes reach the
      * #405 row, THEN let the UI pop (CloseCommitted). Without this, a system back < 750 ms
      * after typing cancelled the debounce with the ViewModel and silently dropped the tail of
      * the draft. Mirrors the quick-reply escalation (save awaited before the effect).
+     *
+     * Two guards (gate #803, NO-GO findings) :
+     * - INERT while a POST is in flight — popping would cancel the submit with the
+     *   viewModelScope and leave the server state unknown with a repostable draft (the sheet
+     *   blocks its dismiss the same way, gate #788) ; on failure `isSubmitting` drops and the
+     *   back works again, on success SubmitSucceeded pops anyway ;
+     * - ONE-SHOT — a second back racing the first CloseCommitted must not emit a second
+     *   effect (each `onClose` pops blindly : the second pop would remove the screen BELOW).
      */
     private fun onCloseRequested() {
+        if (_state.value.isSubmitting || closeRequested) return
+        closeRequested = true
         autosaveJob?.cancel()
         viewModelScope.launch {
             persistDraftNow()
