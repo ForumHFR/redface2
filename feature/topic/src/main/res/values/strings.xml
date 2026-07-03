@@ -116,4 +116,9 @@
     <!-- Vague 3 (#604) : pilule page de la top bar + feuille de navigation. -->
     <string name="topic_page_picker_open">Changer de page</string>
     <string name="topic_page_picker_title">Aller à une page</string>
+    <!-- #772 : titre de la top bar dépliable au tap (1 ligne ↔ 2 lignes). -->
+    <string name="topic_title_expand">Afficher le titre complet</string>
+    <string name="topic_title_collapse">Réduire le titre</string>
+    <string name="topic_title_expanded">Titre développé</string>
+    <string name="topic_title_collapsed">Titre réduit</string>
 </resources>
