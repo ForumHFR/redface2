@@ -1,4 +1,4 @@
-Redface 2 v0.20.1 — dev.
+Redface 2 v0.20.2 — dev.
 
-- Flags: the "+read" pill shortcut now works on every tab (Read and Favorites included).
-- Flags: the empty-state text now points at the right action to see read topics again.
+- Gestures: a swipe starting on the system back-gesture band no longer competes with tab or page changes.
+- Topic: tap the truncated top-bar title to reveal it in full (2 lines), tap again to fold it back.
