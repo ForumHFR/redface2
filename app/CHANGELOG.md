@@ -16,6 +16,14 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.20.1` — `internal` (dev) — 2026-07-03
+
+**Quick wins vue Drapeaux — retours bêta 0.18.0** (PRs #776, #777 — cadrage + gate Codex gpt-5.5).
+
+### Drapeaux
+- #751 (thibw) : le raccourci **« +lus »** (tap sur la zone type de la pilule) fonctionne désormais sur **tous les onglets** — Lu et Favoris rejoignent Cyan et DT (même chemin persisté, même anti-double-tap ; l'indicateur œil/anneau et le suffixe du picker suivent l'état sur chaque onglet).
+- #753 (Dintr-un lemn) : le texte de l'état vide « aucune catégorie avec un message non lu » pointe la bonne action — la bascule « +lus » pour revoir les sujets lus (l'ancien texte prescrivait « Masquer les catégories sans non-lu », qui ne réaffiche que les catégories vides).
+
 ## `0.20.0` — `internal` (dev) — 2026-07-03
 
 **Phase « Vue Topic » (#604) — vague 3 : redesign de la lecture** (PRs #770, #771, #773, #774 — cadrage + gates Codex gpt-5.5, dogfoods émulateur par lot).
