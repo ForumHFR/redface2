@@ -12,10 +12,12 @@ import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.write.ReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.model.write.ReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
+import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import java.io.IOException
 import kotlin.coroutines.cancellation.CancellationException
@@ -41,12 +43,18 @@ data class QuickReplyRequest(
 /** UI state of the quick-reply sheet. [text] is the whole contract — no toolbar, no preview. */
 data class QuickReplyUiState(
     val text: TextFieldValue = TextFieldValue(""),
+    /**
+     * #604 lot 2 — the quote cards, in citation order (reorderable). Transient like the
+     * multi-quote basket : never persisted, the #405 row only ever carries the typed body.
+     */
+    val quotes: List<QuotedPostPreview> = emptyList(),
     val isSubmitting: Boolean = false,
     val submitError: QuickReplySubmitError? = null,
     /** #312 — « Confirmation avant publication » : the pending-confirmation dialog is showing. */
     val confirmVisible: Boolean = false,
 ) {
-    val canSubmit: Boolean get() = text.text.isNotBlank() && !isSubmitting
+    /** With quote cards armed, an empty body is a valid submit (quotes-only reply). */
+    val canSubmit: Boolean get() = (text.text.isNotBlank() || quotes.isNotEmpty()) && !isSubmitting
 }
 
 /** Typed submit failures, the same split as the full editor's `SubmitError`. */
@@ -63,11 +71,13 @@ sealed interface QuickReplyEffect {
 
     /**
      * The draft is persisted — the sheet can hand over to the full-screen editor. Emitted only
-     * AFTER the save completed: the full editor restores the SAME `EditorDraftKey.reply` row,
-     * so the ordering is the whole transfer mechanism (cadrage Codex vague 4 : never a long
-     * text in a route arg, never a memory-only holder).
+     * AFTER the save completed: the full editor restores the SAME `EditorDraftKey.reply` row
+     * (auto-applied, #790), so the ordering is the whole transfer mechanism (cadrage Codex :
+     * never a long text in a route arg, never a memory-only holder). [quoteNumreponses] rides
+     * the route as `quotedNumreponse`/`extraQuoteNumreponses` — the full editor materialises
+     * the `[quotemsg]` prefills itself, exactly like the multi-quote FAB path.
      */
-    data object EscalateToFullEditor : QuickReplyEffect
+    data class EscalateToFullEditor(val quoteNumreponses: List<Int>) : QuickReplyEffect
 }
 
 /**
@@ -86,6 +96,7 @@ sealed interface QuickReplyEffect {
 class QuickReplyViewModel @AssistedInject constructor(
     @Assisted private val request: QuickReplyRequest,
     private val replyRepository: ReplyRepository,
+    private val quoteMaterializer: ReplyQuoteMaterializer,
     private val draftStore: EditorDraftStore,
     userPreferencesRepository: UserPreferencesRepository,
 ) : ViewModel() {
@@ -138,13 +149,44 @@ class QuickReplyViewModel @AssistedInject constructor(
      * typically escalate → edit in the full-screen editor → back → reopen. The row is the
      * source of truth ; the field is unconditionally re-seeded from it (gate Codex PR #788).
      */
-    fun onSheetOpened() {
+    fun onSheetOpened(initialQuote: QuotedPostPreview? = null) {
+        if (initialQuote != null) onQuoteAdded(initialQuote)
         viewModelScope.launch {
             initJob.join()
             val body = draftStore.load(draftOwner, draftKey)?.body.orEmpty()
             _state.update {
                 it.copy(text = TextFieldValue(text = body, selection = TextRange(body.length)))
             }
+        }
+    }
+
+    /** #604 lot 2 — arm a quote card ; idempotent per numreponse (re-citing a post is a no-op). */
+    fun onQuoteAdded(preview: QuotedPostPreview) {
+        _state.update { current ->
+            if (current.quotes.any { it.numreponse == preview.numreponse }) {
+                current
+            } else {
+                current.copy(quotes = current.quotes + preview)
+            }
+        }
+    }
+
+    fun onQuoteRemoved(numreponse: Int) {
+        _state.update { current ->
+            current.copy(quotes = current.quotes.filterNot { it.numreponse == numreponse })
+        }
+    }
+
+    /** Move the card one slot up ([delta] = -1) or down (+1) ; out-of-range moves are no-ops. */
+    fun onQuoteMoved(numreponse: Int, delta: Int) {
+        _state.update { current ->
+            val index = current.quotes.indexOfFirst { it.numreponse == numreponse }
+            val target = index + delta
+            if (index < 0 || target < 0 || target > current.quotes.lastIndex) return@update current
+            val reordered = current.quotes.toMutableList().apply {
+                add(target, removeAt(index))
+            }
+            current.copy(quotes = reordered)
         }
     }
 
@@ -180,7 +222,7 @@ class QuickReplyViewModel @AssistedInject constructor(
         autosaveJob?.cancel()
         viewModelScope.launch {
             saveDraftNow()
-            _effects.send(QuickReplyEffect.EscalateToFullEditor)
+            _effects.send(QuickReplyEffect.EscalateToFullEditor(_state.value.quotes.map { it.numreponse }))
         }
     }
 
@@ -225,13 +267,36 @@ class QuickReplyViewModel @AssistedInject constructor(
         _state.update { it.copy(isSubmitting = true, submitError = null) }
         submitJob = viewModelScope.launch {
             val outcome = runCatching {
-                val form = loadedForm ?: replyRepository.fetchReplyForm(context).also { loadedForm = it }
-                replyRepository.submitReply(
-                    context = context,
-                    form = form,
-                    bbcodeContent = _state.value.text.text,
-                    options = form.options,
-                )
+                val quotes = _state.value.quotes
+                if (quotes.isEmpty()) {
+                    val form = loadedForm ?: replyRepository.fetchReplyForm(context).also { loadedForm = it }
+                    replyRepository.submitReply(
+                        context = context,
+                        form = form,
+                        bbcodeContent = _state.value.text.text,
+                        options = form.options,
+                    )
+                } else {
+                    // #604 lot 2 — materialise the [quotemsg] prefills fresh (never the cached
+                    // plain form: the quote form carries the prefills AND the hash the submit
+                    // rides). Card order = citation order ; the typed body follows the quotes.
+                    // A network failure leaves body AND cards untouched (state only mutates on
+                    // success), per the cadrage's partial-submit interdiction.
+                    val quoteContext = context.copy(
+                        quotedNumreponse = quotes.first().numreponse,
+                        quoteRef = null,
+                    )
+                    val form = quoteMaterializer.fetchFormWithQuotes(
+                        context = quoteContext,
+                        extraQuoteNumreponses = quotes.drop(1).map { it.numreponse },
+                    )
+                    replyRepository.submitReply(
+                        context = quoteContext,
+                        form = form,
+                        bbcodeContent = form.initialContent.trimEnd() + "\n\n" + _state.value.text.text,
+                        options = form.options,
+                    )
+                }
             }
             outcome.fold(
                 onSuccess = { result -> handleSubmitOutcome(result) },

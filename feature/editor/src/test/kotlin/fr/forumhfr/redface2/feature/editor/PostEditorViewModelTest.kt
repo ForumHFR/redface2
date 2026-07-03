@@ -791,6 +791,7 @@ class PostEditorViewModelTest {
         quotedNumreponse: Int? = null,
         quoteRef: Int? = null,
         extraQuoteNumreponses: List<Int> = emptyList(),
+        resumeSharedDraft: Boolean = false,
         diagnostics: DiagnosticsLog = DiagnosticsLog(),
         userPreferencesRepository: UserPreferencesRepository = FakeUserPreferencesRepository(),
         authRepository: AuthRepository = FakeAuthRepository(),
@@ -806,6 +807,7 @@ class PostEditorViewModelTest {
                 quotedNumreponse = quotedNumreponse,
                 quoteRef = quoteRef,
                 extraQuoteNumreponses = extraQuoteNumreponses,
+                resumeSharedDraft = resumeSharedDraft,
             ),
             previewParser = previewParser,
             replyRepository = replyRepository,
@@ -1748,6 +1750,63 @@ class PostEditorViewModelTest {
         viewModel.submit(PostEditorIntent.SubmitClicked)
         testScheduler.advanceUntilIdle()
         assertTrue("a saved edit must drop its draft", draftStore.deletedKeys.contains(key))
+    }
+
+    // ----- #790 : resumeSharedDraft (escalade de la réponse rapide) ----------
+
+    @Test
+    fun `resumeSharedDraft auto-applies the shared draft without the banner`() = runTest {
+        draftStore.preload(
+            EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID),
+            EditorDraftStore.Draft(body = "texte de la sheet"),
+        )
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val viewModel = newReplyViewModel(resumeSharedDraft = true)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.state.test {
+            val settled = expectMostRecentItem()
+            assertEquals("texte de la sheet", settled.draft.text)
+            assertNull("no banner on an escalation hand-over", settled.restorableDraft)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `resumeSharedDraft prepends the quote prefill to the resumed body`() = runTest {
+        draftStore.preload(
+            EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID),
+            EditorDraftStore.Draft(body = "texte de la sheet"),
+        )
+        replyRepository.formResult =
+            Result.success(authenticatedForm(initialContent = "[quotemsg=101]cité[/quotemsg]"))
+        val viewModel = newReplyViewModel(resumeSharedDraft = true, quotedNumreponse = 101)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.state.test {
+            val settled = expectMostRecentItem()
+            assertEquals(
+                "[quotemsg=101]cité[/quotemsg]\n\ntexte de la sheet",
+                settled.draft.text,
+            )
+            assertNull(settled.restorableDraft)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `resumeSharedDraft with no stored draft falls back to classic prefill hydration`() = runTest {
+        replyRepository.formResult =
+            Result.success(authenticatedForm(initialContent = "[quotemsg=101]cité[/quotemsg]"))
+        val viewModel = newReplyViewModel(resumeSharedDraft = true, quotedNumreponse = 101)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.state.test {
+            val settled = expectMostRecentItem()
+            assertEquals("[quotemsg=101]cité[/quotemsg]", settled.draft.text)
+            assertNull(settled.restorableDraft)
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     private fun authenticatedForm(initialContent: String = ""): ReplyForm = ReplyForm(

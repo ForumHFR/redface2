@@ -40,4 +40,11 @@ data class PostEditorRequest(
      * single quote or a plain reply.
      */
     val extraQuoteNumreponses: List<Int> = emptyList(),
+    /**
+     * #790 (#604 lot 2) — `true` when this editor is the ESCALATION of a quick-reply sheet. The
+     * ViewModel then auto-applies the shared #405 draft row instead of surfacing the restore
+     * banner, and COMBINES it with a quote prefill when both are present (prefill first, body
+     * after — commutative whatever lands first, never clobbering either).
+     */
+    val resumeSharedDraft: Boolean = false,
 )

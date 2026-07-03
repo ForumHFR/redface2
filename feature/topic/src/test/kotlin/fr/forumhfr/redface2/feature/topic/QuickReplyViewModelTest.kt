@@ -2,11 +2,13 @@ package fr.forumhfr.redface2.feature.topic
 
 import androidx.compose.ui.text.input.TextFieldValue
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.write.ReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.model.write.ReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
+import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -154,7 +156,7 @@ class QuickReplyViewModelTest {
         val effect = viewModel.effects.first()
 
         // The effect is only emitted once the row is written — the full editor restores it.
-        assertEquals(QuickReplyEffect.EscalateToFullEditor, effect)
+        assertEquals(QuickReplyEffect.EscalateToFullEditor(emptyList()), effect)
         assertEquals("à finir en plein écran", store.storedBody)
     }
 
@@ -188,6 +190,100 @@ class QuickReplyViewModelTest {
         assertEquals(1, repository.submitCalls)
     }
 
+    @Test
+    fun `quote cards accumulate in citation order and adding twice is a no-op`() = runTest {
+        val viewModel = quickReplyViewModel()
+
+        viewModel.onQuoteAdded(preview(101, "alice"))
+        viewModel.onQuoteAdded(preview(202, "bob"))
+        viewModel.onQuoteAdded(preview(101, "alice-encore"))
+
+        assertEquals(listOf(101, 202), viewModel.state.value.quotes.map { it.numreponse })
+    }
+
+    @Test
+    fun `cards can be reordered within bounds and removed`() = runTest {
+        val viewModel = quickReplyViewModel()
+        viewModel.onQuoteAdded(preview(101, "alice"))
+        viewModel.onQuoteAdded(preview(202, "bob"))
+        viewModel.onQuoteAdded(preview(303, "carol"))
+
+        viewModel.onQuoteMoved(303, delta = -1)
+        assertEquals(listOf(101, 303, 202), viewModel.state.value.quotes.map { it.numreponse })
+
+        viewModel.onQuoteMoved(101, delta = -1) // already first — no-op
+        assertEquals(listOf(101, 303, 202), viewModel.state.value.quotes.map { it.numreponse })
+
+        viewModel.onQuoteRemoved(303)
+        assertEquals(listOf(101, 202), viewModel.state.value.quotes.map { it.numreponse })
+    }
+
+    @Test
+    fun `a submit with cards materialises the prefills before the typed body`() = runTest {
+        val repository = FakeQuickReplyRepository(
+            results = mutableListOf(ReplySubmitResult.Success(refreshUrl = null, targetPage = 9, numreponse = 77)),
+        )
+        val viewModel = quickReplyViewModel(replyRepository = repository)
+        advanceUntilIdle() // init prefetch (plain form)
+        viewModel.onQuoteAdded(preview(101, "alice"))
+        viewModel.onQuoteAdded(preview(202, "bob"))
+        viewModel.onTextChanged(TextFieldValue("mon avis"))
+
+        viewModel.onSubmitClicked()
+        advanceUntilIdle()
+
+        // Materialisation fetched the quote forms in citation order (after the init prefetch).
+        assertEquals(listOf(null, 101, 202), repository.fetchedQuotedNumreponses)
+        assertEquals(
+            "[quotemsg=101]corps[/quotemsg]\n\n[quotemsg=202]corps[/quotemsg]\n\nmon avis",
+            repository.submittedBodies.single(),
+        )
+        assertEquals(QuickReplyEffect.SubmitSucceeded(targetPage = 9, scrollTo = 77), viewModel.effects.first())
+        assertTrue(viewModel.state.value.quotes.isEmpty())
+    }
+
+    @Test
+    fun `a submit failure keeps the body and the cards`() = runTest {
+        val repository = FakeQuickReplyRepository(
+            results = mutableListOf(ReplySubmitResult.Failure(ReplyFailureReason.AntiFlood)),
+        )
+        val viewModel = quickReplyViewModel(replyRepository = repository)
+        viewModel.onQuoteAdded(preview(101, "alice"))
+        viewModel.onTextChanged(TextFieldValue("texte"))
+
+        viewModel.onSubmitClicked()
+        advanceUntilIdle()
+
+        assertEquals(listOf(101), viewModel.state.value.quotes.map { it.numreponse })
+        assertEquals("texte", viewModel.state.value.text.text)
+    }
+
+    @Test
+    fun `cards alone allow the submit`() = runTest {
+        val viewModel = quickReplyViewModel()
+        assertTrue(!viewModel.state.value.canSubmit)
+        viewModel.onQuoteAdded(preview(101, "alice"))
+        assertTrue(viewModel.state.value.canSubmit)
+    }
+
+    @Test
+    fun `escalation carries the card numreponses in citation order`() = runTest {
+        val store = FakeQuickReplyDraftStore()
+        val viewModel = quickReplyViewModel(draftStore = store)
+        viewModel.onQuoteAdded(preview(202, "bob"))
+        viewModel.onQuoteAdded(preview(101, "alice"))
+        viewModel.onTextChanged(TextFieldValue("suite en plein écran"))
+
+        viewModel.onEscalateRequested()
+        val effect = viewModel.effects.first()
+
+        assertEquals(QuickReplyEffect.EscalateToFullEditor(listOf(202, 101)), effect)
+        assertEquals("suite en plein écran", store.storedBody)
+    }
+
+    private fun preview(numreponse: Int, author: String): QuotedPostPreview =
+        QuotedPostPreview(numreponse = numreponse, author = author, excerpt = "extrait")
+
     private fun quickReplyViewModel(
         replyRepository: ReplyRepository = FakeQuickReplyRepository(),
         draftStore: EditorDraftStore = FakeQuickReplyDraftStore(),
@@ -195,6 +291,7 @@ class QuickReplyViewModelTest {
     ): QuickReplyViewModel = QuickReplyViewModel(
         request = QuickReplyRequest(cat = 23, subcat = 401, topicId = 35421, page = 3),
         replyRepository = replyRepository,
+        quoteMaterializer = ReplyQuoteMaterializer(replyRepository),
         draftStore = draftStore,
         userPreferencesRepository = FakeUserPreferencesRepository(confirmBeforePosting = confirmBeforePosting),
     )
@@ -233,10 +330,19 @@ private class FakeQuickReplyRepository(
     var fetchCalls = 0
     var submitCalls = 0
     val submittedBodies = mutableListOf<String>()
+    val fetchedQuotedNumreponses = mutableListOf<Int?>()
 
     override suspend fun fetchReplyForm(context: ReplyContext): ReplyForm {
         fetchCalls++
-        return ReplyForm(hashCheck = "hash", sujet = "sujet", hiddenFields = emptyMap(), isAnonymous = false)
+        fetchedQuotedNumreponses += context.quotedNumreponse
+        val prefill = context.quotedNumreponse?.let { "[quotemsg=$it]corps[/quotemsg]" }.orEmpty()
+        return ReplyForm(
+            hashCheck = "hash",
+            sujet = "sujet",
+            hiddenFields = emptyMap(),
+            isAnonymous = false,
+            initialContent = prefill,
+        )
     }
 
     override suspend fun submitReply(
