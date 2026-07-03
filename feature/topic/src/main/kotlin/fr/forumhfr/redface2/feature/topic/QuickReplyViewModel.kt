@@ -73,11 +73,11 @@ sealed interface QuickReplyEffect {
      * The draft is persisted — the sheet can hand over to the full-screen editor. Emitted only
      * AFTER the save completed: the full editor restores the SAME `EditorDraftKey.reply` row
      * (auto-applied, #790), so the ordering is the whole transfer mechanism (cadrage Codex :
-     * never a long text in a route arg, never a memory-only holder). [quoteNumreponses] rides
-     * the route as `quotedNumreponse`/`extraQuoteNumreponses` — the full editor materialises
-     * the `[quotemsg]` prefills itself, exactly like the multi-quote FAB path.
+     * never a long text in a route arg, never a memory-only holder). [quotes] (#604 lot 3)
+     * carries the armed cards as FULL previews through the :app handoff — the editor renders
+     * the same cards (mockup P3) and defers the `[quotemsg]` materialisation to its own submit.
      */
-    data class EscalateToFullEditor(val quoteNumreponses: List<Int>) : QuickReplyEffect
+    data class EscalateToFullEditor(val quotes: List<QuotedPostPreview>) : QuickReplyEffect
 }
 
 /**
@@ -222,7 +222,7 @@ class QuickReplyViewModel @AssistedInject constructor(
         autosaveJob?.cancel()
         viewModelScope.launch {
             saveDraftNow()
-            _effects.send(QuickReplyEffect.EscalateToFullEditor(_state.value.quotes.map { it.numreponse }))
+            _effects.send(QuickReplyEffect.EscalateToFullEditor(_state.value.quotes))
         }
     }
 

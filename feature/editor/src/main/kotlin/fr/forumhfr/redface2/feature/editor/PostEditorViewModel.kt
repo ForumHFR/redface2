@@ -30,6 +30,7 @@ import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.write.EditPostContext
+import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
 import fr.forumhfr.redface2.core.model.write.ReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
@@ -97,8 +98,14 @@ class PostEditorViewModel @AssistedInject constructor(
             numreponse = request.numreponse,
             page = request.page,
             subcat = request.subcat,
-            quotedNumreponse = request.quotedNumreponse,
-            quoteRef = request.quoteRef,
+            // #604 lot 3 — cards seeded from the handoff, deduplicated defensively on the
+            // numreponse (same uniqueness rule as the basket / the sheet) and gated to Reply :
+            // an Edit session has nothing to quote.
+            quotes = if (request.mode == PostEditorMode.Reply) {
+                request.initialQuotes.distinctBy { it.numreponse }
+            } else {
+                emptyList()
+            },
         ),
     )
     val state: StateFlow<PostEditorState> = _state.asStateFlow()
@@ -206,8 +213,9 @@ class PostEditorViewModel @AssistedInject constructor(
      *
      * #790 exception — when the route carries `resumeSharedDraft` (escalation of a quick-reply
      * sheet, which JUST wrote the row), the body is APPENDED to the field instead of banner'd :
-     * the escalation continues the same composition act. Append (not replace) keeps this
-     * commutative with the quote-prefill prepend in [withFormHydration], whichever lands first.
+     * the escalation continues the same composition act. (The quote-prefill prepend this used to
+     * be commutative with is gone since #604 lot 3 — citations are cards, the plain reply form
+     * carries no prefill.)
      */
     private fun restoreDraftIfAny() {
         val key = draftKey ?: return
@@ -224,9 +232,7 @@ class PostEditorViewModel @AssistedInject constructor(
                     } else {
                         current.draft.text.trimEnd() + "\n\n" + body
                     }
-                    current
-                        .withDraft(TextFieldValue(text = combined, selection = TextRange(combined.length)))
-                        .copy(draftHydratedFromForm = current.draft.text.isNotBlank())
+                    current.withDraft(TextFieldValue(text = combined, selection = TextRange(combined.length)))
                 }
                 scheduleAutosave()
             } else {
@@ -281,6 +287,29 @@ class PostEditorViewModel @AssistedInject constructor(
             PostEditorIntent.UploadErrorDismissed -> _state.update { it.copy(uploadError = null) }
             PostEditorIntent.DraftRestoreRequested -> onDraftRestoreRequested()
             PostEditorIntent.DraftDiscardRequested -> onDraftDiscardRequested()
+            is PostEditorIntent.QuoteRemoved -> onQuoteRemoved(intent.numreponse)
+            is PostEditorIntent.QuoteMoved -> onQuoteMoved(intent.numreponse, intent.delta)
+            PostEditorIntent.QuotesCleared -> _state.update { it.copy(quotes = emptyList()) }
+        }
+    }
+
+    /** #604 lot 3 — same card semantics as the quick-reply sheet (remove by numreponse). */
+    private fun onQuoteRemoved(numreponse: Int) {
+        _state.update { current ->
+            current.copy(quotes = current.quotes.filterNot { it.numreponse == numreponse })
+        }
+    }
+
+    /** #604 lot 3 — move the card one slot up ([delta] = -1) or down (+1) ; out-of-range = no-op. */
+    private fun onQuoteMoved(numreponse: Int, delta: Int) {
+        _state.update { current ->
+            val index = current.quotes.indexOfFirst { it.numreponse == numreponse }
+            val target = index + delta
+            if (index < 0 || target < 0 || target > current.quotes.lastIndex) return@update current
+            val reordered = current.quotes.toMutableList().apply {
+                add(target, removeAt(index))
+            }
+            current.copy(quotes = reordered)
         }
     }
 
@@ -613,10 +642,11 @@ class PostEditorViewModel @AssistedInject constructor(
             _state.update { it.copy(submitError = SubmitError.MissingSubcat) }
             return
         }
-        // #291 multi-quote — promoted to the shared ReplyQuoteMaterializer (#604 lot 2), one
-        // implementation for the full editor and the quick-reply sheet. Same contract as before:
-        // extras fetched sequentially in selection order, submit rides the FIRST form's hash.
-        launchFormFetch { quoteMaterializer.fetchFormWithQuotes(context, request.extraQuoteNumreponses) }
+        // #604 lot 3 (mockup P3) — the open-time fetch is always the PLAIN reply form now :
+        // citations live as cards in [PostEditorState.quotes] and their [quotemsg] blocks are
+        // materialised fresh at submit (see [onSubmitClicked]), exactly like the quick-reply
+        // sheet. This fetch only warms the hash and hydrates the per-post options.
+        launchFormFetch { replyRepository.fetchReplyForm(context) }
     }
 
     private fun loadEditFormIfPossible() {
@@ -672,35 +702,18 @@ class PostEditorViewModel @AssistedInject constructor(
             draft.text.isBlank() &&
             form.initialContent.isNotBlank()
 
-    /**
-     * #790 resume — the shared draft body reached the field first (classic hydration is
-     * blank-field-only): PREPEND the quote prefill instead, keeping the escalated text after
-     * the [quotemsg] blocks. Guarded by draftHydratedFromForm so the InvalidHashCheck silent
-     * refetch can never prepend twice.
-     */
-    private fun PostEditorState.shouldPrependPrefillFrom(form: ReplyForm, shouldHydrate: Boolean): Boolean =
-        request.resumeSharedDraft &&
-            !draftHydratedFromForm &&
-            !shouldHydrate &&
-            form.initialContent.isNotBlank() &&
-            draft.text.isNotBlank()
-
     private fun PostEditorState.resolveHydratedDraft(
         form: ReplyForm,
         shouldHydrate: Boolean,
-        shouldPrependPrefill: Boolean,
-    ): TextFieldValue = when {
-        shouldHydrate -> TextFieldValue(
+    ): TextFieldValue = if (shouldHydrate) {
+        TextFieldValue(
             text = form.initialContent,
             // Place caret at the end so the user can type their content
             // right after the prefill — matches HFR's web behavior.
             selection = TextRange(form.initialContent.length),
         )
-        shouldPrependPrefill -> {
-            val combined = form.initialContent.trimEnd() + "\n\n" + draft.text
-            TextFieldValue(text = combined, selection = TextRange(combined.length))
-        }
-        else -> draft
+    } else {
+        draft
     }
 
     /**
@@ -729,8 +742,7 @@ class PostEditorViewModel @AssistedInject constructor(
         nextPreview: PostContent,
     ): PostEditorState {
         val shouldHydrate = shouldHydrateFrom(form)
-        val shouldPrependPrefill = shouldPrependPrefillFrom(form, shouldHydrate)
-        val nextDraft = resolveHydratedDraft(form, shouldHydrate, shouldPrependPrefill)
+        val nextDraft = resolveHydratedDraft(form, shouldHydrate)
         val hydrateOptions = !optionsHydratedFromForm
         return copy(
             isLoadingForm = false,
@@ -741,7 +753,7 @@ class PostEditorViewModel @AssistedInject constructor(
             // flips to false on `current` and we keep the user-driven
             // preview ; the parsed `nextPreview` is dropped.
             preview = if (shouldHydrate && isPreviewVisible) nextPreview else preview,
-            draftHydratedFromForm = draftHydratedFromForm || shouldHydrate || shouldPrependPrefill,
+            draftHydratedFromForm = draftHydratedFromForm || shouldHydrate,
             signatureEnabled = if (hydrateOptions) form.options.signatureEnabled else signatureEnabled,
             smileyDisabled = if (hydrateOptions) form.options.smileyDisabled else smileyDisabled,
             emailNotificationEnabled = if (hydrateOptions) {
@@ -834,12 +846,7 @@ class PostEditorViewModel @AssistedInject constructor(
                 when (snapshot.mode) {
                     PostEditorMode.Reply -> {
                         val context = buildReplyContext() ?: error("canSubmit lied about reply context")
-                        replyRepository.submitReply(
-                            context = context,
-                            form = form,
-                            bbcodeContent = snapshot.draft.text,
-                            options = options,
-                        )
+                        submitReply(context, form, snapshot, options)
                     }
                     PostEditorMode.Edit -> {
                         val context = buildEditPostContext() ?: error("canSubmit lied about edit context")
@@ -857,6 +864,51 @@ class PostEditorViewModel @AssistedInject constructor(
                 onFailure = ::handleSubmitFailure,
             )
         }
+    }
+
+    /**
+     * #604 lot 3 (mockup P3) — the Reply POST, quotes-aware. Without cards the cached plain form
+     * is submitted as before. With cards the [quotemsg] blocks are materialised FRESH here (never
+     * the cached plain form : the quote form carries the prefills AND the hash the submit rides),
+     * card order = citation order, the typed body follows the quotes ; a quotes-only reply keeps
+     * no trailing blank lines (same pinned BBCode as the quick-reply sheet). A failure anywhere
+     * leaves body AND cards untouched — the state only mutates on success. One divergence from
+     * the sheet : [options] comes from the editor's user-editable toggles, not the form defaults.
+     */
+    private suspend fun submitReply(
+        context: ReplyContext,
+        form: ReplyForm,
+        snapshot: PostEditorState,
+        options: ReplyFormOptions,
+    ): ReplySubmitResult {
+        val quotes = snapshot.quotes
+        if (quotes.isEmpty()) {
+            return replyRepository.submitReply(
+                context = context,
+                form = form,
+                bbcodeContent = snapshot.draft.text,
+                options = options,
+            )
+        }
+        val quoteContext = context.copy(
+            quotedNumreponse = quotes.first().numreponse,
+            quoteRef = null,
+        )
+        val quoteForm = quoteMaterializer.fetchFormWithQuotes(
+            context = quoteContext,
+            extraQuoteNumreponses = quotes.drop(1).map { it.numreponse },
+        )
+        val body = snapshot.draft.text
+        return replyRepository.submitReply(
+            context = quoteContext,
+            form = quoteForm,
+            bbcodeContent = if (body.isBlank()) {
+                quoteForm.initialContent.trimEnd()
+            } else {
+                quoteForm.initialContent.trimEnd() + "\n\n" + body
+            },
+            options = options,
+        )
     }
 
     private suspend fun handleSubmitOutcome(
@@ -950,17 +1002,13 @@ class PostEditorViewModel @AssistedInject constructor(
         // #213 — mirror the `ReplyContext.init` rule : reject only the SUBCAT_UNKNOWN
         // sentinel (-1). `subcat = 0` is postable (cat without sub-category, e.g. IA).
         if (subcat < 0) return null
+        // #604 lot 3 — always the PLAIN context : citations are cards, and [submitReply]
+        // derives the quote context (first card's numreponse) when materialising.
         return ReplyContext(
             cat = snapshot.cat,
             subcat = subcat,
             topicId = topicId,
             page = page,
-            // Phase 2C (#146) : both fields are null for a simple reply ; both
-            // non-null for a quote launched from `TopicScreen.onQuote`. The model
-            // tolerates a quote with a null `quoteRef` for forward compat (HFR
-            // could drop `ref` someday), but we keep them aligned in practice.
-            quotedNumreponse = snapshot.quotedNumreponse,
-            quoteRef = snapshot.quoteRef,
         )
     }
 

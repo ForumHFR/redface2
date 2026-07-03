@@ -12,7 +12,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SheetValue
@@ -31,12 +30,13 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
+import fr.forumhfr.redface2.core.ui.editor.QuoteCard
+import fr.forumhfr.redface2.core.ui.editor.QuoteCardControls
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 
 /**
@@ -51,7 +51,10 @@ import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 internal fun QuickReplySheet(
     request: QuickReplyRequest,
     onDismiss: () -> Unit,
-    onEscalate: (quoteNumreponses: List<Int>) -> Unit,
+    // #604 lot 3 — the escalation hands the armed cards over as full previews : the editor
+    // renders the same cards (mockup P3) and needs author + excerpt, which only the topic
+    // surface can snapshot. Riding the callback (→ the :app handoff), never the route.
+    onEscalate: (quotes: List<QuotedPostPreview>) -> Unit,
     onSubmitted: (targetPage: Int?, scrollTo: Int?) -> Unit,
     // #604 lot 2 — « Citer » opens the sheet with this card pre-armed (1-citation session).
     initialQuote: QuotedPostPreview? = null,
@@ -67,7 +70,7 @@ internal fun QuickReplySheet(
         viewModel.effects.collect { effect ->
             when (effect) {
                 is QuickReplyEffect.SubmitSucceeded -> onSubmitted(effect.targetPage, effect.scrollTo)
-                is QuickReplyEffect.EscalateToFullEditor -> onEscalate(effect.quoteNumreponses)
+                is QuickReplyEffect.EscalateToFullEditor -> onEscalate(effect.quotes)
             }
         }
     }
@@ -198,83 +201,5 @@ internal fun QuickReplySubmitError.messageRes(): Int = when (this) {
     }
 }
 
-/**
- * #604 lot 2 — one quote card: « ❝ author — excerpt » on a single line, with reorder and remove
- * affordances. Reordering is up/down buttons by design (cadrage : a11y first, drag deferred) ;
- * first/last are disabled instead of hidden so TalkBack users hear a stable layout.
- */
-/** Reorder/remove affordances of one card, bundled for detekt's parameter budget. */
-private data class QuoteCardControls(
-    val canMoveUp: Boolean,
-    val canMoveDown: Boolean,
-    val enabled: Boolean,
-    val onMoveUp: () -> Unit,
-    val onMoveDown: () -> Unit,
-    val onRemove: () -> Unit,
-)
-
-@Composable
-private fun QuoteCard(
-    quote: QuotedPostPreview,
-    controls: QuoteCardControls,
-) {
-    val moveUpLabel = stringResource(R.string.quick_reply_quote_move_up, quote.author)
-    val moveDownLabel = stringResource(R.string.quick_reply_quote_move_down, quote.author)
-    val removeLabel = stringResource(R.string.quick_reply_quote_remove, quote.author)
-    Surface(
-        shape = MaterialTheme.shapes.small,
-        color = MaterialTheme.colorScheme.surfaceContainerHighest,
-        tonalElevation = 1.dp,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = stringResource(
-                    R.string.quick_reply_quote_line,
-                    quote.author,
-                    quote.excerpt.ifBlank { stringResource(R.string.quick_reply_quote_no_text) },
-                ),
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(start = 12.dp),
-            )
-            QuoteCardAction(
-                enabled = controls.enabled && controls.canMoveUp,
-                label = moveUpLabel,
-                glyph = "↑",
-                onClick = controls.onMoveUp,
-            )
-            QuoteCardAction(
-                enabled = controls.enabled && controls.canMoveDown,
-                label = moveDownLabel,
-                glyph = "↓",
-                onClick = controls.onMoveDown,
-            )
-            QuoteCardAction(
-                enabled = controls.enabled,
-                label = removeLabel,
-                glyph = "✕",
-                onClick = controls.onRemove,
-            )
-        }
-    }
-}
-
-@Composable
-private fun QuoteCardAction(
-    enabled: Boolean,
-    label: String,
-    glyph: String,
-    onClick: () -> Unit,
-) {
-    IconButton(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = Modifier.semantics { contentDescription = label },
-    ) {
-        Text(text = glyph, style = MaterialTheme.typography.titleMedium)
-    }
-}
+// #604 lot 3 — QuoteCard / QuoteCardControls promoted to `:core:ui` (core.ui.editor.QuoteCards):
+// the full-screen editor renders the same cards (mockup P3), one rendering for both surfaces.

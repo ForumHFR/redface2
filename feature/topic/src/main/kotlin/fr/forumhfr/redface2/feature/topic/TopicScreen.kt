@@ -128,12 +128,13 @@ fun TopicScreen(
     /**
      * Open the FULL-SCREEN reply editor for this topic — since #604 lot 1 this is the quick-reply
      * sheet's ESCALATION only (the reply FAB opens the sheet). The lambda receives the topic's
-     * sub-category id, the current page, and the armed quote cards' numreponses in citation order
-     * (lot 2 — empty for a plain escalation) ; cat and topicId are derived from [request]. `:app`
-     * rides the quotes on the editor route (`quotedNumreponse`/`extraQuoteNumreponses`) with
-     * `resumeSharedDraft = true` (#790) so the editor auto-applies the sheet's #405 row.
+     * sub-category id, the current page, and the armed quote cards as FULL previews in citation
+     * order (lot 3 — empty for a plain escalation) ; cat and topicId are derived from [request].
+     * `:app` hands the previews to the editor through the in-memory handoff (never the route) with
+     * `resumeSharedDraft = true` (#790) so the editor auto-applies the sheet's #405 row and
+     * renders the same cards (mockup P3).
      */
-    onReply: (subcat: Int, page: Int, quoteNumreponses: List<Int>) -> Unit,
+    onReply: (subcat: Int, page: Int, quotes: List<QuotedPostPreview>) -> Unit,
     /**
      * Vague 4 (#604) lot 1 — HFR accepted a reply POSTed from the quick-reply sheet. `:app` must
      * refresh this topic route exactly like the full editor's onSubmitSucceeded (replace the route
@@ -676,7 +677,7 @@ internal fun TopicContent(
     listState: LazyListState,
     onIntent: (TopicIntent) -> Unit,
     onBack: () -> Unit,
-    onReply: (subcat: Int, page: Int, quoteNumreponses: List<Int>) -> Unit,
+    onReply: (subcat: Int, page: Int, quotes: List<QuotedPostPreview>) -> Unit,
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
@@ -866,9 +867,9 @@ internal fun TopicContent(
             request = launch.request,
             initialQuote = launch.initialQuote,
             onDismiss = { quickReplyFor = null },
-            onEscalate = { quoteNumreponses ->
+            onEscalate = { quotes ->
                 quickReplyFor = null
-                onReply(launch.request.subcat, launch.request.page, quoteNumreponses)
+                onReply(launch.request.subcat, launch.request.page, quotes)
             },
             onSubmitted = { targetPage, scrollTo ->
                 quickReplyFor = null
