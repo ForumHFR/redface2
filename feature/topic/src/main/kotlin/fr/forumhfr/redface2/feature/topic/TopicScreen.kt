@@ -19,8 +19,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.systemGestures
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -71,6 +73,8 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -1181,6 +1185,12 @@ private fun TopicLoadedContent(
     // the gesture (whose pointerInput does not re-key on this) always sees the current state.
     val entryLifecycle = LocalLifecycleOwner.current.lifecycle
     val swipeEnabled: () -> Boolean = { entryLifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) }
+    // #752 — system-gesture band widths for the swipe's start dead-zone, resolved here (composable)
+    // and handed as ALWAYS-FRESH lambdas (rememberUpdatedState) so the currentPage-keyed
+    // pointerInput sees rotation/split-screen changes ; px conversion happens per gesture.
+    val gestureDensity = rememberUpdatedState(LocalDensity.current)
+    val gestureLayoutDirection = rememberUpdatedState(LocalLayoutDirection.current)
+    val systemGestureInsets = rememberUpdatedState(WindowInsets.systemGestures)
     // #282 (P2-b) — if the loaded page re-keys while we stay Loaded (a force-refresh or page jump that
     // lands the same screen on a new page), drop any residual translation so the page is never left
     // frozen off-centre. Keyed on `topic.page` ONLY — never `topic.totalPages`: a page-count change
@@ -1235,6 +1245,14 @@ private fun TopicLoadedContent(
                     haptics = haptics,
                     onOpenPage = onOpenPage,
                     enabled = swipeEnabled,
+                    leftGestureInsetPx = {
+                        systemGestureInsets.value
+                            .getLeft(gestureDensity.value, gestureLayoutDirection.value)
+                    },
+                    rightGestureInsetPx = {
+                        systemGestureInsets.value
+                            .getRight(gestureDensity.value, gestureLayoutDirection.value)
+                    },
                 ),
             )
             // #382 — double-tap anywhere on the list to refresh the page (RF1 parity). Child

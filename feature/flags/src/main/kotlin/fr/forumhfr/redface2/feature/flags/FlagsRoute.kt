@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.systemGestures
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.lazy.LazyColumn
@@ -81,6 +82,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
@@ -1274,6 +1276,15 @@ private fun AuthenticatedBody(
     // tab list itself can change (the DT tab is a Settings toggle).
     val haptics = LocalHapticFeedback.current
     val dragOffset = remember { mutableFloatStateOf(0f) }
+    // #752 — system-gesture band widths, resolved here (composable) and handed to the gesture as
+    // ALWAYS-FRESH lambdas: the insets object and density are read through rememberUpdatedState so
+    // the Unit-keyed pointerInput sees rotation/split-screen changes without re-keying, and the px
+    // conversion happens per gesture inside the provider.
+    val density = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
+    val systemGestureInsets = rememberUpdatedState(WindowInsets.systemGestures)
+    val updatedDensity = rememberUpdatedState(density)
+    val updatedLayoutDirection = rememberUpdatedState(layoutDirection)
     val updatedTabs = rememberUpdatedState(tabs)
     val updatedSelectedIndex = rememberUpdatedState(selectedIndex)
     val updatedActions = rememberUpdatedState(actions)
@@ -1289,6 +1300,12 @@ private fun AuthenticatedBody(
                 pendingSwipeForward = forward
                 updatedTabs.value.getOrNull(index)
                     ?.let { tab -> updatedActions.value.onSelectTab(tab) }
+            },
+            leftGestureInsetPx = {
+                systemGestureInsets.value.getLeft(updatedDensity.value, updatedLayoutDirection.value)
+            },
+            rightGestureInsetPx = {
+                systemGestureInsets.value.getRight(updatedDensity.value, updatedLayoutDirection.value)
             },
         )
     }

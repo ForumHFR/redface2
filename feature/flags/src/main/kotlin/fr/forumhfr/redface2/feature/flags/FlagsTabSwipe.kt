@@ -24,6 +24,7 @@ import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.unit.IntOffset
 import fr.forumhfr.redface2.core.ui.pager.FLING_VELOCITY_THRESHOLD
 import fr.forumhfr.redface2.core.ui.pager.MIN_COMMIT_DISTANCE
+import fr.forumhfr.redface2.core.ui.pager.inStartGestureDeadZone
 import fr.forumhfr.redface2.core.ui.pager.swipeArmed
 import fr.forumhfr.redface2.core.ui.pager.swipeCommitDirection
 import fr.forumhfr.redface2.core.ui.pager.swipeCommitDistancePx
@@ -87,6 +88,21 @@ internal fun Modifier.flagsTabSwipe(
                     swipeCommitDistancePx(size.width.toFloat(), MIN_COMMIT_DISTANCE.toPx())
                 val flingThresholdPx = FLING_VELOCITY_THRESHOLD.toPx()
                 val down = awaitFirstDown(requireUnconsumed = false)
+                // #752 — never START the tab swipe from the system gesture bands: a real edge swipe
+                // belongs to the system back gesture, and a near-miss just inside the band used to
+                // flip the tab by surprise (Stylken). The down is NOT consumed, so the list scroll
+                // proceeds normally. Placed BEFORE releaseJob/velocity so a banded touch neither
+                // interrupts a running spring-back nor arms anything. Insets read per gesture (not
+                // captured at pointerInput(Unit) start) — same staleness rule as size.width above.
+                if (inStartGestureDeadZone(
+                        x = down.position.x,
+                        widthPx = size.width,
+                        leftInsetPx = handlers.leftGestureInsetPx(),
+                        rightInsetPx = handlers.rightGestureInsetPx(),
+                    )
+                ) {
+                    return@awaitEachGesture
+                }
                 val velocityTracker = VelocityTracker()
                 velocityTracker.addPosition(down.uptimeMillis, down.position)
                 var overSlop = 0f
@@ -159,6 +175,10 @@ internal fun Modifier.flagsTabSwipe(
 internal class FlagsTabSwipeHandlers(
     val haptics: HapticFeedback,
     val onSelectTab: (index: Int, forward: Boolean) -> Unit,
+    // #752 — system-gesture band widths in px, read once per gesture at `down` (lambdas, not
+    // captured px: the pointerInput is keyed on Unit and must survive rotation/split-screen).
+    val leftGestureInsetPx: () -> Int,
+    val rightGestureInsetPx: () -> Int,
 )
 
 /**

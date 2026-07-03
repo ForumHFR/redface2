@@ -32,6 +32,17 @@ import kotlin.math.tanh
  * The page source is the *rendered* page (what the user is looking at), which matches the value the
  * Previous/Next buttons pass to the page-change callback.
  */
+/**
+ * #752 — start (edge-gesture) dead zone: `true` when a gesture's DOWN lands inside the system's
+ * left/right gesture bands ([leftInsetPx] / [rightInsetPx], from `WindowInsets.systemGestures`).
+ * A custom horizontal swipe must not START there: on a real edge the system back gesture wins
+ * anyway, and a finger-width miss just inside the band used to fire a surprise tab/page change
+ * (beta feedback by Stylken). Distinct from the existing « swipe dead-zone » wording, which
+ * denotes the nav-transition collapse (cf. `topicPageSwipe`). Pure → unit-tested without Compose.
+ */
+fun inStartGestureDeadZone(x: Float, widthPx: Int, leftInsetPx: Int, rightInsetPx: Int): Boolean =
+    x < leftInsetPx || x > widthPx - rightInsetPx
+
 fun swipeTargetPage(currentPage: Int, totalPages: Int, forward: Boolean): Int? =
     if (forward) {
         (currentPage + 1).takeIf { it <= totalPages }
