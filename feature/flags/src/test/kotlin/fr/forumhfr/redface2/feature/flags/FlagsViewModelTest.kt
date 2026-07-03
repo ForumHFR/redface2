@@ -355,6 +355,31 @@ class FlagsViewModelTest {
     }
 
     @Test
+    fun `rapid double re-tap on Favorite flips twice via the optimistic value`() = runTest {
+        // #751 gate (Codex) — same-type equivalent of the Cyan shim test below: two rapid re-taps
+        // on Favorite before either write persists must net back to the start (false → true →
+        // false), proving the second tap read the optimistic map value, not the lagging store.
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository()
+        val vm = viewModel(auth, flags, forum, prefs)
+
+        vm.selectTab(FlagTab.Favorite) // real transition
+        prefs.blockUnreadOnlySetUntil = kotlinx.coroutines.CompletableDeferred()
+
+        vm.selectTab(FlagTab.Favorite) // re-tap: false → write(true) gated, pending = true
+        vm.selectTab(FlagTab.Favorite) // re-tap: reads optimistic true → write(false) gated
+        prefs.blockUnreadOnlySetUntil!!.complete(Unit) // release both gated writes (FIFO)
+
+        assertEquals(
+            "two rapid re-taps must net back to the start, not lose the second flip",
+            false,
+            vm.flagsViewSettings.value.unreadOnly,
+        )
+    }
+
+    @Test
     fun `rapid double re-tap on Cyan flips twice via the optimistic value`() = runTest {
         // #317 review (cf. #309 shim): a re-tap reads the RESOLVED settings (an async DataStore
         // flow). Without the optimistic [pendingCyanUnreadOnly], a second rapid re-tap before the first

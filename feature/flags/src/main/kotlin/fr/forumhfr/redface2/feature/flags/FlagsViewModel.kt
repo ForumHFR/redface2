@@ -407,10 +407,11 @@ class FlagsViewModel @Inject constructor(
 
     /**
      * #751 — same « shows read » state for the Red and Favori tabs (they default to showing read
-     * topics, so the indicator is honest from the first frame). Mirrors [cyanShowsReadShortcut];
-     * initialValue `true` matches the type-aware default (unreadOnly=false ⇒ read topics shown)
-     * pinned to the not-yet-selected state being irrelevant (the topbar only reads the selected
-     * tab's value through [flagsReadFilterShowsRead]).
+     * topics, so the indicator is honest as soon as the combine emits). Mirrors
+     * [cyanShowsReadShortcut]; initialValue `false` is the resting « not selected » state — both
+     * sources are eager StateFlows, so the real `tab && !unreadOnly` value lands on the first
+     * collection and the topbar only reads the SELECTED tab's value through
+     * [flagsReadFilterShowsRead] anyway.
      */
     val redShowsReadShortcut: StateFlow<Boolean> = combine(
         selectedTab,
