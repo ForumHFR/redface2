@@ -1,5 +1,4 @@
-Redface 2 v0.20.0 — dev.
+Redface 2 v0.20.1 — dev.
 
-- Vue Topic redessinée (vague 3) : en-tête dissous, pilule « page X / Y » cliquable (sélecteur de page), boutons flottants figés.
-- Fin de page lisible : carte « Page N terminée » cliquable ; « Fin du sujet » calme.
-- Repère « Dernier message lu » traversant à l'ouverture d'un drapeau.
+- Drapeaux : le raccourci « +lus » de la pilule fonctionne sur tous les onglets (Lu et Favoris compris).
+- Drapeaux : le texte de l'état vide pointe la bonne action pour revoir les sujets lus.

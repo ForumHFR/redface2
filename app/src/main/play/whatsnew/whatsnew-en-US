@@ -1,5 +1,4 @@
-Redface 2 v0.20.0 — dev.
+Redface 2 v0.20.1 — dev.
 
-- Redesigned Topic view (wave 3): dissolved header, tappable "page X / Y" pill (page picker), fixed floating buttons.
-- Readable page boundaries: tappable "Page N done" card; calm "End of topic".
-- Traversing "Last read message" marker when opening from a flag.
+- Flags: the "+read" pill shortcut now works on every tab (Read and Favorites included).
+- Flags: the empty-state text now points at the right action to see read topics again.
