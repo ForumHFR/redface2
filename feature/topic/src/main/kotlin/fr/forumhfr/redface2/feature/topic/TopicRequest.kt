@@ -19,6 +19,11 @@ data class TopicRequest(
      * instantly but **always** refreshes afterwards, bypassing the 60s snappy-cache TTL
      * that would otherwise serve a followed topic stale. Ordinary in-app navigation
      * leaves it `false` to keep back-nav snappy.
+     *
+     * ⚠️ #600 (vague 3) piggybacks on this flag as the « last read » discriminator
+     * (`shouldShowLastReadMarker`): the flag tap is its ONLY producer today, and the only
+     * navigation whose [scrollTo] means « last read post ». Adding another producer of
+     * `forceRefresh=true` requires giving the marker its own dedicated field first.
      */
     val forceRefresh: Boolean = false,
     /**

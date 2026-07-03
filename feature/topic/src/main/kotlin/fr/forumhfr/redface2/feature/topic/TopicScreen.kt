@@ -1320,7 +1320,7 @@ private fun TopicLoadedContent(
             // navigation whose scrollTo semantically IS « last read ». A quote jump / deep link
             // (forceRefresh=false) keeps the #104 band tint alone; the amber arrival flash (#200)
             // is a third, independent layer.
-            val showLastReadMarker = state.request.forceRefresh && highlight == post.numreponse
+            val showLastReadMarker = shouldShowLastReadMarker(state.request, post.numreponse)
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (post.numreponse in hiddenNumreponses && post.numreponse !in revealedHiddenPosts) {
                     HiddenPostCard(
@@ -2607,6 +2607,15 @@ internal fun shouldShowEditAction(topic: Topic, post: Post, isAuthenticated: Boo
 // #292 — « Supprimer » shares the « Modifier » gate: HFR exposes deletion through the same edit
 // form, so any post the user can edit, they can delete. The first-post exclusion (deleting it would
 // remove the whole topic) is applied at the call site by position, not here.
+// #600 (vague 3) — « Dernier message lu » separator gate. `forceRefresh` is #231's flag-tap
+// marker: the ONE navigation whose scrollTo is semantically « last read » (the flag handler only
+// sets scrollTo when resuming at the last-read page). Every route-replace (pagination #282,
+// citation jump #699, overflow landing #226) rebuilds the route WITHOUT forceRefresh, so the
+// marker never survives a navigation away from the landing. If forceRefresh ever grows another
+// producer, this gate needs its own dedicated route field — cf. TopicActionGatesTest.
+internal fun shouldShowLastReadMarker(request: TopicRequest, numreponse: Int): Boolean =
+    request.forceRefresh && request.scrollTo == numreponse
+
 internal fun shouldShowDeleteAction(topic: Topic, post: Post, isAuthenticated: Boolean): Boolean =
     post.isEditable && topic.canReply && isAuthenticated
 

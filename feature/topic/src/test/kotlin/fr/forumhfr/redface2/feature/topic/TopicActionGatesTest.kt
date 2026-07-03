@@ -11,6 +11,34 @@ import org.junit.Test
 class TopicActionGatesTest {
 
     @Test
+    fun `last-read marker requires the flag-tap route AND the matching post`() {
+        fun request(scrollTo: Int?, forceRefresh: Boolean) = TopicRequest(
+            cat = 23,
+            post = 35421,
+            page = 61,
+            scrollTo = scrollTo,
+            forceRefresh = forceRefresh,
+        )
+
+        assertTrue(
+            "#600 — flag tap resuming at the last-read post shows the marker there",
+            shouldShowLastReadMarker(request(scrollTo = 42, forceRefresh = true), numreponse = 42),
+        )
+        assertFalse(
+            "the marker belongs to the last-read post only, not its neighbours",
+            shouldShowLastReadMarker(request(scrollTo = 42, forceRefresh = true), numreponse = 43),
+        )
+        assertFalse(
+            "#699 — a citation jump carries scrollTo WITHOUT forceRefresh: no marker",
+            shouldShowLastReadMarker(request(scrollTo = 42, forceRefresh = false), numreponse = 42),
+        )
+        assertFalse(
+            "a flag opened on « 1er non-lu »/« dernière page » drops scrollTo: no marker",
+            shouldShowLastReadMarker(request(scrollTo = null, forceRefresh = true), numreponse = 42),
+        )
+    }
+
+    @Test
     fun `quote action requires a postable topic AND an authenticated session`() {
         val postWithNoParsedQuoteLink = post(quoteRef = null)
         val postable = topic(canReply = true, posts = listOf(postWithNoParsedQuoteLink))
