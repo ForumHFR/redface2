@@ -2443,15 +2443,18 @@ private fun RedfaceNavHost(
                             )
                         }
                     },
-                    // #291 — selection of THIS topic's basket (another topic's selection must
-                    // never leak into the menu checkmarks or the « Citer N » FAB).
-                    multiQuoteSelection = multiQuoteNavState.basket
+                    // #291 / #604 lot 3 — selection of THIS topic's basket as full previews
+                    // (another topic's selection must never leak into the menu checkmarks or
+                    // the « Citer N » FAB) ; under the full-screen threshold the screen pre-arms
+                    // the sheet's cards from them and consumes the basket via onClearMultiQuote.
+                    multiQuoteSelections = multiQuoteNavState.basket
                         ?.takeIf { it.matches(route.cat, route.post) }
-                        ?.numreponses
+                        ?.selections
                         .orEmpty(),
                     onToggleMultiQuote = { preview ->
                         multiQuoteNavState.onToggle(route.cat, route.post, preview)
                     },
+                    onClearMultiQuote = multiQuoteNavState.onClear,
                     // #465 — the topic's saved manual poll choice (null = follow the global
                     // default), and the callback recording a tap on the poll card. Hoisted to
                     // :app so it survives the per-page TopicRoute swap, keyed by (cat, post).
