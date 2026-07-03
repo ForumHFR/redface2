@@ -16,6 +16,16 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.20.0` — `internal` (dev) — 2026-07-03
+
+**Phase « Vue Topic » (#604) — vague 3 : redesign de la lecture** (PRs #770, #771, #773, #774 — cadrage + gates Codex gpt-5.5, dogfoods émulateur par lot).
+
+### Vue Topic
+- #599 : **slots FAB figés** — ‹ › ✎ ❝N occupent des emplacements réservés (40 dp) dès le squelette ; plus aucun décalage quand une action apparaît/disparaît (retour antiseptiqueIncolore). Le slot multi-citation vit à l'extrême gauche du cluster.
+- **Header dissous** (mockup « Lecture A ») : la carte d'en-tête du sujet disparaît — le titre et « page X / Y » vivent dans la top bar ; la **pilule « page X / Y » devient cliquable** et ouvre un sélecteur de page en feuille (préc./suiv., saisie, grille) ; « Modifier le premier message » migre dans le menu « … » du premier post (gates #148/#213 inchangées) ; le sondage devient une carte autonome en tête de liste (invariants d'index préservés). L'indicateur scrollTo disparaît (la surbrillance d'arrivée suffit).
+- **Frontières de page lisibles** (retours thibw & styx42) : en fin de page intermédiaire, carte primaire « Page N terminée » + « Continuer vers la page N+1 » (tap = même navigation que le FAB ›, arrivée en haut) ; en fin de sujet, carte outline calme « Fin du sujet » — les deux états ne se confondent plus.
+- #600 : **repère « Dernier message lu » traversant** (retour Colonel MythO) — règle primaire + pilule centrée sous le dernier message lu, à l'ouverture depuis un drapeau uniquement (gate sémantique testée) ; couche distincte de la surbrillance d'arrivée (#200) et de la teinte d'ancre (#104).
+
 ## `0.19.2` — `internal` (dev) — 2026-07-03
 
 **Phase « Vue Topic » (#604) — fin de la vague 2 : #459 complet** (PR #768, gate Codex gpt-5.5).
