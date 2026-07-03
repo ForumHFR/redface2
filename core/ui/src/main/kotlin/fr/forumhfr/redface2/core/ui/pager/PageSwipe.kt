@@ -39,9 +39,16 @@ import kotlin.math.tanh
  * anyway, and a finger-width miss just inside the band used to fire a surprise tab/page change
  * (beta feedback by Stylken). Distinct from the existing « swipe dead-zone » wording, which
  * denotes the nav-transition collapse (cf. `topicPageSwipe`). Pure → unit-tested without Compose.
+ *
+ * Edges are clamped to `0..widthPx` (and right ≥ left) so aberrant insets — split-screen or
+ * foldable postures reporting bands wider than the window — degrade to a full dead zone at worst
+ * instead of an inverted predicate.
  */
-fun inStartGestureDeadZone(x: Float, widthPx: Int, leftInsetPx: Int, rightInsetPx: Int): Boolean =
-    x < leftInsetPx || x > widthPx - rightInsetPx
+fun inStartGestureDeadZone(x: Float, widthPx: Int, leftInsetPx: Int, rightInsetPx: Int): Boolean {
+    val leftEdge = leftInsetPx.coerceIn(0, widthPx)
+    val rightEdge = (widthPx - rightInsetPx).coerceIn(leftEdge, widthPx)
+    return x < leftEdge || x > rightEdge
+}
 
 fun swipeTargetPage(currentPage: Int, totalPages: Int, forward: Boolean): Int? =
     if (forward) {

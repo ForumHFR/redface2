@@ -271,6 +271,15 @@ class PageSwipeTest {
         assertFalse(inStartGestureDeadZone(x = 1080f, widthPx = 1080, leftInsetPx = 0, rightInsetPx = 0))
     }
 
+    @Test
+    fun `aberrant insets clamp to the window instead of inverting the predicate`() {
+        // Negative insets (bogus provider) behave like zero insets.
+        assertFalse(inStartGestureDeadZone(x = 0f, widthPx = 1080, leftInsetPx = -50, rightInsetPx = -50))
+        // A band wider than the window degrades to a full dead zone, never a partial inversion.
+        assertTrue(inStartGestureDeadZone(x = 540f, widthPx = 1080, leftInsetPx = 0, rightInsetPx = 2000))
+        assertTrue(inStartGestureDeadZone(x = 540f, widthPx = 1080, leftInsetPx = 2000, rightInsetPx = 0))
+    }
+
     private companion object {
         const val TOLERANCE = 0.001f
     }
