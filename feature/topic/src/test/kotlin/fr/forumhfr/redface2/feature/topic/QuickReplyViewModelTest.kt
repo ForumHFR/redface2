@@ -44,12 +44,32 @@ class QuickReplyViewModelTest {
     }
 
     @Test
-    fun `a cached draft is auto-applied into the field on open`() = runTest {
+    fun `opening the sheet seeds the field from the draft row`() = runTest {
         val store = FakeQuickReplyDraftStore(initialBody = "brouillon en cours")
-
         val viewModel = quickReplyViewModel(draftStore = store)
 
+        viewModel.onSheetOpened()
+        advanceUntilIdle()
+
         assertEquals("brouillon en cours", viewModel.state.value.text.text)
+    }
+
+    @Test
+    fun `reopening the sheet re-seeds the field after the row changed elsewhere`() = runTest {
+        // Gate #788 — the VM outlives the sheet: escalate → the full-screen editor rewrites the
+        // shared #405 row → back → reopen. The row must win over the VM's cached text.
+        val store = FakeQuickReplyDraftStore()
+        val viewModel = quickReplyViewModel(draftStore = store)
+        viewModel.onSheetOpened()
+        viewModel.onTextChanged(TextFieldValue("version sheet"))
+        viewModel.onEscalateRequested()
+        advanceUntilIdle()
+
+        store.storedBody = "version plein écran"
+        viewModel.onSheetOpened()
+        advanceUntilIdle()
+
+        assertEquals("version plein écran", viewModel.state.value.text.text)
     }
 
     @Test

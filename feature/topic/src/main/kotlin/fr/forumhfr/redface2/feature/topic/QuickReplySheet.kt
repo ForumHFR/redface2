@@ -14,12 +14,15 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -53,6 +56,9 @@ internal fun QuickReplySheet(
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
     LaunchedEffect(viewModel) {
+        // Re-seed the field from the #405 row at EACH opening — the VM outlives the sheet and
+        // its cached text can be stale after a full-screen edit of the same draft (gate #788).
+        viewModel.onSheetOpened()
         viewModel.effects.collect { effect ->
             when (effect) {
                 is QuickReplyEffect.SubmitSucceeded -> onSubmitted(effect.targetPage, effect.scrollTo)
@@ -62,10 +68,21 @@ internal fun QuickReplySheet(
     }
     val fullScreenLabel = stringResource(R.string.quick_reply_fullscreen)
     val focusRequester = remember { FocusRequester() }
+    // Gate #788 — the sheet must not dismiss while a POST is in flight: the effect collector
+    // lives here, so tearing the sheet down mid-submit would drop SubmitSucceeded (no topic
+    // refresh) or replay it at the next opening. `submitting` is read through
+    // rememberUpdatedState because both guards below are remembered once.
+    val submitting = rememberUpdatedState(state.isSubmitting)
+    val sheetState = rememberModalBottomSheetState(
+        confirmValueChange = { target -> target != SheetValue.Hidden || !submitting.value },
+    )
     ModalBottomSheet(
+        sheetState = sheetState,
         onDismissRequest = {
-            viewModel.onDismissed()
-            onDismiss()
+            if (!submitting.value) {
+                viewModel.onDismissed()
+                onDismiss()
+            }
         },
     ) {
         Column(
@@ -85,6 +102,8 @@ internal fun QuickReplySheet(
                 )
                 IconButton(
                     onClick = viewModel::onEscalateRequested,
+                    // Gate #788 — no escalation while a POST is in flight (submit vs navigation race).
+                    enabled = !state.isSubmitting,
                     modifier = Modifier.semantics { contentDescription = fullScreenLabel },
                 ) {
                     RedfaceVectorIcon(

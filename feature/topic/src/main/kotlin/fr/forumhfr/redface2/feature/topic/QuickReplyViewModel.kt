@@ -118,21 +118,33 @@ class QuickReplyViewModel @AssistedInject constructor(
     /** #312 — mirror of the persisted « Confirmation avant publication » preference. */
     private var confirmBeforePosting: Boolean = false
 
+    /** Owner snapshot + form warm-up ; joined by every draft read/write so they never race it. */
+    private val initJob: Job = viewModelScope.launch {
+        draftOwner = draftStore.currentOwner()
+        prefetchForm()
+    }
+
     init {
         viewModelScope.launch {
             userPreferencesRepository.observeConfirmBeforePosting().collect { enabled ->
                 confirmBeforePosting = enabled
             }
         }
+    }
+
+    /**
+     * Called at EACH sheet opening (not just the first): the VM outlives the sheet, so its
+     * in-memory text can go stale whenever another surface touched the shared #405 row —
+     * typically escalate → edit in the full-screen editor → back → reopen. The row is the
+     * source of truth ; the field is unconditionally re-seeded from it (gate Codex PR #788).
+     */
+    fun onSheetOpened() {
         viewModelScope.launch {
-            draftOwner = draftStore.currentOwner()
-            val body = draftStore.load(draftOwner, draftKey)?.body
-            if (!body.isNullOrBlank() && _state.value.text.text.isBlank()) {
-                _state.update {
-                    it.copy(text = TextFieldValue(text = body, selection = TextRange(body.length)))
-                }
+            initJob.join()
+            val body = draftStore.load(draftOwner, draftKey)?.body.orEmpty()
+            _state.update {
+                it.copy(text = TextFieldValue(text = body, selection = TextRange(body.length)))
             }
-            prefetchForm()
         }
     }
 
@@ -191,6 +203,7 @@ class QuickReplyViewModel @AssistedInject constructor(
     }
 
     private suspend fun saveDraftNow() {
+        initJob.join()
         val body = _state.value.text.text
         if (body.isBlank()) {
             draftStore.delete(draftOwner, draftKey)
