@@ -1,4 +1,5 @@
-Redface 2 v0.19.2 — dev.
+Redface 2 v0.20.0 — dev.
 
-- Image upload in both private-message composers (reply and new message): multi-select, one image per line.
-- Completes Topic view wave 2 (0.19.1): tappable quotes, fixed email links, editor auto-focus.
+- Redesigned Topic view (wave 3): dissolved header, tappable "page X / Y" pill (page picker), fixed floating buttons.
+- Readable page boundaries: tappable "Page N done" card; calm "End of topic".
+- Traversing "Last read message" marker when opening from a flag.
