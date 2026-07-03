@@ -1,3 +1,4 @@
-Redface 2 v0.21.0 — dev.
+Redface 2 v0.22.0 — dev.
 
-- Sujet : réponse rapide en feuille — le bouton répondre ouvre un champ léger (envoi direct ou bascule plein écran, brouillon partagé, rien ne se perd à la fermeture).
+- Réponse rapide : « Citer » y ajoute des cartes de citation (réordonnables, supprimables) ; l'envoi et la bascule plein écran respectent l'ordre.
+- Réponse rapide : la bascule plein écran reprend le texte automatiquement.
