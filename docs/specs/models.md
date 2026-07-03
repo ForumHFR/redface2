@@ -366,14 +366,23 @@ data class Poll(
     val multipleChoice: Boolean,
     val totalVotes: Int,
     val hasVoted: Boolean,
+    val resultsAvailable: Boolean = true, // #697 — false = forme « formulaire » (pas encore voté)
 )
 
 data class PollOption(
     val text: String,
-    val votes: Int,
-    val percentage: Float,
+    val votes: Int,      // 0 et sans signification quand resultsAvailable = false
+    val percentage: Float, // idem
 )
 ```
+
+HFR sert **deux formes** de sondage (#697) : la forme « résultats » (barres `.sondageLeft`, votes et
+pourcentages) uniquement après avoir voté ou cliqué « voir les résultats », et la forme
+« formulaire » (inputs radio/checkbox `name=reponse`) dans tous les autres cas — donc dans **toutes**
+les lectures anonymes, ce que l'app reçoit. `resultsAvailable = false` marque cette seconde forme :
+seuls `question`, `options[].text` et `multipleChoice` (déduit du type d'input : checkbox = multi)
+sont porteurs de sens. Le vote in-app est un chantier séparé (#779) ; `hasVoted` reste `false` en
+lecture seule.
 
 `EditInfo` est retourné par `HfrParser.parseEditPage(html)` (cf. [architecture.md]({{ site.baseurl }}/specs/architecture#core-parser--hfrparser)). Il capture l'état pré-rempli du formulaire d'édition HFR et ce qui doit être renvoyé côté `bdd.php` (cf. [protocol-hfr.md]({{ site.baseurl }}/specs/protocol-hfr#post-bddphp-edit)).
 

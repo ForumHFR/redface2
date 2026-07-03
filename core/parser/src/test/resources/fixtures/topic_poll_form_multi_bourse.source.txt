@@ -1,0 +1,4 @@
+Source: https://forum.hardware.fr/hfr/Discussions/Loisirs/pognon-semaine-francais-sujet_16022_1.htm
+Captured: 2026-07-03
+Auth: logged-out
+Sanitization: verified logged-out curl capture; no cookies, session identifiers or account-specific private data; empty hash_check inputs preserved. Poll FORM shape (#697): multiple-choice (5 checkbox inputs), proves the checkbox=multi detection.

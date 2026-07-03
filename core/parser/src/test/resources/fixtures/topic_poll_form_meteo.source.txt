@@ -1,0 +1,4 @@
+Source: https://forum.hardware.fr/hfr/Discussions/Viepratique/meteo-plaint-temps-sujet_44713_1.htm
+Captured: 2026-07-03
+Auth: logged-out
+Sanitization: verified logged-out curl capture; no cookies, session identifiers or account-specific private data; empty hash_check inputs preserved. Poll FORM shape (#697): single-choice (4 radio inputs name=reponse), question "Qui doit être TT cet été ?".

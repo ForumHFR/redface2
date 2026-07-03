@@ -80,6 +80,9 @@
         <item quantity="other">cité %1$d fois</item>
     </plurals>
     <string name="topic_poll_option">%1$s — %2$.1f%% (%3$d votes)</string>
+    <!-- #697 — forme « formulaire » (pas encore voté / lecture anonyme) : options sans résultats,
+         et remplacement du résumé total-votes par cette mention factuelle. -->
+    <string name="topic_poll_no_results">Résultats disponibles après vote • %1$s</string>
     <string name="topic_poll_summary">%1$d votes au total • %2$s</string>
     <string name="topic_poll_multiple_choices">multi-choix</string>
     <string name="topic_poll_single_choice">choix unique</string>

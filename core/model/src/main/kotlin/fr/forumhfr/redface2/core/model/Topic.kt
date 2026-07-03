@@ -60,10 +60,19 @@ data class Poll(
     val multipleChoice: Boolean,
     val totalVotes: Int,
     val hasVoted: Boolean,
+    /**
+     * #697 — `false` when HFR served the poll's FORM shape (radio/checkbox inputs, the shape every
+     * not-yet-voted — and thus every anonymous — fetch gets): options carry no votes/percentages
+     * (their numeric fields are 0 and meaningless), only the question and labels are known.
+     * `true` on the RESULTS shape (.sondageLeft bars), the only shape parsed before #697.
+     */
+    val resultsAvailable: Boolean = true,
 )
 
 data class PollOption(
     val text: String,
+    /** #697 — meaningless (0) when the owning [Poll.resultsAvailable] is `false`. */
     val votes: Int,
+    /** #697 — meaningless (0) when the owning [Poll.resultsAvailable] is `false`. */
     val percentage: Float,
 )
