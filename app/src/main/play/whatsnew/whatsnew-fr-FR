@@ -1,4 +1,5 @@
-Redface 2 v0.23.0 — dev.
+Redface 2 v0.24.0 — dev.
 
-- Éditeur plein écran : les citations deviennent des cartes compactes (réordonnables, supprimables, « Tout vider ») — plus de pavé BBCode dans le champ.
-- « Citer N » : 1-2 citations ouvrent la réponse rapide, 3+ l'éditeur plein écran.
+- Réponse rapide : le contenu défile (Envoyer toujours accessible clavier ouvert).
+- Éditeur : quitter enregistre le brouillon d'abord ; retour inerte pendant un envoi.
+- Cartes de citation : annonces TalkBack et focus rendu après un retrait.

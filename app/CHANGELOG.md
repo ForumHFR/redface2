@@ -16,6 +16,15 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.24.0` — `internal` (dev) — 2026-07-03
+
+**Phase « Vue Topic » (#604) — vague 4 « Postage », lot 4a polish** (PR #803 — cadrage + gate Codex NO-GO→fixes→GO, dogfood émulateur).
+
+### Vue Topic
+- **Réponse rapide** : le contenu de la feuille défile — plus de bouton « Envoyer » hors d'atteinte clavier ouvert sur petit écran ou en paysage.
+- **Éditeur plein écran** : quitter l'éditeur (retour système) enregistre d'abord le brouillon — les dernières frappes ne sont plus perdues si on sort dans la foulée ; le retour est inerte pendant un envoi en cours (impossible d'interrompre un POST en quittant).
+- **Accessibilité des cartes de citation** : TalkBack annonce le résultat des actions (« Citation de X retirée », « déplacée en position N ») et le focus est rendu à la carte voisine après un retrait.
+
 ## `0.23.0` — `internal` (dev) — 2026-07-03
 
 **Phase « Vue Topic » (#604) — vague 4 « Postage », lot 3** (PRs #800 #801 — cadrage Codex 8 forks, gates GO-avec-réserves/GO, dogfood émulateur).
