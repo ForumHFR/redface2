@@ -358,6 +358,14 @@ data class PostEditorRoute(
      * reply ; defaulted so older serialised back stacks deserialise.
      */
     val extraQuoteNumreponses: List<Int> = emptyList(),
+    /**
+     * #790 (#604 lot 2) — `true` when this editor is the ESCALATION of a quick-reply sheet: the
+     * shared #405 draft row was just written by the sheet, so the editor auto-applies it instead
+     * of surfacing the restore banner (the escalation continues the same composition act). The
+     * text itself never rides the route — only this flag does. Defaulted so older serialised
+     * back stacks deserialise.
+     */
+    val resumeSharedDraft: Boolean = false,
 ) : RedfaceNavKey
 
 @Serializable
@@ -2397,7 +2405,11 @@ private fun RedfaceNavHost(
                         topicScrollNavState.onAnchorSaved(route.cat, route.post, route.page, anchor)
                     },
                     onOpenProfile = onOpenProfile,
-                    onReply = { subcat, page ->
+                    // #604 lots 1-2 — onReply is the quick-reply sheet's ESCALATION : the sheet
+                    // just persisted the shared #405 row, so the editor auto-applies it (#790,
+                    // resumeSharedDraft) instead of surfacing the restore banner. The armed quote
+                    // cards ride the route in citation order, same shape as the multi-quote FAB.
+                    onReply = { subcat, page, quoteNumreponses ->
                         backStack.add(
                             PostEditorRoute(
                                 mode = PostEditorMode.Reply,
@@ -2405,6 +2417,10 @@ private fun RedfaceNavHost(
                                 topicId = route.post,
                                 page = page,
                                 subcat = subcat,
+                                quotedNumreponse = quoteNumreponses.firstOrNull(),
+                                quoteRef = null,
+                                extraQuoteNumreponses = quoteNumreponses.drop(1),
+                                resumeSharedDraft = true,
                             ),
                         )
                     },
@@ -2425,23 +2441,6 @@ private fun RedfaceNavHost(
                                 ),
                             )
                         }
-                    },
-                    onQuote = { subcat, page, quotedNumreponse, quoteRef ->
-                        // Phase 2C (#146) — same destination as reply ; only the
-                        // editor's request differs (quotedNumreponse pulls the HFR
-                        // quote prefill). Route is `PostEditorMode.Reply` because
-                        // quote is a flavour of reply, not a new editor mode.
-                        backStack.add(
-                            PostEditorRoute(
-                                mode = PostEditorMode.Reply,
-                                cat = route.cat,
-                                topicId = route.post,
-                                page = page,
-                                subcat = subcat,
-                                quotedNumreponse = quotedNumreponse,
-                                quoteRef = quoteRef,
-                            ),
-                        )
                     },
                     // #291 — selection of THIS topic's basket (another topic's selection must
                     // never leak into the menu checkmarks or the « Citer N » FAB).
@@ -2601,6 +2600,7 @@ private fun RedfaceNavHost(
                         quotedNumreponse = route.quotedNumreponse,
                         quoteRef = route.quoteRef,
                         extraQuoteNumreponses = route.extraQuoteNumreponses,
+                        resumeSharedDraft = route.resumeSharedDraft,
                     ),
                     onSubmitSucceeded = { targetPage, scrollTo ->
                         // Pop the editor and refresh the topic page. `targetPage` is parsed

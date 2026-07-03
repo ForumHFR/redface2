@@ -203,13 +203,33 @@ class PostEditorViewModel @AssistedInject constructor(
     /**
      * #405 — surface a cached draft for [draftKey] on the banner (never auto-apply : a quote prefill
      * or an edit body would otherwise be silently clobbered). Empty drafts are ignored.
+     *
+     * #790 exception — when the route carries `resumeSharedDraft` (escalation of a quick-reply
+     * sheet, which JUST wrote the row), the body is APPENDED to the field instead of banner'd :
+     * the escalation continues the same composition act. Append (not replace) keeps this
+     * commutative with the quote-prefill prepend in [withFormHydration], whichever lands first.
      */
     private fun restoreDraftIfAny() {
         val key = draftKey ?: return
         viewModelScope.launch {
             draftOwner = draftStore.currentOwner()
             val body = draftStore.load(draftOwner, key)?.body
-            if (!body.isNullOrBlank()) {
+            if (body.isNullOrBlank()) return@launch
+            if (request.resumeSharedDraft) {
+                _state.update { current ->
+                    // Conditional separator (gate #798): a late restore during typing must not
+                    // glue the resumed body to the user's last word.
+                    val combined = if (current.draft.text.isBlank()) {
+                        body
+                    } else {
+                        current.draft.text.trimEnd() + "\n\n" + body
+                    }
+                    current
+                        .withDraft(TextFieldValue(text = combined, selection = TextRange(combined.length)))
+                        .copy(draftHydratedFromForm = current.draft.text.isNotBlank())
+                }
+                scheduleAutosave()
+            } else {
                 _state.update { it.copy(restorableDraft = body) }
             }
         }
@@ -653,6 +673,37 @@ class PostEditorViewModel @AssistedInject constructor(
             form.initialContent.isNotBlank()
 
     /**
+     * #790 resume — the shared draft body reached the field first (classic hydration is
+     * blank-field-only): PREPEND the quote prefill instead, keeping the escalated text after
+     * the [quotemsg] blocks. Guarded by draftHydratedFromForm so the InvalidHashCheck silent
+     * refetch can never prepend twice.
+     */
+    private fun PostEditorState.shouldPrependPrefillFrom(form: ReplyForm, shouldHydrate: Boolean): Boolean =
+        request.resumeSharedDraft &&
+            !draftHydratedFromForm &&
+            !shouldHydrate &&
+            form.initialContent.isNotBlank() &&
+            draft.text.isNotBlank()
+
+    private fun PostEditorState.resolveHydratedDraft(
+        form: ReplyForm,
+        shouldHydrate: Boolean,
+        shouldPrependPrefill: Boolean,
+    ): TextFieldValue = when {
+        shouldHydrate -> TextFieldValue(
+            text = form.initialContent,
+            // Place caret at the end so the user can type their content
+            // right after the prefill — matches HFR's web behavior.
+            selection = TextRange(form.initialContent.length),
+        )
+        shouldPrependPrefill -> {
+            val combined = form.initialContent.trimEnd() + "\n\n" + draft.text
+            TextFieldValue(text = combined, selection = TextRange(combined.length))
+        }
+        else -> draft
+    }
+
+    /**
      * Pure state transformer : produces the next [PostEditorState] after a form
      * fetch lands. The preview AST is supplied by the caller (pre-computed off
      * the state-flow lambda to keep the heavier `parsePreview` call off the
@@ -678,16 +729,8 @@ class PostEditorViewModel @AssistedInject constructor(
         nextPreview: PostContent,
     ): PostEditorState {
         val shouldHydrate = shouldHydrateFrom(form)
-        val nextDraft = if (shouldHydrate) {
-            TextFieldValue(
-                text = form.initialContent,
-                // Place caret at the end so the user can type their content
-                // right after the prefill — matches HFR's web behavior.
-                selection = TextRange(form.initialContent.length),
-            )
-        } else {
-            draft
-        }
+        val shouldPrependPrefill = shouldPrependPrefillFrom(form, shouldHydrate)
+        val nextDraft = resolveHydratedDraft(form, shouldHydrate, shouldPrependPrefill)
         val hydrateOptions = !optionsHydratedFromForm
         return copy(
             isLoadingForm = false,
@@ -698,7 +741,7 @@ class PostEditorViewModel @AssistedInject constructor(
             // flips to false on `current` and we keep the user-driven
             // preview ; the parsed `nextPreview` is dropped.
             preview = if (shouldHydrate && isPreviewVisible) nextPreview else preview,
-            draftHydratedFromForm = draftHydratedFromForm || shouldHydrate,
+            draftHydratedFromForm = draftHydratedFromForm || shouldHydrate || shouldPrependPrefill,
             signatureEnabled = if (hydrateOptions) form.options.signatureEnabled else signatureEnabled,
             smileyDisabled = if (hydrateOptions) form.options.smileyDisabled else smileyDisabled,
             emailNotificationEnabled = if (hydrateOptions) {

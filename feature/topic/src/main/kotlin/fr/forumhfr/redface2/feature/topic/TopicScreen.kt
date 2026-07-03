@@ -126,13 +126,14 @@ import kotlinx.coroutines.flow.first
 fun TopicScreen(
     request: TopicRequest,
     /**
-     * Open the reply editor for this topic. The lambda receives the topic's
-     * sub-category id (parsed from the loaded page) and the current page number ;
-     * cat and topicId are derived from [request]. Phase 2C-A only invokes this
-     * callback when the topic carries a valid `subcat` (otherwise the reply button
-     * stays disabled to avoid passing a sentinel value to the HFR write contract).
+     * Open the FULL-SCREEN reply editor for this topic — since #604 lot 1 this is the quick-reply
+     * sheet's ESCALATION only (the reply FAB opens the sheet). The lambda receives the topic's
+     * sub-category id, the current page, and the armed quote cards' numreponses in citation order
+     * (lot 2 — empty for a plain escalation) ; cat and topicId are derived from [request]. `:app`
+     * rides the quotes on the editor route (`quotedNumreponse`/`extraQuoteNumreponses`) with
+     * `resumeSharedDraft = true` (#790) so the editor auto-applies the sheet's #405 row.
      */
-    onReply: (subcat: Int, page: Int) -> Unit,
+    onReply: (subcat: Int, page: Int, quoteNumreponses: List<Int>) -> Unit,
     /**
      * Vague 4 (#604) lot 1 — HFR accepted a reply POSTed from the quick-reply sheet. `:app` must
      * refresh this topic route exactly like the full editor's onSubmitSucceeded (replace the route
@@ -140,18 +141,6 @@ fun TopicScreen(
      * since the sheet never entered the back stack.
      */
     onQuickReplySubmitted: (targetPage: Int?, scrollTo: Int?) -> Unit = { _, _ -> },
-    /**
-     * Open the editor in quote mode (Phase 2C, #146). Same destination as [onReply],
-     * but the editor GETs HFR's quote form and hydrates the draft with the
-     * `[quotemsg=…]` block HFR prefills. The call-site supplies
-     * `quotedNumreponse = post.numreponse` (always known) and `quoteRef = post.quoteRef`
-     * (forwarded when known, may be `null`). HFR identifies the cited post by
-     * `numrep={numreponse}` alone — `ref` is positional/optional (#227, proven live;
-     * `HfrClient.getReplyForm` omits `&ref=` when null) — so « Citer » is gated on
-     * `Topic.canReply` (cf. the per-post gate below), never on the presence of a
-     * parsed quote link. Obfuscated/cached rows with `quoteRef = null` are supported.
-     */
-    onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int?) -> Unit,
     /**
      * Open the editor in edit mode (Phase 2D, #147). HFR exposes the edit link on
      * the post's left toolbar only when the post belongs to the current user and
@@ -251,12 +240,12 @@ fun TopicScreen(
     multiQuoteSelection: List<Int> = emptyList(),
     /**
      * #291 — toggles a post in the multi-quote basket. Only invoked under the same gate as
-     * [onQuote] (`shouldShowQuoteAction`): a topic the user cannot reply to has nothing to quote.
+     * « Citer » (`shouldShowQuoteAction`): a topic the user cannot reply to has nothing to quote.
      */
     onToggleMultiQuote: (preview: QuotedPostPreview) -> Unit = {},
     /**
      * #291 — opens the editor pre-filled with every selected quote (same destination as
-     * [onQuote]; `:app` rides the selection on the route and clears the basket). Receives the
+     * « Citer »; `:app` rides the selection on the route and clears the basket). Receives the
      * topic's `(subcat, page)` like [onReply].
      */
     onMultiQuote: (subcat: Int, page: Int) -> Unit = { _, _ -> },
@@ -461,7 +450,6 @@ fun TopicScreen(
         onBack = onBack,
         onReply = onReply,
         onQuickReplySubmitted = onQuickReplySubmitted,
-        onQuote = onQuote,
         onEdit = onEdit,
         onEditFirstPost = onEditFirstPost,
         onOpenPage = onOpenPage,
@@ -688,8 +676,7 @@ internal fun TopicContent(
     listState: LazyListState,
     onIntent: (TopicIntent) -> Unit,
     onBack: () -> Unit,
-    onReply: (subcat: Int, page: Int) -> Unit,
-    onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int?) -> Unit,
+    onReply: (subcat: Int, page: Int, quoteNumreponses: List<Int>) -> Unit,
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
@@ -739,10 +726,11 @@ internal fun TopicContent(
     } else {
         null
     }
-    // Vague 4 (#604) lot 1 — the reply FAB opens the quick-reply sheet instead of navigating ;
-    // the sheet escalates to the full-screen editor through the existing onReply. Local UI state
-    // (like the page picker) : non-null while the sheet is up, carrying the reply coordinates.
-    var quickReplyFor by remember { mutableStateOf<QuickReplyRequest?>(null) }
+    // Vague 4 (#604) lots 1-2 — the reply FAB and « Citer » both open the quick-reply sheet
+    // instead of navigating ; the sheet escalates to the full-screen editor through onReply.
+    // Local UI state (like the page picker) : non-null while the sheet is up, carrying the
+    // reply coordinates plus the card « Citer » pre-arms (null from the FAB).
+    var quickReplyFor by remember { mutableStateOf<QuickReplyLaunch?>(null) }
     Scaffold(
         modifier = if (scrollBehavior != null) {
             Modifier.nestedScroll(scrollBehavior.nestedScrollConnection)
@@ -770,11 +758,13 @@ internal fun TopicContent(
                 multiQuoteSelection = multiQuoteSelection,
                 onOpenPage = onOpenPage,
                 onReply = { subcat, page ->
-                    quickReplyFor = QuickReplyRequest(
-                        cat = state.request.cat,
-                        subcat = subcat,
-                        topicId = state.request.post,
-                        page = page,
+                    quickReplyFor = QuickReplyLaunch(
+                        request = QuickReplyRequest(
+                            cat = state.request.cat,
+                            subcat = subcat,
+                            topicId = state.request.post,
+                            page = page,
+                        ),
                     )
                 },
                 onMultiQuote = onMultiQuote,
@@ -837,7 +827,19 @@ internal fun TopicContent(
                             state = state,
                             topic = mode.topic,
                             hiddenNumreponses = mode.hiddenNumreponses,
-                            onQuote = onQuote,
+                            // #604 lot 2 — « Citer » opens the quick-reply sheet with the card
+                            // pre-armed (1-citation session) instead of the full-screen editor.
+                            onQuoteRequested = { preview ->
+                                quickReplyFor = QuickReplyLaunch(
+                                    request = QuickReplyRequest(
+                                        cat = state.request.cat,
+                                        subcat = mode.topic.subcat,
+                                        topicId = state.request.post,
+                                        page = mode.topic.page,
+                                    ),
+                                    initialQuote = preview,
+                                )
+                            },
                             onEdit = onEdit,
                             onEditFirstPost = onEditFirstPost,
                             onOpenPage = onOpenPage,
@@ -859,13 +861,14 @@ internal fun TopicContent(
             }
         }
     }
-    quickReplyFor?.let { replyRequest ->
+    quickReplyFor?.let { launch ->
         QuickReplySheet(
-            request = replyRequest,
+            request = launch.request,
+            initialQuote = launch.initialQuote,
             onDismiss = { quickReplyFor = null },
-            onEscalate = {
+            onEscalate = { quoteNumreponses ->
                 quickReplyFor = null
-                onReply(replyRequest.subcat, replyRequest.page)
+                onReply(launch.request.subcat, launch.request.page, quoteNumreponses)
             },
             onSubmitted = { targetPage, scrollTo ->
                 quickReplyFor = null
@@ -1196,7 +1199,7 @@ private fun TopicLoadedContent(
     hiddenNumreponses: Set<Int> = emptySet(),
     // Vague 3 (#604) — onReply dropped: the dissolved header card was its only consumer here
     // (the bottom FAB cluster replies from TopicContent's own callback).
-    onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int?) -> Unit,
+    onQuoteRequested: (preview: QuotedPostPreview) -> Unit,
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
@@ -1391,7 +1394,7 @@ private fun TopicLoadedContent(
             val quoteAction: (() -> Unit)?
             val multiQuoteToggle: (() -> Unit)?
             if (shouldShowQuoteAction(topic, state.isAuthenticated)) {
-                quoteAction = { onQuote(topic.subcat, topic.page, post.numreponse, post.quoteRef) }
+                quoteAction = { onQuoteRequested(post.toQuotedPreview()) }
                 multiQuoteToggle = { onToggleMultiQuote(post.toQuotedPreview()) }
             } else {
                 quoteAction = null
@@ -1953,7 +1956,7 @@ internal fun TopicPostCard(
     /**
      * #436 — toggles this post in/out of the multi-quote basket directly from the card footer
      * (RF1 quote+/quote- parity), without opening the « … » menu. Null under the same gate as
-     * [onQuote] (a non-postable topic has nothing to quote), so the « + » action and « Citer »
+     * « Citer » (a non-postable topic has nothing to quote), so the « + » action and « Citer »
      * appear together or not at all. The same [multiQuoteSelected] flag drives the glyph/label
      * here, the border, and the pill — one source of truth, they can never desynchronise.
      */
@@ -2699,6 +2702,13 @@ private fun ReplyFab(onClick: () -> Unit) {
 // not purged on logout, cf. CacheInvalidator), so these gates consult auth explicitly instead
 // of trusting `canReply` alone — symmetric with the « Créer topic » FAB
 // (CategoryViewModel.canCreateTopic).
+// #604 lot 2 — what opens the quick-reply sheet : the reply coordinates, plus the card a
+// « Citer » tap pre-arms (null when launched from the reply FAB).
+internal data class QuickReplyLaunch(
+    val request: QuickReplyRequest,
+    val initialQuote: QuotedPostPreview? = null,
+)
+
 // #604 lot 2 — the quote-card snapshot, built AT SELECTION TIME where the full Post is in scope
 // (cadrage Codex : the cards never re-parse a post ; the exact [quotemsg] is fetched at
 // materialisation). Uniqueness in the basket stays keyed on the numreponse.

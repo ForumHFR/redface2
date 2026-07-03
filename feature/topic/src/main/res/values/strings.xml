@@ -139,4 +139,10 @@
     <string name="quick_reply_error_unknown">HFR a renvoyé une réponse inattendue. Réessayez ou actualisez l\'app.</string>
     <string name="quick_reply_error_network">Erreur réseau. Vérifiez votre connexion et réessayez.</string>
     <string name="quick_reply_error_session_expired">Votre session HFR a expiré. Reconnectez-vous.</string>
+    <!-- #604 lot 2 : cartes de citation de la réponse rapide. -->
+    <string name="quick_reply_quote_line">❝ %1$s — %2$s</string>
+    <string name="quick_reply_quote_no_text">(citation sans texte)</string>
+    <string name="quick_reply_quote_move_up">Monter la citation de %1$s</string>
+    <string name="quick_reply_quote_move_down">Descendre la citation de %1$s</string>
+    <string name="quick_reply_quote_remove">Retirer la citation de %1$s</string>
 </resources>
