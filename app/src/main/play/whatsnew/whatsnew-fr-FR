@@ -1,4 +1,4 @@
-Redface 2 v0.20.1 — dev.
+Redface 2 v0.20.2 — dev.
 
-- Drapeaux : le raccourci « +lus » de la pilule fonctionne sur tous les onglets (Lu et Favoris compris).
-- Drapeaux : le texte de l'état vide pointe la bonne action pour revoir les sujets lus.
+- Gestes : un swipe démarré sur la bande du geste back système n'entre plus en conflit avec le changement d'onglet ou de page.
+- Sujet : tap sur le titre tronqué de la barre du haut pour l'afficher en entier (2 lignes), re-tap pour replier.

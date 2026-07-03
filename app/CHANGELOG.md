@@ -16,6 +16,16 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.20.2` — `internal` (dev) — 2026-07-03
+
+**Retours bêta gestes + top bar Topic** (PRs #781, #786 — gates Codex gpt-5.5, dogfoods émulateur).
+
+### Gestes (Drapeaux & Vue Topic)
+- #752 : **zone morte au départ des swipes sur les bandes de gestes système** — un swipe horizontal qui démarre dans la bande latérale (navigation gestuelle) est laissé au geste back système au lieu d'entrer en compétition avec le changement d'onglet (Drapeaux) ou de page (Topic, #282) ; fini la frontière imprévisible au ras du bord. Navigation 3 boutons : comportement strictement inchangé (insets nuls). Bornes clampées contre les insets aberrants (split-screen/foldable).
+
+### Vue Topic
+- #772 (tinc) : **titre dépliable au tap** — le titre tronqué de la top bar se déplie sur 2 lignes au tap (la barre grandit d'une ligne), re-tap ou changement de page le replie ; la pilule « page X / Y » garde sa propre cible (sélecteur de page). Annonces TalkBack dédiées (afficher/réduire + état).
+
 ## `0.20.1` — `internal` (dev) — 2026-07-03
 
 **Quick wins vue Drapeaux — retours bêta 0.18.0** (PRs #776, #777 — cadrage + gate Codex gpt-5.5).
