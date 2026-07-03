@@ -218,6 +218,16 @@ fun FlagsRoute(
     val dtIsRefreshing by viewModel.dtIsRefreshing.collectAsStateWithLifecycle()
     // « +lus » suffix on the DT tab, mirroring [cyanShowsRead]: DT selected AND its unread filter off.
     val dtShowsRead by viewModel.dtShowsRead.collectAsStateWithLifecycle()
+    // #751 — Red and Favori join the « +lus » shortcut: same read-state values for the indicator,
+    // the picker's contextual entry and the tab-label suffix.
+    val redShowsRead by viewModel.redShowsReadShortcut.collectAsStateWithLifecycle()
+    val favoriteShowsRead by viewModel.favoriteShowsReadShortcut.collectAsStateWithLifecycle()
+    val readShortcuts = FlagsReadShortcuts(
+        cyan = cyanShowsRead,
+        dt = dtShowsRead,
+        red = redShowsRead,
+        favorite = favoriteShowsRead,
+    )
 
     // #6 — trigger the DT scan only when the DT tab is OPENED (a stable LaunchedEffect, not the raw
     // composition): fetchStorage scans the inbox and must stay off the per-category auto-refresh.
@@ -421,8 +431,7 @@ fun FlagsRoute(
                         tabs = flagAppBarTabs(
                             authState = authState,
                             showDtTab = showDtTab,
-                            cyanShowsRead = cyanShowsRead,
-                            dtShowsRead = dtShowsRead,
+                            readShortcuts = readShortcuts,
                         ),
                         searchEnabled = searchEnabled,
                         query = searchQuery,
@@ -432,8 +441,7 @@ fun FlagsRoute(
                         currentTab = selectedTab,
                         readFilterShowsRead = flagsReadFilterShowsRead(
                             tab = selectedTab,
-                            cyanShowsRead = cyanShowsRead,
-                            dtShowsRead = dtShowsRead,
+                            shortcuts = readShortcuts,
                         ),
                         // #661 — GLOBAL « +lus » cue shape (eye glyph vs. coloured flag ring).
                         plusLusIndicatorStyle = flagsViewSettings.plusLusIndicatorStyle,
@@ -1008,10 +1016,9 @@ private fun flagTabColor(tab: FlagTab): Color = when (tab) {
 private fun flagAppBarTabs(
     authState: AuthState?,
     showDtTab: Boolean,
-    cyanShowsRead: Boolean,
-    dtShowsRead: Boolean,
+    readShortcuts: FlagsReadShortcuts,
 ): List<FlagTabEntry> = if (authState is AuthState.Authenticated) {
-    flagTabEntries(showDtTab = showDtTab, cyanShowsRead = cyanShowsRead, dtShowsRead = dtShowsRead)
+    flagTabEntries(showDtTab = showDtTab, readShortcuts = readShortcuts)
 } else {
     emptyList()
 }
@@ -1021,8 +1028,7 @@ private fun flagAppBarTabs(
 @Composable
 private fun flagTabEntries(
     showDtTab: Boolean,
-    cyanShowsRead: Boolean,
-    dtShowsRead: Boolean,
+    readShortcuts: FlagsReadShortcuts,
 ): List<FlagTabEntry> {
     val readSuffix = stringResource(R.string.flags_tab_cyan_read_shown_suffix)
     val neutral = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1030,17 +1036,30 @@ private fun flagTabEntries(
         add(
             FlagTabEntry(
                 FlagTab.Cyan,
-                stringResource(R.string.flags_tab_my_topics) + if (cyanShowsRead) readSuffix else "",
+                stringResource(R.string.flags_tab_my_topics) + if (readShortcuts.cyan) readSuffix else "",
                 FlagPalette.Cyan,
             ),
         )
-        add(FlagTabEntry(FlagTab.Red, stringResource(R.string.flags_tab_read_only), FlagPalette.Red))
-        add(FlagTabEntry(FlagTab.Favorite, stringResource(R.string.flags_tab_favorite), FlagPalette.Favorite))
+        // #751 — Red/Favori carry the same « +lus » suffix now that their filter is toggleable.
+        add(
+            FlagTabEntry(
+                FlagTab.Red,
+                stringResource(R.string.flags_tab_read_only) + if (readShortcuts.red) readSuffix else "",
+                FlagPalette.Red,
+            ),
+        )
+        add(
+            FlagTabEntry(
+                FlagTab.Favorite,
+                stringResource(R.string.flags_tab_favorite) + if (readShortcuts.favorite) readSuffix else "",
+                FlagPalette.Favorite,
+            ),
+        )
         if (showDtTab) {
             add(
                 FlagTabEntry(
                     FlagTab.Dt,
-                    stringResource(R.string.flags_tab_dt) + if (dtShowsRead) readSuffix else "",
+                    stringResource(R.string.flags_tab_dt) + if (readShortcuts.dt) readSuffix else "",
                     FlagPalette.Dt,
                 ),
             )

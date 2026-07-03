@@ -355,31 +355,39 @@ class FlagsViewModel @Inject constructor(
         )
 
     /**
-     * Optimistic shim for CYAN's « non-lus uniquement » value (#317), mirroring
-     * [pendingPerTabOverride]. The « +lus » re-tap is the ONLY read-then-flip site, and it is always
-     * CYAN — so the shim is deliberately CYAN-scoped (RED/FAVORITE writes never touch it, so a
-     * concurrent RED write can't clobber a CYAN flip). [setFlagsUnreadOnly] seeds it synchronously
-     * for CYAN; cleared once that write persists.
+     * Optimistic shim for the per-type « non-lus uniquement » values (#317 → #751), mirroring
+     * [pendingPerTabOverride]. The « +lus » re-tap is a read-then-flip site and — since #751 wired
+     * the shortcut on Red and Favori too — it is **type-scoped**, not CYAN-only: each type's pending
+     * flip lives under its own key, so a concurrent write on one type can never clobber another's.
+     * [setFlagsUnreadOnly] seeds the key synchronously; cleared once that write persists.
      */
-    private val pendingCyanUnreadOnly = MutableStateFlow<Boolean?>(null)
+    private val pendingUnreadOnly = MutableStateFlow<Map<FlagType, Boolean>>(emptyMap())
 
     /**
-     * CYAN's resolved « non-lus uniquement » value, optimistic shim ([pendingCyanUnreadOnly]) winning
-     * until the persisted value catches up. Tracks CYAN **regardless of the selected tab** (it is not
-     * keyed on [selectedTab]) and is eagerly seeded with CYAN's type-aware default (`true`), so the
-     * « +lus » re-tap and the Cyan tab suffix never read a value lagging a tab switch or the cold
-     * start (cf. [selectTab] / [cyanShowsReadShortcut]). The bottom-sheet switch keeps reading the
-     * selected-tab [flagsViewSettings] like every other toggle.
+     * [type]'s resolved « non-lus uniquement » value, optimistic shim ([pendingUnreadOnly]) winning
+     * until the persisted value catches up. Tracks the type **regardless of the selected tab** (it is
+     * not keyed on [selectedTab]) and is eagerly seeded with the type-aware default (CYAN `true`,
+     * others `false` — mirrors the DataStore default), so the « +lus » re-tap and the tab suffix
+     * never read a value lagging a tab switch or the cold start (cf. [selectTab] /
+     * [cyanShowsReadShortcut]). The bottom-sheet switch keeps reading the selected-tab
+     * [flagsViewSettings] like every other toggle.
      */
-    val cyanUnreadOnly: StateFlow<Boolean> = combine(
-        userPreferencesRepository.observeFlagsViewSettings(FlagType.CYAN).map { it.unreadOnly },
-        pendingCyanUnreadOnly,
-    ) { persisted, pending -> pending ?: persisted }
+    private fun unreadOnlyState(type: FlagType): StateFlow<Boolean> = combine(
+        userPreferencesRepository.observeFlagsViewSettings(type).map { it.unreadOnly },
+        pendingUnreadOnly,
+    ) { persisted, pending -> pending[type] ?: persisted }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.Eagerly,
-            initialValue = true,
+            initialValue = type == FlagType.CYAN,
         )
+
+    val cyanUnreadOnly: StateFlow<Boolean> = unreadOnlyState(FlagType.CYAN)
+
+    // #751 — Red and Favori get the same resolved values: the « +lus » re-tap shortcut and the
+    // top-bar read-state indicator now cover every real flag type, not just Cyan.
+    val redUnreadOnly: StateFlow<Boolean> = unreadOnlyState(FlagType.RED)
+    val favoriteUnreadOnly: StateFlow<Boolean> = unreadOnlyState(FlagType.FAVORITE)
 
     /**
      * Whether the Cyan tab currently shows read participated topics (drives the discreet « +lus »
@@ -391,6 +399,33 @@ class FlagsViewModel @Inject constructor(
         selectedTab,
         cyanUnreadOnly,
     ) { tab, unreadOnly -> tab == FlagTab.Cyan && !unreadOnly }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = false,
+        )
+
+    /**
+     * #751 — same « shows read » state for the Red and Favori tabs (they default to showing read
+     * topics, so the indicator is honest from the first frame). Mirrors [cyanShowsReadShortcut];
+     * initialValue `true` matches the type-aware default (unreadOnly=false ⇒ read topics shown)
+     * pinned to the not-yet-selected state being irrelevant (the topbar only reads the selected
+     * tab's value through [flagsReadFilterShowsRead]).
+     */
+    val redShowsReadShortcut: StateFlow<Boolean> = combine(
+        selectedTab,
+        redUnreadOnly,
+    ) { tab, unreadOnly -> tab == FlagTab.Red && !unreadOnly }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = false,
+        )
+
+    val favoriteShowsReadShortcut: StateFlow<Boolean> = combine(
+        selectedTab,
+        favoriteUnreadOnly,
+    ) { tab, unreadOnly -> tab == FlagTab.Favorite && !unreadOnly }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.Eagerly,
@@ -580,18 +615,22 @@ class FlagsViewModel @Inject constructor(
     }
 
     /**
-     * Handles a re-tap on the already-selected [tab]. Cyan and DT flip their « non-lus uniquement »
-     * filter (the « +lus » shortcut) — Cyan through the persisted [setFlagsUnreadOnly] write (reading
-     * the optimistic [cyanUnreadOnly]), DT through the in-memory [_dtUnreadOnly] (per-session, not
-     * persisted). Every other tab re-tap is a deliberate no-op (#106 tinc — keep the scroll position).
+     * Handles a re-tap on the already-selected [tab]. Every real tab flips its « non-lus uniquement »
+     * filter (the « +lus » shortcut) — Cyan/Red/Favori through the persisted [setFlagsUnreadOnly]
+     * write (reading their optimistic resolved values — #751, thibw : the shortcut used to no-op
+     * outside Cyan), DT through the in-memory [_dtUnreadOnly] (per-session, not persisted). Only the
+     * Super placeholder keeps the #106 no-op (no list, nothing to flip).
      * Never raises [_recallListToTop]: a filter flip is not a tab transition (the screen's
-     * FilterFlipScrollResetEffect handles the scroll for Cyan).
+     * FilterFlipScrollResetEffect handles the scroll — it watches the ATOMIC per-type
+     * [tabUnreadFilter], so Red/Favori flips reset the scroll exactly like Cyan's).
      */
     private fun handleReTap(tab: FlagTab) {
         when (tab) {
             FlagTab.Cyan -> setFlagsUnreadOnly(!cyanUnreadOnly.value)
+            FlagTab.Red -> setFlagsUnreadOnly(!redUnreadOnly.value)
+            FlagTab.Favorite -> setFlagsUnreadOnly(!favoriteUnreadOnly.value)
             FlagTab.Dt -> _dtUnreadOnly.value = !_dtUnreadOnly.value
-            else -> Unit // #106 — re-tapping any other tab is a no-op.
+            FlagTab.Super -> Unit // #106 — placeholder tab, nothing to flip.
         }
     }
 
@@ -658,16 +697,17 @@ class FlagsViewModel @Inject constructor(
      */
     fun setFlagsUnreadOnly(enabled: Boolean) {
         val type = _selectedTab.value.flagType ?: return
-        // CYAN is the only read-then-flip path (the « +lus » re-tap), so only CYAN needs the
-        // optimistic shim: seed it synchronously (instant, lag-free re-tap target), then persist and
-        // drop the shim only if no newer flip superseded it (compareAndSet) — same pattern as
-        // [setFlagsPerTabOverride]. RED/FAVORITE writes (bottom sheet, explicit on/off) never touch
-        // the shim, so they can't clobber a concurrent CYAN flip. Resolved settings take over once
-        // DataStore commits.
-        if (type == FlagType.CYAN) pendingCyanUnreadOnly.value = enabled
+        // Every real type is a read-then-flip path since #751 (the « +lus » re-tap on Cyan/Red/Favori),
+        // so the optimistic shim is seeded per type: synchronously (instant, lag-free re-tap target),
+        // then persist and drop the type's key only if no newer flip superseded it — same pattern as
+        // [setFlagsPerTabOverride]. Keys are type-scoped, so a concurrent write on one type can't
+        // clobber another's pending flip. Resolved settings take over once DataStore commits.
+        pendingUnreadOnly.update { it + (type to enabled) }
         viewModelScope.launch {
             userPreferencesRepository.setFlagsUnreadOnlyForType(type, enabled)
-            if (type == FlagType.CYAN) pendingCyanUnreadOnly.compareAndSet(expect = enabled, update = null)
+            pendingUnreadOnly.update { pending ->
+                if (pending[type] == enabled) pending - type else pending
+            }
         }
     }
 
