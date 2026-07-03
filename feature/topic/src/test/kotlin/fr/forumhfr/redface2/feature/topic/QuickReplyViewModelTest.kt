@@ -243,6 +243,20 @@ class QuickReplyViewModelTest {
     }
 
     @Test
+    fun `a quotes-only submit pins the exact BBCode without trailing blank lines`() = runTest {
+        val repository = FakeQuickReplyRepository(
+            results = mutableListOf(ReplySubmitResult.Success(refreshUrl = null, targetPage = null)),
+        )
+        val viewModel = quickReplyViewModel(replyRepository = repository)
+        viewModel.onQuoteAdded(preview(101, "alice"))
+
+        viewModel.onSubmitClicked()
+        advanceUntilIdle()
+
+        assertEquals("[quotemsg=101]corps[/quotemsg]", repository.submittedBodies.single())
+    }
+
+    @Test
     fun `a submit failure keeps the body and the cards`() = runTest {
         val repository = FakeQuickReplyRepository(
             results = mutableListOf(ReplySubmitResult.Failure(ReplyFailureReason.AntiFlood)),

@@ -217,7 +217,13 @@ class PostEditorViewModel @AssistedInject constructor(
             if (body.isNullOrBlank()) return@launch
             if (request.resumeSharedDraft) {
                 _state.update { current ->
-                    val combined = current.draft.text + body
+                    // Conditional separator (gate #798): a late restore during typing must not
+                    // glue the resumed body to the user's last word.
+                    val combined = if (current.draft.text.isBlank()) {
+                        body
+                    } else {
+                        current.draft.text.trimEnd() + "\n\n" + body
+                    }
                     current
                         .withDraft(TextFieldValue(text = combined, selection = TextRange(combined.length)))
                         .copy(draftHydratedFromForm = current.draft.text.isNotBlank())

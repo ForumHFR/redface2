@@ -290,10 +290,17 @@ class QuickReplyViewModel @AssistedInject constructor(
                         context = quoteContext,
                         extraQuoteNumreponses = quotes.drop(1).map { it.numreponse },
                     )
+                    val body = _state.value.text.text
                     replyRepository.submitReply(
                         context = quoteContext,
                         form = form,
-                        bbcodeContent = form.initialContent.trimEnd() + "\n\n" + _state.value.text.text,
+                        // Quotes-only reply: no trailing blank lines after the last [quotemsg]
+                        // (gate #798 — the exact BBCode is pinned by the VM tests).
+                        bbcodeContent = if (body.isBlank()) {
+                            form.initialContent.trimEnd()
+                        } else {
+                            form.initialContent.trimEnd() + "\n\n" + body
+                        },
                         options = form.options,
                     )
                 }

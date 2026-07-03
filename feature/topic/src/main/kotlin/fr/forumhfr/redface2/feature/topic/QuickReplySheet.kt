@@ -60,7 +60,7 @@ internal fun QuickReplySheet(
         creationCallback = { factory -> factory.create(request) },
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
-    LaunchedEffect(viewModel) {
+    LaunchedEffect(viewModel, initialQuote?.numreponse) {
         // Re-seed the field from the #405 row at EACH opening — the VM outlives the sheet and
         // its cached text can be stale after a full-screen edit of the same draft (gate #788).
         viewModel.onSheetOpened(initialQuote)
