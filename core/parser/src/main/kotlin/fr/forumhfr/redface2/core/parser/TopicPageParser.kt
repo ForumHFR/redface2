@@ -103,7 +103,14 @@ class TopicPageParser(
 
         val optionBars = pollElement.select(HfrSelectors.POLL_OPTION_BAR)
         val optionLabels = pollElement.select(HfrSelectors.POLL_OPTION_LABEL)
-        return if (question == null || optionBars.isEmpty() || optionBars.size != optionLabels.size) {
+        // #697 — HFR serves TWO poll shapes. The RESULTS shape (.sondageLeft bars, below) only
+        // exists once the reader voted or clicked « voir les résultats » ; every other fetch —
+        // including ALL anonymous reads, i.e. what this app receives — gets the FORM shape
+        // (radio/checkbox inputs), which this parser used to drop silently (optionBars empty →
+        // null → « aucun sondage ne s'affiche », CharLee's report).
+        return if (question != null && optionBars.isEmpty()) {
+            parseFormPoll(pollElement, question)
+        } else if (question == null || optionBars.isEmpty() || optionBars.size != optionLabels.size) {
             null
         } else {
             val options = optionBars.mapIndexed { index, optionBar ->
@@ -148,6 +155,29 @@ class TopicPageParser(
                 hasVoted = false,
             )
         }
+    }
+
+    /**
+     * #697 — builds a read-only [Poll] from the FORM shape: `<ol><li><input name=reponse><label>`.
+     * No votes/percentages exist in this shape (fields are 0, [Poll.resultsAvailable] = false).
+     * Multiple-choice detection reads the INPUT TYPE (checkbox = multi, radio = single — proven on
+     * live fixtures 44713 mono / 16022 multi) : the results-shape « Sondage à N choix » caption
+     * does not exist here, so [choiceCount] must not be used.
+     */
+    private fun parseFormPoll(pollElement: Element, question: String): Poll? {
+        val formOptions = pollElement.select(HfrSelectors.POLL_FORM_OPTION)
+        val labels = formOptions.mapNotNull { option ->
+            option.selectFirst(HfrSelectors.POLL_FORM_OPTION_LABEL)?.text()?.trim()?.takeIf(String::isNotEmpty)
+        }
+        if (labels.isEmpty() || labels.size != formOptions.size) return null
+        return Poll(
+            question = question,
+            options = labels.map { PollOption(text = it, votes = 0, percentage = 0f) },
+            multipleChoice = pollElement.selectFirst(HfrSelectors.POLL_FORM_MULTI_INPUT) != null,
+            totalVotes = 0,
+            hasVoted = false,
+            resultsAvailable = false,
+        )
     }
 
     private fun firstInt(text: String): Int =

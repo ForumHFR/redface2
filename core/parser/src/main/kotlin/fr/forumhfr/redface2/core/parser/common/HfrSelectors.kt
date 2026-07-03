@@ -49,6 +49,13 @@ object HfrSelectors {
     const val POLL_OPTION_LABEL = ".sondageRight"
     const val POLL_OPTION_PERCENT = ".sondageTop"
 
+    // #697 — the poll's FORM shape (not-yet-voted / anonymous): options are <ol><li> rows with a
+    // radio (single-choice) or checkbox (multi-choice) input named `reponse` and a <label> text.
+    // The container POLL and the question POLL_QUESTION are common to both shapes.
+    const val POLL_FORM_OPTION = "ol > li"
+    const val POLL_FORM_OPTION_LABEL = "label"
+    const val POLL_FORM_MULTI_INPUT = "input[type=checkbox]"
+
     // Private-message inbox listing (forum1.php?cat=prive). Each conversation is a
     // `tr.sujet` row whose cells carry the read/unread icon, the subject link (which embeds
     // the thread `post` id), the correspondent and the last-activity date. The list pager has

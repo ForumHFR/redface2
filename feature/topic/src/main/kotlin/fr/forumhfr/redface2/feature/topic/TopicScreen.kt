@@ -1711,26 +1711,35 @@ private fun TopicPollCard(
             if (revealed) {
                 poll.options.forEach { option ->
                     Text(
-                        text = stringResource(
-                            R.string.topic_poll_option,
-                            option.text,
-                            option.percentage,
-                            option.votes,
-                        ),
+                        // #697 — the FORM shape carries no numbers : render the bare label instead
+                        // of a misleading « 0.0% (0 votes) ».
+                        text = if (poll.resultsAvailable) {
+                            stringResource(
+                                R.string.topic_poll_option,
+                                option.text,
+                                option.percentage,
+                                option.votes,
+                            )
+                        } else {
+                            option.text
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                val choiceLabel = if (poll.multipleChoice) {
+                    stringResource(R.string.topic_poll_multiple_choices)
+                } else {
+                    stringResource(R.string.topic_poll_single_choice)
+                }
                 Text(
-                    text = stringResource(
-                        R.string.topic_poll_summary,
-                        poll.totalVotes,
-                        if (poll.multipleChoice) {
-                            stringResource(R.string.topic_poll_multiple_choices)
-                        } else {
-                            stringResource(R.string.topic_poll_single_choice)
-                        },
-                    ),
+                    // #697 — no total on the FORM shape either ; a factual hint replaces it (the
+                    // in-app vote is #779, so no promise about WHERE to vote).
+                    text = if (poll.resultsAvailable) {
+                        stringResource(R.string.topic_poll_summary, poll.totalVotes, choiceLabel)
+                    } else {
+                        stringResource(R.string.topic_poll_no_results, choiceLabel)
+                    },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
