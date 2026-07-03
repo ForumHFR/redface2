@@ -16,6 +16,14 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.22.0` — `internal` (dev) — 2026-07-03
+
+**Phase « Vue Topic » (#604) — vague 4 « Postage », lot 2** (PRs #797 #798 — cadrage 9 forks + gates Codex gpt-5.5, dogfood émulateur).
+
+### Vue Topic
+- **Citations-cartes dans la réponse rapide** : « Citer » ouvre désormais la feuille de réponse rapide avec une carte compacte « ❝ auteur — extrait » (citer un autre message ajoute une carte) ; suppression et réordonnancement ↑/↓ par carte ; l'envoi matérialise les `[quotemsg]` dans l'ordre des cartes, le texte à la suite ; la bascule plein écran emporte les citations. Un échec d'envoi ne perd ni le texte ni les cartes.
+- #790 (styx42, Dintr-un lemn) : **la bascule réponse rapide → plein écran reprend le texte automatiquement** — plus d'étape « Restaurer » sur ce chemin (la bannière reste pour les brouillons de sessions antérieures).
+
 ## `0.21.0` — `internal` (dev) — 2026-07-03
 
 **Phase « Vue Topic » (#604) — vague 4 « Postage », lot 1** (PR #788 — cadrage + gate Codex gpt-5.5 NO-GO→fixes→GO, dogfood IME émulateur).

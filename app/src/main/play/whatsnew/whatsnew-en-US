@@ -1,3 +1,4 @@
-Redface 2 v0.21.0 — dev.
+Redface 2 v0.22.0 — dev.
 
-- Topic: quick reply sheet — the reply button opens a lightweight field (send directly or switch to full screen, shared draft, nothing is lost on close).
+- Quick reply: "Quote" now adds quote cards (reorderable, removable); send and the full-screen switch honour the order.
+- Quick reply: switching to full screen now carries the text automatically.
