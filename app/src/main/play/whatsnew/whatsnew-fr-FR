@@ -1,5 +1,3 @@
-Redface 2 v0.24.0 — dev.
+Redface 2 v0.24.1 — dev.
 
-- Réponse rapide : le contenu défile (Envoyer toujours accessible clavier ouvert).
-- Éditeur : quitter enregistre le brouillon d'abord ; retour inerte pendant un envoi.
-- Cartes de citation : annonces TalkBack et focus rendu après un retrait.
+- Réponse rapide : majuscule automatique en début de phrase (régression corrigée).

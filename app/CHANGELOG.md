@@ -16,6 +16,13 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.24.1` — `internal` (dev) — 2026-07-03
+
+**Fix express dogfood v220** (PR #810).
+
+### Vue Topic
+- #807 (nicko, Dintr-un lemn) : **capitalisation automatique en début de phrase dans la réponse rapide** — régression de surface du fix #237 (le champ de la feuille ne passait pas la consigne autoCap à l'IME).
+
 ## `0.24.0` — `internal` (dev) — 2026-07-03
 
 **Phase « Vue Topic » (#604) — vague 4 « Postage », lot 4a polish** (PR #803 — cadrage + gate Codex NO-GO→fixes→GO, dogfood émulateur).
