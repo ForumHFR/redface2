@@ -132,6 +132,13 @@ fun TopicScreen(
      */
     onReply: (subcat: Int, page: Int) -> Unit,
     /**
+     * Vague 4 (#604) lot 1 — HFR accepted a reply POSTed from the quick-reply sheet. `:app` must
+     * refresh this topic route exactly like the full editor's onSubmitSucceeded (replace the route
+     * with `targetPage`/`scrollTo` and a bumped `submitSignal`, #200) — minus the editor pop,
+     * since the sheet never entered the back stack.
+     */
+    onQuickReplySubmitted: (targetPage: Int?, scrollTo: Int?) -> Unit = { _, _ -> },
+    /**
      * Open the editor in quote mode (Phase 2C, #146). Same destination as [onReply],
      * but the editor GETs HFR's quote form and hydrates the draft with the
      * `[quotemsg=…]` block HFR prefills. The call-site supplies
@@ -451,6 +458,7 @@ fun TopicScreen(
         onIntent = viewModel::send,
         onBack = onBack,
         onReply = onReply,
+        onQuickReplySubmitted = onQuickReplySubmitted,
         onQuote = onQuote,
         onEdit = onEdit,
         onEditFirstPost = onEditFirstPost,
@@ -698,6 +706,9 @@ internal fun TopicContent(
     // the callback recording a tap on the poll card. Threaded to the header card's poll.
     pollManualExpanded: Boolean? = null,
     onPollExpansionChanged: (Boolean) -> Unit = {},
+    // Vague 4 (#604) lot 1 — HFR accepted a quick-reply POST: `:app` refreshes the topic route the
+    // same way the full editor's onSubmitSucceeded does (bumped submitSignal, #200), minus the pop.
+    onQuickReplySubmitted: (targetPage: Int?, scrollTo: Int?) -> Unit = { _, _ -> },
 ) {
     // #285 — the topic title and #284 — the page counter live in a persistent top app bar so they
     // stay visible while the user scrolls (the in-card title/caption scrolls away). While loading,
@@ -726,6 +737,10 @@ internal fun TopicContent(
     } else {
         null
     }
+    // Vague 4 (#604) lot 1 — the reply FAB opens the quick-reply sheet instead of navigating ;
+    // the sheet escalates to the full-screen editor through the existing onReply. Local UI state
+    // (like the page picker) : non-null while the sheet is up, carrying the reply coordinates.
+    var quickReplyFor by remember { mutableStateOf<QuickReplyRequest?>(null) }
     Scaffold(
         modifier = if (scrollBehavior != null) {
             Modifier.nestedScroll(scrollBehavior.nestedScrollConnection)
@@ -752,7 +767,14 @@ internal fun TopicContent(
                 bottomActionsVisible = bottomActionsVisible,
                 multiQuoteSelection = multiQuoteSelection,
                 onOpenPage = onOpenPage,
-                onReply = onReply,
+                onReply = { subcat, page ->
+                    quickReplyFor = QuickReplyRequest(
+                        cat = state.request.cat,
+                        subcat = subcat,
+                        topicId = state.request.post,
+                        page = page,
+                    )
+                },
                 onMultiQuote = onMultiQuote,
             )
         },
@@ -834,6 +856,20 @@ internal fun TopicContent(
                 }
             }
         }
+    }
+    quickReplyFor?.let { replyRequest ->
+        QuickReplySheet(
+            request = replyRequest,
+            onDismiss = { quickReplyFor = null },
+            onEscalate = {
+                quickReplyFor = null
+                onReply(replyRequest.subcat, replyRequest.page)
+            },
+            onSubmitted = { targetPage, scrollTo ->
+                quickReplyFor = null
+                onQuickReplySubmitted(targetPage, scrollTo)
+            },
+        )
     }
 }
 

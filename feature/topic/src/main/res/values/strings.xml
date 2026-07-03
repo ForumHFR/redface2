@@ -121,4 +121,22 @@
     <string name="topic_title_collapse">Réduire le titre</string>
     <string name="topic_title_expanded">Titre développé</string>
     <string name="topic_title_collapsed">Titre réduit</string>
+    <!-- Vague 4 (#604) lot 1 : feuille de réponse rapide. Wording d'erreurs = copie locale de
+         feature/editor (les modules res ne se partagent pas ; promotion :core:ui si un 3e copieur
+         apparaît). -->
+    <string name="quick_reply_title">Réponse rapide</string>
+    <string name="quick_reply_hint">Votre message…</string>
+    <string name="quick_reply_send">Envoyer</string>
+    <string name="quick_reply_fullscreen">Ouvrir l\'éditeur plein écran</string>
+    <string name="quick_reply_confirm_title">Publier la réponse ?</string>
+    <string name="quick_reply_confirm_action">Publier</string>
+    <string name="quick_reply_confirm_cancel">Annuler</string>
+    <string name="quick_reply_error_empty">Message vide. HFR refuse les réponses sans contenu.</string>
+    <string name="quick_reply_error_invalid_hash">Session HFR expirée pendant la saisie. Réessayez ; le formulaire est rechargé en arrière-plan.</string>
+    <string name="quick_reply_error_anti_flood">Anti-flood HFR : pas plus de 3 réponses consécutives par tranche de 10 minutes. Réessayez plus tard.</string>
+    <string name="quick_reply_error_topic_locked">Ce sujet a été fermé. Impossible de poster une réponse.</string>
+    <string name="quick_reply_error_login_required">Vous devez être connecté pour répondre. Reconnectez-vous depuis l\'onglet Messages.</string>
+    <string name="quick_reply_error_unknown">HFR a renvoyé une réponse inattendue. Réessayez ou actualisez l\'app.</string>
+    <string name="quick_reply_error_network">Erreur réseau. Vérifiez votre connexion et réessayez.</string>
+    <string name="quick_reply_error_session_expired">Votre session HFR a expiré. Reconnectez-vous.</string>
 </resources>

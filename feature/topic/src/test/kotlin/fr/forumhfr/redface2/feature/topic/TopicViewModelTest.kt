@@ -2114,11 +2114,13 @@ private class FakeStreamingTopicRepository(
  * DataStore default so the fake stays a thin stand-in. The relevant values are
  * constructor-injectable so tests can assert they reach state.
  */
-private class FakeUserPreferencesRepository(
+// Internal (not private) so QuickReplyViewModelTest reuses the single fake of this wide interface.
+internal class FakeUserPreferencesRepository(
     private val topicTopBarAutoHide: Boolean = false,
     private val topicPageFabs: Boolean = true,
     private val topicPollsExpanded: Boolean = false,
     private val topicSignatures: Boolean = false,
+    private val confirmBeforePosting: Boolean = false,
 ) : UserPreferencesRepository {
     override fun observeProxyConfig(): Flow<ProxyConfig> = MutableStateFlow(ProxyConfig())
 
@@ -2173,7 +2175,7 @@ private class FakeUserPreferencesRepository(
     override suspend fun setTopicTopBarAutoHide(enabled: Boolean) = Unit
 
     // #312 — confirm-before-posting is irrelevant to TopicViewModel; stubbed at its default.
-    override fun observeConfirmBeforePosting(): Flow<Boolean> = MutableStateFlow(false)
+    override fun observeConfirmBeforePosting(): Flow<Boolean> = MutableStateFlow(confirmBeforePosting)
 
     override suspend fun setConfirmBeforePosting(enabled: Boolean) = Unit
 

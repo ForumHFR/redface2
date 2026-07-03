@@ -2401,6 +2401,24 @@ private fun RedfaceNavHost(
                             ),
                         )
                     },
+                    // Vague 4 (#604) lot 1 — a reply POSTed from the quick-reply sheet: same
+                    // refresh contract as the full editor's onSubmitSucceeded below (replace the
+                    // route with targetPage/scrollTo + a bumped submitSignal, #200/#226), minus
+                    // the pop — the sheet never entered the back stack.
+                    onQuickReplySubmitted = { targetPage, scrollTo ->
+                        val topicEntry = backStack.lastOrNull() as? TopicRoute
+                        if (topicEntry != null) {
+                            backStack.removeAt(backStack.lastIndex)
+                            backStack.add(
+                                topicEntry.copy(
+                                    page = targetPage ?: topicEntry.page,
+                                    scrollTo = scrollTo,
+                                    submitSignal = System.currentTimeMillis(),
+                                    postSubmitOverflowLanding = false,
+                                ),
+                            )
+                        }
+                    },
                     onQuote = { subcat, page, quotedNumreponse, quoteRef ->
                         // Phase 2C (#146) — same destination as reply ; only the
                         // editor's request differs (quotedNumreponse pulls the HFR
