@@ -148,9 +148,14 @@ class QuickReplyViewModel @AssistedInject constructor(
      * in-memory text can go stale whenever another surface touched the shared #405 row —
      * typically escalate → edit in the full-screen editor → back → reopen. The row is the
      * source of truth ; the field is unconditionally re-seeded from it (gate Codex PR #788).
+     *
+     * [initialQuotes] (#604 lot 3) — the cards this opening pre-arms, in citation order : one
+     * preview for « Citer », the whole basket for « Citer N » under the full-screen threshold.
+     * Adds are idempotent per numreponse, appended AFTER any cards the surviving VM already
+     * holds (the composition in progress keeps its order).
      */
-    fun onSheetOpened(initialQuote: QuotedPostPreview? = null) {
-        if (initialQuote != null) onQuoteAdded(initialQuote)
+    fun onSheetOpened(initialQuotes: List<QuotedPostPreview> = emptyList()) {
+        initialQuotes.forEach(::onQuoteAdded)
         viewModelScope.launch {
             initJob.join()
             val body = draftStore.load(draftOwner, draftKey)?.body.orEmpty()

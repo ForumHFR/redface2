@@ -56,17 +56,18 @@ internal fun QuickReplySheet(
     // surface can snapshot. Riding the callback (→ the :app handoff), never the route.
     onEscalate: (quotes: List<QuotedPostPreview>) -> Unit,
     onSubmitted: (targetPage: Int?, scrollTo: Int?) -> Unit,
-    // #604 lot 2 — « Citer » opens the sheet with this card pre-armed (1-citation session).
-    initialQuote: QuotedPostPreview? = null,
+    // #604 lots 2-3 — the cards this opening pre-arms : one for « Citer », the whole basket
+    // for « Citer N » under the full-screen threshold (empty from the reply FAB).
+    initialQuotes: List<QuotedPostPreview> = emptyList(),
 ) {
     val viewModel = hiltViewModel<QuickReplyViewModel, QuickReplyViewModel.Factory>(
         creationCallback = { factory -> factory.create(request) },
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
-    LaunchedEffect(viewModel, initialQuote?.numreponse) {
+    LaunchedEffect(viewModel, initialQuotes) {
         // Re-seed the field from the #405 row at EACH opening — the VM outlives the sheet and
         // its cached text can be stale after a full-screen edit of the same draft (gate #788).
-        viewModel.onSheetOpened(initialQuote)
+        viewModel.onSheetOpened(initialQuotes)
         viewModel.effects.collect { effect ->
             when (effect) {
                 is QuickReplyEffect.SubmitSucceeded -> onSubmitted(effect.targetPage, effect.scrollTo)

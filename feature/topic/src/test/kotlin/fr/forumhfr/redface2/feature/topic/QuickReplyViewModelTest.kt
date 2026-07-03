@@ -300,6 +300,28 @@ class QuickReplyViewModelTest {
         assertEquals("suite en plein écran", store.storedBody)
     }
 
+    // ----- #604 lot 3 : pré-armement multi-cartes (panier → sheet) -----------
+
+    @Test
+    fun `onSheetOpened pre-arms several cards in citation order`() = runTest {
+        val viewModel = quickReplyViewModel()
+        viewModel.onSheetOpened(listOf(preview(202, "bob"), preview(101, "alice")))
+        advanceUntilIdle()
+
+        assertEquals(listOf(202, 101), viewModel.state.value.quotes.map { it.numreponse })
+    }
+
+    @Test
+    fun `onSheetOpened appends idempotently after the cards the VM already holds`() = runTest {
+        val viewModel = quickReplyViewModel()
+        viewModel.onQuoteAdded(preview(303, "carol"))
+        // Re-opening with an overlap (303) must neither duplicate nor reorder the existing card.
+        viewModel.onSheetOpened(listOf(preview(101, "alice"), preview(303, "carol")))
+        advanceUntilIdle()
+
+        assertEquals(listOf(303, 101), viewModel.state.value.quotes.map { it.numreponse })
+    }
+
     private fun preview(numreponse: Int, author: String): QuotedPostPreview =
         QuotedPostPreview(numreponse = numreponse, author = author, excerpt = "extrait")
 
