@@ -81,6 +81,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -861,16 +862,22 @@ private fun topicBarPageIndicator(state: TopicUiState, loaded: TopicUiState.Mode
     else -> stringResource(R.string.topic_loading)
 }
 
+// #772 — extra room for the title's second line (titleMedium line height) while the title is
+// expanded; the small M3 top app bar keeps a fixed container height and would clip it otherwise.
+private val TopBarExpandedTitleExtraHeight = 24.dp
+
 /**
  * #285/#284 + Chantier C (#546) — the topic top app bar (title + page counter + back) plus the
  * intra-topic search affordance : a search icon in `actions` (only when the loaded page exposes a
  * usable, authenticated transsearch form) that opens the [TopicSearchBar] directly beneath the bar.
  * Extracted from `TopicContent` to keep that builder under detekt's cyclomatic-complexity cap.
+ * Internal (not private) so the Robolectric UI test can drive the #772 title expansion directly,
+ * same pattern as [TopicPostCard].
  */
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
 @Suppress("LongParameterList") // hoisted bar : title/page/back inputs + search sink + page picker.
-private fun TopicTopBar(
+internal fun TopicTopBar(
     state: TopicUiState,
     barTitle: String,
     barPageIndicator: String,
@@ -888,6 +895,16 @@ private fun TopicTopBar(
     val searchLabel = stringResource(R.string.topic_search_open)
     var pagePickerOpen by remember { mutableStateOf(false) }
     val pagePickerLabel = stringResource(R.string.topic_page_picker_open)
+    // #772 — tap on the title reveals it in full (2 lines max), tap again folds it back. Transient
+    // by design (arbitrage XaTriX) : plain `remember`, so a page change (route replace) or leaving
+    // the screen resets it — unlike the hoisted poll expansion (#465), which must survive swaps.
+    var titleExpanded by remember { mutableStateOf(false) }
+    val titleToggleLabel = stringResource(
+        if (titleExpanded) R.string.topic_title_collapse else R.string.topic_title_expand,
+    )
+    val titleStateLabel = stringResource(
+        if (titleExpanded) R.string.topic_title_expanded else R.string.topic_title_collapsed,
+    )
     Column {
         TopAppBar(
             title = {
@@ -895,8 +912,20 @@ private fun TopicTopBar(
                     Text(
                         text = barTitle,
                         style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
+                        maxLines = if (titleExpanded) 2 else 1,
                         overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .clickable(onClickLabel = titleToggleLabel) {
+                                val expanding = !titleExpanded
+                                titleExpanded = expanding
+                                if (expanding) {
+                                    // enterAlways may hold the bar partially collapsed — re-deploy
+                                    // it so the freshly granted second line shows instead of
+                                    // staying clipped behind the current height offset.
+                                    scrollBehavior?.state?.heightOffset = 0f
+                                }
+                            }
+                            .semantics { stateDescription = titleStateLabel },
                     )
                     Text(
                         text = barPageIndicator,
@@ -937,6 +966,13 @@ private fun TopicTopBar(
                         RedfaceVectorIcon(resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_search)
                     }
                 }
+            },
+            // #772 — the small M3 top app bar has a FIXED container height that never grows for a
+            // 2-line title : grant the extra line height while expanded, else keep the M3 default.
+            expandedHeight = if (titleExpanded) {
+                TopAppBarDefaults.TopAppBarExpandedHeight + TopBarExpandedTitleExtraHeight
+            } else {
+                TopAppBarDefaults.TopAppBarExpandedHeight
             },
             scrollBehavior = scrollBehavior,
         )
