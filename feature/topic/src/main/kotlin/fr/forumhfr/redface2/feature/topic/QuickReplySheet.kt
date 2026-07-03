@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -35,8 +37,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
-import fr.forumhfr.redface2.core.ui.editor.QuoteCard
-import fr.forumhfr.redface2.core.ui.editor.QuoteCardControls
+import fr.forumhfr.redface2.core.ui.editor.QuoteCardsCallbacks
+import fr.forumhfr.redface2.core.ui.editor.QuoteCardsColumn
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 
 /**
@@ -99,7 +101,11 @@ internal fun QuickReplySheet(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp)
                 .imePadding()
-                .navigationBarsPadding(),
+                .navigationBarsPadding()
+                // #604 lot 4a — the sheet content scrolls : with the keyboard up (~40 % of the
+                // screen), two cards + the field + Envoyer can overflow a small or landscape
+                // display, leaving the send button unreachable (cadrage Codex, item 1).
+                .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -120,19 +126,17 @@ internal fun QuickReplySheet(
                     )
                 }
             }
-            state.quotes.forEachIndexed { index, quote ->
-                QuoteCard(
-                    quote = quote,
-                    controls = QuoteCardControls(
-                        canMoveUp = index > 0,
-                        canMoveDown = index < state.quotes.lastIndex,
-                        enabled = !state.isSubmitting,
-                        onMoveUp = { viewModel.onQuoteMoved(quote.numreponse, delta = -1) },
-                        onMoveDown = { viewModel.onQuoteMoved(quote.numreponse, delta = 1) },
-                        onRemove = { viewModel.onQuoteRemoved(quote.numreponse) },
-                    ),
-                )
-            }
+            // #604 lot 4a — shared column : cards + live-region announcements + post-removal
+            // focus (always composed ; renders nothing visible without cards).
+            QuoteCardsColumn(
+                quotes = state.quotes,
+                enabled = !state.isSubmitting,
+                callbacks = QuoteCardsCallbacks(
+                    onMoveUp = { numreponse -> viewModel.onQuoteMoved(numreponse, delta = -1) },
+                    onMoveDown = { numreponse -> viewModel.onQuoteMoved(numreponse, delta = 1) },
+                    onRemove = viewModel::onQuoteRemoved,
+                ),
+            )
             OutlinedTextField(
                 value = state.text,
                 onValueChange = viewModel::onTextChanged,

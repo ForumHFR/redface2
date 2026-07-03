@@ -102,4 +102,8 @@
     <string name="editor_quote_move_up">Monter la citation de %1$s</string>
     <string name="editor_quote_move_down">Descendre la citation de %1$s</string>
     <string name="editor_quote_remove">Retirer la citation de %1$s</string>
+    <!-- #604 lot 4a : annonces TalkBack des mutations de cartes (le label du bouton décrit
+         l'action, la live region décrit le résultat). -->
+    <string name="editor_quote_a11y_removed">Citation de %1$s retirée</string>
+    <string name="editor_quote_a11y_moved">Citation de %1$s déplacée en position %2$d</string>
 </resources>

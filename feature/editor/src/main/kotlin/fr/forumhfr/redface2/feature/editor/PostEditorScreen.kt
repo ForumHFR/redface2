@@ -7,6 +7,7 @@ import fr.forumhfr.redface2.core.ui.editor.bannerText
 
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -64,8 +65,8 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodePreview
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
 import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
 import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
-import fr.forumhfr.redface2.core.ui.editor.QuoteCard
-import fr.forumhfr.redface2.core.ui.editor.QuoteCardControls
+import fr.forumhfr.redface2.core.ui.editor.QuoteCardsCallbacks
+import fr.forumhfr.redface2.core.ui.editor.QuoteCardsColumn
 
 
 /**
@@ -78,6 +79,9 @@ import fr.forumhfr.redface2.core.ui.editor.QuoteCardControls
 fun PostEditorScreen(
     request: PostEditorRequest,
     onSubmitSucceeded: (targetPage: Int?, scrollTo: Int?) -> Unit,
+    // #604 lot 4a — pops this editor AFTER the ViewModel flushed the draft (CloseCommitted).
+    // Default keeps callers without the wiring on the platform back (no flush) — `:app` wires it.
+    onClose: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     viewModel: PostEditorViewModel = hiltViewModel<PostEditorViewModel, PostEditorViewModel.Factory>(
         creationCallback = { factory -> factory.create(request) },
@@ -89,8 +93,15 @@ fun PostEditorScreen(
             when (effect) {
                 is PostEditorEffect.SubmitSucceeded ->
                     onSubmitSucceeded(effect.targetPage, effect.scrollTo)
+                PostEditorEffect.CloseCommitted -> onClose?.invoke()
             }
         }
+    }
+    // #604 lot 4a — route the system back through the ViewModel so the pending autosave debounce
+    // is flushed BEFORE the pop (trading the predictive-back preview for never losing the last
+    // < 750 ms of typing — cadrage Codex, item 2). Only armed when `:app` wired the pop.
+    if (onClose != null) {
+        BackHandler { viewModel.submit(PostEditorIntent.CloseRequested) }
     }
     PostEditorContent(
         state = state,
@@ -367,7 +378,8 @@ private fun EditorQuoteCards(
     enabled: Boolean,
     onIntent: (PostEditorIntent) -> Unit,
 ) {
-    if (quotes.isEmpty()) return
+    // No early-return on empty (#604 lot 4a) : the shared column hosts the live region that
+    // announces the LAST removal — hiding the whole block would silence it.
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (quotes.size > 1) {
             val clearAllLabel = stringResource(R.string.editor_quotes_clear_all_a11y)
@@ -381,26 +393,18 @@ private fun EditorQuoteCards(
                 }
             }
         }
-        Column(
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+        QuoteCardsColumn(
+            quotes = quotes,
+            enabled = enabled,
+            callbacks = QuoteCardsCallbacks(
+                onMoveUp = { numreponse -> onIntent(PostEditorIntent.QuoteMoved(numreponse, delta = -1)) },
+                onMoveDown = { numreponse -> onIntent(PostEditorIntent.QuoteMoved(numreponse, delta = 1)) },
+                onRemove = { numreponse -> onIntent(PostEditorIntent.QuoteRemoved(numreponse)) },
+            ),
             modifier = Modifier
                 .heightIn(max = MAX_VISIBLE_CARDS_HEIGHT)
                 .verticalScroll(rememberScrollState()),
-        ) {
-            quotes.forEachIndexed { index, quote ->
-                QuoteCard(
-                    quote = quote,
-                    controls = QuoteCardControls(
-                        canMoveUp = index > 0,
-                        canMoveDown = index < quotes.lastIndex,
-                        enabled = enabled,
-                        onMoveUp = { onIntent(PostEditorIntent.QuoteMoved(quote.numreponse, delta = -1)) },
-                        onMoveDown = { onIntent(PostEditorIntent.QuoteMoved(quote.numreponse, delta = 1)) },
-                        onRemove = { onIntent(PostEditorIntent.QuoteRemoved(quote.numreponse)) },
-                    ),
-                )
-            }
-        }
+        )
     }
 }
 

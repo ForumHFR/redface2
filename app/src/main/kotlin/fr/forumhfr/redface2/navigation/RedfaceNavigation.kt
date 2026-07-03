@@ -2612,6 +2612,13 @@ private fun RedfaceNavHost(
                         initialQuotes = multiQuoteNavState.pendingEditorQuotes.orEmpty(),
                         resumeSharedDraft = route.resumeSharedDraft,
                     ),
+                    // #604 lot 4a — the system back reaches here only AFTER the ViewModel
+                    // flushed the draft row (CloseCommitted). Same guarded pop as onBack.
+                    onClose = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
                     onSubmitSucceeded = { targetPage, scrollTo ->
                         // Pop the editor and refresh the topic page. `targetPage` is parsed
                         // from HFR's success URL and tells us which page to land on;

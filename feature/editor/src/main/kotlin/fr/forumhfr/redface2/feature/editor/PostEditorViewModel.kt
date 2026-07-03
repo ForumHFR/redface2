@@ -247,16 +247,36 @@ class PostEditorViewModel @AssistedInject constructor(
      * an active session, so nothing is persisted for an anonymous client.
      */
     private fun scheduleAutosave() {
-        val key = draftKey ?: return
-        val body = _state.value.draft.text
+        if (draftKey == null) return
         autosaveJob?.cancel()
         autosaveJob = viewModelScope.launch {
             delay(AUTOSAVE_DEBOUNCE_MS)
-            if (body.isBlank()) {
-                draftStore.delete(draftOwner, key)
-            } else {
-                draftStore.save(draftOwner, key, EditorDraftStore.Draft(body = body))
-            }
+            persistDraftNow()
+        }
+    }
+
+    /** Immediate write of the current body (blank = delete the row, cf. [scheduleAutosave]). */
+    private suspend fun persistDraftNow() {
+        val key = draftKey ?: return
+        val body = _state.value.draft.text
+        if (body.isBlank()) {
+            draftStore.delete(draftOwner, key)
+        } else {
+            draftStore.save(draftOwner, key, EditorDraftStore.Draft(body = body))
+        }
+    }
+
+    /**
+     * #604 lot 4a — dirty close : flush the pending debounce so the last keystrokes reach the
+     * #405 row, THEN let the UI pop (CloseCommitted). Without this, a system back < 750 ms
+     * after typing cancelled the debounce with the ViewModel and silently dropped the tail of
+     * the draft. Mirrors the quick-reply escalation (save awaited before the effect).
+     */
+    private fun onCloseRequested() {
+        autosaveJob?.cancel()
+        viewModelScope.launch {
+            persistDraftNow()
+            _effects.send(PostEditorEffect.CloseCommitted)
         }
     }
 
@@ -290,6 +310,7 @@ class PostEditorViewModel @AssistedInject constructor(
             is PostEditorIntent.QuoteRemoved -> onQuoteRemoved(intent.numreponse)
             is PostEditorIntent.QuoteMoved -> onQuoteMoved(intent.numreponse, intent.delta)
             PostEditorIntent.QuotesCleared -> _state.update { it.copy(quotes = emptyList()) }
+            PostEditorIntent.CloseRequested -> onCloseRequested()
         }
     }
 
