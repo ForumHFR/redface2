@@ -137,7 +137,10 @@
          onglet vide (il peut rester des sujets lus, juste aucun non-lu). On garde donc un état vide
          distinct, factuel, plutôt que le « Aucun favori » trompeur. -->
     <string name="flags_no_unread_category">Aucune catégorie avec un message non lu</string>
-    <string name="flags_no_unread_category_subtitle">Désactive « Masquer les catégories sans non-lu » pour revoir les sujets lus.</string>
+    <!-- #753 (Dintr-un lemn) — l'ancien texte prescrivait « Masquer les catégories sans non-lu »,
+         qui ne réaffiche que les bandeaux de catégories vides : l'action qui réaffiche les SUJETS lus
+         est la bascule « +lus » (pilule d'onglet). Les deux actions sont nommées avec leur effet réel. -->
+    <string name="flags_no_unread_category_subtitle">Tape sur la pilule de l\'onglet pour afficher aussi les sujets lus (« +lus »), ou désactive « Masquer les catégories sans non-lu » pour voir les catégories vides.</string>
     <string name="flags_error">Impossible de récupérer les drapeaux. Vérifie ta connexion ou réessaie.</string>
     <string name="flags_session_expired">Session HFR expirée. Reconnecte-toi pour recharger tes drapeaux.</string>
     <string name="flags_retry">Réessayer</string>
