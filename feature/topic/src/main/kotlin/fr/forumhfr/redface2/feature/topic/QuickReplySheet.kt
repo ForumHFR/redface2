@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -32,6 +33,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -141,6 +143,9 @@ internal fun QuickReplySheet(
                 value = state.text,
                 onValueChange = viewModel::onTextChanged,
                 enabled = !state.isSubmitting,
+                // #807 — same #237 contract as BbcodeTextField : Compose capitalises NOTHING by
+                // default, the IME needs the explicit autoCap hint (surface regression, v220).
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                 placeholder = { Text(stringResource(R.string.quick_reply_hint)) },
                 minLines = 3,
                 maxLines = 6,
