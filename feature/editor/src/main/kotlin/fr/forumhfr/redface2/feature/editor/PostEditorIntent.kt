@@ -92,6 +92,14 @@ sealed interface PostEditorIntent {
 
     /** #436 (#604 lot 3) — « Tout vider » : drop every quote card. The typed body is untouched. */
     data object QuotesCleared : PostEditorIntent
+
+    /**
+     * #604 lot 4a — the user is leaving the editor (system back). The ViewModel flushes the
+     * pending debounced autosave FIRST, then emits [PostEditorEffect.CloseCommitted] — closing
+     * through the ViewModel is what guarantees the last < 750 ms of typing reach the #405 row
+     * (a plain pop would cancel the debounce with the ViewModel).
+     */
+    data object CloseRequested : PostEditorIntent
 }
 
 /**
@@ -113,4 +121,11 @@ sealed interface PostEditorEffect {
         val targetPage: Int?,
         val scrollTo: Int? = null,
     ) : PostEditorEffect
+
+    /**
+     * #604 lot 4a — the draft is persisted, the editor may now actually pop (twin of the
+     * quick-reply escalation contract : the save is AWAITED before the effect, so navigation
+     * can never cancel it).
+     */
+    data object CloseCommitted : PostEditorEffect
 }

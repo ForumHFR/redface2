@@ -54,6 +54,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -1866,6 +1867,86 @@ class PostEditorViewModelTest {
             "the POST must ride the state's toggles, not the quote form's defaults",
             replyRepository.lastSubmittedOptions?.signatureEnabled == true,
         )
+    }
+
+    // ----- #604 lot 4a : dirty close (flush avant pop) -------------------------
+
+    @Test
+    fun `CloseRequested flushes the pending debounce before CloseCommitted`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val viewModel = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+
+        // Type, then close IMMEDIATELY — well inside the 750 ms debounce window.
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("dernier mot")))
+        viewModel.submit(PostEditorIntent.CloseRequested)
+
+        val effect = viewModel.effects.first()
+        assertEquals(PostEditorEffect.CloseCommitted, effect)
+        assertEquals(
+            "the tail of the draft must reach the row before the pop",
+            "dernier mot",
+            draftStore.saved[EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)]?.body,
+        )
+    }
+
+    @Test
+    fun `CloseRequested with a blank body deletes the row and still closes`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        draftStore.preload(key, EditorDraftStore.Draft(body = "stale"))
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val viewModel = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.CloseRequested)
+
+        val effect = viewModel.effects.first()
+        assertEquals(PostEditorEffect.CloseCommitted, effect)
+        assertTrue("an emptied editor must not leave a stale row", draftStore.deletedKeys.contains(key))
+    }
+
+    @Test
+    fun `CloseRequested during an in-flight submit is ignored (gate #803)`() = runTest {
+        val submitGate = CompletableDeferred<Unit>()
+        replyRepository.formResult = Result.success(authenticatedForm())
+        replyRepository.submitResult = ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+        replyRepository.submitGate = submitGate
+        val viewModel = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("en vol")))
+        viewModel.submit(PostEditorIntent.SubmitClicked)
+        // Back pressed while the POST is in flight — must be inert (parity with the sheet, #788).
+        viewModel.submit(PostEditorIntent.CloseRequested)
+        submitGate.complete(Unit)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.effects.test {
+            assertTrue(
+                "the submit outcome must be the ONLY effect — no CloseCommitted",
+                awaitItem() is PostEditorEffect.SubmitSucceeded,
+            )
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a second CloseRequested is a no-op (gate #803)`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val viewModel = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.CloseRequested)
+        viewModel.submit(PostEditorIntent.CloseRequested)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.effects.test {
+            assertEquals(PostEditorEffect.CloseCommitted, awaitItem())
+            // A double back must never yield a second pop (it would remove the screen BELOW).
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     /** #604 lot 3 — quote-card snapshot, as the topic surface would build it at selection time. */
