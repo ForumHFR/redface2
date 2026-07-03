@@ -42,6 +42,7 @@ import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
+import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
 import fr.forumhfr.redface2.core.model.write.ReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
@@ -351,123 +352,124 @@ class PostEditorViewModelTest {
     }
 
     @Test
-    fun `quote VM forwards quotedNumreponse and quoteRef to ReplyRepository on form fetch`() = runTest {
-        replyRepository.formResult = Result.success(
-            authenticatedForm(initialContent = "[quotemsg=2784595,768,1214571]hi[/quotemsg]"),
-        )
-        newReplyViewModel(quotedNumreponse = 2784595, quoteRef = 0)
+    fun `quote cards leave the open-time fetch plain (#604 lot 3)`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val viewModel = newReplyViewModel(initialQuotes = listOf(card(2784595)))
         // Let the launched form fetch complete.
         testScheduler.advanceUntilIdle()
 
         val context = replyRepository.lastFetchedContext
         assertNotNull("fetchReplyForm must have been called", context)
         requireNotNull(context)
-        assertEquals("quoted numreponse must propagate", 2784595, context.quotedNumreponse)
-        assertEquals("quote ref must propagate", 0, context.quoteRef)
-        assertTrue("isQuote must be true", context.isQuote)
+        assertNull("open-time fetch must be the PLAIN form — cards materialise at submit", context.quotedNumreponse)
+        assertFalse("isQuote must be false at open", context.isQuote)
+        assertEquals(listOf(2784595), viewModel.state.value.quotes.map { it.numreponse })
     }
 
     @Test
-    fun `quote VM hydrates the draft from initialContent on first form load`() = runTest {
-        val prefill = "[quotemsg=2784595,768,1214571]hi[/quotemsg]"
-        replyRepository.formResult = Result.success(authenticatedForm(initialContent = prefill))
+    fun `quote cards never prefill the field — the draft stays user-owned`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
 
-        val viewModel = newReplyViewModel(quotedNumreponse = 2784595, quoteRef = 0)
+        val viewModel = newReplyViewModel(initialQuotes = listOf(card(2784595)))
         viewModel.state.test {
             val settled = expectMostRecentItem()
             assertFalse("Form must be fully loaded", settled.isLoadingForm)
-            assertEquals("Draft hydrated with HFR prefill", prefill, settled.draft.text)
-            assertTrue("Caret placed at the end of the prefill", settled.draftHydratedFromForm)
-            assertEquals(prefill.length, settled.draft.selection.start)
+            assertEquals("field stays empty — citations are cards, not BBCode", "", settled.draft.text)
+            assertFalse("nothing hydrated from the plain form", settled.draftHydratedFromForm)
             cancelAndIgnoreRemainingEvents()
         }
     }
 
     @Test
-    fun `multi-quote VM concatenates the prefills in selection order (#291)`() = runTest {
-        // One #146 form fetch per quoted post — the FIRST carries the session form (hash_check),
-        // the extras only contribute their prefill. HFR prefills end with a trailing blank line;
-        // the merge must keep ONE blank line between quotes and one after the last.
+    fun `submit materialises the quote cards in card order (#291, #604 lot 3)`() = runTest {
+        // One #146 form fetch per card AT SUBMIT — the FIRST carries the session form
+        // (hash_check), the extras only contribute their prefill. HFR prefills end with a
+        // trailing blank line; the merge keeps ONE blank line between quotes, the typed body
+        // follows after a single blank line.
+        replyRepository.formResult = Result.success(authenticatedForm())
         replyRepository.formResultsByNumrep = mapOf(
             101 to Result.success(authenticatedForm(initialContent = "[quotemsg=101,1,9]a[/quotemsg]\n\n")),
             303 to Result.success(authenticatedForm(initialContent = "[quotemsg=303,3,9]c[/quotemsg]\n\n")),
             202 to Result.success(authenticatedForm(initialContent = "[quotemsg=202,2,9]b[/quotemsg]\n\n")),
         )
+        replyRepository.submitResult = ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
 
-        // Selection order 101 → 303 → 202 is deliberately NOT post order.
-        val viewModel = newReplyViewModel(
-            quotedNumreponse = 101,
-            quoteRef = 0,
-            extraQuoteNumreponses = listOf(303, 202),
-        )
+        // Card order 101 → 303 → 202 is deliberately NOT post order.
+        val viewModel = newReplyViewModel(initialQuotes = listOf(card(101), card(303), card(202)))
+        testScheduler.advanceUntilIdle()
+        assertEquals("open-time fetch is the plain form only", 1, replyRepository.formFetches)
+
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("Reply")))
+        viewModel.submit(PostEditorIntent.SubmitClicked)
         testScheduler.advanceUntilIdle()
 
-        assertEquals("one fetch per quoted post", 3, replyRepository.formFetches)
+        assertEquals("plain open fetch + one quote fetch per card", 4, replyRepository.formFetches)
         assertEquals(
-            "extras must replay the quote contract with the numreponse swapped (no stale quoteRef)",
-            listOf(101 to 0, 303 to null, 202 to null),
+            "cards replay the quote contract in CARD order (never a stale quoteRef)",
+            listOf(null to null, 101 to null, 303 to null, 202 to null),
             replyRepository.fetchedContexts.map { it.quotedNumreponse to it.quoteRef },
         )
-        viewModel.state.test {
-            val settled = expectMostRecentItem()
-            assertFalse("Form must be fully loaded", settled.isLoadingForm)
-            assertEquals(
-                "prefills concatenated in SELECTION order, single blank line between quotes",
-                "[quotemsg=101,1,9]a[/quotemsg]\n\n" +
-                    "[quotemsg=303,3,9]c[/quotemsg]\n\n" +
-                    "[quotemsg=202,2,9]b[/quotemsg]\n\n",
-                settled.draft.text,
-            )
-            cancelAndIgnoreRemainingEvents()
-        }
+        assertEquals("one POST riding the first quote form's hash", 1, replyRepository.submitCalls)
+        assertEquals(101, replyRepository.lastSubmittedContext?.quotedNumreponse)
+        assertEquals(
+            "prefills concatenated in card order, body after a single blank line",
+            "[quotemsg=101,1,9]a[/quotemsg]\n\n" +
+                "[quotemsg=303,3,9]c[/quotemsg]\n\n" +
+                "[quotemsg=202,2,9]b[/quotemsg]\n\nReply",
+            replyRepository.lastSubmittedBbcode,
+        )
     }
 
     @Test
-    fun `multi-quote VM fails the whole fetch when one extra quote fails (#291)`() = runTest {
+    fun `submit fails whole when one card's fetch fails — cards and body intact (#291)`() = runTest {
         // Silently dropping a quote the user explicitly selected would be worse than the
-        // retryable form-fetch error, so a failed extra fails the load.
+        // retryable error, so a failed card fails the whole submit — and loses NOTHING.
+        replyRepository.formResult = Result.success(authenticatedForm())
         replyRepository.formResultsByNumrep = mapOf(
             101 to Result.success(authenticatedForm(initialContent = "[quotemsg=101,1,9]a[/quotemsg]\n\n")),
             303 to Result.failure(java.io.IOException("boom")),
         )
 
-        val viewModel = newReplyViewModel(
-            quotedNumreponse = 101,
-            quoteRef = null,
-            extraQuoteNumreponses = listOf(303),
-        )
+        val viewModel = newReplyViewModel(initialQuotes = listOf(card(101), card(303)))
+        testScheduler.advanceUntilIdle()
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("Reply")))
+        viewModel.submit(PostEditorIntent.SubmitClicked)
         testScheduler.advanceUntilIdle()
 
+        assertEquals("nothing must reach HFR on a failed materialisation", 0, replyRepository.submitCalls)
         viewModel.state.test {
             val settled = expectMostRecentItem()
-            assertFalse(settled.isLoadingForm)
-            assertEquals("draft must not hydrate from a partial multi-quote", "", settled.draft.text)
+            assertFalse(settled.isSubmitting)
             assertEquals(SubmitError.Network, settled.submitError)
+            assertEquals("cards intact", listOf(101, 303), settled.quotes.map { it.numreponse })
+            assertEquals("body intact", "Reply", settled.draft.text)
             cancelAndIgnoreRemainingEvents()
         }
     }
 
     @Test
-    fun `multi-quote VM fails the whole fetch when a prefill comes back blank (#291)`() = runTest {
+    fun `submit fails whole when a card's prefill comes back blank (#291)`() = runTest {
         // A 200-OK form whose textarea prefill is EMPTY would otherwise silently drop a quote
-        // the user explicitly selected — same contract as a failed extra: fail globally.
+        // the user explicitly selected — same contract as a failed fetch: fail globally.
+        replyRepository.formResult = Result.success(authenticatedForm())
         replyRepository.formResultsByNumrep = mapOf(
             101 to Result.success(authenticatedForm(initialContent = "[quotemsg=101,1,9]a[/quotemsg]\n\n")),
             303 to Result.success(authenticatedForm(initialContent = "")),
         )
 
-        val viewModel = newReplyViewModel(
-            quotedNumreponse = 101,
-            quoteRef = null,
-            extraQuoteNumreponses = listOf(303),
-        )
+        val viewModel = newReplyViewModel(initialQuotes = listOf(card(101), card(303)))
+        testScheduler.advanceUntilIdle()
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("Reply")))
+        viewModel.submit(PostEditorIntent.SubmitClicked)
         testScheduler.advanceUntilIdle()
 
+        assertEquals("nothing must reach HFR", 0, replyRepository.submitCalls)
         viewModel.state.test {
             val settled = expectMostRecentItem()
-            assertFalse(settled.isLoadingForm)
-            assertEquals("draft must not hydrate from a partial multi-quote", "", settled.draft.text)
+            assertFalse(settled.isSubmitting)
             assertEquals(SubmitError.Hfr(ReplyFailureReason.Unknown), settled.submitError)
+            assertEquals("cards intact", listOf(101, 303), settled.quotes.map { it.numreponse })
+            assertEquals("body intact", "Reply", settled.draft.text)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -478,12 +480,10 @@ class PostEditorViewModelTest {
         // we gate the fetch with a CompletableDeferred so we can interleave them
         // exactly like the production race (network in flight, user typing).
         val formGate = CompletableDeferred<Unit>()
-        replyRepository.formResult = Result.success(
-            authenticatedForm(initialContent = "[quotemsg=2784595,768,1214571]hi[/quotemsg]"),
-        )
+        replyRepository.formResult = Result.success(authenticatedForm())
         replyRepository.formGate = formGate
 
-        val viewModel = newReplyViewModel(quotedNumreponse = 2784595, quoteRef = 0)
+        val viewModel = newReplyViewModel(initialQuotes = listOf(card(2784595)))
         // Type before the form lands.
         viewModel.submit(
             PostEditorIntent.ContentChanged(
@@ -716,35 +716,33 @@ class PostEditorViewModelTest {
     }
 
     @Test
-    fun `submit with InvalidHashCheck silently refetches without clobbering quote draft`() = runTest {
-        // `handleSubmitOutcome(InvalidHashCheck)` resets `loadedForm = null` and
-        // re-invokes `loadReplyFormIfPossible()`. The `draftHydratedFromForm`
-        // guard must prevent the refetch from overwriting whatever the user has
-        // typed since the initial hydration. We assert : (a) the second form
-        // fetch did happen, (b) the user's edited draft survives.
-        val prefill = "[quotemsg=2784595,768,1214571]hi[/quotemsg]"
-        replyRepository.formResult = Result.success(authenticatedForm(initialContent = prefill))
+    fun `submit with InvalidHashCheck silently refetches without clobbering draft or cards`() = runTest {
+        // `handleSubmitOutcome(InvalidHashCheck)` resets `loadedForm = null` and re-invokes
+        // `loadReplyFormIfPossible()` (plain form since #604 lot 3 — blank initialContent, so
+        // the refetch has nothing to clobber the field with). We assert : (a) the silent
+        // refetch did happen, (b) the user's text AND the cards survive.
+        replyRepository.formResult = Result.success(authenticatedForm())
+        replyRepository.formResultsByNumrep = mapOf(
+            2784595 to Result.success(
+                authenticatedForm(initialContent = "[quotemsg=2784595,768,1214571]hi[/quotemsg]\n\n"),
+            ),
+        )
         replyRepository.submitResult = ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
 
-        val viewModel = newReplyViewModel(quotedNumreponse = 2784595, quoteRef = 0)
+        val viewModel = newReplyViewModel(initialQuotes = listOf(card(2784595)))
         testScheduler.advanceUntilIdle()
-        assertEquals("initial form fetch", 1, replyRepository.formFetches)
+        assertEquals("initial plain form fetch", 1, replyRepository.formFetches)
 
-        // User edits the prefill (cursor at end → add a real reply after the quote).
-        val edited = "$prefill\n\nReply"
-        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue(edited)))
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("Reply")))
         viewModel.submit(PostEditorIntent.SubmitClicked)
         testScheduler.advanceUntilIdle()
 
-        assertEquals("silent refetch after InvalidHashCheck", 2, replyRepository.formFetches)
+        // Open (plain) + the card's quote-form materialisation + the silent plain refetch.
+        assertEquals("silent refetch after InvalidHashCheck", 3, replyRepository.formFetches)
         viewModel.state.test {
             val settled = expectMostRecentItem()
-            assertEquals(
-                "User edit must survive the silent refetch — draftHydratedFromForm blocks the rewrite",
-                edited,
-                settled.draft.text,
-            )
-            assertTrue("draftHydratedFromForm stays true across refetch", settled.draftHydratedFromForm)
+            assertEquals("user text must survive the silent refetch", "Reply", settled.draft.text)
+            assertEquals("cards must survive too", listOf(2784595), settled.quotes.map { it.numreponse })
             assertEquals(
                 SubmitError.Hfr(ReplyFailureReason.InvalidHashCheck),
                 settled.submitError,
@@ -754,18 +752,15 @@ class PostEditorViewModelTest {
     }
 
     @Test
-    fun `quote hydration refreshes preview when preview was already visible`() = runTest {
-        // Race : user opens quote editor, opens the preview pane WHILE the form
-        // is still loading, form arrives → both `draft` and `preview` must reflect
-        // the `[quotemsg=…]` prefill. Before round 2 the preview AST stayed empty
-        // until the next `ContentChanged` / `TogglePreview`, which felt like a bug
-        // even though the draft was fine.
+    fun `edit hydration refreshes preview when preview was already visible`() = runTest {
+        // Race : user opens the edit editor, opens the preview pane WHILE the form is still
+        // loading, form arrives → both `draft` and `preview` must reflect the existing post
+        // body. (Was a quote-prefill test before #604 lot 3 ; Edit is the only mode still
+        // hydrating the field from `initialContent`, so the guard now lives here.)
         val formGate = CompletableDeferred<Unit>()
-        val prefill = "[quotemsg=2784595,768,1214571]hi[/quotemsg]"
-        replyRepository.formResult = Result.success(authenticatedForm(initialContent = prefill))
-        replyRepository.formGate = formGate
+        editPostRepository.formGate = formGate
 
-        val viewModel = newReplyViewModel(quotedNumreponse = 2784595, quoteRef = 0)
+        val viewModel = newEditViewModel()
         // Toggle preview BEFORE the form lands.
         viewModel.submit(PostEditorIntent.TogglePreview)
         // Now release the form fetch.
@@ -774,11 +769,11 @@ class PostEditorViewModelTest {
 
         viewModel.state.test {
             val settled = expectMostRecentItem()
-            assertEquals("Draft hydrated with HFR prefill", prefill, settled.draft.text)
+            assertEquals("Draft hydrated with the existing post body", "existing post body", settled.draft.text)
             assertTrue("Preview was visible before hydration", settled.isPreviewVisible)
             assertEquals(
                 "Preview AST must reflect the hydrated draft",
-                previewParser.contentFor(prefill),
+                previewParser.contentFor("existing post body"),
                 settled.preview,
             )
             cancelAndIgnoreRemainingEvents()
@@ -788,9 +783,7 @@ class PostEditorViewModelTest {
     @Suppress("LongParameterList") // test helper: every param is an optional, defaulted scenario knob.
     private fun newReplyViewModel(
         subcat: Int? = SAMPLE_SUBCAT,
-        quotedNumreponse: Int? = null,
-        quoteRef: Int? = null,
-        extraQuoteNumreponses: List<Int> = emptyList(),
+        initialQuotes: List<QuotedPostPreview> = emptyList(),
         resumeSharedDraft: Boolean = false,
         diagnostics: DiagnosticsLog = DiagnosticsLog(),
         userPreferencesRepository: UserPreferencesRepository = FakeUserPreferencesRepository(),
@@ -804,9 +797,7 @@ class PostEditorViewModelTest {
                 numreponse = null,
                 page = SAMPLE_PAGE,
                 subcat = subcat,
-                quotedNumreponse = quotedNumreponse,
-                quoteRef = quoteRef,
-                extraQuoteNumreponses = extraQuoteNumreponses,
+                initialQuotes = initialQuotes,
                 resumeSharedDraft = resumeSharedDraft,
             ),
             previewParser = previewParser,
@@ -1773,41 +1764,113 @@ class PostEditorViewModelTest {
     }
 
     @Test
-    fun `resumeSharedDraft prepends the quote prefill to the resumed body`() = runTest {
-        draftStore.preload(
-            EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID),
-            EditorDraftStore.Draft(body = "texte de la sheet"),
-        )
-        replyRepository.formResult =
-            Result.success(authenticatedForm(initialContent = "[quotemsg=101]cité[/quotemsg]"))
-        val viewModel = newReplyViewModel(resumeSharedDraft = true, quotedNumreponse = 101)
+    fun `resumeSharedDraft with no stored draft leaves the field empty — cards carry the citations`() = runTest {
+        // (Replaced the pre-lot-3 « prepend the quote prefill » contract : the plain reply form
+        // has no prefill anymore, the escalated citations arrive as cards.)
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val viewModel = newReplyViewModel(resumeSharedDraft = true, initialQuotes = listOf(card(101)))
         testScheduler.advanceUntilIdle()
 
         viewModel.state.test {
             val settled = expectMostRecentItem()
-            assertEquals(
-                "[quotemsg=101]cité[/quotemsg]\n\ntexte de la sheet",
-                settled.draft.text,
-            )
+            assertEquals("", settled.draft.text)
             assertNull(settled.restorableDraft)
+            assertEquals(listOf(101), settled.quotes.map { it.numreponse })
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    // ----- #604 lot 3 : cartes de citation dans l'éditeur ---------------------
+
+    @Test
+    fun `initial quote cards are seeded in order and deduplicated`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val viewModel = newReplyViewModel(initialQuotes = listOf(card(202), card(101), card(202)))
+        assertEquals(listOf(202, 101), viewModel.state.value.quotes.map { it.numreponse })
     }
 
     @Test
-    fun `resumeSharedDraft with no stored draft falls back to classic prefill hydration`() = runTest {
-        replyRepository.formResult =
-            Result.success(authenticatedForm(initialContent = "[quotemsg=101]cité[/quotemsg]"))
-        val viewModel = newReplyViewModel(resumeSharedDraft = true, quotedNumreponse = 101)
+    fun `QuoteRemoved and QuotesCleared drop cards without touching the body`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val viewModel = newReplyViewModel(initialQuotes = listOf(card(101), card(202)))
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("body")))
+
+        viewModel.submit(PostEditorIntent.QuoteRemoved(101))
+        assertEquals(listOf(202), viewModel.state.value.quotes.map { it.numreponse })
+
+        viewModel.submit(PostEditorIntent.QuotesCleared)
+        assertEquals(emptyList<Int>(), viewModel.state.value.quotes.map { it.numreponse })
+        assertEquals("body untouched by card mutations", "body", viewModel.state.value.draft.text)
+    }
+
+    @Test
+    fun `QuoteMoved reorders within bounds and no-ops outside`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val viewModel = newReplyViewModel(initialQuotes = listOf(card(101), card(202), card(303)))
+
+        viewModel.submit(PostEditorIntent.QuoteMoved(303, delta = -1))
+        assertEquals(listOf(101, 303, 202), viewModel.state.value.quotes.map { it.numreponse })
+
+        viewModel.submit(PostEditorIntent.QuoteMoved(101, delta = -1))
+        assertEquals(
+            "first card cannot move up",
+            listOf(101, 303, 202),
+            viewModel.state.value.quotes.map { it.numreponse },
+        )
+
+        viewModel.submit(PostEditorIntent.QuoteMoved(999, delta = 1))
+        assertEquals(
+            "unknown card is a no-op",
+            listOf(101, 303, 202),
+            viewModel.state.value.quotes.map { it.numreponse },
+        )
+    }
+
+    @Test
+    fun `a quotes-only reply is submittable and keeps no trailing blank lines`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
+        replyRepository.formResultsByNumrep = mapOf(
+            101 to Result.success(authenticatedForm(initialContent = "[quotemsg=101,1,9]a[/quotemsg]\n\n")),
+            202 to Result.success(authenticatedForm(initialContent = "[quotemsg=202,2,9]b[/quotemsg]\n\n")),
+        )
+        replyRepository.submitResult = ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+        val viewModel = newReplyViewModel(initialQuotes = listOf(card(101), card(202)))
         testScheduler.advanceUntilIdle()
 
-        viewModel.state.test {
-            val settled = expectMostRecentItem()
-            assertEquals("[quotemsg=101]cité[/quotemsg]", settled.draft.text)
-            assertNull(settled.restorableDraft)
-            cancelAndIgnoreRemainingEvents()
-        }
+        assertTrue("cards alone must arm the submit (blank body)", viewModel.state.value.canSubmit)
+        viewModel.submit(PostEditorIntent.SubmitClicked)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(
+            "quotes-only reply: pinned BBCode, no trailing blank lines (same contract as the sheet)",
+            "[quotemsg=101,1,9]a[/quotemsg]\n\n[quotemsg=202,2,9]b[/quotemsg]",
+            replyRepository.lastSubmittedBbcode,
+        )
     }
+
+    @Test
+    fun `submit with cards honours the editor's user-edited options`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
+        replyRepository.formResultsByNumrep = mapOf(
+            101 to Result.success(authenticatedForm(initialContent = "[quotemsg=101,1,9]a[/quotemsg]\n\n")),
+        )
+        replyRepository.submitResult = ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+        val viewModel = newReplyViewModel(initialQuotes = listOf(card(101)))
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.ToggleSignature(true))
+        viewModel.submit(PostEditorIntent.SubmitClicked)
+        testScheduler.advanceUntilIdle()
+
+        assertTrue(
+            "the POST must ride the state's toggles, not the quote form's defaults",
+            replyRepository.lastSubmittedOptions?.signatureEnabled == true,
+        )
+    }
+
+    /** #604 lot 3 — quote-card snapshot, as the topic surface would build it at selection time. */
+    private fun card(numreponse: Int, author: String = "auteur$numreponse"): QuotedPostPreview =
+        QuotedPostPreview(numreponse = numreponse, author = author, excerpt = "extrait $numreponse")
 
     private fun authenticatedForm(initialContent: String = ""): ReplyForm = ReplyForm(
         hashCheck = "FAKE_HASH",

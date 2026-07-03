@@ -95,4 +95,11 @@
     <string name="editor_upload_progress">Envoi %1$d/%2$d…</string>
     <string name="editor_upload_provider_diberie">diberie</string>
     <string name="editor_upload_provider_imgur">imgur</string>
+
+    <!-- #604 lot 3 - cartes de citation partagees sheet + editeur plein ecran (promu de :feature:topic). -->
+    <string name="editor_quote_line">❝ %1$s — %2$s</string>
+    <string name="editor_quote_no_text">(citation sans texte)</string>
+    <string name="editor_quote_move_up">Monter la citation de %1$s</string>
+    <string name="editor_quote_move_down">Descendre la citation de %1$s</string>
+    <string name="editor_quote_remove">Retirer la citation de %1$s</string>
 </resources>

@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
@@ -47,10 +48,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
+import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitActions
 import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitButton
@@ -60,6 +64,8 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodePreview
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
 import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
 import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
+import fr.forumhfr.redface2.core.ui.editor.QuoteCard
+import fr.forumhfr.redface2.core.ui.editor.QuoteCardControls
 
 
 /**
@@ -154,6 +160,17 @@ private fun PostEditorContent(
                 // Multi-image upload — « n/N » progress under the toolbar while a batch (> 1 image)
                 // is in flight. A single upload keeps uploadProgress null (toolbar spinner only).
                 UploadProgressLabel(state.uploadProgress)
+
+                // #604 lot 3 (mockup P3) — the armed citations as cards ABOVE the field, the same
+                // rendering as the quick-reply sheet : the field only ever holds the user's text,
+                // the [quotemsg] blocks are materialised at submit. Scrolls internally past a few
+                // cards so a heavy multiquote can never crush the weighted field below. (Renders
+                // nothing without cards — the empty-check lives inside, detekt complexity budget.)
+                EditorQuoteCards(
+                    quotes = state.quotes,
+                    enabled = !state.isSubmitting,
+                    onIntent = onIntent,
+                )
 
                 BbcodeTextField(
                     value = state.draft,
@@ -337,6 +354,58 @@ internal fun DraftRestoreBanner(
         }
     }
 }
+
+/**
+ * #604 lot 3 (mockup P3) — the quote cards block of the full-screen editor : the shared
+ * [QuoteCard] rendering plus « Tout vider » (#436, shown from two cards up — for one card the
+ * per-card ✕ is the same act). The cards column scrolls internally above [MAX_VISIBLE_CARDS_HEIGHT]
+ * so a heavy multiquote (the case that FORCES the full screen) never crushes the draft field.
+ */
+@Composable
+private fun EditorQuoteCards(
+    quotes: List<QuotedPostPreview>,
+    enabled: Boolean,
+    onIntent: (PostEditorIntent) -> Unit,
+) {
+    if (quotes.isEmpty()) return
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (quotes.size > 1) {
+            val clearAllLabel = stringResource(R.string.editor_quotes_clear_all_a11y)
+            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                TextButton(
+                    onClick = { onIntent(PostEditorIntent.QuotesCleared) },
+                    enabled = enabled,
+                    modifier = Modifier.semantics { contentDescription = clearAllLabel },
+                ) {
+                    Text(text = stringResource(R.string.editor_quotes_clear_all))
+                }
+            }
+        }
+        Column(
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .heightIn(max = MAX_VISIBLE_CARDS_HEIGHT)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            quotes.forEachIndexed { index, quote ->
+                QuoteCard(
+                    quote = quote,
+                    controls = QuoteCardControls(
+                        canMoveUp = index > 0,
+                        canMoveDown = index < quotes.lastIndex,
+                        enabled = enabled,
+                        onMoveUp = { onIntent(PostEditorIntent.QuoteMoved(quote.numreponse, delta = -1)) },
+                        onMoveDown = { onIntent(PostEditorIntent.QuoteMoved(quote.numreponse, delta = 1)) },
+                        onRemove = { onIntent(PostEditorIntent.QuoteRemoved(quote.numreponse)) },
+                    ),
+                )
+            }
+        }
+    }
+}
+
+// #604 lot 3 — ~4 one-line cards ; past that the cards column scrolls internally.
+private val MAX_VISIBLE_CARDS_HEIGHT = 192.dp
 
 /**
  * Display state of [EditorSubmitBar]. [confirmArmed] is the « confirmation avant

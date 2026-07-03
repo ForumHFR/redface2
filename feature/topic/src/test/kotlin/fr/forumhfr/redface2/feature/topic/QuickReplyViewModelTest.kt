@@ -281,7 +281,7 @@ class QuickReplyViewModelTest {
     }
 
     @Test
-    fun `escalation carries the card numreponses in citation order`() = runTest {
+    fun `escalation carries the full card previews in citation order`() = runTest {
         val store = FakeQuickReplyDraftStore()
         val viewModel = quickReplyViewModel(draftStore = store)
         viewModel.onQuoteAdded(preview(202, "bob"))
@@ -291,7 +291,12 @@ class QuickReplyViewModelTest {
         viewModel.onEscalateRequested()
         val effect = viewModel.effects.first()
 
-        assertEquals(QuickReplyEffect.EscalateToFullEditor(listOf(202, 101)), effect)
+        // #604 lot 3 — full previews (author + excerpt), not bare numreponses : the editor
+        // renders the same cards and needs the snapshot only the topic surface could take.
+        assertEquals(
+            QuickReplyEffect.EscalateToFullEditor(listOf(preview(202, "bob"), preview(101, "alice"))),
+            effect,
+        )
         assertEquals("suite en plein écran", store.storedBody)
     }
 

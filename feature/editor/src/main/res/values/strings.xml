@@ -4,6 +4,9 @@
     <string name="editor_topic_new_title">Nouveau sujet</string>
     <string name="editor_topic_edit_first_post_title">Modifier le premier message</string>
     <string name="editor_field_label">Contenu BBCode</string>
+    <!-- #436 (#604 lot 3) : cartes de citation dans l'éditeur plein écran. -->
+    <string name="editor_quotes_clear_all">Tout vider</string>
+    <string name="editor_quotes_clear_all_a11y">Retirer toutes les citations</string>
     <string name="editor_field_placeholder">Saisissez votre message…</string>
     <string name="editor_preview_show">Afficher l\'aperçu</string>
     <string name="editor_preview_hide">Masquer l\'aperçu</string>
