@@ -20,6 +20,7 @@ import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.pager.FLING_VELOCITY_THRESHOLD
 import fr.forumhfr.redface2.core.ui.pager.MIN_COMMIT_DISTANCE
+import fr.forumhfr.redface2.core.ui.pager.inStartGestureDeadZone
 import fr.forumhfr.redface2.core.ui.pager.swipeArmed
 import fr.forumhfr.redface2.core.ui.pager.swipeCommitDirection
 import fr.forumhfr.redface2.core.ui.pager.swipeCommitDistancePx
@@ -149,6 +150,19 @@ internal fun Modifier.topicPageSwipe(
                 // off-screen (the very freeze). See #282. (A `down` that lands while still RESUMED but
                 // whose slop is crossed mid-transition is safe: the `committed` latch blocks a 2nd fire.)
                 if (!handlers.enabled()) return@awaitEachGesture
+                // #752 — same start dead-zone as the flags tab swipe: never start the page swipe
+                // from the system gesture bands (system back owns the real edge; a near-miss just
+                // inside used to fire a surprise page change). After the committed/enabled gates —
+                // their precedence is unchanged — and before anything arms.
+                if (inStartGestureDeadZone(
+                        x = down.position.x,
+                        widthPx = size.width,
+                        leftInsetPx = handlers.leftGestureInsetPx(),
+                        rightInsetPx = handlers.rightGestureInsetPx(),
+                    )
+                ) {
+                    return@awaitEachGesture
+                }
                 val velocityTracker = VelocityTracker()
                 velocityTracker.addPosition(down.uptimeMillis, down.position)
                 var overSlop = 0f
@@ -232,6 +246,10 @@ internal class TopicSwipeHandlers(
     val haptics: HapticFeedback,
     val onOpenPage: (Int) -> Unit,
     val enabled: () -> Boolean,
+    // #752 — system-gesture band widths in px, read once per gesture at `down` (lambdas: the
+    // pointerInput is keyed on currentPage, not on insets — a captured px would go stale).
+    val leftGestureInsetPx: () -> Int,
+    val rightGestureInsetPx: () -> Int,
 )
 
 /** Spring the page back to rest (cancel / no-commit), streaming the animation into [dragOffset]. */
