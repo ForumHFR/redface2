@@ -1,5 +1,3 @@
-Redface 2 v0.24.0 — dev.
+Redface 2 v0.24.1 — dev.
 
-- Quick reply: the sheet content scrolls (Send always reachable with the keyboard up).
-- Editor: leaving saves the draft first; back is inert while a post is in flight.
-- Quote cards: TalkBack announcements and focus handover after a removal.
+- Quick reply: automatic sentence capitalization (regression fixed).
