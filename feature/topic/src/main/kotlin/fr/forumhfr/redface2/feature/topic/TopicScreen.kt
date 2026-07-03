@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
@@ -1312,32 +1313,45 @@ private fun TopicLoadedContent(
             // #509 — a blacklisted author's post is replaced by a collapsed placeholder (the post is
             // kept in the list to preserve index/anchor/numreponse invariants), until the reader taps
             // « Afficher ». The placeholder exposes no quote/edit/menu action by design (decision #1).
-            if (post.numreponse in hiddenNumreponses && post.numreponse !in revealedHiddenPosts) {
-                HiddenPostCard(
-                    author = post.author,
-                    onReveal = { revealedHiddenPosts = revealedHiddenPosts + post.numreponse },
-                )
-            } else {
-                TopicPostCard(
-                    post = post,
-                    highlighted = highlight == post.numreponse,
-                    citedCount = citationCounts[post.numreponse] ?: 0,
-                    // #699 — makes sourced quote headers tappable (jump to the cited post).
-                    onGoToCitedPost = onGoToPost,
-                    // #330 — render the author signature beneath the body when the reading preference
-                    // is on (the signature is always parsed/cached on the Post; this is render-only).
-                    showSignature = state.showSignatures,
-                    onQuote = quoteAction,
-                    onEdit = editAction,
-                    onOpenProfile = profileAction,
-                    onOpenMenu = { menuPost = post },
-                    // #436 — same membership source as the menu entry (PostMenuSheet).
-                    multiQuoteSelected = post.numreponse in multiQuoteSelection,
-                    // #436 — per-post add/remove affordance (RF1 quote+/quote- parity), reachable
-                    // without opening the « … » menu. Null/non-null under the SAME gate as « Citer »
-                    // (derived together above), so the « + » and « Citer » always appear as a pair.
-                    onToggleMultiQuote = multiQuoteToggle,
-                )
+            // Vague 3 (#600) — traversing « Dernier message lu » separator BELOW the last-read post
+            // (mockup « Lecture A »). Rendered INSIDE this post's item (a Column, not an extra list
+            // item) so every index-based scroll computation stays untouched (lead item + posts.size
+            // invariants). Gated on forceRefresh: #231 sets it ONLY on a drapeau/flag tap — the one
+            // navigation whose scrollTo semantically IS « last read ». A quote jump / deep link
+            // (forceRefresh=false) keeps the #104 band tint alone; the amber arrival flash (#200)
+            // is a third, independent layer.
+            val showLastReadMarker = shouldShowLastReadMarker(state.request, post.numreponse)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (post.numreponse in hiddenNumreponses && post.numreponse !in revealedHiddenPosts) {
+                    HiddenPostCard(
+                        author = post.author,
+                        onReveal = { revealedHiddenPosts = revealedHiddenPosts + post.numreponse },
+                    )
+                } else {
+                    TopicPostCard(
+                        post = post,
+                        highlighted = highlight == post.numreponse,
+                        citedCount = citationCounts[post.numreponse] ?: 0,
+                        // #699 — makes sourced quote headers tappable (jump to the cited post).
+                        onGoToCitedPost = onGoToPost,
+                        // #330 — render the author signature beneath the body when the reading preference
+                        // is on (the signature is always parsed/cached on the Post; this is render-only).
+                        showSignature = state.showSignatures,
+                        onQuote = quoteAction,
+                        onEdit = editAction,
+                        onOpenProfile = profileAction,
+                        onOpenMenu = { menuPost = post },
+                        // #436 — same membership source as the menu entry (PostMenuSheet).
+                        multiQuoteSelected = post.numreponse in multiQuoteSelection,
+                        // #436 — per-post add/remove affordance (RF1 quote+/quote- parity), reachable
+                        // without opening the « … » menu. Null/non-null under the SAME gate as « Citer »
+                        // (derived together above), so the « + » and « Citer » always appear as a pair.
+                        onToggleMultiQuote = multiQuoteToggle,
+                    )
+                }
+                if (showLastReadMarker) {
+                    LastReadMarker()
+                }
             }
         }
         // #379 — explicit end-of-topic marker after the last post of the LAST page. The
@@ -1434,6 +1448,48 @@ private fun TopicLoadedContent(
         )
     }
 }
+
+/**
+ * #600 → vague 3 (#604) — traversing « Dernier message lu » separator (mockup « Lecture A ») :
+ * a full-width primary rule with a centred primary pill. Rendered below the last-read post,
+ * INSIDE that post's list item (cf. call site — the index math must not see an extra item).
+ * Beta feedback by Colonel MythO : the #104 band tint alone (one notch of tint on the identity
+ * band) was too subtle to spot when catching up from a flag.
+ */
+@Composable
+private fun LastReadMarker() {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        val ruleColor = MaterialTheme.colorScheme.primary.copy(alpha = LAST_READ_RULE_ALPHA)
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            thickness = 2.dp,
+            color = ruleColor,
+        )
+        Text(
+            text = stringResource(R.string.topic_last_read_marker),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onPrimary,
+            modifier = Modifier
+                .background(
+                    color = MaterialTheme.colorScheme.primary,
+                    shape = MaterialTheme.shapes.extraLarge,
+                )
+                .padding(horizontal = 10.dp, vertical = 3.dp),
+        )
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            thickness = 2.dp,
+            color = ruleColor,
+        )
+    }
+}
+
+// #600 — the mockup's rule opacity : strong enough to traverse, calmer than the full-strength pill.
+private const val LAST_READ_RULE_ALPHA = 0.55f
 
 /**
  * #379 → vague 3 (#604) — calm end-of-topic endcard: an outlined card with a centred title and
@@ -2551,6 +2607,15 @@ internal fun shouldShowEditAction(topic: Topic, post: Post, isAuthenticated: Boo
 // #292 — « Supprimer » shares the « Modifier » gate: HFR exposes deletion through the same edit
 // form, so any post the user can edit, they can delete. The first-post exclusion (deleting it would
 // remove the whole topic) is applied at the call site by position, not here.
+// #600 (vague 3) — « Dernier message lu » separator gate. `forceRefresh` is #231's flag-tap
+// marker: the ONE navigation whose scrollTo is semantically « last read » (the flag handler only
+// sets scrollTo when resuming at the last-read page). Every route-replace (pagination #282,
+// citation jump #699, overflow landing #226) rebuilds the route WITHOUT forceRefresh, so the
+// marker never survives a navigation away from the landing. If forceRefresh ever grows another
+// producer, this gate needs its own dedicated route field — cf. TopicActionGatesTest.
+internal fun shouldShowLastReadMarker(request: TopicRequest, numreponse: Int): Boolean =
+    request.forceRefresh && request.scrollTo == numreponse
+
 internal fun shouldShowDeleteAction(topic: Topic, post: Post, isAuthenticated: Boolean): Boolean =
     post.isEditable && topic.canReply && isAuthenticated
 

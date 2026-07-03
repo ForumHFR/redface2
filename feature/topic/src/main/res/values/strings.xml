@@ -24,6 +24,9 @@
     <!-- #110 → vague 3 (#604) — carte de frontière de page actionnable en fin de page intermédiaire
          (mockup « Lecture A ») : titre + libellé d'action (aussi onClickLabel TalkBack). -->
     <string name="topic_page_boundary_done">Page %1$d terminée</string>
+    <!-- #600 → vague 3 (#604) — pilule du séparateur traversant « dernier lu » (mockup Lecture A),
+         affiché sous le dernier message lu à l'ouverture depuis un drapeau. -->
+    <string name="topic_last_read_marker">Dernier message lu</string>
     <string name="topic_page_boundary_next">Continuer vers la page %1$d</string>
     <!-- #285 — top app bar : back affordance (content description) + fallback title shown while
          the topic page has not loaded yet (or errored), so the bar never reads blank. -->
