@@ -35,6 +35,7 @@ import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadedImage
 import fr.forumhfr.redface2.core.domain.upload.UploadedImageRecord
+import fr.forumhfr.redface2.core.domain.write.ReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.FlagType
@@ -816,6 +817,7 @@ class PostEditorViewModelTest {
             uploadRepository = uploadRepository,
             imageUploadReader = imageUploadReader,
             authRepository = authRepository,
+            quoteMaterializer = ReplyQuoteMaterializer(replyRepository),
         )
 
     // ----- Phase 2F-B (#11) : smiley picker ----------------------------------
@@ -1433,6 +1435,7 @@ class PostEditorViewModelTest {
             uploadRepository = uploadRepository,
             imageUploadReader = imageUploadReader,
             authRepository = authRepository,
+            quoteMaterializer = ReplyQuoteMaterializer(replyRepository),
         )
 
     // ----- #312 : confirmation avant publication ------------------------------

@@ -95,6 +95,8 @@ import fr.forumhfr.redface2.core.domain.author.isRf2Creator
 import fr.forumhfr.redface2.core.model.Poll
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.Topic
+import fr.forumhfr.redface2.core.model.postContentExcerpt
+import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
 import fr.forumhfr.redface2.core.ui.RedfacePlaceholderScreen
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
@@ -251,7 +253,7 @@ fun TopicScreen(
      * #291 — toggles a post in the multi-quote basket. Only invoked under the same gate as
      * [onQuote] (`shouldShowQuoteAction`): a topic the user cannot reply to has nothing to quote.
      */
-    onToggleMultiQuote: (numreponse: Int) -> Unit = {},
+    onToggleMultiQuote: (preview: QuotedPostPreview) -> Unit = {},
     /**
      * #291 — opens the editor pre-filled with every selected quote (same destination as
      * [onQuote]; `:app` rides the selection on the route and clears the basket). Receives the
@@ -700,7 +702,7 @@ internal fun TopicContent(
     // #291 — multi-quote selection (owned by :app) + its two actions, threaded to the post menu
     // (toggle) and the floating cluster (« Citer N »).
     multiQuoteSelection: List<Int> = emptyList(),
-    onToggleMultiQuote: (numreponse: Int) -> Unit = {},
+    onToggleMultiQuote: (preview: QuotedPostPreview) -> Unit = {},
     onMultiQuote: (subcat: Int, page: Int) -> Unit = { _, _ -> },
     // #465 — the topic's manual poll choice (owned by :app, null = follow the global default) +
     // the callback recording a tap on the poll card. Threaded to the header card's poll.
@@ -1207,7 +1209,7 @@ private fun TopicLoadedContent(
     listState: LazyListState,
     // #291 — selection state + toggle for the post menu's multi-quote entry.
     multiQuoteSelection: List<Int> = emptyList(),
-    onToggleMultiQuote: (numreponse: Int) -> Unit = {},
+    onToggleMultiQuote: (preview: QuotedPostPreview) -> Unit = {},
     // #509 — block/unblock a post's author from the post menu (blacklist).
     onSetAuthorBlocked: (author: String, blocked: Boolean) -> Unit = { _, _ -> },
     // #465 — the topic's manual poll choice (owned by :app, null = follow the global default) + the
@@ -1237,7 +1239,15 @@ private fun TopicLoadedContent(
     // the selection: the placeholder exposes no deselect affordance (decision #1), so leaving it
     // selected would silently quote a masqué post. The basket is hoisted in :app; reuse its toggle.
     LaunchedEffect(hiddenNumreponses, multiQuoteSelection) {
-        multiQuoteSelection.filter { it in hiddenNumreponses }.forEach(onToggleMultiQuote)
+        multiQuoteSelection.filter { it in hiddenNumreponses }.forEach { numreponse ->
+            // Removal is keyed on the numreponse alone (cf. toggled()) — resolve the hidden post
+            // to rebuild a preview, or fall back to a tombstone if the page no longer carries it.
+            val hidden = topic.posts.firstOrNull { it.numreponse == numreponse }
+            onToggleMultiQuote(
+                hidden?.toQuotedPreview()
+                    ?: QuotedPostPreview(numreponse = numreponse, author = "", excerpt = ""),
+            )
+        }
     }
     // #282 — shared offset between the gesture (drives translationX) and the edge glow. A plain
     // MutableFloatState: the gesture writes it synchronously per frame (no coroutine/alloc), the draw
@@ -1382,7 +1392,7 @@ private fun TopicLoadedContent(
             val multiQuoteToggle: (() -> Unit)?
             if (shouldShowQuoteAction(topic, state.isAuthenticated)) {
                 quoteAction = { onQuote(topic.subcat, topic.page, post.numreponse, post.quoteRef) }
-                multiQuoteToggle = { onToggleMultiQuote(post.numreponse) }
+                multiQuoteToggle = { onToggleMultiQuote(post.toQuotedPreview()) }
             } else {
                 quoteAction = null
                 multiQuoteToggle = null
@@ -1523,7 +1533,7 @@ private fun TopicLoadedContent(
             // replying; a locked topic or an anonymous session has nothing to quote).
             multiQuoteSelected = post.numreponse in multiQuoteSelection,
             onToggleMultiQuote = if (shouldShowQuoteAction(topic, state.isAuthenticated)) {
-                { onToggleMultiQuote(post.numreponse) }
+                { onToggleMultiQuote(post.toQuotedPreview()) }
             } else {
                 null
             },
@@ -2689,6 +2699,15 @@ private fun ReplyFab(onClick: () -> Unit) {
 // not purged on logout, cf. CacheInvalidator), so these gates consult auth explicitly instead
 // of trusting `canReply` alone — symmetric with the « Créer topic » FAB
 // (CategoryViewModel.canCreateTopic).
+// #604 lot 2 — the quote-card snapshot, built AT SELECTION TIME where the full Post is in scope
+// (cadrage Codex : the cards never re-parse a post ; the exact [quotemsg] is fetched at
+// materialisation). Uniqueness in the basket stays keyed on the numreponse.
+internal fun Post.toQuotedPreview(): QuotedPostPreview = QuotedPostPreview(
+    numreponse = numreponse,
+    author = author,
+    excerpt = postContentExcerpt(content),
+)
+
 internal fun shouldEnableReply(topic: Topic, isAuthenticated: Boolean): Boolean =
     topic.canReply && isAuthenticated
 
