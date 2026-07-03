@@ -16,6 +16,13 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.21.0` — `internal` (dev) — 2026-07-03
+
+**Phase « Vue Topic » (#604) — vague 4 « Postage », lot 1** (PR #788 — cadrage + gate Codex gpt-5.5 NO-GO→fixes→GO, dogfood IME émulateur).
+
+### Vue Topic
+- **Réponse rapide en feuille** : le bouton ✎ ouvre une bottom sheet (champ texte, Envoyer, bouton plein écran) au lieu de l'éditeur complet. Le brouillon est partagé avec l'éditeur plein écran (#405) : l'escalade transfère le texte, la fermeture ne perd jamais la saisie (autosave), la réouverture reprend où on en était. Erreurs typées (anti-flood, sujet fermé, session) et « Confirmation avant publication » (#312) respectées. Citations, upload et smileys restent en plein écran (lots 2-4 à venir).
+
 ## `0.20.2` — `internal` (dev) — 2026-07-03
 
 **Retours bêta gestes + top bar Topic** (PRs #781, #786 — gates Codex gpt-5.5, dogfoods émulateur).

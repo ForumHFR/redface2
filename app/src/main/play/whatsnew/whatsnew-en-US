@@ -1,4 +1,3 @@
-Redface 2 v0.20.2 — dev.
+Redface 2 v0.21.0 — dev.
 
-- Gestures: a swipe starting on the system back-gesture band no longer competes with tab or page changes.
-- Topic: tap the truncated top-bar title to reveal it in full (2 lines), tap again to fold it back.
+- Topic: quick reply sheet — the reply button opens a lightweight field (send directly or switch to full screen, shared draft, nothing is lost on close).
