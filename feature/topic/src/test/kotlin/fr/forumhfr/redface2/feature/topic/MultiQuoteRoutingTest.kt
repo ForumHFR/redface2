@@ -13,6 +13,8 @@ class MultiQuoteRoutingTest {
 
     @Test
     fun `one or two cards stay in the quick-reply sheet`() {
+        // 0 is unreachable from the « Citer N » FAB (it only renders armed) — documented inert.
+        assertFalse(multiQuoteOpensFullEditor(0))
         assertFalse(multiQuoteOpensFullEditor(1))
         assertFalse(multiQuoteOpensFullEditor(2))
     }
