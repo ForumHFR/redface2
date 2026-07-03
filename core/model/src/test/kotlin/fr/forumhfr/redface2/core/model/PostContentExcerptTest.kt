@@ -104,6 +104,20 @@ class PostContentExcerptTest {
     }
 
     @Test
+    fun `a smiley never glues to the following text`() {
+        val content = PostContent(
+            blocks = listOf(
+                paragraph(
+                    PostInline.Text("avant"),
+                    PostInline.Smiley(kind = SmileyKind.Builtin(code = ":jap:"), imageUrl = null),
+                    PostInline.Text("après"),
+                ),
+            ),
+        )
+        assertEquals("avant :jap: après", postContentExcerpt(content))
+    }
+
+    @Test
     fun `images inline or block are ignored`() {
         val content = PostContent(
             blocks = listOf(

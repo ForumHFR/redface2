@@ -48,8 +48,11 @@ private fun flattenInlines(inlines: List<PostInline>): String = buildString {
             is PostInline.Link -> append(flattenInlines(inline.children))
             is PostInline.InlineImage -> Unit
             is PostInline.Smiley -> {
+                // Pad both sides so a smiley never glues to adjacent text (`foo :jap: bar`) —
+                // the whitespace collapse downstream absorbs any doubled space.
                 if (isNotEmpty() && !endsWith(' ')) append(' ')
                 append(inline.kind.textualCode())
+                append(' ')
             }
         }
     }
