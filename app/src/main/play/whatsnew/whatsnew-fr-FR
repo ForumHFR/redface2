@@ -1,3 +1,4 @@
-Redface 2 v0.24.1 — dev.
+Redface 2 v0.25.0 — dev.
 
-- Réponse rapide : majuscule automatique en début de phrase (régression corrigée).
+- Citations : retour du BBCode [quotemsg] dans le champ par défaut — modifiable et intercalable, comme sur le site.
+- Les cartes de citation compactes deviennent une option : Réglages > Édition et publication > « Citations en cartes ».

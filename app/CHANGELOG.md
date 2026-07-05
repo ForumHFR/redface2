@@ -16,6 +16,17 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.25.0` — `internal` (dev) — 2026-07-05
+
+**Citations : retour du BBCode inline par défaut** (arbitrage XaTriX sur #805, PR #818) + remise en phase des docs (PR #817).
+
+### Éditeur & réponse rapide
+- #805 : les **cartes de citation deviennent une option, désactivée par défaut**. Par défaut, « Citer » et « Citer N » insèrent le BBCode `[quotemsg]` directement dans le champ — modifiable, réponses intercalées possibles, parité avec le site. Les cartes compactes (#604 lots 2-3) restent disponibles via Réglages > Édition et publication > « Citations en cartes ».
+- La citation s'insère **à la fin du texte en cours, sans jamais perdre la frappe** (matérialisation à l'ouverture, annulée si la feuille est fermée) ; « Citer N » ≥ 3 ouvre toujours l'éditeur plein écran, désormais pré-rempli des blocs `[quotemsg]` fusionnés ; l'escalade feuille → plein écran et les brouillons (#405) suivent sans changement.
+
+### Docs
+- PR #817 : vitrine et specs réalignées sur le code (bêta 0.18.0, gestes Drapeaux post-#603, couverture Roborazzi réelle, ADR-001 amendé, specs v0.11.0).
+
 ## `0.24.1` — `internal` (dev) — 2026-07-03
 
 **Fix express dogfood v220** (PR #810).
