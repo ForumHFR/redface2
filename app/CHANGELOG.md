@@ -16,6 +16,13 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.25.1` — `internal` (dev) — 2026-07-05
+
+**Citation multiple : action « Tout vider »** (dernier volet de #436, PR #820).
+
+### Éditeur & réponse rapide
+- #436 : un **appui long sur le FAB « ❝N »** vide toute la sélection de citation multiple d'un coup (haptique + libellé TalkBack « Vider la sélection de citations »). Le tap court reste inchangé (ouvre l'éditeur / la feuille). Rendu en FAB « maison » (`Surface` + `combinedClickable`) pour que le geste long soit reconnu là où le compteur est visible. Clôt #436 (les volets marquage des posts et panier survivant au back étaient déjà livrés).
+
 ## `0.25.0` — `internal` (dev) — 2026-07-05
 
 **Citations : retour du BBCode inline par défaut** (arbitrage XaTriX sur #805, PR #818) + remise en phase des docs (PR #817).

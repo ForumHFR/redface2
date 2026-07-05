@@ -1,4 +1,3 @@
-Redface 2 v0.25.0 — dev.
+Redface 2 v0.25.1 — dev.
 
-- Quotes: back to inline [quotemsg] BBCode in the field by default — editable and interleavable, like the website.
-- Compact quote cards are now opt-in: Settings > Editing & publishing > "Quote cards".
+- Multi-quote: long-press the "❝N" button to clear the whole selection at once.

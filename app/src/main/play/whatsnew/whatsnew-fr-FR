@@ -1,4 +1,3 @@
-Redface 2 v0.25.0 — dev.
+Redface 2 v0.25.1 — dev.
 
-- Citations : retour du BBCode [quotemsg] dans le champ par défaut — modifiable et intercalable, comme sur le site.
-- Les cartes de citation compactes deviennent une option : Réglages > Édition et publication > « Citations en cartes ».
+- Citation multiple : un appui long sur le bouton « ❝N » vide toute la sélection d'un coup (« Tout vider »).
