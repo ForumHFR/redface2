@@ -223,22 +223,70 @@ class TopicFormViewModel @AssistedInject constructor(
      * The store stamps `updatedAt` and is a no-op without an active session.
      */
     private fun scheduleAutosave() {
+        if (draftKey == null) return
+        autosaveJob?.cancel()
+        autosaveJob = viewModelScope.launch {
+            delay(AUTOSAVE_DEBOUNCE_MS)
+            persistDraftNow()
+        }
+    }
+
+    /**
+     * Immediate write of the current subject + body (both blank = delete the row, cf.
+     * [scheduleAutosave]). Reads [_state] AFTER the debounce delay — the previous shape captured
+     * a snapshot at scheduling time, which the #803 dirty-close flush would have re-persisted
+     * stale (state-hygiene audit 2026-07-05). Mirrors `PostEditorViewModel.persistDraftNow`.
+     */
+    private suspend fun persistDraftNow() {
         val key = draftKey ?: return
         val snapshot = _state.value
         val body = snapshot.draft.text
         val subject = snapshot.subject.text
+        if (body.isBlank() && subject.isBlank()) {
+            draftStore.delete(draftOwner, key)
+        } else {
+            draftStore.save(
+                draftOwner,
+                key,
+                EditorDraftStore.Draft(body = body, subject = subject.ifBlank { null }),
+            )
+        }
+    }
+
+    /** #803 pattern — one-shot latch : a committed close is never re-emitted. */
+    private var closeRequested = false
+
+    /**
+     * #803 pattern (ported from `PostEditorViewModel.onCloseRequested`, state-hygiene audit
+     * 2026-07-05) — dirty close : flush the pending debounce so the last keystrokes reach the
+     * #405 row, THEN let the UI pop (CloseCommitted). Without this, a system back < 750 ms after
+     * typing cancelled the debounce with the ViewModel and silently dropped the tail of the draft.
+     *
+     * Two guards (gate #803) :
+     * - INERT while a POST is in flight — popping would cancel the submit with the viewModelScope
+     *   and leave the server state unknown with a repostable draft ; on failure `isSubmitting`
+     *   drops and the back works again, on success SubmitSucceeded / NewTopicCreated pops anyway ;
+     * - ONE-SHOT — a second back racing the first CloseCommitted must not emit a second effect
+     *   (each `onClose` pops blindly : the second pop would remove the screen BELOW).
+     */
+    private fun onCloseRequested() {
+        if (_state.value.isSubmitting || closeRequested) return
+        closeRequested = true
         autosaveJob?.cancel()
-        autosaveJob = viewModelScope.launch {
-            delay(AUTOSAVE_DEBOUNCE_MS)
-            if (body.isBlank() && subject.isBlank()) {
-                draftStore.delete(draftOwner, key)
-            } else {
-                draftStore.save(
-                    draftOwner,
-                    key,
-                    EditorDraftStore.Draft(body = body, subject = subject.ifBlank { null }),
-                )
+        viewModelScope.launch {
+            // The close must NEVER stay blocked on a failing flush (Room is not contractually
+            // non-throwing — disk full, corrupted store) : the one-shot latch is already set, so
+            // a swallowed failure here only costs the last <750 ms of typing (the debounced
+            // autosave already persisted the rest) while a rethrow would leave the screen
+            // unclosable. CancellationException still propagates (scope teardown is not an error).
+            try {
+                persistDraftNow()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // Best effort — the previous debounced write is what remains.
             }
+            _effects.send(TopicFormEffect.CloseCommitted)
         }
     }
 
@@ -271,6 +319,7 @@ class TopicFormViewModel @AssistedInject constructor(
             TopicFormIntent.UploadErrorDismissed -> _state.update { it.copy(uploadError = null) }
             TopicFormIntent.DraftRestoreRequested -> onDraftRestoreRequested()
             TopicFormIntent.DraftDiscardRequested -> onDraftDiscardRequested()
+            TopicFormIntent.CloseRequested -> onCloseRequested()
         }
     }
 

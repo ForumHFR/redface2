@@ -38,9 +38,13 @@ data class SettingsState(
     val isUpdatingIgnoreTopicCache: Boolean = false,
     val ignoreTopicCacheError: Boolean = false,
     /**
-     * Internal startup-race guard. Set to `true` the moment the user flips the toggle locally,
-     * so the (still-suspended) initial DataStore hydration coroutine in `init` cannot resume
-     * later and overwrite the optimistic flip with a stale snapshot. Never surfaced in the UI.
+     * Legacy write marker, set to `true` the moment the user flips the toggle locally. It used
+     * to gate the one-shot `init` hydration against a stale late snapshot; since the #788
+     * continuous re-sync it is NO LONGER CONSULTED (the in-flight `isUpdating*` flag is the only
+     * hydration guard) — every `*TouchedLocally` field below shares this status. The imgur
+     * Client-ID is the one exception: its latch still opts the instance out of the re-sync while
+     * the user types (persist-on-keystroke field). Never surfaced in the UI; removal deferred to
+     * keep this diff mechanical.
      */
     val ignoreTopicCacheTouchedLocally: Boolean = false,
     // #445 — debug bounds overlay toggle (dev-channel only; the channel gate is in the screen, which
@@ -50,11 +54,11 @@ data class SettingsState(
     val isUpdatingDebugBoundsOverlay: Boolean = false,
     val debugBoundsOverlayError: Boolean = false,
     val debugBoundsOverlayTouchedLocally: Boolean = false,
-    // Drapeaux view preferences (#179 follow-up). Same optimistic-flip + startup-race-guard
-    // machinery as ignoreTopicCache: the field is the displayed value, `isUpdating*` gates the
-    // switch while DataStore writes, `*Error` surfaces a persist failure, and `*TouchedLocally`
-    // forbids a late hydration from clobbering a fast user flip. Defaults match the DataStore
-    // defaults (grouped on, hide-read off).
+    // Drapeaux view preferences (#179 follow-up). Same optimistic-flip machinery as
+    // ignoreTopicCache: the field is the displayed value, `isUpdating*` gates the switch while
+    // DataStore writes, `*Error` surfaces a persist failure, and `*TouchedLocally` is a legacy
+    // write marker (no longer consulted — #788, cf. ignoreTopicCacheTouchedLocally). Defaults
+    // match the DataStore defaults (grouped on, hide-read off).
     val flagsGroupByCategory: Boolean = true,
     val isUpdatingFlagsGroupByCategory: Boolean = false,
     val flagsGroupByCategoryError: Boolean = false,
@@ -70,10 +74,10 @@ data class SettingsState(
     val isUpdatingFlagsPerTabOverride: Boolean = false,
     val flagsPerTabOverrideError: Boolean = false,
     val flagsPerTabOverrideTouchedLocally: Boolean = false,
-    // Theme preferences (#286). Same optimistic-flip + startup-race-guard machinery as the flags
-    // toggles: `themeMode`/`amoledEnabled` are the displayed values, `isUpdating*` gates the control
-    // while DataStore writes, `*Error` surfaces a persist failure, and `*TouchedLocally` forbids a
-    // late `init` hydration from clobbering a fast user change. Defaults match the DataStore defaults
+    // Theme preferences (#286). Same optimistic-flip machinery as the flags toggles:
+    // `themeMode`/`amoledEnabled` are the displayed values, `isUpdating*` gates the control
+    // while DataStore writes, `*Error` surfaces a persist failure, and `*TouchedLocally` is a
+    // legacy write marker (no longer consulted — #788). Defaults match the DataStore defaults
     // (SYSTEM, amoled off).
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val isUpdatingThemeMode: Boolean = false,
@@ -89,10 +93,10 @@ data class SettingsState(
     val isUpdatingAccentColor: Boolean = false,
     val accentColorError: Boolean = false,
     val accentColorTouchedLocally: Boolean = false,
-    // Topic reading preferences (build 89 follow-up). Same optimistic-flip + startup-race-guard
-    // machinery: `topicTopBarAutoHide` is the displayed value, `isUpdating*` gates the switch while
-    // DataStore writes, `*Error` surfaces a persist failure, `*TouchedLocally` forbids a late `init`
-    // hydration from clobbering a fast user flip. Default false (top bar pinned).
+    // Topic reading preferences (build 89 follow-up). Same optimistic-flip machinery:
+    // `topicTopBarAutoHide` is the displayed value, `isUpdating*` gates the switch while
+    // DataStore writes, `*Error` surfaces a persist failure, `*TouchedLocally` is a legacy write
+    // marker (no longer consulted — #788). Default false (top bar pinned).
     val topicTopBarAutoHide: Boolean = false,
     val isUpdatingTopicTopBarAutoHide: Boolean = false,
     val topicTopBarAutoHideError: Boolean = false,
@@ -164,10 +168,10 @@ data class SettingsState(
     val isUpdatingImmersiveNavBarReveal: Boolean = false,
     val immersiveNavBarRevealError: Boolean = false,
     val immersiveNavBarRevealTouchedLocally: Boolean = false,
-    // Publishing preferences (#312). Same optimistic-flip + startup-race-guard machinery:
-    // `confirmBeforePosting` is the displayed value, `isUpdating*` gates the switch while DataStore
-    // writes, `*Error` surfaces a persist failure, `*TouchedLocally` forbids a late `init` hydration
-    // from clobbering a fast user flip. Default false (publishing stays one-tap).
+    // Publishing preferences (#312). Same optimistic-flip machinery: `confirmBeforePosting` is
+    // the displayed value, `isUpdating*` gates the switch while DataStore writes, `*Error`
+    // surfaces a persist failure, `*TouchedLocally` is a legacy write marker (no longer
+    // consulted — #788). Default false (publishing stays one-tap).
     val confirmBeforePosting: Boolean = false,
     val isUpdatingConfirmBeforePosting: Boolean = false,
     val confirmBeforePostingError: Boolean = false,
@@ -196,11 +200,11 @@ data class SettingsState(
     val isUpdatingFlagsAutoRefresh: Boolean = false,
     val flagsAutoRefreshError: Boolean = false,
     val flagsAutoRefreshTouchedLocally: Boolean = false,
-    // Reading display presets (#287). Same optimistic-flip + startup-race-guard machinery as the
-    // theme controls (both are enums, so the bespoke shape): the value is the displayed selection,
-    // `isUpdating*` gates the control while DataStore writes, `*Error` surfaces a persist failure,
-    // `*TouchedLocally` forbids a late `init` hydration from clobbering a fast user change. Defaults
-    // match the DataStore defaults (COMFORT density, M font scale).
+    // Reading display presets (#287). Same optimistic-flip machinery as the theme controls (both
+    // are enums, so the bespoke shape): the value is the displayed selection, `isUpdating*` gates
+    // the control while DataStore writes, `*Error` surfaces a persist failure, `*TouchedLocally`
+    // is a legacy write marker (no longer consulted — #788). Defaults match the DataStore
+    // defaults (COMFORT density, M font scale).
     val displayDensity: DisplayDensity = DisplayDensity.COMFORT,
     val isUpdatingDisplayDensity: Boolean = false,
     val displayDensityError: Boolean = false,
@@ -211,16 +215,17 @@ data class SettingsState(
     val fontScaleTouchedLocally: Boolean = false,
     // #459 — Hébergeur d'images. The provider is an enum, so it uses the bespoke optimistic-flip
     // shape (like themeMode): `uploadProvider` is the displayed selection, `isUpdating*` gates the
-    // control while DataStore writes, `*Error` surfaces a persist failure, `*TouchedLocally` forbids
-    // a late `init` hydration from clobbering a fast user change. Default DIBERIE (no Client-ID).
+    // control while DataStore writes, `*Error` surfaces a persist failure, `*TouchedLocally` is a
+    // legacy write marker (no longer consulted — #788). Default DIBERIE (no Client-ID).
     val uploadProvider: UploadProviderId = UploadProviderId.DIBERIE,
     val isUpdatingUploadProvider: Boolean = false,
     val uploadProviderError: Boolean = false,
     val uploadProviderTouchedLocally: Boolean = false,
     // #459 — imgur Client-ID text field. `imgurClientId` is the displayed/edited value, persisted on
     // each change (no save button — same as the optimistic prefs). `*Error` surfaces a persist
-    // failure; `*TouchedLocally` forbids the late hydration from overwriting in-progress typing.
-    // Default empty = imgur not configured.
+    // failure; `*TouchedLocally` is STILL consulted for this pref only (#788 exception): it opts
+    // the instance out of the continuous re-sync so an echoed emission never overwrites
+    // in-progress typing. Default empty = imgur not configured.
     val imgurClientId: String = "",
     val imgurClientIdError: Boolean = false,
     val imgurClientIdTouchedLocally: Boolean = false,

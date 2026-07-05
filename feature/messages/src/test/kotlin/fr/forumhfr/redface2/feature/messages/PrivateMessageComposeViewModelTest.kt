@@ -20,9 +20,11 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -401,6 +403,94 @@ class PrivateMessageComposeViewModelTest {
         advanceUntilIdle()
 
         assertTrue(draftStore.deletedKeys.contains(EditorDraftKey.mpCompose()))
+    }
+
+    // ----- #803 pattern : dirty close (flush before pop), state-hygiene audit 2026-07-05 -----
+
+    @Test
+    fun `onCloseRequested flushes the pending debounce before CloseCommitted`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val vm = viewModel(repository)
+
+        // Type, then close IMMEDIATELY — well inside the 750 ms debounce window. The flush must
+        // persist the state at close time, not the snapshot the debounce captured at scheduling.
+        vm.onRecipientsChanged("bozoleclown")
+        vm.onSubjectChanged("Salut")
+        vm.onContentChanged(TextFieldValue("dernier mot"))
+        vm.onCloseRequested()
+
+        val effect = vm.effects.first()
+        assertEquals(PrivateMessageComposeEffect.CloseCommitted, effect)
+        val saved = draftStore.saved[EditorDraftKey.mpCompose()]
+        assertEquals("the tail of the draft must reach the row before the pop", "dernier mot", saved?.body)
+        assertEquals("Salut", saved?.subject)
+        assertEquals("bozoleclown", saved?.recipients)
+        assertTrue("MP drafts must stay flagged private", saved?.isPrivate == true)
+    }
+
+    @Test
+    fun `onCloseRequested with every field blank deletes the row and still closes`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val key = EditorDraftKey.mpCompose()
+        draftStore.preload(key, EditorDraftStore.Draft(body = "stale", isPrivate = true))
+        val vm = viewModel(repository)
+
+        vm.onCloseRequested()
+
+        val effect = vm.effects.first()
+        assertEquals(PrivateMessageComposeEffect.CloseCommitted, effect)
+        assertTrue("an emptied composer must not leave a stale row", draftStore.deletedKeys.contains(key))
+    }
+
+    @Test
+    fun `onCloseRequested during an in-flight submit is ignored (gate #803)`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        // Hold the POST in flight so the close lands while isSubmitting is true.
+        val gate = CompletableDeferred<Unit>()
+        coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } coAnswers {
+            gate.await()
+            ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+        }
+        val vm = viewModel(repository)
+        vm.onRecipientsChanged("bozoleclown")
+        vm.onSubjectChanged("Sujet")
+        vm.onContentChanged(TextFieldValue("en vol"))
+
+        vm.onSubmit()
+        // Close requested while the POST is in flight — must be inert (gate #803).
+        vm.onCloseRequested()
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        vm.effects.test {
+            assertTrue(
+                "the submit outcome must be the ONLY effect — no CloseCommitted",
+                awaitItem() is PrivateMessageComposeEffect.SubmitSucceeded,
+            )
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a second onCloseRequested is a no-op (gate #803)`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val vm = viewModel(repository)
+
+        vm.onCloseRequested()
+        vm.onCloseRequested()
+        advanceUntilIdle()
+
+        vm.effects.test {
+            assertEquals(PrivateMessageComposeEffect.CloseCommitted, awaitItem())
+            // A double close must never yield a second pop (it would remove the screen BELOW).
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     /** #405 — in-memory fake [EditorDraftStore], same shape as the one in `PostEditorViewModelTest`. */

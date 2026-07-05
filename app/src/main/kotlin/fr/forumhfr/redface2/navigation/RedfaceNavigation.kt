@@ -2106,6 +2106,9 @@ private fun RedfaceNavHost(
                         }
                         privateMessageNavState.onConversationSent()
                     },
+                    // #803 pattern (state-hygiene audit 2026-07-05) — invoked only on
+                    // CloseCommitted, after the ViewModel flushed the private draft. The screen
+                    // routes the system back AND the header arrow through the ViewModel first.
                     onBack = {
                         if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)
@@ -2170,6 +2173,9 @@ private fun RedfaceNavHost(
                             )
                         }
                     },
+                    // #803 pattern (state-hygiene audit 2026-07-05) — invoked only on
+                    // CloseCommitted, after the ViewModel flushed the private draft. The screen
+                    // routes the system back AND the header arrow through the ViewModel first.
                     onBack = {
                         if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)
@@ -2671,6 +2677,14 @@ private fun RedfaceNavHost(
                         page = route.page,
                         numreponse = route.numreponse,
                     ),
+                    // #803 pattern (state-hygiene audit 2026-07-05) — the system back reaches here
+                    // only AFTER the ViewModel flushed the draft row (CloseCommitted). Same guarded
+                    // pop as PostEditorRoute.onClose.
+                    onClose = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
                     onSubmitSucceeded = { targetPage, scrollTo ->
                         // Phase 2D (#148) — pop the FP form, replace the topic route below
                         // with one that refreshes the target page and scrolls to the edited

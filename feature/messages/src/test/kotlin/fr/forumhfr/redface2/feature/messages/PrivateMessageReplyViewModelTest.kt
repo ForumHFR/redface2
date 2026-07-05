@@ -25,6 +25,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -585,6 +586,104 @@ class PrivateMessageReplyViewModelTest {
         advanceUntilIdle()
 
         assertTrue(draftStore.deletedKeys.contains(EditorDraftKey.mpReply(request.threadId)))
+    }
+
+    // ----- #803 pattern : dirty close (flush before pop), state-hygiene audit 2026-07-05 -----
+
+    @Test
+    fun `onCloseRequested flushes the pending debounce before CloseCommitted`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
+        )
+
+        // Type, then close IMMEDIATELY — well inside the 750 ms debounce window. The flush must
+        // persist the state at close time, not the snapshot the debounce captured at scheduling.
+        viewModel.onContentChanged(TextFieldValue("dernier mot"))
+        viewModel.onCloseRequested()
+
+        val effect = viewModel.effects.first()
+        assertEquals(PrivateMessageReplyEffect.CloseCommitted, effect)
+        val saved = draftStore.saved[EditorDraftKey.mpReply(request.threadId)]
+        assertEquals("the tail of the draft must reach the row before the pop", "dernier mot", saved?.body)
+        assertTrue("MP drafts must stay flagged private", saved?.isPrivate == true)
+    }
+
+    @Test
+    fun `onCloseRequested with a blank body deletes the row and still closes`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        val key = EditorDraftKey.mpReply(request.threadId)
+        draftStore.preload(key, EditorDraftStore.Draft(body = "stale", isPrivate = true))
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
+        )
+
+        viewModel.onCloseRequested()
+
+        val effect = viewModel.effects.first()
+        assertEquals(PrivateMessageReplyEffect.CloseCommitted, effect)
+        assertTrue("an emptied editor must not leave a stale row", draftStore.deletedKeys.contains(key))
+    }
+
+    @Test
+    fun `onCloseRequested during an in-flight submit is ignored (gate #803)`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        // Hold the POST in flight so the close lands while isSubmitting is true.
+        val gate = CompletableDeferred<Unit>()
+        coEvery { repository.submitReply(any(), any(), any(), any(), any()) } coAnswers {
+            gate.await()
+            ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+        }
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
+        )
+        viewModel.onContentChanged(TextFieldValue("en vol"))
+
+        viewModel.onSubmit()
+        // Close requested while the POST is in flight — must be inert (gate #803).
+        viewModel.onCloseRequested()
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        viewModel.effects.test {
+            assertTrue(
+                "the submit outcome must be the ONLY effect — no CloseCommitted",
+                awaitItem() is PrivateMessageReplyEffect.SubmitSucceeded,
+            )
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a second onCloseRequested is a no-op (gate #803)`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
+        )
+
+        viewModel.onCloseRequested()
+        viewModel.onCloseRequested()
+        advanceUntilIdle()
+
+        viewModel.effects.test {
+            assertEquals(PrivateMessageReplyEffect.CloseCommitted, awaitItem())
+            // A double close must never yield a second pop (it would remove the screen BELOW).
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     // ----- #606 : owner manages DT/MultiMP members --------------------------------

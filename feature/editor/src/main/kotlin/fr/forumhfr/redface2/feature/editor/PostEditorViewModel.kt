@@ -357,7 +357,18 @@ class PostEditorViewModel @AssistedInject constructor(
         closeRequested = true
         autosaveJob?.cancel()
         viewModelScope.launch {
-            persistDraftNow()
+            // The close must NEVER stay blocked on a failing flush (Room is not contractually
+            // non-throwing — disk full, corrupted store) : the one-shot latch is already set, so
+            // a swallowed failure here only costs the last <750 ms of typing (the debounced
+            // autosave already persisted the rest) while a rethrow would leave the screen
+            // unclosable. CancellationException still propagates (scope teardown is not an error).
+            try {
+                persistDraftNow()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // Best effort — the previous debounced write is what remains.
+            }
             _effects.send(PostEditorEffect.CloseCommitted)
         }
     }
