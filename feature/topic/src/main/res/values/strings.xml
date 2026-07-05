@@ -8,6 +8,8 @@
         <item quantity="one">Citer %1$d message sélectionné</item>
         <item quantity="other">Citer %1$d messages sélectionnés</item>
     </plurals>
+    <!-- #436 — appui long sur le FAB « Citer N » : vide tout le panier de citation multiple. -->
+    <string name="topic_fab_multi_quote_clear">Vider la sélection de citations</string>
     <!-- #291 — entrée du menu contextuel : ajoute/retire le post du panier de citation multiple. -->
     <string name="topic_post_menu_multi_quote_add">Ajouter à la citation multiple</string>
     <string name="topic_post_menu_multi_quote_remove">Retirer de la citation multiple</string>

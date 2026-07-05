@@ -2454,6 +2454,8 @@ private fun RedfaceNavHost(
                     onToggleMultiQuote = { preview ->
                         multiQuoteNavState.onToggle(route.cat, route.post, preview)
                     },
+                    // #436 — « Tout vider » : a long press on the « Citer N » FAB empties the
+                    // whole hoisted basket (same reset path as the post-editor launch / logout).
                     onClearMultiQuote = multiQuoteNavState.onClear,
                     // #465 — the topic's saved manual poll choice (null = follow the global
                     // default), and the callback recording a tap on the poll card. Hoisted to

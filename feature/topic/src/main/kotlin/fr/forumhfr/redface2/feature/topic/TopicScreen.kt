@@ -9,6 +9,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -256,6 +257,8 @@ fun TopicScreen(
      * #604 lot 3 — clears the multi-quote basket after the sheet consumed it (« Citer N » below
      * the threshold) : the cards live on in the sheet's ViewModel, and backing out must not
      * re-arm a stale « Citer N » — same intent-consumed rule as the full-screen path.
+     * #436 — also « Tout vider » : a long press on the « Citer N » FAB empties the whole basket
+     * in one gesture. Owned by `:app` (the basket lives there); the screen only triggers the reset.
      */
     onClearMultiQuote: () -> Unit = {},
     /**
@@ -702,6 +705,7 @@ internal fun TopicContent(
     multiQuoteSelections: List<QuotedPostPreview> = emptyList(),
     onToggleMultiQuote: (preview: QuotedPostPreview) -> Unit = {},
     onMultiQuote: (subcat: Int, page: Int) -> Unit = { _, _ -> },
+    // #436 — empties the whole basket (« Tout vider », long-press on the « Citer N » FAB).
     onClearMultiQuote: () -> Unit = {},
     // #465 — the topic's manual poll choice (owned by :app, null = follow the global default) +
     // the callback recording a tap on the poll card. Threaded to the header card's poll.
@@ -802,6 +806,8 @@ internal fun TopicContent(
                         onClearMultiQuote()
                     }
                 },
+                // #436 — « Tout vider » : the long press on « ❝N » resets the hoisted basket.
+                onClearMultiQuote = onClearMultiQuote,
             )
         },
     ) { innerPadding ->
@@ -2569,6 +2575,8 @@ private fun TopicBottomActionsHost(
     onOpenPage: (Int) -> Unit,
     onReply: (subcat: Int, page: Int) -> Unit,
     onMultiQuote: (subcat: Int, page: Int) -> Unit,
+    // #436 — empties the whole basket (« Tout vider », long-press on the « Citer N » FAB).
+    onClearMultiQuote: () -> Unit,
 ) {
     // #411 — tuck the cluster away while reading down, reveal it on the first upward scroll.
     // AnimatedVisibility in the Scaffold's FAB slot simply collapses to nothing when hidden;
@@ -2595,6 +2603,7 @@ private fun TopicBottomActionsHost(
             onNextPage = { loaded?.let { onOpenPage((it.topic.page + 1).coerceAtMost(it.topic.totalPages)) } },
             onReply = { loaded?.let { onReply(it.topic.subcat, it.topic.page) } },
             onMultiQuote = { loaded?.let { onMultiQuote(it.topic.subcat, it.topic.page) } },
+            onClearMultiQuote = onClearMultiQuote,
         )
     }
 }
@@ -2628,6 +2637,7 @@ private fun TopicBottomActions(
     onNextPage: () -> Unit,
     onReply: () -> Unit,
     onMultiQuote: () -> Unit,
+    onClearMultiQuote: () -> Unit,
 ) {
     val previousLabel = stringResource(R.string.topic_fab_previous_page)
     val nextLabel = stringResource(R.string.topic_fab_next_page)
@@ -2642,7 +2652,7 @@ private fun TopicBottomActions(
         // explicitly armed, not page navigation (call-site zeroes the count when quoting is
         // unavailable).
         FabSlot(visible = multiQuoteCount > 0) {
-            MultiQuoteFab(count = multiQuoteCount, onClick = onMultiQuote)
+            MultiQuoteFab(count = multiQuoteCount, onClick = onMultiQuote, onClear = onClearMultiQuote)
         }
         // #383 — the preference only governs the ‹/› page FABs; « Répondre » keeps its own gate.
         if (showPageFabs) {
@@ -2685,17 +2695,43 @@ private fun FabSlot(visible: Boolean, content: @Composable () -> Unit) {
 /** #599 — M3 small-FAB container footprint, the reserved geometry of every [FabSlot]. */
 private val FAB_SLOT_SIZE = 40.dp
 
+// `internal` (#436): MultiQuoteFabClearTest mounts the FAB directly to pin the « Tout vider »
+// long-press wiring (tap → onClick, long press → onClear) without standing up the whole screen.
 @Composable
-private fun MultiQuoteFab(count: Int, onClick: () -> Unit) {
-    // #291 — same SmallFloatingActionButton footprint as PageFab/ReplyFab; the glyph is a
-    // decorative « ❝N » (no Material icons — detekt ForbiddenImport blocks
-    // androidx.compose.material.*) and the real label rides on contentDescription for TalkBack.
+internal fun MultiQuoteFab(count: Int, onClick: () -> Unit, onClear: () -> Unit) {
+    // #291 — same small-FAB footprint as PageFab/ReplyFab; the glyph is a decorative « ❝N » (no
+    // Material icons — detekt ForbiddenImport blocks androidx.compose.material.*) and the real
+    // label rides on contentDescription for TalkBack.
+    // #436 — a LONG PRESS empties the whole basket (« Tout vider »), on the FAB where the user
+    // sees the count (XaTriX arbitrage: not in the post menu nor the editor). Hand-rolled FAB
+    // (pattern FlagItem) : a NON-clickable Surface carries the combinedClickable, because a real
+    // SmallFloatingActionButton's inner clickable swallows the pointer input of any
+    // combinedClickable stacked on its modifier — neither gesture ever fires (pinned by
+    // MultiQuoteFabClearTest). combinedClickable brings the built-in long-press haptics and
+    // exposes « Tout vider » through onLongClickLabel for TalkBack. Shape/colors/elevation and
+    // the labelLarge glyph mirror the M3 small-FAB defaults of the sibling FABs.
     val label = pluralStringResource(R.plurals.topic_fab_multi_quote, count, count)
-    SmallFloatingActionButton(
-        onClick = onClick,
-        modifier = Modifier.semantics { contentDescription = label },
+    val clearLabel = stringResource(R.string.topic_fab_multi_quote_clear)
+    Surface(
+        modifier = Modifier
+            .semantics { contentDescription = label }
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onClear,
+                onLongClickLabel = clearLabel,
+                role = Role.Button,
+            ),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        shadowElevation = 6.dp,
     ) {
-        Text("❝$count")
+        Box(
+            modifier = Modifier.sizeIn(minWidth = FAB_SLOT_SIZE, minHeight = FAB_SLOT_SIZE),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("❝$count", style = MaterialTheme.typography.labelLarge)
+        }
     }
 }
 
