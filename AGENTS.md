@@ -17,7 +17,7 @@ Voir SKILLS.md à la racine pour l'index humain des skills.
 
 ## Projet
 
-- Phase actuelle : **Phase 4 — UI & hygiène + Extensions** ([roadmap](docs/specs/roadmap.md)). Phases 0 à 3 livrées (bootstrap ; lecture du forum ; écriture poster/citer/upload ; messages MP + DT/MultiMP), bêta **0.16.0** publiée (Play open testing + F-Droid). En cours : refontes UI (vue Drapeaux #603, vue Topic #604), aide & réglages, architecture d'extensions (#6 MPStorage, #7).
+- Phase actuelle : **Phase 4 — UI & hygiène + Extensions** ([roadmap](docs/specs/roadmap.md)). Phases 0 à 3 livrées (bootstrap ; lecture du forum ; écriture poster/citer/upload ; messages MP + DT/MultiMP), bêta **0.18.0** publiée (Play open testing + F-Droid ; vue Drapeaux #603 livrée). En cours : refonte vue Topic (#604), aide & réglages, architecture d'extensions (#6 MPStorage, #7).
 - Licence : GPL-3.0-only
 - Documentation : GitHub Pages via `docs/` (Jekyll + just-the-docs)
 - Langue : code en anglais, issues et docs en francais
@@ -50,10 +50,11 @@ docs/
     roadmap.md       # Phases de developpement
     extensions.md    # Extensions communautaires et architecture d'extensions
   adr/               # Architecture Decision Records (depuis v0.5.1)
-  guides/            # Pages d'accompagnement
+  guides/            # Pages d'accompagnement (liste non exhaustive)
     contributing.md  # Conventions, tests, accessibilite, localisation
-    rationale.md     # Pourquoi la reecriture
-    naming.md        # Candidats pour le nom de l'app
+    release.md       # Procedure de release (channels, gardes)
+    installation.md  # Installer les betas (Play / F-Droid)
+    ...              # + rationale, naming, profiling, proxy, known-issues, references, app-icon
   _config.yml        # Config Jekyll (version des specs dans le footer)
 ```
 
@@ -66,7 +67,7 @@ Kotlin, Jetpack Compose, MVI, Compose Navigation 3, Hilt (KSP), OkHttp 5, Jsoup,
 Tests bootstrappes en Phase 0 et consommes des Phase 1 :
 - **Konsist** (`app/src/test/.../ArchitectureKonsistTest.kt`) — frontières architecture, scope non vide.
 - **JUnit 4** + **Turbine** sur le parser (`core/parser/src/test/.../PostContentParserTest.kt`, `TopicPageParserTest.kt`) et les ViewModel slice (`feature/topic/src/test/.../TopicViewModelTest.kt`).
-- **MockK** et **Robolectric** câblés dans `gradle/libs.versions.toml` mais pas encore consommés (arrivent avec les ViewModels et écrans réels Phase 1+).
+- **MockK** et **Robolectric** consommés dans tout le repo (tests ViewModel/écrans, Compose Testing JVM, tests Roborazzi record de `:core:ui`).
 
 Strategie complete (TDD/spec/prototype par sous-chantier, fixtures, couverture differenciee) definie dans `docs/specs/methodology.md` et `docs/guides/contributing.md` :
 - Couverture **hybride differenciee** : 100% sur les transformers du parser HFR (fixtures dictent l'exhaustivite), guidee par risque ailleurs (ViewModels, mappers, repositories). **Pas d'objectif 100% global.**
@@ -88,8 +89,9 @@ Strategie complete (TDD/spec/prototype par sous-chantier, fixtures, couverture d
 > **Méta-règle : AGENTS.md = la loi, la CI = la police.** Une règle « stricte » est soit
 > `[enforced]` (garde machine bloquante : CI / Konsist / Detekt / lint / hook), soit
 > `[advisory]` (discipline, au mieux rappelée par le template PR). **Ne jamais présenter une
-> règle comme `[enforced]` sans garde réelle** — le statut de chaque garde vit dans
-> `docs/guides/contributing.md`.
+> règle comme `[enforced]` sans garde réelle** — les tags `[enforced]`/`[advisory]` de chaque règle
+> vivent dans `docs/specs/methodology.md` § Pipeline ; `docs/guides/contributing.md`
+> § « Enforcement au build » détaille les gardes machine.
 
 ### Cadence Codex `[advisory]`
 
@@ -210,7 +212,7 @@ Tout commentaire sur issue, PR ou post HFR généré par un LLM doit commencer p
 
 | Fournisseur | Ligne d'attribution |
 |---|---|
-| Claude Code | `> Action par Claude Opus <version> (demandée par @<demandeur>)` |
+| Claude Code | `> Action par Claude <modèle> (demandée par @<demandeur>)` — ex. `Claude Fable 5`, `Claude Opus 4.8` |
 | OpenAI Codex | `> Action par GPT-5 Codex (demandée par @<demandeur>)` |
 | GitHub Copilot coding agent | `> Action par GitHub Copilot Agent (demandée par @<demandeur>)` |
 | Gemini CLI | `> Action par Gemini <version> (demandée par @<demandeur>)` |
