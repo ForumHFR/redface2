@@ -1,3 +1,5 @@
-Redface 2 v0.25.1 — dev.
+Redface 2 v0.25.2 — dev.
 
-- Citation multiple : un appui long sur le bouton « ❝N » vide toute la sélection d'un coup (« Tout vider »).
+- Nouveau réglage « Surface d'écriture » : choisissez ce qu'ouvrent Répondre et Citer (feuille rapide ou éditeur plein écran).
+- Couleurs de texte illisibles en thème sombre corrigées automatiquement.
+- Réglages toujours à jour, dernière frappe sauvée à la fermeture des éditeurs, recherche de smileys plus précise.

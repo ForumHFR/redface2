@@ -16,6 +16,20 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.25.2` — `internal` (dev) — 2026-07-05
+
+**Presets de surface d'écriture (#806)** + lot d'hygiène d'état (audit rf2-10) + deux fixes de veille.
+
+### Éditeur & réponse rapide
+- #806 : réglage « **Surface d'écriture** » (Réglages > Édition et publication, PR #829) — « Toujours la feuille » (défaut, comportement actuel), « Feuille sauf citations » (toute citation ouvre l'éditeur plein écran — la demande du fil DEV), « Toujours plein écran ». L'escalade feuille → plein écran reste disponible partout ; réglage orthogonal à « Citations en cartes ».
+- #808 : dans la feuille de réponse rapide, le bloc de cartes de citation est plafonné (~2 cartes, scroll interne, PR #827) — le champ et « Envoyer » restent toujours visibles clavier levé.
+- #794 : la recherche du wiki smileys applique un **ET implicite** entre les termes (PR #828) — « chat noir » cherche l'intersection, plus l'union ; les opérateurs saisis (`+`/`-`) sont préservés.
+
+### Corrections d'état (audit 05/07, PR #826)
+- Réglages : les valeurs ne sont plus jamais périmées au retour sur l'écran (re-synchronisation continue, gate #788).
+- Éditeurs (sujet, MP compose/réponse) : la dernière frappe n'est plus perdue à la fermeture (flush du brouillon avant fermeture, pattern #803) ; une fermeture ne peut plus rester bloquée par un stockage défaillant.
+- Lecture : les couleurs `[color]` illisibles sont éclaircies/assombries a minima selon le thème (teinte préservée) — un `[#000080]` redevient lisible en sombre/AMOLED.
+
 ## `0.25.1` — `internal` (dev) — 2026-07-05
 
 **Citation multiple : action « Tout vider »** (dernier volet de #436, PR #820).

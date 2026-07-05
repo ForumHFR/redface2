@@ -1,3 +1,5 @@
-Redface 2 v0.25.1 — dev.
+Redface 2 v0.25.2 — dev.
 
-- Multi-quote: long-press the "❝N" button to clear the whole selection at once.
+- New "Writing surface" setting: choose what Reply and Quote open (quick-reply sheet or full-screen editor).
+- Unreadable text colors auto-corrected in dark themes.
+- Settings always fresh, last keystrokes saved on editor close, sharper smiley search.
