@@ -14,6 +14,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -210,6 +211,12 @@ class SettingsViewModel @Inject constructor(
             isLocked = { it.isUpdatingEditorImageInsert },
             apply = { state, value -> state.copy(editorImageInsert = value) },
         )
+        // #806 — writing-surface preset (enum), same collection shape.
+        observePreference(
+            flow = userPreferencesRepository.observeWritingSurfacePreset(),
+            isLocked = { it.isUpdatingWritingSurfacePreset },
+            apply = { state, value -> state.copy(writingSurfacePreset = value) },
+        )
     }
 
     /**
@@ -297,6 +304,7 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.SetUploadProvider -> updateUploadProvider(intent.provider)
             is SettingsIntent.SetImgurClientId -> updateImgurClientId(intent.text)
             is SettingsIntent.SetEditorImageInsert -> updateEditorImageInsert(intent.mode)
+            is SettingsIntent.SetWritingSurfacePreset -> updateWritingSurfacePreset(intent.preset)
         }
     }
 
@@ -687,6 +695,38 @@ class SettingsViewModel @Inject constructor(
                             editorImageInsert = previous,
                             isUpdatingEditorImageInsert = false,
                             editorImageInsertError = true,
+                        )
+                    }
+                }
+        }
+    }
+
+    // #806 — writing-surface preset is an enum, same optimistic-flip shape as editorImageInsert.
+    // The #788 continuous re-sync (observePreference in init) keeps every SettingsViewModel
+    // instance aligned; `isUpdatingWritingSurfacePreset` gates the re-sync during the write.
+    private fun updateWritingSurfacePreset(desired: WritingSurfacePreset) {
+        val previous = _state.value.writingSurfacePreset
+        _state.update {
+            it.copy(
+                writingSurfacePreset = desired,
+                isUpdatingWritingSurfacePreset = true,
+                writingSurfacePresetError = false,
+                writingSurfacePresetTouchedLocally = true,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { userPreferencesRepository.setWritingSurfacePreset(desired) }
+                .onSuccess {
+                    _state.update {
+                        it.copy(writingSurfacePreset = desired, isUpdatingWritingSurfacePreset = false)
+                    }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            writingSurfacePreset = previous,
+                            isUpdatingWritingSurfacePreset = false,
+                            writingSurfacePresetError = true,
                         )
                     }
                 }

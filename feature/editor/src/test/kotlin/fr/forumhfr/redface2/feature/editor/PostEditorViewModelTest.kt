@@ -32,6 +32,7 @@ import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
 import fr.forumhfr.redface2.core.domain.upload.UploadException
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadedImage
 import fr.forumhfr.redface2.core.domain.upload.UploadedImageRecord
@@ -2298,6 +2299,12 @@ class PostEditorViewModelTest {
         override suspend fun setQuoteCardsEnabled(enabled: Boolean) {
             quoteCardsEnabled.value = enabled
         }
+
+        // #806 — the writing-surface preset routes taps in :feature:topic, not here; default stub.
+        override fun observeWritingSurfacePreset(): Flow<WritingSurfacePreset> =
+            MutableStateFlow(WritingSurfacePreset.SHEET)
+
+        override suspend fun setWritingSurfacePreset(preset: WritingSurfacePreset) = Unit
 
         override fun observeShowDtSection(): Flow<Boolean> = MutableStateFlow(false)
 

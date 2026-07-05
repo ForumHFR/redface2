@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.feature.topic
 
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.model.Topic
+import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 
 data class TopicUiState(
     val request: TopicRequest,
@@ -52,6 +53,14 @@ data class TopicUiState(
      * preference emission; the field is always parsed/cached so toggling never refetches.
      */
     val showSignatures: Boolean = false,
+    /**
+     * #806 — mirrors `UserPreferencesRepository.observeWritingSurfacePreset()`. Feeds
+     * [writingSurfaceFor] AT TAP TIME on the three write entry points (reply FAB, « Citer »,
+     * « Citer N ») to pick the quick-reply sheet or the full-screen editor. Default
+     * [WritingSurfacePreset.SHEET] = the 0.25.1 behaviour. A preset change never migrates an
+     * already-open sheet (the decision is only ever taken on the next tap).
+     */
+    val writingSurfacePreset: WritingSurfacePreset = WritingSurfacePreset.SHEET,
     /**
      * #335 — `true` while a manual pull-to-refresh of the current page is in flight. Drives the
      * Material3 `PullToRefreshBox` spinner. Set on the `Refresh` intent, cleared in the refresh

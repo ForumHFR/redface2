@@ -7,6 +7,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 
 data class SettingsState(
     val proxyEnabled: Boolean = false,
@@ -182,6 +183,14 @@ data class SettingsState(
     val isUpdatingQuoteCardsEnabled: Boolean = false,
     val quoteCardsEnabledError: Boolean = false,
     val quoteCardsEnabledTouchedLocally: Boolean = false,
+    // #806 — which surface a write action in a topic opens (sheet / sheet-except-quotes / full
+    // editor). Enum, so the same bespoke optimistic-flip shape as [editorImageInsert]. Default
+    // SHEET (the 0.25.1 behaviour). Distinct from [quoteCardsEnabled], which governs the quote
+    // RENDERING inside whichever surface opens.
+    val writingSurfacePreset: WritingSurfacePreset = WritingSurfacePreset.SHEET,
+    val isUpdatingWritingSurfacePreset: Boolean = false,
+    val writingSurfacePresetError: Boolean = false,
+    val writingSurfacePresetTouchedLocally: Boolean = false,
     // Drapeaux — opt-in « DT » placeholder tab (MPStorage sync #6 lands later). Same
     // optimistic-flip + startup-race-guard machinery. Default false (tab hidden).
     val showDtSection: Boolean = false,
@@ -330,6 +339,10 @@ data class SettingsState(
     val canToggleQuoteCardsEnabled: Boolean
         get() = !isUpdatingQuoteCardsEnabled
 
+    // #806 — the writing-surface radio group is gated only by its own in-flight write.
+    val canChangeWritingSurfacePreset: Boolean
+        get() = !isUpdatingWritingSurfacePreset
+
     // DT tab — gated only by its own write.
     val canToggleShowDtSection: Boolean
         get() = !isUpdatingShowDtSection
@@ -469,6 +482,13 @@ sealed interface SettingsIntent {
 
     // #805 — quote-cards-in-composer toggle. Optimistic-flip contract, like the flags toggles.
     data class QuoteCardsEnabledChanged(val enabled: Boolean) : SettingsIntent
+
+    /**
+     * #806 — choose which surface a write action in a topic opens. `preset` is the desired
+     * selection (one intent per radio pick), applied optimistically with revert-on-failure,
+     * like [SetEditorImageInsert].
+     */
+    data class SetWritingSurfacePreset(val preset: WritingSurfacePreset) : SettingsIntent
 
     // Drapeaux — opt-in « DT » placeholder tab (MPStorage sync #6 lands later). Optimistic-flip
     // contract, like the flags toggles: the boolean is the desired post-flip state.

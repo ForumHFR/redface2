@@ -36,6 +36,7 @@ import fr.forumhfr.redface2.core.domain.upload.UploadedImage
 import fr.forumhfr.redface2.core.domain.upload.UploadedImageRecord
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
 import fr.forumhfr.redface2.core.model.EditorSmiley
 import fr.forumhfr.redface2.core.model.EditorSmileySource
@@ -1628,6 +1629,12 @@ class TopicFormViewModelTest {
 
         override fun observeQuoteCardsEnabled(): Flow<Boolean> = MutableStateFlow(false)
         override suspend fun setQuoteCardsEnabled(enabled: Boolean) = Unit
+
+        // #806 — the writing-surface preset routes taps in :feature:topic, not here; default stub.
+        override fun observeWritingSurfacePreset(): Flow<WritingSurfacePreset> =
+            MutableStateFlow(WritingSurfacePreset.SHEET)
+
+        override suspend fun setWritingSurfacePreset(preset: WritingSurfacePreset) = Unit
 
         override fun observeShowDtSection(): Flow<Boolean> = MutableStateFlow(false)
 
