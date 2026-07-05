@@ -45,6 +45,8 @@ Les **8 modules d'extensions communautaires** arrivent en **Phase 4**, pas avant
 
 > **Amendement PR #208 (Phase 2 finish)** — `:feature:profile` (bottom sheet résumé + page complète du profil utilisateur) ajouté en Phase 2. Total : 16 modules (8 core + 8 features base).
 
+> **Amendement 2026-07-05 (reality pass)** — le décompte ci-dessus omettait `:feature:flags` (présent depuis la Phase 1, écran d'accueil) : la liste « 8 features de base » de la décision initiale ne le contenait pas non plus. Décompte réel : **17 modules** (8 core + 9 features, hors `:app`) — vérifiable dans `settings.gradle.kts`. Les 8 modules d'extensions communautaires restent différés (Phase 4, #7).
+
 ## Conséquences
 
 - les frontières d'architecture sont enforcées à la compilation, pas seulement par convention

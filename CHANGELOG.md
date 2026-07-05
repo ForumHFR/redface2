@@ -8,6 +8,24 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ## [Unreleased]
 
+_(rien pour l'instant)_
+
+---
+
+## v0.11.0 — 2026-07-05
+
+**Reality pass** (audit repo 2026-07-05) + rattrapage du lockstep : cette version regroupe les évolutions de specs restées en « Unreleased » depuis v0.10.8 (entrées Phase 2 ci-dessous) et les corrections d'état Phase 3/4.
+
+### Changed (reality pass 2026-07-05)
+- État courant corrigé partout (README, `docs/index.md`, `AGENTS.md`, `contributing.md`) : bêta **0.18.0**, refonte Drapeaux #603 **livrée**, refonte Topic #604 en cours (vagues 1-4 livrées en dev 0.19.x→0.24.x).
+- `navigation.md` / `mvi.md` : vue Drapeaux post-#603 — retrait par **appui long** (`FlagActionsSheet`), le **swipe horizontal change d'onglet** (#660, l'ancien swipe-to-remove documenté était devenu faux), Super = super-favoris **locaux** (ADR-017, plus un placeholder), sheet « Affichage » ouvert depuis la top bar / config rapide ; notes d'état #603/#604 en tête des sections Drapeaux et Topic.
+- `contributing.md` : couverture Roborazzi réelle (`:core:ui` uniquement — la mention `:feature:topic` était fausse), Kover **non branché** (proposé par la RFC #761), module `:feature:profile` ajouté à l'arborescence.
+- `AGENTS.md` : MockK/Robolectric « pas encore consommés » corrigé (consommés partout), localisation des tags `[enforced]`/`[advisory]` (methodology.md, pas contributing.md), arborescence `docs/guides/` complétée, ligne d'attribution Claude rendue générique (`Claude <modèle>`).
+- ADR-001 : amendement — le décompte omettait `:feature:flags` ; réel = **17 modules** (8 core + 9 features).
+- `roadmap.md` : cases #603 (livrée) et #605 (hygiène exécutée, requalifiée en ombrelle) cochées.
+
+### Contexte Phase 2 (entrées accumulées, inchangées)
+
 Phase 2 finish (#206/#214) — create-topic : succès correctement classé et sujet créé mis en évidence dans la liste d'arrivée. Phase 2G-B (#150 suite) — recherche HFR alignée sur le formulaire réel : choix Titres+messages/Titres/Messages, parsing du lien « Dernier message correspondant » quand HFR fournit un `numreponse`, pivot catégories rendu comme un scope secondaire. Phase 2G-A (#150 partiel) — recherche HFR réelle dans les titres de topics (`forum1.php?recherches=1&...`), parser pivot/single/multi/no-results, écran Recherche fonctionnel avec navigation vers le topic. Phase 2F-C (#11 partiel) — picker smileys symétrique sur `TopicFormScreen` (Edit FP + New topic). Phase 2F-B (#11 partiel) — picker smileys dans l'éditeur (bottom-sheet Material 3, onglet Standard 25 builtins HFR + onglet Wiki live via `message-smi-mp-aj.php`). Phase 2E (#149) création de topic + follow-up Phase 2B-B (#144) déjà mergés décrits plus bas.
 
 ### Added (Phase 2 finish #206/#214)

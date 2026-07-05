@@ -15,7 +15,7 @@ Comment participer au projet.
 
 ## Phase actuelle : Phase 4 — UI & extensions
 
-Phases 0 à 3 sont livrées (bootstrap ; lecture du forum ; écriture : poster/citer/`[img]`/upload ; messages : MP + DT/MultiMP), bêta **0.16.0** publiée (Play open testing + F-Droid). Phase 4 en cours : refontes UI (vue Drapeaux [#603](https://github.com/ForumHFR/redface2/issues/603), vue Topic [#604](https://github.com/ForumHFR/redface2/issues/604)), aide & réglages, et architecture d'extensions ([#6](https://github.com/ForumHFR/redface2/issues/6), [#7](https://github.com/ForumHFR/redface2/issues/7)). Voir [roadmap]({{ site.baseurl }}/specs/roadmap). Les contributions utiles maintenant :
+Phases 0 à 3 sont livrées (bootstrap ; lecture du forum ; écriture : poster/citer/`[img]`/upload ; messages : MP + DT/MultiMP), bêta **0.18.0** publiée (Play open testing + F-Droid ; refonte vue Drapeaux [#603](https://github.com/ForumHFR/redface2/issues/603) livrée). Phase 4 en cours : refonte vue Topic ([#604](https://github.com/ForumHFR/redface2/issues/604)), aide & réglages, et architecture d'extensions ([#6](https://github.com/ForumHFR/redface2/issues/6), [#7](https://github.com/ForumHFR/redface2/issues/7)). Voir [roadmap]({{ site.baseurl }}/specs/roadmap). Les contributions utiles maintenant :
 
 - **Implémenter une issue Phase 4** ouverte (refonte Drapeaux/Topic, extensions, polish UX)
 - **Proposer des features** : ouvrir une issue avec le label `feature`
@@ -123,6 +123,7 @@ redface2/
     auth/                 # Login
     search/               # Recherche
     settings/             # Préférences
+    profile/              # Profil utilisateur (sheet aperçu + page complète)
 ```
 
 ### Gestion des dépendances
@@ -239,7 +240,7 @@ Cette page décrit **comment** contribuer ; elle ne redéfinit pas la méthode d
 **Couverture (hybride différenciée) :**
 - **100% sur les transformers du parser HFR** — naturel, fixtures dictent exhaustivité
 - **Guidée par risque ailleurs** (ViewModels, mappers, repositories) — tests sur edge cases réels + fixtures, pas de quota chiffré
-- Outil de mesure (Kover) pour info, pas comme gate CI
+- Aucun outil de mesure branché à ce jour (Kover proposé par la RFC [#761](https://github.com/ForumHFR/redface2/issues/761)) ; pas de gate CI de couverture
 
 **Stratégie :**
 - **TDD sélectif** sur fonctions pures (parser, PostContent AST, ViewModels, helpers, mappers) — red → green → refactor
@@ -253,7 +254,7 @@ Screenshot testing **JVM** (sur Robolectric, sans device) via Roborazzi 1.63, co
 - **Mode `record`** (par défaut ici) : un test `captureRoboImage` génère un PNG dans `<module>/build/outputs/roborazzi/` (non versionné) → **inspection visuelle** rapide (~40 s). Lancer via l'env Docker, ex. `./scripts/docker-dev.sh ./gradlew :core:ui:testDebugUnitTest`. (Il n'existe **pas** de tâche `recordRoborazzi` : le plugin Gradle Roborazzi n'est pas appliqué — record forcé via `roborazzi.test.record=true`.)
 - **Quand l'utiliser** : `record` est réservé aux **changements de rendu intentionnels** (PostRenderer, écrans refondus) — on régénère puis on regarde l'image. `verifyRoborazzi` (compare) existe mais les **baselines ne sont pas versionnées** en V1 (elles bougeraient à chaque itération des refontes #603/#604).
 - **Statut** : **recommandé** pour tout changement de rendu UI structurant, **pas encore un gate CI dur**. Le passage en `verify` + baselines committées + gate fera l'objet d'une décision dédiée une fois les refontes UI stabilisées.
-- **Couverture actuelle** : `:core:ui` (PostRenderer — code, smiley, citation) + `:feature:topic` + coquille réglages. Elle s'étend au cas par cas — **pas** d'obligation « tout écran doit avoir un snapshot ».
+- **Couverture actuelle** : `:core:ui` uniquement (PostRenderer — code, smiley, citation ; `FlagItem` refonte #603 ; vitrine réglages `SettingsHomeShowcase`). Aucun test Roborazzi dans les modules `feature/` à ce jour. Elle s'étend au cas par cas — **pas** d'obligation « tout écran doit avoir un snapshot ».
 - Décision et rationale : [ADR-016]({{ site.baseurl }}/adr/016-roborazzi-screenshot-testing).
 
 **Smoke test mensuel HFR (fin de phase de lecture) :**
