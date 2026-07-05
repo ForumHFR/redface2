@@ -598,6 +598,16 @@ internal fun buildSettingsCatalogue(
                     .takeIf { state.confirmBeforePostingError },
                 onCheckedChange = { onIntent(SettingsIntent.ConfirmBeforePostingChanged(it)) },
             ),
+            toggleRow(
+                id = "quote_cards_enabled",
+                title = stringResource(R.string.settings_quote_cards_title),
+                description = stringResource(R.string.settings_quote_cards_description),
+                checked = state.quoteCardsEnabled,
+                enabled = state.canToggleQuoteCardsEnabled,
+                errorRes = R.string.settings_quote_cards_persist_failed
+                    .takeIf { state.quoteCardsEnabledError },
+                onCheckedChange = { onIntent(SettingsIntent.QuoteCardsEnabledChanged(it)) },
+            ),
             futureRow(
                 id = "future_auto_signature",
                 title = stringResource(R.string.settings_future_auto_signature),

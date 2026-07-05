@@ -2121,6 +2121,8 @@ internal class FakeUserPreferencesRepository(
     private val topicPollsExpanded: Boolean = false,
     private val topicSignatures: Boolean = false,
     private val confirmBeforePosting: Boolean = false,
+    // #805 — quote rendering in the composer; false mirrors the production default (inline BBCode).
+    private val quoteCardsEnabled: Boolean = false,
 ) : UserPreferencesRepository {
     override fun observeProxyConfig(): Flow<ProxyConfig> = MutableStateFlow(ProxyConfig())
 
@@ -2178,6 +2180,10 @@ internal class FakeUserPreferencesRepository(
     override fun observeConfirmBeforePosting(): Flow<Boolean> = MutableStateFlow(confirmBeforePosting)
 
     override suspend fun setConfirmBeforePosting(enabled: Boolean) = Unit
+
+    override fun observeQuoteCardsEnabled(): Flow<Boolean> = MutableStateFlow(quoteCardsEnabled)
+
+    override suspend fun setQuoteCardsEnabled(enabled: Boolean) = Unit
 
     override fun observeShowDtSection(): Flow<Boolean> = MutableStateFlow(false)
 

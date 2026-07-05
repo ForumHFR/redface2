@@ -139,4 +139,6 @@
     <string name="quick_reply_error_unknown">HFR a renvoyé une réponse inattendue. Réessayez ou actualisez l\'app.</string>
     <string name="quick_reply_error_network">Erreur réseau. Vérifiez votre connexion et réessayez.</string>
     <string name="quick_reply_error_session_expired">Votre session HFR a expiré. Reconnectez-vous.</string>
+    <string name="quick_reply_error_quote_fetch">Impossible de récupérer la citation. Réessayez depuis « Citer ».</string>
+    <string name="quick_reply_preparing_quote">Insertion de la citation…</string>
 </resources>

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -68,7 +69,14 @@ internal fun QuickReplySheet(
         creationCallback = { factory -> factory.create(request) },
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
-    LaunchedEffect(viewModel, initialQuotes) {
+    // Keyed on the VM ALONE — one `onSheetOpened` delivery per sheet composition. Keying on
+    // `initialQuotes` too would restart the effect on any launch mutation and re-seed the field
+    // from a possibly-stale row mid-typing (#805 cadrage, réserve n°1). A deliberate re-cite is
+    // a new launch, hence a new composition, hence a fresh delivery — GUARANTEED structurally :
+    // every `quickReplyFor` setter in TopicScreen (FAB, « Citer », « Citer N ») sits behind this
+    // modal's scrim, so a new launch can only happen after a dismiss nulled the previous one
+    // (gate Codex, finding 2). Re-assigning the launch over an OPEN sheet would break delivery.
+    LaunchedEffect(viewModel) {
         // Re-seed the field from the #405 row at EACH opening — the VM outlives the sheet and
         // its cached text can be stale after a full-screen edit of the same draft (gate #788).
         viewModel.onSheetOpened(initialQuotes)
@@ -119,8 +127,9 @@ internal fun QuickReplySheet(
                 )
                 IconButton(
                     onClick = viewModel::onEscalateRequested,
-                    // Gate #788 — no escalation while a POST is in flight (submit vs navigation race).
-                    enabled = !state.isSubmitting,
+                    // Gate #788 — no escalation while a POST is in flight (submit vs navigation
+                    // race) ; #805 — nor while a [quotemsg] insert is being fetched.
+                    enabled = !state.isSubmitting && !state.isPreparingQuotes,
                     modifier = Modifier.semantics { contentDescription = fullScreenLabel },
                 ) {
                     RedfaceVectorIcon(
@@ -153,6 +162,21 @@ internal fun QuickReplySheet(
                     .fillMaxWidth()
                     .focusRequester(focusRequester),
             )
+            // #805 cards OFF — the [quotemsg] fetch runs at opening : typing stays enabled (the
+            // insert concatenates onto the live field), only send/escalate wait for it.
+            if (state.isPreparingQuotes) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.padding(end = 8.dp).size(16.dp),
+                        strokeWidth = 2.dp,
+                    )
+                    Text(
+                        text = stringResource(R.string.quick_reply_preparing_quote),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             state.submitError?.let { error ->
                 Text(
                     text = stringResource(error.messageRes()),
@@ -201,6 +225,7 @@ internal fun QuickReplySheet(
 internal fun QuickReplySubmitError.messageRes(): Int = when (this) {
     QuickReplySubmitError.Network -> R.string.quick_reply_error_network
     QuickReplySubmitError.SessionExpired -> R.string.quick_reply_error_session_expired
+    QuickReplySubmitError.QuoteFetchFailed -> R.string.quick_reply_error_quote_fetch
     is QuickReplySubmitError.Hfr -> when (reason) {
         ReplyFailureReason.EmptyMessage -> R.string.quick_reply_error_empty
         ReplyFailureReason.InvalidHashCheck -> R.string.quick_reply_error_invalid_hash

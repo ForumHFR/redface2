@@ -10,9 +10,12 @@ import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
+import java.io.IOException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -21,6 +24,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -322,6 +326,153 @@ class QuickReplyViewModelTest {
         assertEquals(listOf(303, 101), viewModel.state.value.quotes.map { it.numreponse })
     }
 
+    // ----- #805 : cartes OFF (défaut production) — [quotemsg] inline dans le champ ----------
+
+    @Test
+    fun `inline mode appends the quote BBCode after the row body and arms no card`() = runTest {
+        val repository = FakeQuickReplyRepository()
+        val viewModel = quickReplyViewModel(
+            replyRepository = repository,
+            draftStore = FakeQuickReplyDraftStore(initialBody = "brouillon"),
+            quoteCardsEnabled = false,
+        )
+        viewModel.onSheetOpened(listOf(preview(101, "alice")))
+        advanceUntilIdle()
+
+        val state = viewModel.state.value
+        assertEquals("brouillon\n\n[quotemsg=101]corps[/quotemsg]", state.text.text)
+        assertTrue(state.quotes.isEmpty())
+        assertFalse(state.isPreparingQuotes)
+        // Prefetch (plain) then the quote form — whose hash the later submit rides.
+        assertEquals(listOf(null, 101), repository.fetchedQuotedNumreponses)
+    }
+
+    @Test
+    fun `inline mode merges a small basket in citation order`() = runTest {
+        val repository = FakeQuickReplyRepository()
+        val viewModel = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
+        viewModel.onSheetOpened(listOf(preview(202, "bob"), preview(101, "alice")))
+        advanceUntilIdle()
+
+        assertEquals(
+            "[quotemsg=202]corps[/quotemsg]\n\n[quotemsg=101]corps[/quotemsg]",
+            viewModel.state.value.text.text,
+        )
+        assertTrue(viewModel.state.value.quotes.isEmpty())
+    }
+
+    @Test
+    fun `inline mode never loses typing made during the quote fetch`() = runTest {
+        // Réserve Codex n°1 — the completion CONCATENATES onto the live field content, never a
+        // replacement recomputed from the row : keystrokes landed mid-fetch must survive.
+        val repository = GatedQuoteFormRepository()
+        val viewModel = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
+        viewModel.onSheetOpened(listOf(preview(101, "alice")))
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value.isPreparingQuotes)
+
+        viewModel.onTextChanged(TextFieldValue("pendant le fetch"))
+        assertFalse(viewModel.state.value.canSubmit)
+
+        repository.quoteGate.complete(Unit)
+        advanceUntilIdle()
+
+        val state = viewModel.state.value
+        assertEquals("pendant le fetch\n\n[quotemsg=101]corps[/quotemsg]", state.text.text)
+        assertFalse(state.isPreparingQuotes)
+        assertTrue(state.canSubmit)
+    }
+
+    @Test
+    fun `inline mode surfaces a quote-fetch failure and keeps the field intact`() = runTest {
+        val repository = GatedQuoteFormRepository(failQuoteFetch = true)
+        repository.quoteGate.complete(Unit)
+        val viewModel = quickReplyViewModel(
+            replyRepository = repository,
+            draftStore = FakeQuickReplyDraftStore(initialBody = "acquis"),
+            quoteCardsEnabled = false,
+        )
+        viewModel.onSheetOpened(listOf(preview(101, "alice")))
+        advanceUntilIdle()
+
+        val state = viewModel.state.value
+        assertEquals("acquis", state.text.text)
+        assertEquals(QuickReplySubmitError.QuoteFetchFailed, state.submitError)
+        assertFalse(state.isPreparingQuotes)
+    }
+
+    @Test
+    fun `dismiss cancels an in-flight inline materialisation`() = runTest {
+        // Réserve Codex n°2 — a fetch started for an abandoned composition must never inject
+        // its BBCode into the next one.
+        val repository = GatedQuoteFormRepository()
+        val viewModel = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
+        viewModel.onSheetOpened(listOf(preview(101, "alice")))
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value.isPreparingQuotes)
+
+        viewModel.onDismissed()
+        repository.quoteGate.complete(Unit)
+        advanceUntilIdle()
+
+        assertEquals("", viewModel.state.value.text.text)
+        assertFalse(viewModel.state.value.isPreparingQuotes)
+    }
+
+    @Test
+    fun `escalation is inert while the quote insert is in flight`() = runTest {
+        val repository = GatedQuoteFormRepository()
+        val viewModel = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
+        viewModel.onSheetOpened(listOf(preview(101, "alice")))
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value.isPreparingQuotes)
+
+        var escalated = false
+        val collector = launch { viewModel.effects.first(); escalated = true }
+        viewModel.onEscalateRequested()
+        advanceUntilIdle()
+        assertFalse(escalated)
+
+        repository.quoteGate.complete(Unit)
+        advanceUntilIdle()
+        collector.cancel()
+    }
+
+    @Test
+    fun `stale cards from a previous ON session are folded into the inline insert`() = runTest {
+        // Gate Codex (finding 1) — the VM outlives the sheet : cards armed while the preference
+        // was ON must not re-render (nor re-arm the cards submit path) after a flip to OFF.
+        val repository = FakeQuickReplyRepository()
+        val viewModel = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
+        viewModel.onQuoteAdded(preview(101, "alice"))
+
+        viewModel.onSheetOpened(listOf(preview(202, "bob")))
+        advanceUntilIdle()
+
+        val state = viewModel.state.value
+        assertTrue("no card survives an OFF opening", state.quotes.isEmpty())
+        assertEquals(
+            "[quotemsg=101]corps[/quotemsg]\n\n[quotemsg=202]corps[/quotemsg]",
+            state.text.text,
+        )
+    }
+
+    @Test
+    fun `inline mode submits through the plain path with the field content`() = runTest {
+        val repository = FakeQuickReplyRepository()
+        val viewModel = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
+        viewModel.onSheetOpened(listOf(preview(101, "alice")))
+        advanceUntilIdle()
+        viewModel.onTextChanged(TextFieldValue("[quotemsg=101]corps[/quotemsg]\n\nmon ajout"))
+
+        viewModel.onSubmitClicked()
+        advanceUntilIdle()
+
+        assertEquals(listOf("[quotemsg=101]corps[/quotemsg]\n\nmon ajout"), repository.submittedBodies)
+        // No card in state → plain submit path, riding the warmed quote form : no extra fetch.
+        assertEquals(listOf(null, 101), repository.fetchedQuotedNumreponses)
+    }
+
     private fun preview(numreponse: Int, author: String): QuotedPostPreview =
         QuotedPostPreview(numreponse = numreponse, author = author, excerpt = "extrait")
 
@@ -329,12 +480,18 @@ class QuickReplyViewModelTest {
         replyRepository: ReplyRepository = FakeQuickReplyRepository(),
         draftStore: EditorDraftStore = FakeQuickReplyDraftStore(),
         confirmBeforePosting: Boolean = false,
+        // Test default = cards ON so the #604 lot 2-3 card suites keep exercising their mode ;
+        // the #805 inline tests opt OUT explicitly (the PRODUCTION default is false = inline).
+        quoteCardsEnabled: Boolean = true,
     ): QuickReplyViewModel = QuickReplyViewModel(
         request = QuickReplyRequest(cat = 23, subcat = 401, topicId = 35421, page = 3),
         replyRepository = replyRepository,
         quoteMaterializer = ReplyQuoteMaterializer(replyRepository),
         draftStore = draftStore,
-        userPreferencesRepository = FakeUserPreferencesRepository(confirmBeforePosting = confirmBeforePosting),
+        userPreferencesRepository = FakeUserPreferencesRepository(
+            confirmBeforePosting = confirmBeforePosting,
+            quoteCardsEnabled = quoteCardsEnabled,
+        ),
     )
 
     private companion object {
@@ -363,6 +520,38 @@ private class FakeQuickReplyDraftStore(
     override suspend fun delete(owner: String?, key: String) {
         storedBody = null
     }
+}
+
+/**
+ * #805 — quote-form fetches block on [quoteGate] (and optionally fail once released) so the
+ * inline-mode tests can observe the in-flight state ; the plain prefetch answers immediately.
+ */
+private class GatedQuoteFormRepository(
+    private val failQuoteFetch: Boolean = false,
+) : ReplyRepository {
+    val quoteGate = CompletableDeferred<Unit>()
+
+    override suspend fun fetchReplyForm(context: ReplyContext): ReplyForm {
+        val quoted = context.quotedNumreponse
+        if (quoted != null) {
+            quoteGate.await()
+            if (failQuoteFetch) throw IOException("quote fetch down")
+        }
+        return ReplyForm(
+            hashCheck = "hash",
+            sujet = "sujet",
+            hiddenFields = emptyMap(),
+            isAnonymous = false,
+            initialContent = quoted?.let { "[quotemsg=$it]corps[/quotemsg]" }.orEmpty(),
+        )
+    }
+
+    override suspend fun submitReply(
+        context: ReplyContext,
+        form: ReplyForm,
+        bbcodeContent: String,
+        options: ReplyFormOptions,
+    ): ReplySubmitResult = ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
 }
 
 private class FakeQuickReplyRepository(

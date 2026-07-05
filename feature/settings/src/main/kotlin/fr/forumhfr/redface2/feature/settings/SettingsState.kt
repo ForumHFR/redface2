@@ -172,6 +172,12 @@ data class SettingsState(
     val isUpdatingConfirmBeforePosting: Boolean = false,
     val confirmBeforePostingError: Boolean = false,
     val confirmBeforePostingTouchedLocally: Boolean = false,
+    // #805 arbitrage — quote cards in the composer, opt-in. Same optimistic-flip + startup-race
+    // machinery. Default false (citations = inline [quotemsg] BBCode in the field).
+    val quoteCardsEnabled: Boolean = false,
+    val isUpdatingQuoteCardsEnabled: Boolean = false,
+    val quoteCardsEnabledError: Boolean = false,
+    val quoteCardsEnabledTouchedLocally: Boolean = false,
     // Drapeaux — opt-in « DT » placeholder tab (MPStorage sync #6 lands later). Same
     // optimistic-flip + startup-race-guard machinery. Default false (tab hidden).
     val showDtSection: Boolean = false,
@@ -315,6 +321,10 @@ data class SettingsState(
     val canToggleConfirmBeforePosting: Boolean
         get() = !isUpdatingConfirmBeforePosting
 
+    // #805 — the quote-cards toggle is gated only by its own write.
+    val canToggleQuoteCardsEnabled: Boolean
+        get() = !isUpdatingQuoteCardsEnabled
+
     // DT tab — gated only by its own write.
     val canToggleShowDtSection: Boolean
         get() = !isUpdatingShowDtSection
@@ -451,6 +461,9 @@ sealed interface SettingsIntent {
     // #312 — confirm-before-posting toggle. Optimistic-flip contract, like the flags toggles:
     // the boolean is the desired post-flip state.
     data class ConfirmBeforePostingChanged(val enabled: Boolean) : SettingsIntent
+
+    // #805 — quote-cards-in-composer toggle. Optimistic-flip contract, like the flags toggles.
+    data class QuoteCardsEnabledChanged(val enabled: Boolean) : SettingsIntent
 
     // Drapeaux — opt-in « DT » placeholder tab (MPStorage sync #6 lands later). Optimistic-flip
     // contract, like the flags toggles: the boolean is the desired post-flip state.

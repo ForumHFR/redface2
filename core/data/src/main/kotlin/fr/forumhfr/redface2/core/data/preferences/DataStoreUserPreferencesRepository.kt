@@ -348,6 +348,22 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeQuoteCardsEnabled(): Flow<Boolean> =
+        dataStore.data
+            // Default `false` (#805 arbitrage): citations land as editable [quotemsg] BBCode in
+            // the field; the compact cards of #604 lots 2-3 are the opt-in rendering.
+            .map { prefs -> prefs[KEY_QUOTE_CARDS_ENABLED] ?: false }
+            .distinctUntilChanged()
+            .catch { emit(false) }
+
+    override suspend fun setQuoteCardsEnabled(enabled: Boolean) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_QUOTE_CARDS_ENABLED] = enabled
+            }
+        }
+    }
+
     override fun observeShowDtSection(): Flow<Boolean> =
         dataStore.data
             // Default `false`: the DT tab is a placeholder until the MPStorage sync (#6) — opt-in only.
@@ -962,6 +978,9 @@ class DataStoreUserPreferencesRepository @Inject constructor(
 
         // #312 — confirmation dialog before any publish action (reply / edit / new topic / MP).
         val KEY_CONFIRM_BEFORE_POSTING = booleanPreferencesKey("confirm_before_posting")
+
+        // #805 arbitrage — quote cards in the composer (default OFF = inline [quotemsg] BBCode).
+        val KEY_QUOTE_CARDS_ENABLED = booleanPreferencesKey("quote_cards_enabled")
 
         // Opt-in « DT » placeholder tab on the Drapeaux screen (MPStorage sync lands later, #6).
         val KEY_FLAGS_SHOW_DT_SECTION = booleanPreferencesKey("flags_show_dt_section")

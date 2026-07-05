@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -49,12 +50,19 @@ data class QuickReplyUiState(
      */
     val quotes: List<QuotedPostPreview> = emptyList(),
     val isSubmitting: Boolean = false,
+    /**
+     * #805 arbitrage — cards OFF : a `[quotemsg]` materialisation is in flight for this opening.
+     * Typing stays enabled (the completion CONCATENATES onto the live field, réserve Codex) ;
+     * submit and escalation wait for the insert.
+     */
+    val isPreparingQuotes: Boolean = false,
     val submitError: QuickReplySubmitError? = null,
     /** #312 — « Confirmation avant publication » : the pending-confirmation dialog is showing. */
     val confirmVisible: Boolean = false,
 ) {
     /** With quote cards armed, an empty body is a valid submit (quotes-only reply). */
-    val canSubmit: Boolean get() = (text.text.isNotBlank() || quotes.isNotEmpty()) && !isSubmitting
+    val canSubmit: Boolean
+        get() = (text.text.isNotBlank() || quotes.isNotEmpty()) && !isSubmitting && !isPreparingQuotes
 }
 
 /** Typed submit failures, the same split as the full editor's `SubmitError`. */
@@ -62,6 +70,13 @@ sealed interface QuickReplySubmitError {
     data class Hfr(val reason: ReplyFailureReason) : QuickReplySubmitError
     data object Network : QuickReplySubmitError
     data object SessionExpired : QuickReplySubmitError
+
+    /**
+     * #805 cards OFF — the opening-time `[quotemsg]` fetch failed : the field is untouched,
+     * nothing is lost, re-tapping « Citer » retries. Session expiry still maps to
+     * [SessionExpired] (reconnect is the actionable fix).
+     */
+    data object QuoteFetchFailed : QuickReplySubmitError
 }
 
 /** One-shot events consumed by the sheet composable. */
@@ -98,7 +113,7 @@ class QuickReplyViewModel @AssistedInject constructor(
     private val replyRepository: ReplyRepository,
     private val quoteMaterializer: ReplyQuoteMaterializer,
     private val draftStore: EditorDraftStore,
-    userPreferencesRepository: UserPreferencesRepository,
+    private val userPreferencesRepository: UserPreferencesRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(QuickReplyUiState())
@@ -119,6 +134,13 @@ class QuickReplyViewModel @AssistedInject constructor(
     private var formJob: Job? = null
     private var submitJob: Job? = null
     private var autosaveJob: Job? = null
+
+    /**
+     * #805 cards OFF — the opening-time materialisation. Cancelled at each (re)opening and at
+     * dismiss : a fetch started for an abandoned composition can never inject its BBCode into
+     * the next one (réserve Codex n°2).
+     */
+    private var materializeJob: Job? = null
 
     /** #405 — the SAME key the full-screen reply editor uses for this topic. */
     private val draftKey: String = EditorDraftKey.reply(request.cat, request.topicId)
@@ -149,18 +171,83 @@ class QuickReplyViewModel @AssistedInject constructor(
      * typically escalate → edit in the full-screen editor → back → reopen. The row is the
      * source of truth ; the field is unconditionally re-seeded from it (gate Codex PR #788).
      *
-     * [initialQuotes] (#604 lot 3) — the cards this opening pre-arms, in citation order : one
+     * [initialQuotes] (#604 lot 3) — the citations this opening delivers, in citation order : one
      * preview for « Citer », the whole basket for « Citer N » under the full-screen threshold.
-     * Adds are idempotent per numreponse, appended AFTER any cards the surviving VM already
-     * holds (the composition in progress keeps its order).
+     * Delivery happens ONCE per sheet composition (the sheet keys its effect on the VM alone) ;
+     * a deliberate re-cite is a new launch, hence a new composition.
+     *
+     * Rendering is decided HERE per opening (#805 arbitrage, `observeQuoteCardsEnabled().first()`) :
+     * cards ON → idempotent card adds (unchanged #604 behaviour) ; cards OFF (default) → the
+     * `[quotemsg]` prefills are fetched now and APPENDED to the live field content at completion
+     * (never a replacement computed from the row — réserve Codex n°1).
      */
     fun onSheetOpened(initialQuotes: List<QuotedPostPreview> = emptyList()) {
-        initialQuotes.forEach(::onQuoteAdded)
+        materializeJob?.cancel()
         viewModelScope.launch {
             initJob.join()
             val body = draftStore.load(draftOwner, draftKey)?.body.orEmpty()
             _state.update {
                 it.copy(text = TextFieldValue(text = body, selection = TextRange(body.length)))
+            }
+            if (initialQuotes.isEmpty() && _state.value.quotes.isEmpty()) return@launch
+            if (userPreferencesRepository.observeQuoteCardsEnabled().first()) {
+                initialQuotes.forEach(::onQuoteAdded)
+            } else {
+                // Gate Codex (finding 1) — cards armed under a previous cards-ON session must not
+                // survive an OFF opening : rendered again, they would re-arm the cards submit
+                // path against the arbitrage. They are FOLDED into this opening's inline insert
+                // instead (nothing the user cited is dropped), deduplicated like cards were.
+                val pending = (_state.value.quotes + initialQuotes).distinctBy { it.numreponse }
+                _state.update { it.copy(quotes = emptyList()) }
+                materializeInlineQuotes(pending)
+            }
+        }
+    }
+
+    /**
+     * #805 cards OFF — fetch the `[quotemsg]` prefills (same materializer call as the cards-ON
+     * submit) and insert them into the field. The insert CONCATENATES onto the field content as
+     * it is at completion time — typing during the fetch is never lost, successive citations
+     * keep their chronological order, and the caret lands after the inserted quote (the natural
+     * « continue typing » position). The fresh quote form also warms [loadedForm] : its hash is
+     * exactly what the pre-cards flow rode at submit.
+     */
+    @Suppress("TooGenericExceptionCaught") // mapped to a typed error below; cancellation rethrown.
+    private fun materializeInlineQuotes(quotes: List<QuotedPostPreview>) {
+        materializeJob?.cancel()
+        materializeJob = viewModelScope.launch {
+            _state.update { it.copy(isPreparingQuotes = true, submitError = null) }
+            try {
+                val quoteContext = context.copy(
+                    quotedNumreponse = quotes.first().numreponse,
+                    quoteRef = null,
+                )
+                val form = quoteMaterializer.fetchFormWithQuotes(
+                    context = quoteContext,
+                    extraQuoteNumreponses = quotes.drop(1).map { it.numreponse },
+                )
+                loadedForm = form
+                val prefills = form.initialContent.trimEnd()
+                _state.update { current ->
+                    val existing = current.text.text
+                    val combined = if (existing.isBlank()) prefills else existing.trimEnd() + "\n\n" + prefills
+                    current.copy(
+                        text = TextFieldValue(text = combined, selection = TextRange(combined.length)),
+                        isPreparingQuotes = false,
+                    )
+                }
+                scheduleAutosave()
+            } catch (cancelled: CancellationException) {
+                _state.update { it.copy(isPreparingQuotes = false) }
+                throw cancelled
+            } catch (_: SessionExpiredException) {
+                _state.update {
+                    it.copy(isPreparingQuotes = false, submitError = QuickReplySubmitError.SessionExpired)
+                }
+            } catch (_: Exception) {
+                _state.update {
+                    it.copy(isPreparingQuotes = false, submitError = QuickReplySubmitError.QuoteFetchFailed)
+                }
             }
         }
     }
@@ -224,6 +311,9 @@ class QuickReplyViewModel @AssistedInject constructor(
      * editor. The effect is emitted only after the save completed — see [QuickReplyEffect.EscalateToFullEditor].
      */
     fun onEscalateRequested() {
+        // #805 cards OFF — inert while the [quotemsg] insert is in flight : escalating now would
+        // hand over a row without the citation the user just asked for.
+        if (_state.value.isPreparingQuotes) return
         autosaveJob?.cancel()
         viewModelScope.launch {
             saveDraftNow()
@@ -237,6 +327,9 @@ class QuickReplyViewModel @AssistedInject constructor(
      * scoped to the topic's nav entry).
      */
     fun onDismissed() {
+        // A pending [quotemsg] insert dies with the composition it belonged to (réserve Codex
+        // n°2) — the user abandoned it; the flush below only persists what the field showed.
+        materializeJob?.cancel()
         autosaveJob?.cancel()
         viewModelScope.launch { saveDraftNow() }
     }

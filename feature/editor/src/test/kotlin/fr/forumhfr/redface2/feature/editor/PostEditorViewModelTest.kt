@@ -787,7 +787,11 @@ class PostEditorViewModelTest {
         initialQuotes: List<QuotedPostPreview> = emptyList(),
         resumeSharedDraft: Boolean = false,
         diagnostics: DiagnosticsLog = DiagnosticsLog(),
-        userPreferencesRepository: UserPreferencesRepository = FakeUserPreferencesRepository(),
+        // Test default = cards ON so the #604 lot 3 card suites keep exercising their mode ;
+        // the #805 inline tests pass their own fake with `quoteCardsEnabled = false` (the
+        // PRODUCTION default is false = inline [quotemsg] in the field).
+        userPreferencesRepository: UserPreferencesRepository =
+            FakeUserPreferencesRepository(quoteCardsEnabled = true),
         authRepository: AuthRepository = FakeAuthRepository(),
     ): PostEditorViewModel =
         PostEditorViewModel(
@@ -1781,6 +1785,100 @@ class PostEditorViewModelTest {
         }
     }
 
+    // ----- #805 : cartes OFF (défaut production) — [quotemsg] hydraté à l'ouverture ----------
+
+    @Test
+    fun `cards OFF - the open fetch is the quote form and the field hydrates the merged prefills`() = runTest {
+        replyRepository.formResultsByNumrep = mapOf(
+            101 to Result.success(authenticatedForm(initialContent = "[quotemsg=101,1,9]a[/quotemsg]\n\n")),
+            202 to Result.success(authenticatedForm(initialContent = "[quotemsg=202,2,9]b[/quotemsg]\n\n")),
+        )
+        val viewModel = newReplyViewModel(
+            initialQuotes = listOf(card(101), card(202)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false),
+        )
+        testScheduler.advanceUntilIdle()
+
+        viewModel.state.test {
+            val settled = expectMostRecentItem()
+            assertEquals(
+                "pre-lot-3 flow restored : the field hydrates the merged [quotemsg] prefills",
+                "[quotemsg=101,1,9]a[/quotemsg]\n\n[quotemsg=202,2,9]b[/quotemsg]",
+                settled.draft.text.trimEnd(),
+            )
+            assertTrue("no card in inline mode", settled.quotes.isEmpty())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(
+            "the open fetch replays the quote contract in citation order",
+            listOf(101, 202),
+            replyRepository.fetchedContexts.map { it.quotedNumreponse },
+        )
+    }
+
+    @Test
+    fun `cards OFF - resumeSharedDraft appends after the prefill with exactly one quote block`() = runTest {
+        // Réserve Codex n°5 — the #790 trio restored : quote-form hydration (prepend) + shared-row
+        // append must compose to ONE [quotemsg] block and a stable order, whichever lands first.
+        draftStore.preload(
+            EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID),
+            EditorDraftStore.Draft(body = "texte de la sheet"),
+        )
+        replyRepository.formResultsByNumrep = mapOf(
+            101 to Result.success(authenticatedForm(initialContent = "[quotemsg=101,1,9]a[/quotemsg]\n\n")),
+        )
+        val viewModel = newReplyViewModel(
+            resumeSharedDraft = true,
+            initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false),
+        )
+        testScheduler.advanceUntilIdle()
+
+        viewModel.state.test {
+            val settled = expectMostRecentItem()
+            assertEquals(
+                "[quotemsg=101,1,9]a[/quotemsg]\n\ntexte de la sheet",
+                settled.draft.text,
+            )
+            assertNull("no banner on an escalation hand-over", settled.restorableDraft)
+            assertEquals(
+                "exactly one quote block — no double hydration",
+                1,
+                Regex("\\[quotemsg=101").findAll(settled.draft.text).count(),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `cards OFF - submit rides the plain path with the field content`() = runTest {
+        // Réserve Codex n°6 — the content already carries the [quotemsg] block ; the submit is
+        // the plain path (no re-materialisation), riding the warmed quote form.
+        replyRepository.formResultsByNumrep = mapOf(
+            101 to Result.success(authenticatedForm(initialContent = "[quotemsg=101,1,9]a[/quotemsg]\n\n")),
+        )
+        replyRepository.submitResult = ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+        val viewModel = newReplyViewModel(
+            initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false),
+        )
+        testScheduler.advanceUntilIdle()
+        val openFetches = replyRepository.formFetches
+
+        viewModel.submit(
+            PostEditorIntent.ContentChanged(TextFieldValue("[quotemsg=101,1,9]a[/quotemsg]\n\nma réponse")),
+        )
+        viewModel.submit(PostEditorIntent.SubmitClicked)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("no re-materialisation at submit", openFetches, replyRepository.formFetches)
+        assertEquals("[quotemsg=101,1,9]a[/quotemsg]\n\nma réponse", replyRepository.lastSubmittedBbcode)
+        assertNull(
+            "plain submit context — the quote already lives in the content",
+            replyRepository.lastSubmittedContext?.quotedNumreponse,
+        )
+    }
+
     // ----- #604 lot 3 : cartes de citation dans l'éditeur ---------------------
 
     @Test
@@ -2155,8 +2253,11 @@ class PostEditorViewModelTest {
         // production defaults to REDUCED (cf. DataStoreUserPreferencesRepository), exercised by the
         // dedicated mode tests below.
         editorImageInsert: EditorImageInsert = EditorImageInsert.FULL,
+        // #805 — false mirrors the production default (inline BBCode); the card tests opt in.
+        quoteCardsEnabled: Boolean = false,
     ) : UserPreferencesRepository {
         private val confirmBeforePosting = MutableStateFlow(confirmBeforePosting)
+        private val quoteCardsEnabled = MutableStateFlow(quoteCardsEnabled)
 
         override fun observeProxyConfig(): Flow<ProxyConfig> = MutableStateFlow(ProxyConfig())
         override suspend fun saveProxyConfig(config: ProxyConfig) = Unit
@@ -2192,6 +2293,10 @@ class PostEditorViewModelTest {
         override fun observeConfirmBeforePosting(): Flow<Boolean> = confirmBeforePosting
         override suspend fun setConfirmBeforePosting(enabled: Boolean) {
             confirmBeforePosting.value = enabled
+        }
+        override fun observeQuoteCardsEnabled(): Flow<Boolean> = quoteCardsEnabled
+        override suspend fun setQuoteCardsEnabled(enabled: Boolean) {
+            quoteCardsEnabled.value = enabled
         }
 
         override fun observeShowDtSection(): Flow<Boolean> = MutableStateFlow(false)
