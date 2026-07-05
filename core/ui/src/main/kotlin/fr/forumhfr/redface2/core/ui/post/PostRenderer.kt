@@ -39,6 +39,8 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -270,10 +272,15 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
     val imageAlt = stringResource(R.string.post_inline_image_alt)
     // #553 — signatures provide LocalIgnoreInlineColors = true so author `[color]` is dropped.
     val ignoreColors = LocalIgnoreInlineColors.current
+    // State-hygiene audit 2026-07-05 — author `[color]` legibility: dark is detected from the
+    // surface luminance so it follows AMOLED and a forced ThemeMode, not just the system flag
+    // (same rule as CreatorHighlight). isDark keys the remember so a live theme switch rebuilds
+    // the spans; it never changes during media measurements, so the #175 invariance holds.
+    val isDark = MaterialTheme.colorScheme.surface.luminance() < DARK_SURFACE_LUMINANCE
     // The AnnotatedString is INVARIANT — it carries only the U+FFFC markers + IDs (via MediaCounter),
     // never a size — so it is never rebuilt when a measurement lands (#175 stability pivot).
-    val annotated = remember(inlines, linkStyles, imageAlt, ignoreColors) {
-        buildInlineText(inlines, linkStyles, imageAlt, ignoreColors)
+    val annotated = remember(inlines, linkStyles, imageAlt, ignoreColors, isDark) {
+        buildInlineText(inlines, linkStyles, imageAlt, ignoreColors, isDark)
     }
     val hasMedia = remember(inlines) { hasInlineMedia(inlines) }
 
@@ -967,60 +974,70 @@ internal fun buildInlineText(
     // web-tuned colours read as garish/illegible on the app theme). Text falls back to the caller's
     // colour. Default false: post bodies keep author colours.
     ignoreColors: Boolean = false,
+    // State-hygiene audit 2026-07-05 — when true, author `[color]` values are clamped for
+    // legibility on a dark surface via [ensureReadableColor] (and symmetrically on light).
+    // Default false: existing callers/tests keep the light-theme behaviour.
+    isDark: Boolean = false,
 ): AnnotatedString = buildAnnotatedString {
     val media = MediaCounter()
-    appendInlines(inlines, linkStyles, media, imageAlt, ignoreColors)
+    appendInlines(inlines, linkStyles, media, imageAlt, ignoreColors, isDark)
 }
 
+@Suppress("LongParameterList") // Recursive walker — every param is the same threaded context.
 private fun AnnotatedString.Builder.appendInlines(
     inlines: List<PostInline>,
     linkStyles: TextLinkStyles,
     media: MediaCounter,
     imageAlt: String,
     ignoreColors: Boolean,
+    isDark: Boolean,
 ) {
-    inlines.forEach { inline -> appendInline(inline, linkStyles, media, imageAlt, ignoreColors) }
+    inlines.forEach { inline -> appendInline(inline, linkStyles, media, imageAlt, ignoreColors, isDark) }
 }
 
-@Suppress("CyclomaticComplexMethod")
+// LongParameterList: recursive walker — every param is the same threaded context.
+@Suppress("CyclomaticComplexMethod", "LongParameterList")
 private fun AnnotatedString.Builder.appendInline(
     inline: PostInline,
     linkStyles: TextLinkStyles,
     media: MediaCounter,
     imageAlt: String,
     ignoreColors: Boolean,
+    isDark: Boolean,
 ) {
     when (inline) {
         is PostInline.Text -> append(inline.value)
         PostInline.LineBreak -> append('\n')
         is PostInline.Strong -> withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors)
+            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors, isDark)
         }
 
         is PostInline.Emphasis -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
-            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors)
+            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors, isDark)
         }
 
         is PostInline.Underline -> withStyle(SpanStyle(textDecoration = TextDecoration.Underline)) {
-            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors)
+            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors, isDark)
         }
 
         is PostInline.Strike -> withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) {
-            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors)
+            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors, isDark)
         }
 
         // #553 — drop the author colour when asked (signatures): render the children plain so they
         // inherit the caller's neutral colour instead of the web-tuned, often-illegible author hue.
+        // Otherwise the colour is kept but clamped for legibility on the current theme
+        // (state-hygiene audit 2026-07-05): a web-tuned navy is unreadable on a dark surface.
         is PostInline.Color -> if (ignoreColors) {
-            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors)
+            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors, isDark)
         } else {
-            withStyle(SpanStyle(color = parseColor(inline.colorHex))) {
-                appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors)
+            withStyle(SpanStyle(color = ensureReadableColor(parseColor(inline.colorHex), isDark))) {
+                appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors, isDark)
             }
         }
 
         is PostInline.Link -> withLink(LinkAnnotation.Url(inline.url, linkStyles)) {
-            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors)
+            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors, isDark)
         }
 
         is PostInline.InlineImage -> appendInlineContent(media.nextImage(), inline.description ?: imageAlt)
@@ -1438,6 +1455,68 @@ private fun SmileyKind.token(): String = when (this) {
     is SmileyKind.Builtin -> code
     is SmileyKind.Perso -> "[:$name]"
 }
+
+/**
+ * State-hygiene audit 2026-07-05 — clamps an author `[color]`'s relative luminance into the
+ * current theme's readable range, hue preserved. A web-tuned navy (`#000080`) is invisible on a
+ * dark/AMOLED surface; symmetrically a pale yellow washes out on light. Pure function (no
+ * Composable dependency) so it stays JVM-testable like [parseColor]:
+ *
+ * - dark theme + luminance below [MIN_DARK_LUMINANCE] → lerp towards White just enough to reach
+ *   the floor;
+ * - light theme + luminance above [MAX_LIGHT_LUMINANCE] → lerp towards Black down to the ceiling;
+ * - already-readable colours (e.g. `#CC0000`) pass through UNTOUCHED in both themes — this is a
+ *   clamp, not a remap.
+ *
+ * The minimal lerp fraction is found by binary search: Compose's [lerp] interpolates in Oklab, so
+ * luminance is not linear in the fraction (a closed form would be wrong). The invariant
+ * `reached(high)` guarantees the returned colour satisfies the threshold. The original alpha is
+ * preserved (the defensive #RRGGBBAA parse path).
+ */
+internal fun ensureReadableColor(color: Color, isDark: Boolean): Color {
+    if (color == Color.Unspecified) return color
+    val luminance = color.luminance()
+    return when {
+        isDark && luminance < MIN_DARK_LUMINANCE ->
+            clampLuminance(color, towards = Color.White) { it >= MIN_DARK_LUMINANCE }
+        !isDark && luminance > MAX_LIGHT_LUMINANCE ->
+            clampLuminance(color, towards = Color.Black) { it <= MAX_LIGHT_LUMINANCE }
+        else -> color
+    }
+}
+
+/** Smallest-fraction lerp of [color] towards [towards] whose luminance satisfies [reached]. */
+private fun clampLuminance(color: Color, towards: Color, reached: (Float) -> Boolean): Color {
+    var low = 0f
+    // `reached(1f)` always holds: a full lerp IS the target (White = 1.0, Black = 0.0).
+    var high = 1f
+    repeat(LUMINANCE_CLAMP_ITERATIONS) {
+        val mid = (low + high) / 2f
+        if (reached(lerp(color, towards, mid).luminance())) high = mid else low = mid
+    }
+    return lerp(color, towards, high).copy(alpha = color.alpha)
+}
+
+/**
+ * Dark detection threshold on the surface's relative luminance — duplicated from
+ * `CreatorHighlight.DARK_SURFACE_LUMINANCE` (private there): follows AMOLED and a forced
+ * ThemeMode, not just the system flag.
+ */
+private const val DARK_SURFACE_LUMINANCE = 0.5f
+
+/**
+ * Author-colour luminance floor on dark surfaces. Deliberately conservative (a CLAMP for the
+ * unreadable tail, not a beautifier): classic dark-but-readable hues like `#CC0000` (≈ 0.13) or
+ * pure red `#FF0000` (≈ 0.21) pass untouched, while navy `#000080` (≈ 0.016) or pure blue
+ * `#0000FF` (≈ 0.07) — invisible on near-black — get lifted to the floor.
+ */
+internal const val MIN_DARK_LUMINANCE = 0.1f
+
+/** Author-colour luminance ceiling on light surfaces (pure yellow `#FFFF00` ≈ 0.93 gets darkened). */
+internal const val MAX_LIGHT_LUMINANCE = 0.78f
+
+/** Binary-search depth for [clampLuminance] — 2^-12 fraction precision, plenty for 8-bit channels. */
+private const val LUMINANCE_CLAMP_ITERATIONS = 12
 
 internal fun parseColor(hex: String): Color {
     // Pure-Kotlin parsing keeps :core:ui testable on plain JVM (no Android runtime). The parser
