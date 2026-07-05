@@ -6,6 +6,7 @@ import fr.forumhfr.redface2.core.ui.editor.bannerText
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -63,12 +64,17 @@ import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
  * - Submit button + error banner.
  */
 @Composable
+@Suppress("LongParameterList") // One callback per navigation outcome — each wired to a distinct :app pop.
 fun TopicFormScreen(
     request: TopicFormRequest,
     onSubmitSucceeded: (targetPage: Int?, scrollTo: Int?) -> Unit,
     // #206 workaround — `subject` is the exact posted title, forwarded to the category
     // listing so it can highlight the freshly-created row (HFR never returns the new id).
     onNewTopicCreated: (cat: Int, subcat: Int, newTopicId: Int?, newNumreponse: Int?, subject: String) -> Unit,
+    // #803 pattern (state-hygiene audit 2026-07-05) — pops this form AFTER the ViewModel flushed
+    // the draft (CloseCommitted). Default keeps callers without the wiring on the platform back
+    // (no flush) — `:app` wires it. Mirrors PostEditorScreen.onClose.
+    onClose: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     viewModel: TopicFormViewModel = hiltViewModel<TopicFormViewModel, TopicFormViewModel.Factory>(
         creationCallback = { factory -> factory.create(request) },
@@ -101,8 +107,16 @@ fun TopicFormScreen(
                         effect.subject,
                     )
                 }
+                TopicFormEffect.CloseCommitted -> onClose?.invoke()
             }
         }
+    }
+
+    // #803 pattern — route the system back through the ViewModel so the pending autosave debounce
+    // is flushed BEFORE the pop (trading the predictive-back preview for never losing the last
+    // < 750 ms of typing — same trade-off as PostEditorScreen). Only armed when `:app` wired the pop.
+    if (onClose != null) {
+        BackHandler { viewModel.submit(TopicFormIntent.CloseRequested) }
     }
 
     TopicFormContent(

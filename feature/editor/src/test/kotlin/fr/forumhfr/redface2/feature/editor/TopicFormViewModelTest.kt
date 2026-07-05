@@ -57,6 +57,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -1108,6 +1109,107 @@ class TopicFormViewModelTest {
         testScheduler.advanceUntilIdle()
         assertEquals(1, topicFormRepository.submitCalls)
         assertTrue("a saved FP must drop its draft", draftStore.deletedKeys.contains(key))
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // #803 pattern — dirty close (flush before pop), state-hygiene audit 2026-07-05.
+    // Same contract as PostEditorViewModelTest's « #604 lot 4a » block.
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `CloseRequested flushes the pending debounce before CloseCommitted`() = runTest {
+        val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        testScheduler.advanceUntilIdle()
+
+        // Type, then close IMMEDIATELY — well inside the 750 ms debounce window. The flush must
+        // persist the state at close time, not the snapshot the debounce captured at scheduling.
+        viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Mon titre")))
+        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("dernier mot")))
+        viewModel.submit(TopicFormIntent.CloseRequested)
+
+        val effect = viewModel.effects.first()
+        assertEquals(TopicFormEffect.CloseCommitted, effect)
+        val key = EditorDraftKey.newTopic(SAMPLE_CAT)
+        assertEquals(
+            "the tail of the draft must reach the row before the pop",
+            "dernier mot",
+            draftStore.saved[key]?.body,
+        )
+        assertEquals("Mon titre", draftStore.saved[key]?.subject)
+    }
+
+    @Test
+    fun `CloseRequested with blank subject and body deletes the row and still closes`() = runTest {
+        val key = EditorDraftKey.newTopic(SAMPLE_CAT)
+        draftStore.preload(key, EditorDraftStore.Draft(body = "stale", subject = "stale title"))
+        val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(TopicFormIntent.CloseRequested)
+
+        val effect = viewModel.effects.first()
+        assertEquals(TopicFormEffect.CloseCommitted, effect)
+        assertTrue("an emptied form must not leave a stale row", draftStore.deletedKeys.contains(key))
+    }
+
+    @Test
+    fun `CloseRequested with a subject only saves the draft instead of deleting it`() = runTest {
+        // The delete branch requires BOTH fields blank : a titled-but-bodyless topic in progress
+        // is still worth restoring.
+        val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Titre seul")))
+        viewModel.submit(TopicFormIntent.CloseRequested)
+
+        val effect = viewModel.effects.first()
+        assertEquals(TopicFormEffect.CloseCommitted, effect)
+        val key = EditorDraftKey.newTopic(SAMPLE_CAT)
+        assertEquals("Titre seul", draftStore.saved[key]?.subject)
+        assertFalse(draftStore.deletedKeys.contains(key))
+    }
+
+    @Test
+    fun `CloseRequested during an in-flight submit is ignored (gate #803)`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        topicFormRepository.submitGate = gate
+        val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        testScheduler.advanceUntilIdle()
+        viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Mon titre")))
+        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Mon corps")))
+
+        viewModel.submit(TopicFormIntent.SubmitClicked)
+        // Back pressed while the POST is in flight — must be inert (gate #803: popping would
+        // cancel the submit with the viewModelScope and leave the server state unknown).
+        viewModel.submit(TopicFormIntent.CloseRequested)
+        gate.complete(Unit)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.effects.test {
+            assertTrue(
+                "the submit outcome must be the ONLY effect — no CloseCommitted",
+                awaitItem() is TopicFormEffect.NewTopicCreated,
+            )
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a second CloseRequested is a no-op (gate #803)`() = runTest {
+        val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(TopicFormIntent.CloseRequested)
+        viewModel.submit(TopicFormIntent.CloseRequested)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.effects.test {
+            assertEquals(TopicFormEffect.CloseCommitted, awaitItem())
+            // A double back must never yield a second pop (it would remove the screen BELOW).
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     // ──────────────────────────────────────────────────────────────────────

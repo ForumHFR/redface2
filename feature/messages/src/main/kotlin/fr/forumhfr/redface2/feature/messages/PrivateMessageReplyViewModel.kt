@@ -178,15 +178,52 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
      * it. Blank body → delete the row. The store is a no-op without an active session.
      */
     private fun scheduleAutosave() {
-        val body = _state.value.draft.text
         autosaveJob?.cancel()
         autosaveJob = viewModelScope.launch {
             delay(AUTOSAVE_DEBOUNCE_MS)
-            if (body.isBlank()) {
-                draftStore.delete(draftOwner, draftKey)
-            } else {
-                draftStore.save(draftOwner, draftKey, EditorDraftStore.Draft(body = body, isPrivate = true))
-            }
+            persistDraftNow()
+        }
+    }
+
+    /**
+     * Immediate write of the current body (blank = delete the row, cf. [scheduleAutosave]). Reads
+     * [_state] AFTER the debounce delay — the previous shape captured a snapshot at scheduling
+     * time, which the #803 dirty-close flush would have re-persisted stale (state-hygiene audit
+     * 2026-07-05). Mirrors `PostEditorViewModel.persistDraftNow`.
+     */
+    private suspend fun persistDraftNow() {
+        val body = _state.value.draft.text
+        if (body.isBlank()) {
+            draftStore.delete(draftOwner, draftKey)
+        } else {
+            draftStore.save(draftOwner, draftKey, EditorDraftStore.Draft(body = body, isPrivate = true))
+        }
+    }
+
+    /** #803 pattern — one-shot latch : a committed close is never re-emitted. */
+    private var closeRequested = false
+
+    /**
+     * #803 pattern (ported from `PostEditorViewModel.onCloseRequested`, state-hygiene audit
+     * 2026-07-05) — dirty close : flush the pending debounce so the last keystrokes reach the #405
+     * row, THEN let the UI pop (CloseCommitted). Without this, closing the reply editor < 750 ms
+     * after typing (system back or the header's back arrow) cancelled the debounce with the
+     * ViewModel and silently dropped the tail of the PRIVATE draft.
+     *
+     * Two guards (gate #803) :
+     * - INERT while a POST is in flight — popping would cancel the submit with the viewModelScope
+     *   and leave the server state unknown ; on failure `isSubmitting` drops and the back works
+     *   again, on success SubmitSucceeded pops anyway ;
+     * - ONE-SHOT — a second close racing the first CloseCommitted must not emit a second effect
+     *   (the pop is blind : a second one would remove the screen BELOW).
+     */
+    fun onCloseRequested() {
+        if (_state.value.isSubmitting || closeRequested) return
+        closeRequested = true
+        autosaveJob?.cancel()
+        viewModelScope.launch {
+            persistDraftNow()
+            _effects.send(PrivateMessageReplyEffect.CloseCommitted)
         }
     }
 
@@ -681,6 +718,13 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
  */
 sealed interface PrivateMessageReplyEffect {
     data class SubmitSucceeded(val threadId: Int, val page: Int) : PrivateMessageReplyEffect
+
+    /**
+     * #803 pattern — the draft is persisted, the editor may now actually pop (the save is AWAITED
+     * before the effect, so navigation can never cancel it). Mirrors
+     * `PostEditorEffect.CloseCommitted`.
+     */
+    data object CloseCommitted : PrivateMessageReplyEffect
 }
 
 /**

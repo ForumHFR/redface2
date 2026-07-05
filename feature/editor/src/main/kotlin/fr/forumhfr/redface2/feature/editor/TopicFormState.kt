@@ -210,6 +210,15 @@ sealed interface TopicFormIntent {
 
     /** #405 — discard the cached draft : delete the row and clear the banner. */
     data object DraftDiscardRequested : TopicFormIntent
+
+    /**
+     * #803 pattern (state-hygiene audit 2026-07-05) — the user is leaving the form (system
+     * back). The ViewModel flushes the pending debounced autosave FIRST, then emits
+     * [TopicFormEffect.CloseCommitted] — closing through the ViewModel is what guarantees the
+     * last < 750 ms of typing reach the #405 row (a plain pop would cancel the debounce with
+     * the ViewModel). Mirrors [PostEditorIntent.CloseRequested].
+     */
+    data object CloseRequested : TopicFormIntent
 }
 
 /**
@@ -244,6 +253,13 @@ sealed interface TopicFormEffect {
         /** Exact subject the user posted ; used to highlight the new row in the listing (#206). */
         val subject: String,
     ) : TopicFormEffect
+
+    /**
+     * #803 pattern — the draft is persisted, the form may now actually pop (the save is AWAITED
+     * before the effect, so navigation can never cancel it). Mirrors
+     * `PostEditorEffect.CloseCommitted`.
+     */
+    data object CloseCommitted : TopicFormEffect
 }
 
 internal fun TopicFormState.withDraft(updated: TextFieldValue): TopicFormState =
