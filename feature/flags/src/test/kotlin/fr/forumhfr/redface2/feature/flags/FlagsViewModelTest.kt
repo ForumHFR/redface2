@@ -31,6 +31,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.Flag
@@ -2616,6 +2617,12 @@ class FlagsViewModelTest {
         override fun observeQuoteCardsEnabled(): Flow<Boolean> = MutableStateFlow(false)
 
         override suspend fun setQuoteCardsEnabled(enabled: Boolean) = Unit
+
+        // #806 — writing surface is irrelevant to FlagsViewModel; stubbed at its default.
+        override fun observeWritingSurfacePreset(): Flow<WritingSurfacePreset> =
+            MutableStateFlow(WritingSurfacePreset.SHEET)
+
+        override suspend fun setWritingSurfacePreset(preset: WritingSurfacePreset) = Unit
 
         override fun observeShowDtSection(): Flow<Boolean> = MutableStateFlow(false)
 

@@ -96,6 +96,7 @@ import fr.forumhfr.redface2.core.domain.author.isRf2Creator
 import fr.forumhfr.redface2.core.model.Poll
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.Topic
+import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.postContentExcerpt
 import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
 import fr.forumhfr.redface2.core.ui.RedfacePlaceholderScreen
@@ -683,7 +684,11 @@ private const val REANCHOR_STABLE_FRAMES = 3
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-@Suppress("LongParameterList") // state-hoisted Composable : each param has a distinct call-site.
+// LongParameterList: state-hoisted Composable, each param has a distinct call-site.
+// CyclomaticComplexMethod: the #806 tap-time surface routing adds one two-branch `when` per write
+// entry point (FAB / « Citer » / « Citer N ») — flat dispatches, the decision table itself lives
+// in the pure `writingSurfaceFor`.
+@Suppress("LongParameterList", "CyclomaticComplexMethod")
 internal fun TopicContent(
     state: TopicUiState,
     listState: LazyListState,
@@ -742,10 +747,11 @@ internal fun TopicContent(
     } else {
         null
     }
-    // Vague 4 (#604) lots 1-2 — the reply FAB and « Citer » both open the quick-reply sheet
-    // instead of navigating ; the sheet escalates to the full-screen editor through onReply.
-    // Local UI state (like the page picker) : non-null while the sheet is up, carrying the
-    // reply coordinates plus the card « Citer » pre-arms (null from the FAB).
+    // Vague 4 (#604) lots 1-2 / #806 — the reply FAB and « Citer » open the quick-reply sheet
+    // when the user's writing-surface preset routes them there (writingSurfaceFor, decided at
+    // tap time) ; the sheet escalates to the full-screen editor through onReply. Local UI state
+    // (like the page picker) : non-null while the sheet is up, carrying the reply coordinates
+    // plus the card « Citer » pre-arms (null from the FAB).
     var quickReplyFor by remember { mutableStateOf<QuickReplyLaunch?>(null) }
     // #291 — the per-post toggle checkmarks and the « ❝N » count only need the numreponses.
     val multiQuoteNumreponses = multiQuoteSelections.map { it.numreponse }
@@ -775,35 +781,50 @@ internal fun TopicContent(
                 bottomActionsVisible = bottomActionsVisible,
                 multiQuoteSelection = multiQuoteNumreponses,
                 onOpenPage = onOpenPage,
+                // #806 — the surface is decided AT TAP TIME from the preset (never re-evaluated
+                // on recomposition, never migrating an already-open sheet). No quotes here, so
+                // only the FULL_EDITOR preset skips the sheet.
                 onReply = { subcat, page ->
-                    quickReplyFor = QuickReplyLaunch(
-                        request = QuickReplyRequest(
-                            cat = state.request.cat,
-                            subcat = subcat,
-                            topicId = state.request.post,
-                            page = page,
-                        ),
-                    )
-                },
-                // #604 lot 3 — threshold routing (mockup P3, « le cas qui force le plein
-                // écran ») : a small selection opens the quick-reply sheet with the cards
-                // pre-armed and consumes the basket HERE (the cards live on in the sheet's
-                // ViewModel) ; from MULTI_QUOTE_FULL_EDITOR_THRESHOLD up, the full-screen
-                // editor path (`:app`, in-memory handoff + basket clear) takes over.
-                onMultiQuote = { subcat, page ->
-                    if (multiQuoteOpensFullEditor(multiQuoteSelections.size)) {
-                        onMultiQuote(subcat, page)
-                    } else {
-                        quickReplyFor = QuickReplyLaunch(
+                    when (writingSurfaceFor(state.writingSurfacePreset, quoteCount = 0)) {
+                        WritingSurface.SHEET -> quickReplyFor = QuickReplyLaunch(
                             request = QuickReplyRequest(
                                 cat = state.request.cat,
                                 subcat = subcat,
                                 topicId = state.request.post,
                                 page = page,
                             ),
-                            initialQuotes = multiQuoteSelections,
                         )
-                        onClearMultiQuote()
+                        // Same :app path as the sheet's escalation — in-memory quote handoff
+                        // (empty) + PostEditorRoute(resumeSharedDraft = true).
+                        WritingSurface.FULL_EDITOR -> onReply(subcat, page, emptyList())
+                    }
+                },
+                // #604 lot 3 / #806 — preset routing (mockup P3, « le cas qui force le plein
+                // écran ») : when the sheet wins, the cards are pre-armed and the basket is
+                // consumed HERE (they live on in the sheet's ViewModel) ; when the full-screen
+                // editor wins (3+ under SHEET, any citation under SHEET_EXCEPT_QUOTES, always
+                // under FULL_EDITOR), the `:app` path (in-memory handoff + basket clear) takes
+                // over. The sheet branch snapshots the selection BEFORE its local clear so the
+                // launch can never observe a half-emptied basket ; the full-editor branch
+                // delegates to the existing `:app` contract, which reads the hoisted basket and
+                // hands it over BEFORE clearing it (RedfaceNavigation, « Citer N » entry) — the
+                // local snapshot is not what that branch ships (gate Codex #806).
+                onMultiQuote = { subcat, page ->
+                    val selection = multiQuoteSelections.toList()
+                    when (writingSurfaceFor(state.writingSurfacePreset, quoteCount = selection.size)) {
+                        WritingSurface.FULL_EDITOR -> onMultiQuote(subcat, page)
+                        WritingSurface.SHEET -> {
+                            quickReplyFor = QuickReplyLaunch(
+                                request = QuickReplyRequest(
+                                    cat = state.request.cat,
+                                    subcat = subcat,
+                                    topicId = state.request.post,
+                                    page = page,
+                                ),
+                                initialQuotes = selection,
+                            )
+                            onClearMultiQuote()
+                        }
                     }
                 },
                 // #436 — « Tout vider » : the long press on « ❝N » resets the hoisted basket.
@@ -867,18 +888,24 @@ internal fun TopicContent(
                             state = state,
                             topic = mode.topic,
                             hiddenNumreponses = mode.hiddenNumreponses,
-                            // #604 lot 2 — « Citer » opens the quick-reply sheet with the card
-                            // pre-armed (1-citation session) instead of the full-screen editor.
+                            // #604 lot 2 / #806 — « Citer » opens the quick-reply sheet with the
+                            // card pre-armed (1-citation session), unless the preset routes any
+                            // citation to the full-screen editor (decision at tap time; same :app
+                            // path as the sheet's escalation, resumeSharedDraft = true).
                             onQuoteRequested = { preview ->
-                                quickReplyFor = QuickReplyLaunch(
-                                    request = QuickReplyRequest(
-                                        cat = state.request.cat,
-                                        subcat = mode.topic.subcat,
-                                        topicId = state.request.post,
-                                        page = mode.topic.page,
-                                    ),
-                                    initialQuotes = listOf(preview),
-                                )
+                                when (writingSurfaceFor(state.writingSurfacePreset, quoteCount = 1)) {
+                                    WritingSurface.SHEET -> quickReplyFor = QuickReplyLaunch(
+                                        request = QuickReplyRequest(
+                                            cat = state.request.cat,
+                                            subcat = mode.topic.subcat,
+                                            topicId = state.request.post,
+                                            page = mode.topic.page,
+                                        ),
+                                        initialQuotes = listOf(preview),
+                                    )
+                                    WritingSurface.FULL_EDITOR ->
+                                        onReply(mode.topic.subcat, mode.topic.page, listOf(preview))
+                                }
                             },
                             onEdit = onEdit,
                             onEditFirstPost = onEditFirstPost,
@@ -2772,24 +2799,43 @@ private fun ReplyFab(onClick: () -> Unit) {
 // not purged on logout, cf. CacheInvalidator), so these gates consult auth explicitly instead
 // of trusting `canReply` alone — symmetric with the « Créer topic » FAB
 // (CategoryViewModel.canCreateTopic).
-// #604 lots 2-3 — what opens the quick-reply sheet : the reply coordinates, plus the cards this
-// opening pre-arms (one for « Citer », the whole basket for « Citer N » under the full-screen
-// threshold, empty from the reply FAB).
+// #604 lots 2-3 / #806 — what opens the quick-reply sheet : the reply coordinates, plus the cards
+// this opening pre-arms (one for « Citer », the whole basket for « Citer N », empty from the reply
+// FAB) — whenever [writingSurfaceFor] routed the tap to the sheet rather than the editor.
 internal data class QuickReplyLaunch(
     val request: QuickReplyRequest,
     val initialQuotes: List<QuotedPostPreview> = emptyList(),
 )
 
-/**
- * #604 lot 3 — « Citer N » routing (mockup P3 : « le cas qui force le plein écran ») : up to
- * [MULTI_QUOTE_FULL_EDITOR_THRESHOLD] - 1 cards the quick-reply sheet stays comfortable with the
- * keyboard open ; from the threshold up the selection goes straight to the full-screen editor.
- * Pure so the boundary is unit-testable.
- */
-internal fun multiQuoteOpensFullEditor(selectionCount: Int): Boolean =
-    selectionCount >= MULTI_QUOTE_FULL_EDITOR_THRESHOLD
+/** #806 — the two composition surfaces a write tap can open. */
+internal enum class WritingSurface { SHEET, FULL_EDITOR }
 
-/** #604 lot 3 — cadrage Codex : « 3 citations = plein écran » (constante nommée, pas un réglage). */
+/**
+ * #806 — which surface a write tap opens, from the user's [preset] and the number of citations the
+ * tap carries (0 for the reply FAB, 1 for « Citer », the basket size for « Citer N »).
+ *
+ * - [WritingSurfacePreset.SHEET] (default) keeps the 0.25.1 routing exactly : the quick-reply
+ *   sheet, except a multi-quote basket of [MULTI_QUOTE_FULL_EDITOR_THRESHOLD]+ cards (mockup P3 :
+ *   « le cas qui force le plein écran », #604 lot 3) — up to that the sheet stays comfortable with
+ *   the keyboard open.
+ * - [WritingSurfacePreset.SHEET_EXCEPT_QUOTES] : any citation (1..N) opens the full-screen editor.
+ * - [WritingSurfacePreset.FULL_EDITOR] : always the full-screen editor.
+ *
+ * Pure so the routing table is unit-testable ([MultiQuoteRoutingTest]).
+ */
+internal fun writingSurfaceFor(preset: WritingSurfacePreset, quoteCount: Int): WritingSurface = when (preset) {
+    WritingSurfacePreset.FULL_EDITOR -> WritingSurface.FULL_EDITOR
+    WritingSurfacePreset.SHEET_EXCEPT_QUOTES ->
+        if (quoteCount > 0) WritingSurface.FULL_EDITOR else WritingSurface.SHEET
+    WritingSurfacePreset.SHEET ->
+        if (quoteCount >= MULTI_QUOTE_FULL_EDITOR_THRESHOLD) WritingSurface.FULL_EDITOR else WritingSurface.SHEET
+}
+
+/**
+ * #604 lot 3 — cadrage Codex : « 3 citations = plein écran », a named constant. Since #806 the
+ * user setting is the PRESET above ; this threshold remains a constant guarding the
+ * [WritingSurfacePreset.SHEET] preset only (the other presets ignore it by construction).
+ */
 internal const val MULTI_QUOTE_FULL_EDITOR_THRESHOLD = 3
 
 // #604 lot 2 — the quote-card snapshot, built AT SELECTION TIME where the full Post is in scope

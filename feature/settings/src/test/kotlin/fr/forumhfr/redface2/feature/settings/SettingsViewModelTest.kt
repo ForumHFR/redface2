@@ -18,6 +18,7 @@ import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.FlagType
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -1404,6 +1405,53 @@ class SettingsViewModelTest {
         assertTrue(viewModel.state.value.quoteCardsEnabledError)
     }
 
+    // ──────────────────────────────────────────────────────────────────────
+    // Writing surface preset (#806)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `writingSurfacePreset re-syncs continuously from the persisted preference (#788)`() = runTest {
+        val viewModel = newViewModel()
+        assertEquals(
+            "#806 — SHEET is the default (the 0.25.1 behaviour)",
+            WritingSurfacePreset.SHEET,
+            viewModel.state.value.writingSurfacePreset,
+        )
+
+        // An external write (another SettingsViewModel instance, or any other writer) must land
+        // in THIS instance too — the #788 continuous re-sync, not a one-shot hydration.
+        repository.emitWritingSurfacePreset(WritingSurfacePreset.SHEET_EXCEPT_QUOTES)
+
+        assertEquals(WritingSurfacePreset.SHEET_EXCEPT_QUOTES, viewModel.state.value.writingSurfacePreset)
+    }
+
+    @Test
+    fun `SetWritingSurfacePreset persists the pick`() = runTest {
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.SetWritingSurfacePreset(WritingSurfacePreset.FULL_EDITOR))
+
+        assertEquals(WritingSurfacePreset.FULL_EDITOR, viewModel.state.value.writingSurfacePreset)
+        assertFalse(viewModel.state.value.isUpdatingWritingSurfacePreset)
+        assertEquals(1, repository.writingSurfacePresetSetCalls)
+    }
+
+    @Test
+    fun `SetWritingSurfacePreset reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnWritingSurfacePresetSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.SetWritingSurfacePreset(WritingSurfacePreset.FULL_EDITOR))
+
+        assertEquals(
+            "must revert to the previous value on failure",
+            WritingSurfacePreset.SHEET,
+            viewModel.state.value.writingSurfacePreset,
+        )
+        assertFalse(viewModel.state.value.isUpdatingWritingSurfacePreset)
+        assertTrue(viewModel.state.value.writingSurfacePresetError)
+    }
+
     @Test
     fun `init hydrates the experimental MPStorage write opt-in from the persisted preference`() = runTest {
         repository.emitSyncPrivateMessagesWriteEnabled(true)
@@ -2083,6 +2131,24 @@ class SettingsViewModelTest {
             quoteCardsEnabledSetCalls += 1
             check(!failOnQuoteCardsEnabledSet) { "boom" }
             quoteCardsEnabled.value = enabled
+        }
+
+        // #806 — writing-surface preset. Same optimistic-flip seam, enum-typed.
+        private val writingSurfacePreset = MutableStateFlow(WritingSurfacePreset.SHEET)
+        var writingSurfacePresetSetCalls: Int = 0
+            private set
+        var failOnWritingSurfacePresetSet: Boolean = false
+
+        override fun observeWritingSurfacePreset(): Flow<WritingSurfacePreset> = writingSurfacePreset
+
+        override suspend fun setWritingSurfacePreset(preset: WritingSurfacePreset) {
+            writingSurfacePresetSetCalls += 1
+            check(!failOnWritingSurfacePresetSet) { "boom" }
+            writingSurfacePreset.value = preset
+        }
+
+        fun emitWritingSurfacePreset(value: WritingSurfacePreset) {
+            writingSurfacePreset.value = value
         }
 
         private val showDtSection = MutableStateFlow(false)

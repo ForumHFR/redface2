@@ -189,6 +189,13 @@ class TopicViewModel @AssistedInject constructor(
                 _state.update { it.copy(showSignatures = show) }
             }
             .launchIn(viewModelScope)
+        // #806 — mirror the writing-surface preset so the screen can route each write tap
+        // (reply FAB / « Citer » / « Citer N ») to the sheet or the full-screen editor.
+        userPreferencesRepository.observeWritingSurfacePreset()
+            .onEach { preset ->
+                _state.update { it.copy(writingSurfacePreset = preset) }
+            }
+            .launchIn(viewModelScope)
     }
 
     fun send(intent: TopicIntent) {
