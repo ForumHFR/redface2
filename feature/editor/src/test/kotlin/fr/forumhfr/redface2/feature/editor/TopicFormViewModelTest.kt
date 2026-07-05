@@ -1524,6 +1524,9 @@ class TopicFormViewModelTest {
             confirmBeforePosting.value = enabled
         }
 
+        override fun observeQuoteCardsEnabled(): Flow<Boolean> = MutableStateFlow(false)
+        override suspend fun setQuoteCardsEnabled(enabled: Boolean) = Unit
+
         override fun observeShowDtSection(): Flow<Boolean> = MutableStateFlow(false)
 
         override suspend fun setShowDtSection(enabled: Boolean) = Unit

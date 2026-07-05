@@ -236,6 +236,20 @@ interface UserPreferencesRepository {
     suspend fun setConfirmBeforePosting(enabled: Boolean)
 
     /**
+     * Quote cards in the composer (#805 arbitrage, 2026-07-05): when `true`, citations picked via
+     * « Citer » / « Citer N » are rendered as compact cards above the field (quick-reply sheet AND
+     * full-screen editor) and materialised into `[quotemsg]` BBCode only at submit. Default `false`
+     * — citations are inserted as editable `[quotemsg]` BBCode directly in the text field
+     * (interleaving-friendly, web parity). Read ONCE at surface-opening time (`first()`, not
+     * collected) by `QuickReplyViewModel` and `PostEditorViewModel` — a toggle flip never
+     * rewires a composition session in flight. Toggled in Settings (« Édition et publication »).
+     */
+    fun observeQuoteCardsEnabled(): Flow<Boolean>
+
+    /** Persists [observeQuoteCardsEnabled]. Default `false` until the first call. */
+    suspend fun setQuoteCardsEnabled(enabled: Boolean)
+
+    /**
      * Opt-in « DT » section on the Drapeaux screen: when `true`, a « DT » tab appears next
      * to the flag-type tabs. Placeholder for now — the content (the followed-discussions
      * list whose flags sync through the MPStorage document, #6) lands later. Default

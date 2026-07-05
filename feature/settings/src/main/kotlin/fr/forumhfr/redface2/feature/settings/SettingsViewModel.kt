@@ -155,6 +155,11 @@ class SettingsViewModel @Inject constructor(
             apply = { state, value -> state.copy(confirmBeforePosting = value) },
         )
         hydratePreference(
+            read = { userPreferencesRepository.observeQuoteCardsEnabled().first() },
+            isLocked = { it.quoteCardsEnabledTouchedLocally || it.isUpdatingQuoteCardsEnabled },
+            apply = { state, value -> state.copy(quoteCardsEnabled = value) },
+        )
+        hydratePreference(
             read = { userPreferencesRepository.observeShowDtSection().first() },
             isLocked = { it.showDtSectionTouchedLocally || it.isUpdatingShowDtSection },
             apply = { state, value -> state.copy(showDtSection = value) },
@@ -275,6 +280,7 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.SyncPrivateMessagesWriteEnabledChanged ->
                 updateSyncPrivateMessagesWriteEnabled(intent.enabled)
             is SettingsIntent.ConfirmBeforePostingChanged -> updateConfirmBeforePosting(intent.enabled)
+            is SettingsIntent.QuoteCardsEnabledChanged -> updateQuoteCardsEnabled(intent.enabled)
             is SettingsIntent.FlagsAutoRefreshChanged -> updateFlagsAutoRefresh(intent.enabled)
             is SettingsIntent.DisplayDensityChanged -> updateDisplayDensity(intent.density)
             is SettingsIntent.FontScaleChanged -> updateFontScale(intent.scale)
@@ -1192,6 +1198,33 @@ class SettingsViewModel @Inject constructor(
                 }
             },
             persist = userPreferencesRepository::setConfirmBeforePosting,
+        )
+    }
+
+    private fun updateQuoteCardsEnabled(desired: Boolean) {
+        val previous = _state.value.quoteCardsEnabled
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    quoteCardsEnabled = desired,
+                    isUpdatingQuoteCardsEnabled = true,
+                    quoteCardsEnabledError = false,
+                    quoteCardsEnabledTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(quoteCardsEnabled = desired, isUpdatingQuoteCardsEnabled = false)
+                } else {
+                    state.copy(
+                        quoteCardsEnabled = previous,
+                        isUpdatingQuoteCardsEnabled = false,
+                        quoteCardsEnabledError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setQuoteCardsEnabled,
         )
     }
 

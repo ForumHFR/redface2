@@ -569,6 +569,11 @@ class TopicRepositoryImplTest {
 
         override suspend fun setConfirmBeforePosting(enabled: Boolean) = Unit
 
+        // #805 — quote rendering is irrelevant to TopicRepositoryImpl; stubbed at its default.
+        override fun observeQuoteCardsEnabled(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setQuoteCardsEnabled(enabled: Boolean) = Unit
+
         override fun observeShowDtSection(): Flow<Boolean> = MutableStateFlow(false)
 
         override suspend fun setShowDtSection(enabled: Boolean) = Unit

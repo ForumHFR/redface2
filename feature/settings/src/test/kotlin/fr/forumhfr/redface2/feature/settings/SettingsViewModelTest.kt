@@ -1363,6 +1363,30 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `QuoteCardsEnabledChanged persists the flip`() = runTest {
+        val viewModel = newViewModel()
+        assertFalse("#805 — quote cards are OFF by default (inline BBCode)", viewModel.state.value.quoteCardsEnabled)
+
+        viewModel.submit(SettingsIntent.QuoteCardsEnabledChanged(true))
+
+        assertTrue(viewModel.state.value.quoteCardsEnabled)
+        assertFalse(viewModel.state.value.isUpdatingQuoteCardsEnabled)
+        assertEquals(1, repository.quoteCardsEnabledSetCalls)
+    }
+
+    @Test
+    fun `QuoteCardsEnabledChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnQuoteCardsEnabledSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.QuoteCardsEnabledChanged(true))
+
+        assertFalse("must revert to the previous value on failure", viewModel.state.value.quoteCardsEnabled)
+        assertFalse(viewModel.state.value.isUpdatingQuoteCardsEnabled)
+        assertTrue(viewModel.state.value.quoteCardsEnabledError)
+    }
+
+    @Test
     fun `init hydrates the experimental MPStorage write opt-in from the persisted preference`() = runTest {
         repository.emitSyncPrivateMessagesWriteEnabled(true)
 
@@ -2038,6 +2062,20 @@ class SettingsViewModelTest {
             confirmBeforePostingSetCalls += 1
             check(!failOnConfirmBeforePostingSet) { "boom" }
             confirmBeforePosting.value = enabled
+        }
+
+        // #805 — quote cards in the composer. Same optimistic-flip seam as confirm-before-posting.
+        private val quoteCardsEnabled = MutableStateFlow(false)
+        var quoteCardsEnabledSetCalls: Int = 0
+            private set
+        var failOnQuoteCardsEnabledSet: Boolean = false
+
+        override fun observeQuoteCardsEnabled(): Flow<Boolean> = quoteCardsEnabled
+
+        override suspend fun setQuoteCardsEnabled(enabled: Boolean) {
+            quoteCardsEnabledSetCalls += 1
+            check(!failOnQuoteCardsEnabledSet) { "boom" }
+            quoteCardsEnabled.value = enabled
         }
 
         private val showDtSection = MutableStateFlow(false)

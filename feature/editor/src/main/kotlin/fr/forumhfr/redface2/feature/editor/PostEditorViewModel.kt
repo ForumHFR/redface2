@@ -49,6 +49,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -98,14 +99,10 @@ class PostEditorViewModel @AssistedInject constructor(
             numreponse = request.numreponse,
             page = request.page,
             subcat = request.subcat,
-            // #604 lot 3 — cards seeded from the handoff, deduplicated defensively on the
-            // numreponse (same uniqueness rule as the basket / the sheet) and gated to Reply :
-            // an Edit session has nothing to quote.
-            quotes = if (request.mode == PostEditorMode.Reply) {
-                request.initialQuotes.distinctBy { it.numreponse }
-            } else {
-                emptyList()
-            },
+            // #805 arbitrage — the handoff quotes are NOT seeded here anymore : their rendering
+            // (cards vs inline [quotemsg]) is decided per opening from the persisted preference,
+            // which is a suspend read — see [resolveQuoteRenderingThenLoad] in init.
+            quotes = emptyList(),
         ),
     )
     val state: StateFlow<PostEditorState> = _state.asStateFlow()
@@ -202,8 +199,79 @@ class PostEditorViewModel @AssistedInject constructor(
         }
         restoreDraftIfAny()
         when (request.mode) {
-            PostEditorMode.Reply -> loadReplyFormIfPossible()
+            PostEditorMode.Reply -> resolveQuoteRenderingThenLoad()
             PostEditorMode.Edit -> loadEditFormIfPossible()
+        }
+    }
+
+    /**
+     * #805 arbitrage — one preference read (`first()`, decided per opening) picks the citation
+     * rendering for this session :
+     *
+     * - **cards ON** — the #604 lot 3 behaviour, unchanged : handoff previews become
+     *   [PostEditorState.quotes] (deduplicated per numreponse, Reply-only), the open-time fetch
+     *   stays PLAIN, `[quotemsg]` is materialised fresh at submit.
+     * - **cards OFF (default)** — the pre-lot-3 flow : the open-time fetch IS the materialisation
+     *   ([ReplyQuoteMaterializer.fetchFormWithQuotes]), so [launchFormFetch] hydrates the field
+     *   with the merged `[quotemsg]` prefills through the existing anti-clobber guards, and
+     *   [restoreDraftIfAny]'s `resumeSharedDraft` append stays commutative with it (#790).
+     *   `state.quotes` stays empty → submit takes the plain path (the content is the field).
+     */
+    private fun resolveQuoteRenderingThenLoad() {
+        val initialQuotes = request.initialQuotes.distinctBy { it.numreponse }
+        if (initialQuotes.isEmpty()) {
+            loadReplyFormIfPossible()
+            return
+        }
+        viewModelScope.launch {
+            if (userPreferencesRepository.observeQuoteCardsEnabled().first()) {
+                _state.update { it.copy(quotes = initialQuotes) }
+                loadReplyFormIfPossible()
+            } else {
+                loadReplyFormWithInlineQuotes(initialQuotes)
+            }
+        }
+    }
+
+    /**
+     * #805 cards OFF — open-time fetch through the materializer (quote form + merged prefills).
+     *
+     * The prefill does NOT ride [launchFormFetch]'s hydration : that path only fills a BLANK
+     * field (anti-clobber), so a `resumeSharedDraft` restore landing first would silently drop
+     * the citation. Instead the merged `[quotemsg]` blocks are PREPENDED onto the live field
+     * content at completion — commutative with the restore's append whichever lands first
+     * (réserve Codex n°5), and typing started during the fetch survives. Options still hydrate
+     * through [withFormHydration] (with a content-blanked form, so the text path stays inert).
+     */
+    private fun loadReplyFormWithInlineQuotes(quotes: List<QuotedPostPreview>) {
+        val context = buildReplyContext() ?: run {
+            _state.update { it.copy(submitError = SubmitError.MissingSubcat) }
+            return
+        }
+        val quoteContext = context.copy(quotedNumreponse = quotes.first().numreponse, quoteRef = null)
+        _state.update { it.copy(isLoadingForm = true, submitError = null) }
+        viewModelScope.launch {
+            val outcome = runCatching {
+                quoteMaterializer.fetchFormWithQuotes(
+                    context = quoteContext,
+                    extraQuoteNumreponses = quotes.drop(1).map { it.numreponse },
+                )
+            }
+            outcome.fold(
+                onSuccess = { form ->
+                    loadedForm = form
+                    val prefills = form.initialContent.trimEnd()
+                    _state.update { current ->
+                        val existing = current.draft.text
+                        val combined = if (existing.isBlank()) prefills else prefills + "\n\n" + existing
+                        current
+                            .withFormHydration(form.copy(initialContent = ""), current.preview)
+                            .copy(draft = TextFieldValue(text = combined, selection = TextRange(combined.length)))
+                    }
+                    scheduleAutosave()
+                },
+                onFailure = { error -> handleFetchFailure(error) },
+            )
         }
     }
 
@@ -213,9 +281,10 @@ class PostEditorViewModel @AssistedInject constructor(
      *
      * #790 exception — when the route carries `resumeSharedDraft` (escalation of a quick-reply
      * sheet, which JUST wrote the row), the body is APPENDED to the field instead of banner'd :
-     * the escalation continues the same composition act. (The quote-prefill prepend this used to
-     * be commutative with is gone since #604 lot 3 — citations are cards, the plain reply form
-     * carries no prefill.)
+     * the escalation continues the same composition act. With cards OFF (#805 default) the
+     * open-time quote form DOES carry a `[quotemsg]` prefill again : this append and the form
+     * hydration prepend are commutative, guarded against double-hydration — the original #790
+     * contract, restored.
      */
     private fun restoreDraftIfAny() {
         val key = draftKey ?: return
@@ -676,10 +745,11 @@ class PostEditorViewModel @AssistedInject constructor(
             _state.update { it.copy(submitError = SubmitError.MissingSubcat) }
             return
         }
-        // #604 lot 3 (mockup P3) — the open-time fetch is always the PLAIN reply form now :
-        // citations live as cards in [PostEditorState.quotes] and their [quotemsg] blocks are
-        // materialised fresh at submit (see [onSubmitClicked]), exactly like the quick-reply
-        // sheet. This fetch only warms the hash and hydrates the per-post options.
+        // #604 lot 3 (mockup P3) — with cards ON (or no citations at all) the open-time fetch is
+        // the PLAIN reply form : citations live as cards in [PostEditorState.quotes] and their
+        // [quotemsg] blocks are materialised fresh at submit (see [onSubmitClicked]), exactly
+        // like the quick-reply sheet. This fetch only warms the hash and hydrates the per-post
+        // options. Cards OFF goes through [loadReplyFormWithInlineQuotes] instead (#805).
         launchFormFetch { replyRepository.fetchReplyForm(context) }
     }
 
