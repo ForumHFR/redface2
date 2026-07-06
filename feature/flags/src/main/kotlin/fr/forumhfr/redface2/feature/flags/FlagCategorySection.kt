@@ -117,11 +117,12 @@ fun groupFlagsByCategory(
  * follow-up). A section is KEPT when it has at least one unread flag; empty sections are always
  * dropped.
  *
- * [keepFullyRead] is the cyan « +lus » override: when the user explicitly opted to show
- * already-read participated topics, a section that holds only read flags is still kept (only
- * truly empty sections are dropped) — otherwise the read topics the user just asked to see would
- * be hidden by this very filter. For the RED/FAVORITE tabs (no « +lus » affordance) the caller
- * passes `false`, so fully-read categories are dropped as the preference intends.
+ * [keepFullyRead] is the « +lus » override (#317, generalised to every real type by #825): when
+ * the user explicitly opted to show already-read topics (unreadOnly off — an explicit choice on
+ * CYAN/RED/FAVORITE alike since the #751 re-tap shortcut), a section that holds only read flags
+ * is still kept (only truly empty sections are dropped) — otherwise the read topics the user
+ * just asked to see would be hidden by this very filter. Callers pass `false` only for
+ * unread-only views, where the read flags were already filtered out upstream.
  *
  * Pure, testable without Android.
  */

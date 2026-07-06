@@ -955,9 +955,11 @@ class FlagsViewModelTest {
     }
 
     @Test
-    fun `hide-read pref drops categories without an unread flag on RED`() = runTest {
-        // RED is not read-filtered, so both read and unread reach the grouping: hide-read must
-        // drop the all-read category (10) and the empty ones, keeping only the one with an unread.
+    fun `hide-read with unread-only on RED drops categories without an unread flag`() = runTest {
+        // Unread-only view on RED (explicit opt-in, off by default): the #317 filter removes the
+        // read flag first, so its category (10) groups empty and hide-read drops it — keeping only
+        // the one with an actionable unread. The read-showing RED default is pinned by the #825
+        // regression test below.
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository(catIds = listOf(1, 10))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
@@ -967,6 +969,7 @@ class FlagsViewModelTest {
         vm.flagsState.test {
             awaitItem() // initial null
             vm.selectTab(FlagTab.Red)
+            vm.setFlagsUnreadOnly(true)
             flags.emit(
                 FlagType.RED,
                 FlagsResult.Success(
@@ -1042,11 +1045,11 @@ class FlagsViewModelTest {
     }
 
     @Test
-    fun `hide-read with no unread flag collapses the grouped sections to empty`() = runTest {
-        // Codex review: when hide-read is on and NO category has an unread flag (all read, or CYAN
-        // all-read with +lus off), the grouped content must be Grouped(emptyList()). The screen
-        // renders a placeholder for this state so the body never blanks (anti #229 regression);
-        // this test pins the state contract the screen relies on.
+    fun `red default read-showing view keeps fully-read categories under hide-read (#825)`() = runTest {
+        // #825 regression: RED shows read topics by default (« Lu (+lus) », unreadOnly off). The
+        // CYAN-only override used to leak the literal hide-read filter onto this view — once every
+        // red flag was read, every section was dropped and the body collapsed to empty. The « +lus »
+        // override applies to every read-showing view: only truly empty categories are dropped.
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository(catIds = listOf(1, 10))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
@@ -1055,7 +1058,7 @@ class FlagsViewModelTest {
 
         vm.flagsState.test {
             awaitItem() // initial null
-            vm.selectTab(FlagTab.Red) // RED isn't read-filtered: the all-read flags reach grouping.
+            vm.selectTab(FlagTab.Red)
             flags.emit(
                 FlagType.RED,
                 FlagsResult.Success(
@@ -1065,9 +1068,75 @@ class FlagsViewModelTest {
                     ),
                 ),
             )
+            val success = awaitItem() as FlagsListUiState.Success
+            assertEquals(
+                "all-read categories must stay visible when RED shows read topics",
+                listOf(1, 10),
+                sections(success).map { it.catId },
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `favorite default read-showing view keeps fully-read categories under hide-read (#825)`() = runTest {
+        // #825 twin on FAVORITE: same read-showing default as RED, same override.
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(catIds = listOf(1, 10))
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository(hideReadCategories = true)
+        val vm = viewModel(auth, flags, forum, prefs)
+
+        vm.flagsState.test {
+            awaitItem() // initial null
+            vm.selectTab(FlagTab.Favorite)
+            flags.emit(
+                FlagType.FAVORITE,
+                FlagsResult.Success(
+                    listOf(
+                        stubFlag(1, FlagType.FAVORITE, hasUnread = false, cat = 1),
+                        stubFlag(2, FlagType.FAVORITE, hasUnread = false, cat = 10),
+                    ),
+                ),
+            )
+            val success = awaitItem() as FlagsListUiState.Success
+            assertEquals(
+                "all-read categories must stay visible when FAVORITE shows read topics",
+                listOf(1, 10),
+                sections(success).map { it.catId },
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `hide-read with no unread flag collapses the grouped sections to empty`() = runTest {
+        // Codex review: when hide-read is on and NO category has a VISIBLE flag (here CYAN
+        // all-read with its default unread-only filter on, so the #317 filter empties the list),
+        // the grouped content must be Grouped(emptyList()). The screen renders a placeholder for
+        // this state so the body never blanks (anti #229 regression); this test pins the state
+        // contract the screen relies on. (Moved off RED by #825: its read-showing default no
+        // longer collapses — the collapse now only happens in unread-only views.)
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(catIds = listOf(1, 10))
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository(hideReadCategories = true)
+        val vm = viewModel(auth, flags, forum, prefs)
+
+        vm.flagsState.test {
+            awaitItem() // initial null
+            flags.emit(
+                FlagType.CYAN,
+                FlagsResult.Success(
+                    listOf(
+                        stubFlag(1, FlagType.CYAN, hasUnread = false, cat = 1),
+                        stubFlag(2, FlagType.CYAN, hasUnread = false, cat = 10),
+                    ),
+                ),
+            )
             val grouped = (awaitItem() as FlagsListUiState.Success).content as FlagsContent.Grouped
             assertTrue(
-                "every category is fully read → hide-read collapses to zero sections",
+                "no unread flag survives CYAN's unread-only filter → zero sections",
                 grouped.sections.isEmpty(),
             )
             cancelAndIgnoreRemainingEvents()
