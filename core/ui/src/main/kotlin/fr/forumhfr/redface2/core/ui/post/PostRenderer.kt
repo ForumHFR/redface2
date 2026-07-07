@@ -1172,6 +1172,12 @@ private fun collectMeasurableSmileyUrl(inline: PostInline, urls: MutableSet<Stri
  * (no-upscale native sizing, like #175 smileys). The `:core:ui` parser has already stripped
  * non-http(s) schemes, so every collected URL is safe to hand to Coil. Recurses into inline
  * containers (e.g. an `[img]` wrapped in a `[url=…]` link), mirroring [walkInlinesForMedia].
+ *
+ * #256 — URLs carrying the `hfr-cc-image=true` marker are EXCLUDED: their box is pinned by the
+ * [imageDisplayBox] fast-path (never read from the measurement cache), so probing them would only
+ * spend a useless network round-trip. Block promotion is unaffected: an unmeasured URL never trips
+ * [shouldPromoteImagesToBlocks], which is exactly the intended always-inline treatment for a marked
+ * emoji.
  */
 internal fun collectMeasurableImageUrls(inlines: List<PostInline>): Set<String> {
     val urls = LinkedHashSet<String>()
@@ -1185,7 +1191,8 @@ private fun collectMeasurableImageUrlsInto(inlines: List<PostInline>, urls: Muta
 
 private fun collectMeasurableImageUrl(inline: PostInline, urls: MutableSet<String>) {
     when (inline) {
-        is PostInline.InlineImage -> urls += inline.url
+        // #256 — cc-image-marked URLs are not measurable (fixed one-line box, see the KDoc above).
+        is PostInline.InlineImage -> if (!isCcImageUrl(inline.url)) urls += inline.url
         is PostInline.Strong -> collectMeasurableImageUrlsInto(inline.children, urls)
         is PostInline.Emphasis -> collectMeasurableImageUrlsInto(inline.children, urls)
         is PostInline.Underline -> collectMeasurableImageUrlsInto(inline.children, urls)
@@ -1232,12 +1239,30 @@ private fun smileyDisplayBox(
  * 16×16 emoji) is already at its final size — zero flash — and any larger image just grows from a
  * one-line slot once measured instead of shrinking from a giant one. Still relative-capped so even
  * the fallback never overflows a narrow quote. Mirrors [smileyDisplayBox].
+ *
+ * #256 — a URL carrying the `hfr-cc-image=true` marker short-circuits ALL of the above: fixed
+ * one-line square, no measurement involved (see [isCcImageUrl] and the fast-path comment below).
  */
 internal fun imageDisplayBox(
     image: PostInline.InlineImage,
     measured: Map<String, IntSize?>,
     maxWidthSp: Int,
 ): InlineMediaBox {
+    // #256 — render-time fast-path: a URL carrying the `hfr-cc-image=true` marker declares itself a
+    // community cc-image emoji (a one-line glyph). Pin its box to the one-line square immediately —
+    // the same square as the #253 cold fallback below, so a marked emoji is at its final size from
+    // the very first frame (zero flash, zero reflow) — and IGNORE any measured size on record: the
+    // marker, not the measurement, is the contract (matching + duplicate rules in [isCcImageUrl]).
+    // The companion exclusion in [collectMeasurableImageUrl] skips the async probe for these URLs
+    // entirely. Still relative-capped so even this square cannot overflow a pathologically narrow
+    // container. Everything else (AST, link semantics, MediaCounter, promotion) is untouched.
+    if (isCcImageUrl(image.url)) {
+        val fixed = capToWidth(
+            PixelSize(INLINE_IMAGE_MIN_HEIGHT_SP, INLINE_IMAGE_MIN_HEIGHT_SP),
+            maxWidthSp,
+        )
+        return InlineMediaBox(fixed.width.sp, fixed.height.sp)
+    }
     val size = measured[image.url]
     val base = if (size != null) {
         // #175 no-upscale + cap with the inline-image caps, then a min-height floor so a SUB-16 low-res

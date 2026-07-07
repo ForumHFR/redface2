@@ -90,6 +90,52 @@ class InlineImageDisplayBoxTest {
         assertEquals(INLINE_IMAGE_MIN_HEIGHT_SP.toFloat(), b.placeholderHeight.value, TOLERANCE)
     }
 
+    // #256 — the hfr-cc-image marker pins the box to the one-line square at render time.
+
+    private val ccUrl = "https://cdn.example.org/emojis-micro/1f600.png?hfr-cc-image=true&raw=true"
+    private val ccImage = PostInline.InlineImage(url = ccUrl, description = null)
+
+    private fun ccBox(measured: IntSize?, maxWidthSp: Int): InlineMediaBox =
+        imageDisplayBox(ccImage, mapOf(ccUrl to measured), maxWidthSp)
+
+    @Test
+    fun `cc-image marker pins the one-line square without any measurement`() {
+        // The fast-path needs no measured size: the box is final from the very first frame.
+        val b = ccBox(measured = null, maxWidthSp = 400)
+        assertEquals(INLINE_IMAGE_MIN_HEIGHT_SP.toFloat(), b.placeholderWidth.value, TOLERANCE)
+        assertEquals(INLINE_IMAGE_MIN_HEIGHT_SP.toFloat(), b.placeholderHeight.value, TOLERANCE)
+    }
+
+    @Test
+    fun `cc-image marker ignores a measured size on record`() {
+        // Even a (stale or warmed-elsewhere) 500×500 measurement must not resize a marked emoji:
+        // the marker, not the measurement, is the contract.
+        val b = ccBox(measured = IntSize(500, 500), maxWidthSp = 400)
+        assertEquals(INLINE_IMAGE_MIN_HEIGHT_SP.toFloat(), b.placeholderWidth.value, TOLERANCE)
+        assertEquals(INLINE_IMAGE_MIN_HEIGHT_SP.toFloat(), b.placeholderHeight.value, TOLERANCE)
+    }
+
+    @Test
+    fun `cc-image square is still relative-capped in a pathologically narrow container`() {
+        // Defensive parity with the cold fallback: the fixed square obeys the same relative cap.
+        val b = ccBox(measured = null, maxWidthSp = 10)
+        assertEquals(10f, b.placeholderWidth.value, TOLERANCE)
+        assertEquals(10f, b.placeholderHeight.value, TOLERANCE)
+    }
+
+    @Test
+    fun `a false marker falls back to the normal measured path`() {
+        // hfr-cc-image=false is NOT the marker: normal intrinsic sizing applies.
+        val falseUrl = "https://cdn.example.org/pic.png?hfr-cc-image=false"
+        val b = imageDisplayBox(
+            PostInline.InlineImage(url = falseUrl, description = null),
+            mapOf(falseUrl to IntSize(80, 60)),
+            maxWidthSp = 400,
+        )
+        assertEquals(80f, b.placeholderWidth.value, TOLERANCE)
+        assertEquals(60f, b.placeholderHeight.value, TOLERANCE)
+    }
+
     private companion object {
         const val TOLERANCE = 0.5f
     }
