@@ -81,8 +81,10 @@ import coil3.request.ImageRequest
 import coil3.request.crossfade
 import coil3.size.Precision
 import coil3.size.Scale
+import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.ui.motion.rememberAnimationsEnabled
 import fr.forumhfr.redface2.core.ui.R
+import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
 import fr.forumhfr.redface2.core.ui.theme.LocalFoldLongQuotes
 import fr.forumhfr.redface2.core.ui.theme.LocalIgnoreInlineColors
 import fr.forumhfr.redface2.core.model.PostBlock
@@ -202,6 +204,20 @@ internal fun quoteAccentRole(quoteDepth: Int, isBareQuote: Boolean): QuoteAccent
  */
 internal fun isBareQuote(quote: PostBlock.Quote): Boolean =
     quote.author == null && quote.numreponse == null && quote.page == null
+
+/**
+ * #785 — true when a quote cites a black-listed author: the quote's parsed author matches (by the
+ * canonical key, cf. [canonicalizePseudo]) one of the blocked canonicals the reading surface
+ * provided through [LocalBlockedQuoteAuthors]. Author-only on purpose: a citation HFR served in
+ * the dynamic `forum2.php` form keeps `page`/`numreponse` null but still carries the author, so
+ * the mask must never depend on the jump coordinates. A `[quotemsg]` forged with an arbitrary
+ * pseudo masks too — acceptable, the author line is the only identity a citation carries. Pure
+ * decision so it is pinned in [PostRendererQuoteDepthTest] without entering Compose.
+ */
+internal fun isBlockedQuoteAuthor(author: String?, blockedCanonicals: Set<String>): Boolean {
+    if (author == null || blockedCanonicals.isEmpty()) return false
+    return canonicalizePseudo(author) in blockedCanonicals
+}
 
 @Composable
 fun PostRenderer(
@@ -397,12 +413,23 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
     }
 }
 
+// ReturnCount: the guard chain (blocked author first, then the folds) IS the dispatch.
+@Suppress("ReturnCount")
 @Composable
 private fun QuoteBlock(
     block: PostBlock.Quote,
     quoteDepth: Int,
     onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
 ) {
+    // #785 — the blacklist applies INSIDE quotes too: a citation whose author is black-listed is
+    // masked like that author's own posts are. This branch runs BEFORE the depth/length folds so a
+    // blocked quote can never leak through an expanded render; the QuoteBlock recursion covers
+    // nested citations natively, and the local's empty default keeps every non-topic surface
+    // (editor preview, MP threads, signatures) unchanged.
+    if (isBlockedQuoteAuthor(block.author, LocalBlockedQuoteAuthors.current)) {
+        BlockedQuoteBlock(block, quoteDepth, onGoToCitedPost)
+        return
+    }
     if (isCollapsedQuoteDepth(quoteDepth)) {
         CollapsedQuoteBlock(block, quoteDepth, onGoToCitedPost)
         return
@@ -626,6 +653,59 @@ private fun CollapsedQuoteBlock(
             PostBlocksRenderer(
                 blocks = block.content.blocks,
                 quoteDepth = 0,
+                onGoToCitedPost = onGoToCitedPost,
+            )
+        }
+    }
+}
+
+/**
+ * #785 — placeholder for a quote whose author is black-listed, mirroring the [CollapsedQuoteBlock]
+ * interaction (one-line label + « Afficher »/« Masquer », the whole frame toggles) and the topic
+ * screen's `HiddenPostCard` copy (the pseudo stays visible, consistent with the post-level mask).
+ * The reveal is per-quote and transient (`rememberSaveable`, same lifetime as the other folds).
+ * Unlike [CollapsedQuoteBlock] the reveal keeps the REAL depth (`quoteDepth + 1`, like the expanded
+ * render): revealing a blocked quote must not grant extra nesting levels, and a blocked citation
+ * nested inside the revealed body stays masked through the recursion.
+ */
+@Composable
+private fun BlockedQuoteBlock(
+    block: PostBlock.Quote,
+    quoteDepth: Int,
+    onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
+) {
+    var revealed by rememberSaveable(block) { mutableStateOf(false) }
+    QuoteFrame(
+        quoteDepth = quoteDepth,
+        isBareQuote = isBareQuote(block),
+        modifier = Modifier.clickable { revealed = !revealed },
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                // isBlockedQuoteAuthor never matches a null author, so the fallback is defensive.
+                text = stringResource(R.string.post_quote_blocked_author, block.author.orEmpty()),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = if (revealed) {
+                    stringResource(R.string.post_quote_hide)
+                } else {
+                    stringResource(R.string.post_quote_show)
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        if (revealed) {
+            // #252/#699 — same header rule as the expanded QuoteBlock (and same jump affordance).
+            QuoteHeader(block, onGoToCitedPost)
+            PostBlocksRenderer(
+                blocks = block.content.blocks,
+                quoteDepth = quoteDepth + 1,
                 onGoToCitedPost = onGoToCitedPost,
             )
         }

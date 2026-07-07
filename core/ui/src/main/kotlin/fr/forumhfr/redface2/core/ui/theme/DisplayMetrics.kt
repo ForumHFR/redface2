@@ -82,6 +82,17 @@ val LocalFoldLongQuotes = staticCompositionLocalOf { true }
 val LocalShowScrollbar = staticCompositionLocalOf { true }
 
 /**
+ * #785 — canonical pseudos (cf. `canonicalizePseudo`) of the black-listed authors, provided by the
+ * topic reading surface around its post list so `QuoteBlock` can mask a citation OF a blocked
+ * author embedded in another user's post (the post-level mask alone let a blocked author's words
+ * resurface through quotes). Defaults to the empty set: every other PostRenderer host (editor
+ * preview, MP threads, signatures) keeps rendering quotes untouched. `staticCompositionLocalOf`:
+ * the value changes only when the blacklist changes, so a one-shot subtree recomposition on change
+ * is acceptable (same stance as [LocalFoldLongQuotes]).
+ */
+val LocalBlockedQuoteAuthors = staticCompositionLocalOf { emptySet<String>() }
+
+/**
  * Project CompositionLocal asking the post renderer to IGNORE the author's inline `[color]` styling
  * for the subtree it wraps (#553). HFR signatures embed colours chosen for the white web background;
  * rendered as-is on the app theme (especially dark) they read as unreadable/garish, so the signature

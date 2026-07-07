@@ -813,6 +813,40 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `the canonical blocked set is exposed for quote masking and re-filters live (#785)`() = runTest {
+        // #785 — the screen provides Loaded.blockedQuoteAuthors to the quote renderer
+        // (LocalBlockedQuoteAuthors), so the set must (a) land with the initial load — even when the
+        // blocked author has NO post on the page, only citations of them — and (b) follow live
+        // blacklist changes through the same seam as hiddenNumreponses (loadedMode).
+        val topic = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            posts = listOf(fakePost(100, author = "Alice"), fakePost(101, author = "Bob")),
+        )
+        val blacklist = FakeBlacklistRepository(blockedCanonicals = setOf("charlie"))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            blacklistRepository = blacklist,
+        )
+
+        viewModel.state.test {
+            val initial = assertMode<TopicUiState.Mode.Loaded>(awaitItem())
+            // charlie posts nothing on this page (hiddenNumreponses empty), yet the canonical set is
+            // exposed so a CITATION of charlie in Alice/Bob's posts can be masked by the renderer.
+            assertEquals(setOf("charlie"), initial.blockedQuoteAuthors)
+            assertEquals(emptySet<Int>(), initial.hiddenNumreponses)
+
+            blacklist.block("Alice")
+            val refiltered = assertMode<TopicUiState.Mode.Loaded>(awaitItem())
+            assertEquals(setOf("charlie", "alice"), refiltered.blockedQuoteAuthors)
+            assertEquals(setOf(100), refiltered.hiddenNumreponses)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `blocking an author after a pull-to-refresh hides their posts live (#509 beta)`() = runTest {
         // Beta regression: the blacklist used to be collected only inside loadCurrentPage's combine, so
         // a refresh (which cancels loadJob and runs a one-shot refetch) FROZE the live re-filter — a

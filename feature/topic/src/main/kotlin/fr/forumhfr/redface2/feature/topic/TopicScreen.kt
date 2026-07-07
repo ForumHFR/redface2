@@ -110,6 +110,7 @@ import fr.forumhfr.redface2.core.ui.post.PostIdentityBand
 import fr.forumhfr.redface2.core.ui.post.PostIdentityHeader
 import fr.forumhfr.redface2.core.ui.post.PostListScaffold
 import fr.forumhfr.redface2.core.ui.post.PostRenderer
+import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 import fr.forumhfr.redface2.core.ui.theme.LocalIgnoreInlineColors
 import fr.forumhfr.redface2.core.ui.theme.rememberCreatorPseudoBrush
@@ -887,54 +888,61 @@ internal fun TopicContent(
                         // (overlaying the list's right edge, outside the scrolled element), so the
                         // manual Box + LazyListScrollbar wrapper is gone. PullToRefreshBox stays the
                         // feature's wrapper (its refresh state belongs to the ViewModel).
-                        TopicLoadedContent(
-                            state = state,
-                            topic = mode.topic,
-                            hiddenNumreponses = mode.hiddenNumreponses,
-                            // #604 lot 2 / #806 — « Citer » opens the quick-reply sheet with the
-                            // card pre-armed (1-citation session), unless the preset routes any
-                            // citation to the full-screen editor (decision at tap time; same :app
-                            // path as the sheet's escalation, resumeSharedDraft = true).
-                            onQuoteRequested = { preview ->
-                                when (writingSurfaceFor(state.writingSurfacePreset, quoteCount = 1)) {
-                                    WritingSurface.SHEET -> quickReplyFor = QuickReplyLaunch(
-                                        request = QuickReplyRequest(
-                                            cat = state.request.cat,
-                                            subcat = mode.topic.subcat,
-                                            topicId = state.request.post,
-                                            page = mode.topic.page,
-                                        ),
-                                        initialQuotes = listOf(preview),
-                                    )
-                                    WritingSurface.FULL_EDITOR ->
-                                        onReply(mode.topic.subcat, mode.topic.page, listOf(preview))
-                                }
-                            },
-                            // #823 — LONG press on « Citer » : one-shot override of the #806
-                            // preset — always the full-screen editor, through the same :app path
-                            // as the FULL_EDITOR branch above (in-memory handoff +
-                            // resumeSharedDraft = true, #790). Deliberately does NOT consult
-                            // writingSurfaceFor: the gesture IS the routing decision (identical
-                            // to the tap under the FULL_EDITOR preset).
-                            onQuoteFullEditorRequested = { preview ->
-                                onReply(mode.topic.subcat, mode.topic.page, listOf(preview))
-                            },
-                            onEdit = onEdit,
-                            onEditFirstPost = onEditFirstPost,
-                            onOpenPage = onOpenPage,
-                            onGoToPost = onGoToPost,
-                            onOpenProfile = onOpenProfile,
-                            onDeleteRequest = onDeleteRequest,
-                            onDoubleTapRefresh = { onIntent(TopicIntent.Refresh) },
-                            listState = listState,
-                            multiQuoteSelection = multiQuoteNumreponses,
-                            onToggleMultiQuote = onToggleMultiQuote,
-                            onSetAuthorBlocked = { author, blocked ->
-                                onIntent(TopicIntent.SetAuthorBlocked(author, blocked))
-                            },
-                            pollManualExpanded = pollManualExpanded,
-                            onPollExpansionChanged = onPollExpansionChanged,
-                        )
+                        //
+                        // #785 — the blacklist applies inside quotes too: the canonical blocked set
+                        // is provided to the post renderers so QuoteBlock masks a citation OF a
+                        // blocked author. Scoped to the reading list only — the quick-reply sheet
+                        // and editor previews (outside this provider) keep the empty default.
+                        CompositionLocalProvider(LocalBlockedQuoteAuthors provides mode.blockedQuoteAuthors) {
+                            TopicLoadedContent(
+                                state = state,
+                                topic = mode.topic,
+                                hiddenNumreponses = mode.hiddenNumreponses,
+                                // #604 lot 2 / #806 — « Citer » opens the quick-reply sheet with the
+                                // card pre-armed (1-citation session), unless the preset routes any
+                                // citation to the full-screen editor (decision at tap time; same :app
+                                // path as the sheet's escalation, resumeSharedDraft = true).
+                                onQuoteRequested = { preview ->
+                                    when (writingSurfaceFor(state.writingSurfacePreset, quoteCount = 1)) {
+                                        WritingSurface.SHEET -> quickReplyFor = QuickReplyLaunch(
+                                            request = QuickReplyRequest(
+                                                cat = state.request.cat,
+                                                subcat = mode.topic.subcat,
+                                                topicId = state.request.post,
+                                                page = mode.topic.page,
+                                            ),
+                                            initialQuotes = listOf(preview),
+                                        )
+                                        WritingSurface.FULL_EDITOR ->
+                                            onReply(mode.topic.subcat, mode.topic.page, listOf(preview))
+                                    }
+                                },
+                                // #823 — LONG press on « Citer » : one-shot override of the #806
+                                // preset — always the full-screen editor, through the same :app path
+                                // as the FULL_EDITOR branch above (in-memory handoff +
+                                // resumeSharedDraft = true, #790). Deliberately does NOT consult
+                                // writingSurfaceFor: the gesture IS the routing decision (identical
+                                // to the tap under the FULL_EDITOR preset).
+                                onQuoteFullEditorRequested = { preview ->
+                                    onReply(mode.topic.subcat, mode.topic.page, listOf(preview))
+                                },
+                                onEdit = onEdit,
+                                onEditFirstPost = onEditFirstPost,
+                                onOpenPage = onOpenPage,
+                                onGoToPost = onGoToPost,
+                                onOpenProfile = onOpenProfile,
+                                onDeleteRequest = onDeleteRequest,
+                                onDoubleTapRefresh = { onIntent(TopicIntent.Refresh) },
+                                listState = listState,
+                                multiQuoteSelection = multiQuoteNumreponses,
+                                onToggleMultiQuote = onToggleMultiQuote,
+                                onSetAuthorBlocked = { author, blocked ->
+                                    onIntent(TopicIntent.SetAuthorBlocked(author, blocked))
+                                },
+                                pollManualExpanded = pollManualExpanded,
+                                onPollExpansionChanged = onPollExpansionChanged,
+                            )
+                        }
                     }
                 }
             }
