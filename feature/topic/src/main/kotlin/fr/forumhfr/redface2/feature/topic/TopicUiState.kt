@@ -102,6 +102,16 @@ data class TopicUiState(
              * first emission (combine with the blacklist) so a blocked post never flashes before hiding.
              */
             val hiddenNumreponses: Set<Int> = emptySet(),
+            /**
+             * #785 — canonical pseudos (cf. `canonicalizePseudo`) of the black-listed authors — the
+             * same blacklist snapshot [hiddenNumreponses] was computed from. The screen provides it
+             * to the post renderers (`LocalBlockedQuoteAuthors`) so a citation OF a blocked author
+             * inside another user's post is masked too. Kept in lock-step with [hiddenNumreponses]
+             * by `TopicViewModel.loadedMode` — the single construction seam for this mode — so the
+             * post-level and quote-level masks can never diverge across the load / refresh /
+             * force-refresh / post-delete / search / live-refilter paths.
+             */
+            val blockedQuoteAuthors: Set<String> = emptySet(),
         ) : Mode
 
         data class Error(

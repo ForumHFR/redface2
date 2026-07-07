@@ -259,11 +259,10 @@ class TopicViewModel @AssistedInject constructor(
                 blockedCanonicals = blocked
                 _state.update { current ->
                     val loaded = current.mode as? TopicUiState.Mode.Loaded ?: return@update current
-                    current.copy(
-                        mode = loaded.copy(
-                            hiddenNumreponses = computeHiddenNumreponses(loaded.topic, blocked),
-                        ),
-                    )
+                    // #785 — rebuild the WHOLE loaded mode through the single seam (loadedMode) so
+                    // the post-level mask (hiddenNumreponses) and the quote-level canonical set
+                    // (blockedQuoteAuthors) re-filter together on a live blacklist change.
+                    current.copy(mode = loadedMode(loaded.topic))
                 }
             }
             // This collector is independent of any load job, so an unhandled error here would tear
@@ -298,7 +297,7 @@ class TopicViewModel @AssistedInject constructor(
                 val topic = topicRepository.refreshTopicPage(request.cat, request.post, request.page)
                 _state.update {
                     it.copy(
-                        mode = TopicUiState.Mode.Loaded(topic, computeHiddenNumreponses(topic, blockedCanonicals)),
+                        mode = loadedMode(topic),
                         availablePages = (1..topic.totalPages).toList(),
                     )
                 }
@@ -416,7 +415,7 @@ class TopicViewModel @AssistedInject constructor(
                 .collect { topic ->
                     _state.update {
                         it.copy(
-                            mode = TopicUiState.Mode.Loaded(topic, computeHiddenNumreponses(topic, blockedCanonicals)),
+                            mode = loadedMode(topic),
                             availablePages = (1..topic.totalPages).toList(),
                         )
                     }
@@ -429,6 +428,22 @@ class TopicViewModel @AssistedInject constructor(
                 }
         }
     }
+
+    /**
+     * #785 — SINGLE construction seam for [TopicUiState.Mode.Loaded]. Every path that puts a page on
+     * screen (cache-aside load, manual refresh, post-submit force refresh, post-delete refetch,
+     * intra-topic search, live blacklist re-filter) builds the mode here, from the same
+     * [blockedCanonicals] snapshot, so the post-level mask ([TopicUiState.Mode.Loaded.hiddenNumreponses])
+     * and the quote-level canonical set ([TopicUiState.Mode.Loaded.blockedQuoteAuthors]) can never
+     * diverge — a path bypassing this seam would make masked citations flicker across
+     * refresh/search/delete (Codex framing reservation on #785).
+     */
+    private fun loadedMode(topic: Topic): TopicUiState.Mode.Loaded =
+        TopicUiState.Mode.Loaded(
+            topic = topic,
+            hiddenNumreponses = computeHiddenNumreponses(topic, blockedCanonicals),
+            blockedQuoteAuthors = blockedCanonicals,
+        )
 
     /**
      * #509 — `numreponse` of the posts in [topic] whose author is blacklisted (canonical match). The
@@ -490,7 +505,7 @@ class TopicViewModel @AssistedInject constructor(
                 val topic = topicRepository.refreshTopicPage(request.cat, request.post, request.page)
                 _state.update {
                     it.copy(
-                        mode = TopicUiState.Mode.Loaded(topic, computeHiddenNumreponses(topic, blockedCanonicals)),
+                        mode = loadedMode(topic),
                         availablePages = (1..topic.totalPages).toList(),
                     )
                 }
@@ -646,7 +661,7 @@ class TopicViewModel @AssistedInject constructor(
                 val topic = topicRepository.refreshTopicPage(request.cat, request.post, request.page)
                 _state.update {
                     it.copy(
-                        mode = TopicUiState.Mode.Loaded(topic, computeHiddenNumreponses(topic, blockedCanonicals)),
+                        mode = loadedMode(topic),
                         availablePages = (1..topic.totalPages).toList(),
                     )
                 }
@@ -959,7 +974,7 @@ class TopicViewModel @AssistedInject constructor(
     private fun renderSearchPage(topic: Topic, status: TopicSearchStatus, canPrev: Boolean, canNext: Boolean) {
         _state.update {
             it.copy(
-                mode = TopicUiState.Mode.Loaded(topic, computeHiddenNumreponses(topic, blockedCanonicals)),
+                mode = loadedMode(topic),
                 search = it.search.copy(
                     status = status,
                     canGoPreviousResult = canPrev,
