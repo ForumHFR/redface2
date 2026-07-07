@@ -482,12 +482,17 @@ class FlagsViewModel @Inject constructor(
         ) { result, unreadOnly ->
             FilteredFlags(
                 result = filterUnreadOnly(result, unreadOnly),
-                // The « +lus » override: keep fully-read categories under « masquer les catégories
-                // sans non-lu » ONLY on CYAN when its unread filter is off — i.e. the user explicitly
-                // opted to see read participated topics, so this filter must not hide them right back.
-                // RED/FAVORITE default to showing read topics, but there hide-read keeps its literal
-                // meaning (drop categories without an unread flag), preserving the #179/#309 behaviour.
-                keepFullyReadSections = type == FlagType.CYAN && !unreadOnly,
+                // The « +lus » override: under « masquer les catégories sans non-lu », keep the
+                // fully-read categories whenever the tab shows read topics (unreadOnly off). Showing
+                // read topics is an explicit user choice on EVERY real type since the #751 re-tap
+                // shortcut, so this filter must not hide them right back. It used to be CYAN-only
+                // (#317), which leaked the literal filter onto the RED/FAVORITE read views and
+                // collapsed them to an empty body once every flag was read (#825).
+                // Semantics decision (#825): the option means « hide categories with no flag VISIBLE
+                // under the current filter » — no unread flag in an unread-only view, no flag at all
+                // in a « +lus » view. Inert when unreadOnly is on: [filterUnreadOnly] already removed
+                // every read flag, so a surviving non-empty section always has an unread flag.
+                keepFullyReadSections = !unreadOnly,
             )
         }
             // #225 — keep the existing list anchored during a user refresh instead of blanking
@@ -532,8 +537,8 @@ class FlagsViewModel @Inject constructor(
     /**
      * Carries the « +lus » decision ([keepFullyReadSections]) alongside the filtered [result] so it
      * travels as one unit through [keepContentDuringRefresh] and the outer `combine` (cf.
-     * [authenticatedFlagsListState]). It is the CYAN-specific override (`type == CYAN && !unreadOnly`,
-     * #317) — RED/FAVORITE always pass `false` so hide-read keeps its literal meaning there.
+     * [authenticatedFlagsListState]). It is `!unreadOnly` for every real type (#317, generalised by
+     * #825): whenever a tab shows read topics, hide-read only drops truly empty categories.
      */
     private data class FilteredFlags(
         val result: FlagsResult,
@@ -1036,9 +1041,9 @@ class FlagsViewModel @Inject constructor(
      *
      * [groupByCategory] / [hideReadCategories] are the two persisted Drapeaux layout preferences
      * (#179 follow-up): flat vs grouped layout, and whether to hide categories without an unread
-     * flag. [keepFullyReadSections] (the CYAN « +lus » override, #317) is forwarded from
-     * [FilteredFlags]: when CYAN explicitly shows read topics, its fully-read categories survive the
-     * hide filter so those topics stay reachable.
+     * flag. [keepFullyReadSections] (the « +lus » override, #317/#825) is forwarded from
+     * [FilteredFlags]: when a tab explicitly shows read topics, its fully-read categories survive
+     * the hide filter so those topics stay reachable.
      */
     private fun toFlagsListUiState(
         flagsResult: FlagsResult,
