@@ -35,16 +35,20 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * #610 — diagnostic-only Roborazzi captures of the unified inline/block `[img]` parity
- * (HFR-web `img { max-width: 90%; max-height: 200px }`, no upscale).
+ * #610/#842 — diagnostic-only Roborazzi captures of the `[img]` sizing (`max-width: 90%`, no upscale).
  *
- * Visual proof of the three #610 properties:
- *  - **inline/block parity**: the same 360×640 portrait renders at the SAME size (~113×200) inside
- *    prose (inline path, sp) and as a standalone `PostBlock.Image` (block path, dp) — pre-#610 the
- *    block was full-width and 480 dp tall while the inline was 113×200;
+ * Visual proof of the current properties (config `w360dp-h780dp` → block height cap
+ * [blockImageMaxHeightDp] = `max(400, 0.5×780)` = 400 dp):
+ *  - **inline height cap 200 (conservative, #842)**: a 360×640 portrait inside prose (inline path, sp)
+ *    stays ~113×200 so it never breaks the text flow;
+ *  - **block fills the width (#842)**: the SAME portrait as a standalone `PostBlock.Image` (block path)
+ *    now renders ~225×400 under the recalibrated cap — deliberately taller/wider than the inline box
+ *    (each image takes only one path per the width ≥ 240 promotion threshold), reversing #610's flat
+ *    200 that squeezed it to ~113×200 (~48 % width);
  *  - **no block upscale**: a small 80×60 image posted alone stays 80×60 centred — pre-#610
  *    `fillMaxWidth` blew it up to the column width;
- *  - **height cap**: a large 4:3 photo caps at 200 (267×200), not the legacy 480 dp letterbox.
+ *  - **bounded**: a large 4:3 photo is still bounded (width cap → ~295×221 here), not the legacy
+ *    480 dp letterbox nor a scroll-destroying blow-up.
  *
  * Images are fed by a [FakeImageLoaderEngine] returning distinct-coloured [ColorImage]s at native px,
  * and the intrinsic cache is pre-seeded so the first composition is already at the final size (no
@@ -90,17 +94,19 @@ class PostRendererImageParityRoborazziTest {
 
     @Test
     fun portraitInlineInProse() {
-        // The #610/#813-repro paragraph shape: text + [img] + text → INLINE path. Expected ~113×200.
-        capture("img_610_inline_in_prose", widthDp = 360) {
+        // The #610/#813-repro paragraph shape: text + [img] + text → INLINE path. Inline keeps the
+        // conservative 200 height cap (#842) → ~113×200, so an in-prose image never breaks the flow.
+        capture("img_inline_in_prose_cap200", widthDp = 360) {
             PostRenderer(content = inlineInProseContent())
         }
     }
 
     @Test
-    fun portraitStandaloneBlock() {
-        // Same portrait as a standalone PostBlock.Image → BLOCK path. Expected the SAME ~113×200,
-        // centred — compare with img_610_inline_in_prose (pre-#610: full width, 480 dp tall).
-        capture("img_610_standalone_block", widthDp = 360) {
+    fun portraitStandaloneBlockFillsWidth() {
+        // #842 — same portrait as a standalone PostBlock.Image → BLOCK path, recalibrated cap 400 dp
+        // (h780dp) → ~225×400, deliberately larger than the inline box above (compare
+        // img_inline_in_prose_cap200). Reverses #610's flat 200 (~113×200, ~48 % width).
+        capture("img_842_standalone_block_fills_width", widthDp = 360) {
             PostRenderer(content = standaloneBlockContent(portraitUrl))
         }
     }
@@ -114,9 +120,10 @@ class PostRendererImageParityRoborazziTest {
     }
 
     @Test
-    fun largePhotoBlockCapsAt200() {
-        // 4000×3000 → 267×200 (height cap), not the legacy full-width 480 dp letterbox.
-        capture("img_610_large_block_cap200", widthDp = 360) {
+    fun largePhotoBlockStaysBounded() {
+        // #842 — 4000×3000 stays bounded by the 90 % width cap → ~295×221 here (not the legacy
+        // 480 dp letterbox, not a full-screen blow-up). The recalibrated height cap never upscales.
+        capture("img_842_large_block_bounded", widthDp = 360) {
             PostRenderer(content = standaloneBlockContent(photoUrl))
         }
     }
@@ -127,7 +134,7 @@ class PostRendererImageParityRoborazziTest {
                 inlines = listOf(
                     PostInline.Text("Texte avant la photo "),
                     PostInline.InlineImage(url = portraitUrl, description = "portrait"),
-                    PostInline.Text(" puis texte après : la photo est capée à 200 de haut (parité web)."),
+                    PostInline.Text(" puis texte après : en inline la photo est capée à 200 de haut (#842)."),
                 ),
             ),
         ),
