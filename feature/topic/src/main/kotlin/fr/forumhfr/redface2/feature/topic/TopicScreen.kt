@@ -1370,9 +1370,11 @@ private fun TopicLoadedContent(
                 PostImageActionsViewModel.SaveImageEffect.FAILED_TOO_LARGE ->
                     R.string.topic_image_menu_save_failed_too_large
             }
+            // The @StringRes overload resolves at show() time — no LocalContext resource query
+            // (LocalContextGetResourceValueCall) for a one-shot Toast.
             android.widget.Toast.makeText(
                 imageActionsContext,
-                imageActionsContext.getString(messageRes),
+                messageRes,
                 android.widget.Toast.LENGTH_SHORT,
             ).show()
         }
