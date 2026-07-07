@@ -134,15 +134,25 @@ import kotlinx.coroutines.flow.first
 fun TopicScreen(
     request: TopicRequest,
     /**
-     * Open the FULL-SCREEN reply editor for this topic — since #604 lot 1 this is the quick-reply
-     * sheet's ESCALATION only (the reply FAB opens the sheet). The lambda receives the topic's
-     * sub-category id, the current page, and the armed quote cards as FULL previews in citation
-     * order (lot 3 — empty for a plain escalation) ; cat and topicId are derived from [request].
-     * `:app` hands the previews to the editor through the in-memory handoff (never the route) with
-     * `resumeSharedDraft = true` (#790) so the editor auto-applies the sheet's #405 row and
-     * renders the same cards (mockup P3).
+     * Open the FULL-SCREEN reply editor COLD for this topic — the reply FAB under the FULL_EDITOR
+     * preset, « Citer » routed to the full editor (#806), and the #823 long-press. The lambda
+     * receives the topic's sub-category id, the current page, and the armed quote cards as FULL
+     * previews in citation order (empty for a plain reply) ; cat and topicId are derived from
+     * [request]. `:app` hands the previews to the editor through the in-memory handoff (never the
+     * route). #843 — a COLD open sets `resumeSharedDraft = false`, so an existing #405 draft is
+     * SURFACED via the restore banner (Restaurer / Ignorer) instead of being silently re-applied:
+     * these cold paths had lost that choice when #829/#833 reused the escalation flag.
      */
     onReply: (subcat: Int, page: Int, quotes: List<QuotedPostPreview>) -> Unit,
+    /**
+     * #843 — the quick-reply sheet's ESCALATION to the full editor (the only genuine « resume the
+     * same composition » case). Same handoff as [onReply] but `:app` sets `resumeSharedDraft = true`
+     * (#790): the sheet JUST wrote the #405 row, so the editor auto-applies it (appending to any
+     * typed text) WITHOUT a banner — re-proposing a draft the user is visibly continuing would be
+     * noise. Defaults to a no-op for non-topic callers (previews/tests never escalate).
+     */
+    onEscalateToFullEditor: (subcat: Int, page: Int, quotes: List<QuotedPostPreview>) -> Unit =
+        { _, _, _ -> },
     /**
      * Vague 4 (#604) lot 1 — HFR accepted a reply POSTed from the quick-reply sheet. `:app` must
      * refresh this topic route exactly like the full editor's onSubmitSucceeded (replace the route
@@ -473,6 +483,7 @@ fun TopicScreen(
         onIntent = viewModel::send,
         onBack = onBack,
         onReply = onReply,
+        onEscalateToFullEditor = onEscalateToFullEditor,
         onQuickReplySubmitted = onQuickReplySubmitted,
         onEdit = onEdit,
         onEditFirstPost = onEditFirstPost,
@@ -720,6 +731,10 @@ internal fun TopicContent(
     onIntent: (TopicIntent) -> Unit,
     onBack: () -> Unit,
     onReply: (subcat: Int, page: Int, quotes: List<QuotedPostPreview>) -> Unit,
+    // #843 — the quick-reply sheet's escalation (resumeSharedDraft = true, silent append) ; distinct
+    // from [onReply] which is a COLD full-editor open (resumeSharedDraft = false → restore banner).
+    onEscalateToFullEditor: (subcat: Int, page: Int, quotes: List<QuotedPostPreview>) -> Unit =
+        { _, _, _ -> },
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
@@ -819,8 +834,9 @@ internal fun TopicContent(
                                 page = page,
                             ),
                         )
-                        // Same :app path as the sheet's escalation — in-memory quote handoff
-                        // (empty) + PostEditorRoute(resumeSharedDraft = true).
+                        // #843 — cold full-editor open (no sheet in flight): in-memory quote handoff
+                        // (empty) + PostEditorRoute(resumeSharedDraft = false) → an existing draft is
+                        // offered via the restore banner, not silently re-applied.
                         WritingSurface.FULL_EDITOR -> onReply(subcat, page, emptyList())
                     }
                 },
@@ -921,8 +937,10 @@ internal fun TopicContent(
                                 hiddenNumreponses = mode.hiddenNumreponses,
                                 // #604 lot 2 / #806 — « Citer » opens the quick-reply sheet with the
                                 // card pre-armed (1-citation session), unless the preset routes any
-                                // citation to the full-screen editor (decision at tap time; same :app
-                                // path as the sheet's escalation, resumeSharedDraft = true).
+                                // citation to the full-screen editor (decision at tap time). #843 —
+                                // that full-editor open is COLD (onReply, resumeSharedDraft = false):
+                                // the cards are handed over, an existing text draft is offered via the
+                                // restore banner, not silently appended.
                                 onQuoteRequested = { preview ->
                                     when (writingSurfaceFor(state.writingSurfacePreset, quoteCount = 1)) {
                                         WritingSurface.SHEET -> quickReplyFor = QuickReplyLaunch(
@@ -940,10 +958,10 @@ internal fun TopicContent(
                                 },
                                 // #823 — LONG press on « Citer » : one-shot override of the #806
                                 // preset — always the full-screen editor, through the same :app path
-                                // as the FULL_EDITOR branch above (in-memory handoff +
-                                // resumeSharedDraft = true, #790). Deliberately does NOT consult
-                                // writingSurfaceFor: the gesture IS the routing decision (identical
-                                // to the tap under the FULL_EDITOR preset).
+                                // as the FULL_EDITOR branch above (cold open, in-memory handoff +
+                                // resumeSharedDraft = false → restore banner, #843). Deliberately
+                                // does NOT consult writingSurfaceFor: the gesture IS the routing
+                                // decision (identical to the tap under the FULL_EDITOR preset).
                                 onQuoteFullEditorRequested = { preview ->
                                     onReply(mode.topic.subcat, mode.topic.page, listOf(preview))
                                 },
@@ -976,7 +994,9 @@ internal fun TopicContent(
             onDismiss = { quickReplyFor = null },
             onEscalate = { quotes ->
                 quickReplyFor = null
-                onReply(launch.request.subcat, launch.request.page, quotes)
+                // #843 — genuine escalation: resumeSharedDraft = true (silent append), NOT the cold
+                // onReply path which surfaces the restore banner.
+                onEscalateToFullEditor(launch.request.subcat, launch.request.page, quotes)
             },
             onSubmitted = { targetPage, scrollTo ->
                 quickReplyFor = null
