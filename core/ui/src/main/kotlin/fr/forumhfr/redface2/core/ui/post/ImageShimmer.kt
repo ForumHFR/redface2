@@ -6,7 +6,7 @@ import fr.forumhfr.redface2.core.ui.loading.SkeletonBox
 
 /**
  * #249 — animated shimmer painted INSIDE the already-reserved block-image box (see
- * [PostMediaDisplayPolicy.reservedBlockImageHeight]) while the bitmap loads, so the user reads
+ * [PostMediaDisplayPolicy.blockImageDisplaySize]) while the bitmap loads, so the user reads
  * "image en cours de chargement ici" without a spinner — and because the box is pre-sized to the
  * final image, the crossfade reveal causes no bump.
  *

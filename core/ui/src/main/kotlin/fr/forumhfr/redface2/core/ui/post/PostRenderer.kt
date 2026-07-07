@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.InlineTextContent
@@ -332,10 +333,12 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
     }
 
     // #224 (option B) — a paragraph whose only content is image(s) (a gallery, or a lone posted image
-    // the parser kept inline because of a stray sibling) is promoted to full-width centred blocks once
-    // a measurement shows at least one is larger than the inline caps (a left-aligned 240sp thumbnail).
-    // cc-image emoji / small reactions never trip the threshold, so they keep their inline size. The
-    // measure LaunchedEffect above feeds the same cache the threshold reads.
+    // the parser kept inline because of a stray sibling) is promoted to centred blocks once a
+    // measurement shows at least one is larger than the promotion thresholds. Since #610 the block
+    // SIZE equals the inline size (unified parity policy): promotion only buys the layout semantics
+    // (own centred line, block loading/error UX, #257 tap-through). cc-image emoji / small reactions
+    // never trip the threshold, so they keep their inline flow. The measure LaunchedEffect above
+    // feeds the same cache the threshold reads.
     val galleryImages = remember(inlines) { imageOnlyParagraphImages(inlines) }
     if (galleryImages != null && shouldPromoteImagesToBlocks(galleryImages, measuredSizes)) {
         Column(
@@ -683,23 +686,27 @@ private fun SpoilerBlock(
 private fun ImageBlock(block: PostBlock.Image) = BlockImage(url = block.url, description = block.description)
 
 /**
- * Full-width, centred, bounded image. The home of a standalone `PostBlock.Image`, and (since #224
- * option B) of a large image promoted out of an image-only paragraph.
+ * Centred, bounded block image on its own line. The home of a standalone `PostBlock.Image`, and
+ * (since #224 option B) of a large image promoted out of an image-only paragraph.
  *
  * When [linkUrl] is non-null the image was posted as `[url=…][img]` (the "click to enlarge" pattern):
- * the whole block is tappable and opens that URL (#257), so a linked image gets the full-width
- * treatment AND keeps its tap-through instead of being kept as a small inline thumbnail.
+ * the whole block is tappable and opens that URL (#257), so a linked image gets the block treatment
+ * AND keeps its tap-through instead of being kept as a small inline thumbnail.
  *
- * Bounded so a 4000×3000 RAW screenshot can't blow up the post and destroy the scroll position.
- * SubcomposeAsyncImage exposes loading/error slots so the user gets visual feedback when an HFR image
- * host (rehost.diberie.com, super-h.fr, …) is offline rather than a silent empty Box.
+ * #610 — a MEASURED image renders in a box of EXACTLY its web-parity display size
+ * ([PostMediaDisplayPolicy.blockImageDisplaySize]: native size, no upscale, width ≤ 90% of the
+ * column, height ≤ 200 dp), centred. Before #610 the container FILLED the column width — upscaling
+ * any narrower source — with its height clamped to the legacy [160, 480] dp slot; that slot now only
+ * hosts a not-yet-measured image (cold cache / failed measurement). Bounded either way, so a
+ * 4000×3000 RAW screenshot can't blow up the post and destroy the scroll position.
  *
- * #249 — anti-CLS: instead of reserving the legacy `minHeight` slot (which then SNAPS to the bitmap's
- * real height on arrival = a bump), reserve the EXACT final height from the measured intrinsic size
- * (`width × h/w`, same #175/#224 cache) so the shimmer placeholder occupies the loaded image's slot and
- * nothing below moves. The image then `crossfade`s in (Coil native) into the already-sized box. A
- * not-yet-measured image (standalone `PostBlock.Image`, no paragraph measure effect) keeps the legacy
- * min/max slot. Animations honour the system reduce-motion preference ([rememberAnimationsEnabled]).
+ * #249 — anti-CLS survives the #610 unification: the exact box is computed BEFORE the bitmap arrives
+ * (same measured-intrinsic cache as #175/#224), so the shimmer placeholder occupies the loaded
+ * image's slot and nothing below moves; the image then `crossfade`s in (Coil native) into the
+ * already-sized box. SubcomposeAsyncImage exposes loading/error slots so the user gets visual
+ * feedback when an HFR image host (rehost.diberie.com, super-h.fr, …) is offline rather than a
+ * silent empty Box. Animations honour the system reduce-motion preference
+ * ([rememberAnimationsEnabled]).
  */
 @Composable
 private fun BlockImage(url: String, description: String?, linkUrl: String? = null) {
@@ -714,10 +721,11 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
     val sizeCache = LocalIntrinsicMediaSizeCache.current
     val measured: IntSize? = sizeCache.get(url)
     // #249 follow-up — a standalone PostBlock.Image is NOT covered by the paragraph measure effect, so
-    // without this its intrinsic size never lands in the cache: reservedBlockImageHeight stays null, the
-    // image falls into the legacy min/max slot and loses both the full-width fit and the reserved loading
-    // space (#249 anti-CLS). Measure it here through the same guarded seam the paragraph effect uses; the
-    // SnapshotStateMap write then recomposes this block onto the reserved-box path.
+    // without this its intrinsic size never lands in the cache: blockImageDisplaySize stays null, the
+    // image falls into the legacy min/max slot and loses both the exact parity box (#610) and the
+    // reserved loading space (#249 anti-CLS). Measure it here through the same guarded seam the
+    // paragraph effect uses; the SnapshotStateMap write then recomposes this block onto the exact-box
+    // path.
     val platformContext = LocalPlatformContext.current
     LaunchedEffect(url, sizeCache, platformContext) {
         measureAndCacheIntrinsicMediaSize(
@@ -728,22 +736,24 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
         )
     }
 
-    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-        val reservedHeight = PostMediaDisplayPolicy.reservedBlockImageHeight(
+    // contentAlignment centres the (usually narrower-than-column, #610) exact box on its own line —
+    // the same visual centring the pre-#610 full-width Fit letterboxing produced.
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        val displaySize = PostMediaDisplayPolicy.blockImageDisplaySize(
             measured = measured?.let { PixelSize(it.width, it.height) },
             availableWidthDp = maxWidth.value,
         )
-        // Reserved box: an exact height when measured (anti-CLS), else the legacy min/max slot.
-        val sizeModifier = if (reservedHeight != null) {
-            Modifier.height(reservedHeight)
+        // #610/#249 — the EXACT web-parity box when measured (no upscale, ≤ 90% width, ≤ 200 dp tall;
+        // anti-CLS: it is also the reserved loading slot), else the legacy full-width min/max slot.
+        val sizeModifier = if (displaySize != null) {
+            Modifier.size(displaySize.width.dp, displaySize.height.dp)
         } else {
             Modifier
+                .fillMaxWidth()
                 .defaultMinSize(minHeight = PostMediaDisplayPolicy.blockImageMinHeight)
                 .heightIn(max = PostMediaDisplayPolicy.blockImageMaxHeight)
         }
-        val containerModifier = Modifier
-            .fillMaxWidth()
-            .then(sizeModifier)
+        val containerModifier = sizeModifier
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             .then(
@@ -771,11 +781,11 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
             contentScale = ContentScale.Fit,
             modifier = containerModifier,
             loading = {
-                // Measured: fill the exact reserved box. Unmeasured (max-only constraint): a STABLE
+                // Measured: fill the exact parity box (#610). Unmeasured (max-only constraint): a STABLE
                 // min-height placeholder — NOT fillMaxSize, which would balloon to the max slot and then
                 // collapse to the loaded intrinsic height (a visible shift, Codex review). The legacy
-                // min→intrinsic grow on load remains for these rare standalone images.
-                val shimmerModifier = if (reservedHeight != null) {
+                // min→intrinsic grow on load remains for these rare unmeasured images.
+                val shimmerModifier = if (displaySize != null) {
                     Modifier.fillMaxSize()
                 } else {
                     Modifier.fillMaxWidth().height(PostMediaDisplayPolicy.blockImageMinHeight)
@@ -1228,9 +1238,11 @@ private fun smileyDisplayBox(
 }
 
 /**
- * #224 (option A) — resolve an inline `[img]` placeholder box from its measured intrinsic size:
- * no-upscale + absolute cap ([INLINE_IMAGE_MAX_WIDTH_SP]×[INLINE_IMAGE_MAX_HEIGHT_SP]) via the shared
- * [intrinsicSmileyDisplaySize] policy, then the relative `0.9 × contentWidth` cap ([maxWidthSp]).
+ * #224 (option A) / #610 — resolve an inline `[img]` placeholder box from its measured intrinsic
+ * size via the unified web-parity policy [imageParityDisplaySize]: no upscale, height capped to
+ * [IMAGE_MAX_HEIGHT_UNITS] (web `max-height: 200px`), width capped to the relative
+ * `0.9 × contentWidth` ([maxWidthSp], web `max-width: 90%`) — the former absolute 240 sp width cap
+ * is gone, see [IMAGE_PROMOTION_WIDTH_UNITS].
  *
  * #253 — while the measurement is in flight (cold cache / miss) it falls back to a small square of
  * [INLINE_IMAGE_MIN_HEIGHT_SP] (≈ one text line) rather than the old 240×180 bucket. With
@@ -1265,26 +1277,26 @@ internal fun imageDisplayBox(
     }
     val size = measured[image.url]
     val base = if (size != null) {
-        // #175 no-upscale + cap with the inline-image caps, then a min-height floor so a SUB-16 low-res
-        // source can't render below ~one text line. A cc-image emoji (16×16) sits exactly at the floor
-        // → kept native (per @XaaT dogfood); only smaller sources get enlarged. NB: the floor only
-        // grows the BOX — the bitmap fills it via ContentScale.Fit.
+        // #610 web-parity sizing (no upscale, height ≤ IMAGE_MAX_HEIGHT_UNITS, width ≤ the relative
+        // maxWidthSp cap), then the #253 min-height floor so a SUB-16 low-res source can't render
+        // below ~one text line. A cc-image emoji (16×16) sits exactly at the floor → kept native (per
+        // @XaaT dogfood); only smaller sources get enlarged. NB: the floor only grows the BOX — the
+        // bitmap fills it via ContentScale.Fit.
         //
-        // Re-apply the absolute caps AFTER the floor: a very wide/short source (e.g. 250×10) capped to
-        // 240×10 then floored to height 16 would grow to ~384×16 — past both the 240sp width cap and its
-        // native width. The second cap clamps that back (the floor simply doesn't apply when it can't fit
-        // the width cap), so the no-upscale/cap contract holds for every aspect ratio (Codex review #246).
-        intrinsicSmileyDisplaySize(
+        // Re-apply the parity caps AFTER the floor: a very wide/short source (e.g. 250×10) floored to
+        // height 16 grows to ~400×16 — potentially past the relative width cap. The second pass clamps
+        // that back, so the box never exceeds the caps for any aspect ratio (Codex review #246). The
+        // floor stays the one sanctioned upscale, now bounded by the relative cap instead of the
+        // former absolute 240 sp cap (#610).
+        imageParityDisplaySize(
             upscaleToMinHeight(
-                intrinsicSmileyDisplaySize(
+                imageParityDisplaySize(
                     PixelSize(size.width, size.height),
-                    maxWidthSp = INLINE_IMAGE_MAX_WIDTH_SP,
-                    maxHeightSp = INLINE_IMAGE_MAX_HEIGHT_SP,
+                    maxWidthUnits = maxWidthSp,
                 ),
                 INLINE_IMAGE_MIN_HEIGHT_SP,
             ),
-            maxWidthSp = INLINE_IMAGE_MAX_WIDTH_SP,
-            maxHeightSp = INLINE_IMAGE_MAX_HEIGHT_SP,
+            maxWidthUnits = maxWidthSp,
         )
     } else {
         // #253 cold-fallback: a one-line square, not the 240×180 bucket (no giant Fit upscale flash).
@@ -1301,12 +1313,13 @@ internal data class PromotedImage(val image: PostInline.InlineImage, val linkUrl
  * #224 (option B) / #257 — if a paragraph's only meaningful content is image(s) (a single posted image
  * the parser kept inline because of a stray sibling, or a gallery of several), return them in order,
  * each paired with the URL of its enclosing `[url=…]` link if there is one, so they can be promoted to
- * full-width centred blocks. Blank text and line breaks are ignored.
+ * centred blocks (each on its own line — since #610 the block size equals the inline size, promotion
+ * is layout semantics only). Blank text and line breaks are ignored.
  *
  * Returns null when the paragraph has any other meaningful inline (non-blank text, a smiley): genuine
  * prose keeps its inline image treatment. A link wrapping ONLY an image is fine — #257 promotes it to a
- * block that opens the link on tap, so the "click to enlarge" tap-through is preserved AND the image
- * fills the width (before #257 a linked image was kept inline → small + the inline pixelation path).
+ * block that opens the link on tap, so the "click to enlarge" tap-through is preserved (before #257 a
+ * linked image was kept inline → the link stayed a text-span affair).
  * A link wrapping image **+** text still counts as other content → null (stays inline prose).
  */
 @Suppress("CyclomaticComplexMethod") // exhaustive when over the PostInline sealed type, like appendInline
@@ -1334,18 +1347,23 @@ internal fun imageOnlyParagraphImages(inlines: List<PostInline>): List<PromotedI
 }
 
 /**
- * #224 (option B) — promote an image-only paragraph to full-width blocks only once at least one image
- * has measured larger than the inline display caps (so inline rendering would shrink it to a small
- * left-aligned thumbnail). A cc-image emoji (16×16) or a small reaction never trips this, so they keep
- * their inline size; a real posted photo / gallery does, and gets the centred full-width treatment.
- * Returns false while every size is unknown (cold) so promotion only kicks in after measurement.
+ * #224 (option B) — promote an image-only paragraph to blocks only once at least one image has
+ * measured larger than the promotion thresholds (a real posted photo, not an emoji / small reaction:
+ * a 16×16 cc-image never trips this and keeps its inline treatment). Returns false while every size
+ * is unknown (cold) so promotion only kicks in after measurement.
+ *
+ * #610 — inline and block now SIZE identically ([imageParityDisplaySize]), so promotion is purely
+ * layout semantics: the image gets its own centred line, the block loading/error UX, and the #257
+ * link tap-through. The thresholds keep their pre-#610 calibration
+ * ([IMAGE_PROMOTION_WIDTH_UNITS] = the former absolute inline width cap, [IMAGE_MAX_HEIGHT_UNITS]
+ * = the shared parity height cap).
  */
 internal fun shouldPromoteImagesToBlocks(
     images: List<PromotedImage>,
     measured: Map<String, IntSize?>,
 ): Boolean = images.any { promoted ->
     val size = measured[promoted.image.url] ?: return@any false
-    size.width > INLINE_IMAGE_MAX_WIDTH_SP || size.height > INLINE_IMAGE_MAX_HEIGHT_SP
+    size.width > IMAGE_PROMOTION_WIDTH_UNITS || size.height > IMAGE_MAX_HEIGHT_UNITS
 }
 
 /** True when [inlines] contains at least one renderable inline media (a smiley with a URL, or an image). */
@@ -1379,24 +1397,22 @@ internal fun imageInlineContent(image: PostInline.InlineImage, box: InlineMediaB
         // tracks the sp-based placeholder under any fontScale; the no-upscale rule lives in the BOX
         // sizing (imageDisplayBox), not the content scale.
         //
-        // #257 — decode at a STABLE size (the inline display cap in px, bounded) instead of letting
-        // Coil resolve the size from the placeholder constraints. The box grows from the cold-fallback
-        // square to the measured size when the measurement lands; with constraint-driven sizing Coil
-        // re-decodes at the new size and, meanwhile, paints the previous tiny bitmap upscaled →
-        // pixelated. A fixed decode size keeps ONE sharp bitmap that Fit scales into whatever box (Coil
-        // never upscales the decode past the source, so a small image still decodes at native). The
+        // #257/#610 — decode at a STABLE size (the flat INLINE_IMAGE_DECODE_CAP_PX bound) instead of
+        // letting Coil resolve the size from the placeholder constraints. The box grows from the
+        // cold-fallback square to the measured size when the measurement lands; with constraint-driven
+        // sizing Coil re-decodes at the new size and, meanwhile, paints the previous tiny bitmap
+        // upscaled → pixelated. A fixed decode size keeps ONE sharp bitmap that Fit scales into
+        // whatever box (Coil never upscales the decode past the source, so a small image still decodes
+        // at native). Before #610 the size derived from the absolute 240×200 sp display cap in px;
+        // that width cap is now relative to the container, so the request uses the flat px bound
+        // directly (still covers 0.9 × container at any realistic phone density/fontScale). The
         // request is remembered so a measurement landing doesn't rebuild it. Smileys keep their own
         // (much smaller) path — this cap is photo-sized.
-        val density = LocalDensity.current
         val context = LocalPlatformContext.current
-        val widthPx = with(density) { INLINE_IMAGE_MAX_WIDTH_SP.sp.roundToPx() }
-            .coerceAtMost(INLINE_IMAGE_DECODE_CAP_PX)
-        val heightPx = with(density) { INLINE_IMAGE_MAX_HEIGHT_SP.sp.roundToPx() }
-            .coerceAtMost(INLINE_IMAGE_DECODE_CAP_PX)
-        val request = remember(image.url, widthPx, heightPx, context) {
+        val request = remember(image.url, context) {
             ImageRequest.Builder(context)
                 .data(image.url)
-                .size(widthPx, heightPx)
+                .size(INLINE_IMAGE_DECODE_CAP_PX, INLINE_IMAGE_DECODE_CAP_PX)
                 .scale(Scale.FIT)
                 .precision(Precision.INEXACT)
                 .build()

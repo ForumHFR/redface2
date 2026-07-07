@@ -495,12 +495,13 @@ fun TopicScreen(
 /**
  * #197 — keep [target] anchored at the top of the viewport while upstream block images settle.
  *
- * `PostBlock.Image` renders a `SubcomposeAsyncImage` that starts at `blockImageMinHeight` (160.dp)
- * while loading/erroring and grows to its decoded height (up to `blockImageMaxHeight`, 480.dp) once
- * Coil resolves the bitmap. Any block image in a post *above* the deep-link target shifts the
- * cumulative scroll offset by up to +320.dp *after* the initial one-shot `scrollToItem`, leaving the
- * target scrolled off-screen. A warm image cache decodes synchronously before the first measure,
- * which is why #197 only reproduces on a cold cache.
+ * An UNMEASURED `PostBlock.Image` (cold intrinsic cache) renders a `SubcomposeAsyncImage` that
+ * starts at `blockImageMinHeight` (160.dp) while loading/erroring and settles to its exact
+ * web-parity box (`blockImageDisplaySize`, ≤ 200.dp tall since #610) once the intrinsic size lands.
+ * Any block image in a post *above* the deep-link target shifts the cumulative scroll offset (in
+ * either direction) *after* the initial one-shot `scrollToItem`, leaving the target scrolled
+ * off-screen. A warm cache sizes the box exactly before the first measure (#249), which is why #197
+ * only reproduces on a cold cache.
  *
  * Each frame we re-pin the target to the top (when it has drifted) and stop once the minimum
  * settle window has elapsed *and* its position has held still for [REANCHOR_STABLE_FRAMES]
