@@ -5,9 +5,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * Covers the pure priority resolver for the initial scroll of a topic page landing (#307, #412):
- * route `scrollTo` > post-submit landing (`submitSignal`, #344) > saved anchor >
- * previous-page bottom (#412) > top.
+ * Covers the pure priority resolver for the initial scroll of a topic page landing (#307, #412,
+ * #782): route `scrollTo` > post-submit landing (`submitSignal`, #344) > quote-jump return anchor
+ * (#782) > saved anchor > previous-page bottom (#412) > top.
  */
 class TopicScrollRestorationTest {
 
@@ -122,6 +122,49 @@ class TopicScrollRestorationTest {
                 submitSignal = 1_000L,
                 savedAnchor = null,
                 previousPageLanding = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `level 3bis - a quote-jump return anchor beats the saved anchor (#782)`() {
+        // An INTRA-page jump overwrites the disposal-saved anchor of the same (cat, post, page)
+        // with the cited post's position; on the back-return only the tap-time capture is truthful.
+        val jumpReturn = TopicScrollAnchor(index = 42, offset = 17)
+
+        val restoration = resolveTopicScrollRestoration(
+            scrollTo = null,
+            submitSignal = null,
+            savedAnchor = savedAnchor,
+            previousPageLanding = true,
+            jumpReturnAnchor = jumpReturn,
+        )
+
+        assertEquals(TopicScrollRestoration.RestoreSaved(jumpReturn), restoration)
+    }
+
+    @Test
+    fun `level 1 and 2 - scrollTo and submit landings still beat a jump return anchor (#782)`() {
+        // Defensive: a return route never carries scrollTo/submitSignal today, but the strict order
+        // must hold if a future flow arms both — the scroll effects own those landings.
+        val jumpReturn = TopicScrollAnchor(index = 42, offset = 17)
+
+        assertEquals(
+            TopicScrollRestoration.FollowScrollTo,
+            resolveTopicScrollRestoration(
+                scrollTo = 4242,
+                submitSignal = null,
+                savedAnchor = null,
+                jumpReturnAnchor = jumpReturn,
+            ),
+        )
+        assertEquals(
+            TopicScrollRestoration.FollowSubmitLanding,
+            resolveTopicScrollRestoration(
+                scrollTo = null,
+                submitSignal = 1_000L,
+                savedAnchor = null,
+                jumpReturnAnchor = jumpReturn,
             ),
         )
     }

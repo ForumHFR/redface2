@@ -171,8 +171,13 @@ fun TopicScreen(
      * href. `:app` wires it to the same in-place `TopicRoute` replace as [onOpenPage], but with
      * `scrollTo = numreponse` so the landing scrolls to and highlights the cited post (the #200
      * deep-link mechanism) — one uniform path whether the target is on this page or another.
+     *
+     * #782 — also carries [sourceAnchor], the reader's EXACT position captured AT TAP TIME from the
+     * screen-owned `LazyListState`, so `:app` can push a return entry before replacing the route.
+     * Tap-time capture is mandatory: the disposal-saved anchor (#307) is written AFTER the jump has
+     * scrolled away, so an intra-page jump would overwrite it with the cited post's position.
      */
-    onGoToPost: (page: Int, numreponse: Int) -> Unit,
+    onGoToPost: (page: Int, numreponse: Int, sourceAnchor: TopicScrollAnchor) -> Unit,
     /**
      * #285 — leave the topic and go back to the screen that opened it (topic list / flags).
      * Wired to a back-stack pop in `:app`. Surfaced as an explicit back arrow in the top app
@@ -469,7 +474,20 @@ fun TopicScreen(
         onEdit = onEdit,
         onEditFirstPost = onEditFirstPost,
         onOpenPage = onOpenPage,
-        onGoToPost = onGoToPost,
+        // #782 — enrich the quote jump with the CURRENT scroll anchor, read at tap time from the
+        // screen-owned LazyListState (raw index/offset, header-aware — same shape as the #307
+        // disposal save). TopicContent and everything below keep the plain (page, numreponse)
+        // callback; only this seam knows about the list state.
+        onGoToPost = { page, numreponse ->
+            onGoToPost(
+                page,
+                numreponse,
+                TopicScrollAnchor(
+                    index = lazyListState.firstVisibleItemIndex,
+                    offset = lazyListState.firstVisibleItemScrollOffset,
+                ),
+            )
+        },
         onOpenProfile = onOpenProfile,
         onDeleteRequest = { numreponse -> deleteCandidate = numreponse },
         multiQuoteSelections = multiQuoteSelections,
