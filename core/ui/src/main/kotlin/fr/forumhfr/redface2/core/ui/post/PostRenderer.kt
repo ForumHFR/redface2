@@ -51,6 +51,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -893,10 +894,11 @@ private fun ImageBlock(block: PostBlock.Image) = BlockImage(url = block.url, des
  * the whole block is tappable and opens that URL (#257), so a linked image gets the block treatment
  * AND keeps its tap-through instead of being kept as a small inline thumbnail.
  *
- * #610 — a MEASURED image renders in a box of EXACTLY its web-parity display size
+ * #610/#842 — a MEASURED image renders in a box of EXACTLY its parity display size
  * ([PostMediaDisplayPolicy.blockImageDisplaySize]: native size, no upscale, width ≤ 90% of the
- * column, height ≤ 200 dp), centred. Before #610 the container FILLED the column width — upscaling
- * any narrower source — with its height clamped to the legacy [160, 480] dp slot; that slot now only
+ * column, height ≤ the mobile-recalibrated [blockImageMaxHeightDp]), centred. Before #610 the
+ * container FILLED the column width — upscaling any narrower source — with its height clamped to the
+ * legacy [160, 480] dp slot; that slot now only
  * hosts a not-yet-measured image (cold cache / failed measurement). Bounded either way, so a
  * 4000×3000 RAW screenshot can't blow up the post and destroy the scroll position.
  *
@@ -936,15 +938,21 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
         )
     }
 
+    // #842 — the block height cap is recalibrated for mobile (relative to the viewport), read here
+    // where the screen height is known; #610's flat 200 dp squeezed square/portrait photos to ~48 %
+    // width on phones (the width cap ≈ 90 % never got a chance to bind).
+    val screenHeightDp = LocalConfiguration.current.screenHeightDp
     // contentAlignment centres the (usually narrower-than-column, #610) exact box on its own line —
     // the same visual centring the pre-#610 full-width Fit letterboxing produced.
     BoxWithConstraints(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         val displaySize = PostMediaDisplayPolicy.blockImageDisplaySize(
             measured = measured?.let { PixelSize(it.width, it.height) },
             availableWidthDp = maxWidth.value,
+            maxHeightDp = blockImageMaxHeightDp(screenHeightDp),
         )
-        // #610/#249 — the EXACT web-parity box when measured (no upscale, ≤ 90% width, ≤ 200 dp tall;
-        // anti-CLS: it is also the reserved loading slot), else the legacy full-width min/max slot.
+        // #610/#249/#842 — the EXACT parity box when measured (no upscale, ≤ 90% width, ≤ the
+        // mobile-recalibrated height cap; anti-CLS: it is also the reserved loading slot), else the
+        // legacy full-width min/max slot.
         val sizeModifier = if (displaySize != null) {
             Modifier.size(displaySize.width.dp, displaySize.height.dp)
         } else {
