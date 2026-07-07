@@ -3,9 +3,6 @@ package fr.forumhfr.redface2.core.ui.post
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -1574,14 +1571,20 @@ internal fun imageInlineContent(image: PostInline.InlineImage, box: InlineMediaB
 /**
  * #831 — long-press-ONLY gesture + a11y surface for a post image. Deliberately NOT a
  * `combinedClickable`: that would install an onClick and consume every tap (Codex framing, firm
- * reserve — cf. the call-site comments for the tap contracts it would break). And deliberately NOT
- * `detectTapGestures(onLongPress)` either: that detector still consumes the down/up of every
- * gesture, so a tap or a text-selection drag starting on the image would die inside it (Codex
- * gate catch). Instead the raw `awaitEachGesture` loop below observes the down WITHOUT consuming
- * it and only consumes the event once a stationary long press has actually completed — taps,
- * selection drags and scrolls through the image reach their own handlers untouched by
- * construction. The `semantics` block exposes the same action to TalkBack as a custom long-click
- * action labelled [optionsLabel] (`combinedClickable`'s `onLongClickLabel` equivalent).
+ * reserve — cf. the call-site comments for the tap contracts it would break).
+ *
+ * `detectTapGestures(onLongPress)` DOES claim the gesture's down, and that claim is load-bearing:
+ * a fully non-consuming variant (`awaitEachGesture` + `awaitLongPressOrCancellation`) was tried
+ * after the Codex gate flagged the consumption, and its own tests proved it worse — with the down
+ * unclaimed, the parent SelectionContainer (#281) ALSO reacts to the long press, starting a word
+ * selection with its magnifier underneath the menu sheet (the Robolectric suite crashes in
+ * `Magnifier.dismiss`, pinning exactly that). The claim costs what a tap on an inline image was
+ * already documented to cost (a no-op — the known clear-selection loss), and does NOT break
+ * scrolling: Compose `scrollable` starts from unconsumed MOVE deltas past the touch slop and is
+ * insensitive to a consumed down. Selection drags STARTED on surrounding text never reach this
+ * node (they are captured by the text at their own down) and keep travelling across the image.
+ * The `semantics` block exposes the same action to TalkBack as a custom long-click action
+ * labelled [optionsLabel] (`combinedClickable`'s `onLongClickLabel` equivalent).
  *
  * Non-composable on purpose (the resolved [haptics]/[optionsLabel] come in as parameters):
  * composable `Modifier` factories are flagged by the Compose lint (`ComposableModifierFactory`).
@@ -1593,17 +1596,12 @@ private fun Modifier.postImageLongPress(
     optionsLabel: String,
 ): Modifier = this
     .pointerInput(actions, target) {
-        awaitEachGesture {
-            val down = awaitFirstDown(requireUnconsumed = false)
-            // Null when the pointer lifts (tap) or moves past the touch slop (scroll/selection)
-            // before the long-press timeout — in which case NOTHING was consumed here.
-            val longPress = awaitLongPressOrCancellation(down.id)
-            if (longPress != null) {
-                longPress.consume()
+        detectTapGestures(
+            onLongPress = {
                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                 actions.onLongPress(target)
-            }
-        }
+            },
+        )
     }
     .semantics {
         onLongClick(label = optionsLabel) {
