@@ -181,6 +181,48 @@ class PostRendererImageLongPressTest {
     }
 
     @Test
+    fun `known limitation - a linked inline image in a mixed paragraph stays behind the link overlay`() {
+        // CHARACTERIZATION, not a feature (2nd Codex gate arbitration): a [url=…][img] image whose
+        // paragraph also carries text is NOT promoted to a block, and BasicText's LinkAnnotation
+        // overlay intercepts the down on the placeholder region — the long-press never reaches the
+        // image, tap AND long-press open the link exactly as before this PR. #831 stays OPEN for
+        // this shape (viewer / global interception strategy). INVERT or DELETE this test when the
+        // linked-inline case is actually covered.
+        var received: PostImageTarget? = null
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(
+                    LocalPostImageActions provides PostImageActions(onLongPress = { received = it }),
+                ) {
+                    PostRenderer(
+                        content = PostContent(
+                            blocks = listOf(
+                                PostBlock.Paragraph(
+                                    inlines = listOf(
+                                        PostInline.Text("regarde "),
+                                        PostInline.Link(
+                                            url = "https://example.org/full",
+                                            children = listOf(
+                                                PostInline.InlineImage(url = inlineUrl, description = "photo"),
+                                            ),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ),
+                        selectable = false,
+                    )
+                }
+            }
+        }
+
+        composeTestRule.onNodeWithContentDescription("photo")
+            .performTouchInput { longClick() }
+
+        assertNull(received)
+    }
+
+    @Test
     fun `without provided actions the image stays inert (MP, preview, signatures)`() {
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
