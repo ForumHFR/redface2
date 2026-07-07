@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -69,6 +70,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -907,6 +909,15 @@ internal fun TopicContent(
                                         onReply(mode.topic.subcat, mode.topic.page, listOf(preview))
                                 }
                             },
+                            // #823 — LONG press on « Citer » : one-shot override of the #806
+                            // preset — always the full-screen editor, through the same :app path
+                            // as the FULL_EDITOR branch above (in-memory handoff +
+                            // resumeSharedDraft = true, #790). Deliberately does NOT consult
+                            // writingSurfaceFor: the gesture IS the routing decision (identical
+                            // to the tap under the FULL_EDITOR preset).
+                            onQuoteFullEditorRequested = { preview ->
+                                onReply(mode.topic.subcat, mode.topic.page, listOf(preview))
+                            },
                             onEdit = onEdit,
                             onEditFirstPost = onEditFirstPost,
                             onOpenPage = onOpenPage,
@@ -1267,6 +1278,10 @@ private fun TopicLoadedContent(
     // Vague 3 (#604) — onReply dropped: the dissolved header card was its only consumer here
     // (the bottom FAB cluster replies from TopicContent's own callback).
     onQuoteRequested: (preview: QuotedPostPreview) -> Unit,
+    // #823 — LONG press on « Citer » : same preview payload as [onQuoteRequested], but routed
+    // STRAIGHT to the full-screen editor by the caller (never through writingSurfaceFor — the
+    // gesture IS the one-shot routing decision, overriding the #806 preset).
+    onQuoteFullEditorRequested: (preview: QuotedPostPreview) -> Unit,
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
@@ -1459,12 +1474,18 @@ private fun TopicLoadedContent(
             // both inside the same branch keeps them in lock-step — they can never drift apart — and
             // avoids a second decision point in this already-dense list builder.
             val quoteAction: (() -> Unit)?
+            // #823 — the « Citer » long press (full-editor override) is derived INSIDE the same
+            // branch as the tap, so the gesture can never outlive or outreach « Citer » itself
+            // (a non-postable topic exposes neither).
+            val quoteLongPressAction: (() -> Unit)?
             val multiQuoteToggle: (() -> Unit)?
             if (shouldShowQuoteAction(topic, state.isAuthenticated)) {
                 quoteAction = { onQuoteRequested(post.toQuotedPreview()) }
+                quoteLongPressAction = { onQuoteFullEditorRequested(post.toQuotedPreview()) }
                 multiQuoteToggle = { onToggleMultiQuote(post.toQuotedPreview()) }
             } else {
                 quoteAction = null
+                quoteLongPressAction = null
                 multiQuoteToggle = null
             }
             // Phase 2D (#147) — « Modifier » is exposed by HFR only on the
@@ -1509,6 +1530,9 @@ private fun TopicLoadedContent(
                         // is on (the signature is always parsed/cached on the Post; this is render-only).
                         showSignature = state.showSignatures,
                         onQuote = quoteAction,
+                        // #823 — full-editor long-press override, same gate as « Citer »
+                        // (derived together above).
+                        onQuoteLongPress = quoteLongPressAction,
                         onEdit = editAction,
                         onOpenProfile = profileAction,
                         onOpenMenu = { menuPost = post },
@@ -2002,6 +2026,14 @@ internal fun TopicPostCard(
      */
     showSignature: Boolean = false,
     onQuote: (() -> Unit)?,
+    /**
+     * #823 — LONG press on « Citer » : opens the full-screen editor directly, a one-shot override
+     * of the #806 writing-surface preset (decided at gesture time ; under the FULL_EDITOR preset
+     * it is identical to the tap). Null under the same gate as [onQuote] (both are derived in the
+     * same branch at the call site) and for previews/tests that only exercise the tap. Ignored
+     * while [onQuote] is null — no « Citer » button, nothing to long-press.
+     */
+    onQuoteLongPress: (() -> Unit)? = null,
     onEdit: (() -> Unit)?,
     /**
      * Phase 2 finish (#208) — tapping the avatar or author opens the profile bottom sheet.
@@ -2131,6 +2163,7 @@ internal fun TopicPostCard(
             {
                 TopicPostActions(
                     onQuote = onQuote,
+                    onQuoteLongPress = onQuoteLongPress,
                     onEdit = onEdit,
                     onToggleMultiQuote = onToggleMultiQuote,
                     multiQuoteSelected = multiQuoteSelected,
@@ -2328,9 +2361,14 @@ private fun TopicPostBadges(
  * subordinate to the post content. The body↔footer gap and the card's bottom padding ride on
  * [modifier] (reinjected by the call site). « Supprimer » (#292) moved to the contextual menu (#418).
  */
+// LongParameterList: state-hoisted Composable, each param has a distinct call-site.
+@Suppress("LongParameterList")
 @Composable
 private fun TopicPostActions(
     onQuote: (() -> Unit)?,
+    // #823 — LONG press on « Citer » : straight to the full-screen editor (one-shot override of
+    // the #806 writing-surface preset). Null keeps a plain tap-only « Citer ».
+    onQuoteLongPress: (() -> Unit)?,
     onEdit: (() -> Unit)?,
     onToggleMultiQuote: (() -> Unit)?,
     multiQuoteSelected: Boolean,
@@ -2388,10 +2426,50 @@ private fun TopicPostActions(
             }
         }
         if (onQuote != null) {
-            TextButton(onClick = onQuote) {
-                Text(text = stringResource(R.string.topic_post_quote))
-            }
+            QuoteTextButton(onQuote = onQuote, onQuoteLongPress = onQuoteLongPress)
         }
+    }
+}
+
+/**
+ * #823 — the « Citer » footer action, hand-rolled so a LONG press can open the full-screen editor
+ * directly (a one-shot override of the #806 writing-surface preset ; under the FULL_EDITOR preset
+ * the gesture is identical to the tap). A real M3 [TextButton] is a Surface(onClick) whose inner
+ * clickable swallows the pointer input of any combinedClickable stacked on its modifier — the same
+ * trap as the FABs (#436/#822, pinned by [MultiQuoteFabClearTest]) — so this button carries the
+ * combinedClickable itself. Shape / labelLarge / primary content colour / content padding / min
+ * size / 48 dp touch target replicate the M3 TextButton defaults of the sibling footer actions,
+ * and combinedClickable brings the built-in long-press haptics plus the TalkBack announcement via
+ * onLongClickLabel. A null [onQuoteLongPress] falls back to a plain clickable so no long-press
+ * semantics are advertised (ForumListRow idiom, #457).
+ */
+@Composable
+private fun QuoteTextButton(onQuote: () -> Unit, onQuoteLongPress: (() -> Unit)?) {
+    val longPressLabel = stringResource(R.string.topic_post_quote_full_editor)
+    val interaction = if (onQuoteLongPress != null) {
+        Modifier.combinedClickable(
+            onClick = onQuote,
+            onLongClick = onQuoteLongPress,
+            onLongClickLabel = longPressLabel,
+            role = Role.Button,
+        )
+    } else {
+        Modifier.clickable(role = Role.Button, onClick = onQuote)
+    }
+    Box(
+        modifier = Modifier
+            .minimumInteractiveComponentSize()
+            .clip(ButtonDefaults.textShape)
+            .then(interaction)
+            .defaultMinSize(minWidth = ButtonDefaults.MinWidth, minHeight = ButtonDefaults.MinHeight)
+            .padding(ButtonDefaults.TextButtonContentPadding),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = stringResource(R.string.topic_post_quote),
+            color = MaterialTheme.colorScheme.primary,
+            style = MaterialTheme.typography.labelLarge,
+        )
     }
 }
 
@@ -2628,6 +2706,12 @@ private fun TopicBottomActionsHost(
             // robustness as the header guard and the swipe (#282).
             onPreviousPage = { loaded?.let { onOpenPage((it.topic.page - 1).coerceAtLeast(1)) } },
             onNextPage = { loaded?.let { onOpenPage((it.topic.page + 1).coerceAtMost(it.topic.totalPages)) } },
+            // #822 — long press on ‹/› jumps to the first/last page. Both targets are in bounds by
+            // construction (1 and the parsed totalPages) ; same belt-and-braces null-guard as the
+            // single-page steps above. The #383 preference gate is untouched — the gestures live on
+            // FABs already governed by showPageFabs.
+            onFirstPage = { loaded?.let { onOpenPage(1) } },
+            onLastPage = { loaded?.let { onOpenPage(it.topic.totalPages) } },
             onReply = { loaded?.let { onReply(it.topic.subcat, it.topic.page) } },
             onMultiQuote = { loaded?.let { onMultiQuote(it.topic.subcat, it.topic.page) } },
             onClearMultiQuote = onClearMultiQuote,
@@ -2662,12 +2746,17 @@ private fun TopicBottomActions(
     multiQuoteCount: Int,
     onPreviousPage: () -> Unit,
     onNextPage: () -> Unit,
+    // #822 — long press on ‹/› jumps straight to the first/last page (tap keeps the single step).
+    onFirstPage: () -> Unit,
+    onLastPage: () -> Unit,
     onReply: () -> Unit,
     onMultiQuote: () -> Unit,
     onClearMultiQuote: () -> Unit,
 ) {
     val previousLabel = stringResource(R.string.topic_fab_previous_page)
     val nextLabel = stringResource(R.string.topic_fab_next_page)
+    val firstPageLabel = stringResource(R.string.topic_fab_first_page)
+    val lastPageLabel = stringResource(R.string.topic_fab_last_page)
     Row(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -2688,6 +2777,9 @@ private fun TopicBottomActions(
                     description = previousLabel,
                     iconRes = fr.forumhfr.redface2.core.ui.R.drawable.ic_chevron_left,
                     onClick = onPreviousPage,
+                    // #822 — long press jumps to page 1.
+                    onLongClick = onFirstPage,
+                    onLongClickLabel = firstPageLabel,
                 )
             }
             FabSlot(visible = canGoNext) {
@@ -2695,6 +2787,9 @@ private fun TopicBottomActions(
                     description = nextLabel,
                     iconRes = fr.forumhfr.redface2.core.ui.R.drawable.ic_chevron_right,
                     onClick = onNextPage,
+                    // #822 — long press jumps to the last page.
+                    onLongClick = onLastPage,
+                    onLongClickLabel = lastPageLabel,
                 )
             }
         }
@@ -2762,21 +2857,49 @@ internal fun MultiQuoteFab(count: Int, onClick: () -> Unit, onClear: () -> Unit)
     }
 }
 
+// `internal` (#822): PageFabLongPressTest mounts the FAB directly to pin the gesture split
+// (tap → onClick, long press → onLongClick) without standing up the whole screen — same
+// visibility relaxation as MultiQuoteFab above.
 @Composable
-private fun PageFab(
+internal fun PageFab(
     description: String,
     @DrawableRes iconRes: Int,
     onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onLongClickLabel: String,
 ) {
     // #360 / ADR-015 — chevron en vector stroke unifié (poids optique aligné sur la flèche retour),
     // dimensionné en dp via le primitive partagé :core:ui plutôt qu'un glyphe « ‹ »/« › » dépendant
     // de la police. Pas de Material icons (detekt ForbiddenImport). L'étiquette a11y reste sur le FAB,
     // donc l'icône est décorative.
-    SmallFloatingActionButton(
-        onClick = onClick,
-        modifier = Modifier.semantics { contentDescription = description },
+    // #822 — a LONG PRESS jumps straight to the first/last page (‹ → page 1, › → totalPages), on
+    // the same FAB as the single-page step. Hand-rolled FAB (pattern #820, cloned from
+    // MultiQuoteFab above): a NON-clickable Surface carries the combinedClickable, because a real
+    // SmallFloatingActionButton's inner clickable swallows the pointer input of any
+    // combinedClickable stacked on its modifier — neither gesture ever fires (pinned by
+    // MultiQuoteFabClearTest). combinedClickable brings the built-in long-press haptics and
+    // announces the jump through onLongClickLabel for TalkBack. Shape/colors/elevation and the
+    // FAB_SLOT_SIZE footprint mirror the M3 small-FAB defaults of the sibling ReplyFab.
+    Surface(
+        modifier = Modifier
+            .semantics { contentDescription = description }
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick,
+                onLongClickLabel = onLongClickLabel,
+                role = Role.Button,
+            ),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        shadowElevation = 6.dp,
     ) {
-        RedfaceVectorIcon(resId = iconRes)
+        Box(
+            modifier = Modifier.sizeIn(minWidth = FAB_SLOT_SIZE, minHeight = FAB_SLOT_SIZE),
+            contentAlignment = Alignment.Center,
+        ) {
+            RedfaceVectorIcon(resId = iconRes)
+        }
     }
 }
 

@@ -3,6 +3,10 @@
     <string name="topic_fab_reply">Répondre</string>
     <string name="topic_fab_previous_page">Page précédente</string>
     <string name="topic_fab_next_page">Page suivante</string>
+    <!-- #822 — appui long sur les FAB ‹/› : saut direct à la première / dernière page
+         (onLongClickLabel TalkBack). -->
+    <string name="topic_fab_first_page">Aller à la première page</string>
+    <string name="topic_fab_last_page">Aller à la dernière page</string>
     <!-- #291 — FAB « Citer N » : ouvre l'éditeur pré-rempli avec les citations sélectionnées. -->
     <plurals name="topic_fab_multi_quote">
         <item quantity="one">Citer %1$d message sélectionné</item>
@@ -97,6 +101,9 @@
     <string name="topic_page_jump_label">Aller à la page</string>
     <string name="topic_page_jump_action">Y aller</string>
     <string name="topic_post_quote">Citer</string>
+    <!-- #823 — appui long sur « Citer » : ouvre directement l'éditeur plein écran, sans passer
+         par le preset de surface d'écriture (#806). onLongClickLabel TalkBack. -->
+    <string name="topic_post_quote_full_editor">Citer dans l\'éditeur plein écran</string>
     <string name="topic_post_edit">Modifier</string>
     <string name="topic_edit_first_post">Modifier le premier message</string>
     <string name="topic_post_submit_refresh_failed">Message envoyé, mais le rafraîchissement de la page a échoué. Tirez pour réessayer.</string>
