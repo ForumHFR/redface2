@@ -16,6 +16,29 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.26.0` — `internal` (dev) — 2026-07-07
+
+**Vague 5 Vue Topic (#604)** : interactions image, lot citations, rendu média parité web, gestes d'appui long, recherche smileys, fix Drapeaux.
+
+### Lecture (vue Topic)
+- #831 (partiel) : **appui long sur une image de post → menu contextuel** (PR #837) — Copier l'URL, Ouvrir dans le navigateur, Enregistrer (octets originaux via le cache disque Coil, GIF préservés ; « Taille réelle » arrive avec le viewer #182). Le tap court sur une image liée ouvre toujours le navigateur (#257). Limite connue : le menu n'est pas accessible sur les images `[url=][img]` restées inline dans un paragraphe mixte — l'issue #831 reste ouverte pour ce cas.
+- #610 : le dimensionnement des `[img]` s'aligne sur HFR web (max-width 90 %, max-height ~200 dp, PR #836) — parité visuelle avec le site, ni upscale ni débordement.
+- #256 : fast-path de rendu pour le marqueur `hfr-cc-image` (PR #835) — matching strict sur la query (garde anti-fragment), règle « un intrus = pas de marqueur ».
+
+### Citations
+- #785 : la black-list masque aussi le **contenu des citations** d'un auteur bloqué (PR #838) — bandeau « Citation de X masquée », tap pour révéler.
+- #782 : après un saut vers un post cité, **le retour ramène à la position de lecture précédente** (PR #839) — pile de retour par onglet, vidée à la sortie du topic.
+- #784 : les **citations longues sont repliées** avec un aperçu (PR #840) — tap sur le corps pour déplier, l'en-tête continue de sauter au post cité.
+
+### Gestes
+- #822/#823 : appui long sur les **FAB de pagination → première/dernière page**, appui long sur **Citer → éditeur plein écran** (PR #833) — haptique + libellés TalkBack.
+
+### Éditeur
+- #441/#824 : recherche de smileys unifiée derrière `SmileyPickerController` (un seul chemin feuille/plein écran) et **recherche restaurée à la réouverture** du picker, onglet inclus (PR #834).
+
+### Drapeaux
+- #825 : le filtre « masquer les catégories vides » ne s'applique plus à l'**onglet lus** (PR #832).
+
 ## `0.25.2` — `internal` (dev) — 2026-07-05
 
 **Presets de surface d'écriture (#806)** + lot d'hygiène d'état (audit rf2-10) + deux fixes de veille.

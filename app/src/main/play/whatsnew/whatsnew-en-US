@@ -1,5 +1,7 @@
-Redface 2 v0.25.2 — dev.
+Redface 2 v0.26.0 — dev.
 
-- New "Writing surface" setting: choose what Reply and Quote open (quick-reply sheet or full-screen editor).
-- Unreadable text colors auto-corrected in dark themes.
-- Settings always fresh, last keystrokes saved on editor close, sharper smiley search.
+- Long-press an image: copy URL, open, save.
+- Quotes: blacklisted authors hidden inside quotes too, back returns to your reading spot after a quote jump, long quotes collapse to a preview.
+- Images sized like the website.
+- Long-press: page FABs → first/last, Quote → full editor.
+- Smiley search restored on reopen; empty-categories filter fixed on the read tab.
