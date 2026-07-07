@@ -138,6 +138,49 @@ class PostRendererImageLongPressTest {
     }
 
     @Test
+    fun `long press on a promoted linked image reaches the handler with the link URL`() {
+        // The [url=…][img] shape from the field (Codex review: this non-regression was missing):
+        // an image-only paragraph whose image measures past the inline caps is promoted to a
+        // block (#224/#257) carrying its enclosing link — the ONE path that combines a tap
+        // (browser) and the #831 long-press on the same node.
+        var received: PostImageTarget? = null
+        val cache = DefaultIntrinsicMediaSizeCache()
+        cache.putSuccess(blockUrl, androidx.compose.ui.unit.IntSize(800, 600))
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(
+                    LocalPostImageActions provides PostImageActions(onLongPress = { received = it }),
+                    LocalIntrinsicMediaSizeCache provides cache,
+                ) {
+                    PostRenderer(
+                        content = PostContent(
+                            blocks = listOf(
+                                PostBlock.Paragraph(
+                                    inlines = listOf(
+                                        PostInline.Link(
+                                            url = "https://example.org/full",
+                                            children = listOf(
+                                                PostInline.InlineImage(url = blockUrl, description = "promue"),
+                                            ),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ),
+                        selectable = true,
+                    )
+                }
+            }
+        }
+
+        composeTestRule.onNodeWithContentDescription("promue")
+            .performTouchInput { longClick() }
+
+        assertEquals(blockUrl, received?.url)
+        assertEquals("https://example.org/full", received?.linkUrl)
+    }
+
+    @Test
     fun `without provided actions the image stays inert (MP, preview, signatures)`() {
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
