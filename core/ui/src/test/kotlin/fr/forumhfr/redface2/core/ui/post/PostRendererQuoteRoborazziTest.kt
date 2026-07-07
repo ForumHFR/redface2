@@ -143,10 +143,10 @@ class PostRendererQuoteRoborazziTest {
     }
 
     /**
-     * Issue #332 — a "long" top-level citation folds to a single header line by default ("longues
-     * citations repliées sur une ligne, dépliables au clic puis repliables"). This captures the
-     * default *folded* state: the framed quote shows only its "Citation de X" header + the
-     * "(afficher)" affordance, and the wall-of-text body is hidden until tapped.
+     * Issue #332 — a "long" top-level citation folds by default. Since #784 the folded state is a
+     * bounded PREVIEW: the "Citation de X" header + « Déplier » affordance, the first
+     * ~[LONG_QUOTE_PREVIEW_LINES] lines of the body clipped in place, and a bottom fade hinting at
+     * the hidden remainder. This captures that default folded/preview state.
      */
     @Test
     fun postRendererLongQuoteFoldedLight() {

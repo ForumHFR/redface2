@@ -215,6 +215,49 @@ class PostRendererQuoteDepthTest {
     }
 
     // ---------------------------------------------------------------------------------------------
+    // #784 — folded long quotes show a bounded preview. The container/fade rendering lives in the
+    // @Composable LongQuotePreview (PostRendererLongQuoteFoldTest, Robolectric); here we pin the
+    // pure sizing and clip decisions.
+    // ---------------------------------------------------------------------------------------------
+
+    @Test
+    fun `the preview keeps the documented number of body lines`() {
+        assertEquals(
+            "Changing LONG_QUOTE_PREVIEW_LINES changes how much of every folded quote is visible " +
+                "— keep it a deliberate review step.",
+            5,
+            LONG_QUOTE_PREVIEW_LINES,
+        )
+    }
+
+    @Test
+    fun `preview max height is the line height times the line budget, with a fallback`() {
+        // bodyMedium's M3 line height (20sp) → 100sp of preview.
+        assertEquals(20f * LONG_QUOTE_PREVIEW_LINES, longQuotePreviewMaxHeightSp(20f), 0f)
+        // A theme leaving lineHeight unspecified (0 / negative) falls back to the documented value
+        // instead of collapsing the preview to zero height.
+        assertEquals(
+            LONG_QUOTE_FALLBACK_LINE_HEIGHT_SP * LONG_QUOTE_PREVIEW_LINES,
+            longQuotePreviewMaxHeightSp(0f),
+            0f,
+        )
+        assertEquals(
+            LONG_QUOTE_FALLBACK_LINE_HEIGHT_SP * LONG_QUOTE_PREVIEW_LINES,
+            longQuotePreviewMaxHeightSp(-1f),
+            0f,
+        )
+    }
+
+    @Test
+    fun `the bottom fade draws only when the preview actually clipped`() {
+        // At (or within rounding tolerance of) the cap = the box was constrained → content hidden.
+        assertTrue(isLongQuotePreviewClipped(contentHeightPx = 500f, maxHeightPx = 500f))
+        assertTrue(isLongQuotePreviewClipped(contentHeightPx = 499.5f, maxHeightPx = 500f))
+        // Clearly under the cap = the whole quote is visible; a « more below » fade would lie.
+        assertFalse(isLongQuotePreviewClipped(contentHeightPx = 300f, maxHeightPx = 500f))
+    }
+
+    // ---------------------------------------------------------------------------------------------
     // #785 — the blacklist applies inside quotes. The rendering branch lives in the @Composable
     // QuoteBlock/BlockedQuoteBlock (PostRendererBlockedQuoteTest, Robolectric); here we pin the pure
     // decision so the canonical-match contract can't drift silently.
