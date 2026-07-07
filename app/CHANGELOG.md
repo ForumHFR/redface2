@@ -16,6 +16,16 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.26.1` — `internal` (dev) — 2026-07-07
+
+**Réponses aux deux premiers retours du fil DEV sur la 0.26.0** (même soirée).
+
+### Lecture (vue Topic)
+- #842 : le **plafond de hauteur des images bloc est recalibré pour mobile** — `max(400 dp, 0,5 × hauteur d'écran)` au lieu du flat 200 dp de #610 (PR #844). Une image quasi carrée/portrait remplit maintenant ~90 % de la largeur (mesurée à ~48 % sur le retour du fil) ; paysage inchangé ; toujours borné (pas d'explosion du scroll), aucun upscale. Le 200 n'avait pas de base web réelle (la seule règle HFR est `max-width: 90%`) — l'étiquette « parité web » de #610 est corrigée dans le code. Chemin inline inchangé (200 sp, conservateur dans la prose).
+
+### Éditeur & brouillons
+- #843 : la **bannière « Un brouillon non envoyé a été retrouvé » (Restaurer / Ignorer) est de retour sur les ouvertures à froid** de l'éditeur plein écran (PR #845) — FAB en preset plein écran, « Citer » routé vers l'éditeur, appui long #823, « Citer N » 3+. `resumeSharedDraft` avait dérivé de son contrat #790 : ces chemins ré-appliquaient silencieusement un vieux brouillon, sans choix d'ignorer. L'escalade feuille → éditeur garde l'append silencieux (#790 inchangé).
+
 ## `0.26.0` — `internal` (dev) — 2026-07-07
 
 **Vague 5 Vue Topic (#604)** : interactions image, lot citations, rendu média parité web, gestes d'appui long, recherche smileys, fix Drapeaux.

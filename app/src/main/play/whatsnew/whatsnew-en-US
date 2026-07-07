@@ -1,7 +1,4 @@
-Redface 2 v0.26.0 — dev.
+Redface 2 v0.26.1 — dev.
 
-- Long-press an image: copy URL, open, save.
-- Quotes: blacklisted authors hidden inside quotes too, back returns to your reading spot after a quote jump, long quotes collapse to a preview.
-- Images sized like the website.
-- Long-press: page FABs → first/last, Quote → full editor.
-- Smiley search restored on reopen; empty-categories filter fixed on the read tab.
+- Square and portrait images finally fill ~90% of the width (height cap recalibrated for mobile).
+- The "draft found" message (Restore / Discard) is back when opening the editor with a pending draft.

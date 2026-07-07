@@ -1,7 +1,4 @@
-Redface 2 v0.26.0 — dev.
+Redface 2 v0.26.1 — dev.
 
-- Appui long sur une image : copier l'URL, ouvrir, enregistrer.
-- Citations : auteurs black-listés masqués aussi en citation, retour à la position de lecture après un saut, citations longues repliées avec aperçu.
-- Images à la taille du site web.
-- Appui long : FAB de page → première/dernière, Citer → éditeur plein écran.
-- Recherche de smileys conservée à la réouverture ; filtre « catégories vides » corrigé sur l'onglet lus.
+- Les images carrées et portrait remplissent enfin ~90 % de la largeur (le plafond de hauteur est recalibré pour mobile).
+- Le message « brouillon retrouvé » (Restaurer / Ignorer) est de retour quand on ouvre l'éditeur avec un brouillon en attente.
