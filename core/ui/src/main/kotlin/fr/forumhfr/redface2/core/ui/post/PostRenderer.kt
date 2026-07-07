@@ -36,9 +36,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
@@ -165,13 +168,49 @@ private fun inlineVisibleTextLength(inline: PostInline): Int = when (inline) {
 }
 
 /**
- * Issue #332 — true when a quote must fold to a one-line header by default because it is "long".
+ * Issue #332 — true when a quote must fold by default because it is "long" (since #784 the fold
+ * shows a bounded PREVIEW instead of a bare header line, cf. [FoldableQuoteBlock]).
  * Restricted to [quoteDepth] == 0: a nested quote is already governed by the depth rule
  * ([isCollapsedQuoteDepth]) and the parent fold, so folding it again by length would stack two
  * different toggles on the same sub-tree. Pure decision, pinned in [PostRendererQuoteDepthTest].
  */
 internal fun isLongQuote(block: PostBlock.Quote, quoteDepth: Int): Boolean =
     quoteDepth == 0 && quoteVisibleTextLength(block.content) > LONG_QUOTE_CHAR_THRESHOLD
+
+/**
+ * #784 — how many `bodyMedium` lines of a folded long quote stay visible as a PREVIEW. 5 lines ≈
+ * the reading depth of a short citation: enough context to decide whether the wall of text is
+ * worth unfolding, small enough that a folded quote never dominates the post. Pure constant so
+ * the budget is pinned in [PostRendererQuoteDepthTest] and any change is a deliberate review step.
+ */
+internal const val LONG_QUOTE_PREVIEW_LINES = 5
+
+/** #784 — fallback line height (sp) when the theme leaves `bodyMedium.lineHeight` unspecified. */
+internal const val LONG_QUOTE_FALLBACK_LINE_HEIGHT_SP = 20f
+
+/**
+ * #784 — max height (sp) of the folded preview container: [LONG_QUOTE_PREVIEW_LINES] ×
+ * the body line height. Sp on purpose so the preview grows with the user's font scale (a fixed
+ * dp cap would show fewer lines at accessibility font sizes). Pure so the sizing rule is
+ * testable without composing anything ([PostRendererQuoteDepthTest]).
+ */
+internal fun longQuotePreviewMaxHeightSp(bodyLineHeightSp: Float): Float {
+    val line = if (bodyLineHeightSp > 0f) bodyLineHeightSp else LONG_QUOTE_FALLBACK_LINE_HEIGHT_SP
+    return line * LONG_QUOTE_PREVIEW_LINES
+}
+
+/** #784 — tolerance for the clip decision below (sub-pixel rounding of the constrained height). */
+internal const val LONG_QUOTE_CLIP_TOLERANCE_PX = 1f
+
+/**
+ * #784 — whether the folded preview actually CLIPPED its content: the constrained box reports a
+ * height at (or within a rounding tolerance of) the cap only when the content wanted more room.
+ * Gates the bottom fade so a quote that is « long » by character count but renders short (wide
+ * screen, media-light text) is not painted with a misleading « more below » scrim. Pure decision,
+ * pinned in [PostRendererQuoteDepthTest].
+ */
+internal fun isLongQuotePreviewClipped(contentHeightPx: Float, maxHeightPx: Float): Boolean =
+    contentHeightPx >= maxHeightPx - LONG_QUOTE_CLIP_TOLERANCE_PX
 
 /**
  * Which themed accent the [QuoteFrame] left bar uses. Issue #252 — a **bare** `[quote]` (typed by
@@ -492,12 +531,18 @@ private fun QuoteHeader(
 }
 
 /**
- * Issue #332 — a "long" top-level citation (`isLongQuote`) folds to a single header line by default,
- * dépliable au clic puis repliable. Mirrors the [SpoilerBlock] interaction (a `rememberSaveable`
- * boolean + a clickable header carrying an "Afficher"/"Masquer" affordance) and reuses [QuoteFrame]
- * so the accent bar, surface and bare-quote palette stay identical to a normal quote. Unlike
+ * Issue #332 — a "long" top-level citation (`isLongQuote`) folds by default, dépliable au clic puis
+ * repliable. Since #784 the folded state is a bounded PREVIEW ([LongQuotePreview]: the first
+ * ~[LONG_QUOTE_PREVIEW_LINES] lines, clipped, with a bottom fade) instead of a bare header line, so
+ * the reader gets enough context to decide whether to unfold. Reuses [QuoteFrame] so the accent
+ * bar, surface and bare-quote palette stay identical to a normal quote. Unlike
  * [CollapsedQuoteBlock] (issue #3 depth fold, which resets depth to 0 on reveal) this fold keeps the
  * real [quoteDepth] when expanded so a long quote that also nests deeply still hits the depth rule.
+ *
+ * Gesture contract (#784, Codex framing): the FRAME — preview body, fade, « Déplier »/« Replier »
+ * label — toggles the fold, with its own a11y `onClickLabel`; the HEADER keeps its distinct #699
+ * « go to the cited post » tap (its clickable consumes the event before the frame's). Inline links
+ * inside the preview keep consuming their own taps, like everywhere else in the renderer.
  */
 @Composable
 private fun FoldableQuoteBlock(
@@ -509,7 +554,11 @@ private fun FoldableQuoteBlock(
     QuoteFrame(
         quoteDepth = quoteDepth,
         isBareQuote = isBareQuote(block),
-        modifier = Modifier.clickable { expanded = !expanded },
+        modifier = Modifier.clickable(
+            onClickLabel = stringResource(
+                if (expanded) R.string.post_quote_collapse_label else R.string.post_quote_expand_label,
+            ),
+        ) { expanded = !expanded },
     ) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -520,9 +569,9 @@ private fun FoldableQuoteBlock(
             QuoteHeader(block, onGoToCitedPost)
             Text(
                 text = if (expanded) {
-                    stringResource(R.string.post_quote_hide)
+                    stringResource(R.string.post_quote_collapse)
                 } else {
-                    stringResource(R.string.post_quote_show)
+                    stringResource(R.string.post_quote_expand)
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary,
@@ -534,7 +583,70 @@ private fun FoldableQuoteBlock(
                 quoteDepth = quoteDepth + 1,
                 onGoToCitedPost = onGoToCitedPost,
             )
+        } else {
+            LongQuotePreview(block, quoteDepth, onGoToCitedPost)
         }
+    }
+}
+
+/** #784 — height of the bottom fade hinting at the clipped remainder of a folded preview. */
+private val LONG_QUOTE_FADE_HEIGHT: Dp = 28.dp
+
+/**
+ * #784 — bounded, clipped preview of a folded long quote: the normal [PostBlocksRenderer] inside a
+ * `heightIn(max = ~5 bodyMedium lines)` + `clipToBounds` container, with a bottom fade towards the
+ * frame's own container colour hinting at the hidden remainder.
+ *
+ * STRICTLY a container: no AnnotatedString is ever rebuilt to measure or truncate the text (the
+ * #175 invariance pivot — the paragraphs inside are byte-identical to the expanded render), and no
+ * intrinsic measurement is asked of the subtree (`SubcomposeAsyncImage` crashes under
+ * `IntrinsicSize`, cf. the [QuoteFrame] history note). The fade is skipped when the content
+ * actually fits under the cap ([isLongQuotePreviewClipped]) so a char-count-long but visually
+ * short quote is not painted with a misleading « more below » scrim.
+ */
+@Composable
+private fun LongQuotePreview(
+    block: PostBlock.Quote,
+    quoteDepth: Int,
+    onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)?,
+) {
+    val bodyLineHeight = MaterialTheme.typography.bodyMedium.lineHeight
+    val density = LocalDensity.current
+    // Sp-based cap so the preview keeps showing ~the same LINE COUNT at any font scale.
+    val maxHeight = with(density) {
+        longQuotePreviewMaxHeightSp(
+            bodyLineHeightSp = if (bodyLineHeight.isSp) bodyLineHeight.value else 0f,
+        ).sp.toDp()
+    }
+    val maxHeightPx = with(density) { maxHeight.toPx() }
+    // The fade dissolves the clipped last line into the quote card's own surface colour.
+    val fadeColor = MaterialTheme.colorScheme.surfaceContainerHighest
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(max = maxHeight)
+            .clipToBounds()
+            .drawWithContent {
+                drawContent()
+                if (isLongQuotePreviewClipped(contentHeightPx = size.height, maxHeightPx = maxHeightPx)) {
+                    val fadeHeightPx = LONG_QUOTE_FADE_HEIGHT.toPx()
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(Color.Transparent, fadeColor),
+                            startY = size.height - fadeHeightPx,
+                            endY = size.height,
+                        ),
+                        topLeft = Offset(0f, size.height - fadeHeightPx),
+                        size = Size(size.width, fadeHeightPx),
+                    )
+                }
+            },
+    ) {
+        PostBlocksRenderer(
+            blocks = block.content.blocks,
+            quoteDepth = quoteDepth + 1,
+            onGoToCitedPost = onGoToCitedPost,
+        )
     }
 }
 

@@ -11,6 +11,12 @@
     <string name="post_quote_collapsed_revealed">Citations imbriquées</string>
     <string name="post_quote_show">Afficher</string>
     <string name="post_quote_hide">Masquer</string>
+    <!-- #784 : aperçu borné des citations longues. Libellés visibles du dépli/repli, plus les
+         libellés a11y du tap sur le corps/cadre — distincts de post_quote_go_to (saut du header). -->
+    <string name="post_quote_expand">Déplier</string>
+    <string name="post_quote_collapse">Replier</string>
+    <string name="post_quote_expand_label">Déplier la citation</string>
+    <string name="post_quote_collapse_label">Replier la citation</string>
     <string name="post_spoiler_default_label">Spoiler</string>
     <string name="post_spoiler_show">(afficher)</string>
     <string name="post_spoiler_hide">(masquer)</string>
