@@ -2504,12 +2504,30 @@ private fun RedfaceNavHost(
                         topicScrollNavState.onAnchorSaved(route.cat, route.post, route.page, anchor)
                     },
                     onOpenProfile = onOpenProfile,
-                    // #604 lots 1-3 — onReply is the quick-reply sheet's ESCALATION : the sheet
-                    // just persisted the shared #405 row, so the editor auto-applies it (#790,
-                    // resumeSharedDraft) instead of surfacing the restore banner. The armed quote
-                    // cards travel as FULL previews through the in-memory handoff (lot 3, mockup
-                    // P3) — the editor renders the same cards and materialises at submit.
+                    // #843 — onReply is a COLD full-editor open (FAB under FULL_EDITOR, « Citer »
+                    // routed to the editor, #823 long-press): no sheet is in flight, so
+                    // resumeSharedDraft = false and an existing #405 draft is SURFACED via the
+                    // restore banner (Restaurer / Ignorer) instead of being silently re-applied. The
+                    // armed quote cards still travel as FULL previews through the in-memory handoff
+                    // (lot 3) — cards are independent of the text draft. The genuine sheet escalation
+                    // uses onEscalateToFullEditor below.
                     onReply = { subcat, page, quotes ->
+                        multiQuoteNavState.onEditorQuotesHandoff(quotes.takeIf { it.isNotEmpty() })
+                        backStack.add(
+                            PostEditorRoute(
+                                mode = PostEditorMode.Reply,
+                                cat = route.cat,
+                                topicId = route.post,
+                                page = page,
+                                subcat = subcat,
+                                resumeSharedDraft = false,
+                            ),
+                        )
+                    },
+                    // #843/#790 — the quick-reply sheet's ESCALATION only: the sheet just persisted
+                    // the shared #405 row, so the editor auto-applies it (resumeSharedDraft = true,
+                    // silent append — same composition act) WITHOUT surfacing the restore banner.
+                    onEscalateToFullEditor = { subcat, page, quotes ->
                         multiQuoteNavState.onEditorQuotesHandoff(quotes.takeIf { it.isNotEmpty() })
                         backStack.add(
                             PostEditorRoute(
@@ -2568,8 +2586,10 @@ private fun RedfaceNavHost(
                         // handed to the editor (cards, mockup P3) through the in-memory handoff.
                         // The basket is cleared on launch: the selection's intent is consumed,
                         // and backing out of the editor should not re-arm a stale « Citer N ».
-                        // resumeSharedDraft (Codex fork 4) : quoting is a continuation of this
-                        // topic's composition — any sheet-drafted text is picked up bannerless.
+                        // #843 — « Citer N » (3+) is a COLD full-editor open, not a sheet escalation:
+                        // resumeSharedDraft = false, so an existing text draft is offered via the
+                        // restore banner (cards are independent of it), instead of the silent append
+                        // the escalation flag used to force here (pre-#843 Codex fork 4).
                         val selection = multiQuoteNavState.basket
                             ?.takeIf { it.matches(route.cat, route.post) }
                             ?.selections
@@ -2583,7 +2603,7 @@ private fun RedfaceNavHost(
                                     topicId = route.post,
                                     page = page,
                                     subcat = subcat,
-                                    resumeSharedDraft = true,
+                                    resumeSharedDraft = false,
                                 ),
                             )
                             multiQuoteNavState.onClear()
