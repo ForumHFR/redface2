@@ -102,6 +102,7 @@ internal class AndroidPostImageSaver @Inject constructor(
     }
 
     /** MediaStore write with the IS_PENDING 1 → 0 protocol and orphan-row cleanup on failure. */
+    @Suppress("ThrowsCount") // The IS_PENDING protocol's failure exits ARE the contract.
     private fun insertIntoMediaStore(bytes: ByteArray, mimeType: String, displayName: String) {
         val resolver = context.contentResolver
         val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)

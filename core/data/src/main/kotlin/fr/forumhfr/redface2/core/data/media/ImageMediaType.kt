@@ -47,11 +47,7 @@ internal fun resolveImageMediaType(bytes: ByteArray, url: String): ImageMediaTyp
 internal fun sniffImageMediaType(bytes: ByteArray): ImageMediaType? {
     if (bytes.size < 12) return null
     if (bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() && bytes[2] == 0xFF.toByte()) return JPEG
-    if (bytes[0] == 0x89.toByte() && bytes[1] == 'P'.code.toByte() &&
-        bytes[2] == 'N'.code.toByte() && bytes[3] == 'G'.code.toByte()
-    ) {
-        return PNG
-    }
+    if (bytes[0] == 0x89.toByte() && bytes.startsWithAscii(1, "PNG")) return PNG
     if (bytes.startsWithAscii(0, "GIF8")) return GIF
     if (bytes.startsWithAscii(0, "RIFF") && bytes.startsWithAscii(8, "WEBP")) return WEBP
     if (bytes.startsWithAscii(0, "BM")) return BMP

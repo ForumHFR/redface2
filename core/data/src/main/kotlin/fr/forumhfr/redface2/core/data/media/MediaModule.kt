@@ -9,7 +9,7 @@ import javax.inject.Singleton
 
 @Module
 @InstallIn(SingletonComponent::class)
-internal interface MediaBindingsModule {
+internal interface MediaModule {
 
     // #831 — the image contextual menu's « Enregistrer l'image » saves through this seam ; the
     // Android impl lives here (it needs MediaStore + the Coil disk cache) so the feature ViewModel
