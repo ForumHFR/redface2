@@ -2,11 +2,9 @@ package fr.forumhfr.redface2.feature.editor
 import fr.forumhfr.redface2.core.ui.editor.UploadError
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 
-import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import androidx.compose.ui.text.input.TextFieldValue
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
 import fr.forumhfr.redface2.core.domain.editor.validateBbcodeDraft
-import fr.forumhfr.redface2.core.model.EditorSmiley
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
@@ -74,16 +72,12 @@ data class PostEditorState(
      * submit attempt.
      */
     val optionsHydratedFromForm: Boolean = false,
-    /**
-     * Phase 2F-B (#11 partial) — smiley picker visibility + wiki search state. Hidden by
-     * default. Opening the picker is an Intent ; closing it is also an Intent, so the
-     * bottom-sheet dismiss path stays MVI-correct.
-     */
-    val smileyPicker: SmileyPickerState = SmileyPickerState.Hidden,
+    // #441 — the smiley picker state no longer lives here : visibility + wiki search moved
+    // to the shared `SmileyPickerController` exposed as `PostEditorViewModel.smileyPicker`.
     /**
      * HFR user id parsed from the form HTML (cf. `ReplyForm.userId`). Used by the wiki
-     * smiley search call. `null` when the form is anonymous or unparseable — the
-     * repository falls back to `user_id=0`.
+     * smiley search call (read by the `SmileyPickerController` lambda). `null` when the
+     * form is anonymous or unparseable — the controller falls back to `user_id=0`.
      */
     val userId: Int? = null,
     /**

@@ -14,7 +14,7 @@ import kotlinx.coroutines.launch
 /**
  * #387 — self-contained state machine for the [SmileyPickerSheet], extracted from
  * `PostEditorViewModel`'s embedded logic so ANY editor host (the MP reply/compose ViewModels
- * today, the `:feature:editor` ViewModels as a follow-up migration) gets the picker without
+ * since #440, the `:feature:editor` ViewModels since #441) gets the picker without
  * re-implementing the debounce and its race guards.
  *
  * The host owns insertion : a tap on a smiley hands the BBCode token back to the host
@@ -28,9 +28,22 @@ import kotlinx.coroutines.launch
  *  - job-identity + query-equality guards drop stale responses (cancelled jobs, retyped
  *    queries) so an older network result can never overwrite a newer one.
  *
+ * #824 — restore-on-reopen contract : [dismiss] snapshots the visible search (query + wiki
+ * results) instead of dropping it, and the next [open] restores it, so an insertion (which
+ * dismisses the sheet on all surfaces) or an accidental swipe-down never costs the user a
+ * retype. `Results` are restored verbatim (no refetch) ; the transient `Loading` / `Error`
+ * branches are normalised to `Idle` at snapshot time (a restored Loading would spin forever
+ * — its job was cancelled — and a restored Error would resurface a stale failure). There is
+ * deliberately no public reset : the controller lives and dies with its host ViewModel, whose
+ * editorial context is frozen at construction, so « editor closed = search forgotten » is the
+ * ViewModel lifecycle itself.
+ *
  * [searchWiki] is a lambda (not `SmileyRepository`) so `:core:ui` gains no dependency on
  * `:core:domain` ; [userId] feeds HFR's wiki endpoint and falls back to 0 when the session
  * has not resolved an id (proven harmless — same fallback as `PostEditorViewModel`).
+ * [onSearchFailed] lets a host apply its own failure policy (the `:feature:editor` ViewModels
+ * record a diagnostics WARN — class name only, never the query nor the userId — while the MP
+ * composers keep the no-op default).
  */
 class SmileyPickerController(
     private val scope: CoroutineScope,
@@ -44,15 +57,46 @@ class SmileyPickerController(
 
     private var searchJob: Job? = null
 
+    /**
+     * #824 — snapshot of the last dismissed Open state, already normalised by [dismiss]
+     * (`wiki` is either `Results` or `Idle`, never a transient branch). Null until the
+     * first dismissal ; never cleared — the whole controller is dropped with its host
+     * ViewModel, which is the intended invalidation boundary.
+     */
+    private var lastDismissed: SmileyPickerState.Open? = null
+
     fun open() {
         _state.update { current ->
-            if (current is SmileyPickerState.Open) current else SmileyPickerState.Open()
+            if (current is SmileyPickerState.Open) {
+                // Idempotent while visible : a redundant open() must NOT clobber the live
+                // query/results with the stale dismissal snapshot below.
+                current
+            } else {
+                // #824 — restore the last dismissed search (query + results) so reopening
+                // right after an insertion / accidental swipe-down never costs a retype.
+                lastDismissed ?: SmileyPickerState.Open()
+            }
         }
     }
 
     fun dismiss() {
         searchJob?.cancel()
         searchJob = null
+        // #824 — keep the visible search for the next open(), normalising the transient
+        // branches : a restored Loading would spin forever (its job was just cancelled
+        // above) and a restored Error would resurface a stale failure, so both collapse
+        // to Idle. Results are restored verbatim — no refetch on reopen ; staleness within
+        // one editing session is acceptable (issue #824, immediate-reopen use case).
+        val current = _state.value
+        if (current is SmileyPickerState.Open) {
+            lastDismissed = current.copy(
+                wiki = when (val wiki = current.wiki) {
+                    is WikiSearchState.Results -> wiki
+                    WikiSearchState.Idle, WikiSearchState.Loading, WikiSearchState.Error ->
+                        WikiSearchState.Idle
+                },
+            )
+        }
         _state.value = SmileyPickerState.Hidden
     }
 

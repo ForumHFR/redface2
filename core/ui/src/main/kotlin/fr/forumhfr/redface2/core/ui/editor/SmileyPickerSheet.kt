@@ -74,7 +74,12 @@ fun SmileyPickerSheet(
         // way into the ViewModel. `rememberSaveable` so a configuration change (rotation,
         // dark mode toggle) does not reset the user back to the Standard tab while the
         // bottom-sheet is still open.
-        var tabIndex by rememberSaveable { mutableStateOf(0) }
+        // #824 — start on the Wiki tab when the controller restored a search (non-empty
+        // query at first composition) so the reopened sheet lands on the results the user
+        // came back for. Evaluated once per sheet instance (each open is a fresh
+        // composition) ; deliberately NOT keyed on the query — that would reset the tab
+        // on every keystroke.
+        var tabIndex by rememberSaveable { mutableStateOf(if (state.query.isNotEmpty()) 1 else 0) }
         Column(
             modifier = Modifier
                 .fillMaxWidth()
