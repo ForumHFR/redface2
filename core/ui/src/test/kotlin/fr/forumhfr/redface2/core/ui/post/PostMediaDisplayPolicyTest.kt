@@ -38,55 +38,112 @@ class PostMediaDisplayPolicyTest {
         assertEquals(PostMediaDisplayPolicy.persoSmiley, PostMediaDisplayPolicy.smileyBox(variant))
     }
 
-    // #249 / #249 follow-up — reserved block-image height: exact aspect at full width, clamped to the
-    // [blockImageMinHeight, blockImageMaxHeight] slot, null when the size is unknown/invalid.
+    // #249 / #610 — block-image display size: the exact web-parity box (no upscale, width ≤ 90% of
+    // the column, height ≤ IMAGE_MAX_HEIGHT_UNITS), null when the size is unknown/invalid (legacy
+    // placeholder slot). Doubles as the anti-CLS reservation (#249): the box is final pre-bitmap.
+
     @Test
-    fun `reserved height is the aspect-exact height at full width when within the slot`() {
-        // 400 dp wide, 4:3 image → 300 dp, inside [160, 480].
-        val height = PostMediaDisplayPolicy.reservedBlockImageHeight(
+    fun `block display size caps a 4-3 photo to the parity height, not the full width`() {
+        // Column 400 dp → relative cap 360; 400×300 → the 200-height cap bites (0.667 < 0.9) →
+        // 267×200. Before #610: full width 400 dp × 300 dp tall.
+        val size = PostMediaDisplayPolicy.blockImageDisplaySize(
             measured = PixelSize(width = 400, height = 300),
             availableWidthDp = 400f,
         )
-        assertEquals(300.dp, height)
+        assertEquals(PixelSize(267, IMAGE_MAX_HEIGHT_UNITS), size)
     }
 
     @Test
-    fun `reserved height clamps a tall portrait to the max slot`() {
-        // 400 dp wide, very tall (1:3) → 1200 dp raw → clamped to 480 dp (letterbox is the intended cap).
-        val height = PostMediaDisplayPolicy.reservedBlockImageHeight(
-            measured = PixelSize(width = 400, height = 1200),
+    fun `block display size keeps a small image native — no full-width upscale (#610)`() {
+        // THE block-path #610 fix: 80×60 in a 400 dp column stays 80×60. Before #610 fillMaxWidth
+        // upscaled it to 400 dp wide (300 dp tall, clamped to 160 min → visual blow-up).
+        val size = PostMediaDisplayPolicy.blockImageDisplaySize(
+            measured = PixelSize(width = 80, height = 60),
             availableWidthDp = 400f,
         )
-        assertEquals(PostMediaDisplayPolicy.blockImageMaxHeight, height)
+        assertEquals(PixelSize(80, 60), size)
     }
 
     @Test
-    fun `reserved height clamps a very wide image to the min slot`() {
-        // 400 dp wide, very flat (10:1) → 40 dp raw → floored to 160 dp.
-        val height = PostMediaDisplayPolicy.reservedBlockImageHeight(
-            measured = PixelSize(width = 400, height = 40),
+    fun `block display size caps a tall portrait to 200 like the web`() {
+        // The issue-repro shape (360×640): web max-height:200px → ~113×200. Before #610 the block
+        // path rendered it full-width and 480 dp tall (blockImageMaxHeight letterbox).
+        val size = PostMediaDisplayPolicy.blockImageDisplaySize(
+            measured = PixelSize(width = 360, height = 640),
             availableWidthDp = 400f,
         )
-        assertEquals(PostMediaDisplayPolicy.blockImageMinHeight, height)
+        assertEquals(PixelSize(113, IMAGE_MAX_HEIGHT_UNITS), size)
     }
 
     @Test
-    fun `reserved height is null when the size is unknown or invalid`() {
-        assertEquals(null, PostMediaDisplayPolicy.reservedBlockImageHeight(measured = null, availableWidthDp = 400f))
+    fun `block display size caps a very wide image to 90 percent of the column`() {
+        // 2000×500 in a 400 dp column → width cap 360 bites (0.18 < 0.4) → 360×90. No 160 dp floor
+        // any more: the min-height slot is placeholder-only since #610.
+        val size = PostMediaDisplayPolicy.blockImageDisplaySize(
+            measured = PixelSize(width = 2000, height = 500),
+            availableWidthDp = 400f,
+        )
+        assertEquals(PixelSize(360, 90), size)
+    }
+
+    @Test
+    fun `block display size is null when the size is unknown or invalid`() {
+        assertEquals(null, PostMediaDisplayPolicy.blockImageDisplaySize(measured = null, availableWidthDp = 400f))
         assertEquals(
             null,
-            PostMediaDisplayPolicy.reservedBlockImageHeight(
+            PostMediaDisplayPolicy.blockImageDisplaySize(
                 measured = PixelSize(width = 0, height = 300),
                 availableWidthDp = 400f,
             ),
         )
         assertEquals(
             null,
-            PostMediaDisplayPolicy.reservedBlockImageHeight(
+            PostMediaDisplayPolicy.blockImageDisplaySize(
                 measured = PixelSize(width = 400, height = 300),
                 availableWidthDp = 0f,
             ),
         )
+    }
+
+    // #610 — the unified parity policy itself, and the inline/block parity it guarantees.
+
+    @Test
+    fun `imageParityDisplaySize never upscales and caps to the web rule`() {
+        // native smaller than caps → untouched.
+        assertEquals(PixelSize(80, 60), imageParityDisplaySize(PixelSize(80, 60), maxWidthUnits = 360))
+        // height cap (web max-height:200px).
+        assertEquals(
+            PixelSize(113, IMAGE_MAX_HEIGHT_UNITS),
+            imageParityDisplaySize(PixelSize(360, 640), maxWidthUnits = 360),
+        )
+        // width cap (the caller's 0.9 × container).
+        assertEquals(PixelSize(360, 90), imageParityDisplaySize(PixelSize(2000, 500), maxWidthUnits = 360))
+        // non-positive width cap = no width cap (defensive, mirrors capToWidth): only the height
+        // cap applies → 2000×500 scaled by 200/500 → 800×200.
+        assertEquals(
+            PixelSize(800, IMAGE_MAX_HEIGHT_UNITS),
+            imageParityDisplaySize(PixelSize(2000, 500), maxWidthUnits = 0),
+        )
+    }
+
+    @Test
+    fun `inline and block paths produce the same parity numbers (#610)`() {
+        // The whole point of #610: for any measured native size, the inline box (sp) and the block
+        // box (dp) carry the SAME numbers — units differ, values match. The inline path adds a
+        // one-line legibility floor (#253) that is a no-op for these ≥16-tall parity results.
+        val columnWidthDp = 400f
+        val relativeCapUnits = 360 // 0.9 × column, what the renderer passes on both paths
+        listOf(
+            PixelSize(360, 640),
+            PixelSize(4000, 3000),
+            PixelSize(80, 60),
+            PixelSize(2000, 500),
+            PixelSize(300, 150),
+        ).forEach { native ->
+            val inline = imageParityDisplaySize(native, maxWidthUnits = relativeCapUnits)
+            val block = PostMediaDisplayPolicy.blockImageDisplaySize(native, columnWidthDp)
+            assertEquals("parity broken for $native", inline, block)
+        }
     }
 
     @Test
@@ -137,15 +194,16 @@ class PostMediaDisplayPolicyTest {
 
     @Test
     fun `block image min height is 160dp`() {
-        // Reserves a stable visual slot during SubcomposeAsyncImage loading/error to avoid a
-        // layout jump when the bitmap finally resolves (cf. PR #126 Codex review).
+        // #610 — UNMEASURED placeholder slot only: reserves a stable visual slot during
+        // SubcomposeAsyncImage loading/error so the UX stays visible and the layout jump is bounded
+        // (cf. PR #126 Codex review). A measured image uses its exact blockImageDisplaySize box.
         assertEquals(160.dp, PostMediaDisplayPolicy.blockImageMinHeight)
     }
 
     @Test
     fun `block image max height is 480dp`() {
-        // Soft cap so a 4000x3000 RAW screenshot can't blow up the post and break scrolling.
-        // Bumping this would also regress the cache estimates discussed in the policy KDoc.
+        // #610 — UNMEASURED slot cap only (load-without-measurement can't blow up the post). The
+        // measured path caps at IMAGE_MAX_HEIGHT_UNITS (200) via blockImageDisplaySize.
         assertEquals(480.dp, PostMediaDisplayPolicy.blockImageMaxHeight)
     }
 
