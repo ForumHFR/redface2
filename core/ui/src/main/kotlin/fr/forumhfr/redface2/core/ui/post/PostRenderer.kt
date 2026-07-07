@@ -3,6 +3,9 @@ package fr.forumhfr.redface2.core.ui.post
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -1571,9 +1574,13 @@ internal fun imageInlineContent(image: PostInline.InlineImage, box: InlineMediaB
 /**
  * #831 — long-press-ONLY gesture + a11y surface for a post image. Deliberately NOT a
  * `combinedClickable`: that would install an onClick and consume every tap (Codex framing, firm
- * reserve — cf. the call-site comments for the tap contracts it would break). `detectTapGestures`
- * with only `onLongPress` set fires the haptic + the action on a stationary long press and nothing
- * on a tap; the `semantics` block exposes the same action to TalkBack as a custom long-click
+ * reserve — cf. the call-site comments for the tap contracts it would break). And deliberately NOT
+ * `detectTapGestures(onLongPress)` either: that detector still consumes the down/up of every
+ * gesture, so a tap or a text-selection drag starting on the image would die inside it (Codex
+ * gate catch). Instead the raw `awaitEachGesture` loop below observes the down WITHOUT consuming
+ * it and only consumes the event once a stationary long press has actually completed — taps,
+ * selection drags and scrolls through the image reach their own handlers untouched by
+ * construction. The `semantics` block exposes the same action to TalkBack as a custom long-click
  * action labelled [optionsLabel] (`combinedClickable`'s `onLongClickLabel` equivalent).
  *
  * Non-composable on purpose (the resolved [haptics]/[optionsLabel] come in as parameters):
@@ -1586,12 +1593,17 @@ private fun Modifier.postImageLongPress(
     optionsLabel: String,
 ): Modifier = this
     .pointerInput(actions, target) {
-        detectTapGestures(
-            onLongPress = {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            // Null when the pointer lifts (tap) or moves past the touch slop (scroll/selection)
+            // before the long-press timeout — in which case NOTHING was consumed here.
+            val longPress = awaitLongPressOrCancellation(down.id)
+            if (longPress != null) {
+                longPress.consume()
                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                 actions.onLongPress(target)
-            },
-        )
+            }
+        }
     }
     .semantics {
         onLongClick(label = optionsLabel) {

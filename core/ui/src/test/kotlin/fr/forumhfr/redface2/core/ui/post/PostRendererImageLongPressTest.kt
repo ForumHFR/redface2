@@ -5,6 +5,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -90,6 +91,27 @@ class PostRendererImageLongPressTest {
         assertEquals(inlineUrl, received?.url)
         assertEquals("photo", received?.description)
         assertNull(received?.linkUrl)
+    }
+
+    @Test
+    fun `a short tap on an inline image never fires the long-press action`() {
+        // Tap-transparency contract (Codex gate): the interceptor observes without consuming,
+        // so a plain click must NOT open the menu — and by construction cannot eat the tap.
+        var received: PostImageTarget? = null
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(
+                    LocalPostImageActions provides PostImageActions(onLongPress = { received = it }),
+                ) {
+                    PostRenderer(content = inlineImageContent(inlineUrl), selectable = true)
+                }
+            }
+        }
+
+        composeTestRule.onNodeWithContentDescription("photo")
+            .performTouchInput { click() }
+
+        assertNull(received)
     }
 
     @Test
