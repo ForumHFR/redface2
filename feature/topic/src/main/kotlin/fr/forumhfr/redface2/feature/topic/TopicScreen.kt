@@ -105,9 +105,12 @@ import fr.forumhfr.redface2.core.ui.RedfacePlaceholderScreen
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
+import fr.forumhfr.redface2.core.ui.post.LocalPostImageActions
 import fr.forumhfr.redface2.core.ui.post.PostCardShell
 import fr.forumhfr.redface2.core.ui.post.PostIdentityBand
 import fr.forumhfr.redface2.core.ui.post.PostIdentityHeader
+import fr.forumhfr.redface2.core.ui.post.PostImageActions
+import fr.forumhfr.redface2.core.ui.post.PostImageTarget
 import fr.forumhfr.redface2.core.ui.post.PostListScaffold
 import fr.forumhfr.redface2.core.ui.post.PostRenderer
 import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
@@ -1342,6 +1345,38 @@ private fun TopicLoadedContent(
     // it needs a Hilt ViewModel). Deliberately NOT rememberSaveable: Post is not Parcelable
     // and losing an open overflow menu across process death is acceptable.
     var menuPost by remember { mutableStateOf<Post?>(null) }
+    // #831 — post image whose contextual menu is open (null = closed). Same local-UI-state
+    // rationale as menuPost above (no async data in the sheet itself); the target is a small
+    // value type but deliberately NOT rememberSaveable either — losing an open image menu across
+    // process death is acceptable, and symmetry with menuPost keeps ONE dismissal model.
+    var imageMenuTarget by remember { mutableStateOf<PostImageTarget?>(null) }
+    // #831 — one stable handler instance provided (via TopicPostCard) to the post bodies'
+    // LocalPostImageActions; remembered so providing it never invalidates the cards.
+    val postImageActions = remember { PostImageActions(onLongPress = { imageMenuTarget = it }) }
+    // #831 — « Enregistrer l'image » seam. A dedicated thin @HiltViewModel (precedent
+    // QuickReplyViewModel) so the save survives the sheet's dismissal; feedback = Toast
+    // (feature-topic convention, no SnackbarHost in TopicScreen).
+    val imageActionsViewModel: PostImageActionsViewModel = hiltViewModel()
+    val imageActionsContext = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(imageActionsViewModel) {
+        imageActionsViewModel.effects.collect { effect ->
+            val messageRes = when (effect) {
+                PostImageActionsViewModel.SaveImageEffect.SAVED ->
+                    R.string.topic_image_menu_saved
+                PostImageActionsViewModel.SaveImageEffect.FAILED_FETCH ->
+                    R.string.topic_image_menu_save_failed_fetch
+                PostImageActionsViewModel.SaveImageEffect.FAILED_STORAGE ->
+                    R.string.topic_image_menu_save_failed_storage
+                PostImageActionsViewModel.SaveImageEffect.FAILED_TOO_LARGE ->
+                    R.string.topic_image_menu_save_failed_too_large
+            }
+            android.widget.Toast.makeText(
+                imageActionsContext,
+                imageActionsContext.getString(messageRes),
+                android.widget.Toast.LENGTH_SHORT,
+            ).show()
+        }
+    }
     // #509 — posts the reader chose to reveal despite the author being blacklisted. Temporary and
     // re-keyed on `topic.page`, not persisted: re-hiding on a page change is the intended "masqué by
     // default" behaviour (decision #6). This composable instance is bound to one (cat, post), so the
@@ -1569,6 +1604,8 @@ private fun TopicLoadedContent(
                         // without opening the « … » menu. Null/non-null under the SAME gate as « Citer »
                         // (derived together above), so the « + » and « Citer » always appear as a pair.
                         onToggleMultiQuote = multiQuoteToggle,
+                        // #831 — long-press on a post image opens the image contextual menu.
+                        onImageLongPress = postImageActions.onLongPress,
                     )
                 }
                 if (showLastReadMarker) {
@@ -1667,6 +1704,16 @@ private fun TopicLoadedContent(
             } else {
                 { onSetAuthorBlocked(post.author, post.numreponse !in hiddenNumreponses) }
             },
+        )
+    }
+    // #831 — per-image contextual menu, opened by a long-press on a post image (wired through
+    // LocalPostImageActions inside TopicPostCard). Hosted at the same level as PostMenuSheet so
+    // the two sheets share one lifecycle model.
+    imageMenuTarget?.let { target ->
+        PostImageMenuSheet(
+            target = target,
+            onSave = imageActionsViewModel::saveImage,
+            onDismiss = { imageMenuTarget = null },
         )
     }
 }
@@ -2092,6 +2139,14 @@ internal fun TopicPostCard(
      * Null keeps the headers inert (previews/tests that render a card without navigation).
      */
     onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
+    /**
+     * #831 — provided as [LocalPostImageActions] around the BODY renderer only, so a long-press
+     * on a post image (inline `[img]`, block, promoted) opens the image contextual menu. The
+     * signature render below stays OUTSIDE the provider on purpose — signatures keep their
+     * historical inert images, same stance as MP threads and the editor preview (default null).
+     * Null (previews/tests) leaves every image inert.
+     */
+    onImageLongPress: ((PostImageTarget) -> Unit)? = null,
 ) {
     // #287 — structural spacing from the active density preset (Comfort = the historical rhythm).
     val m = LocalDisplayMetrics.current
@@ -2164,7 +2219,15 @@ internal fun TopicPostCard(
                 verticalArrangement = Arrangement.spacedBy(m.postSpacing),
             ) {
                 // #281 — topic posts are selectable/copyable (opt-in; default is OFF in PostRenderer).
-                PostRenderer(content = post.content, selectable = true, onGoToCitedPost = onGoToCitedPost)
+                // #831 — the image-actions handler rides a CompositionLocal read inside the two image
+                // render paths of PostRenderer, so neither the frozen content models nor the invariant
+                // AnnotatedString (#175) change. Wrapped around the BODY only (cf. onImageLongPress KDoc).
+                val imageActions = remember(onImageLongPress) {
+                    onImageLongPress?.let { PostImageActions(onLongPress = it) }
+                }
+                CompositionLocalProvider(LocalPostImageActions provides imageActions) {
+                    PostRenderer(content = post.content, selectable = true, onGoToCitedPost = onGoToCitedPost)
+                }
                 // #330 — the author signature (web parity), gated by the reading preference. Rendered
                 // with the shared PostRenderer (the signature is BBCode/HTML like the body) but in a
                 // subdued style: a divider separates it from the body and a reduced alpha makes it

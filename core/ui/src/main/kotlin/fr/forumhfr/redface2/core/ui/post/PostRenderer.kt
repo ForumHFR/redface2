@@ -2,6 +2,8 @@ package fr.forumhfr.redface2.core.ui.post
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -42,12 +44,18 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.hapticfeedback.HapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.Placeholder
@@ -833,20 +841,54 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
                 .defaultMinSize(minHeight = PostMediaDisplayPolicy.blockImageMinHeight)
                 .heightIn(max = PostMediaDisplayPolicy.blockImageMaxHeight)
         }
+        // #831 — contextual image menu on long-press. The tap contract is preserved EXACTLY (Codex
+        // framing, firm reserve): a linked image (#257) keeps its tap-through and gains the
+        // long-press through ONE combinedClickable (a tap already exists there); an unlinked block
+        // image gets a long-press-ONLY handler (no onClick — its tap stays inert as before). When
+        // the surface provides no actions (MP threads, editor preview, signatures: default null),
+        // or the URL is not actionable (data:/blob:/empty), the historical modifiers are
+        // reproduced verbatim.
+        val imageActions = LocalPostImageActions.current?.takeIf { isEligiblePostImageUrl(url) }
+        val interactionModifier = when {
+            imageActions != null && linkUrl != null ->
+                // Role.Image (not Button): the element IS an image that opens its full version on
+                // tap; the localized labels carry both actions for TalkBack. combinedClickable
+                // brings the built-in long-press haptics (#436 precedent, MultiQuoteFab).
+                Modifier.combinedClickable(
+                    role = Role.Image,
+                    onClickLabel = openLabel,
+                    onLongClickLabel = stringResource(R.string.post_image_options_action),
+                    onLongClick = {
+                        imageActions.onLongPress(
+                            PostImageTarget(url = url, description = description, linkUrl = linkUrl),
+                        )
+                    },
+                ) {
+                    runCatching { uriHandler.openUri(linkUrl) }
+                }
+
+            imageActions != null -> Modifier.postImageLongPress(
+                actions = imageActions,
+                target = PostImageTarget(url = url, description = description, linkUrl = null),
+                haptics = LocalHapticFeedback.current,
+                optionsLabel = stringResource(R.string.post_image_options_action),
+            )
+
+            linkUrl != null ->
+                // Role.Image (not Button): the element IS an image that opens its full version on
+                // tap; the localized onClickLabel carries the action for TalkBack.
+                Modifier.clickable(role = Role.Image, onClickLabel = openLabel) {
+                    runCatching { uriHandler.openUri(linkUrl) }
+                }
+
+            else -> Modifier
+        }
+        // #610 — the exact parity box centres via the BoxWithConstraints contentAlignment; no
+        // fillMaxWidth here (the pre-#610 full-width shape is gone).
         val containerModifier = sizeModifier
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-            .then(
-                if (linkUrl != null) {
-                    // Role.Image (not Button): the element IS an image that opens its full version on
-                    // tap; the localized onClickLabel carries the action for TalkBack.
-                    Modifier.clickable(role = Role.Image, onClickLabel = openLabel) {
-                        runCatching { uriHandler.openUri(linkUrl) }
-                    }
-                } else {
-                    Modifier
-                },
-            )
+            .then(interactionModifier)
         val request = remember(url, animationsEnabled, platformContext) {
             ImageRequest.Builder(platformContext)
                 .data(url)
@@ -1497,14 +1539,66 @@ internal fun imageInlineContent(image: PostInline.InlineImage, box: InlineMediaB
                 .precision(Precision.INEXACT)
                 .build()
         }
+        // #831 — the hosting surface (topic reading) may provide image actions; the lambda of an
+        // InlineTextContent is @Composable, so the CompositionLocal is read HERE, without touching
+        // the invariant AnnotatedString (#175) nor the remember keys of ParagraphBlock. Codex
+        // framing (firm reserve): LONG-PRESS ONLY — no combinedClickable / no-op onClick on inline
+        // images, which would eat the tap and disturb text selection around the image. The
+        // long-press detector does claim the initial down, which is precisely what keeps the
+        // parent SelectionContainer (#281) from starting a word selection under a finger resting
+        // on the image; selection drags STARTED on the surrounding text still travel across the
+        // image unaffected, and taps outside the image keep their behaviour.
+        val imageActions = LocalPostImageActions.current
+        val longPressModifier = if (imageActions != null && isEligiblePostImageUrl(image.url)) {
+            Modifier.postImageLongPress(
+                actions = imageActions,
+                target = PostImageTarget(url = image.url, description = image.description, linkUrl = null),
+                haptics = LocalHapticFeedback.current,
+                optionsLabel = stringResource(R.string.post_image_options_action),
+            )
+        } else {
+            Modifier
+        }
         AsyncImage(
             model = request,
             contentDescription = image.description,
             contentScale = PostMediaDisplayPolicy.inlineImageContentScale,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().then(longPressModifier),
         )
     }
 }
+
+/**
+ * #831 — long-press-ONLY gesture + a11y surface for a post image. Deliberately NOT a
+ * `combinedClickable`: that would install an onClick and consume every tap (Codex framing, firm
+ * reserve — cf. the call-site comments for the tap contracts it would break). `detectTapGestures`
+ * with only `onLongPress` set fires the haptic + the action on a stationary long press and nothing
+ * on a tap; the `semantics` block exposes the same action to TalkBack as a custom long-click
+ * action labelled [optionsLabel] (`combinedClickable`'s `onLongClickLabel` equivalent).
+ *
+ * Non-composable on purpose (the resolved [haptics]/[optionsLabel] come in as parameters):
+ * composable `Modifier` factories are flagged by the Compose lint (`ComposableModifierFactory`).
+ */
+private fun Modifier.postImageLongPress(
+    actions: PostImageActions,
+    target: PostImageTarget,
+    haptics: HapticFeedback,
+    optionsLabel: String,
+): Modifier = this
+    .pointerInput(actions, target) {
+        detectTapGestures(
+            onLongPress = {
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                actions.onLongPress(target)
+            },
+        )
+    }
+    .semantics {
+        onLongClick(label = optionsLabel) {
+            actions.onLongPress(target)
+            true
+        }
+    }
 
 internal fun smileyInlineContent(
     smiley: PostInline.Smiley,
