@@ -5,6 +5,7 @@ import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 import fr.forumhfr.redface2.core.ui.editor.UploadProgressLabel
 import fr.forumhfr.redface2.core.ui.editor.bannerText
 
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
 import androidx.activity.compose.BackHandler
@@ -106,6 +107,9 @@ fun PostEditorScreen(
     PostEditorContent(
         state = state,
         onIntent = remember(viewModel) { { intent: PostEditorIntent -> viewModel.submit(intent) } },
+        // #441 — the picker is driven by the shared controller (same wiring as the MP
+        // composers, cf. PrivateMessageReplyScreen) ; only SmileySelected stays an intent.
+        smileyPicker = viewModel.smileyPicker,
         modifier = modifier,
     )
 }
@@ -114,6 +118,7 @@ fun PostEditorScreen(
 private fun PostEditorContent(
     state: PostEditorState,
     onIntent: (PostEditorIntent) -> Unit,
+    smileyPicker: SmileyPickerController,
     modifier: Modifier = Modifier,
 ) {
     var imageUrlDialogOpen by remember { mutableStateOf(false) }
@@ -285,22 +290,23 @@ private fun PostEditorContent(
                         onConfirmSubmit = { onIntent(PostEditorIntent.SubmitConfirmed) },
                         onDisarmConfirm = { onIntent(PostEditorIntent.SubmitConfirmationDismissed) },
                         onOpenOptions = { optionsSheetOpen = true },
-                        onOpenSmileys = { onIntent(PostEditorIntent.SmileyPickerOpened) },
+                        onOpenSmileys = smileyPicker::open,
                     ),
                 )
             }
         }
         // Phase 2F-B (#11) — bottom-sheet smiley picker. Rendered as a sibling of the
         // Column so the sheet can scrim the editor without being constrained by the
-        // verticalScroll above. Visibility is owned by the ViewModel via
-        // `SmileyPickerState` ; dismissal goes through the dedicated intent so the
-        // ViewModel can cancel any in-flight wiki search at the same time.
-        val picker = state.smileyPicker
-        if (picker is SmileyPickerState.Open) {
+        // verticalScroll above. #441 — visibility is owned by the shared
+        // SmileyPickerController ; dismissal goes through the controller (which cancels
+        // any in-flight wiki search and snapshots the search for the #824 restore), while
+        // the insertion stays an MVI intent (draft mutation).
+        val pickerState by smileyPicker.state.collectAsStateWithLifecycle()
+        (pickerState as? SmileyPickerState.Open)?.let { picker ->
             SmileyPickerSheet(
                 state = picker,
-                onDismiss = { onIntent(PostEditorIntent.SmileyPickerDismissed) },
-                onQueryChange = { query -> onIntent(PostEditorIntent.SmileySearchQueryChanged(query)) },
+                onDismiss = smileyPicker::dismiss,
+                onQueryChange = smileyPicker::onQueryChanged,
                 onSmileyClicked = { token -> onIntent(PostEditorIntent.SmileySelected(token)) },
             )
         }
