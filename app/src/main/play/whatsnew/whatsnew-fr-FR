@@ -1,4 +1,4 @@
-Redface 2 v0.26.2 — dev.
+Redface 2 v0.26.3 — dev.
 
-- Écriture sur petit écran : le champ de saisie et « Envoyer » restent toujours visibles, même clavier ouvert avec plusieurs citations.
-- Fermer la réponse rapide ne demande plus qu'un seul retour (fini l'arrêt à mi-hauteur).
+- Le sélecteur de smileys respecte l'échelle du forum : standards petits et nets, persos en grand.
+- Tourner l'écran dans une conversation MP ne ramène plus à la liste des messages.

@@ -16,6 +16,16 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.26.3` — `internal` (dev) — 2026-07-10
+
+**Suite de la nuit rf2-12** (lot d'issues non démarrées de la phase).
+
+### Éditeur
+- #816 (suggestion thibw) : le **sélecteur de smileys respecte l'échelle du forum** (PR #865) — les standards s'affichent près de leur taille native (petits, pixel-art net), les persos remplissent la cellule. Fini l'uniforme 30 dp qui rendait les standards énormes et flous et les persos à l'étroit.
+
+### Messages privés
+- #812 : **tourner l'écran dans une conversation ne ramène plus à la liste des MP** (PR #866) — le nettoyage de session se rejouait à chaque recréation d'activité et résetait la pile de navigation Messages ; il est désormais limité aux vraies transitions de session (login, logout, changement de compte).
+
 ## `0.26.2` — `internal` (dev) — 2026-07-10
 
 **Écriture sur écran court** (retour de la checklist de test, thibw — PR #861, cadrage + gate Codex GO, dogfood émulateur 1080×1700 et 1080×2400).
