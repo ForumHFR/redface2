@@ -96,7 +96,12 @@ internal fun QuickReplySheet(
     // refresh) or replay it at the next opening. `submitting` is read through
     // rememberUpdatedState because both guards below are remembered once.
     val submitting = rememberUpdatedState(state.isSubmitting)
+    // #854 — no half-height stop : this is a TYPING surface (autofocused field, IME quasi
+    // permanent), the M3 PartiallyExpanded state only ever appears when a short display makes
+    // the content taller than half the screen — and then a back/swipe must dismiss in ONE step,
+    // not park the sheet at mid-height (thibw : « 3× retour pour revenir au topic »).
     val sheetState = rememberModalBottomSheetState(
+        skipPartiallyExpanded = true,
         confirmValueChange = { target -> target != SheetValue.Hidden || !submitting.value },
     )
     ModalBottomSheet(
@@ -113,92 +118,99 @@ internal fun QuickReplySheet(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp)
                 .imePadding()
-                .navigationBarsPadding()
-                // #604 lot 4a — the sheet content scrolls : with the keyboard up (~40 % of the
-                // screen), two cards + the field + Envoyer can overflow a small or landscape
-                // display, leaving the send button unreachable (cadrage Codex, item 1).
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+                .navigationBarsPadding(),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = stringResource(R.string.quick_reply_title),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.weight(1f),
-                )
-                IconButton(
-                    onClick = viewModel::onEscalateRequested,
-                    // Gate #788 — no escalation while a POST is in flight (submit vs navigation
-                    // race) ; #805 — nor while a [quotemsg] insert is being fetched.
-                    enabled = !state.isSubmitting && !state.isPreparingQuotes,
-                    modifier = Modifier.semantics { contentDescription = fullScreenLabel },
-                ) {
-                    RedfaceVectorIcon(
-                        resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_ms_open_in_new,
-                    )
-                }
-            }
-            // #604 lot 4a — shared column : cards + live-region announcements + post-removal
-            // focus (always composed ; renders nothing visible without cards).
-            // #808 — the cards block is CAPPED and scrolls internally so a heavy selection can
-            // never push the field and « Envoyer » under the IME fold : the field is the priority
-            // surface. Same pattern as the editor's EditorQuoteCards (192dp) and
-            // RecipientManagerSheet. Unconditional cap (no isImeVisible gate) : the field
-            // autofocuses on open so the IME is quasi-permanent here, and the cap also covers
-            // landscape ; nested same-direction scroll has a working precedent in
-            // RecipientManagerSheet.
-            QuoteCardsColumn(
-                quotes = state.quotes,
-                enabled = !state.isSubmitting,
-                callbacks = QuoteCardsCallbacks(
-                    onMoveUp = { numreponse -> viewModel.onQuoteMoved(numreponse, delta = -1) },
-                    onMoveDown = { numreponse -> viewModel.onQuoteMoved(numreponse, delta = 1) },
-                    onRemove = viewModel::onQuoteRemoved,
-                ),
+            // #855 — only the FIELDS scroll ; « Envoyer » is pinned OUTSIDE the scroll, always
+            // visible above the IME. Before this, the whole column scrolled (#604 lot 4a) and on
+            // a short display the send button silently sat below the keyboard fold (thibw).
+            // weight(fill = false) : take AT MOST the space above the pinned row, never stretch
+            // the sheet taller than its natural content on a roomy display.
+            Column(
                 modifier = Modifier
-                    .heightIn(max = QUICK_REPLY_MAX_CARDS_HEIGHT)
-                    .verticalScroll(rememberScrollState())
-                    .testTag("quick_reply_quote_cards"),
-            )
-            OutlinedTextField(
-                value = state.text,
-                onValueChange = viewModel::onTextChanged,
-                enabled = !state.isSubmitting,
-                // #807 — same #237 contract as BbcodeTextField : Compose capitalises NOTHING by
-                // default, the IME needs the explicit autoCap hint (surface regression, v220).
-                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                placeholder = { Text(stringResource(R.string.quick_reply_hint)) },
-                minLines = 3,
-                maxLines = 6,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .focusRequester(focusRequester),
-            )
-            // #805 cards OFF — the [quotemsg] fetch runs at opening : typing stays enabled (the
-            // insert concatenates onto the live field), only send/escalate wait for it.
-            if (state.isPreparingQuotes) {
+                    .weight(1f, fill = false)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.padding(end = 8.dp).size(16.dp),
-                        strokeWidth = 2.dp,
-                    )
                     Text(
-                        text = stringResource(R.string.quick_reply_preparing_quote),
+                        text = stringResource(R.string.quick_reply_title),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(
+                        onClick = viewModel::onEscalateRequested,
+                        // Gate #788 — no escalation while a POST is in flight (submit vs navigation
+                        // race) ; #805 — nor while a [quotemsg] insert is being fetched.
+                        enabled = !state.isSubmitting && !state.isPreparingQuotes,
+                        modifier = Modifier.semantics { contentDescription = fullScreenLabel },
+                    ) {
+                        RedfaceVectorIcon(
+                            resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_ms_open_in_new,
+                        )
+                    }
+                }
+                // #604 lot 4a — shared column : cards + live-region announcements + post-removal
+                // focus (always composed ; renders nothing visible without cards).
+                // #808 — the cards block is CAPPED and scrolls internally so a heavy selection can
+                // never push the field and « Envoyer » under the IME fold : the field is the priority
+                // surface. Same pattern as the editor's EditorQuoteCards (192dp) and
+                // RecipientManagerSheet. Unconditional cap (no isImeVisible gate) : the field
+                // autofocuses on open so the IME is quasi-permanent here, and the cap also covers
+                // landscape ; nested same-direction scroll has a working precedent in
+                // RecipientManagerSheet.
+                QuoteCardsColumn(
+                    quotes = state.quotes,
+                    enabled = !state.isSubmitting,
+                    callbacks = QuoteCardsCallbacks(
+                        onMoveUp = { numreponse -> viewModel.onQuoteMoved(numreponse, delta = -1) },
+                        onMoveDown = { numreponse -> viewModel.onQuoteMoved(numreponse, delta = 1) },
+                        onRemove = viewModel::onQuoteRemoved,
+                    ),
+                    modifier = Modifier
+                        .heightIn(max = QUICK_REPLY_MAX_CARDS_HEIGHT)
+                        .verticalScroll(rememberScrollState())
+                        .testTag("quick_reply_quote_cards"),
+                )
+                OutlinedTextField(
+                    value = state.text,
+                    onValueChange = viewModel::onTextChanged,
+                    enabled = !state.isSubmitting,
+                    // #807 — same #237 contract as BbcodeTextField : Compose capitalises NOTHING by
+                    // default, the IME needs the explicit autoCap hint (surface regression, v220).
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                    placeholder = { Text(stringResource(R.string.quick_reply_hint)) },
+                    minLines = 3,
+                    maxLines = 6,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(focusRequester),
+                )
+                // #805 cards OFF — the [quotemsg] fetch runs at opening : typing stays enabled (the
+                // insert concatenates onto the live field), only send/escalate wait for it.
+                if (state.isPreparingQuotes) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.padding(end = 8.dp).size(16.dp),
+                            strokeWidth = 2.dp,
+                        )
+                        Text(
+                            text = stringResource(R.string.quick_reply_preparing_quote),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                state.submitError?.let { error ->
+                    Text(
+                        text = stringResource(error.messageRes()),
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = MaterialTheme.colorScheme.error,
                     )
                 }
-            }
-            state.submitError?.let { error ->
-                Text(
-                    text = stringResource(error.messageRes()),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
             }
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
