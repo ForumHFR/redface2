@@ -1,4 +1,4 @@
-Redface 2 v0.26.2 — dev.
+Redface 2 v0.26.3 — dev.
 
-- Writing on small screens: the text field and "Send" always stay visible, even with the keyboard up and several quote cards.
-- Closing the quick reply takes a single back press again (no more half-height stop).
+- The smiley picker respects the forum's scale: standard smileys small and crisp, perso smileys large.
+- Rotating the screen inside a PM conversation no longer kicks you back to the message list.
