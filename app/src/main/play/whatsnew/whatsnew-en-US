@@ -1,4 +1,4 @@
-Redface 2 v0.26.1 — dev.
+Redface 2 v0.26.2 — dev.
 
-- Square and portrait images finally fill ~90% of the width (height cap recalibrated for mobile).
-- The "draft found" message (Restore / Discard) is back when opening the editor with a pending draft.
+- Writing on small screens: the text field and "Send" always stay visible, even with the keyboard up and several quote cards.
+- Closing the quick reply takes a single back press again (no more half-height stop).

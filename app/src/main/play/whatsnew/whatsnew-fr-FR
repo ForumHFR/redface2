@@ -1,4 +1,4 @@
-Redface 2 v0.26.1 — dev.
+Redface 2 v0.26.2 — dev.
 
-- Les images carrées et portrait remplissent enfin ~90 % de la largeur (le plafond de hauteur est recalibré pour mobile).
-- Le message « brouillon retrouvé » (Restaurer / Ignorer) est de retour quand on ouvre l'éditeur avec un brouillon en attente.
+- Écriture sur petit écran : le champ de saisie et « Envoyer » restent toujours visibles, même clavier ouvert avec plusieurs citations.
+- Fermer la réponse rapide ne demande plus qu'un seul retour (fini l'arrêt à mi-hauteur).
