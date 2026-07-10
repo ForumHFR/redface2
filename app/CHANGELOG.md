@@ -16,6 +16,15 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.26.2` — `internal` (dev) — 2026-07-10
+
+**Écriture sur écran court** (retour de la checklist de test, thibw — PR #861, cadrage + gate Codex GO, dogfood émulateur 1080×1700 et 1080×2400).
+
+### Éditeur & réponse rapide
+- Le **champ de saisie n'est plus jamais écrasé par le clavier** (réf #555) : dans l'éditeur plein écran, tout ce qui concurrence le champ (bannière de brouillon, bandeaux d'erreur, cartes de citation) vit dans une zone haute budgétée qui défile au-delà de son budget — le champ garde 96 dp minimum par construction. À l'apparition d'une alerte, la zone se recale en haut.
+- **« Envoyer » toujours visible dans la réponse rapide** (réf #855) : seule la zone des champs défile, la rangée « Envoyer » est épinglée au-dessus du clavier.
+- **Fermer la réponse rapide = un seul retour** (réf #854) : la feuille ne s'arrête plus à mi-hauteur quand un petit écran l'avait forcée en pleine hauteur (fini le « 3× retour pour revenir au sujet »).
+
 ## `0.26.1` — `internal` (dev) — 2026-07-07
 
 **Réponses aux deux premiers retours du fil DEV sur la 0.26.0** (même soirée).
