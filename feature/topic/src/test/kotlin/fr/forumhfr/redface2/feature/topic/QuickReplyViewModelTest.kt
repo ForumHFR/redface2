@@ -340,7 +340,9 @@ class QuickReplyViewModelTest {
         advanceUntilIdle()
 
         val state = viewModel.state.value
-        assertEquals("brouillon\n\n[quotemsg=101]corps[/quotemsg]", state.text.text)
+        // #881 — exactly one trailing newline: typing starts under the citation.
+        assertEquals("brouillon\n\n[quotemsg=101]corps[/quotemsg]\n", state.text.text)
+        assertEquals(state.text.text.length, state.text.selection.start)
         assertTrue(state.quotes.isEmpty())
         assertFalse(state.isPreparingQuotes)
         // Prefetch (plain) then the quote form — whose hash the later submit rides.
@@ -355,7 +357,7 @@ class QuickReplyViewModelTest {
         advanceUntilIdle()
 
         assertEquals(
-            "[quotemsg=202]corps[/quotemsg]\n\n[quotemsg=101]corps[/quotemsg]",
+            "[quotemsg=202]corps[/quotemsg]\n\n[quotemsg=101]corps[/quotemsg]\n",
             viewModel.state.value.text.text,
         )
         assertTrue(viewModel.state.value.quotes.isEmpty())
@@ -378,7 +380,7 @@ class QuickReplyViewModelTest {
         advanceUntilIdle()
 
         val state = viewModel.state.value
-        assertEquals("pendant le fetch\n\n[quotemsg=101]corps[/quotemsg]", state.text.text)
+        assertEquals("pendant le fetch\n\n[quotemsg=101]corps[/quotemsg]\n", state.text.text)
         assertFalse(state.isPreparingQuotes)
         assertTrue(state.canSubmit)
     }
@@ -452,7 +454,7 @@ class QuickReplyViewModelTest {
         val state = viewModel.state.value
         assertTrue("no card survives an OFF opening", state.quotes.isEmpty())
         assertEquals(
-            "[quotemsg=101]corps[/quotemsg]\n\n[quotemsg=202]corps[/quotemsg]",
+            "[quotemsg=101]corps[/quotemsg]\n\n[quotemsg=202]corps[/quotemsg]\n",
             state.text.text,
         )
     }

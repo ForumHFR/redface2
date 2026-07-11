@@ -1727,6 +1727,24 @@ class PostEditorViewModelTest {
     }
 
     @Test
+    fun `cards OFF - a quote block ending the field carries exactly one trailing newline`() = runTest {
+        // #881 — typing starts under the citation : one normalised newline (never two, never
+        // the raw HFR trailing newline), caret on the fresh line.
+        replyRepository.formResultsByNumrep = mapOf(
+            101 to Result.success(authenticatedForm(initialContent = "[quotemsg=101,1,9]a[/quotemsg]\n\n")),
+        )
+        val viewModel = newReplyViewModel(
+            initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false),
+        )
+        testScheduler.advanceUntilIdle()
+
+        val draft = viewModel.state.value.draft
+        assertEquals("[quotemsg=101,1,9]a[/quotemsg]\n", draft.text)
+        assertEquals("caret sits after the newline", draft.text.length, draft.selection.start)
+    }
+
+    @Test
     fun `cards OFF - resumeSharedDraft appends after the prefill with exactly one quote block`() = runTest {
         // Réserve Codex n°5 — the #790 trio restored : quote-form hydration (prepend) + shared-row
         // append must compose to ONE [quotemsg] block and a stable order, whichever lands first.
