@@ -6,9 +6,12 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -72,6 +75,34 @@ class TopicTopBarTitleExpandTest {
         composeTestRule.onNode(withStateDescription(EXPANDED_STATE)).assertHasClickAction()
         composeTestRule.onNodeWithText(LONG_TITLE).performClick()
         composeTestRule.onNode(withStateDescription(COLLAPSED_STATE)).assertHasClickAction()
+    }
+
+    @Test
+    fun `a long press emits the flag-removal intent while a short tap still toggles (#809)`() {
+        val intents = mutableListOf<TopicIntent>()
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                TopicTopBar(
+                    state = sampleState(),
+                    barTitle = LONG_TITLE,
+                    barPageIndicator = "page 3 / 10",
+                    backLabel = "Retour",
+                    scrollBehavior = null,
+                    onBack = {},
+                    onIntent = { intents += it },
+                )
+            }
+        }
+
+        // A long press fires the drapeau-removal intent and does NOT toggle the title (combinedClickable
+        // routes a long press to onLongClick only): the title stays collapsed and clickable.
+        composeTestRule.onNodeWithText(LONG_TITLE).performTouchInput { longClick() }
+        assertEquals(listOf<TopicIntent>(TopicIntent.RequestRemoveTopicFlag), intents)
+        composeTestRule.onNode(withStateDescription(COLLAPSED_STATE)).assertHasClickAction()
+
+        // A short tap still toggles to expanded — the #772 tap contract survives the #809 long-press wiring.
+        composeTestRule.onNodeWithText(LONG_TITLE).performClick()
+        composeTestRule.onNode(withStateDescription(EXPANDED_STATE)).assertHasClickAction()
     }
 
     private fun withStateDescription(value: String): SemanticsMatcher =

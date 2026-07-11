@@ -11,6 +11,7 @@ import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.blacklist.BlacklistRepository
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
+import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.search.SearchRepository
 import fr.forumhfr.redface2.core.domain.topic.NoTopicSearchResultsException
@@ -51,7 +52,12 @@ import kotlinx.coroutines.withTimeoutOrNull
  * synthetic chain of pages.
  */
 @HiltViewModel(assistedFactory = TopicViewModel.Factory::class)
-@Suppress("LongParameterList") // ViewModel aggregates its injected repositories; one per concern.
+// LongParameterList: the ViewModel aggregates its injected repositories, one per concern.
+// LargeClass (#809): the topic ViewModel is the reading surface's single MVI hub — load / pagination /
+// refresh / delete / intra-topic search / flag removal all live here by design (same aggregator shape
+// as FlagsViewModel). Adding the #809 flow tipped it over the threshold; splitting the hub is a
+// separate refactor, tracked rather than forced by this feature.
+@Suppress("LongParameterList", "LargeClass")
 class TopicViewModel @AssistedInject constructor(
     // #750 — `var`, not `val`: when [TopicRequest.resolveScrollToPage] is set the real target page
     // is only known after the resolution probe; the resolved request then REPLACES this one (and
@@ -65,6 +71,9 @@ class TopicViewModel @AssistedInject constructor(
     private val blacklistRepository: BlacklistRepository,
     private val topicSearchRepository: TopicSearchRepository,
     private val searchRepository: SearchRepository,
+    // #809 — plain Hilt dependency (the assisted Factory is unchanged): resolves + removes THIS
+    // topic's drapeau for the top-bar long-press.
+    private val flagRepository: FlagRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(TopicUiState.initial(request))
@@ -207,6 +216,7 @@ class TopicViewModel @AssistedInject constructor(
             is TopicIntent.DeletePost -> deletePost(intent.numreponse)
             TopicIntent.Refresh -> refresh()
             is TopicIntent.SetAuthorBlocked -> setAuthorBlocked(intent.author, intent.blocked)
+            TopicIntent.RequestRemoveTopicFlag -> requestRemoveTopicFlag()
             TopicIntent.OpenSearch -> openSearch()
             TopicIntent.CloseSearch -> closeSearch()
             is TopicIntent.SearchWordChanged ->
@@ -670,6 +680,93 @@ class TopicViewModel @AssistedInject constructor(
             } catch (@Suppress("TooGenericExceptionCaught") refreshError: Exception) {
                 android.util.Log.w(LOG_TAG, "Post-delete refresh failed", refreshError)
                 loadCurrentPage()
+            }
+        }
+    }
+
+    // ─── remove topic flag (#809) ─────────────────────────────────────────────────
+
+    /**
+     * #809 — drives the top-bar long-press « Retirer le drapeau » interaction. Explicit MVI state so
+     * the confirmation gates the delflag call and the anti double-press guard is observable. The
+     * [RemoveTopicFlagState.Resolving] step (which FlagsViewModel lacks — it already holds the Flag)
+     * covers the async lookup that may fan out the network on a cold flag cache.
+     */
+    private val _removeTopicFlagState = MutableStateFlow<RemoveTopicFlagState>(RemoveTopicFlagState.Idle)
+    val removeTopicFlagState: StateFlow<RemoveTopicFlagState> = _removeTopicFlagState.asStateFlow()
+
+    /**
+     * #809 — user long-pressed the title : resolve THIS topic's drapeau, then either raise the
+     * confirmation dialog ([RemoveTopicFlagState.Confirming]) or emit [TopicEffect.TopicFlagNotFound]
+     * (topic not flagged, anonymous, or an unresolvable lookup — see below). The outcome rides the
+     * screen's single [effects] channel like every other one-shot Toast (review finding : no parallel
+     * consumable StateFlow). No-op while a lookup or a removal is already running, so a second
+     * long-press during the (possibly network-bound) resolve cannot launch a duplicate.
+     */
+    @Suppress("TooGenericExceptionCaught") // gate #809 — any resolve failure folds to NotFound below;
+    // cancellation is rethrown after releasing the state.
+    fun requestRemoveTopicFlag() {
+        val current = _removeTopicFlagState.value
+        if (current is RemoveTopicFlagState.Resolving || current is RemoveTopicFlagState.Removing) return
+        _removeTopicFlagState.value = RemoveTopicFlagState.Resolving
+        viewModelScope.launch {
+            // Gate Codex #809 — findFlag can die mid-resolve (an in-flight fetch cancelled by an
+            // account switch, an unexpected runtime failure) : fold it to « unresolvable » instead of
+            // leaving the state wedged in Resolving with no event — the long-press would otherwise be
+            // dead until the VM is recreated. CancellationException is rethrown (the scope is going
+            // away) AFTER releasing the state.
+            val flag = try {
+                flagRepository.findFlag(cat = request.cat, topicId = request.post)
+            } catch (cancelled: CancellationException) {
+                _removeTopicFlagState.value = RemoveTopicFlagState.Idle
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
+            if (flag != null) {
+                _removeTopicFlagState.value = RemoveTopicFlagState.Confirming(flag)
+            } else {
+                _effects.send(TopicEffect.TopicFlagNotFound)
+                _removeTopicFlagState.value = RemoveTopicFlagState.Idle
+            }
+        }
+    }
+
+    /** #809 — user dismissed the confirmation dialog without confirming. */
+    fun cancelRemoveTopicFlag() {
+        if (_removeTopicFlagState.value is RemoveTopicFlagState.Confirming) {
+            _removeTopicFlagState.value = RemoveTopicFlagState.Idle
+        }
+    }
+
+    /**
+     * #809 — user confirmed in the dialog : move to [RemoveTopicFlagState.Removing] (disables the
+     * action), call the repository, then emit the one-shot outcome on [effects]. The repository owns
+     * the cache reconciliation, so nothing optimistic happens here.
+     */
+    fun confirmRemoveTopicFlag() {
+        val confirming = _removeTopicFlagState.value as? RemoveTopicFlagState.Confirming ?: return
+        val flag = confirming.flag
+        _removeTopicFlagState.value = RemoveTopicFlagState.Removing(flag)
+        viewModelScope.launch {
+            try {
+                // Review #809 — removeFlag CAN throw outside its Result (evictFlagFromCaches runs in
+                // `.onSuccess`, past the internal runCatching) : fold a raw throw to Failure so the
+                // user still gets feedback instead of a crash. Cancellation propagates untouched
+                // (the finally below releases the lock either way).
+                val result = runCatching { flagRepository.removeFlag(flag) }
+                    .getOrElse { raised ->
+                        if (raised is CancellationException) throw raised
+                        Result.failure(raised)
+                    }
+                _effects.send(
+                    if (result.isSuccess) TopicEffect.TopicFlagRemoved else TopicEffect.TopicFlagRemovalFailed,
+                )
+            } finally {
+                // #603 audit fix (fork #5) — always release the Removing lock, even if removeFlag
+                // throws outside its Result (or the coroutine is cancelled). Otherwise the state stays
+                // Removing forever and the anti double-tap guard wedges until the VM is recreated.
+                _removeTopicFlagState.value = RemoveTopicFlagState.Idle
             }
         }
     }

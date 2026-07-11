@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.topic
 
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
+import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 
@@ -209,6 +210,13 @@ sealed interface TopicIntent {
      */
     data class SetAuthorBlocked(val author: String, val blocked: Boolean) : TopicIntent
 
+    /**
+     * #809 — a long-press on the top-bar title requests removing THIS topic's drapeau. Carries no
+     * payload : the ViewModel already knows the topic from its [TopicRequest] and resolves the full
+     * [fr.forumhfr.redface2.core.model.Flag] through `FlagRepository.findFlag` before confirming.
+     */
+    data object RequestRemoveTopicFlag : TopicIntent
+
     // ─── intra-topic search (#546) ───────────────────────────────────────────────
 
     /** Open the search bar. No-op if the loaded page has no usable search form. */
@@ -341,4 +349,41 @@ sealed interface TopicEffect {
      * sober Toast (« Aucun résultat suivant ») and the next arrow disables.
      */
     data object SearchResultsEnd : TopicEffect
+
+    // ─── #809 — one-shot outcomes of the title long-press flag removal. They ride THIS channel
+    // (the screen's single effects collector + Toast surface, like PostDeleted) rather than a
+    // parallel consumable StateFlow — one one-shot mechanism per screen (review finding).
+
+    /** #809 — `delflag.php` confirmed the removal ; the Drapeaux caches are already reconciled. */
+    data object TopicFlagRemoved : TopicEffect
+
+    /** #809 — the removal failed (refused, transport, session) ; nothing was touched. */
+    data object TopicFlagRemovalFailed : TopicEffect
+
+    /**
+     * #809 — the long-press resolved to no removable drapeau : topic not flagged, anonymous
+     * session, or an unresolvable lookup (resolve failure folds here — cf. TopicViewModel).
+     */
+    data object TopicFlagNotFound : TopicEffect
 }
+
+/**
+ * #809 — drives the « Retirer le drapeau » long-press interaction on the topic top bar. MVI-style
+ * explicit state so the confirmation gates the network call. Mirrors FlagsViewModel's
+ * `RemoveFlagState`, plus a [Resolving] step the Drapeaux view never needs : that screen already
+ * holds the [Flag], whereas the topic screen must first resolve it through `FlagRepository.findFlag`
+ * (which may fan out the network on a cold cache).
+ *
+ * - [Idle] — nothing pending.
+ * - [Resolving] — the long-press fired ; the flag lookup is in flight. Blocks a second long-press.
+ * - [Confirming] — a drapeau was found ; the screen shows the confirmation dialog ([flag] feeds its
+ *   title). Absent this state, no dialog.
+ * - [Removing] — the user confirmed ; the `delflag.php` call is in flight (anti double-tap).
+ */
+sealed interface RemoveTopicFlagState {
+    data object Idle : RemoveTopicFlagState
+    data object Resolving : RemoveTopicFlagState
+    data class Confirming(val flag: Flag) : RemoveTopicFlagState
+    data class Removing(val flag: Flag) : RemoveTopicFlagState
+}
+

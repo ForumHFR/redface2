@@ -95,6 +95,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.domain.author.isRf2Creator
+import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.Poll
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.Topic
@@ -342,6 +343,10 @@ fun TopicScreen(
     val searchFailedMsg = stringResource(R.string.topic_search_failed)
     // Chantier B (#546) — « no further result » Toast (resolved upfront, same rationale).
     val searchResultsEndMsg = stringResource(R.string.topic_search_results_end)
+    // #809 — flag-removal feedback messages (resolved upfront, same rationale).
+    val flagRemovedMsg = stringResource(R.string.topic_remove_flag_success)
+    val flagRemoveFailedMsg = stringResource(R.string.topic_remove_flag_failure)
+    val flagNotFoundMsg = stringResource(R.string.topic_remove_flag_not_found)
     // #292 — delete feedback messages, resolved upfront (same rationale as refreshFailedMsg).
     val deleteSuccessMsg = stringResource(R.string.topic_post_delete_success)
     val deleteFailedLoginMsg = stringResource(R.string.topic_post_delete_failed_login)
@@ -350,6 +355,10 @@ fun TopicScreen(
     // #292 — `numreponse` awaiting delete confirmation (null = no dialog). Local UI state: the
     // confirmation is a pure view concern, only the confirmed deletion reaches the ViewModel.
     var deleteCandidate by rememberSaveable { mutableStateOf<Int?>(null) }
+    // #809 — long-press flag removal. The confirmation dialog is state-driven (the ViewModel owns the
+    // resolve → confirm → remove flow); the outcomes ride the screen's single TopicEffect collector
+    // below, like every other one-shot Toast on this screen.
+    val removeTopicFlagState by viewModel.removeTopicFlagState.collectAsStateWithLifecycle()
 
     // Bug fix (build 89) — report the loaded title up so `:app` caches it per topic. The next page
     // (recreated screen) reads it back through `request.titleHint`, keeping the top bar title stable
@@ -481,6 +490,28 @@ fun TopicScreen(
                         android.widget.Toast.LENGTH_SHORT,
                     ).show()
                 }
+                TopicEffect.TopicFlagRemoved -> {
+                    // #809 — delflag confirmed; the Drapeaux caches are already reconciled.
+                    android.widget.Toast.makeText(
+                        context,
+                        flagRemovedMsg,
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+                TopicEffect.TopicFlagRemovalFailed -> {
+                    android.widget.Toast.makeText(
+                        context,
+                        flagRemoveFailedMsg,
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                }
+                TopicEffect.TopicFlagNotFound -> {
+                    android.widget.Toast.makeText(
+                        context,
+                        flagNotFoundMsg,
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
             }
         }
     }
@@ -532,6 +563,44 @@ fun TopicScreen(
             onDismiss = { deleteCandidate = null },
         )
     }
+
+    // #809 — confirmation gate before the delflag call. Renders only while the ViewModel is in the
+    // Confirming state; confirming moves to Removing (action disabled) and fires the removal.
+    (removeTopicFlagState as? RemoveTopicFlagState.Confirming)?.let { confirming ->
+        RemoveTopicFlagConfirmDialog(
+            flag = confirming.flag,
+            onConfirm = viewModel::confirmRemoveTopicFlag,
+            onDismiss = viewModel::cancelRemoveTopicFlag,
+        )
+    }
+}
+
+/**
+ * #809 — M3 confirmation dialog shown before the `delflag.php` call, mirroring the Drapeaux view's
+ * `RemoveFlagConfirmationDialog` (#99). Spells out the topic title so the user knows exactly what is
+ * being un-flagged — the removal is not undoable in-app (no optimistic re-add).
+ */
+@Composable
+private fun RemoveTopicFlagConfirmDialog(
+    flag: Flag,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.topic_remove_flag_dialog_title)) },
+        text = { Text(stringResource(R.string.topic_remove_flag_dialog_message, flag.title)) },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(stringResource(R.string.topic_remove_flag_dialog_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.topic_remove_flag_dialog_cancel))
+            }
+        },
+    )
 }
 
 /**
@@ -1087,6 +1156,8 @@ internal fun TopicTopBar(
     val titleStateLabel = stringResource(
         if (titleExpanded) R.string.topic_title_expanded else R.string.topic_title_collapsed,
     )
+    // #809 — long-press on the title opens the drapeau-removal flow (the tap toggle is unchanged).
+    val titleLongPressLabel = stringResource(R.string.topic_remove_flag_long_press)
     Column {
         TopAppBar(
             title = {
@@ -1097,16 +1168,26 @@ internal fun TopicTopBar(
                         maxLines = if (titleExpanded) 2 else 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier
-                            .clickable(onClickLabel = titleToggleLabel) {
-                                val expanding = !titleExpanded
-                                titleExpanded = expanding
-                                if (expanding) {
-                                    // enterAlways may hold the bar partially collapsed — re-deploy
-                                    // it so the freshly granted second line shows instead of
-                                    // staying clipped behind the current height offset.
-                                    scrollBehavior?.state?.heightOffset = 0f
-                                }
-                            }
+                            // #809 — combinedClickable adds the long-press (« Gérer le drapeau ») on
+                            // top of the #772 tap toggle. onClick is the SAME toggle as before
+                            // (heightOffset re-deploy included) so TopicTopBarTitleExpandTest stays
+                            // green; onClickLabel + the stateDescription semantics are preserved.
+                            .combinedClickable(
+                                onClickLabel = titleToggleLabel,
+                                onLongClickLabel = titleLongPressLabel,
+                                role = Role.Button,
+                                onLongClick = { onIntent(TopicIntent.RequestRemoveTopicFlag) },
+                                onClick = {
+                                    val expanding = !titleExpanded
+                                    titleExpanded = expanding
+                                    if (expanding) {
+                                        // enterAlways may hold the bar partially collapsed — re-deploy
+                                        // it so the freshly granted second line shows instead of
+                                        // staying clipped behind the current height offset.
+                                        scrollBehavior?.state?.heightOffset = 0f
+                                    }
+                                },
+                            )
                             .semantics { stateDescription = titleStateLabel },
                     )
                     Text(
