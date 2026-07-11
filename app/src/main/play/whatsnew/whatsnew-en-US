@@ -1,4 +1,6 @@
-Redface 2 v0.26.3 — dev.
+Redface 2 v0.27.0 — dev.
 
-- The smiley picker respects the forum's scale: standard smileys small and crisp, perso smileys large.
-- Rotating the screen inside a PM conversation no longer kicks you back to the message list.
+- Long-press a topic's title to remove its flag without going back to the list.
+- Post menu: "Send a PM" to the author, with the composer prefilled.
+- Quote: the cursor now starts below the quoted block.
+- The "Quote cards" setting is now labelled experimental.

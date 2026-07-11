@@ -1,4 +1,6 @@
-Redface 2 v0.26.3 — dev.
+Redface 2 v0.27.0 — dev.
 
-- Le sélecteur de smileys respecte l'échelle du forum : standards petits et nets, persos en grand.
-- Tourner l'écran dans une conversation MP ne ramène plus à la liste des messages.
+- Appui long sur le titre d'un sujet : retirer son drapeau sans repasser par la liste.
+- Menu d'un post : « Envoyer un MP » à l'auteur, composeur pré-rempli.
+- Citer : le curseur démarre sous la citation.
+- Le réglage « Citations en cartes » est marqué expérimental.

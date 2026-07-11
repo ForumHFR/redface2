@@ -16,6 +16,18 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.27.0` — `internal` (dev) — 2026-07-12
+
+**Lot d'arbitrages et reliquats de la phase** (#792, #809, #881, #805-exp — cadrage + gates Codex par PR, review multi-angles sur #809, dogfood émulateur de chaque flux).
+
+### Vue Topic
+- #809 (#tagsuggestion tinc) : **appui long sur le titre → retirer le drapeau** du sujet courant (PR #887) — confirmation avant retrait, résultat en toast, la liste Drapeaux se met à jour sans refetch. Un drapeau d'un onglet jamais ouvert est retrouvé à la demande. Le tap court (dépliage du titre) est inchangé.
+- #792 (suggestion Dintr-un lemn) : **« Envoyer un MP »** dans le menu contextuel « … » d'un post (PR #886) — ouvre le composeur avec l'auteur pré-rempli. Absent sur ses propres posts et hors session.
+
+### Éditeur & réponse rapide
+- #881 (arbitrage du fil) : **le curseur démarre sous la citation** (PR #885) — un retour à la ligne unique après le bloc [quotemsg] quand il termine le champ, feuille et plein écran.
+- #805 : le réglage **« Citations en cartes » est étiqueté (expérimental)** (PR #885) — défaut inchangé (désactivé) ; le chantier design des cartes est reporté à l'itération Vue · Topic 2.
+
 ## `0.26.3` — `internal` (dev) — 2026-07-10
 
 **Suite de la nuit rf2-12** (lot d'issues non démarrées de la phase).
