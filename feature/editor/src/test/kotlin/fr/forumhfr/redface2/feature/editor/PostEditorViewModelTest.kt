@@ -1727,6 +1727,48 @@ class PostEditorViewModelTest {
     }
 
     @Test
+    fun `cards OFF - a quote block ending the field carries exactly one trailing newline`() = runTest {
+        // #881 — typing starts under the citation : one normalised newline (never two, never
+        // the raw HFR trailing newline), caret on the fresh line.
+        replyRepository.formResultsByNumrep = mapOf(
+            101 to Result.success(authenticatedForm(initialContent = "[quotemsg=101,1,9]a[/quotemsg]\n\n")),
+        )
+        val viewModel = newReplyViewModel(
+            initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false),
+        )
+        testScheduler.advanceUntilIdle()
+
+        val draft = viewModel.state.value.draft
+        assertEquals("[quotemsg=101,1,9]a[/quotemsg]\n", draft.text)
+        assertEquals("caret sits after the newline", draft.text.length, draft.selection.start)
+    }
+
+    @Test
+    fun `cards OFF - a quote prepended onto typed text keeps the plain double-newline separator`() = runTest {
+        // #881 réserve gate — the prepend branch adds NO extra newline : the "\n\n" separator
+        // already puts the existing typing under the citation. The fetch is gated so the
+        // typing deterministically lands first (same interleave as the race test above).
+        val formGate = CompletableDeferred<Unit>()
+        replyRepository.formGate = formGate
+        replyRepository.formResultsByNumrep = mapOf(
+            101 to Result.success(authenticatedForm(initialContent = "[quotemsg=101,1,9]a[/quotemsg]\n\n")),
+        )
+        val viewModel = newReplyViewModel(
+            initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false),
+        )
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("déjà tapé")))
+        formGate.complete(Unit)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(
+            "[quotemsg=101,1,9]a[/quotemsg]\n\ndéjà tapé",
+            viewModel.state.value.draft.text,
+        )
+    }
+
+    @Test
     fun `cards OFF - resumeSharedDraft appends after the prefill with exactly one quote block`() = runTest {
         // Réserve Codex n°5 — the #790 trio restored : quote-form hydration (prepend) + shared-row
         // append must compose to ONE [quotemsg] block and a stable order, whichever lands first.

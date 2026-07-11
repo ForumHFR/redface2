@@ -230,7 +230,11 @@ class QuickReplyViewModel @AssistedInject constructor(
                 val prefills = form.initialContent.trimEnd()
                 _state.update { current ->
                     val existing = current.text.text
-                    val combined = if (existing.isBlank()) prefills else existing.trimEnd() + "\n\n" + prefills
+                    // #881 — the inserted quote block ends the field here, so it carries exactly
+                    // ONE trailing newline (normalised: prefills are trimEnd()'d above, never
+                    // blind-appended) and the caret lands on the fresh line below the citation.
+                    val combined =
+                        (if (existing.isBlank()) prefills else existing.trimEnd() + "\n\n" + prefills) + "\n"
                     current.copy(
                         text = TextFieldValue(text = combined, selection = TextRange(combined.length)),
                         isPreparingQuotes = false,

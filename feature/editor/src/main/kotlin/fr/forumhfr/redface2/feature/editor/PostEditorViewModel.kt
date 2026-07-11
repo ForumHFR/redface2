@@ -260,7 +260,11 @@ class PostEditorViewModel @AssistedInject constructor(
                     val prefills = form.initialContent.trimEnd()
                     _state.update { current ->
                         val existing = current.draft.text
-                        val combined = if (existing.isBlank()) prefills else prefills + "\n\n" + existing
+                        // #881 — a quote block that ends the field carries exactly ONE trailing
+                        // newline so typing starts under the citation. In the prepend branch the
+                        // existing "\n\n" separator already provides it; a later resumeSharedDraft
+                        // append trimEnd()s the field first, so both orders stay commutative (#790).
+                        val combined = if (existing.isBlank()) prefills + "\n" else prefills + "\n\n" + existing
                         current
                             .withFormHydration(form.copy(initialContent = ""), current.preview)
                             .copy(draft = TextFieldValue(text = combined, selection = TextRange(combined.length)))

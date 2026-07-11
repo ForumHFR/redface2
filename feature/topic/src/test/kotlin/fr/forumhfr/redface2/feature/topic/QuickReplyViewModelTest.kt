@@ -331,18 +331,23 @@ class QuickReplyViewModelTest {
     @Test
     fun `inline mode appends the quote BBCode after the row body and arms no card`() = runTest {
         val repository = FakeQuickReplyRepository()
+        val draftStore = FakeQuickReplyDraftStore(initialBody = "brouillon")
         val viewModel = quickReplyViewModel(
             replyRepository = repository,
-            draftStore = FakeQuickReplyDraftStore(initialBody = "brouillon"),
+            draftStore = draftStore,
             quoteCardsEnabled = false,
         )
         viewModel.onSheetOpened(listOf(preview(101, "alice")))
         advanceUntilIdle()
 
         val state = viewModel.state.value
-        assertEquals("brouillon\n\n[quotemsg=101]corps[/quotemsg]", state.text.text)
+        // #881 — exactly one trailing newline: typing starts under the citation.
+        assertEquals("brouillon\n\n[quotemsg=101]corps[/quotemsg]\n", state.text.text)
+        assertEquals(state.text.text.length, state.text.selection.start)
         assertTrue(state.quotes.isEmpty())
         assertFalse(state.isPreparingQuotes)
+        // #881 réserve gate — the autosave persists the field verbatim, trailing newline included.
+        assertEquals(state.text.text, draftStore.savedBodies.last())
         // Prefetch (plain) then the quote form — whose hash the later submit rides.
         assertEquals(listOf(null, 101), repository.fetchedQuotedNumreponses)
     }
@@ -355,7 +360,7 @@ class QuickReplyViewModelTest {
         advanceUntilIdle()
 
         assertEquals(
-            "[quotemsg=202]corps[/quotemsg]\n\n[quotemsg=101]corps[/quotemsg]",
+            "[quotemsg=202]corps[/quotemsg]\n\n[quotemsg=101]corps[/quotemsg]\n",
             viewModel.state.value.text.text,
         )
         assertTrue(viewModel.state.value.quotes.isEmpty())
@@ -378,7 +383,8 @@ class QuickReplyViewModelTest {
         advanceUntilIdle()
 
         val state = viewModel.state.value
-        assertEquals("pendant le fetch\n\n[quotemsg=101]corps[/quotemsg]", state.text.text)
+        assertEquals("pendant le fetch\n\n[quotemsg=101]corps[/quotemsg]\n", state.text.text)
+        assertEquals("caret on the fresh line", state.text.text.length, state.text.selection.start)
         assertFalse(state.isPreparingQuotes)
         assertTrue(state.canSubmit)
     }
@@ -452,7 +458,7 @@ class QuickReplyViewModelTest {
         val state = viewModel.state.value
         assertTrue("no card survives an OFF opening", state.quotes.isEmpty())
         assertEquals(
-            "[quotemsg=101]corps[/quotemsg]\n\n[quotemsg=202]corps[/quotemsg]",
+            "[quotemsg=101]corps[/quotemsg]\n\n[quotemsg=202]corps[/quotemsg]\n",
             state.text.text,
         )
     }
