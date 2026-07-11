@@ -364,8 +364,9 @@
     <string name="settings_writing_surface_full_editor">Toujours plein écran</string>
     <string name="settings_writing_surface_full_editor_description">Répondre et citer ouvrent directement l\'éditeur plein écran.</string>
     <string name="settings_writing_surface_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
-    <string name="settings_quote_cards_title">Citations en cartes</string>
-    <string name="settings_quote_cards_description">Représente les citations par des cartes compactes au-dessus du champ. Désactivé : la citation est insérée en BBCode, modifiable dans le texte.</string>
+    <!-- #805 — statut expérimental acté (arbitrage 11/07) : même pattern que settings_mp_sync_write_title. -->
+    <string name="settings_quote_cards_title">Citations en cartes (expérimental)</string>
+    <string name="settings_quote_cards_description">Expérimental : représente les citations par des cartes compactes au-dessus du champ. Désactivé (défaut) : la citation est insérée en BBCode, modifiable dans le texte.</string>
     <string name="settings_quote_cards_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
 
     <!-- #459 PR3 — entrée vers l'écran « Mes images uploadées » depuis le catalogue de réglages. -->
