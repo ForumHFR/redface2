@@ -140,6 +140,31 @@ class TopicActionGatesTest {
         )
     }
 
+    @Test
+    fun `send private message requires auth, a real profile, and someone else's post`() {
+        val other = post(profileId = 123)
+
+        assertTrue(
+            "#792 — authenticated + someone else's profiled post exposes « Envoyer un MP »",
+            shouldShowSendPrivateMessage(other, isAuthenticated = true),
+        )
+        assertFalse(
+            "#220 — logged-out must never see « Envoyer un MP »",
+            shouldShowSendPrivateMessage(other, isAuthenticated = false),
+        )
+        assertFalse(
+            "no MP to oneself",
+            shouldShowSendPrivateMessage(
+                post(profileId = 123, isOwnPost = true),
+                isAuthenticated = true,
+            ),
+        )
+        assertFalse(
+            "profile-less rows (« Publicité », anonymous reads) are not messageable",
+            shouldShowSendPrivateMessage(post(profileId = null), isAuthenticated = true),
+        )
+    }
+
     private fun topic(
         canReply: Boolean,
         posts: List<Post> = listOf(post()),
@@ -163,6 +188,8 @@ class TopicActionGatesTest {
         isEditable: Boolean = false,
         quoteRef: Int? = 1,
         numreponse: Int = 16244,
+        isOwnPost: Boolean = isEditable,
+        profileId: Int? = null,
     ): Post = Post(
         numreponse = numreponse,
         author = "XaTriX",
@@ -170,10 +197,10 @@ class TopicActionGatesTest {
         content = PostContent(blocks = emptyList()),
         avatarUrl = null,
         isEditable = isEditable,
-        isOwnPost = isEditable,
+        isOwnPost = isOwnPost,
         quotedAuthors = emptyList(),
         postIndex = null,
         quoteRef = quoteRef,
-        profileId = null,
+        profileId = profileId,
     )
 }

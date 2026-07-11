@@ -69,6 +69,8 @@
     <string name="topic_post_menu_open_in_browser">Ouvrir dans le navigateur</string>
     <string name="topic_post_menu_no_browser">Aucun navigateur disponible</string>
     <string name="topic_post_menu_report_soon">Alerter (à venir)</string>
+    <!-- #792 — entrée « Envoyer un MP » du menu contextuel de post (composeur MP pré-rempli). -->
+    <string name="topic_post_menu_send_private_message">Envoyer un MP</string>
     <!-- #509 — entrée du menu post : masquer / réafficher tous les posts de l'auteur (blacklist). -->
     <string name="topic_post_menu_block_author">Masquer cet utilisateur</string>
     <string name="topic_post_menu_unblock_author">Ne plus masquer cet utilisateur</string>

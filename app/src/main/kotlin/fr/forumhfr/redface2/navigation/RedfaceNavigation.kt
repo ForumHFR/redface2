@@ -2519,6 +2519,11 @@ private fun RedfaceNavHost(
                         topicScrollNavState.onAnchorSaved(route.cat, route.post, route.page, anchor)
                     },
                     onOpenProfile = onOpenProfile,
+                    // #792 — « Envoyer un MP » from a post's menu : the NEW-conversation composer
+                    // opens with the post's author prefilled (the route arg was designed for this).
+                    onSendPrivateMessage = { author ->
+                        backStack.add(PrivateMessageComposeRoute(prefilledRecipient = author))
+                    },
                     // #843 — onReply is a COLD full-editor open (FAB under FULL_EDITOR, « Citer »
                     // routed to the editor, #823 long-press): no sheet is in flight, so
                     // resumeSharedDraft = false and an existing #405 draft is SURFACED via the
