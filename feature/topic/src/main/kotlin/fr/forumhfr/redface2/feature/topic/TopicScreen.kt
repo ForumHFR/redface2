@@ -223,6 +223,14 @@ fun TopicScreen(
      */
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
     /**
+     * #792 — « Envoyer un MP » from a post's contextual menu : `:app` opens the NEW-conversation
+     * MP composer with [author] prefilled as recipient (`PrivateMessageComposeRoute.prefilledRecipient`
+     * was designed for exactly this entry point). Only emitted on an authenticated session, never
+     * for the user's own posts, and only when the post carries a real profile — cf.
+     * [shouldShowSendPrivateMessage].
+     */
+    onSendPrivateMessage: (author: String) -> Unit = {},
+    /**
      * #307 — saved read position to restore for THIS `(cat, post, page)` landing, or `null` when
      * nothing should be restored. `:app` resolves the full priority chain
      * (`resolveTopicScrollRestoration`: route `scrollTo` > post-submit landing > saved anchor >
@@ -503,6 +511,7 @@ fun TopicScreen(
             )
         },
         onOpenProfile = onOpenProfile,
+        onSendPrivateMessage = onSendPrivateMessage,
         onDeleteRequest = { numreponse -> deleteCandidate = numreponse },
         multiQuoteSelections = multiQuoteSelections,
         onToggleMultiQuote = onToggleMultiQuote,
@@ -741,6 +750,8 @@ internal fun TopicContent(
     // #699 — quote-header tap, threaded down to the post cards (cf. TopicScreen KDoc).
     onGoToPost: (page: Int, numreponse: Int) -> Unit = { _, _ -> },
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
+    // #792 — « Envoyer un MP » entry of the post menu, forwarded up to `:app` (MP composer).
+    onSendPrivateMessage: (author: String) -> Unit = {},
     // #292 — a per-post « Supprimer » tap; the screen owns the confirmation dialog, so this only
     // requests it (carrying the post's numreponse). Never invoked for the first post (excluded).
     onDeleteRequest: (numreponse: Int) -> Unit = {},
@@ -970,6 +981,7 @@ internal fun TopicContent(
                                 onOpenPage = onOpenPage,
                                 onGoToPost = onGoToPost,
                                 onOpenProfile = onOpenProfile,
+                                onSendPrivateMessage = onSendPrivateMessage,
                                 onDeleteRequest = onDeleteRequest,
                                 onDoubleTapRefresh = { onIntent(TopicIntent.Refresh) },
                                 listState = listState,
@@ -1338,6 +1350,8 @@ private fun TopicLoadedContent(
     // #699 — quote-header tap, forwarded into each TopicPostCard's PostRenderer.
     onGoToPost: (page: Int, numreponse: Int) -> Unit = { _, _ -> },
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
+    // #792 — « Envoyer un MP » entry of the post menu (gated at the mount below).
+    onSendPrivateMessage: (author: String) -> Unit = {},
     onDeleteRequest: (numreponse: Int) -> Unit = {},
     /** #382 — double-tap anywhere on the list refreshes the current page (RF1 parity). */
     onDoubleTapRefresh: () -> Unit = {},
@@ -1708,6 +1722,13 @@ private fun TopicLoadedContent(
             // anonymous reads expose no profile link, the hero stays inert.
             onOpenProfile = post.profileId?.let { profileId ->
                 { onOpenProfile(profileId, post.author, post.avatarUrl) }
+            },
+            // #792 — « Envoyer un MP » : auth-gated, never on own posts, real profiles only
+            // (« Publicité » rows are not messageable). Carries the author pseudo to `:app`.
+            onSendPrivateMessage = if (shouldShowSendPrivateMessage(post, state.isAuthenticated)) {
+                { onSendPrivateMessage(post.author) }
+            } else {
+                null
             },
             // #291 — multi-quote toggle, same gate as « Citer » (quoting is a flavour of
             // replying; a locked topic or an anonymous session has nothing to quote).
@@ -3093,6 +3114,13 @@ internal fun effectiveMultiQuoteCount(topic: Topic, isAuthenticated: Boolean, se
 
 internal fun shouldShowQuoteAction(topic: Topic, isAuthenticated: Boolean): Boolean =
     topic.canReply && isAuthenticated
+
+// #792 — « Envoyer un MP » from the post's contextual menu. Auth-only (the MP composer is a
+// logged-in surface), never on the user's own posts, and only for authors with a real HFR
+// profile (`profileId != null` : « Publicité » rows and anonymous reads are not messageable —
+// same gate as the profile hero). Topic lock is irrelevant : the MP leaves the topic entirely.
+internal fun shouldShowSendPrivateMessage(post: Post, isAuthenticated: Boolean): Boolean =
+    isAuthenticated && !post.isOwnPost && post.profileId != null
 
 internal fun shouldShowEditAction(topic: Topic, post: Post, isAuthenticated: Boolean): Boolean =
     post.isEditable && topic.canReply && isAuthenticated

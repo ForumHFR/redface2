@@ -98,6 +98,14 @@ internal fun PostMenuSheet(
      */
     onOpenProfile: (() -> Unit)? = null,
     /**
+     * #792 — « Envoyer un MP » : opens the NEW-conversation MP composer with this post's
+     * author prefilled as recipient. Null hides the entry (anonymous session, own post, or
+     * no real profile — cf. `shouldShowSendPrivateMessage`). The sheet hides first, then
+     * dismisses AND navigates (same order as « Modifier le premier message ») so the
+     * composer never opens under a still-visible menu sheet.
+     */
+    onSendPrivateMessage: (() -> Unit)? = null,
+    /**
      * #291 — whether this post already sits in the multi-quote basket; flips the entry's
      * label between « Ajouter à » and « Retirer de » la citation multiple.
      */
@@ -240,6 +248,23 @@ internal fun PostMenuSheet(
                             },
                         ),
                     )
+                }
+            }
+
+            if (onSendPrivateMessage != null) {
+                Spacer(Modifier.height(8.dp))
+                // #792 — person-directed action, grouped with the author-scoped entry below. Hide
+                // first, then dismiss AND navigate (same order as « Modifier le premier message »).
+                OutlinedButton(
+                    onClick = {
+                        hideThenDismiss(coroutineScope, sheetState) {
+                            onDismiss()
+                            onSendPrivateMessage()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.topic_post_menu_send_private_message))
                 }
             }
 
