@@ -203,6 +203,11 @@ class AppAccountViewModelTest {
             // Not exercised in these tests — included to satisfy the interface (#99).
             return Result.success(Unit)
         }
+
+        override suspend fun findFlag(cat: Int, topicId: Int): fr.forumhfr.redface2.core.model.Flag? {
+            // Not exercised in these tests — included to satisfy the interface (#809).
+            return null
+        }
     }
 
     /**

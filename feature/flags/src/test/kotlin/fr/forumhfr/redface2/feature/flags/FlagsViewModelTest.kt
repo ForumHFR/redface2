@@ -2389,6 +2389,11 @@ class FlagsViewModelTest {
             return removeFlagResult.await()
         }
 
+        override suspend fun findFlag(cat: Int, topicId: Int): Flag? {
+            // #809 — not exercised by the Drapeaux-view tests (findFlag serves the topic screen).
+            return null
+        }
+
         suspend fun emit(type: FlagType, result: FlagsResult) {
             perType.getValue(type).emit(result)
         }

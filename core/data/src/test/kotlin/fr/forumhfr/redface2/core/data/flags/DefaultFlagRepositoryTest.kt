@@ -35,6 +35,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -1005,6 +1006,166 @@ class DefaultFlagRepositoryTest {
         assertTrue("anonymous removeFlag must fail", result.isFailure)
         coVerify(exactly = 0) {
             hfrClient.removeFlag(cat = any(), subcat = any(), topicId = any(), type = any(), page = any())
+        }
+    }
+
+    // ─── findFlag (#809) ──────────────────────────────────────────────────────────
+
+    @Test
+    fun `findFlag returns a warm cached flag without any further network - 809`() = runTest {
+        // Only the CYAN (participated) bucket is stubbed; warming it seeds topic 35395 (cat 23).
+        val (apiClient, forumRepository) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+        }
+        val repo = buildRepository(apiClient, forumRepository)
+        repo.observe(FlagType.CYAN).first { it is FlagsResult.Success }
+
+        val found = repo.findFlag(cat = 23, topicId = 35395)
+        assertEquals(35395, found?.topicId)
+        assertEquals(FlagType.CYAN, found?.type)
+
+        // A memory hit fires NO fallback fan-out: the RED / FAVORITE buckets were never queried.
+        coVerify(exactly = 0) {
+            apiClient.getCategoryFlagTopics(
+                cat = any(), bucket = HfrRestFlagBucket.READ, page = any(), resultsPerPage = any(), useAuth = any(),
+            )
+        }
+        coVerify(exactly = 0) {
+            apiClient.getCategoryFlagTopics(
+                cat = any(),
+                bucket = HfrRestFlagBucket.FAVORITES,
+                page = any(),
+                resultsPerPage = any(),
+                useAuth = any(),
+            )
+        }
+    }
+
+    @Test
+    fun `findFlag resolves a cold FAVORITE behind a warm CYAN miss - 809`() = runTest {
+        // Review finding #809 — the Drapeaux screen warms ONE tab at a time : a warm-but-missing
+        // CYAN bucket says nothing about a never-loaded FAVORITE bucket. The cold buckets — and
+        // only those — are fetched, so a FAVORITE-only topic stays removable from the topic screen.
+        val (apiClient, forumRepository) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(13, HfrRestFlagBucket.READ, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.READ, EMPTY_PAGE)
+            stubFlagsCall(13, HfrRestFlagBucket.FAVORITES, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.FAVORITES, capturedParticipatedFixture)
+        }
+        val repo = buildRepository(apiClient, forumRepository)
+        repo.observe(FlagType.CYAN).first { it is FlagsResult.Success } // warms CYAN only
+
+        val found = repo.findFlag(cat = 23, topicId = 35395)
+        assertEquals(35395, found?.topicId)
+        assertEquals(FlagType.FAVORITE, found?.type)
+
+        // The warm CYAN bucket was authoritative for its own type : never implicitly re-fetched.
+        coVerify(exactly = 1) {
+            apiClient.getCategoryFlagTopics(
+                cat = 23,
+                bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(),
+                resultsPerPage = any(),
+                useAuth = any(),
+            )
+        }
+    }
+
+    @Test
+    fun `findFlag misses with zero network when all three buckets are warm - 809`() = runTest {
+        val (apiClient, forumRepository) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+            stubFlagsCall(13, HfrRestFlagBucket.READ, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.READ, EMPTY_PAGE)
+            stubFlagsCall(13, HfrRestFlagBucket.FAVORITES, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.FAVORITES, EMPTY_PAGE)
+        }
+        val repo = buildRepository(apiClient, forumRepository)
+        FlagType.entries.forEach { type ->
+            repo.observe(type).first { it is FlagsResult.Success }
+        }
+
+        // Every bucket warm + miss → null with ZERO additional network (one observe fetch per
+        // bucket per cat, nothing more — the Drapeaux view owns refresh policy).
+        val found = repo.findFlag(cat = 23, topicId = 999_999)
+        assertNull(found)
+        HfrRestFlagBucket.entries.forEach { bucket ->
+            coVerify(exactly = 1) {
+                apiClient.getCategoryFlagTopics(
+                    cat = 23, bucket = bucket, page = any(), resultsPerPage = any(), useAuth = any(),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `findFlag fans out the three buckets and hits when no cache is warm - 809`() = runTest {
+        // Cold caches: every bucket of every cat must be stubbed since the fallback fans all three out.
+        // The target 35395 lives in the FAVORITES bucket, so the re-scan resolves it as a FAVORITE.
+        val (apiClient, forumRepository) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(13, HfrRestFlagBucket.READ, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.READ, EMPTY_PAGE)
+            stubFlagsCall(13, HfrRestFlagBucket.FAVORITES, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.FAVORITES, capturedParticipatedFixture)
+        }
+        val repo = buildRepository(apiClient, forumRepository)
+
+        val found = repo.findFlag(cat = 23, topicId = 35395)
+        assertEquals(35395, found?.topicId)
+        assertEquals(FlagType.FAVORITE, found?.type)
+
+        // The fan-out actually queried the FAVORITES bucket that held the match.
+        coVerify {
+            apiClient.getCategoryFlagTopics(
+                cat = 23, bucket = HfrRestFlagBucket.FAVORITES, page = any(), resultsPerPage = any(), useAuth = true,
+            )
+        }
+    }
+
+    @Test
+    fun `findFlag tie-breaks a multi-bucket topic to the earliest FlagType - 809`() = runTest {
+        // Gate Codex #809 — topic 35395 warm in BOTH the CYAN and FAVORITE buckets : the EnumMap
+        // iteration (CYAN → RED → FAVORITE) must resolve it deterministically to CYAN, the type
+        // `removeFlag` will key `delflag.php` on.
+        val (apiClient, forumRepository) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+            stubFlagsCall(13, HfrRestFlagBucket.FAVORITES, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.FAVORITES, capturedParticipatedFixture)
+        }
+        val repo = buildRepository(apiClient, forumRepository)
+        repo.observe(FlagType.CYAN).first { it is FlagsResult.Success }
+        repo.observe(FlagType.FAVORITE).first { it is FlagsResult.Success }
+
+        val found = repo.findFlag(cat = 23, topicId = 35395)
+        assertEquals(35395, found?.topicId)
+        assertEquals(FlagType.CYAN, found?.type)
+    }
+
+    @Test
+    fun `findFlag returns null for an anonymous session without hitting the network - 809`() = runTest {
+        val apiClient = mockk<HfrApiClient>(relaxed = true)
+        val anonymousAuth = mockk<AuthRepository>()
+        every { anonymousAuth.observeAuthState() } returns flowOf(AuthState.Anonymous)
+        val repo = buildRepository(
+            apiClient = apiClient,
+            forumRepository = stubForumRepository(sampleCategories),
+            authRepository = anonymousAuth,
+        )
+
+        // Cold cache + anonymous → short-circuit to null before any REST round-trip.
+        val found = repo.findFlag(cat = 23, topicId = 35395)
+        assertNull(found)
+        coVerify(exactly = 0) {
+            apiClient.getCategoryFlagTopics(
+                cat = any(), bucket = any(), page = any(), resultsPerPage = any(), useAuth = any(),
+            )
         }
     }
 

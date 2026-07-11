@@ -6,6 +6,8 @@ import fr.forumhfr.redface2.core.domain.blacklist.BlacklistRepository
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
+import fr.forumhfr.redface2.core.domain.flags.FlagRepository
+import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
@@ -35,6 +37,7 @@ import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostResult
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.blacklist.BlacklistEntry
+import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.write.EditPostContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
@@ -1346,6 +1349,224 @@ class TopicViewModelTest {
     }
 
     /** Chantier B (#546) — a topic repo that loads a 5-page topic carrying [form] (keeps lines short). */
+    // ──────────────────────────────────────────────────────────────────────
+    // #809 — long-press flag removal from the topic top bar
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `requestRemoveTopicFlag resolves then moves to Confirming when a flag is found (#809)`() = runTest {
+        val flag = fakeFlag()
+        // Gate the lookup so the Resolving frame is observable (an instant findFlag would be conflated
+        // by the StateFlow before the collector reads it).
+        val gate = CompletableDeferred<Unit>()
+        val flagRepo = FakeFlagRepository(flagToFind = flag).apply { findFlagGate = gate }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(2, 3)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            flagRepository = flagRepo,
+        )
+
+        viewModel.removeTopicFlagState.test {
+            assertEquals(RemoveTopicFlagState.Idle, awaitItem())
+            viewModel.send(TopicIntent.RequestRemoveTopicFlag)
+            assertEquals(RemoveTopicFlagState.Resolving, awaitItem())
+            gate.complete(Unit)
+            val confirming = awaitItem() as RemoveTopicFlagState.Confirming
+            assertEquals(flag, confirming.flag)
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(1, flagRepo.findFlagCalls)
+    }
+
+    @Test
+    fun `requestRemoveTopicFlag emits NotFound and returns to Idle when no flag is found (#809)`() = runTest {
+        val flagRepo = FakeFlagRepository(flagToFind = null)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(2, 3)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            flagRepository = flagRepo,
+        )
+
+        viewModel.send(TopicIntent.RequestRemoveTopicFlag)
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.TopicFlagNotFound, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(RemoveTopicFlagState.Idle, viewModel.removeTopicFlagState.value)
+        assertTrue(
+            "a NotFound resolution must never reach the confirmation dialog",
+            viewModel.removeTopicFlagState.value !is RemoveTopicFlagState.Confirming,
+        )
+    }
+
+    @Test
+    fun `requestRemoveTopicFlag folds a resolve failure into NotFound and returns to Idle (#809)`() = runTest {
+        // Gate Codex #809 — a findFlag that dies mid-resolve (cancelled in-flight fetch after an
+        // account switch, runtime failure) must not wedge the state in Resolving with no event :
+        // it folds to NotFound and the long-press stays usable.
+        val flagRepo = FakeFlagRepository(flagToFind = fakeFlag()).apply {
+            findFlagError = RuntimeException("resolve died")
+        }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(2, 3)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            flagRepository = flagRepo,
+        )
+
+        viewModel.send(TopicIntent.RequestRemoveTopicFlag)
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.TopicFlagNotFound, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(RemoveTopicFlagState.Idle, viewModel.removeTopicFlagState.value)
+
+        // The guard is released : a next long-press resolves again instead of being wedged.
+        flagRepo.findFlagError = null
+        viewModel.send(TopicIntent.RequestRemoveTopicFlag)
+        assertTrue(
+            "after a failed resolve, a retry must reach Confirming",
+            viewModel.removeTopicFlagState.value is RemoveTopicFlagState.Confirming,
+        )
+    }
+
+    @Test
+    fun `requestRemoveTopicFlag ignores a second press while Resolving (#809)`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val flagRepo = FakeFlagRepository(flagToFind = fakeFlag()).apply { findFlagGate = gate }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(2, 3)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            flagRepository = flagRepo,
+        )
+
+        viewModel.send(TopicIntent.RequestRemoveTopicFlag) // → Resolving, awaiting the gate
+        viewModel.send(TopicIntent.RequestRemoveTopicFlag) // ignored while Resolving
+
+        assertEquals(RemoveTopicFlagState.Resolving, viewModel.removeTopicFlagState.value)
+        assertEquals("the second long-press must not launch a duplicate lookup", 1, flagRepo.findFlagCalls)
+        gate.complete(Unit)
+    }
+
+    @Test
+    fun `requestRemoveTopicFlag ignores a press while a removal is in flight (#809)`() = runTest {
+        val removeGate = CompletableDeferred<Unit>()
+        val flagRepo = FakeFlagRepository(flagToFind = fakeFlag()).apply { removeFlagGate = removeGate }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(2, 3)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            flagRepository = flagRepo,
+        )
+
+        viewModel.send(TopicIntent.RequestRemoveTopicFlag) // resolves instantly → Confirming
+        viewModel.confirmRemoveTopicFlag() // → Removing, awaiting the removal gate
+        assertTrue(viewModel.removeTopicFlagState.value is RemoveTopicFlagState.Removing)
+
+        viewModel.send(TopicIntent.RequestRemoveTopicFlag) // ignored while Removing
+
+        assertEquals("no re-resolution while a removal is in flight", 1, flagRepo.findFlagCalls)
+        assertTrue(viewModel.removeTopicFlagState.value is RemoveTopicFlagState.Removing)
+        removeGate.complete(Unit)
+    }
+
+    @Test
+    fun `confirmRemoveTopicFlag success emits Success and resets to Idle (#809)`() = runTest {
+        val flag = fakeFlag(title = "Redface 2")
+        val flagRepo = FakeFlagRepository(flagToFind = flag, removeResult = Result.success(Unit))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(2, 3)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            flagRepository = flagRepo,
+        )
+
+        viewModel.send(TopicIntent.RequestRemoveTopicFlag)
+        assertTrue(viewModel.removeTopicFlagState.value is RemoveTopicFlagState.Confirming)
+        viewModel.confirmRemoveTopicFlag()
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.TopicFlagRemoved, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(RemoveTopicFlagState.Idle, viewModel.removeTopicFlagState.value)
+        assertEquals(1, flagRepo.removeFlagCalls)
+        assertEquals(flag, flagRepo.lastRemovedFlag)
+    }
+
+    @Test
+    fun `confirmRemoveTopicFlag failure emits Failure and resets to Idle (#809)`() = runTest {
+        val flag = fakeFlag(title = "Redface 2")
+        val flagRepo = FakeFlagRepository(
+            flagToFind = flag,
+            removeResult = Result.failure(IllegalStateException("delflag refused")),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(2, 3)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            flagRepository = flagRepo,
+        )
+
+        viewModel.send(TopicIntent.RequestRemoveTopicFlag)
+        viewModel.confirmRemoveTopicFlag()
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.TopicFlagRemovalFailed, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        // The Removing lock is always released in the finally block (#603 fork 5 lesson).
+        assertEquals(RemoveTopicFlagState.Idle, viewModel.removeTopicFlagState.value)
+    }
+
+    @Test
+    fun `confirmRemoveTopicFlag folds a raw removeFlag throw into RemovalFailed (#809)`() = runTest {
+        // Review #809 — removeFlag CAN throw outside its Result (evictFlagFromCaches runs in
+        // `.onSuccess`, past the internal runCatching) : the user still gets the failure toast
+        // and the Removing lock is released, instead of an app crash with no feedback.
+        val flagRepo = FakeFlagRepository(flagToFind = fakeFlag()).apply {
+            removeFlagError = IllegalStateException("evict blew up")
+        }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(2, 3)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            flagRepository = flagRepo,
+        )
+
+        viewModel.send(TopicIntent.RequestRemoveTopicFlag)
+        viewModel.confirmRemoveTopicFlag()
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.TopicFlagRemovalFailed, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(RemoveTopicFlagState.Idle, viewModel.removeTopicFlagState.value)
+    }
+
+    @Test
+    fun `cancelRemoveTopicFlag dismisses the confirmation without removing (#809)`() = runTest {
+        val flagRepo = FakeFlagRepository(flagToFind = fakeFlag())
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(2, 3)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            flagRepository = flagRepo,
+        )
+
+        viewModel.send(TopicIntent.RequestRemoveTopicFlag)
+        assertTrue(viewModel.removeTopicFlagState.value is RemoveTopicFlagState.Confirming)
+        viewModel.cancelRemoveTopicFlag()
+
+        assertEquals(RemoveTopicFlagState.Idle, viewModel.removeTopicFlagState.value)
+        assertEquals("cancelling must never call delflag", 0, flagRepo.removeFlagCalls)
+    }
+
     private fun searchableRepo(form: TopicSearchForm): FakeTopicRepository =
         FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 5, searchForm = form)) }))
 
@@ -1359,6 +1580,7 @@ class TopicViewModelTest {
         blacklistRepository: BlacklistRepository = FakeBlacklistRepository(),
         topicSearchRepository: TopicSearchRepository = FakeTopicSearchRepository(),
         searchRepository: SearchRepository = FakeSearchRepository(),
+        flagRepository: FlagRepository = FakeFlagRepository(),
     ): TopicViewModel = TopicViewModel(
         request = request,
         topicRepository = topicRepository,
@@ -1368,6 +1590,7 @@ class TopicViewModelTest {
         blacklistRepository = blacklistRepository,
         topicSearchRepository = topicSearchRepository,
         searchRepository = searchRepository,
+        flagRepository = flagRepository,
     )
 
     private fun topicRequest(
@@ -1975,6 +2198,23 @@ class TopicViewModelTest {
         postIndex = null,
     )
 
+    // #809 — a full drapeau for the SAMPLE topic, as FlagRepository.findFlag would resolve it.
+    private fun fakeFlag(title: String = "fake flag"): Flag = Flag(
+        cat = SAMPLE_CAT,
+        subcat = SAMPLE_SUBCAT,
+        topicId = SAMPLE_POST,
+        title = title,
+        totalPages = 10,
+        replyCount = 42,
+        type = FlagType.CYAN,
+        hasUnread = true,
+        lastReadPage = 7,
+        lastPostReadId = 1234L,
+        firstPostAuthor = "XaT",
+        lastReplyAuthor = "XaTelitte",
+        lastReplyAt = "2026-05-03 12:00",
+    )
+
     private inline fun <reified T : TopicUiState.Mode> assertMode(state: TopicUiState): T {
         val mode = state.mode
         assertTrue("expected mode ${T::class.simpleName} but was ${mode::class.simpleName}", mode is T)
@@ -2081,6 +2321,52 @@ private class FakeDeletePostRepository(
     override suspend fun deletePost(context: EditPostContext): DeletePostResult {
         calls += context
         return result
+    }
+}
+
+/**
+ * #809 — canned FlagRepository for the topic ViewModel. [flagToFind] is what `findFlag` resolves
+ * (null = not flagged / anonymous), [removeResult] the removal outcome. Optional [findFlagGate] /
+ * [removeFlagGate] hold the respective call in flight so a test can observe the Resolving / Removing
+ * states and their anti double-press guard. The read APIs (`observe` / `refresh` / `clearSessionCache`)
+ * fail loudly — the topic ViewModel must never touch them.
+ */
+private class FakeFlagRepository(
+    private val flagToFind: Flag? = null,
+    private val removeResult: Result<Unit> = Result.success(Unit),
+) : FlagRepository {
+    var findFlagCalls = 0
+    var removeFlagCalls = 0
+    var lastRemovedFlag: Flag? = null
+    var findFlagGate: CompletableDeferred<Unit>? = null
+    var removeFlagGate: CompletableDeferred<Unit>? = null
+
+    /** Gate #809 — when set, [findFlag] throws instead of returning (resolve failure path). */
+    var findFlagError: Throwable? = null
+
+    /** Review #809 — when set, [removeFlag] throws RAW (outside its Result contract). */
+    var removeFlagError: Throwable? = null
+
+    override fun observe(type: FlagType): Flow<FlagsResult> =
+        error("TopicViewModel must not observe flags")
+
+    override suspend fun refresh(type: FlagType) = error("TopicViewModel must not refresh flags")
+
+    override fun clearSessionCache() = error("TopicViewModel must not clear the flags cache")
+
+    override suspend fun findFlag(cat: Int, topicId: Int): Flag? {
+        findFlagCalls++
+        findFlagGate?.await()
+        findFlagError?.let { throw it }
+        return flagToFind
+    }
+
+    override suspend fun removeFlag(flag: Flag): Result<Unit> {
+        removeFlagCalls++
+        lastRemovedFlag = flag
+        removeFlagGate?.await()
+        removeFlagError?.let { throw it }
+        return removeResult
     }
 }
 
