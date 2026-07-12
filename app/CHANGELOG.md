@@ -16,6 +16,15 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.27.3` — `internal` (dev) — 2026-07-12
+
+**Quick wins zéro-flash** (#895, PR #899 — premier lot du chantier « zéro flash au changement de page » ; le fond, pagination intra-topic dans un même ViewModel, suit dans un lot dédié).
+
+### Vue Topic — changement de page
+- **La pilule de la barre dit la vérité** : une page servie du cache pendant son actualisation affiche « page X / Y » (le contenu réellement à l'écran) au lieu de « Chargement… » ; « Chargement… » est réservé au vrai chargement sans contenu.
+- **Signal d'actualisation discret** : fine barre de progression (2 dp) sous la top bar pendant l'actualisation d'une page en cache — bande toujours réservée, aucun décalage de mise en page ; annonce d'accessibilité « actualisation en cours » sur la pilule.
+- **Prefetch sans réseau inutile** : le préchargement des pages voisines ne refait plus de requête quand la page est déjà en cache (et n'écrase jamais une version authentifiée — garde couverte par tests).
+
 ## `0.27.2` — `internal` (dev) — 2026-07-12
 
 **Recherche intra-topic v2** (#894, retours XaTriX sur 0.27.1 — contrat `transsearch` re-vérifié live, cadrage + gates Codex, dogfoods sur le serveur réel).

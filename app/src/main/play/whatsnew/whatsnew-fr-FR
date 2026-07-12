@@ -1,5 +1,5 @@
-Redface 2 v0.27.2 — dev.
+Redface 2 v0.27.3 — dev.
 
-- Recherche dans le sujet : la recherche par pseudo sans filtre refonctionne.
-- La recherche part de la page courante (comme le site) ; option « Chercher depuis le début du sujet ».
-- Résultats filtrés : bouton « Afficher les résultats suivants » quand HFR tronque la liste (~200).
+- Changement de page : la barre affiche « page X / Y » du contenu à l'écran au lieu de « Chargement… » quand la page vient du cache.
+- Fine barre de progression sous la top bar pendant l'actualisation, sans décalage de mise en page.
+- Préchargement des pages voisines sans requête réseau inutile quand la page est déjà en cache.
