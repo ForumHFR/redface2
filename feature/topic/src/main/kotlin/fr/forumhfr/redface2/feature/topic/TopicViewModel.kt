@@ -236,6 +236,8 @@ class TopicViewModel @AssistedInject constructor(
                 _state.update { it.copy(search = it.search.copy(spseudo = intent.pseudo)) }
             is TopicIntent.SearchOnlyMatchesChanged ->
                 _state.update { it.copy(search = it.search.copy(onlyMatches = intent.onlyMatches)) }
+            is TopicIntent.SearchFromStartChanged ->
+                _state.update { it.copy(search = it.search.copy(fromStart = intent.fromStart)) }
             TopicIntent.SubmitSearch -> submitSearch()
             TopicIntent.SearchNextResultsPage -> searchNextResultsPage()
             TopicIntent.NextResult -> nextResult()
@@ -324,6 +326,7 @@ class TopicViewModel @AssistedInject constructor(
                     it.copy(
                         mode = loadedMode(topic),
                         availablePages = (1..topic.totalPages).toList(),
+                        search = it.search.capturingAnchor(topic),
                     )
                 }
                 // Re-arm the page+1 warmup, like `loadCurrentPage` (l. ~219). Unlike the post-submit
@@ -447,6 +450,9 @@ class TopicViewModel @AssistedInject constructor(
                             // terminal after a failed refresh).
                             mode = loadedMode(topic, provisional = emission.provisional),
                             availablePages = (1..topic.totalPages).toList(),
+                            // #894 — a REAL topic page refreshes the search session anchor
+                            // (a transsearch response has no form anchor : no-op there).
+                            search = it.search.capturingAnchor(topic),
                         )
                     }
                     // First content visible — close the async section. Subsequent emissions
@@ -905,17 +911,27 @@ class TopicViewModel @AssistedInject constructor(
                     status = if (s.status == TopicSearchStatus.Loading) TopicSearchStatus.Idle else s.status,
                     canGoPreviousResult = false,
                     canGoNextResult = false,
-                    // #879 — a normal load owns the page again : the filtered-results footer and
-                    // its pager are stale, reset them (transverse risk : state paginé mal remis).
+                    // #879/#894 — a normal load owns the page again : the filtered-results footer,
+                    // its resume cursor and the frozen criteria are stale, reset them (transverse
+                    // risk : state de résultats mal remis). `sessionAnchor` deliberately SURVIVES —
+                    // it describes the page being read, and the incoming load refreshes it.
                     showingFilteredResults = false,
-                    resultPage = 1,
-                    resultTotalPages = 1,
+                    resumeCursor = null,
                     resultWord = "",
                     resultSpseudo = "",
+                    resultAnchor = null,
                 ),
             )
         }
     }
+
+    /**
+     * #894 — refresh [TopicSearchUiState.sessionAnchor] from a rendered REAL topic page. A
+     * `transsearch` response ships its form without `firstnum`, so it can never overwrite the
+     * anchor of the page the user was actually reading — exactly the intended no-op.
+     */
+    private fun TopicSearchUiState.capturingAnchor(topic: Topic): TopicSearchUiState =
+        topic.searchForm?.firstnum?.let { copy(sessionAnchor = it) } ?: this
 
     /** Chantier B (#546) — drop the client-side result cursor history (no search position active). */
     private fun resetSearchCursors() {
@@ -951,13 +967,14 @@ class TopicViewModel @AssistedInject constructor(
         // fresh-form fetch has not landed yet (or failed) : fail EXPLICITLY (same Toast as a
         // network search failure) and retry the form fetch, never a silent no-op tap. The toast
         // only fires on a submittable bar — a tap with empty criteria stays inert either way.
-        // #894 — a NON-FILTERED fresh search needs the page anchor (`firstnum`), which only the
-        // form of a real topic page carries : a `transsearch` RESPONSE form ships without it.
-        // A null anchor must fail explicitly (same recovery as a missing form) — silently sending
-        // no `firstnum` would run a whole-topic search the user did not ask for. The proper
-        // « search again from the results » flow (frozen session anchor) is the #894 semantics PR.
-        val missingAnchor = !current.search.onlyMatches && form != null && form.firstnum == null
-        if (form == null || !form.canSearch || missingAnchor) {
+        // #894 — resolve the anchor of a FRESH search : « depuis le début » sends an explicit 0,
+        // the default sends the anchor of the page the search starts from — the on-screen form's
+        // `firstnum` (a real topic page) or, from a results page (whose form carries none), the
+        // frozen session anchor. A default-mode submit with NO anchor available must fail
+        // explicitly (same recovery as a missing form) — silently omitting `firstnum` would run a
+        // whole-topic search the user did not ask for (cadrage F1).
+        val anchor = if (current.search.fromStart) 0 else form?.firstnum ?: current.search.sessionAnchor
+        if (form == null || !form.canSearch || anchor == null) {
             if (current.search.canSubmit) {
                 viewModelScope.launch { _effects.send(TopicEffect.SearchFailed) }
                 ensureSearchForm()
@@ -969,7 +986,8 @@ class TopicViewModel @AssistedInject constructor(
             word = current.search.word.trim(),
             spseudo = current.search.spseudo.trim(),
             onlyMatches = current.search.onlyMatches,
-            // Fresh search: no cursor, keep firstnum (isStep = false). HFR re-anchors on the first match.
+            // Fresh search : no cursor (HFR re-anchors on the first match at-or-after the anchor).
+            anchor = anchor,
         )
         if (!current.search.canSubmit || !request.isMeaningful) return
         resetSearchCursors()
@@ -977,24 +995,27 @@ class TopicViewModel @AssistedInject constructor(
     }
 
     /**
-     * #879 — fetch the NEXT page of a FILTERED result list (« résultats suivants » footer). A plain
-     * re-submit of the same criteria with `p = resultPage + 1` ; latest-wins via the same
-     * generation token as every search. The form is re-read from the page on screen (a transsearch
-     * reply carries its own form).
+     * #894 — fetch the NEXT batch of a FILTERED result list (« Résultats suivants » footer, web
+     * parity) : HFR's scan window truncated and its response advertised a resume cursor. The
+     * continuation re-POSTs the FROZEN criteria with `currentnum = resumeCursor` and NO anchor
+     * (cadrage F3) ; latest-wins via the same generation token as every search. The form is
+     * re-read from the page on screen (a transsearch reply carries its own form).
      */
     private fun searchNextResultsPage() {
         val current = _state.value
-        val form = (current.mode as? TopicUiState.Mode.Loaded)?.topic?.searchForm
-        // One combined gate : more pages announced + a usable form on the rendered result page.
-        if (!current.search.hasMoreFilteredResults || form == null || !form.canSearch) return
+        val form = (current.mode as? TopicUiState.Mode.Loaded)?.topic?.searchForm?.takeIf { it.canSearch }
+        // One combined gate : a batch announced (hasMore ⇒ cursor non-null) + a usable form on the
+        // rendered result page.
+        val cursor = current.search.resumeCursor?.takeIf { current.search.hasMoreFilteredResults }
+        if (cursor == null || form == null) return
         val request = TopicSearchRequest(
             form = form,
-            // Gate finding 1 — the pager belongs to the SUBMITTED search : page N+1 is fetched
-            // with the frozen criteria, whatever the (editable) bar currently shows.
+            // Gate #879 finding 1 — the cursor belongs to the SUBMITTED search : the next batch is
+            // fetched with the frozen criteria, whatever the (editable) bar currently shows.
             word = current.search.resultWord,
             spseudo = current.search.resultSpseudo,
             onlyMatches = true,
-            page = current.search.resultPage + 1,
+            currentNum = cursor.toString(),
         )
         if (!request.isMeaningful) return
         launchSearch(request, isFresh = false)
@@ -1021,11 +1042,15 @@ class TopicViewModel @AssistedInject constructor(
         val form = navigableSearchForm(current).takeIf { searchCursorIndex > 0 } ?: return
         val targetIndex = searchCursorIndex - 1
         val request = if (targetIndex == 0) {
+            // #894 (cadrage F5) — the replay to the FIRST result re-issues the fresh search with
+            // the FROZEN criteria and the FROZEN anchor of the displayed search session : the
+            // on-screen response form carries no anchor, and the editable bar may have changed.
             TopicSearchRequest(
                 form = form,
-                word = current.search.word.trim(),
-                spseudo = current.search.spseudo.trim(),
+                word = current.search.resultWord,
+                spseudo = current.search.resultSpseudo,
                 onlyMatches = false,
+                anchor = current.search.resultAnchor,
             )
         } else {
             stepRequest(form, current.search, cursor = searchCursors[targetIndex - 1])
@@ -1043,15 +1068,19 @@ class TopicViewModel @AssistedInject constructor(
         return (current.mode as? TopicUiState.Mode.Loaded)?.topic?.searchForm?.takeIf { it.canSearch }
     }
 
-    /** Chantier B (#546) — a next/previous STEP request (cursor set, firstnum omitted via isStep). */
+    /**
+     * Chantier B (#546) — a next/previous STEP request : cursor set, NO anchor (re-sending one
+     * re-anchors HFR on the first match). #894 (cadrage F5) — steps re-submit the FROZEN criteria
+     * of the displayed search, never the live editable bar.
+     */
     private fun stepRequest(
         form: TopicSearchForm,
         search: TopicSearchUiState,
         cursor: Int,
     ): TopicSearchRequest = TopicSearchRequest(
         form = form,
-        word = search.word.trim(),
-        spseudo = search.spseudo.trim(),
+        word = search.resultWord,
+        spseudo = search.resultSpseudo,
         onlyMatches = false,
         currentNum = cursor.toString(),
         isStep = true,
@@ -1081,16 +1110,27 @@ class TopicViewModel @AssistedInject constructor(
                     topic,
                     isFresh = isFresh,
                     rewindToIndex = rewindToIndex,
-                    requestedPage = request.page,
-                    submittedWord = request.word,
-                    submittedSpseudo = request.spseudo,
-                    onlyMatches = request.onlyMatches,
+                    submitted = request,
                 )
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (noResults: NoTopicSearchResultsException) {
                 android.util.Log.i(LOG_TAG, "Intra-topic search returned no result", noResults)
                 if (generation != searchGeneration) return@launch
+                if (request.onlyMatches && !isFresh) {
+                    // #894 — an empty FILTERED CONTINUATION (matches deleted since the previous
+                    // batch advertised the cursor) is the END of the results, never « Aucun
+                    // résultat » (cadrage F6) : keep the displayed batch, drop the cursor.
+                    _state.update {
+                        it.copy(
+                            search = it.search.copy(
+                                status = TopicSearchStatus.Done,
+                                resumeCursor = null,
+                            ),
+                        )
+                    }
+                    return@launch
+                }
                 // Same dispatch as a parsed reply with no usable landing (fresh→no results,
                 // rewind→replay failure ≠ end, forward→end of results).
                 signalNoLanding(isFresh, rewindToIndex)
@@ -1118,35 +1158,32 @@ class TopicViewModel @AssistedInject constructor(
         topic: Topic,
         isFresh: Boolean,
         rewindToIndex: Int?,
-        // #879 — the result page this reply was asked for (anti-loop clamp in filtered mode).
-        requestedPage: Int,
-        // #879 (gate finding 1) — the criteria of THIS submission, frozen into the state with the
-        // filtered pager so the footer can never mix a new bar content with an old pager.
-        submittedWord: String,
-        submittedSpseudo: String,
-        // Snapshot of the MODE the request was launched with — NOT the live toggle, which the user
-        // may have flipped mid-flight (Codex review : that would apply a non-filtered reply as
-        // filtered or vice-versa).
-        onlyMatches: Boolean,
+        // #894 — the request this reply answers : its criteria are frozen into the state (gate
+        // #879 finding 1 — the footer/steps must never mix new bar content with old results), its
+        // `onlyMatches` snapshot dispatches the branch (never the live toggle, which the user may
+        // have flipped mid-flight — Codex review), and its cursor drives the anti-loop guard.
+        submitted: TopicSearchRequest,
     ) {
-        if (onlyMatches) {
-            // #879 — the filtered page is ONE page of the result list ; its pager (topic.page /
-            // topic.totalPages) is the SEARCH's, never the canonical one. Anti-loop guard (3C) :
-            // a reply that did not land on the requested page (HFR re-served an earlier one)
-            // clamps the total to what was actually reached — « résultats suivants » disappears
-            // instead of looping on the same page.
-            val reachedTotal = if (requestedPage > topic.page) topic.page else topic.totalPages
+        if (submitted.onlyMatches) {
+            // #894 — the filtered page is ONE batch of the result list. HFR advertises a further
+            // batch through the response form's `currentnum` (truncated scan) ; a COMPLETE list
+            // carries none. Anti-loop guard (cadrage F3) : a continuation cursor that did not
+            // STRICTLY advance past the one we sent would re-serve the same batch forever — treat
+            // it as the end instead.
+            val sentCursor = submitted.currentNum?.toIntOrNull()
+            val resumeCursor = topic.searchForm?.currentNum
+                ?.takeIf { sentCursor == null || it > sentCursor }
             renderSearchPage(
                 topic,
                 TopicSearchStatus.Done,
                 canPrev = false,
                 canNext = false,
-                filteredPager = topic.page to reachedTotal,
-                // Gate finding 1 — freeze the SUBMITTED criteria with the pager they belong to.
-                submittedCriteria = submittedWord to submittedSpseudo,
+                filteredResumeCursor = resumeCursor,
+                showingFiltered = true,
+                submitted = submitted,
             )
-            // Gate finding 2 — the list content was replaced in place : reposition at the top so
-            // the first results of this page are visible (fresh AND next-page renders alike).
+            // Gate #879 finding 2 — the list content was replaced in place : reposition at the top
+            // so the first results of this batch are visible (fresh AND continuation alike).
             _effects.send(TopicEffect.ScrollToTopOfResults)
             return
         }
@@ -1171,6 +1208,9 @@ class TopicViewModel @AssistedInject constructor(
             // Forward-only HFR never reports a count up front; keep « next » enabled until a step
             // actually reports the end (onStepEnd disables it).
             canNext = true,
+            // #894 (cadrage F5) — freeze the criteria + anchor for the steps and the backward
+            // replay, which must never read the live editable bar.
+            submitted = submitted,
         )
         _effects.send(TopicEffect.ScrollToPost(landed))
     }
@@ -1217,15 +1257,19 @@ class TopicViewModel @AssistedInject constructor(
      * and the prev/next affordances, keeping the previously-known [TopicUiState.availablePages] (the
      * transsearch pager is not the canonical topic pager) and never scheduling a prefetch off it.
      */
+    @Suppress("LongParameterList") // single render seam of the search state : one param per facet.
     private fun renderSearchPage(
         topic: Topic,
         status: TopicSearchStatus,
         canPrev: Boolean,
         canNext: Boolean,
-        // #879 — non-null ONLY for a filtered render : (page, total) of the RESULT list.
-        filteredPager: Pair<Int, Int>? = null,
-        // #879 (gate finding 1) — the criteria the filtered list was submitted with.
-        submittedCriteria: Pair<String, String>? = null,
+        // #894 — resume cursor advertised by a FILTERED response (null = complete list).
+        filteredResumeCursor: Int? = null,
+        // #894 — `true` ONLY for a filtered render (the batch replaces the list on screen).
+        showingFiltered: Boolean = false,
+        // #879 finding 1 + #894 F5 — the request this render answers : criteria + anchor frozen
+        // with the results they produced, for the continuation / steps / backward replay.
+        submitted: TopicSearchRequest? = null,
     ) {
         _state.update {
             it.copy(
@@ -1234,11 +1278,13 @@ class TopicViewModel @AssistedInject constructor(
                     status = status,
                     canGoPreviousResult = canPrev,
                     canGoNextResult = canNext,
-                    showingFilteredResults = filteredPager != null,
-                    resultPage = filteredPager?.first ?: 1,
-                    resultTotalPages = filteredPager?.second ?: 1,
-                    resultWord = submittedCriteria?.first ?: "",
-                    resultSpseudo = submittedCriteria?.second ?: "",
+                    showingFilteredResults = showingFiltered,
+                    resumeCursor = filteredResumeCursor,
+                    resultWord = submitted?.word ?: "",
+                    resultSpseudo = submitted?.spseudo ?: "",
+                    // A step/continuation carries no anchor : keep the one frozen by the fresh
+                    // submit — the backward replay re-anchors on it.
+                    resultAnchor = submitted?.anchor ?: it.search.resultAnchor,
                 ),
             )
         }

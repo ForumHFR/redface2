@@ -56,17 +56,13 @@ class TopicSearchRepositoryImpl @Inject constructor(
             spseudo = request.spseudo,
             onlyMatches = request.onlyMatches,
             hashCheck = request.form.hashCheck,
-            // #546/#879 — la sémantique du point de départ est PAR MODE (arbitrage cadrage) :
-            // - FILTRÉ (liste des matches, défaut) : tout le topic → firstnum OMIS. Avec firstnum
-            //   HFR ancre EN AVANT et rate les matches antérieurs (vérifié live #546, bug tinc
-            //   2788609 « aucun résultat alors que le web en a »).
-            // - NON FILTRÉ (occurrence suivante) : parité web #879 — le fresh part de la page
-            //   courante (firstnum = 1er post de la page affichée) ; le STEP l'omet TOUJOURS
-            //   (le renvoyer ré-ancre HFR sur le 1er match et le curseur n'avance plus).
-            firstnum = if (!request.onlyMatches && !request.isStep) request.form.firstnum else null,
+            // #894 — the anchor decision (« which firstnum, if any ») belongs to the ViewModel :
+            // session anchor (current page — HFR's own default), 0 (« depuis le début » opt-in),
+            // or null (steps and continuations MUST omit it — re-sending an anchor re-anchors HFR
+            // on the first match, live-verified #546). Forwarded verbatim.
+            firstnum = request.anchor,
             owntopic = request.form.owntopic,
             currentnum = request.currentNum,
-            p = request.page,
         )
         if (html.hasNoSearchResults()) {
             // Chantier B (#546) — HFR rendered « aucune réponse n'a été trouvée » (a frequent term

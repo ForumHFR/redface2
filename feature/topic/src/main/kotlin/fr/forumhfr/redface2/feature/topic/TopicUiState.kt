@@ -188,6 +188,19 @@ data class TopicSearchUiState(
     val word: String = "",
     val spseudo: String = "",
     val onlyMatches: Boolean = true,
+    /**
+     * #894 — the « Chercher depuis le début » opt-in : a fresh submit sends `firstnum=0` (whole
+     * topic) instead of the session anchor (HFR's default « from the current page onwards »).
+     * EPHEMERAL by design (cadrage F4) : plain bar state, no persisted preference.
+     */
+    val fromStart: Boolean = false,
+    /**
+     * #894 — the search anchor of the topic page the user is READING : the form `firstnum` of the
+     * last REAL topic page rendered (a transsearch response carries none, so it never overwrites
+     * this). A fresh default-mode submit sends it ; a fresh submit from a results page reuses it
+     * (the on-screen response form has no anchor of its own).
+     */
+    val sessionAnchor: Int? = null,
     val status: TopicSearchStatus = TopicSearchStatus.Idle,
     val canGoPreviousResult: Boolean = false,
     val canGoNextResult: Boolean = false,
@@ -200,30 +213,34 @@ data class TopicSearchUiState(
      */
     val showingFilteredResults: Boolean = false,
     /**
-     * #879 — pager of the filtered RESULT list (HFR paginates transsearch like a topic). This is
-     * the search's OWN pager — the canonical `availablePages` is never touched by it. `resultPage`
-     * / `resultTotalPages` come from the transsearch reply ; « résultats suivants » re-submits
-     * with `p = resultPage + 1`.
+     * #894 — resume cursor of the displayed FILTERED result list. HFR truncates its scan window
+     * (~200 matches observed) : a truncated response advertises the resume point in its form's
+     * `currentnum` (⇒ « Résultats suivants » available), a COMPLETE response carries none.
+     * `null` = no further batch. The continuation re-submits the FROZEN criteria below with
+     * `currentnum = resumeCursor` (and NO anchor) ; the next batch REPLACES the list (web parity).
      */
-    val resultPage: Int = 1,
-    val resultTotalPages: Int = 1,
+    val resumeCursor: Int? = null,
     /**
-     * #879 (gate finding 1) — the criteria the displayed result list was actually SUBMITTED with.
-     * The pager belongs to that submission, not to the live editable fields : « résultats
-     * suivants » re-submits THESE, so editing the bar (or flipping « Filtrer ») after page 1 can
-     * never fetch « page 2 of a different search ».
+     * #879 (gate finding 1) + #894 — the criteria the displayed results were actually SUBMITTED
+     * with. The continuation, the non-filtered steps and the backward replay re-submit THESE,
+     * never the live editable fields : editing the bar after a render can never fetch « the next
+     * batch of a different search ». [resultAnchor] is the `firstnum` actually sent (`0` when
+     * « depuis le début » was checked) — the backward replay re-anchors on it, a response form
+     * carrying no anchor of its own.
      */
     val resultWord: String = "",
     val resultSpseudo: String = "",
+    val resultAnchor: Int? = null,
 ) {
     /**
-     * #879 — more filtered result pages are reachable. Deliberately PAGER-based only (gate
-     * finding 3) : during Loading the footer is simply hidden by the screen, and after a failed
-     * next-page fetch the pager is untouched — the card stays and doubles as the retry
-     * affordance. `EndOfSearchResultsCard` is only truthful on `Done && !hasMore`.
+     * #894 — a further batch of filtered results is reachable. Deliberately CURSOR-based only
+     * (gate #879 finding 3, carried over) : during Loading the footer is simply hidden by the
+     * screen, and after a failed continuation the cursor is untouched — the card stays and
+     * doubles as the retry affordance. `EndOfSearchResultsCard` is only truthful on
+     * `Done && !hasMore`.
      */
     val hasMoreFilteredResults: Boolean
-        get() = showingFilteredResults && resultPage < resultTotalPages
+        get() = showingFilteredResults && resumeCursor != null
 
     /** HFR needs at least a term or an author ; the submit button is disabled otherwise. */
     val canSubmit: Boolean get() = word.isNotBlank() || spseudo.isNotBlank()
@@ -289,6 +306,9 @@ sealed interface TopicIntent {
     data class SearchPseudoChanged(val pseudo: String) : TopicIntent
 
     data class SearchOnlyMatchesChanged(val onlyMatches: Boolean) : TopicIntent
+
+    /** #894 — toggle « Chercher depuis le début » (fresh submits send `firstnum=0`). Ephemeral. */
+    data class SearchFromStartChanged(val fromStart: Boolean) : TopicIntent
 
     /** Submit the intra-topic search (`POST transsearch.php`). */
     data object SubmitSearch : TopicIntent

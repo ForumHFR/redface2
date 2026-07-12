@@ -1368,6 +1368,28 @@ private fun TopicSearchBar(
                     Text(stringResource(R.string.topic_search_submit))
                 }
             }
+            // #894 (cadrage F4) — the « depuis le début » opt-in on its own labelled options row :
+            // the default stays HFR's own semantics (anchored to the current page, forward).
+            // Ephemeral bar state — no persisted preference.
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(
+                    checked = search.fromStart,
+                    onCheckedChange = { onIntent(TopicIntent.SearchFromStartChanged(it)) },
+                    enabled = search.status != TopicSearchStatus.Loading,
+                )
+                Text(
+                    text = stringResource(R.string.topic_search_from_start),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable(enabled = search.status != TopicSearchStatus.Loading) {
+                            onIntent(TopicIntent.SearchFromStartChanged(!search.fromStart))
+                        },
+                )
+            }
             // Chantier B (#546) — per-result navigation (non-filtered) / « no result » feedback.
             TopicSearchResultNav(search = search, onIntent = onIntent)
         }
@@ -1763,11 +1785,7 @@ private fun TopicLoadedContent(
             if (state.search.status != TopicSearchStatus.Loading) {
                 item {
                     if (state.search.hasMoreFilteredResults) {
-                        SearchMoreResultsCard(
-                            resultPage = state.search.resultPage,
-                            resultTotalPages = state.search.resultTotalPages,
-                            onNext = onSearchNextResults,
-                        )
+                        SearchMoreResultsCard(onNext = onSearchNextResults)
                     } else if (state.search.status == TopicSearchStatus.Done) {
                         EndOfSearchResultsCard()
                     }
@@ -1992,12 +2010,13 @@ private fun PageBoundaryCard(donePage: Int, onNextPage: () -> Unit) {
 }
 
 /**
- * #879 — footer of a FILTERED search-result page when more result pages exist. Same actionable
- * card language as [PageBoundaryCard] (filled primaryContainer = « there is more ») but the tap
- * re-submits the SEARCH with `p = resultPage + 1` — never the canonical pager.
+ * #894 — footer of a FILTERED search-result list when HFR truncated its scan window (the response
+ * advertised a resume cursor). Same actionable card language as [PageBoundaryCard] (filled
+ * primaryContainer = « there is more ») ; the tap re-submits the SEARCH with the resume cursor —
+ * web parity with HFR's own « Résultats suivants » button, never the canonical pager.
  */
 @Composable
-private fun SearchMoreResultsCard(resultPage: Int, resultTotalPages: Int, onNext: () -> Unit) {
+private fun SearchMoreResultsCard(onNext: () -> Unit) {
     Card(
         onClick = onNext,
         colors = CardDefaults.cardColors(
@@ -2015,11 +2034,7 @@ private fun SearchMoreResultsCard(resultPage: Int, resultTotalPages: Int, onNext
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = stringResource(
-                        R.string.topic_search_results_page_done,
-                        resultPage,
-                        resultTotalPages,
-                    ),
+                    text = stringResource(R.string.topic_search_results_truncated),
                     style = MaterialTheme.typography.titleSmall,
                 )
                 Text(
