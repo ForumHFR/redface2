@@ -37,6 +37,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -146,10 +148,28 @@ private fun WikiTabContent(
     LaunchedEffect(Unit) {
         searchFocus.requestFocus()
     }
+    // #901 — the field owns a TextFieldValue seeded from the (possibly #824-restored) query
+    // with the caret at the END, so a restored word can be completed or erased right away.
+    // The String overload of OutlinedTextField builds its internal TextFieldValue with
+    // selection = TextRange(0), which put the restored caret at the START of the word.
+    // Seeded ONCE (no resync from state.query) : while this tab is composed the only query
+    // writer is this very field (the #824 restore happens in open(), atomically with the
+    // Hidden→Open transition that composes the sheet), and a composition-time resync would
+    // race the collectAsStateWithLifecycle echo of onQueryChange, clobbering fast typing.
+    var fieldValue by remember {
+        mutableStateOf(TextFieldValue(text = state.query, selection = TextRange(state.query.length)))
+    }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedTextField(
-            value = state.query,
-            onValueChange = onQueryChange,
+            value = fieldValue,
+            onValueChange = { newValue ->
+                // The TextFieldValue overload also fires on caret/selection moves : only a
+                // text change may reach the controller, whose onQueryChanged cancels the
+                // in-flight search — a mid-word tap must not kill a pending debounce.
+                val textChanged = newValue.text != fieldValue.text
+                fieldValue = newValue
+                if (textChanged) onQueryChange(newValue.text)
+            },
             singleLine = true,
             label = { Text(stringResource(R.string.editor_smiley_search_label)) },
             modifier = Modifier
