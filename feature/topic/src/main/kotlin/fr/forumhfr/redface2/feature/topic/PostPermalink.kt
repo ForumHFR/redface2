@@ -11,7 +11,7 @@ package fr.forumhfr.redface2.feature.topic
  * `docs/specs/navigation.md` § lien vers un post spécifique). The host is hardcoded:
  * the permalink targets the real forum for sharing, never a test override base URL.
  *
- * Pure top-level function (same spirit as [citationCountsByNumreponse]) so the URL
+ * Pure top-level function so the URL
  * contract is unit-testable without Compose.
  */
 internal fun buildPostPermalink(cat: Int, post: Int, page: Int, numreponse: Int): String =

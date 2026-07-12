@@ -78,6 +78,15 @@ data class PostEntity(
      */
     val editedAt: Instant? = null,
     /**
+     * #863 — HFR's server-side citation counter (« Message cité N fois » in the same
+     * `div.edited` trailer), the authoritative CROSS-PAGE count. Persisted in Room v15
+     * (`MIGRATION_14_15`). Nullable on disk:
+     *
+     * - pre-v15 rows backfill to `NULL` (recovered on the next live fetch);
+     * - never-cited posts legitimately carry no counter link.
+     */
+    val citedCount: Int? = null,
+    /**
      * #330 — the author signature AST (`<span class="signature">`), persisted as JSON via the
      * nullable [Converters.nullablePostContentToJson] converter so the « Afficher les signatures »
      * reading preference is a pure render-time switch (no refetch when toggled). Persisted in

@@ -57,6 +57,20 @@ data class Post(
      */
     val editedAt: Instant? = null,
     /**
+     * #863 — HFR's SERVER-side citation counter, parsed from the same `div.edited`
+     * trailer as [editedAt] : « Message cité N fois » (an `a[href*=quote_only=1]`
+     * link the web renders for every post cited at least once, ANYWHERE in the
+     * topic). This is the authoritative CROSS-PAGE count — unlike the historical
+     * client-side scan of the loaded page, which undercounted by construction.
+     * `null` = absent, unknown or not parsed : a post never cited, a pre-v15
+     * cached row not yet refreshed, or an unrecognized trailer — render as
+     * 0 / no badge in every case (the next live fetch settles it).
+     *
+     * Persisted in Room v15 (cf. `MIGRATION_14_15`) so cache hits keep the badge;
+     * pre-v15 rows backfill to `NULL` and recover on the next live fetch.
+     */
+    val citedCount: Int? = null,
+    /**
      * #330 — the author's signature block (the HFR `<span class="signature">`
      * trailer rendered under the post body on the web), parsed into the same
      * [PostContent] AST as [content] so it can be rendered with the shared
