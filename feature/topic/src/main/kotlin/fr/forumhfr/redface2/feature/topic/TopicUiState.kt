@@ -76,6 +76,14 @@ data class TopicUiState(
      * answers a topic page), so there is no separate "results list" model here.
      */
     val search: TopicSearchUiState = TopicSearchUiState(),
+    /**
+     * #782 / #895 étape 4 — `true` while the in-VM quote-jump chain is non-empty, i.e. the next
+     * back gesture should unwind one jump ([TopicViewModel.returnFromJump]) instead of leaving
+     * the topic. Drives the screen's `BackHandler(enabled = …)` — the interception moved from
+     * `:app` (route-replace era) into the screen, next to the ViewModel that owns the chain.
+     * Kept in lock-step with every jump-stack mutation (push / pop / clear).
+     */
+    val canReturnFromJump: Boolean = false,
 ) {
     /**
      * Helper used by the screen / ViewModel : `true` when the user has navigated to a
@@ -413,22 +421,6 @@ sealed interface TopicEffect {
      * current page stays on screen (cache-first); the screen surfaces a Toast inviting a retry.
      */
     data object RefreshFailed : TopicEffect
-
-    /**
-     * Issue #226 — emitted after a plain-reply submit when the reply overflowed the topic onto a
-     * newly-created page but HFR's success URL anchored the OLD page (the one the form was on). The
-     * ViewModel detects this in `forceRefreshCurrentPage`: the force-refreshed page reports a
-     * `totalPages` greater than `request.page` while `scrollTo` is null (plain reply — quote/edit
-     * carry a `#t{N}` scrollTo and are excluded). The navigation host re-routes to [page] (= the new
-     * `totalPages`) with `scrollTo = null`, a **fresh `submitSignal`** AND
-     * `postSubmitOverflowLanding = true` (cf. `TopicRequest`). The fresh `submitSignal` makes the new
-     * ViewModel force-fetch that last page — never a stale cache-aside row — and the landing flag
-     * makes it emit [ScrollToEndOfPage] (surfacing the freshly-published post) **without** re-emitting
-     * `NavigateToLastPage`: if a concurrent post bumped `totalPages` further during the refresh, the
-     * flag breaks the moving-tail chase. Defensive: works whether HFR anchored the old page (the bug)
-     * or the new one.
-     */
-    data class NavigateToLastPage(val page: Int) : TopicEffect
 
     /**
      * #292 — emitted after a post was successfully deleted. The screen surfaces a confirmation

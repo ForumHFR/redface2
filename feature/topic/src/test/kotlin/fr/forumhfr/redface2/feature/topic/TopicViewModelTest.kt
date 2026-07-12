@@ -1002,26 +1002,33 @@ class TopicViewModelTest {
     @Test
     fun `a post-submit landing hides authors already blacklisted before the force refresh (#509 beta)`() =
         runTest {
-            // Beta regression: a VM created with submitSignal != null lands via forceRefreshCurrentPage
-            // and NEVER calls loadCurrentPage, so the blacklist combine never ran → blockedCanonicals
-            // stayed emptySet() and an already-blocked author was NOT hidden on the landing page. The
-            // init collector now seeds blockedCanonicals before the force refresh computes its hidden set.
+            // Beta regression (#509), re-anchored on the engine (#895 PR 2) : the post-submit
+            // landing is built by performSubmitRefresh through loadedMode(), which must see the
+            // blacklist seeded by the init collector — an already-blocked author is hidden on the
+            // freshly force-fetched page too, not only on cache-aside loads.
+            val stale = fakeTopic(
+                page = 2,
+                totalPages = 2,
+                posts = listOf(fakePost(1, author = "Bob")),
+            )
             val fresh = fakeTopic(
                 page = 2,
-                totalPages = 5,
+                totalPages = 2,
                 posts = listOf(fakePost(900, author = "Alice"), fakePost(901, author = "Bob")),
             )
             val repository = FakeTopicRepository(
-                flowsToReturn = emptyList(),
+                flowsToReturn = listOf(flow { emit(stale) }),
                 refreshTopicsToReturn = listOf(fresh),
             )
             val viewModel = topicViewModel(
-                request = topicRequest(page = 2, submitSignal = 1_700_000_000_000L),
+                request = topicRequest(page = 2),
                 topicRepository = repository,
                 authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
                 // Alice is ALREADY blacklisted when the VM is constructed.
                 blacklistRepository = FakeBlacklistRepository(blockedCanonicals = setOf("alice")),
             )
+
+            viewModel.applySubmitResult(targetPage = 2, scrollTo = null)
 
             val mode = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
             assertEquals(fresh, mode.topic)
@@ -1030,7 +1037,11 @@ class TopicViewModelTest {
                 setOf(900),
                 mode.hiddenNumreponses,
             )
-            assertTrue("the landing went through the force-refresh path", repository.calls.isEmpty())
+            assertEquals(
+                "the landing went through the force-refresh path",
+                listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)),
+                repository.refreshCalls,
+            )
         }
 
     @Test
@@ -2487,38 +2498,6 @@ class TopicViewModelTest {
     }
 
     @Test
-    fun `a completed submitSignal never replays after process death (#895)`() = runTest {
-        val handle = SavedStateHandle()
-        val first = topicViewModel(
-            request = topicRequest(page = 2, submitSignal = 111L),
-            topicRepository = FakeTopicRepository(
-                flowsToReturn = emptyList(),
-                refreshTopicsToReturn = listOf(fakeTopic(2, 2)),
-            ),
-            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
-            savedStateHandle = handle,
-        )
-        first.effects.test {
-            assertEquals(TopicEffect.ScrollToEndOfPage(2), awaitItem())
-            cancelAndIgnoreRemainingEvents()
-        }
-
-        val restoredRepo = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(2, 2)) }))
-        topicViewModel(
-            request = topicRequest(page = 2, submitSignal = 111L),
-            topicRepository = restoredRepo,
-            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
-            savedStateHandle = handle,
-        )
-        assertEquals(
-            "a consumed submit must fall back to the plain cache-aside load",
-            emptyList<Triple<Int, Int, Int>>(),
-            restoredRepo.refreshCalls,
-        )
-        assertEquals(listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)), restoredRepo.calls)
-    }
-
-    @Test
     fun `a consumed forceRefresh does not replay after process death (#231 via engine)`() = runTest {
         val handle = SavedStateHandle()
         val firstRepo = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(2, 5)) }))
@@ -2653,47 +2632,6 @@ class TopicViewModelTest {
     }
 
     @Test
-    fun `a completed submit consumes the forceRefresh intention too (#895 gate)`() = runTest {
-        val handle = SavedStateHandle()
-        val combined = TopicRequest(
-            cat = SAMPLE_CAT,
-            post = SAMPLE_POST,
-            page = 2,
-            scrollTo = null,
-            submitSignal = 222L,
-            forceRefresh = true,
-        )
-        topicViewModel(
-            request = combined,
-            topicRepository = FakeTopicRepository(
-                flowsToReturn = emptyList(),
-                refreshTopicsToReturn = listOf(fakeTopic(2, 2)),
-            ),
-            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
-            savedStateHandle = handle,
-        )
-
-        val restoredRepo = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(2, 2)) }))
-        topicViewModel(
-            request = combined,
-            topicRepository = restoredRepo,
-            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
-            savedStateHandle = handle,
-        )
-
-        assertEquals(
-            "the completed submit must not replay",
-            emptyList<Triple<Int, Int, Int>>(),
-            restoredRepo.refreshCalls,
-        )
-        assertEquals(
-            "the successful authenticated refresh satisfied the #231 catch-up too (bloquant 3)",
-            false,
-            restoredRepo.lastForceRefresh,
-        )
-    }
-
-    @Test
     fun `a late manual-refresh reply never overwrites a newer page (#895 gate r2)`() = runTest {
         val gate = CompletableDeferred<Unit>()
         val repository = FakeTopicRepository(
@@ -2819,16 +2757,12 @@ class TopicViewModelTest {
     private fun topicRequest(
         page: Int,
         scrollTo: Int? = null,
-        submitSignal: Long? = null,
-        postSubmitOverflowLanding: Boolean = false,
         resolveScrollToPage: Boolean = false,
     ): TopicRequest = TopicRequest(
         cat = SAMPLE_CAT,
         post = SAMPLE_POST,
         page = page,
         scrollTo = scrollTo,
-        submitSignal = submitSignal,
-        postSubmitOverflowLanding = postSubmitOverflowLanding,
         resolveScrollToPage = resolveScrollToPage,
     )
 
@@ -2906,197 +2840,6 @@ class TopicViewModelTest {
         assertEquals(1, repository.calls.single().third)
         assertEquals(1, viewModel.state.value.request.page)
     }
-
-    // ──────────────────────────────────────────────────────────────────────
-    // Issue #200 — post-submit force refresh path
-    // ──────────────────────────────────────────────────────────────────────
-
-    @Test
-    fun `submitSignal triggers a force refresh instead of the cache-aside path`() = runTest {
-        // Reply / quote / edit / edit-FP landing: the navigation host bumped submitSignal
-        // so the ViewModel must skip observeTopicPage (cache-aside) and call refreshTopicPage
-        // directly, otherwise the user would see a stale page that doesn't include the post
-        // they just published.
-        val freshTopic = fakeTopic(page = 2, totalPages = 5, posts = listOf(fakePost(987)))
-        val repository = FakeTopicRepository(
-            flowsToReturn = emptyList(),
-            refreshTopicsToReturn = listOf(freshTopic),
-        )
-
-        val viewModel = topicViewModel(
-            request = topicRequest(page = 2, submitSignal = 1_700_000_000_000L),
-            topicRepository = repository,
-            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
-        )
-
-        viewModel.state.test {
-            val loaded = awaitItem()
-            val mode = assertMode<TopicUiState.Mode.Loaded>(loaded)
-            assertEquals(freshTopic, mode.topic)
-            cancelAndIgnoreRemainingEvents()
-        }
-        assertEquals(
-            "Force refresh path must hit refreshTopicPage, not observeTopicPage",
-            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)),
-            repository.refreshCalls,
-        )
-        assertTrue(
-            "observeTopicPage must NOT be called when submitSignal is non-null",
-            repository.calls.isEmpty(),
-        )
-    }
-
-    @Test
-    fun `submitSignal with scrollTo emits ScrollToPost after the force refresh`() = runTest {
-        // Quote / edit / edit-FP path: the parser extracted #t{numreponse} so the navigation
-        // host passed scrollTo through. The ViewModel must emit ScrollToPost(target) once
-        // the force-refreshed page is loaded and contains the target post.
-        val targetNumreponse = 2_523_833
-        val freshTopic = fakeTopic(
-            page = 1,
-            totalPages = 3,
-            posts = listOf(fakePost(2_523_829), fakePost(targetNumreponse)),
-        )
-        val repository = FakeTopicRepository(
-            flowsToReturn = emptyList(),
-            refreshTopicsToReturn = listOf(freshTopic),
-        )
-
-        val viewModel = topicViewModel(
-            request = topicRequest(page = 1, scrollTo = targetNumreponse, submitSignal = 42L),
-            topicRepository = repository,
-            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
-        )
-
-        viewModel.effects.test {
-            assertEquals(TopicEffect.ScrollToPost(targetNumreponse), awaitItem())
-            cancelAndIgnoreRemainingEvents()
-        }
-    }
-
-    @Test
-    fun `submitSignal without scrollTo emits ScrollToEndOfPage so plain reply lands on the new post`() = runTest {
-        // Plain reply path: HFR anchored #bas so the parser left scrollTo null. The ViewModel
-        // emits ScrollToEndOfPage so the screen scrolls to the last post (the one just
-        // published) rather than letting the user wonder where their reply went.
-        val freshTopic = fakeTopic(
-            page = 20,
-            totalPages = 20,
-            posts = listOf(fakePost(1), fakePost(2), fakePost(3)),
-        )
-        val repository = FakeTopicRepository(
-            flowsToReturn = emptyList(),
-            refreshTopicsToReturn = listOf(freshTopic),
-        )
-
-        val viewModel = topicViewModel(
-            request = topicRequest(page = 20, scrollTo = null, submitSignal = 99L),
-            topicRepository = repository,
-            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
-        )
-
-        viewModel.effects.test {
-            assertEquals(TopicEffect.ScrollToEndOfPage(20), awaitItem())
-            cancelAndIgnoreRemainingEvents()
-        }
-    }
-
-    @Test
-    fun `submitSignal without scrollTo on an overflowed reply emits NavigateToLastPage (#226)`() = runTest {
-        // #226 — the plain reply was submitted from page 20's form, but it overflowed onto a freshly
-        // created page 21. HFR anchored the form's page (20) so the force refresh of page 20 reports
-        // an up-to-date totalPages = 21 > request.page = 20. The new post lives on page 21, not here,
-        // so the ViewModel must re-route there (NavigateToLastPage) rather than ScrollToEndOfPage on
-        // the stale page 20 (which would scroll to the pre-overflow last post and confuse the user).
-        val overflowedTopic = fakeTopic(
-            page = 20,
-            totalPages = 21,
-            posts = listOf(fakePost(1), fakePost(2), fakePost(3)),
-        )
-        val repository = FakeTopicRepository(
-            flowsToReturn = emptyList(),
-            refreshTopicsToReturn = listOf(overflowedTopic),
-        )
-
-        val viewModel = topicViewModel(
-            request = topicRequest(page = 20, scrollTo = null, submitSignal = 123L),
-            topicRepository = repository,
-            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
-        )
-
-        viewModel.effects.test {
-            assertEquals(TopicEffect.NavigateToLastPage(21), awaitItem())
-            cancelAndIgnoreRemainingEvents()
-        }
-    }
-
-    @Test
-    fun `overflow landing force-refreshes and scrolls to end without re-redirecting (#226)`() = runTest {
-        // #226 — the host re-routed us onto the freshly created last page (21) with a fresh
-        // submitSignal AND postSubmitOverflowLanding = true. The force refresh still runs (submitSignal
-        // != null) so the page is never a stale cache-aside row — the original #226 failure — but the
-        // landing flag means we stop here: emit ScrollToEndOfPage to surface the new reply, NOT another
-        // NavigateToLastPage. (totalPages == request.page, the normal post-overflow shape.)
-        val landedTopic = fakeTopic(
-            page = 21,
-            totalPages = 21,
-            posts = listOf(fakePost(40), fakePost(41)),
-        )
-        val repository = FakeTopicRepository(
-            flowsToReturn = emptyList(),
-            refreshTopicsToReturn = listOf(landedTopic),
-        )
-
-        val viewModel = topicViewModel(
-            request = topicRequest(
-                page = 21,
-                scrollTo = null,
-                submitSignal = 456L,
-                postSubmitOverflowLanding = true,
-            ),
-            topicRepository = repository,
-            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
-        )
-
-        viewModel.effects.test {
-            assertEquals(TopicEffect.ScrollToEndOfPage(21), awaitItem())
-            cancelAndIgnoreRemainingEvents()
-        }
-    }
-
-    @Test
-    fun `overflow landing does not chase a moving tail when a concurrent post grows totalPages (#226)`() =
-        runTest {
-            // #226 anti-chase — on the overflow landing (page 21, flag set), a concurrent poster
-            // created page 22 during our refresh, so the fresh page reports totalPages = 22 >
-            // request.page = 21. Without the flag the ViewModel would NavigateToLastPage(22) and keep
-            // chasing the moving tail. The flag pins us here: ScrollToEndOfPage, never NavigateToLastPage.
-            val landedTopic = fakeTopic(
-                page = 21,
-                totalPages = 22,
-                posts = listOf(fakePost(40), fakePost(41)),
-            )
-            val repository = FakeTopicRepository(
-                flowsToReturn = emptyList(),
-                refreshTopicsToReturn = listOf(landedTopic),
-            )
-
-            val viewModel = topicViewModel(
-                request = topicRequest(
-                    page = 21,
-                    scrollTo = null,
-                    submitSignal = 789L,
-                    postSubmitOverflowLanding = true,
-                ),
-                topicRepository = repository,
-                authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
-            )
-
-            viewModel.effects.test {
-                assertEquals(TopicEffect.ScrollToEndOfPage(21), awaitItem())
-                cancelAndIgnoreRemainingEvents()
-            }
-        }
 
     // ──────────────────────────────────────────────────────────────────────
     // #335 — manual pull-to-refresh
@@ -3306,15 +3049,15 @@ class TopicViewModelTest {
     }
 
     @Test
-    fun `normal load without submitSignal does not emit ScrollToEndOfPage`() = runTest {
-        // Regression guard: ScrollToEndOfPage is gated on submitSignal != null. A normal
-        // deep-link navigation (cache-aside) must never emit it, even when scrollTo is null,
-        // otherwise we would snap to the bottom on every back navigation.
+    fun `normal entry load does not emit ScrollToEndOfPage`() = runTest {
+        // Regression guard: the bottom landing belongs to the post-submit path
+        // (applySubmitResult). A normal navigation (cache-aside) must never emit it, even
+        // when scrollTo is null, otherwise we would snap to the bottom on every back navigation.
         val topic = fakeTopic(page = 1, totalPages = 1, posts = listOf(fakePost(1)))
         val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) }))
 
         val viewModel = topicViewModel(
-            request = topicRequest(page = 1, scrollTo = null, submitSignal = null),
+            request = topicRequest(page = 1, scrollTo = null),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
         )
@@ -3333,37 +3076,33 @@ class TopicViewModelTest {
     }
 
     @Test
-    fun `submitSignal refresh failure falls back to the cache-aside path`() = runTest {
-        // Resilience: a transient network blip on the force refresh must not strand the user
-        // on an error screen. The ViewModel falls back to observeTopicPage so the cached
-        // page is shown (without the new post — but with a Retry affordance).
+    fun `applySubmitResult refresh failure falls back to the cache-aside path`() = runTest {
+        // Resilience: a transient network blip on the post-submit force refresh must not strand
+        // the user on an error screen. The ViewModel emits PostSubmitRefreshFailed (Toast : HFR
+        // DID accept the post) then falls back to observeTopicPage so the cached page is shown
+        // (without the new post — but with a Retry affordance) and must NOT re-emit a bottom
+        // landing on that stale cache (post 100 is the pre-submit last post).
         val cachedTopic = fakeTopic(
             page = 2,
             totalPages = 5,
-            // Stale cache: the pre-submit "last post" is post 100. If the VM erroneously
-            // emitted ScrollToEndOfPage after the fallback, the user would be scrolled to
-            // post 100 thinking it's their fresh reply — that's the bug we guard against.
             posts = listOf(fakePost(100)),
         )
         val repository = FakeTopicRepository(
-            flowsToReturn = listOf(flow { emit(cachedTopic) }),
+            flowsToReturn = listOf(flow { emit(cachedTopic) }, flow { emit(cachedTopic) }),
             refreshErrorToThrow = IOException("force refresh transient failure"),
         )
 
         val viewModel = topicViewModel(
-            request = topicRequest(page = 2, submitSignal = 7L),
+            request = topicRequest(page = 2),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
         )
 
-        // The first effect emitted on the failure path must be PostSubmitRefreshFailed so the
-        // screen surfaces a Toast (cf. TopicScreen.kt) telling the user HFR did accept their post
-        // even though the local refresh blipped. The fallback to observeTopicPage must NOT then
-        // re-emit ScrollToEndOfPage on the stale cache.
         viewModel.effects.test {
+            viewModel.applySubmitResult(targetPage = 2, scrollTo = null)
             assertEquals(TopicEffect.PostSubmitRefreshFailed, awaitItem())
-            // expectNoEvents() would race with cache emission; we settle by ensuring no
-            // further effect lands within the test scheduler's idle.
+            // A bottom landing on the stale cache would surface here — nothing must.
+            expectNoEvents()
             cancelAndIgnoreRemainingEvents()
         }
 
@@ -3379,10 +3118,46 @@ class TopicViewModelTest {
             repository.refreshCalls,
         )
         assertEquals(
-            "Fallback path must hit observeTopicPage after the failure",
-            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)),
+            "Entry load then the post-failure fallback both ride observeTopicPage",
+            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2), Triple(SAMPLE_CAT, SAMPLE_POST, 2)),
             repository.calls,
         )
+    }
+
+    @Test
+    fun `canReturnFromJump mirrors the jump chain across push, unwind and manual switch (#782)`() = runTest {
+        // #895 étape 4 (PR 2) — the screen's BackHandler is driven by this flag: enabled while
+        // the in-VM jump chain has frames to unwind, disabled once it is empty or a MANUAL page
+        // change invalidated it (browser-like).
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flow { emit(fakeTopic(2, 5)) },
+                flow { emit(fakeTopic(3, 5)) },
+                flow { emit(fakeTopic(2, 5)) },
+                flow { emit(fakeTopic(3, 5)) },
+                flow { emit(fakeTopic(4, 5)) },
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+        assertEquals(false, viewModel.state.value.canReturnFromJump)
+
+        viewModel.goToPost(targetPage = 3, numreponse = 42)
+        assertEquals(true, viewModel.state.value.canReturnFromJump)
+
+        assertEquals(true, viewModel.returnFromJump())
+        assertEquals(false, viewModel.state.value.canReturnFromJump)
+        assertEquals("the unwind landed back on the departure page", 2, viewModel.state.value.request.page)
+
+        // Re-arm a jump, then a MANUAL switch drops the whole chain (#782 browser-like rule).
+        viewModel.goToPost(targetPage = 3, numreponse = 42)
+        assertEquals(true, viewModel.state.value.canReturnFromJump)
+        viewModel.switchToPage(4)
+        assertEquals(false, viewModel.state.value.canReturnFromJump)
+        assertEquals(false, viewModel.returnFromJump())
     }
 
     @Suppress("LongParameterList") // test builder mirroring the Topic model's fields, all defaulted.
