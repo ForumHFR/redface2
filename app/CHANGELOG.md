@@ -16,6 +16,16 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.27.2` — `internal` (dev) — 2026-07-12
+
+**Recherche intra-topic v2** (#894, retours XaTriX sur 0.27.1 — contrat `transsearch` re-vérifié live, cadrage + gates Codex, dogfoods sur le serveur réel).
+
+### Vue Topic — recherche
+- **Le mode non-filtré refonctionne** (PR #896) : le form des réponses transsearch (sans `firstnum`) parse à nouveau — le curseur de match n'est plus perdu (« Aucun résultat » systématique corrigé).
+- **Ancrage parité web** (PR #897) : la recherche part de la page courante vers la fin (ancre de session explicite) ; nouvelle option « **Chercher depuis le début du sujet** » (défaut décoché).
+- **« Afficher les résultats suivants »** (PR #897) : quand HFR tronque sa fenêtre de scan (~200 matches), un footer de continuation reprend au curseur annoncé — le batch suivant remplace la liste et s'ouvre en haut. Le pager `p` de 0.27.1 (sans effet serveur) est supprimé.
+- Les étapes ‹ › et le retour au premier résultat re-soumettent les critères figés de la recherche affichée, plus jamais la barre en cours d'édition.
+
 ## `0.27.1` — `internal` (dev) — 2026-07-12
 
 **Lot de 4 fixes Vue Topic** (#877, #879, #880, #863 — cadrage groupé, gate Codex par PR, dogfood émulateur de chaque flux dont migration Room v14→v15 en conditions réelles).

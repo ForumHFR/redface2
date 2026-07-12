@@ -1,6 +1,5 @@
-Redface 2 v0.27.1 — dev.
+Redface 2 v0.27.2 — dev.
 
-- Vue topic : top bar stable pendant les chargements (« Chargement… », plus de numéro périmé).
-- Recherche dans le sujet : le filtre couvre tout le sujet, résultats paginés.
-- Badge « cité ×N » : compteur serveur, toutes pages confondues.
-- Réponse rapide → plein écran : le curseur reste visible au-dessus du clavier.
+- Recherche dans le sujet : la recherche par pseudo sans filtre refonctionne.
+- La recherche part de la page courante (comme le site) ; option « Chercher depuis le début du sujet ».
+- Résultats filtrés : bouton « Afficher les résultats suivants » quand HFR tronque la liste (~200).
