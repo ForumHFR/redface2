@@ -124,6 +124,14 @@ class TopicRepositoryImpl @Inject constructor(
      * **No-op when the alpha `ignoreTopicCache` toggle is ON**: prefetching into Room
      * while the user explicitly asked to bypass it would re-fill the very cache they
      * want to skip, so the call returns early without hitting the network.
+     *
+     * **No-op when ANY cache row already exists** (#895 quick win 2) : the prefetch's declared
+     * purpose is warming pages never visited. Re-fetching over an existing AUTHENTICATED row is
+     * pure waste (the DAO guard below would refuse the write anyway), and over a stale ANONYMOUS
+     * row it buys nothing either — reading an anon row always triggers the authenticated refetch.
+     * The `upsertTopicPageWithPostsUnlessAuthenticated` transaction stays as the LAST line of
+     * defense against the check-then-fetch race (a concurrent authenticated fetch landing between
+     * this read and the persist).
      */
     override suspend fun prefetch(cat: Int, post: Int, page: Int) {
         val ignoreTopicCache = withContext(ioDispatcher) {
@@ -135,6 +143,10 @@ class TopicRepositoryImpl @Inject constructor(
             // very cache they asked us to skip. Cancellation semantics are preserved because we
             // do nothing.
             Log.d(LOG_TAG, "Skipped topic prefetch because ignore topic cache is enabled")
+            return
+        }
+        if (withContext(ioDispatcher) { loadFromCache(cat, post, page) } != null) {
+            Log.d(LOG_TAG, "Skipped topic prefetch: page already cached (cat=$cat post=$post page=$page)")
             return
         }
         try {
