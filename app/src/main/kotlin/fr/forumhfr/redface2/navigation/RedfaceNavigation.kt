@@ -1976,8 +1976,8 @@ private fun RedfaceNavHost(
         // le backStack → ça passe par transitionSpec : on le détecte par le changement de racine de pile
         // (chaque onglet a une racine distincte) pour ne pas hériter du slide de drill-down.
         transitionSpec = { navForwardTransform(initialState, targetState) },
-        popTransitionSpec = { navPopTransform(initialState, targetState) },
-        predictivePopTransitionSpec = { navPopTransform(initialState, targetState) },
+        popTransitionSpec = { navSharedAxisXBack() },
+        predictivePopTransitionSpec = { navSharedAxisXBack() },
         entryDecorators = listOf(
             rememberSaveableStateHolderNavEntryDecorator(),
             rememberViewModelStoreNavEntryDecorator(),
@@ -2436,7 +2436,7 @@ private fun RedfaceNavHost(
                     },
                 )
             }
-            entry<TopicRoute>(metadata = mapOf(TOPIC_SCENE_METADATA_KEY to true)) { route ->
+            entry<TopicRoute> { route ->
                 // #895 étape 4 (PR 2) — the route is FROZEN at entry : every in-topic page change,
                 // quote jump, jump return and post-submit landing now lives inside the retained
                 // TopicViewModel (single nav entry, single LazyListState — no more per-page entry
@@ -2866,8 +2866,6 @@ private const val TAB_FADE_IN_MS = 140
 private const val TAB_FADE_OUT_MS = 80
 private const val SLIDE_DIVISOR = 4
 
-private fun navInstant(): ContentTransform = EnterTransition.None togetherWith ExitTransition.None
-
 /** Shared-axis X, sens AVANT : l'entrant glisse depuis la droite, le sortant part vers la gauche. */
 private fun navSharedAxisXForward(): ContentTransform =
     (slideInHorizontally(tween(DRILL_MS, easing = EmphasizedDecelerate)) { it / SLIDE_DIVISOR } +
@@ -2885,26 +2883,6 @@ private fun navSharedAxisXBack(): ContentTransform =
 /** Fade-through court entre onglets (contenus sans relation spatiale → pas de slide). */
 private fun navTabFadeThrough(): ContentTransform =
     fadeIn(tween(TAB_FADE_IN_MS, delayMillis = 30)) togetherWith fadeOut(tween(TAB_FADE_OUT_MS))
-
-/**
- * Marks a [TopicRoute] NavEntry so [isTopicScene] can recognise a topic scene without relying on the
- * route type: nav3 1.1.1 exposes `Scene.key` as `route.toString()` (a String), not the route object,
- * so an `is TopicRoute` test on the scene key would never match. The entry's public metadata is the
- * stable signal instead.
- */
-internal const val TOPIC_SCENE_METADATA_KEY = "fr.forumhfr.redface2.topicScene"
-
-/**
- * True iff [metadata] carries the topic-scene marker. Null/empty/other-keys/false → false. Extracted
- * as a pure function so the marker contract (incl. the empty-`entries` → null case) is unit-testable
- * without a Compose/nav3 runtime.
- */
-internal fun isTopicSceneMetadata(metadata: Map<String, Any>?): Boolean =
-    metadata?.get(TOPIC_SCENE_METADATA_KEY) == true
-
-/** True when this scene's top entry is a [TopicRoute] (tagged via [TOPIC_SCENE_METADATA_KEY]). */
-private fun Scene<NavKey>.isTopicScene(): Boolean =
-    isTopicSceneMetadata(entries.lastOrNull()?.metadata)
 
 /**
  * Pure : une navigation AVANT est un drill-down (push) — par opposition à un changement d'onglet ou un
@@ -2929,16 +2907,15 @@ private fun Scene<NavKey>.isForwardDrillDownTo(to: Scene<NavKey>): Boolean =
     )
 
 /**
- * Transition AVANT (push/replace non-pop) : instantané pour le swipe topic→topic (#282), shared-axis X
- * avant pour un drill-down (push intra-onglet, toute profondeur), fade-through sinon (changement
- * d'onglet ou remplacement de pile — contenus sans relation spatiale parent/enfant).
+ * Transition AVANT (push/replace non-pop) : shared-axis X avant pour un drill-down (push
+ * intra-onglet, toute profondeur), fade-through sinon (changement d'onglet ou remplacement de
+ * pile — contenus sans relation spatiale parent/enfant). #895 étape 5 : le cas spécial
+ * « instantané topic→topic » (swipe de page #282) est mort avec la route figée — un changement
+ * de page ne traverse plus la navigation, et un vrai topic→topic (deep link pendant la lecture)
+ * mérite la même transition que tout autre remplacement.
  */
 private fun navForwardTransform(from: Scene<NavKey>, to: Scene<NavKey>): ContentTransform = when {
-    from.isTopicScene() && to.isTopicScene() -> navInstant()
     from.isForwardDrillDownTo(to) -> navSharedAxisXForward()
     else -> navTabFadeThrough()
 }
 
-/** Transition ARRIÈRE (pop / retour prédictif) : instantané topic→topic, sinon shared-axis X arrière. */
-private fun navPopTransform(from: Scene<NavKey>, to: Scene<NavKey>): ContentTransform =
-    if (from.isTopicScene() && to.isTopicScene()) navInstant() else navSharedAxisXBack()
