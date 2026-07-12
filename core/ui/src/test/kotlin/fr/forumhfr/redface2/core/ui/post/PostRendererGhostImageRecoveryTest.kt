@@ -17,11 +17,14 @@ import androidx.test.core.app.ApplicationProvider
 import coil3.ColorImage
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
+import coil3.intercept.Interceptor
+import coil3.request.ImageResult
 import coil3.test.FakeImageLoaderEngine
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -36,10 +39,13 @@ import org.robolectric.annotation.GraphicsMode
  * then a `mediaRefreshGeneration` bump — WITHOUT disposing the composition (the historical
  * work-around was « citer puis revenir », which disposed the whole topic composition).
  *
- * The pin: the same live composition, fed a bumped generation, re-probes the URL and grows the
- * placeholder box from the 16 sp cold square to the measured size. Without the generation in the
- * measure effect's keys the effect never relaunched (structurally-equal `inlines` on refresh), and
- * the expired failure TTL was never even re-consulted — this test fails on the old code.
+ * Two pins, matching the two ghost mechanisms:
+ *  - the placeholder BOX grows from the 16 sp cold square to the measured size (the measure effect
+ *    relaunched — it never did on refresh before, `inlines` being structurally equal);
+ *  - the PAINTER actually re-attempts its load (what `key(generation)` buys) — proven by counting
+ *    the loader requests for the URL, pixel capture being unreliable for Coil drawings under this
+ *    harness. After the bump the URL must be requested at least twice more: the re-probe AND the
+ *    recreated painter. Without `key()` only the probe re-fires.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w360dp-h780dp-xxhdpi")
@@ -54,6 +60,9 @@ class PostRendererGhostImageRecoveryTest {
 
     private val appContext: Context = ApplicationProvider.getApplicationContext()
 
+    /** Every url the loader was asked for, across engine swaps (class-level, cumulative). */
+    private val requestedUrls = CopyOnWriteArrayList<String>()
+
     @OptIn(coil3.annotation.DelicateCoilApi::class)
     private fun installLoader(serveGhost: Boolean) {
         val builder = FakeImageLoaderEngine.Builder()
@@ -61,10 +70,22 @@ class PostRendererGhostImageRecoveryTest {
             builder.intercept(ghostUrl, ColorImage(0xFF1565C0.toInt(), width = 320, height = 240))
         }
         // else: ghostUrl NOT intercepted → Coil error result = the production failure mode.
+        val engine = builder.build()
+        val counter = object : Interceptor {
+            override suspend fun intercept(chain: Interceptor.Chain): ImageResult {
+                (chain.request.data as? String)?.let(requestedUrls::add)
+                return chain.proceed()
+            }
+        }
         SingletonImageLoader.setUnsafe(
-            ImageLoader.Builder(appContext).components { add(builder.build()) }.build(),
+            ImageLoader.Builder(appContext).components {
+                add(counter)
+                add(engine)
+            }.build(),
         )
     }
+
+    private fun ghostRequestCount(): Int = requestedUrls.count { it == ghostUrl }
 
     @Test
     fun `explicit refresh (clear + generation bump) recovers a ghost inline image in place`() {
@@ -109,6 +130,8 @@ class PostRendererGhostImageRecoveryTest {
         // Phase 2 — the outage recovers, the user pulls to refresh: the screen clears the memoized
         // failures FIRST, then bumps the generation (the production order in TopicContent).
         installLoader(serveGhost = true)
+        composeTestRule.waitForIdle()
+        val requestsBeforeRefresh = ghostRequestCount()
         composeTestRule.runOnIdle {
             cache.clearFailures()
             generation++
@@ -127,5 +150,12 @@ class PostRendererGhostImageRecoveryTest {
             "the ghost box must grow to the measured size after the refresh (was $grownHeight)",
             grownHeight > 60.dp,
         )
+
+        // Painter proof (Sol gate r1) : the refresh must trigger BOTH the re-probe and a fresh
+        // painter load — ≥ 2 new loader requests for the URL. Without key(generation) the stuck
+        // error painter never re-requests and only the probe (+1) fires.
+        composeTestRule.waitUntil(timeoutMillis = 5_000) {
+            ghostRequestCount() >= requestsBeforeRefresh + 2
+        }
     }
 }

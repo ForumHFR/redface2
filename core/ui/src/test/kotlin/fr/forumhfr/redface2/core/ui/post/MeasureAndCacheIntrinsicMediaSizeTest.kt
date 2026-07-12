@@ -89,6 +89,38 @@ class MeasureAndCacheIntrinsicMediaSizeTest {
     }
 
     @Test
+    fun `a failure from a probe that predates clearFailures is discarded (813 stale write)`() = runTest {
+        val cache = DefaultIntrinsicMediaSizeCache()
+        val url = "https://hfr/ghost.jpg"
+        val loader = loaderReturning(url, ColorImage(width = 1, height = 1)) // bypassed by the fake probes
+        val probing = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+
+        // Old measure effect : its probe is in flight when the user refreshes. Compose only cancels
+        // it at the next recomposition — here it simply completes (with a failure) after the clear.
+        val old = launch {
+            measureAndCacheIntrinsicMediaSize(url, cache, context, loader) { _, _, _ ->
+                probing.complete(Unit)
+                release.await()
+                null
+            }
+        }
+        probing.await()
+
+        cache.clearFailures() // the user's explicit refresh, mid-probe
+        release.complete(Unit)
+        old.join()
+
+        assertFalse(
+            "a failure produced by a probe older than the clear must be discarded",
+            cache.isFailureFresh(url, System.currentTimeMillis()),
+        )
+        // The path stays open : the retry probes and lands.
+        measureAndCacheIntrinsicMediaSize(url, cache, context, loader) { _, _, _ -> IntSize(320, 240) }
+        assertEquals(IntSize(320, 240), cache.get(url))
+    }
+
+    @Test
     fun `a cancelled probe records nothing and a waiting caller takes over (813 race)`() = runTest {
         val cache = DefaultIntrinsicMediaSizeCache()
         val url = "https://hfr/slow.jpg"

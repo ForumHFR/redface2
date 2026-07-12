@@ -9,6 +9,8 @@ import coil3.size.Precision
 import coil3.size.Scale
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 /**
  * #175/#257 — probe a media's dimensions via a **bounded** Coil decode (aspect ratio + size class).
@@ -83,6 +85,11 @@ internal suspend fun measureAndCacheIntrinsicMediaSize(
     while (true) {
         val now = System.currentTimeMillis()
         if (cache.get(url) != null || cache.isFailureFresh(url, now)) return
+        // #813 — capture the failure epoch BEFORE probing: if the user refreshes (clearFailures)
+        // while this probe is in flight, its failure result is STALE — exactly the outage the user
+        // is retrying — and must not be re-deposited on top of the clear. Compose only cancels the
+        // old measure effect at the next recomposition, so this window is real, not theoretical.
+        val epoch = cache.failureEpoch()
         val ticket = CompletableDeferred<Unit>()
         val winner = inFlightMeasurements.putIfAbsent(url, ticket)
         if (winner != null) {
@@ -94,7 +101,11 @@ internal suspend fun measureAndCacheIntrinsicMediaSize(
         }
         try {
             val size = probe(url, context, imageLoader)
-            if (size != null) cache.putSuccess(url, size) else cache.putFailure(url, now)
+            // Belt for a probe that swallowed cancellation: never publish a result on behalf of a
+            // dead effect (the epoch guard below covers failures; a success is always welcome, but
+            // only from a live coroutine).
+            currentCoroutineContext().ensureActive()
+            if (size != null) cache.putSuccess(url, size) else cache.putFailureIfEpoch(url, now, epoch)
             return
         } finally {
             inFlightMeasurements.remove(url, ticket)
