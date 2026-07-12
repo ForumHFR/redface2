@@ -5,8 +5,10 @@ import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
@@ -28,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextLayoutResult
@@ -174,9 +177,22 @@ private fun BbcodeFieldImpl(
     // layout result (a new one lands after every text change) AND the selection (caret moves
     // without relayout: taps, arrow keys), never on `value.text` alone — that would fire
     // against the stale layout of the previous text.
-    LaunchedEffect(isFocused, value.selection, textLayout) {
+    //
+    // #880 — ALSO keyed on the IME bottom inset. At the sheet → full-screen escalation the
+    // resumed draft (and its end-of-text caret) lands ASYNC, after autoFocus already fired and
+    // while the keyboard is still animating in under `adjustNothing` : the follow then runs
+    // against a viewport that has not shrunk yet, judges the caret « already visible », and
+    // nothing re-triggers it once the IME finally covers the field. Re-keying on the inset
+    // re-issues the bring-into-view when the viewport settles ; each key change cancels the
+    // previous effect (and its in-flight bringIntoView), so requests never pile up.
+    val imeBottom = WindowInsets.ime.getBottom(LocalDensity.current)
+    LaunchedEffect(isFocused, value.selection, textLayout, imeBottom) {
         if (!isFocused) return@LaunchedEffect
         val layout = textLayout ?: return@LaunchedEffect
+        // #880 — a layout for ANOTHER text (the async restore replaced the value, its fresh
+        // layout not delivered yet) would scroll to a meaningless rect : skip, the matching
+        // `onTextLayout` re-keys this effect immediately after.
+        if (layout.layoutInput.text.text != value.text) return@LaunchedEffect
         val cursorOffset = value.selection.end.coerceIn(0, layout.layoutInput.text.length)
         bringCursorIntoView.bringIntoView(layout.getCursorRect(cursorOffset))
     }
