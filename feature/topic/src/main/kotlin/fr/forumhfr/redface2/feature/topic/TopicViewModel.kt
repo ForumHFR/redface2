@@ -1391,13 +1391,23 @@ class TopicViewModel @AssistedInject constructor(
      * actually applied (`status == Done`) to avoid a needless refetch on a cancel-before-submit.
      */
     private fun closeSearch() {
-        val hadResults = _state.value.search.status == TopicSearchStatus.Done
+        val current = _state.value
+        val hadResults = current.search.status == TopicSearchStatus.Done
+        // #913 (verdict Sol loupe/#910) — a search submitted during a page transition took over
+        // the switch load ; closing WITHOUT results used to skip the reload, leaving the departed
+        // page displayed while the canonical page is the target with NO load in flight — the
+        // durable « displayed ≠ canonical » state the #907 gates forbid. Reload whenever the
+        // displayed page is not the canonical one (a missing Loaded — skeleton — reloads too).
+        val displayedPage = (current.mode as? TopicUiState.Mode.Loaded)?.topic?.page
+        val mustReload = hadResults || displayedPage != request.page
         _state.update {
             it.copy(search = it.search.copy(isActive = false, status = TopicSearchStatus.Idle))
         }
-        // loadCurrentPage already cancels searchJob + bumps the generation (takeOverFromSearch). When
-        // there is nothing to reload, drop the in-flight search ourselves so a late reply can't write.
-        if (hadResults) loadCurrentPage() else takeOverFromSearch()
+        // loadCurrentPage already cancels searchJob + bumps the generation (takeOverFromSearch).
+        // Reload on results (Done) OR on a displayed/canonical mismatch ; only the aligned
+        // no-result close skips it — then drop the in-flight search ourselves so a late reply
+        // can't write.
+        if (mustReload) loadCurrentPage() else takeOverFromSearch()
     }
 
     /**
