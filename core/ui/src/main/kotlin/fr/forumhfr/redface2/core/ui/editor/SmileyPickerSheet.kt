@@ -37,12 +37,19 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import coil3.SingletonImageLoader
 import coil3.compose.AsyncImage
+import coil3.compose.LocalPlatformContext
 import fr.forumhfr.redface2.core.model.BUILTIN_HFR_SMILEYS
 import fr.forumhfr.redface2.core.model.EditorSmiley
 import fr.forumhfr.redface2.core.model.EditorSmileySource
+import fr.forumhfr.redface2.core.ui.post.LocalIntrinsicMediaSizeCache
+import fr.forumhfr.redface2.core.ui.post.PixelSize
+import fr.forumhfr.redface2.core.ui.post.intrinsicSmileyDisplaySize
+import fr.forumhfr.redface2.core.ui.post.measureAndCacheIntrinsicMediaSize
 
 /**
  * Phase 2F-B (#11 partial) — bottom-sheet smiley picker. Promoted from `:feature:editor`
@@ -217,6 +224,25 @@ private fun SmileyGrid(items: List<EditorSmiley>, onSmileyClicked: (String) -> U
 @Composable
 private fun SmileyCell(smiley: EditorSmiley, onClick: () -> Unit) {
     val description = stringResource(R.string.editor_smiley_insert_description, smiley.token)
+    // #871 — persos reuse the posts' intrinsic-measurement pipeline (#175) : a bounded Coil probe
+    // shares the SingletonImageLoader caches with the rendering AsyncImage below (no double
+    // fetch), and the process-wide URL cache means a smiley measured in the picker is already
+    // sized when it later renders inside a post — and vice versa. Builtins are never measured
+    // (known ~16 px sprites, same contract as the posts). The cache read is a tracked snapshot
+    // read : the cell recomposes at the measured size the moment the probe lands.
+    val sizeCache = LocalIntrinsicMediaSizeCache.current
+    val platformContext = LocalPlatformContext.current
+    if (smiley.source == EditorSmileySource.WIKI) {
+        LaunchedEffect(smiley.imageUrl) {
+            measureAndCacheIntrinsicMediaSize(
+                url = smiley.imageUrl,
+                cache = sizeCache,
+                context = platformContext,
+                imageLoader = SingletonImageLoader.get(platformContext),
+            )
+        }
+    }
+    val measuredPx = if (smiley.source == EditorSmileySource.WIKI) sizeCache.get(smiley.imageUrl) else null
     Box(
         modifier = Modifier
             // #236 — 48.dp keeps the Material minimum touch target while the grid gets denser.
@@ -234,10 +260,12 @@ private fun SmileyCell(smiley: EditorSmiley, onClick: () -> Unit) {
             // are ~15 px sprites rendered near-native, persos are richer images that deserve
             // most of the cell. The single 30.dp of #236 made builtins big+blurry and persos
             // cramped at once. ContentScale.Fit preserves aspect ratios in both cases.
-            modifier = Modifier.size(smileyCellImageSize(smiley.source)),
+            // #871 — the perso box is the measured no-upscale size, so Fit never stretches a
+            // small sprite past its native scale ; the parent Box centres it in the cell.
+            modifier = Modifier.size(smileyCellImageSize(smiley.source, measuredPx)),
             contentScale = ContentScale.Fit,
             // Pixel-art builtins stay crisp unfiltered ; persos (photos, rich art, GIF frames)
-            // look better bilinear-filtered at their mild upscale.
+            // look better bilinear-filtered when the cell cap scales them down.
             filterQuality = when (smiley.source) {
                 EditorSmileySource.BUILTIN -> FilterQuality.None
                 EditorSmileySource.WIKI -> FilterQuality.Low
@@ -248,10 +276,34 @@ private fun SmileyCell(smiley: EditorSmiley, onClick: () -> Unit) {
 
 /**
  * #816 — the picker's per-source thumbnail size : builtins near their ~15 px native scale,
- * persos filling most of the 48.dp cell, mirroring their relative sizes in a rendered post.
- * Pure — pinned by unit test.
+ * persos mirroring their relative size in a rendered post.
+ *
+ * #871 (thibw) — a MEASURED perso applies the posts' no-upscale + cap policy (#175,
+ * [intrinsicSmileyDisplaySize]) at the forum scale (1 native px ≈ 1 dp, the picker analogue of
+ * the renderer's `px → sp`) : a sprite smaller than the [WIKI_CELL_IMAGE_SIZE_DP] cell renders
+ * at its crisp native size (centred by the cell), a larger one shrinks to fit, aspect ratio
+ * preserved. An UNMEASURED perso (cold cache, or measurement failure — dead URL) keeps the
+ * pre-#871 cell-filling square as provisional fallback. Pure — pinned by unit test.
  */
-internal fun smileyCellImageSize(source: EditorSmileySource): Dp = when (source) {
-    EditorSmileySource.BUILTIN -> 20.dp
-    EditorSmileySource.WIKI -> 44.dp
+internal fun smileyCellImageSize(source: EditorSmileySource, measuredPx: IntSize?): DpSize = when (source) {
+    EditorSmileySource.BUILTIN -> DpSize(20.dp, 20.dp)
+    EditorSmileySource.WIKI -> {
+        val nativePx = measuredPx?.takeIf { it.width > 0 && it.height > 0 }
+        if (nativePx == null) {
+            DpSize(WIKI_CELL_IMAGE_SIZE_DP.dp, WIKI_CELL_IMAGE_SIZE_DP.dp)
+        } else {
+            val display = intrinsicSmileyDisplaySize(
+                nativePx = PixelSize(nativePx.width, nativePx.height),
+                maxWidthSp = WIKI_CELL_IMAGE_SIZE_DP,
+                maxHeightSp = WIKI_CELL_IMAGE_SIZE_DP,
+            )
+            DpSize(display.width.dp, display.height.dp)
+        }
+    }
 }
+
+/**
+ * #816/#871 — the perso thumbnail slot inside the 48.dp cell : the fixed size of an unmeasured
+ * perso, and the per-axis cap of a measured one.
+ */
+internal const val WIKI_CELL_IMAGE_SIZE_DP = 44
