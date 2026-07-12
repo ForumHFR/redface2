@@ -63,6 +63,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -118,6 +119,7 @@ import fr.forumhfr.redface2.core.ui.post.PostImageActions
 import fr.forumhfr.redface2.core.ui.post.PostImageTarget
 import fr.forumhfr.redface2.core.ui.post.PostListScaffold
 import fr.forumhfr.redface2.core.ui.post.PostRenderer
+import fr.forumhfr.redface2.core.ui.post.clearPostMediaMeasurementFailures
 import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 import fr.forumhfr.redface2.core.ui.theme.LocalIgnoreInlineColors
@@ -944,6 +946,17 @@ internal fun TopicContent(
     // the title falls back to the cached hint (or a generic label) and the counter to « Chargement… »
     // — never a page total that has not been parsed yet (#622).
     val loaded = state.mode as? TopicUiState.Mode.Loaded
+    // #813 — media-retry generation for the post renderers, bumped on each EXPLICIT user refresh
+    // (pull-to-refresh, double-tap) so ghost inline images re-probe (failed measure) and restart
+    // their painter. Failures are cleared BEFORE the bump (Sol framing) — the other order would let
+    // the relaunched measure effect re-read a still-fresh failure and skip the probe. Saveable so a
+    // config change mid-session keeps the count monotonic (a fresh composition retries on its own).
+    var mediaRefreshGeneration by rememberSaveable { mutableIntStateOf(0) }
+    val refreshWithMediaRetry = {
+        clearPostMediaMeasurementFailures()
+        mediaRefreshGeneration++
+        onIntent(TopicIntent.Refresh)
+    }
     // #411 — bottom action cluster hides on scroll-down, re-appears on scroll-up (RF1 parity).
     val bottomActionsVisible = rememberBottomActionsVisible(listState)
     val fallbackTitle = stringResource(R.string.topic_topbar_fallback_title)
@@ -1097,7 +1110,8 @@ internal fun TopicContent(
                     // preserved on refresh (the ViewModel emits no scroll effect).
                     PullToRefreshBox(
                         isRefreshing = state.isRefreshing,
-                        onRefresh = { onIntent(TopicIntent.Refresh) },
+                        // #813 — user refresh also clears + re-probes failed media measurements.
+                        onRefresh = refreshWithMediaRetry,
                         modifier = Modifier.fillMaxSize(),
                     ) {
                         // #300/#351 — the intra-page scrollbar now rides inside PostListScaffold
@@ -1151,7 +1165,7 @@ internal fun TopicContent(
                                 onOpenProfile = onOpenProfile,
                                 onSendPrivateMessage = onSendPrivateMessage,
                                 onDeleteRequest = onDeleteRequest,
-                                onDoubleTapRefresh = { onIntent(TopicIntent.Refresh) },
+                                onDoubleTapRefresh = refreshWithMediaRetry,
                                 onSearchNextResults = { onIntent(TopicIntent.SearchNextResultsPage) },
                                 listState = listState,
                                 multiQuoteSelection = multiQuoteNumreponses,
@@ -1161,6 +1175,8 @@ internal fun TopicContent(
                                 },
                                 pollManualExpanded = pollManualExpanded,
                                 onPollExpansionChanged = onPollExpansionChanged,
+                                // #813 — explicit-refresh retry for ghost inline images.
+                                mediaRefreshGeneration = mediaRefreshGeneration,
                             )
                         }
                     }
@@ -1638,6 +1654,8 @@ private fun TopicLoadedContent(
     // callback recording a tap on the poll card. Threaded down to the header card's poll.
     pollManualExpanded: Boolean? = null,
     onPollExpansionChanged: (Boolean) -> Unit = {},
+    /** #813 — screen-owned media-retry generation, threaded to each card's body renderer. */
+    mediaRefreshGeneration: Int = 0,
 ) {
     // Scroll-anchor (#104 follow-up): the post the reader was sent to (quote link, deep link, last-read).
     // Marked by tinting ONLY its identity band with tertiaryContainer (XaTriX: the left-rail attempt was
@@ -1914,6 +1932,8 @@ private fun TopicLoadedContent(
                         onToggleMultiQuote = multiQuoteToggle,
                         // #831 — long-press on a post image opens the image contextual menu.
                         onImageLongPress = postImageActions.onLongPress,
+                        // #813 — explicit-refresh retry for ghost inline images.
+                        mediaRefreshGeneration = mediaRefreshGeneration,
                     )
                 }
                 if (showLastReadMarker) {
@@ -2536,6 +2556,13 @@ internal fun TopicPostCard(
      * Null (previews/tests) leaves every image inert.
      */
     onImageLongPress: ((PostImageTarget) -> Unit)? = null,
+    /**
+     * #813 — screen-owned media-retry generation, forwarded to the BODY [PostRenderer] : bumped by
+     * the screen on an explicit user refresh so ghost inline images (failed measure/painter)
+     * re-probe without leaving the screen. The signature render keeps the default 0 (inert images,
+     * same stance as [onImageLongPress]). Default 0 for previews/tests.
+     */
+    mediaRefreshGeneration: Int = 0,
 ) {
     // #287 — structural spacing from the active density preset (Comfort = the historical rhythm).
     val m = LocalDisplayMetrics.current
@@ -2615,7 +2642,12 @@ internal fun TopicPostCard(
                     onImageLongPress?.let { PostImageActions(onLongPress = it) }
                 }
                 CompositionLocalProvider(LocalPostImageActions provides imageActions) {
-                    PostRenderer(content = post.content, selectable = true, onGoToCitedPost = onGoToCitedPost)
+                    PostRenderer(
+                        content = post.content,
+                        selectable = true,
+                        onGoToCitedPost = onGoToCitedPost,
+                        mediaRefreshGeneration = mediaRefreshGeneration,
+                    )
                 }
                 // #330 — the author signature (web parity), gated by the reading preference. Rendered
                 // with the shared PostRenderer (the signature is BBCode/HTML like the body) but in a

@@ -30,7 +30,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -279,25 +281,44 @@ fun PostRenderer(
     // quote's header. Null (default) keeps the header inert — only the topic reading surface wires
     // it (the editor preview, MP threads and signatures have nowhere meaningful to navigate).
     onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
+    // #813 — screen-owned retry generation for inline media. The hosting screen bumps it on an
+    // explicit user refresh (AFTER clearPostMediaMeasurementFailures()) so paragraphs re-probe
+    // failed measurements and inline painters restart — a ghost image (16 sp cold box / stuck
+    // error painter) becomes recoverable without leaving the screen. Default 0 = never bumped,
+    // the exact previous behaviour for surfaces without a refresh affordance (preview, MP,
+    // signatures). Explicit parameter at this entry point (it is screen state, not ambient
+    // context); distributed below via a private CompositionLocal like the file's other
+    // cross-cutting render context, so the recursive quote/spoiler chain stays untouched.
+    mediaRefreshGeneration: Int = 0,
 ) {
-    if (selectable) {
-        // #281 — allow selecting / copying a post's text. The SelectionContainer is wrapped at this
-        // ENTRY POINT only, never inside the recursive PostBlocksRenderer (Quote/Spoiler): a nested
-        // SelectionContainer silently breaks selection. Links (LinkAnnotation.Url) stay tappable
-        // inside a SelectionContainer; inline media carry a U+FFFC placeholder that can pollute a
-        // copied selection spanning them (known, acceptable limitation).
-        SelectionContainer(modifier = modifier) {
-            PostBlocksRenderer(blocks = content.blocks, quoteDepth = 0, onGoToCitedPost = onGoToCitedPost)
+    CompositionLocalProvider(LocalMediaRefreshGeneration provides mediaRefreshGeneration) {
+        if (selectable) {
+            // #281 — allow selecting / copying a post's text. The SelectionContainer is wrapped at this
+            // ENTRY POINT only, never inside the recursive PostBlocksRenderer (Quote/Spoiler): a nested
+            // SelectionContainer silently breaks selection. Links (LinkAnnotation.Url) stay tappable
+            // inside a SelectionContainer; inline media carry a U+FFFC placeholder that can pollute a
+            // copied selection spanning them (known, acceptable limitation).
+            SelectionContainer(modifier = modifier) {
+                PostBlocksRenderer(blocks = content.blocks, quoteDepth = 0, onGoToCitedPost = onGoToCitedPost)
+            }
+        } else {
+            PostBlocksRenderer(
+                blocks = content.blocks,
+                modifier = modifier,
+                quoteDepth = 0,
+                onGoToCitedPost = onGoToCitedPost,
+            )
         }
-    } else {
-        PostBlocksRenderer(
-            blocks = content.blocks,
-            modifier = modifier,
-            quoteDepth = 0,
-            onGoToCitedPost = onGoToCitedPost,
-        )
     }
 }
+
+/**
+ * #813 — internal distribution of [PostRenderer]'s `mediaRefreshGeneration` parameter to the
+ * paragraph measure effect and the inline image painters, across the recursive quote/spoiler
+ * renderers. `compositionLocalOf` (not static): the value changes at runtime on user refresh and
+ * only the readers (media paragraphs) must recompose.
+ */
+private val LocalMediaRefreshGeneration = compositionLocalOf { 0 }
 
 @Composable
 private fun PostBlocksRenderer(
@@ -388,8 +409,12 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
     // Measure the not-yet-known URLs. Coil's execute() is a main-safe suspend call (it dispatches its
     // own I/O), and reuses the shared SingletonImageLoader caches the rendering AsyncImage hits — so no
     // double network fetch. A dead URL is recorded as a failure (TTL) so it is not re-fetched.
+    // #813 — the refresh generation keys the effect too: a re-parsed page yields a structurally
+    // EQUAL `inlines` (remember keeps the same set instance), so without it the effect never
+    // relaunched on pull-to-refresh and an expired failure TTL was never even re-consulted.
     val platformContext = LocalPlatformContext.current
-    LaunchedEffect(measurableUrls) {
+    val mediaRefreshGeneration = LocalMediaRefreshGeneration.current
+    LaunchedEffect(measurableUrls, mediaRefreshGeneration) {
         val loader = SingletonImageLoader.get(platformContext)
         measurableUrls.forEach { url ->
             measureAndCacheIntrinsicMediaSize(url, sizeCache, platformContext, loader)
@@ -1679,12 +1704,19 @@ internal fun imageInlineContent(image: PostInline.InlineImage, box: InlineMediaB
         } else {
             Modifier
         }
-        AsyncImage(
-            model = request,
-            contentDescription = image.description,
-            contentScale = PostMediaDisplayPolicy.inlineImageContentScale,
-            modifier = Modifier.fillMaxSize().then(longPressModifier),
-        )
+        // #813 — key() on the refresh generation recreates the AsyncImage node on an explicit user
+        // refresh: a painter stuck in error restarts its load (the remembered request may keep its
+        // instance — the painter, not the request, holds the error state). Deliberately key()
+        // rather than betting on ImageRequest equality semantics — Compose-native, deterministic.
+        // A healthy image reloads from Coil's memory cache, so a bump costs no visible flash.
+        key(LocalMediaRefreshGeneration.current) {
+            AsyncImage(
+                model = request,
+                contentDescription = image.description,
+                contentScale = PostMediaDisplayPolicy.inlineImageContentScale,
+                modifier = Modifier.fillMaxSize().then(longPressModifier),
+            )
+        }
     }
 }
 

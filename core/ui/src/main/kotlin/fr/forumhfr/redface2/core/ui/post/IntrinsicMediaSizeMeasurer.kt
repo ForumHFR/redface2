@@ -8,6 +8,7 @@ import coil3.request.SuccessResult
 import coil3.size.Precision
 import coil3.size.Scale
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CompletableDeferred
 
 /**
  * #175/#257 — probe a media's dimensions via a **bounded** Coil decode (aspect ratio + size class).
@@ -61,26 +62,43 @@ internal suspend fun measureIntrinsicMediaSize(
  *
  * The cache guard is a non-atomic check-then-act, so two callers racing on the SAME cold URL (the
  * BlockImage effect vs the paragraph effect, or two on-screen copies) could each start a probe before
- * the first result lands. [inFlightMeasurements] de-dupes that window: the first caller wins the URL and
- * the others no-op until it clears the entry (in a `finally`, so a cancelled probe also releases it).
- * Process-wide like [ProcessIntrinsicMediaSizeCache]; keyed by URL (native sizes are URL-immutable).
+ * the first result lands. [inFlightMeasurements] de-dupes that window: the first caller wins the URL,
+ * the others AWAIT its ticket then re-run the guard. The await (not a fire-and-forget no-op) matters
+ * for #813: when a refresh generation bump cancels the winning effect mid-probe, a plain "loser
+ * returns" would leave the URL cold with nobody left to probe it until the next refresh — the loser
+ * waking up on the ticket re-checks the cache and becomes the new winner. A CANCELLED winner records
+ * nothing (a cancelled probe is not a dead host), so its late unwind can never overwrite a fresh
+ * success either. Process-wide like [ProcessIntrinsicMediaSizeCache]; keyed by URL.
  */
-private val inFlightMeasurements: MutableSet<String> = ConcurrentHashMap.newKeySet()
+private val inFlightMeasurements = ConcurrentHashMap<String, CompletableDeferred<Unit>>()
 
 internal suspend fun measureAndCacheIntrinsicMediaSize(
     url: String,
     cache: IntrinsicMediaSizeCache,
     context: PlatformContext,
     imageLoader: ImageLoader,
+    // Injectable for the cancellation-race tests only — production callers keep the default.
+    probe: suspend (String, PlatformContext, ImageLoader) -> IntSize? = ::measureIntrinsicMediaSize,
 ) {
-    val now = System.currentTimeMillis()
-    if (cache.get(url) != null || cache.isFailureFresh(url, now)) return
-    // Lost the race to another in-flight probe for this URL — its putSuccess/putFailure will recompose us.
-    if (!inFlightMeasurements.add(url)) return
-    try {
-        val size = measureIntrinsicMediaSize(url, context, imageLoader)
-        if (size != null) cache.putSuccess(url, size) else cache.putFailure(url, now)
-    } finally {
-        inFlightMeasurements.remove(url)
+    while (true) {
+        val now = System.currentTimeMillis()
+        if (cache.get(url) != null || cache.isFailureFresh(url, now)) return
+        val ticket = CompletableDeferred<Unit>()
+        val winner = inFlightMeasurements.putIfAbsent(url, ticket)
+        if (winner != null) {
+            // Lost the race — wait for the in-flight probe to settle (result OR cancellation),
+            // then loop: a landed result short-circuits on the guard, a cancelled probe left the
+            // URL cold and this caller takes over.
+            winner.await()
+            continue
+        }
+        try {
+            val size = probe(url, context, imageLoader)
+            if (size != null) cache.putSuccess(url, size) else cache.putFailure(url, now)
+            return
+        } finally {
+            inFlightMeasurements.remove(url, ticket)
+            ticket.complete(Unit)
+        }
     }
 }

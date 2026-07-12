@@ -32,6 +32,13 @@ internal interface IntrinsicMediaSizeCache {
     fun putSuccess(url: String, size: IntSize)
 
     fun putFailure(url: String, nowMillis: Long)
+
+    /**
+     * #813 — drop every memoized failure (successes are kept: native sizes are immutable).
+     * Called on an explicit user refresh so a transient outage does not leave ghost images
+     * pinned to the cold fallback box until the TTL happens to be re-consulted.
+     */
+    fun clearFailures()
 }
 
 /**
@@ -66,6 +73,16 @@ internal class DefaultIntrinsicMediaSizeCache(
 
     override fun putFailure(url: String, nowMillis: Long) = put(url, Entry.Failure(nowMillis))
 
+    override fun clearFailures() {
+        synchronized(lock) {
+            val failed = entries.filterValues { it is Entry.Failure }.keys
+            failed.forEach { url ->
+                entries.remove(url)
+                insertionOrder.remove(url)
+            }
+        }
+    }
+
     private fun put(url: String, entry: Entry) {
         synchronized(lock) {
             if (!entries.containsKey(url)) insertionOrder.addLast(url)
@@ -97,4 +114,14 @@ internal object ProcessIntrinsicMediaSizeCache :
  */
 internal val LocalIntrinsicMediaSizeCache = staticCompositionLocalOf<IntrinsicMediaSizeCache> {
     ProcessIntrinsicMediaSizeCache
+}
+
+/**
+ * #813 — public seam for the hosting screens (:feature modules cannot see the internal cache):
+ * drop the memoized measurement failures so the next measure pass re-probes them. Call it on an
+ * explicit user refresh, BEFORE bumping the media-refresh generation passed to [PostRenderer] —
+ * clearing after the bump would let the relaunched effect re-read a still-fresh failure.
+ */
+fun clearPostMediaMeasurementFailures() {
+    ProcessIntrinsicMediaSizeCache.clearFailures()
 }
