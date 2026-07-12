@@ -1,0 +1,19 @@
+Source : POST https://forum.hardware.fr/transsearch.php (curl -L, redirected to forum2.php)
+Body : config=hfr.inc&cat=23&post=35395&p=1&sondage=0&owntopic=0&word=&spseudo=XaTriX&firstnum=2789839&currentnum=&hash_check=<real token>
+
+Captured : 2026-07-12 via curl with an authenticated session (maintainer account, read-only GET
+semantics — transsearch does not mutate). Same query as the anonymous twin fixture
+(transsearch_response_nonfilter_anon.html) : non-filtered author-only search anchored at page 61.
+
+Shape : identical to the anonymous twin — full topic page of the first match, embedded transsearch
+form with `currentnum` = 2789841 and **NO `firstnum` input** — but the `hash_check` inputs are
+NON-EMPTY, so `TopicSearchForm.canSearch` must read true on this capture. The pair (anon/auth)
+pins that `firstnum` is absent from search responses in BOTH render modes (HFR serves different
+HTML authenticated vs anonymous).
+
+Sanitization :
+- Every real `hash_check` value replaced by the constant placeholder
+  `0123456789abcdef0123456789abcdef` (kept non-empty on purpose — `canSearch` semantics).
+  0 occurrences of the real token verified after rewrite.
+- No emails (grep = 0), no session cookies in the document. « XaTriX » occurrences are the public
+  post authors/quotes of the page content itself.

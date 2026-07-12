@@ -951,7 +951,13 @@ class TopicViewModel @AssistedInject constructor(
         // fresh-form fetch has not landed yet (or failed) : fail EXPLICITLY (same Toast as a
         // network search failure) and retry the form fetch, never a silent no-op tap. The toast
         // only fires on a submittable bar — a tap with empty criteria stays inert either way.
-        if (form == null || !form.canSearch) {
+        // #894 — a NON-FILTERED fresh search needs the page anchor (`firstnum`), which only the
+        // form of a real topic page carries : a `transsearch` RESPONSE form ships without it.
+        // A null anchor must fail explicitly (same recovery as a missing form) — silently sending
+        // no `firstnum` would run a whole-topic search the user did not ask for. The proper
+        // « search again from the results » flow (frozen session anchor) is the #894 semantics PR.
+        val missingAnchor = !current.search.onlyMatches && form != null && form.firstnum == null
+        if (form == null || !form.canSearch || missingAnchor) {
             if (current.search.canSubmit) {
                 viewModelScope.launch { _effects.send(TopicEffect.SearchFailed) }
                 ensureSearchForm()

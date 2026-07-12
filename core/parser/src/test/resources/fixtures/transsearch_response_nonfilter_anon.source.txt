@@ -1,0 +1,20 @@
+Source : POST https://forum.hardware.fr/transsearch.php (curl -L, redirected to forum2.php)
+Body : config=hfr.inc&cat=23&post=35395&p=1&sondage=0&owntopic=0&word=&spseudo=XaTriX&firstnum=2789839&currentnum=&hash_check=
+
+Captured : 2026-07-12 via curl, anonymous (no session cookies). Topic = « Redface 2 — client
+Android HFR — bêta » (cat 23, post 35395), non-filtered author-only search anchored at page 61
+(firstnum = 2789839, the first numreponse of that page).
+
+Shape : « transsearch RESPONSE, non-filtered » (#894 contract, verified live) — HFR answers with
+the FULL topic page containing the first match at-or-after the anchor, and the embedded
+transsearch form carries :
+- `currentnum` = 2789841 (the anchored match's numreponse — the navigation cursor), and
+- **NO `firstnum` input at all** — only the form of a NORMAL topic page ships the anchor.
+This absence is the whole point of the fixture : the parser must NOT require `firstnum`, or every
+search-response form parses to null and the `currentnum` cursor is lost (the « Aucun résultat »
+bug — non-filtered mode broken against live HFR).
+
+Sanitization : none required.
+- hash_check inputs empty (anonymous capture, no auth token) — 0 non-empty occurrences verified.
+- No cookies, no emails (grep = 0), no session identifiers. Post content is the public page 61 of
+  a public topic.

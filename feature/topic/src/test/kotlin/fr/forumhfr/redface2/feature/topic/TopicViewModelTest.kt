@@ -1140,6 +1140,40 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `#894 non-filtered SubmitSearch without a firstnum anchor fails explicitly, never whole-topic`() = runTest {
+        // The page on screen is a transsearch RESPONSE : its form has NO firstnum anchor (live
+        // contract). A fresh NON-FILTERED submit from there must fail explicitly and refetch the
+        // form — silently omitting firstnum would run a whole-topic search the user did not ask for.
+        val responseForm = TopicSearchForm(
+            hashCheck = "tok",
+            topicId = SAMPLE_POST,
+            cat = SAMPLE_CAT,
+            firstnum = null,
+            currentNum = 4242,
+        )
+        val repo = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(fakeTopic(1, 3, searchForm = responseForm)) }),
+            refreshTopicsToReturn = listOf(fakeTopic(1, 3, searchForm = responseForm)),
+        )
+        val searchRepo = FakeTopicSearchRepository(result = fakeTopic(1, 1))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repo,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("betatest"))
+        viewModel.send(TopicIntent.SearchOnlyMatchesChanged(false))
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.SubmitSearch)
+            assertEquals(TopicEffect.SearchFailed, awaitItem())
+        }
+        assertEquals("the anchorless submit must never reach the network", 0, searchRepo.requests.size)
+    }
+
+    @Test
     fun `SubmitSearch posts the parsed form plus criteria and renders the returned page`() = runTest {
         val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
         val resultTopic = fakeTopic(page = 1, totalPages = 1, title = "filtered", searchForm = form)
