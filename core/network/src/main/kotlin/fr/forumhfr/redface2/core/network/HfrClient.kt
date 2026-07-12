@@ -549,9 +549,6 @@ class HfrClient @Inject constructor(
         firstnum: Int?,
         owntopic: Int = 0,
         currentnum: String? = null,
-        // #879 — page of the RESULTS (HFR `p`). Frozen to 1 before, which made every result page
-        // beyond the first unreachable (filtered lists truncated to the oldest matches).
-        p: Int = 1,
     ): String {
         val url = baseUrl.newBuilder()
             .addPathSegment("transsearch.php")
@@ -561,7 +558,10 @@ class HfrClient @Inject constructor(
             .add("post", topicId.toString())
             .add("cat", cat.toString())
             .add("config", "hfr.inc")
-            .add("p", p.toString())
+            // #894 — constant hidden field of the web form. NOT a results pager : `p` paginates
+            // nothing on transsearch (verified live, `p=2` returns the same page) — result batches
+            // beyond HFR's scan window are reached through the `currentnum` resume cursor instead.
+            .add("p", "1")
             .add("sondage", "0")
             .add("owntopic", owntopic.toString())
             .add("word", word)

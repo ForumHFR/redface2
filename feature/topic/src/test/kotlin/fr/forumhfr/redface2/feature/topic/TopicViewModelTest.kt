@@ -1206,12 +1206,24 @@ class TopicViewModelTest {
     }
 
     @Test
-    fun `#879 filtered results expose their own pager and fetch the next page on demand`() = runTest {
+    fun `#894 a truncated filtered reply exposes the resume cursor and fetches the next batch`() = runTest {
         val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
-        val page1 = fakeTopic(page = 1, totalPages = 3, title = "results-p1", searchForm = form)
-        val page2 = fakeTopic(page = 2, totalPages = 3, title = "results-p2", searchForm = form)
+        // Batch 1 : HFR truncated its scan → the response form advertises the resume cursor.
+        // Batch 2 : complete list → no cursor.
+        val batch1 = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            title = "results-b1",
+            searchForm = form.copy(firstnum = null, currentNum = 500),
+        )
+        val batch2 = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            title = "results-b2",
+            searchForm = form.copy(firstnum = null, currentNum = null),
+        )
         val searchRepo = FakeTopicSearchRepository()
-        searchRepo.responder = { req -> if (req.page >= 2) page2 else page1 }
+        searchRepo.responder = { req -> if (req.currentNum == "500") batch2 else batch1 }
         val viewModel = topicViewModel(
             request = topicRequest(page = 1),
             topicRepository = FakeTopicRepository(
@@ -1224,28 +1236,36 @@ class TopicViewModelTest {
         viewModel.send(TopicIntent.SearchWordChanged("iwds"))
         viewModel.send(TopicIntent.SubmitSearch)
 
-        // The filtered reply carries the RESULT pager — own to the search, canonical pager intact.
-        assertEquals("results-p1", assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic.title)
+        // The truncated reply advertises a further batch — canonical pager intact.
+        assertEquals("results-b1", assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic.title)
         assertEquals(true, viewModel.state.value.search.showingFilteredResults)
-        assertEquals(1, viewModel.state.value.search.resultPage)
-        assertEquals(3, viewModel.state.value.search.resultTotalPages)
+        assertEquals(500, viewModel.state.value.search.resumeCursor)
         assertEquals(true, viewModel.state.value.search.hasMoreFilteredResults)
         assertEquals(listOf(1, 2, 3, 4, 5), viewModel.state.value.availablePages)
+        // The fresh submit anchored on the current page (web parity, #894).
+        assertEquals(999, searchRepo.requests.single().anchor)
 
         viewModel.send(TopicIntent.SearchNextResultsPage)
 
         assertEquals(2, searchRepo.requests.size)
-        assertEquals("the footer must re-submit with p = resultPage + 1", 2, searchRepo.requests.last().page)
-        assertEquals(true, searchRepo.requests.last().onlyMatches)
-        assertEquals("results-p2", assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic.title)
-        assertEquals(2, viewModel.state.value.search.resultPage)
-        assertEquals(true, viewModel.state.value.search.hasMoreFilteredResults)
+        val continuation = searchRepo.requests.last()
+        assertEquals("the footer must re-submit the resume cursor", "500", continuation.currentNum)
+        assertEquals("a continuation never re-sends an anchor", null, continuation.anchor)
+        assertEquals(true, continuation.onlyMatches)
+        assertEquals("results-b2", assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic.title)
+        assertEquals("a complete batch ends the continuation", null, viewModel.state.value.search.resumeCursor)
+        assertEquals(false, viewModel.state.value.search.hasMoreFilteredResults)
     }
 
     @Test
     fun `#879 the footer re-submits the FROZEN criteria, not the edited bar (gate finding 1)`() = runTest {
         val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
-        val results = fakeTopic(page = 1, totalPages = 3, title = "results", searchForm = form)
+        val results = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            title = "results",
+            searchForm = form.copy(firstnum = null, currentNum = 500),
+        )
         val searchRepo = FakeTopicSearchRepository(result = results)
         val viewModel = topicViewModel(
             request = topicRequest(page = 1),
@@ -1265,17 +1285,22 @@ class TopicViewModelTest {
 
         assertEquals(2, searchRepo.requests.size)
         assertEquals(
-            "page 2 must belong to the SUBMITTED search, never the edited bar",
+            "the next batch must belong to the SUBMITTED search, never the edited bar",
             "iwds",
             searchRepo.requests.last().word,
         )
-        assertEquals(2, searchRepo.requests.last().page)
+        assertEquals("500", searchRepo.requests.last().currentNum)
     }
 
     @Test
     fun `#879 every filtered render repositions at the top of the results (gate finding 2)`() = runTest {
         val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
-        val results = fakeTopic(page = 1, totalPages = 3, title = "results", searchForm = form)
+        val results = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            title = "results",
+            searchForm = form.copy(firstnum = null, currentNum = 500),
+        )
         val searchRepo = FakeTopicSearchRepository(result = results)
         val viewModel = topicViewModel(
             request = topicRequest(page = 1),
@@ -1297,12 +1322,17 @@ class TopicViewModelTest {
     }
 
     @Test
-    fun `#879 a failed next-page fetch keeps the pager so the footer stays as retry (gate finding 3)`() = runTest {
+    fun `#879 a failed continuation keeps the cursor so the footer stays as retry (gate finding 3)`() = runTest {
         val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
-        val page1 = fakeTopic(page = 1, totalPages = 3, title = "results-p1", searchForm = form)
+        val batch1 = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            title = "results-b1",
+            searchForm = form.copy(firstnum = null, currentNum = 500),
+        )
         val searchRepo = FakeTopicSearchRepository()
         searchRepo.responder = { req ->
-            if (req.page >= 2) throw IOException("boom") else page1
+            if (req.currentNum != null) throw IOException("boom") else batch1
         }
         val viewModel = topicViewModel(
             request = topicRequest(page = 1),
@@ -1319,18 +1349,24 @@ class TopicViewModelTest {
 
         viewModel.send(TopicIntent.SearchNextResultsPage)
 
-        // The fetch failed : the pager is untouched — the « more » card doubles as retry.
-        assertEquals(1, viewModel.state.value.search.resultPage)
+        // The fetch failed : the cursor is untouched — the « more » card doubles as retry.
+        assertEquals(500, viewModel.state.value.search.resumeCursor)
         assertEquals(true, viewModel.state.value.search.hasMoreFilteredResults)
         assertEquals(true, viewModel.state.value.search.showingFilteredResults)
     }
 
     @Test
-    fun `#879 anti-loop — a filtered reply that did not advance clamps the results pager`() = runTest {
+    fun `#894 anti-loop — a continuation cursor that did not advance ends the results`() = runTest {
         val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
-        // HFR mis-reports : the reply to the p=2 request re-serves page 1 (total still 3).
-        val page1 = fakeTopic(page = 1, totalPages = 3, title = "results-p1", searchForm = form)
-        val searchRepo = FakeTopicSearchRepository(result = page1)
+        // HFR mis-reports : the continuation re-advertises the SAME cursor it was sent — following
+        // it would re-serve the same batch forever.
+        val batch = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            title = "results-b1",
+            searchForm = form.copy(firstnum = null, currentNum = 500),
+        )
+        val searchRepo = FakeTopicSearchRepository(result = batch)
         val viewModel = topicViewModel(
             request = topicRequest(page = 1),
             topicRepository = FakeTopicRepository(
@@ -1346,17 +1382,64 @@ class TopicViewModelTest {
 
         viewModel.send(TopicIntent.SearchNextResultsPage)
 
-        // The reply landed on page 1 < requested 2 → the total is clamped to what was reached :
-        // the footer disappears instead of looping on the same page forever.
-        assertEquals(1, viewModel.state.value.search.resultPage)
-        assertEquals(1, viewModel.state.value.search.resultTotalPages)
+        // A non-advancing cursor is treated as the end : footer gone, no infinite loop.
+        assertEquals(null, viewModel.state.value.search.resumeCursor)
         assertEquals(false, viewModel.state.value.search.hasMoreFilteredResults)
+        assertEquals(true, viewModel.state.value.search.showingFilteredResults)
     }
 
     @Test
-    fun `#879 a normal load resets the filtered results pager`() = runTest {
+    fun `#894 an EMPTY filtered continuation is the end of results, never « Aucun résultat »`() = runTest {
+        // Cadrage F6 — the matches behind the advertised cursor were deleted meanwhile : HFR
+        // answers its « aucune réponse n'a été trouvée » page. The displayed batch must STAY on
+        // screen, the status settle on Done (not NoResults) and the cursor drop so the footer
+        // becomes the end card.
         val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
-        val results = fakeTopic(page = 1, totalPages = 3, title = "results", searchForm = form)
+        val batch1 = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            title = "results-b1",
+            searchForm = form.copy(firstnum = null, currentNum = 500),
+        )
+        val searchRepo = FakeTopicSearchRepository()
+        searchRepo.responder = { req ->
+            if (req.currentNum != null) throw NoTopicSearchResultsException() else batch1
+        }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(flow { emit(fakeTopic(1, 5, searchForm = form)) }),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("iwds"))
+        viewModel.send(TopicIntent.SubmitSearch)
+        assertEquals(true, viewModel.state.value.search.hasMoreFilteredResults)
+
+        viewModel.send(TopicIntent.SearchNextResultsPage)
+
+        assertEquals(TopicSearchStatus.Done, viewModel.state.value.search.status)
+        assertEquals(null, viewModel.state.value.search.resumeCursor)
+        assertEquals(false, viewModel.state.value.search.hasMoreFilteredResults)
+        assertEquals(true, viewModel.state.value.search.showingFilteredResults)
+        assertEquals(
+            "the displayed batch must stay on screen",
+            "results-b1",
+            assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic.title,
+        )
+    }
+
+    @Test
+    fun `#879 a normal load resets the filtered results state`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
+        val results = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            title = "results",
+            searchForm = form.copy(firstnum = null, currentNum = 500),
+        )
         val searchRepo = FakeTopicSearchRepository(result = results)
         val viewModel = topicViewModel(
             request = topicRequest(page = 1),
@@ -1377,10 +1460,75 @@ class TopicViewModelTest {
 
         viewModel.send(TopicIntent.Refresh)
 
-        // A normal-load owner reset the search pager : footer gone, no stale « résultats suivants ».
+        // A normal-load owner reset the results state : footer gone, no stale « résultats suivants ».
         assertEquals(false, viewModel.state.value.search.showingFilteredResults)
-        assertEquals(1, viewModel.state.value.search.resultPage)
+        assertEquals(null, viewModel.state.value.search.resumeCursor)
         assertEquals(false, viewModel.state.value.search.hasMoreFilteredResults)
+    }
+
+    @Test
+    fun `#894 from-start submits an explicit 0 anchor, default anchors the current page`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
+        val results = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            title = "results",
+            searchForm = form.copy(firstnum = null, currentNum = null),
+        )
+        val searchRepo = FakeTopicSearchRepository(result = results)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(flow { emit(fakeTopic(1, 5, searchForm = form)) }),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("iwds"))
+        viewModel.send(TopicIntent.SearchFromStartChanged(true))
+        viewModel.send(TopicIntent.SubmitSearch)
+
+        assertEquals("« depuis le début » = explicit 0", 0, searchRepo.requests.last().anchor)
+
+        viewModel.send(TopicIntent.SearchFromStartChanged(false))
+        viewModel.send(TopicIntent.SubmitSearch)
+
+        assertEquals("default anchors the current page", 999, searchRepo.requests.last().anchor)
+    }
+
+    @Test
+    fun `#894 a fresh submit from a results page reuses the frozen session anchor`() = runTest {
+        // The on-screen page is a transsearch RESPONSE (form without anchor) : a new fresh submit
+        // must reuse the session anchor captured from the last REAL topic page, never fail and
+        // never silently search the whole topic.
+        val pageForm = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 777)
+        val results = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            title = "results",
+            searchForm = pageForm.copy(firstnum = null, currentNum = null),
+        )
+        val searchRepo = FakeTopicSearchRepository(result = results)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(flow { emit(fakeTopic(1, 5, searchForm = pageForm)) }),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("iwds"))
+        viewModel.send(TopicIntent.SubmitSearch)
+        assertEquals(777, searchRepo.requests.last().anchor)
+
+        // Second fresh submit FROM the rendered results page (its form has no firstnum).
+        viewModel.send(TopicIntent.SearchWordChanged("autre"))
+        viewModel.send(TopicIntent.SubmitSearch)
+
+        assertEquals(2, searchRepo.requests.size)
+        assertEquals("the session anchor survives the results render", 777, searchRepo.requests.last().anchor)
     }
 
     @Test

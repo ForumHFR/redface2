@@ -44,10 +44,12 @@
     <string name="topic_search_word_hint">Mot</string>
     <string name="topic_search_pseudo_hint">Pseudo</string>
     <string name="topic_search_only_matches">Filtrer (résultats uniquement)</string>
+    <!-- #894 — opt-in « depuis le début » ; le défaut reste ancré à la page courante (parité web). -->
+    <string name="topic_search_from_start">Chercher depuis le début du sujet</string>
     <string name="topic_search_submit">Rechercher</string>
     <string name="topic_search_failed">La recherche dans le sujet a échoué.</string>
-    <!-- #879 — pagination de la liste de résultats FILTRÉS (pager propre à la recherche). -->
-    <string name="topic_search_results_page_done">Résultats — page %1$d / %2$d</string>
+    <!-- #894 — continuation des résultats FILTRÉS (fenêtre de scan HFR tronquée, parité web). -->
+    <string name="topic_search_results_truncated">La liste s’arrête ici, d’autres résultats existent</string>
     <string name="topic_search_results_next">Afficher les résultats suivants</string>
     <string name="topic_search_results_list_end">Fin des résultats de la recherche</string>
     <!-- Chantier B (#546) — navigation entre résultats + cas « aucun résultat ». -->

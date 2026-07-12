@@ -74,14 +74,20 @@ data class TopicSearchForm(
  * @property onlyMatches the real semantics of HFR's `filter` checkbox : when `true`, HFR re-renders
  *   the topic page showing ONLY the messages matching the search ; when `false` it returns the
  *   page with the matches highlighted in place. Named for intent, not for the wire (`filter=1`).
- * @property currentNum the server-side navigation cursor (HFR's JS-managed `currentnum`). `null`/blank
- *   for a FRESH search (the documented "clear on submit" behaviour : HFR re-anchors on the first
- *   match) ; carries the current match's `numreponse` for a next/previous STEP so HFR advances to the
- *   following match. Built by the ViewModel from the previous response's [TopicSearchForm.currentNum].
- * @property isStep `true` for a next/previous navigation step (as opposed to a fresh search). When
- *   stepping, the repository OMITS `firstnum` (and `dep`) from the POST : re-sending `firstnum`
- *   re-anchors HFR on the FIRST match and the cursor never progresses (the live-verified stepping bug
- *   — Chantier B / #546). A fresh search keeps `firstnum` (the page anchor HFR expects).
+ * @property currentNum the server-side cursor (HFR's JS-managed `currentnum`). `null`/blank for a
+ *   FRESH search (the documented "clear on submit" behaviour : HFR re-anchors on the first match).
+ *   Carries a `numreponse` for : a next/previous STEP in non-filtered mode (HFR advances to the
+ *   following match), or a FILTERED CONTINUATION (#894 : « Résultats suivants » — HFR's truncated
+ *   scan resumes from the cursor its response advertised). Built by the ViewModel from the previous
+ *   response's [TopicSearchForm.currentNum].
+ * @property isStep `true` for a next/previous navigation step (as opposed to a fresh search).
+ *   Informational since #894 (diagnostics) — the wire decision (« send `firstnum` or not ») is
+ *   carried explicitly by [anchor].
+ * @property anchor the `firstnum` value to POST, or `null` to omit the field entirely (#894).
+ *   The ViewModel decides it : a fresh search sends the SESSION anchor (first `numreponse` of the
+ *   real topic page the search started from — HFR's own « search from the current page onwards »
+ *   semantics), `0` when the user opted into « chercher depuis le début », and `null` on steps and
+ *   continuations (re-sending an anchor re-anchors HFR on the first match — live-verified, #546).
  */
 data class TopicSearchRequest(
     val form: TopicSearchForm,
@@ -90,13 +96,7 @@ data class TopicSearchRequest(
     val onlyMatches: Boolean,
     val currentNum: String? = null,
     val isStep: Boolean = false,
-    /**
-     * #879 — page of the transsearch RESULTS to fetch (HFR's `p` form field, historically frozen
-     * to 1 : only the first page of a filtered result list was ever reachable, so late matches
-     * were silently dropped). The result pager is OWN to the search — never the canonical topic
-     * pager. Fresh submits send 1 ; « résultats suivants » re-submits with the next page.
-     */
-    val page: Int = 1,
+    val anchor: Int? = null,
 ) {
     /** HFR needs at least a term or an author ; an all-blank search is meaningless. */
     val isMeaningful: Boolean get() = word.isNotBlank() || spseudo.isNotBlank()
