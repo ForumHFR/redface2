@@ -53,12 +53,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -2102,7 +2105,7 @@ class TopicViewModelTest {
     // ──────────────────────────────────────────────────────────────────────
 
     @Test
-    fun `switchToPage without a snapshot shows Loading and loads the target (#895)`() = runTest {
+    fun `switchToPage without a snapshot holds the departed page then loads the target (#895 slash #910)`() = runTest {
         val repository = FakeTopicRepository(
             flowsToReturn = listOf(
                 flow { emit(fakeTopic(2, 5)) },
@@ -2125,8 +2128,9 @@ class TopicViewModelTest {
             val emitted = cancelAndConsumeRemainingEvents()
                 .mapNotNull { (it as? app.cash.turbine.Event.Item)?.value }
             assertTrue(
-                "an unvisited page must go through Loading (no snapshot to bridge)",
-                emitted.any { it.mode is TopicUiState.Mode.Loading },
+                "an unvisited page bridges with the departed page held provisional (#910) — " +
+                    "a snapshot hit would swap Loaded(non-provisional) directly",
+                emitted.any { (it.mode as? TopicUiState.Mode.Loaded)?.provisional == true },
             )
         }
         assertEquals(3, viewModel.state.value.request.page)
@@ -2198,8 +2202,9 @@ class TopicViewModelTest {
             val emitted = cancelAndConsumeRemainingEvents()
                 .mapNotNull { (it as? app.cash.turbine.Event.Item)?.value }
             assertTrue(
-                "page 1 was evicted from the LRU : the return must show a true Loading",
-                emitted.any { it.mode is TopicUiState.Mode.Loading },
+                "page 1 was evicted from the LRU : the return is a COLD switch (provisional hold, " +
+                    "#910) — a surviving snapshot would swap Loaded(non-provisional) atomically",
+                emitted.any { (it.mode as? TopicUiState.Mode.Loaded)?.provisional == true },
             )
         }
         assertEquals(7, repository.calls.size)
@@ -2561,8 +2566,9 @@ class TopicViewModelTest {
             val emitted = cancelAndConsumeRemainingEvents()
                 .mapNotNull { (it as? app.cash.turbine.Event.Item)?.value }
             assertTrue(
-                "post-delete, the stale page-2 snapshot must not serve : true Loading expected",
-                emitted.any { it.mode is TopicUiState.Mode.Loading },
+                "post-delete, the stale page-2 snapshot must not serve : the return is a COLD " +
+                    "switch (provisional hold, #910), never an atomic snapshot swap",
+                emitted.any { (it.mode as? TopicUiState.Mode.Loaded)?.provisional == true },
             )
         }
     }
@@ -2722,6 +2728,154 @@ class TopicViewModelTest {
             assertEquals(TopicEffect.ScrollToAnchor(anchor, 2), awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // #910 — stale-while-switching (cold-switch grace)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `a fast cold switch keeps the departed page then swaps without any skeleton (#910)`() = runTest {
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(
+                    flow { emit(fakeTopic(2, 5, title = "departed")) },
+                    // The target lands fast but not synchronously (50 ms — well within the grace).
+                    flow {
+                        kotlinx.coroutines.delay(50)
+                        emit(fakeTopic(3, 5, title = "target"))
+                    },
+                ),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+        )
+
+        viewModel.switchToPage(3)
+        // Mid-grace : the departed page is held on screen, flagged provisional, canonical = 3.
+        val held = viewModel.state.value
+        val heldMode = assertMode<TopicUiState.Mode.Loaded>(held)
+        assertEquals("the departed page stays on screen during the grace", "departed", heldMode.topic.title)
+        assertTrue("the hold is flagged provisional (hairline, honest pill)", heldMode.provisional)
+        assertEquals(3, held.request.page)
+
+        // Record every state from here : the swap must be Loaded→Loaded, never Loading.
+        val states = mutableListOf<TopicUiState>()
+        val recorder = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.state.collect { states.add(it) }
+        }
+        advanceTimeBy(60)
+        runCurrent()
+        recorder.cancel()
+
+        assertTrue(
+            "the skeleton must never show on a fast cold switch",
+            states.none { it.mode is TopicUiState.Mode.Loading },
+        )
+        assertEquals("target", assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic.title)
+    }
+
+    @Test
+    fun `a slow cold switch posts the skeleton only after the grace (#910)`() = runTest {
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(
+                    flow { emit(fakeTopic(2, 5, title = "departed")) },
+                    flow { kotlinx.coroutines.awaitCancellation() },
+                ),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+        )
+        viewModel.switchToPage(3)
+
+        val held = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+        assertEquals("departed", held.topic.title)
+        assertTrue(held.provisional)
+
+        // Just under the grace : still holding.
+        advanceTimeBy(200)
+        runCurrent()
+        assertTrue(viewModel.state.value.mode is TopicUiState.Mode.Loaded)
+
+        // Past the grace with no emission : the skeleton is now legitimate.
+        advanceTimeBy(100)
+        runCurrent()
+        assertTrue(
+            "a genuinely slow load still gets its skeleton after the grace",
+            viewModel.state.value.mode is TopicUiState.Mode.Loading,
+        )
+    }
+
+    @Test
+    fun `a failed cold switch surfaces the error instead of a stale hold (#910)`() = runTest {
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(
+                    flow { emit(fakeTopic(2, 5, title = "departed")) },
+                    flow { throw IOException("switch load failed") },
+                ),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+        )
+        viewModel.switchToPage(3)
+
+        // A durable « displayed ≠ canonical » hold is forbidden (#907 gates) : the failed target
+        // surfaces Error (Retry reloads it) instead of silently keeping the departed page.
+        assertTrue(viewModel.state.value.mode is TopicUiState.Mode.Error)
+        // And the cancelled grace never stomps the error with a late skeleton.
+        advanceTimeBy(300)
+        runCurrent()
+        assertTrue(viewModel.state.value.mode is TopicUiState.Mode.Error)
+    }
+
+    @Test
+    fun `a cold switch whose flow completes empty terminalizes in Error, never a stuck hold (#910)`() = runTest {
+        // Gate r1 : a NORMAL completion with no emission used to leave the grace orphaned —
+        // skeleton (or provisional hold) forever. The empty completion must terminalize.
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(
+                    flow { emit(fakeTopic(2, 5, title = "departed")) },
+                    flow { /* completes without emitting */ },
+                ),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+        )
+        viewModel.switchToPage(3)
+
+        assertTrue(
+            "an empty completion surfaces Error for the target (Retry reloads it)",
+            viewModel.state.value.mode is TopicUiState.Mode.Error,
+        )
+        // The cancelled grace never repaints a skeleton over the error.
+        advanceTimeBy(300)
+        runCurrent()
+        assertTrue(viewModel.state.value.mode is TopicUiState.Mode.Error)
+    }
+
+    @Test
+    fun `pull-to-refresh is a no-op while the displayed page is not the canonical one (#910)`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flow { emit(fakeTopic(2, 5, title = "departed")) },
+                flow { kotlinx.coroutines.awaitCancellation() },
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+        viewModel.switchToPage(3)
+
+        // Mid-grace : the displayed Loaded is page 2, the canonical page is 3. A pull here must
+        // not refresh the page the user is leaving (nor fight the in-flight switch load).
+        viewModel.send(TopicIntent.Refresh)
+        assertEquals(emptyList<Triple<Int, Int, Int>>(), repository.refreshCalls)
+        assertEquals(false, viewModel.state.value.isRefreshing)
     }
 
     private fun searchableRepo(form: TopicSearchForm): FakeTopicRepository =
