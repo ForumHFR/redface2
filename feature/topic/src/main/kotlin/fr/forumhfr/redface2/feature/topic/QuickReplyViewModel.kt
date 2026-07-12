@@ -142,6 +142,10 @@ class QuickReplyViewModel @AssistedInject constructor(
      */
     private var materializeJob: Job? = null
 
+    // #868-#870 (gate Sol) — one opening at a time : a re-open cancels the previous opening's
+    // seed/arm work so two rapid openings can never finish out of order (last opening wins).
+    private var openJob: Job? = null
+
     /** #405 — the SAME key the full-screen reply editor uses for this topic. */
     private val draftKey: String = EditorDraftKey.reply(request.cat, request.topicId)
 
@@ -183,7 +187,8 @@ class QuickReplyViewModel @AssistedInject constructor(
      */
     fun onSheetOpened(initialQuotes: List<QuotedPostPreview> = emptyList()) {
         materializeJob?.cancel()
-        viewModelScope.launch {
+        openJob?.cancel()
+        openJob = viewModelScope.launch {
             initJob.join()
             val body = draftStore.load(draftOwner, draftKey)?.body.orEmpty()
             _state.update {

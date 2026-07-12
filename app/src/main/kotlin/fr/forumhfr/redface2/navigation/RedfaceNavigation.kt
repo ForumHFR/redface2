@@ -2529,10 +2529,12 @@ private fun RedfaceNavHost(
                     onEscalateToFullEditor = { subcat, page, quotes, consumesBasket ->
                         // #868-#870 — the escalated editor inherits the sheet session's basket
                         // consumption : a « Citer N » sheet escalated to full screen still empties
-                        // the basket on ITS successful submit, and only then.
+                        // the basket on ITS successful submit, and only then. The handoff is built
+                        // UNCONDITIONALLY (gate Sol r1) : a « Citer N » sheet whose cards were all
+                        // removed before escalating still consumes the basket — the flag follows
+                        // the OPEN PATH, never the quote count.
                         multiQuoteNavState.onEditorQuotesHandoff(
-                            quotes.takeIf { it.isNotEmpty() }
-                                ?.let { EditorQuotesHandoff(it, consumesBasket = consumesBasket) },
+                            EditorQuotesHandoff(quotes, consumesBasket = consumesBasket),
                         )
                         backStack.add(
                             PostEditorRoute(
@@ -2659,9 +2661,11 @@ private fun RedfaceNavHost(
                 // restored editor keeps the #405 text, not the cards (transient by decision).
                 // #868-#870 — the handoff is CAPTURED here (remember runs before the clearing
                 // effect) : `consumesBasket` must still be known at submit time, long after the
-                // slot was nulled. An activity recreation loses the capture together with the
-                // hoisted basket itself (both plain remember) — consistent, nothing to clear.
-                val editorQuotesHandoff = remember { multiQuoteNavState.pendingEditorQuotes }
+                // slot was nulled. Keyed on the route (gate Sol r1) so two editor routes
+                // succeeding each other at the same Compose position can never share a capture.
+                // An activity recreation loses the capture together with the hoisted basket
+                // itself (both plain remember) — consistent, nothing to clear.
+                val editorQuotesHandoff = remember(route) { multiQuoteNavState.pendingEditorQuotes }
                 LaunchedEffect(Unit) { multiQuoteNavState.onEditorQuotesHandoff(null) }
                 PostEditorScreen(
                     request = PostEditorRequest(
@@ -2700,7 +2704,13 @@ private fun RedfaceNavHost(
                         // #868/#869 — the selection's intent is consumed by the SUCCESSFUL submit
                         // of a basket-consuming session (« Citer N » / its escalation), and only
                         // then : a failure, a back or a « Citer » simple never empty the basket.
-                        if (editorQuotesHandoff?.consumesBasket == true) {
+                        // Guarded on the basket still being THIS topic's (gate Sol r1) : the one
+                        // basket is keyed (cat, post), so if it was re-armed on another topic
+                        // while this editor lived, the submit must not wipe that newer selection.
+                        if (editorQuotesHandoff?.consumesBasket == true &&
+                            topicId != null &&
+                            multiQuoteNavState.basket?.matches(route.cat, topicId) == true
+                        ) {
                             multiQuoteNavState.onClear()
                         }
                         // Same guarded pop as the global `onBack` lambda: never collapse below the
