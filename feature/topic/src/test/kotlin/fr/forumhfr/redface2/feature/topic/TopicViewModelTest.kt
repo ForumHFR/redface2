@@ -24,6 +24,7 @@ import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.search.SearchRepository
 import fr.forumhfr.redface2.core.domain.topic.NoTopicSearchResultsException
+import fr.forumhfr.redface2.core.domain.topic.TopicPageEmission
 import fr.forumhfr.redface2.core.domain.topic.TopicRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicSearchRepository
 import fr.forumhfr.redface2.core.model.TopicSearchForm
@@ -55,6 +56,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -205,6 +207,108 @@ class TopicViewModelTest {
 
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `#877 provisional cache emission is exposed then settles on the network emission`() = runTest {
+        val cached = fakeTopic(page = 1, totalPages = 3, title = "cached")
+        val fresh = fakeTopic(page = 1, totalPages = 5, title = "fresh")
+        val controlled = MutableSharedFlow<TopicPageEmission>(replay = 0)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeStreamingEmissionTopicRepository(controlled),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.state.test {
+            assertMode<TopicUiState.Mode.Loading>(awaitItem())
+
+            controlled.emit(TopicPageEmission(cached, provisional = true))
+            val provisional = assertMode<TopicUiState.Mode.Loaded>(awaitItem())
+            assertEquals("cached", provisional.topic.title)
+            assertTrue("the cache emission must surface as provisional", provisional.provisional)
+
+            controlled.emit(TopicPageEmission(fresh, provisional = false))
+            val settled = assertMode<TopicUiState.Mode.Loaded>(awaitItem())
+            assertEquals("fresh", settled.topic.title)
+            assertFalse("the network emission must settle the page", settled.provisional)
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `#877 live blacklist re-filter preserves the provisional flag`() = runTest {
+        // Gate finding : loadedMode() defaults provisional=false, and the independent blacklist
+        // collector rebuilds Mode.Loaded from the page ON SCREEN. Landing between the provisional
+        // cache emission and the settled one, it must carry the provenance over — not fake-settle.
+        val cached = fakeTopic(
+            page = 1,
+            totalPages = 3,
+            title = "cached",
+            posts = listOf(fakePost(100, author = "Alice"), fakePost(101, author = "Bob")),
+        )
+        val controlled = MutableSharedFlow<TopicPageEmission>(replay = 0)
+        val blacklist = FakeBlacklistRepository()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeStreamingEmissionTopicRepository(controlled),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            blacklistRepository = blacklist,
+        )
+
+        viewModel.state.test {
+            assertMode<TopicUiState.Mode.Loading>(awaitItem())
+            controlled.emit(TopicPageEmission(cached, provisional = true))
+            assertTrue(assertMode<TopicUiState.Mode.Loaded>(awaitItem()).provisional)
+
+            blacklist.block("alice")
+            val refiltered = assertMode<TopicUiState.Mode.Loaded>(awaitItem())
+            assertEquals(setOf(100), refiltered.hiddenNumreponses)
+            assertTrue("the local re-filter must NOT fake-settle the page", refiltered.provisional)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `#877 a stale form fetch is dropped after a newer owner took the same page`() = runTest {
+        // Gate finding : `request == fetchedFor` cannot tell two successive owners of the SAME page
+        // apart — the generation token must drop the late form-fetch reply, like a stale transsearch.
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 1)
+        val gate = CompletableDeferred<Unit>()
+        var gated = true
+        val repo = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(fakeTopic(1, 3, title = "no-form")) }),
+            // Consumed in COMPLETION order : the (ungated) pull-to-refresh takes the first item,
+            // the released form fetch takes the second.
+            refreshTopicsToReturn = listOf(
+                fakeTopic(1, 3, title = "refreshed"),
+                fakeTopic(1, 3, title = "late-form", searchForm = form),
+            ),
+        )
+        repo.refreshHook = { _, _, _ ->
+            if (gated) {
+                gated = false
+                gate.await()
+            }
+        }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repo,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.send(TopicIntent.OpenSearch) // ensureSearchForm suspends on the gate
+        viewModel.send(TopicIntent.Refresh) // same page, NEW owner → bumps the generation
+        assertEquals("refreshed", assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic.title)
+
+        gate.complete(Unit) // the late form fetch lands — and must be dropped
+
+        assertEquals(
+            "the stale form fetch must not clobber the newer owner",
+            "refreshed",
+            assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic.title,
+        )
     }
 
     @Test
@@ -970,17 +1074,69 @@ class TopicViewModelTest {
     // ─── intra-topic search (#546) ───────────────────────────────────────────────
 
     @Test
-    fun `OpenSearch is a no-op when the loaded page exposes no usable search form`() = runTest {
-        // No searchForm ⇒ canSearchInTopic=false ⇒ the bar must not open.
+    fun `#877 OpenSearch without a form opens the bar and fetches a fresh form`() = runTest {
+        // The TTL-skip cache path serves a settled page WITHOUT a searchForm (transient, never
+        // cached). Pre-#877 the Loupe simply vanished ; now the bar opens (auth + page on screen)
+        // and ensureSearchForm harvests a fresh form in the background.
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 1)
+        val repo = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(fakeTopic(1, 3, title = "no-form")) }),
+            refreshTopicsToReturn = listOf(fakeTopic(1, 3, title = "fresh-form", searchForm = form)),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repo,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        assertEquals(true, viewModel.state.value.canOpenSearch)
+        viewModel.send(TopicIntent.OpenSearch)
+
+        assertEquals(true, viewModel.state.value.search.isActive)
+        assertEquals("the fresh-form fetch must fire", 1, repo.refreshCalls.size)
+        val loaded = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+        assertEquals("fresh-form", loaded.topic.title)
+        assertEquals("the harvested form makes submit usable", true, viewModel.state.value.canSearchInTopic)
+    }
+
+    @Test
+    fun `#877 OpenSearch stays a no-op when logged out`() = runTest {
         val viewModel = topicViewModel(
             request = topicRequest(page = 1),
             topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
-            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
         )
 
         viewModel.send(TopicIntent.OpenSearch)
 
+        assertEquals(false, viewModel.state.value.canOpenSearch)
         assertEquals(false, viewModel.state.value.search.isActive)
+    }
+
+    @Test
+    fun `#877 SubmitSearch without a form fails explicitly and retries the form fetch`() = runTest {
+        // Both refresh fetches come back formless (e.g. session lost server-side) : the submit
+        // must surface an explicit SearchFailed Toast — never a silent no-op tap — and retry.
+        val repo = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(fakeTopic(1, 3, title = "no-form")) }),
+            refreshTopicsToReturn = listOf(
+                fakeTopic(1, 3, title = "still-no-form"),
+                fakeTopic(1, 3, title = "still-no-form-2"),
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repo,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+        viewModel.send(TopicIntent.OpenSearch) // consumes refresh #1, lands formless
+        viewModel.send(TopicIntent.SearchWordChanged("betatest"))
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.SubmitSearch)
+            assertEquals(TopicEffect.SearchFailed, awaitItem())
+        }
+        assertEquals("submit must retry the form fetch", 2, repo.refreshCalls.size)
     }
 
     @Test
@@ -2293,10 +2449,14 @@ private class FakeTopicRepository(
      */
     var refreshHook: (suspend (cat: Int, post: Int, page: Int) -> Unit)? = null
 
-    override fun observeTopicPage(cat: Int, post: Int, page: Int, forceRefresh: Boolean): Flow<Topic> {
+    override fun observeTopicPage(cat: Int, post: Int, page: Int, forceRefresh: Boolean): Flow<TopicPageEmission> {
         calls += Triple(cat, post, page)
         lastForceRefresh = forceRefresh
-        return queue.removeFirstOrNull() ?: error("No more flows queued")
+        val flow = queue.removeFirstOrNull() ?: error("No more flows queued")
+        // #877 — tests enqueue plain Flow<Topic> ; the fake settles every page (provisional =
+        // false) so the pre-#877 assertions keep their meaning. Provisional-specific tests use
+        // [FakeStreamingEmissionTopicRepository].
+        return flow.map { TopicPageEmission(it, provisional = false) }
     }
 
     override suspend fun refreshTopicPage(cat: Int, post: Int, page: Int): Topic {
@@ -2438,7 +2598,8 @@ private class FakeTopicSearchRepository(
 private class FakeStreamingTopicRepository(
     private val source: Flow<Topic>,
 ) : TopicRepository {
-    override fun observeTopicPage(cat: Int, post: Int, page: Int, forceRefresh: Boolean): Flow<Topic> = source
+    override fun observeTopicPage(cat: Int, post: Int, page: Int, forceRefresh: Boolean): Flow<TopicPageEmission> =
+        source.map { TopicPageEmission(it, provisional = false) }
 
     override suspend fun refreshTopicPage(cat: Int, post: Int, page: Int): Topic {
         error("refreshTopicPage not used by ViewModel under test")
@@ -2446,6 +2607,30 @@ private class FakeStreamingTopicRepository(
 
     override suspend fun prefetch(cat: Int, post: Int, page: Int) {
         // no-op for streaming tests
+    }
+}
+
+/**
+ * #877 — streaming fake whose emissions carry an explicit [TopicPageEmission.provisional] flag,
+ * for the provenance tests (cache emission held provisional, settled page confirmed).
+ */
+private class FakeStreamingEmissionTopicRepository(
+    private val source: Flow<TopicPageEmission>,
+    private val refreshTopicsToReturn: List<Topic> = emptyList(),
+) : TopicRepository {
+    private val refreshQueue = ArrayDeque(refreshTopicsToReturn)
+    val refreshCalls: MutableList<Triple<Int, Int, Int>> = mutableListOf()
+
+    override fun observeTopicPage(cat: Int, post: Int, page: Int, forceRefresh: Boolean): Flow<TopicPageEmission> =
+        source
+
+    override suspend fun refreshTopicPage(cat: Int, post: Int, page: Int): Topic {
+        refreshCalls += Triple(cat, post, page)
+        return refreshQueue.removeFirstOrNull() ?: error("No refresh topic queued (#877 ensureSearchForm)")
+    }
+
+    override suspend fun prefetch(cat: Int, post: Int, page: Int) {
+        // no-op
     }
 }
 

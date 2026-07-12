@@ -98,6 +98,14 @@ class TopicViewModel @AssistedInject constructor(
     private var searchJob: Job? = null
 
     /**
+     * #877 — at most one background « fetch a fresh search form » in flight (cf. [ensureSearchForm]).
+     * Fired when the search bar opens over a page whose transient `searchForm` is absent — the
+     * TTL-skip cache path never refetches, so without this the form (and thus submit) would stay
+     * unavailable until an unrelated reload.
+     */
+    private var searchFormJob: Job? = null
+
+    /**
      * Chantier C (#546) — monotonic token guarding against a stale `transsearch` write.
      * Incremented whenever ANY flow that owns the page (a normal load, refresh, force-refresh,
      * post-delete refetch or a new search) takes over. [submitSearch] snapshots it before the POST
@@ -272,7 +280,10 @@ class TopicViewModel @AssistedInject constructor(
                     // #785 — rebuild the WHOLE loaded mode through the single seam (loadedMode) so
                     // the post-level mask (hiddenNumreponses) and the quote-level canonical set
                     // (blockedQuoteAuthors) re-filter together on a live blacklist change.
-                    current.copy(mode = loadedMode(loaded.topic))
+                    // #877 — this is a LOCAL transformation of the page already on screen : it must
+                    // carry the provenance over, or a re-filter landing between the provisional
+                    // cache emission and the settled one would fake-settle the pill (gate finding).
+                    current.copy(mode = loadedMode(loaded.topic, provisional = loaded.provisional))
                 }
             }
             // This collector is independent of any load job, so an unhandled error here would tear
@@ -422,10 +433,15 @@ class TopicViewModel @AssistedInject constructor(
                     // still draws a bounded sliver from intent to terminal state.
                     endFirstContentSectionIfNeeded()
                 }
-                .collect { topic ->
+                .collect { emission ->
+                    val topic = emission.topic
                     _state.update {
                         it.copy(
-                            mode = loadedMode(topic),
+                            // #877 — the provenance flag rides into Mode.Loaded so the top-bar
+                            // pill can hold « Chargement… » through the cache emission and only
+                            // show « page X / Y » once the page is settled (network / TTL skip /
+                            // terminal after a failed refresh).
+                            mode = loadedMode(topic, provisional = emission.provisional),
                             availablePages = (1..topic.totalPages).toList(),
                         )
                     }
@@ -448,11 +464,15 @@ class TopicViewModel @AssistedInject constructor(
      * diverge — a path bypassing this seam would make masked citations flicker across
      * refresh/search/delete (Codex framing reservation on #785).
      */
-    private fun loadedMode(topic: Topic): TopicUiState.Mode.Loaded =
+    private fun loadedMode(topic: Topic, provisional: Boolean = false): TopicUiState.Mode.Loaded =
         TopicUiState.Mode.Loaded(
             topic = topic,
             hiddenNumreponses = computeHiddenNumreponses(topic, blockedCanonicals),
             blockedQuoteAuthors = blockedCanonicals,
+            // #877 — default false : every other caller (refresh, force-refresh, post-delete,
+            // search, live re-filter) renders a settled network page ; only the cache-aside
+            // collect above forwards the repository's provenance.
+            provisional = provisional,
         )
 
     /**
@@ -774,13 +794,63 @@ class TopicViewModel @AssistedInject constructor(
     // ─── intra-topic search (#546) ───────────────────────────────────────────────
 
     /**
-     * Open the search bar. No-op unless the loaded page exposes a usable search form
-     * ([TopicUiState.canSearchInTopic]) — the screen only shows the affordance in that case, but we
-     * re-check here so a stale tap can never open an inert bar.
+     * Open the search bar. Gated on [TopicUiState.canOpenSearch] (authenticated + page on screen,
+     * #877) — NOT on the transient `searchForm`, whose absence on a cache emission made the Loupe
+     * vanish. When the form is missing (TTL-skip cache, provisional page), [ensureSearchForm]
+     * fetches a fresh one in the background so the submit gate is usually satisfied by the time
+     * the user finished typing ; a submit that still has no form fails explicitly (Toast).
      */
     private fun openSearch() {
-        if (!_state.value.canSearchInTopic) return
+        if (!_state.value.canOpenSearch) return
         _state.update { it.copy(search = it.search.copy(isActive = true)) }
+        ensureSearchForm()
+    }
+
+    /**
+     * #877 — background fetch of a fresh, authenticated page for the sole purpose of harvesting
+     * its transient `searchForm` (hash_check). Never persisted beyond the normal page cache — the
+     * session token itself is NEVER written to Room (cadrage : périssable + sensible). The fresh
+     * page replaces the on-screen one through the single [loadedMode] seam (same page, newer
+     * posts — an acceptable, even desirable, side effect). Failures are silent : the submit path
+     * owns the explicit error surface.
+     */
+    private fun ensureSearchForm() {
+        val loaded = _state.value.mode as? TopicUiState.Mode.Loaded ?: return
+        // No fetch when : the form is already usable ; the page is provisional (the cache-aside
+        // network refresh is in flight and will carry the form — if it fails, the terminal
+        // re-emission drops `provisional` and a re-open of the bar or the submit failure path
+        // retries from here) ; or a fetch is already running.
+        val shouldFetch = loaded.topic.searchForm?.canSearch != true &&
+            !loaded.provisional &&
+            searchFormJob?.isActive != true
+        if (!shouldFetch) return
+        // Snapshot the request AND the generation token : `request` is a var (page changes mutate
+        // it), and `request == fetchedFor` alone cannot tell two successive owners of the SAME
+        // page apart (a refresh or a search taking over between our launch and our landing). Every
+        // owner change bumps `searchGeneration` (takeOverFromSearch / launchSearch), so a stale
+        // form-fetch reply is dropped exactly like a stale transsearch reply (gate finding, #877).
+        val fetchedFor = request
+        val generation = searchGeneration
+        searchFormJob = viewModelScope.launch {
+            runCatching {
+                topicRepository.refreshTopicPage(fetchedFor.cat, fetchedFor.post, fetchedFor.page)
+            }.onSuccess { fresh ->
+                _state.update { state ->
+                    // Latest-wins : same page still on screen AND no newer owner took over.
+                    if (state.mode is TopicUiState.Mode.Loaded &&
+                        request == fetchedFor &&
+                        generation == searchGeneration
+                    ) {
+                        state.copy(
+                            mode = loadedMode(fresh),
+                            availablePages = (1..fresh.totalPages).toList(),
+                        )
+                    } else {
+                        state
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -812,6 +882,9 @@ class TopicViewModel @AssistedInject constructor(
      */
     private fun takeOverFromSearch() {
         searchJob?.cancel()
+        // #877 — a form fetch tied to the outgoing page is moot (its inject guard would drop the
+        // result anyway) : cancel it so it does not waste a network round-trip.
+        searchFormJob?.cancel()
         searchGeneration++
         // A normal-load path owns the page now, so the result cursor history is stale: a later
         // next/prev would step from a position that no longer matches what is on screen. Reset it
@@ -863,7 +936,17 @@ class TopicViewModel @AssistedInject constructor(
         val current = _state.value
         val form = (current.mode as? TopicUiState.Mode.Loaded)?.topic?.searchForm
         // Re-validate the gate server-side: never POST without a usable (authenticated) form.
-        if (form == null || !form.canSearch || !current.search.canSubmit) return
+        // #877 — with the icon decoupled from the transient form, this path is reachable when the
+        // fresh-form fetch has not landed yet (or failed) : fail EXPLICITLY (same Toast as a
+        // network search failure) and retry the form fetch, never a silent no-op tap. The toast
+        // only fires on a submittable bar — a tap with empty criteria stays inert either way.
+        if (form == null || !form.canSearch) {
+            if (current.search.canSubmit) {
+                viewModelScope.launch { _effects.send(TopicEffect.SearchFailed) }
+                ensureSearchForm()
+            }
+            return
+        }
         val request = TopicSearchRequest(
             form = form,
             word = current.search.word.trim(),
@@ -871,7 +954,7 @@ class TopicViewModel @AssistedInject constructor(
             onlyMatches = current.search.onlyMatches,
             // Fresh search: no cursor, keep firstnum (isStep = false). HFR re-anchors on the first match.
         )
-        if (!request.isMeaningful) return
+        if (!current.search.canSubmit || !request.isMeaningful) return
         resetSearchCursors()
         launchSearch(request, isFresh = true)
     }

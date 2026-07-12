@@ -113,6 +113,15 @@ data class TopicUiState(
              * force-refresh / post-delete / search / live-refilter paths.
              */
             val blockedQuoteAuthors: Set<String> = emptySet(),
+            /**
+             * #877 — `true` while this page is the instant cache emission that a network refresh
+             * will supersede on the same load (cf. `TopicPageEmission.provisional`). The posts
+             * render normally (cache-first snappiness) but the top-bar pill keeps « Chargement… »
+             * instead of a possibly stale « page X / Y ». The repository guarantees a terminal
+             * `provisional = false` emission on every path (network page, TTL skip, failed
+             * refresh), so this can never strand the pill.
+             */
+            val provisional: Boolean = false,
         ) : Mode
 
         data class Error(
@@ -128,13 +137,24 @@ data class TopicUiState(
     }
 
     /**
-     * Helper used by the screen : `true` when the loaded topic page exposes a usable intra-topic
-     * search form (authenticated, non-empty `hash_check`). Drives the search icon affordance,
-     * symmetric with the reply gate. The form is transient (never cached), so a cold cache row
-     * keeps search disabled until a live authenticated load.
+     * `true` when the loaded topic page exposes a usable intra-topic search form (authenticated,
+     * non-empty `hash_check`). The form is transient (never cached) — a cache emission carries
+     * none, which is why the ICON affordance is no longer gated on it (cf. [canOpenSearch], #877) :
+     * this gate keeps protecting the actual POST paths (submit / step).
      */
     val canSearchInTopic: Boolean
         get() = (mode as? Mode.Loaded)?.topic?.searchForm?.canSearch == true
+
+    /**
+     * #877 — search ICON affordance : authenticated + a page on screen. Deliberately decoupled
+     * from the transient [canSearchInTopic] : cache emissions (and the TTL-skip path, which never
+     * refetches) carry no `searchForm`, and gating the icon on it made the Loupe vanish between
+     * pages — deterministic on a fresh authenticated cache, perceived as intermittent. Opening
+     * the bar without a form triggers a fresh form fetch (`TopicViewModel.ensureSearchForm`) ;
+     * a submit that still has no form fails explicitly (Toast), never silently.
+     */
+    val canOpenSearch: Boolean
+        get() = isAuthenticated && mode is Mode.Loaded
 
     companion object {
         fun initial(request: TopicRequest): TopicUiState =
