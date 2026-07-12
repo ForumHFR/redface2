@@ -11,6 +11,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.blacklist.BlacklistRepository
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
+import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
@@ -28,6 +29,7 @@ import fr.forumhfr.redface2.core.model.write.EditPostContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -427,7 +429,11 @@ class TopicViewModel @AssistedInject constructor(
      * authenticated (same justification as `performSubmitRefresh`).
      */
     private fun refresh() {
-        if (_state.value.mode !is TopicUiState.Mode.Loaded || _state.value.isRefreshing) return
+        val displayed = _state.value.mode as? TopicUiState.Mode.Loaded ?: return
+        // #910 — during a cold-switch grace the DISPLAYED page is the departed one while the
+        // canonical page is already the target : a pull here would refresh a page the user is
+        // leaving (and fight the in-flight switch load). The switch resolves within the grace.
+        if (displayed.topic.page != request.page || _state.value.isRefreshing) return
         becomePageOwner()
         _state.update { it.copy(isRefreshing = true) }
         // Gate Sol PR1 r2 (bloquant 1) — same ownership guard as every other async producer :
@@ -609,7 +615,7 @@ class TopicViewModel @AssistedInject constructor(
      * memory snapshot : the collect then refreshes the page IN PLACE (provisional pill + hairline,
      * quick win 3) instead of flashing the skeleton — removing that flash is the point of #895.
      */
-    private fun startPageLoad(showLoading: Boolean) {
+    private fun startPageLoad(showLoading: Boolean, graceLoading: Boolean = false) {
         beginFirstContentSection()
         if (showLoading) {
             _state.update { it.copy(mode = TopicUiState.Mode.Loading) }
@@ -622,6 +628,23 @@ class TopicViewModel @AssistedInject constructor(
         // emission raced from the previous owner can never write over the new page.
         val generation = ownerGeneration
         loadJob = viewModelScope.launch {
+            // #910 — grace timer for a cold switch that kept the departed page on screen : post
+            // the skeleton only if NO emission arrived within the grace. `received` (cadrage Sol :
+            // the cancel alone cannot outrace a timer that already crossed its delay — both run
+            // on the Main-confined scope, so the flag read/write cannot interleave) keeps a
+            // late-firing timer from stomping a Loaded that just landed ; the generation guard
+            // keeps a takeover's timer from stomping the next owner.
+            var received = false
+            val grace = if (graceLoading) {
+                launch {
+                    delay(SWITCH_GRACE_MS)
+                    if (generation == ownerGeneration && !received) {
+                        _state.update { it.copy(mode = TopicUiState.Mode.Loading) }
+                    }
+                }
+            } else {
+                null
+            }
             topicRepository
                 .observeTopicPage(request.cat, request.post, request.page, forceRefresh = effectiveForceRefresh)
                 // #509 — the blacklist is owned by the independent observeBlockedCanonicals collector
@@ -631,31 +654,17 @@ class TopicViewModel @AssistedInject constructor(
                 // between this load and the live re-filter — the init collector is the sole re-filter.
                 .catch { error ->
                     if (error is CancellationException) throw error
-                    // Cache-first UX: if we already showed a cached page, keep it on screen
-                    // and swallow the refresh failure. The user won't see broken UI just because
-                    // the network blip after the cache emission. A surface for that error
-                    // (Snackbar / banner) is deferred to Phase 1D.
-                    _state.update { current ->
-                        if (current.mode is TopicUiState.Mode.Loaded) {
-                            current
-                        } else {
-                            current.copy(
-                                mode = TopicUiState.Mode.Error(
-                                    message = error.message ?: "Unknown error",
-                                    // #324 — type-derived kind so the screen can tell an HFR
-                                    // 5xx outage from a local network cut.
-                                    kind = classifyHfrError(error),
-                                ),
-                            )
-                        }
-                    }
-                    // Close the async trace section even on the error path so the trace
-                    // still draws a bounded sliver from intent to terminal state.
-                    endFirstContentSectionIfNeeded()
+                    // #910 — a failed load must never leave a dangling grace (it would post a
+                    // skeleton over the error state, or an endless hairline).
+                    grace?.cancel()
+                    terminalizeLoadFailure(error)
                 }
                 .collect { emission ->
                     // F4 — drop an emission raced from a previous owner (page switch / takeover).
                     if (generation != ownerGeneration) return@collect
+                    // #910 — the target arrived within the grace : the skeleton never shows.
+                    received = true
+                    grace?.cancel()
                     val topic = emission.topic
                     _state.update {
                         it.copy(
@@ -685,7 +694,64 @@ class TopicViewModel @AssistedInject constructor(
                     dispatchPendingLanding(topic)
                     maybeSchedulePrefetch(totalPages = topic.totalPages)
                 }
+            // #910 gate r1 — a NORMAL completion with NO emission would otherwise leave either
+            // the grace's skeleton or the provisional hold on screen forever (nobody cancels the
+            // timer, nothing terminal ever lands).
+            grace?.cancel()
+            if (!received && generation == ownerGeneration) {
+                terminalizeEmptyCompletion()
+            }
         }
+    }
+
+    /**
+     * #910 — terminal state of a load whose flow FAILED. Cache-first UX : a Loaded already on
+     * screen OF THIS PAGE stays (the refresh failure is swallowed) ; anything else — grace hold
+     * of the departed page, entry skeleton — surfaces Error (a durable « displayed ≠ canonical »
+     * state is exactly what the #907 gates forbid, and Retry reloads the target).
+     */
+    private fun terminalizeLoadFailure(error: Throwable) {
+        _state.update { current ->
+            val displayed = current.mode as? TopicUiState.Mode.Loaded
+            if (displayed != null && displayed.topic.page == request.page) {
+                current
+            } else {
+                current.copy(
+                    mode = TopicUiState.Mode.Error(
+                        message = error.message ?: "Unknown error",
+                        // #324 — type-derived kind so the screen can tell an HFR
+                        // 5xx outage from a local network cut.
+                        kind = classifyHfrError(error),
+                    ),
+                )
+            }
+        }
+        // Close the async trace section even on the error path so the trace
+        // still draws a bounded sliver from intent to terminal state.
+        endFirstContentSectionIfNeeded()
+    }
+
+    /**
+     * #910 gate r1 — terminal state of a load whose flow completed NORMALLY with no emission :
+     * an on-screen Loaded OF THIS PAGE stays (refresh flavour), an Error stays (a failed flow
+     * also completes — the catch's typed Error must not be overwritten), anything else surfaces
+     * a generic Error (Retry reloads the target).
+     */
+    private fun terminalizeEmptyCompletion() {
+        _state.update { current ->
+            val displayed = current.mode as? TopicUiState.Mode.Loaded
+            when {
+                current.mode is TopicUiState.Mode.Error -> current
+                displayed != null && displayed.topic.page == request.page -> current
+                else -> current.copy(
+                    mode = TopicUiState.Mode.Error(
+                        message = "Page load completed without content",
+                        kind = HfrErrorKind.Other,
+                    ),
+                )
+            }
+        }
+        endFirstContentSectionIfNeeded()
     }
 
     /**
@@ -905,20 +971,33 @@ class TopicViewModel @AssistedInject constructor(
                 ?: if (bottomLandingEligible) PendingLanding.Bottom else PendingLanding.Top,
         )
         // Steps 6-8 — activate the terminal memory snapshot atomically (blacklist recomputed
-        // through loadedMode, F2) and refresh in place ; a miss shows the skeleton.
+        // through loadedMode, F2) and refresh in place ; a miss keeps the CURRENT page on screen
+        // under a grace timer (#910 stale-while-switching) — the skeleton only appears when the
+        // target genuinely takes longer than the grace, or when there is nothing to keep showing.
         val snapshot = pageSnapshots[target]
-        if (snapshot != null) {
-            _state.update {
-                it.copy(
-                    mode = loadedMode(snapshot),
-                    availablePages = (1..snapshot.totalPages).toList(),
-                    search = it.search.capturingAnchor(snapshot),
-                )
+        val displayed = _state.value.mode as? TopicUiState.Mode.Loaded
+        when {
+            snapshot != null -> {
+                _state.update {
+                    it.copy(
+                        mode = loadedMode(snapshot),
+                        availablePages = (1..snapshot.totalPages).toList(),
+                        search = it.search.capturingAnchor(snapshot),
+                    )
+                }
+                dispatchLandingAgainstScreen()
+                startPageLoad(showLoading = false)
             }
-            dispatchLandingAgainstScreen()
-            startPageLoad(showLoading = false)
-        } else {
-            startPageLoad(showLoading = true)
+            displayed != null -> {
+                // #910 — the departed page stays visible, flagged provisional : the pill keeps
+                // describing the displayed content (#877 rule) and the 2 dp hairline signals the
+                // switch. A fast target (Room hit ~30 ms, quick network) swaps Loaded→Loaded
+                // with zero flash ; the grace timer inside startPageLoad posts the skeleton
+                // only if nothing arrived in time.
+                _state.update { it.copy(mode = displayed.copy(provisional = true)) }
+                startPageLoad(showLoading = false, graceLoading = true)
+            }
+            else -> startPageLoad(showLoading = true)
         }
     }
 
@@ -1829,6 +1908,15 @@ class TopicViewModel @AssistedInject constructor(
 
         // #782 — same cap as the historical `:app` TopicJumpStack (TOPIC_JUMP_STACK_MAX).
         private const val JUMP_STACK_MAX = 8
+
+        /**
+         * #910 — grace before a cold page switch shows the skeleton : the departed page stays on
+         * screen (provisional) and a target arriving within the grace swaps Loaded→Loaded with no
+         * flash. ~15 frames at 60 Hz — long enough for a Room hit or a fast network round-trip,
+         * short enough that a genuinely slow load still gets its skeleton promptly (cadrage Sol :
+         * initial default, to be tuned by feel/telemetry).
+         */
+        private const val SWITCH_GRACE_MS = 250L
 
         // SavedStateHandle keys (F1/F3 + Sol points 4-5) — primitives only, never a Kotlin map.
         private const val KEY_CURRENT_PAGE = "topic.currentPage"
