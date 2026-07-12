@@ -1,4 +1,4 @@
-Redface 2 v0.27.4 — dev.
+Redface 2 v0.28.0 — dev.
 
-- Sélecteur de smileys : les petits smileys perso s'affichent à leur taille réelle, plus jamais agrandis et flous.
-- La recherche du panneau smileys rouvre avec le curseur à la fin du mot conservé.
+- Plus aucun flash au changement de page : le topic est un seul écran, les pages déjà lues se rouvrent instantanément à la position exacte.
+- Le retour après « aller au message cité » revient exactement au point de départ, même en chaîne.

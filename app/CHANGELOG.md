@@ -16,6 +16,18 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.28.0` — `internal` (dev) — 2026-07-12
+
+**Zéro flash au changement de page** (#895 étapes 4-5, PRs #905/#907/#908 — le fond du chantier, après les quick wins de 0.27.3).
+
+### Vue topic — moteur de pagination in-ViewModel
+- **Plus aucun flash au changement de page** : la pagination vit dans un seul écran retenu (une seule entrée de navigation pour tout le topic) — plus de squelette plein écran ni de barre recréée entre deux pages ; le squelette ne reste que pour une page jamais visitée.
+- **Revisite instantanée** : les 5 dernières pages lues sont gardées en mémoire — y revenir est immédiat, à la position exacte où on les avait laissées.
+- **Retour de citation fidèle** (#782 renforcé) : après « aller au message cité », le retour ramène à la position exacte du tap, même en chaîne ; un changement de page manuel réinitialise la chaîne (comportement navigateur), un 2e retour sort du topic.
+- **Landing « page précédente » conservé** (#412) : reculer d'une page atterrit en bas (sens de lecture), sauf position déjà connue pour cette page.
+- Post-submit : la publication rafraîchit la bonne page dans le MÊME écran (débordement #226 géré en interne, plus de re-navigation) ; la position de lecture survit à la mort de process (page + ancre).
+- Nettoyage : transition instantanée topic→topic supprimée (code mort de l'ère « une route par page »).
+
 ## `0.27.4` — `internal` (dev) — 2026-07-12
 
 **Duo picker smileys** (retours tinc/nicko du jour sur le fil DEV — fixes livrés en parallèle par sub-agents, gates Codex GO).
