@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.topic
 
+import androidx.activity.compose.BackHandler
 import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -125,6 +126,8 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 
 @Composable
@@ -158,13 +161,6 @@ fun TopicScreen(
     onEscalateToFullEditor: (subcat: Int, page: Int, quotes: List<QuotedPostPreview>) -> Unit =
         { _, _, _ -> },
     /**
-     * Vague 4 (#604) lot 1 — HFR accepted a reply POSTed from the quick-reply sheet. `:app` must
-     * refresh this topic route exactly like the full editor's onSubmitSucceeded (replace the route
-     * with `targetPage`/`scrollTo` and a bumped `submitSignal`, #200) — minus the editor pop,
-     * since the sheet never entered the back stack.
-     */
-    onQuickReplySubmitted: (targetPage: Int?, scrollTo: Int?) -> Unit = { _, _ -> },
-    /**
      * Open the editor in edit mode (Phase 2D, #147). HFR exposes the edit link on
      * the post's left toolbar only when the post belongs to the current user and
      * the topic is not locked — `TopicPageParser` translates that into
@@ -182,31 +178,12 @@ fun TopicScreen(
      * the topic id.
      */
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
-    onOpenPage: (Int) -> Unit,
-    /**
-     * #699 — jump to the post a quote header cites: `(page, numreponse)` parsed from the citation
-     * href. `:app` wires it to the same in-place `TopicRoute` replace as [onOpenPage], but with
-     * `scrollTo = numreponse` so the landing scrolls to and highlights the cited post (the #200
-     * deep-link mechanism) — one uniform path whether the target is on this page or another.
-     *
-     * #782 — also carries [sourceAnchor], the reader's EXACT position captured AT TAP TIME from the
-     * screen-owned `LazyListState`, so `:app` can push a return entry before replacing the route.
-     * Tap-time capture is mandatory: the disposal-saved anchor (#307) is written AFTER the jump has
-     * scrolled away, so an intra-page jump would overwrite it with the cited post's position.
-     */
-    onGoToPost: (page: Int, numreponse: Int, sourceAnchor: TopicScrollAnchor) -> Unit,
     /**
      * #285 — leave the topic and go back to the screen that opened it (topic list / flags).
      * Wired to a back-stack pop in `:app`. Surfaced as an explicit back arrow in the top app
      * bar so the user never has to rely on the system / gesture back to exit a topic.
      */
     onBack: () -> Unit,
-    /**
-     * #226 — after a plain reply that overflowed onto a freshly created page, re-route to that
-     * last page : the post the user just published lives there, not on the page the reply form
-     * was anchored to. `:app` replaces the current TopicRoute in place with the target page.
-     */
-    onNavigateToLastPage: (page: Int) -> Unit,
     /**
      * Bug fix (build 89) — reports the loaded topic title up to `:app` so it can keep a per-topic
      * title cache. On a page change the screen is recreated and starts in `Loading`; `:app` feeds
@@ -235,39 +212,36 @@ fun TopicScreen(
      */
     onSendPrivateMessage: (author: String) -> Unit = {},
     /**
-     * #307 — saved read position to restore for THIS `(cat, post, page)` landing, or `null` when
-     * nothing should be restored. `:app` resolves the full priority chain
-     * (`resolveTopicScrollRestoration`: route `scrollTo` > post-submit landing > saved anchor >
-     * previous-page bottom (#412) > top) BEFORE threading the value here, so a non-null anchor
-     * already means « the saved position won »
-     * — the screen applies it once the first `Loaded` emission lands, exactly once per landing, and
-     * it can never compete with the `ScrollToPost` / `ScrollToEndOfPage` effects (their routes
-     * resolve to `null` here).
+     * #307 — saved read position to restore for the ENTRY landing of this `(cat, post, page)`, or
+     * `null` when nothing should be restored. `:app` resolves the entry priority chain
+     * (`resolveTopicScrollRestoration`: route `scrollTo` > saved anchor > top) BEFORE threading
+     * the value here, so a non-null anchor already means « the saved position won » — the screen
+     * applies it once the entry page's first `Loaded` emission lands, exactly once, and it can
+     * never compete with the `ScrollToPost` effect (its routes resolve to `null` here). In-topic
+     * page changes never come back through this seam : their landings are armed by the in-VM page
+     * engine (#895 étape 4) and delivered as page-scoped scroll effects.
      */
     restoreScrollAnchor: TopicScrollAnchor? = null,
     /**
-     * #412 — `true` when this landing is a « page précédente » navigation with no saved anchor
-     * (resolved by `:app`, mutually exclusive with a non-null [restoreScrollAnchor]): once the
-     * first `Loaded` emission lands, scroll to the LAST item of the page — reading backwards,
-     * the next posts to read are at the bottom (HFR web's `#bas` landing). One-shot, same
-     * contract as the anchor restore.
+     * #307 — reports the read position (with the CANONICAL page it belongs to — the in-VM engine
+     * may have switched pages since entry, cf. #895 étape 4) when the screen leaves the
+     * composition, so `:app` can cache it per `(cat, post, page)` (twin of [onTitleLoaded] / the
+     * title cache). Fired from a single `DisposableEffect` — the unique save point covering EVERY
+     * departure (back, tab switch, editor push) — and only after a page actually loaded, so a
+     * landing abandoned while still `Loading` never clobbers a previously saved position with
+     * `(0, 0)`.
      */
-    startAtBottom: Boolean = false,
+    onScrollAnchorSaved: (page: Int, anchor: TopicScrollAnchor) -> Unit = { _, _ -> },
     /**
-     * #412 — invoked once the bottom landing for this page has been executed (or skipped on an
-     * empty page), right after the first `Loaded` emission. `:app` uses it to clear the transient
-     * « page précédente » marker so the landing can never replay on a later visit to the same page
-     * (the marker is nav state, not a route field — cf. Codex review on PR #420).
+     * #895 étape 4 (PR 2) — pending full-editor submit outcome for THIS topic, published by `:app`
+     * BEFORE the editor pop and matched on `(cat, post)` at the nav seam. Consumed exactly once
+     * (keyed on [TopicSubmitResult.eventId]) : the screen forwards it to
+     * [TopicViewModel.applySubmitResult] and immediately acknowledges through
+     * [onSubmitResultConsumed]. `null` when no submit is pending.
      */
-    onStartAtBottomConsumed: () -> Unit = {},
-    /**
-     * #307 — reports the read position when the screen leaves the composition, so `:app` can cache
-     * it per `(cat, post, page)` (twin of [onTitleLoaded] / the title cache). Fired from a single
-     * `DisposableEffect` — the unique save point covering EVERY departure (swipe, FAB, header pager,
-     * back, tab switch) — and only after the page actually loaded, so a landing abandoned while
-     * still `Loading` never clobbers a previously saved position with `(0, 0)`.
-     */
-    onScrollAnchorSaved: (TopicScrollAnchor) -> Unit = {},
+    pendingSubmitResult: TopicSubmitResult? = null,
+    /** #895 étape 4 (PR 2) — clears the `:app` pending-submit slot once the result was applied. */
+    onSubmitResultConsumed: () -> Unit = {},
     /**
      * #291 / #604 lot 3 — the multi-quote selection of THIS topic as FULL previews, in selection
      * order. Owned by `:app` (the basket must survive the per-page entry swap, like the title
@@ -334,6 +308,70 @@ fun TopicScreen(
         active = immersiveNavBarRevealActive,
         onScrollFacts = onImmersiveNavBarScroll,
     )
+    // #895 étape 4 — the reader's CURRENT position, read at call time from the screen-owned
+    // LazyListState (raw index/offset, header-aware — same shape as the #307 disposal save).
+    // Departure anchors for the page engine are always captured tap-time (#782 rationale).
+    val currentAnchor = {
+        TopicScrollAnchor(
+            index = lazyListState.firstVisibleItemIndex,
+            offset = lazyListState.firstVisibleItemScrollOffset,
+        )
+    }
+    // Gate r1 (PR 2) — the list-alignment marker : a switch swaps the CONTENT before its landing
+    // moves the POSITION, and inside that window the canonical page already points to the new
+    // page. Every position persist below (settle report, disposal save, tap-time departure
+    // anchors) is gated on « the list is aligned with the canonical page », so a late fling
+    // settle or a dispose can never record page N's coordinates under page N+1.
+    val alignment = remember { TopicListAlignment() }
+    // Gate r1 — tap-time departure anchor, but ONLY while aligned : right after a rapid second
+    // page tap the list may still sit at the previous page's offset. A null departure just falls
+    // back to the engine's stored anchor for the departed page.
+    val alignedDepartureAnchor = {
+        val current = viewModel.state.value
+        currentAnchor().takeIf {
+            alignment.shouldPersist(
+                canonicalPage = current.request.page,
+                isLoaded = current.mode is TopicUiState.Mode.Loaded,
+            )
+        }
+    }
+    // #782 / #895 étape 4 — unwind ONE quote jump on back while the in-VM chain is non-empty ;
+    // once empty the handler disables itself and the next back pops out of the topic as usual.
+    // Composed inside the screen (next to the ViewModel that owns the chain) — the historical
+    // :app interception died with the route-replace navigation.
+    BackHandler(enabled = state.canReturnFromJump) {
+        viewModel.returnFromJump(alignedDepartureAnchor())
+    }
+    // #895 étape 4 (PR 2) — consume the pending full-editor submit outcome exactly once per
+    // eventId : hand it to the retained ViewModel (in-place force refresh + landing) and clear
+    // the :app slot. The quick-reply sheet path below calls applySubmitResult directly.
+    LaunchedEffect(pendingSubmitResult?.eventId) {
+        pendingSubmitResult?.let { result ->
+            viewModel.applySubmitResult(result.targetPage, result.scrollTo)
+            onSubmitResultConsumed()
+        }
+    }
+    // #895 étape 4 — feed the engine's per-page anchor map on every scroll settle (drag/fling
+    // end), so revisit landings restore the exact reading position. `drop(1)` skips the initial
+    // idle emission (reporting (0, 0) before any scroll would clobber a restored anchor) ; the
+    // Loaded gate skips settles on a skeleton.
+    LaunchedEffect(Unit) {
+        snapshotFlow { lazyListState.isScrollInProgress }
+            .drop(1)
+            .filter { scrolling -> !scrolling }
+            .collect {
+                // Gate r1 — a settle that outlives a page switch (fling ends after an LRU
+                // activation) must not record the old page's coordinates under the new page.
+                val current = viewModel.state.value
+                val aligned = alignment.shouldPersist(
+                    canonicalPage = current.request.page,
+                    isLoaded = current.mode is TopicUiState.Mode.Loaded,
+                )
+                if (aligned) {
+                    viewModel.reportPageAnchor(currentAnchor())
+                }
+            }
+    }
     val context = androidx.compose.ui.platform.LocalContext.current
     // Resolve the string at composition time, not inside the LaunchedEffect collect block.
     // Lint flags `context.getString(R.string.…)` inside a Compose call site (the call is in a
@@ -378,8 +416,7 @@ fun TopicScreen(
         lazyListState = lazyListState,
         request = request,
         restoreScrollAnchor = restoreScrollAnchor,
-        startAtBottom = startAtBottom,
-        onStartAtBottomConsumed = onStartAtBottomConsumed,
+        alignment = alignment,
         onScrollAnchorSaved = onScrollAnchorSaved,
     )
 
@@ -399,18 +436,26 @@ fun TopicScreen(
         viewModel.effects.collect { effect ->
             when (effect) {
                 is TopicEffect.ScrollToPost -> {
-                    val loadedMode = viewModel.state.first { it.mode is TopicUiState.Mode.Loaded }.mode
-                            as TopicUiState.Mode.Loaded
+                    val landedState = viewModel.state.first { it.mode is TopicUiState.Mode.Loaded }
+                    val loadedMode = landedState.mode as TopicUiState.Mode.Loaded
                     val index = loadedMode.topic.posts.indexOfFirst { it.numreponse == effect.numreponse }
                     if (index >= 0) {
                         // +1 because the LazyColumn header card occupies item 0.
                         val target = index + 1
                         lazyListState.scrollToItem(target)
+                        // Gate r1/r2 — aligned only AFTER the scroll actually applied (a suspension
+                        // or disposal mid-landing must keep persists blocked) ; the #197 re-anchor
+                        // below only re-pins the same target, the position keeps describing this page.
+                        alignment.onLandingApplied(landedState.request.page)
                         // #197 — block images above the target grow from 160dp to up to 480dp once
                         // Coil decodes them, shifting the offset *after* this one-shot scroll and
                         // leaving the target off-screen on a cold image cache. Keep it pinned while
                         // the layout settles (bails on user scroll, bounded by a frame budget).
                         lazyListState.reanchorWhileMediaSettles(target)
+                    } else {
+                        // Gate r2 — not-found : the no-scroll DECISION is the landing application
+                        // (the content is this page, at a position the user now owns).
+                        alignment.onLandingApplied(landedState.request.page)
                     }
                 }
                 TopicEffect.ScrollToTopOfResults -> {
@@ -432,13 +477,15 @@ fun TopicScreen(
                         it.request.page != effect.page || it.mode is TopicUiState.Mode.Loaded
                     }
                     val loadedMode = landed.mode as? TopicUiState.Mode.Loaded
-                    if (
-                        landed.request.page == effect.page &&
-                        loadedMode != null &&
-                        loadedMode.topic.posts.isNotEmpty()
-                    ) {
-                        // +1 for the header card (same offset rationale as ScrollToPost above).
-                        lazyListState.scrollToItem(loadedMode.topic.posts.size)
+                    if (landed.request.page == effect.page && loadedMode != null) {
+                        if (loadedMode.topic.posts.isNotEmpty()) {
+                            // +1 for the header card (same offset rationale as ScrollToPost above).
+                            lazyListState.scrollToItem(loadedMode.topic.posts.size)
+                        }
+                        // Gate r1/r2 — aligned only AFTER the scroll applied (or after the
+                        // empty-page decision skipped it) : a suspension or disposal mid-landing
+                        // must keep persists blocked.
+                        alignment.onLandingApplied(effect.page)
                     }
                 }
                 is TopicEffect.ScrollToAnchor -> {
@@ -452,6 +499,8 @@ fun TopicScreen(
                     }
                     if (landed.request.page == effect.page && landed.mode is TopicUiState.Mode.Loaded) {
                         lazyListState.scrollToItem(effect.anchor.index, effect.anchor.offset)
+                        // Gate r1/r2 — aligned only AFTER the scroll applied.
+                        alignment.onLandingApplied(effect.page)
                     }
                 }
                 is TopicEffect.ScrollToTop -> {
@@ -464,6 +513,8 @@ fun TopicScreen(
                     }
                     if (landed.request.page == effect.page && landed.mode is TopicUiState.Mode.Loaded) {
                         lazyListState.scrollToItem(0)
+                        // Gate r1/r2 — aligned only AFTER the scroll applied.
+                        alignment.onLandingApplied(effect.page)
                     }
                 }
                 TopicEffect.PostSubmitRefreshFailed -> {
@@ -488,13 +539,6 @@ fun TopicScreen(
                         refreshManualFailedMsg,
                         android.widget.Toast.LENGTH_LONG,
                     ).show()
-                }
-                is TopicEffect.NavigateToLastPage -> {
-                    // #226 — the plain reply overflowed onto a freshly created last page. Hand the
-                    // target page to `:app`, which replaces the current TopicRoute in place so the
-                    // user lands on the page that actually holds their new post (the ViewModel for
-                    // that route then anchors #bas → ScrollToEndOfPage as usual).
-                    onNavigateToLastPage(effect.page)
                 }
                 TopicEffect.PostDeleted -> {
                     // #292 — HFR accepted the deletion; the ViewModel force-refreshes the page so the
@@ -568,23 +612,22 @@ fun TopicScreen(
         onBack = onBack,
         onReply = onReply,
         onEscalateToFullEditor = onEscalateToFullEditor,
-        onQuickReplySubmitted = onQuickReplySubmitted,
+        // Vague 4 (#604) lot 1 / #895 étape 4 — a reply POSTed from the quick-reply sheet goes
+        // straight to the retained ViewModel (in-place force refresh, #200/#226) : the sheet
+        // never entered the back stack and the topic entry no longer gets replaced.
+        onQuickReplySubmitted = viewModel::applySubmitResult,
         onEdit = onEdit,
         onEditFirstPost = onEditFirstPost,
-        onOpenPage = onOpenPage,
-        // #782 — enrich the quote jump with the CURRENT scroll anchor, read at tap time from the
-        // screen-owned LazyListState (raw index/offset, header-aware — same shape as the #307
-        // disposal save). TopicContent and everything below keep the plain (page, numreponse)
-        // callback; only this seam knows about the list state.
+        // #895 étape 4 — MANUAL page change (swipe, header pager, ‹/› FABs, boundary cards) :
+        // the in-VM engine switches in place (LRU snapshot, armed landing) — no navigation.
+        // The departure anchor is captured tap-time so revisiting this page restores it.
+        onOpenPage = { targetPage ->
+            viewModel.switchToPage(targetPage, alignedDepartureAnchor())
+        },
+        // #699/#782 — jump to a cited post : the engine pushes the departure {page, tap-time
+        // anchor} on its jump chain and lands on the target (highlight via ScrollToPost).
         onGoToPost = { page, numreponse ->
-            onGoToPost(
-                page,
-                numreponse,
-                TopicScrollAnchor(
-                    index = lazyListState.firstVisibleItemIndex,
-                    offset = lazyListState.firstVisibleItemScrollOffset,
-                ),
-            )
+            viewModel.goToPost(page, numreponse, alignedDepartureAnchor())
         },
         onOpenProfile = onOpenProfile,
         onSendPrivateMessage = onSendPrivateMessage,
@@ -719,19 +762,22 @@ private suspend fun LazyListState.reanchorWhileMediaSettles(target: Int) {
 /**
  * #307 — one-shot restoration of the saved read position + the single central save point.
  *
- * RESTORE: waits for the FIRST `Loaded` emission (same timing as the `ScrollToPost` effect, and read
- * from the [state] flow — not a recomposition-captured snapshot — for the same race-free reason),
- * then applies the anchor — or the #412 bottom landing when `startAtBottom` won the resolution —
- * exactly once per route landing. Subsequent `Loaded` emissions (cache→network refresh of the stale
- * path, manual pull-to-refresh, post-delete reload) never re-scroll: the effect has already
- * completed, mirroring the one-shot contract of the scroll effects. The priority chain was resolved
- * by `:app` — see `restoreScrollAnchor` / `startAtBottom` on [TopicScreen].
+ * RESTORE: waits for the ENTRY page's first `Loaded` emission OR its abandonment (the in-VM
+ * engine may switch pages before the entry page ever loads — waiting unconditionally would apply
+ * the entry anchor to the wrong page ; same loaded-or-abandoned pattern as the page-scoped scroll
+ * effects, gate r6), then applies the anchor exactly once. Subsequent `Loaded` emissions
+ * (cache→network refresh of the stale path, manual pull-to-refresh, post-delete reload, in-VM
+ * page switches) never re-scroll: the effect has already completed. The entry priority chain was
+ * resolved by `:app` — see `restoreScrollAnchor` on [TopicScreen] ; in-topic landings belong to
+ * the engine (#895 étape 4).
  *
- * SAVE: `onDispose` is the ONE save point. `onOpenPage` is shared by swipe, header, pager and
- * FAB, so saving per trigger would multiply call sites (and race); disposal of this composition
- * covers every departure — swipe, FAB, back, tab switch, editor push — with a single write.
- * `scrollAnchorSettled` gates the save: a page abandoned while still Loading reads (0, 0) from
- * a list that never rendered, and must not clobber the real position saved by an earlier visit.
+ * SAVE: `onDispose` is the ONE save point — disposal covers every departure (back, tab switch,
+ * editor push) with a single write. The anchor is saved under the CANONICAL page read from
+ * [state] at disposal time (the engine may have switched pages since entry), and ONLY while the
+ * [TopicListAlignment] marker says the list is aligned with that page (gate r1) : a disposal
+ * racing a fresh switch — content swapped, landing not yet applied — must not save the old
+ * page's position under the new page, and a page abandoned while still Loading must not clobber
+ * the real position saved by an earlier visit.
  */
 @Suppress("LongParameterList") // Private effect holder: the params are TopicScreen's own
 // restoration inputs threaded as-is; grouping them into a holder type would only add indirection.
@@ -741,37 +787,45 @@ private fun TopicScrollRestorationEffects(
     lazyListState: LazyListState,
     request: TopicRequest,
     restoreScrollAnchor: TopicScrollAnchor?,
-    startAtBottom: Boolean,
-    onStartAtBottomConsumed: () -> Unit,
-    onScrollAnchorSaved: (TopicScrollAnchor) -> Unit,
+    alignment: TopicListAlignment,
+    onScrollAnchorSaved: (page: Int, anchor: TopicScrollAnchor) -> Unit,
 ) {
-    var scrollAnchorSettled by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        val loadedMode = state.first { it.mode is TopicUiState.Mode.Loaded }.mode
-                as TopicUiState.Mode.Loaded
-        when {
-            restoreScrollAnchor != null ->
-                lazyListState.scrollToItem(restoreScrollAnchor.index, restoreScrollAnchor.offset)
-            // #412 — « page précédente » without a saved anchor: land on the last item (reading
-            // direction). Same `posts.size` target as the ScrollToEndOfPage handler — the +1
-            // header card at index 0 makes the last post index == posts.size.
-            startAtBottom && loadedMode.topic.posts.isNotEmpty() ->
-                lazyListState.scrollToItem(loadedMode.topic.posts.size)
+        val landed = state.first {
+            it.request.page != request.page || it.mode is TopicUiState.Mode.Loaded
         }
-        if (startAtBottom) {
-            // Consume even when the empty-page guard skipped the scroll: the landing decision for
-            // this page is spent either way.
-            onStartAtBottomConsumed()
+        if (landed.request.page == request.page && landed.mode is TopicUiState.Mode.Loaded) {
+            when {
+                // Gate r1/r2 — aligned AFTER the restore scroll ran. The resolver never hands an
+                // anchor when the route carries a scrollTo (FollowScrollTo wins), so this branch
+                // and the ScrollToPost landing are mutually exclusive.
+                restoreScrollAnchor != null -> {
+                    lazyListState.scrollToItem(restoreScrollAnchor.index, restoreScrollAnchor.offset)
+                    alignment.onLandingApplied(request.page)
+                }
+                // Gate r3 — a TRUE default-top start only : with a route scrollTo the ScrollToPost
+                // effect owns the entry landing, and aligning here on the bare first Loaded would
+                // re-open the persist window before (or during) its scroll. ScrollToPost aligns
+                // after its own application instead.
+                request.scrollTo == null -> alignment.onLandingApplied(request.page)
+            }
+            // An abandoned entry never aligns here — the switched page's own landing effect will.
         }
-        scrollAnchorSettled = true
     }
-    DisposableEffect(request.cat, request.post, request.page) {
+    DisposableEffect(request.cat, request.post) {
         onDispose {
-            // Deliberately captures THIS composition's `onScrollAnchorSaved` (keyed to this route's
-            // (cat, post, page)) rather than a rememberUpdatedState latest-value: if the request
-            // ever changed in place, the departing position must be saved under the OLD key.
-            if (scrollAnchorSettled) {
+            // The save key is the CANONICAL page at disposal time — never the (frozen) route
+            // page. Gate r1 — skipped while the list is not aligned with that page (a dispose
+            // racing a fresh switch, before its landing applied, would otherwise save the OLD
+            // page's position under the NEW page).
+            val departed = state.value
+            val aligned = alignment.shouldPersist(
+                canonicalPage = departed.request.page,
+                isLoaded = departed.mode is TopicUiState.Mode.Loaded,
+            )
+            if (aligned) {
                 onScrollAnchorSaved(
+                    departed.request.page,
                     TopicScrollAnchor(
                         index = lazyListState.firstVisibleItemIndex,
                         offset = lazyListState.firstVisibleItemScrollOffset,

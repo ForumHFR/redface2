@@ -72,7 +72,7 @@ class TopicViewModel @AssistedInject constructor(
     @Assisted private var request: TopicRequest,
     // #895 (étape 4) — canonical current page + one-shot consumption markers, so a process death
     // neither loses the page the user had switched to nor replays an already-consumed entry
-    // intention (scrollTo / submitSignal / forceRefresh / resolveScrollToPage). Plain Hilt
+    // intention (scrollTo / forceRefresh / resolveScrollToPage). Plain Hilt
     // dependency : @HiltViewModel supports SavedStateHandle alongside assisted params.
     private val savedStateHandle: SavedStateHandle,
     private val topicRepository: TopicRepository,
@@ -257,11 +257,9 @@ class TopicViewModel @AssistedInject constructor(
                 TopicScrollAnchor(index, savedStateHandle.get<Int>(KEY_ANCHOR_OFFSET) ?: 0)
         }
         // Sol points 4-5 — ENTRY intentions are consumable one-shots : an already-consumed
-        // scrollTo / submitSignal never replays after process death ; an interrupted one resumes.
+        // scrollTo never replays after process death ; an interrupted one resumes.
         val initialScrollTo = request.scrollTo
             ?.takeIf { savedStateHandle.get<Boolean>(KEY_SCROLL_TO_CONSUMED) != true }
-        val pendingSubmit = request.submitSignal
-            ?.takeIf { it != savedStateHandle.get<Long>(KEY_SUBMIT_CONSUMED) }
         val untrustedPageTarget = request.resolveScrollToPage && initialScrollTo != null &&
             canonicalPage == null
         // Gate Sol PR1 (bloquant 1) — the canonical page is only persisted once it is TRUSTED :
@@ -274,22 +272,12 @@ class TopicViewModel @AssistedInject constructor(
         // before the ownership bump would tag it with a stale generation).
         val entryLanding: PendingLanding? = when {
             initialScrollTo != null -> PendingLanding.Post(initialScrollTo)
-            // Issue #200 — plain reply : HFR anchors `#bas`, no numreponse ; land at the end of
-            // the force-refreshed page where the freshly-published reply lives.
-            pendingSubmit != null -> PendingLanding.Bottom
             // Process restore : land back on the persisted reading position, if any.
             canonicalPage != null -> pageAnchors[request.page]?.let { PendingLanding.Anchor(it) }
             else -> null
         }
         val entryLandingIsScrollTo = initialScrollTo != null
         when {
-            // Issue #200 — the user just published a reply / quote / edit / edit-FP and the
-            // navigation host signalled us to skip the cache so the freshly-published post
-            // is actually visible. Without this short-circuit, `observeTopicPage` would
-            // emit a stale cached page that doesn't contain the new post (it was created
-            // server-side after the cache was populated).
-            pendingSubmit != null ->
-                forceRefreshCurrentPage(pendingSubmit, entryLanding, entryLandingIsScrollTo)
             // #750 — email deep link: `page` is a lie (always 1), resolve the real one first.
             untrustedPageTarget -> resolveScrollToPageThenLoad(entryLanding, entryLandingIsScrollTo)
             else -> loadCurrentPage(entryLanding, entryLandingIsScrollTo)
@@ -436,7 +424,7 @@ class TopicViewModel @AssistedInject constructor(
      *
      * konsist:bypass-prefetch-guard — cancels the in-flight prefetch and force-fetches the page; this
      * is an explicit user-initiated authenticated refresh, not an anonymous warmup escalating to
-     * authenticated (same justification as `forceRefreshCurrentPage`).
+     * authenticated (same justification as `performSubmitRefresh`).
      */
     private fun refresh() {
         if (_state.value.mode !is TopicUiState.Mode.Loaded || _state.value.isRefreshing) return
@@ -458,7 +446,7 @@ class TopicViewModel @AssistedInject constructor(
                 }
                 recordSnapshot(topic)
                 // Re-arm the page+1 warmup, like `loadCurrentPage` (l. ~219). Unlike the post-submit
-                // `forceRefreshCurrentPage` (which deliberately skips it), a manual mid-page pull is
+                // `performSubmitRefresh` (which deliberately skips it), a manual mid-page pull is
                 // exactly when the user keeps reading forward, so re-warming page+1 restores the
                 // prefetch benefit lost by the `prefetchedPage = null` reset above.
                 maybeSchedulePrefetch(totalPages = topic.totalPages)
@@ -793,6 +781,17 @@ class TopicViewModel @AssistedInject constructor(
     // ─── #895 étape 4 — page switch engine (unbranched until the navigation PR) ──
 
     /**
+     * #782/#895 étape 4 — mirror the jump chain's availability into state after EVERY mutation
+     * (push / pop / clear), so the screen's `BackHandler(enabled = canReturnFromJump)` always
+     * reflects the chain the next back gesture would unwind. StateFlow conflation makes the
+     * no-change case free.
+     */
+    private fun syncJumpAvailability() {
+        val available = jumpStack.isNotEmpty()
+        _state.update { it.copy(canReturnFromJump = available) }
+    }
+
+    /**
      * F1/F3 — the screen reports the CURRENT page's reading anchor (on scroll settle / departure).
      * Feeds the RAM anchor map (revisit landings) and mirrors the primitives into the
      * [SavedStateHandle] so a process death restores the position of the page being read.
@@ -811,6 +810,7 @@ class TopicViewModel @AssistedInject constructor(
     fun switchToPage(target: Int, departureAnchor: TopicScrollAnchor? = null) {
         if (target == request.page || target < 1) return
         jumpStack.clear()
+        syncJumpAvailability()
         internalSwitch(
             target = target,
             departureAnchor = departureAnchor,
@@ -827,6 +827,7 @@ class TopicViewModel @AssistedInject constructor(
     fun goToPost(targetPage: Int, numreponse: Int, departureAnchor: TopicScrollAnchor? = null) {
         if (jumpStack.size >= JUMP_STACK_MAX) jumpStack.removeFirst()
         jumpStack.addLast(TopicJumpFrame(request.page, departureAnchor))
+        syncJumpAvailability()
         if (targetPage == request.page) {
             departureAnchor?.let { reportPageAnchor(it) }
             armLanding(PendingLanding.Post(numreponse))
@@ -843,6 +844,7 @@ class TopicViewModel @AssistedInject constructor(
      */
     fun returnFromJump(departureAnchor: TopicScrollAnchor? = null): Boolean {
         val frame = jumpStack.removeLastOrNull() ?: return false
+        syncJumpAvailability()
         val landing = frame.anchor?.let { PendingLanding.Anchor(it) }
         if (frame.page == request.page) {
             departureAnchor?.let { reportPageAnchor(it) }
@@ -871,6 +873,7 @@ class TopicViewModel @AssistedInject constructor(
         // F2 — the submitted-to page is dirty : its snapshot must never serve again as terminal.
         pageSnapshots.remove(target)
         jumpStack.clear()
+        syncJumpAvailability()
         performSubmitRefresh(target, scrollTo)
     }
 
@@ -1032,96 +1035,6 @@ class TopicViewModel @AssistedInject constructor(
     }
 
     /**
-     * Issue #200 — post-submit force fetch. Bypasses [TopicRepository.observeTopicPage]
-     * (cache-aside) and calls [TopicRepository.refreshTopicPage] directly so the freshly
-     * published post is in the emitted [Topic]. Falls back to the cache-aside path on
-     * failure and emits [TopicEffect.PostSubmitRefreshFailed] so the user is told that
-     * HFR accepted the post even though the local refresh blipped.
-     *
-     * Konsist guard: this function legitimately cancels the inflight prefetch AND calls
-     * `refreshTopicPage` — the anti-anonymous-upgrade rule in `ArchitectureKonsistTest`
-     * is bypassed via the literal marker `konsist:bypass-prefetch-guard` (see the test
-     * for the allow-list mechanism). The bypass is intentional: this is a deliberate
-     * authenticated refetch following an explicit submit signal from the navigation host,
-     * not an anonymous warmup escalating to authenticated.
-     */
-    private fun forceRefreshCurrentPage(
-        signal: Long,
-        entryLanding: PendingLanding?,
-        entryLandingIsScrollTo: Boolean,
-    ) {
-        becomePageOwner()
-        armLanding(entryLanding, initialScrollTo = entryLandingIsScrollTo)
-        beginFirstContentSection()
-        _state.update { it.copy(mode = TopicUiState.Mode.Loading) }
-        // Gate Sol PR1 (bloquant 2) — same ownership guard as every other async producer.
-        val generation = ownerGeneration
-        loadJob = viewModelScope.launch {
-            try {
-                val topic = topicRepository.refreshTopicPage(request.cat, request.post, request.page)
-                if (generation != ownerGeneration) return@launch
-                // Sol point 4 — the submit entry intention is consumed on COMPLETION (success or
-                // handled failure below) : an interrupted force-fetch resumes after process death
-                // (idempotent GET), a completed one never replays. Gate Sol PR1 (bloquant 3) — a
-                // successful AUTHENTICATED refresh also satisfies the #231 catch-up : mark it done
-                // too, or the TTL bypass would replay through startPageLoad after process death.
-                savedStateHandle[KEY_SUBMIT_CONSUMED] = signal
-                savedStateHandle[KEY_FORCE_REFRESH_DONE] = true
-                _state.update {
-                    it.copy(
-                        mode = loadedMode(topic),
-                        availablePages = (1..topic.totalPages).toList(),
-                    )
-                }
-                endFirstContentSectionIfNeeded()
-                recordSnapshot(topic)
-                // #226 — plain-reply overflow: the reply created a new page but HFR anchored the page
-                // the form was on (request.page). The force-refreshed page reports the up-to-date
-                // totalPages; if it now exceeds request.page (plain reply → scrollTo null; quote/edit
-                // carry a #t{N} scrollTo and are excluded), the fresh post lives on the last page, not
-                // here. Re-route there instead of scrolling this stale page. A same-page reply keeps
-                // totalPages == request.page and falls through to the #200 ScrollToEndOfPage path.
-                // Best-effort under concurrency: HFR's #bas success URL carries NO numreponse, so we
-                // cannot tell our own overflow from a concurrent poster's new page — we send the user
-                // to the last page either way (a reasonable landing). `postSubmitOverflowLanding`
-                // guards re-entry: once the host re-routes us onto that last page it sets the flag (and
-                // a fresh submitSignal so we STILL force-fetch it — no stale cache). On that landing we
-                // must NOT redirect again, or a concurrent post bumping totalPages during our refresh
-                // would start a moving-tail chase. The flagged landing falls through to
-                // ScrollToEndOfPage below.
-                if (request.scrollTo == null &&
-                    topic.totalPages > request.page &&
-                    !request.postSubmitOverflowLanding
-                ) {
-                    _effects.send(TopicEffect.NavigateToLastPage(topic.totalPages))
-                    return@launch
-                }
-                dispatchPendingLanding(topic)
-                // Skip the page+1 warmup here — the user just submitted and is unlikely to need
-                // page+1 immediately; the next normal navigation will trigger the warmup through
-                // `loadCurrentPage` as usual.
-            } catch (cancellation: CancellationException) {
-                throw cancellation
-            } catch (@Suppress("TooGenericExceptionCaught") refreshError: Exception) {
-                // Force-refresh failed — log, tell the user HFR did accept the post even though
-                // the local view may be stale (Toast in the screen, cf. TopicScreen.kt), and drop the
-                // pending landing so the cache-aside fallback we hand off to does NOT
-                // re-trigger `ScrollToEndOfPage` on a stale page (which would scroll the user to
-                // some pre-submit "last post" and confuse them into thinking they're looking at
-                // their fresh reply). Then hand off to the cache-aside path so the user at least
-                // sees a previously-cached page with a Retry affordance.
-                android.util.Log.w(LOG_TAG, "Force refresh failed for post-submit reload", refreshError)
-                if (generation != ownerGeneration) return@launch
-                savedStateHandle[KEY_SUBMIT_CONSUMED] = signal
-                _effects.trySend(TopicEffect.PostSubmitRefreshFailed)
-                clearLanding()
-                endFirstContentSectionIfNeeded()
-                loadCurrentPage()
-            }
-        }
-    }
-
-    /**
      * Fires off an anonymous prefetch of `currentPage + 1` once per loaded
      * page. We deliberately:
      *
@@ -1213,7 +1126,7 @@ class TopicViewModel @AssistedInject constructor(
      * worst case is a briefly-stale list that the normal refresh reconciles.
      *
      * Konsist guard: this function cancels the inflight prefetch AND calls `refreshTopicPage`, so it
-     * carries the `konsist:bypass-prefetch-guard` marker (same allow-list as `forceRefreshCurrentPage`).
+     * carries the `konsist:bypass-prefetch-guard` marker (cf. `ArchitectureKonsistTest`).
      * The bypass is intentional: this is a deliberate authenticated refetch following an explicit
      * user-confirmed deletion, not an anonymous warmup escalating to authenticated.
      */
@@ -1923,7 +1836,6 @@ class TopicViewModel @AssistedInject constructor(
         private const val KEY_ANCHOR_INDEX = "topic.anchorIndex"
         private const val KEY_ANCHOR_OFFSET = "topic.anchorOffset"
         private const val KEY_SCROLL_TO_CONSUMED = "topic.scrollToConsumed"
-        private const val KEY_SUBMIT_CONSUMED = "topic.submitConsumed"
         private const val KEY_FORCE_REFRESH_DONE = "topic.forceRefreshDone"
     }
 }
