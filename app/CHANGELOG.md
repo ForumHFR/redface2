@@ -16,6 +16,14 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.27.4` — `internal` (dev) — 2026-07-12
+
+**Duo picker smileys** (retours tinc/nicko du jour sur le fil DEV — fixes livrés en parallèle par sub-agents, gates Codex GO).
+
+### Éditeur — sélecteur de smileys
+- **Fini les petits smileys flous** (#871, PR #903) : les persos plus petits que la cellule s'affichent à leur taille intrinsèque (même pipeline de mesure que le rendu des posts, #175), jamais étirés ; cap 44 dp conservé, builtins inchangés.
+- **Curseur en fin de mot** (#901, PR #904) : la recherche restaurée à la réouverture du panneau (#824) garde le terme et place le curseur à la FIN — effacer ou compléter est immédiat.
+
 ## `0.27.3` — `internal` (dev) — 2026-07-12
 
 **Quick wins zéro-flash** (#895, PR #899 — premier lot du chantier « zéro flash au changement de page » ; le fond, pagination intra-topic dans un même ViewModel, suit dans un lot dédié).
