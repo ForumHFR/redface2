@@ -50,8 +50,8 @@ import kotlinx.coroutines.launch
  * - a hero row: avatar + author, with « Post n°{numreponse} » (the post number moved
  *   here from the header bar) and the post date underneath;
  * - optional info lines: « Édité le … » when [Post.editedAt] is non-null, and
- *   « Cité N fois sur cette page » when [citedCount] > 0 (hidden at 0 — same
- *   page-scoped #239 count as the badge, which stays on the card);
+ *   « Cité N fois dans le sujet » when [citedCount] > 0 (hidden at 0) — #863 : the SERVER
+ *   counter, cross-page, same value as the card's badge;
  * - stacked full-width actions, profile-sheet style: a filled « Copier le lien de ce
  *   post » (primary), an outlined « Ouvrir dans le navigateur » (debug-friendly: the
  *   canonical permalink opens in the default browser), and a DISABLED « Alerter »
@@ -175,7 +175,7 @@ internal fun PostMenuSheet(
                 if (citedCount > 0) {
                     Text(
                         text = pluralStringResource(
-                            R.plurals.topic_post_menu_cited_on_page,
+                            R.plurals.topic_post_menu_cited_in_topic,
                             citedCount,
                             citedCount,
                         ),

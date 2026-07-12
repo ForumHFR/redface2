@@ -393,6 +393,41 @@ class TopicRepositoryImplTest {
         assertEquals("fresh cache hit must not trigger a refresh", 1, server.requestCount)
     }
 
+    @Test
+    fun `observeTopicPage fresh cache preserves citedCount without network refresh`() = runTest {
+        // #863 : Post.citedCount = HFR's SERVER « Message cité N fois » counter (cross-page,
+        // authoritative), persisted in Room v15 (MIGRATION_14_15). Without the column + mapper
+        // round-trip, every fresh cache hit would reset the badge to null. Same fixture posts
+        // as the editedAt test : n°16628102 carries « Message cité 2 fois », n°16628071 has no
+        // trailer at all.
+        server.enqueue(MockResponse().setBody(fixtureHtml("topic_khakha_page_2.html")))
+        val repo = repository(now = Instant.parse("2026-04-26T18:00:00Z"))
+        val fresh = repo.refreshTopicPage(13, 84_540, 2)
+        assertEquals(
+            "the parser must extract the server citation counter",
+            2,
+            fresh.posts.first { it.numreponse == 16_628_102 }.citedCount,
+        )
+
+        // Same clock → fresh cache → no network refresh. #877 rebase : emissions are
+        // TopicPageEmission wrappers — a TTL-skipped cache hit is terminal (settled).
+        repo.observeTopicPage(13, 84_540, 2).test {
+            val cached = awaitItem()
+            awaitComplete()
+            assertFalse("TTL-skipped cache hit must be settled, not provisional", cached.provisional)
+            assertEquals(
+                "citedCount must round-trip Room v15 unchanged on cache hit",
+                2,
+                cached.topic.posts.first { it.numreponse == 16_628_102 }.citedCount,
+            )
+            assertNull(
+                "never-cited post must keep citedCount null on cache hit",
+                cached.topic.posts.first { it.numreponse == 16_628_071 }.citedCount,
+            )
+        }
+        assertEquals("fresh cache hit must not trigger a refresh", 1, server.requestCount)
+    }
+
     // ──────────────────────────────────────────────────────────────────────
     // Alpha "Ignorer le cache topic" toggle — bypass tests
     // ──────────────────────────────────────────────────────────────────────

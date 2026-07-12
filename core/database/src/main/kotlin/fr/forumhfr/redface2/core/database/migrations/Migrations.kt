@@ -393,3 +393,19 @@ val MIGRATION_13_14: Migration = object : Migration(13, 14) {
         db.execSQL("ALTER TABLE posts ADD COLUMN signature TEXT")
     }
 }
+
+/**
+ * v14 → v15 (#863) — adds `posts.citedCount`, HFR's server-side « Message cité N fois »
+ * counter (cross-page, authoritative — replaces the page-scoped client scan as the badge
+ * source). Nullable `INTEGER` on disk because:
+ * - pre-v15 rows backfill to `NULL` (the next live fetch sets the real value);
+ * - never-cited posts legitimately carry no counter.
+ *
+ * Pure DDL, no row rewrite — posts are short-lived cache and the next fetch overwrites every
+ * row with a parsed (possibly null) counter.
+ */
+val MIGRATION_14_15: Migration = object : Migration(14, 15) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE posts ADD COLUMN citedCount INTEGER")
+    }
+}

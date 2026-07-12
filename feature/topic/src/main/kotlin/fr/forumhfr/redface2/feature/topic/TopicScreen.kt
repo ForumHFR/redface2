@@ -1465,9 +1465,6 @@ private fun TopicLoadedContent(
     // Marked by tinting ONLY its identity band with tertiaryContainer (XaTriX: the left-rail attempt was
     // ugly; the old card+band double tint stays removed) — one subtle band, no layout shift.
     val highlight = state.request.scrollTo
-    // #239 — how many posts of THIS page cite each post, computed once per loaded post list. Drives
-    // the « cité N fois » badge below. Pure + page-scoped (cf. citationCountsByNumreponse KDoc).
-    val citationCounts = remember(topic.posts) { citationCountsByNumreponse(topic.posts) }
     // #362 — post whose contextual menu is open (null = closed). Plain local UI state at the
     // Loaded level: the menu carries no async data, so no ViewModel/hoisting is needed — the
     // sheet lives in :feature:topic (unlike ProfilePreviewSheet, hoisted in :app only because
@@ -1716,7 +1713,9 @@ private fun TopicLoadedContent(
                     TopicPostCard(
                         post = post,
                         highlighted = highlight == post.numreponse,
-                        citedCount = citationCounts[post.numreponse] ?: 0,
+                        // #863 — the SERVER count (« Message cité N fois », cross-page), parsed
+                        // from div.edited ; null = never cited. The page-scoped client scan is gone.
+                        citedCount = post.citedCount ?: 0,
                         // #699 — makes sourced quote headers tappable (jump to the cited post).
                         onGoToCitedPost = onGoToPost,
                         // #330 — render the author signature beneath the body when the reading preference
@@ -1795,7 +1794,7 @@ private fun TopicLoadedContent(
     }
     // #362 — per-post contextual menu. The permalink is rebuilt from the LOADED topic's
     // (cat, post, page) — not the request — so it always reflects the page HFR actually
-    // served (HFR clamps out-of-range pages). citedCount reuses the page-scoped #239 index.
+    // served (HFR clamps out-of-range pages). citedCount = the server counter (#863).
     menuPost?.let { post ->
         // #292 → #418 — « Supprimer » lives in the contextual menu now (anti accidental tap,
         // beta feedback by nicko). Same gates as before : « Modifier »'s gate (HFR allows
@@ -1831,7 +1830,7 @@ private fun TopicLoadedContent(
                 page = topic.page,
                 numreponse = post.numreponse,
             ),
-            citedCount = citationCounts[post.numreponse] ?: 0,
+            citedCount = post.citedCount ?: 0,
             onDismiss = { menuPost = null },
             onDelete = menuDeleteAction,
             onEditFirstPost = menuEditFirstPostAction,
@@ -2631,8 +2630,8 @@ private fun TopicPostBadges(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (citedCount > 0) {
-            // #239 — sober pill: how many posts of THIS page cite this one. Page-scoped (cf.
-            // citationCountsByNumreponse); jumping to the citing posts is a follow-up.
+            // #239/#863 — sober pill: HFR's server-side citation count (cross-page,
+            // authoritative). Jumping to the citing posts is a follow-up (#783).
             // surfaceContainerHighest : a touch above the surfaceContainer card so the pill reads.
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainerHighest,
