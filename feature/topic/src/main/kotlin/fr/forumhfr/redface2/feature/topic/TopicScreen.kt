@@ -342,7 +342,7 @@ fun TopicScreen(
     // Chantier C (#546) — intra-topic search failure message (resolved upfront, same rationale).
     val searchFailedMsg = stringResource(R.string.topic_search_failed)
     // Chantier B (#546) — « no further result » Toast (resolved upfront, same rationale).
-    val searchResultsEndMsg = stringResource(R.string.topic_search_results_end)
+    val searchResultsEndMsg = stringResource(R.string.topic_search_results_list_end)
     // #809 — flag-removal feedback messages (resolved upfront, same rationale).
     val flagRemovedMsg = stringResource(R.string.topic_remove_flag_success)
     val flagRemoveFailedMsg = stringResource(R.string.topic_remove_flag_failure)
@@ -409,6 +409,12 @@ fun TopicScreen(
                         // the layout settles (bails on user scroll, bounded by a frame budget).
                         lazyListState.reanchorWhileMediaSettles(target)
                     }
+                }
+                TopicEffect.ScrollToTopOfResults -> {
+                    // #879 — a filtered result page replaced the list in place : reposition at the
+                    // top (item 0 = header slot) so its first results are on screen.
+                    viewModel.state.first { it.mode is TopicUiState.Mode.Loaded }
+                    lazyListState.scrollToItem(0)
                 }
                 TopicEffect.ScrollToEndOfPage -> {
                     // Issue #200 — post-reply landing : HFR anchored `#bas`, the parser couldn't
@@ -1053,6 +1059,7 @@ internal fun TopicContent(
                                 onSendPrivateMessage = onSendPrivateMessage,
                                 onDeleteRequest = onDeleteRequest,
                                 onDoubleTapRefresh = { onIntent(TopicIntent.Refresh) },
+                                onSearchNextResults = { onIntent(TopicIntent.SearchNextResultsPage) },
                                 listState = listState,
                                 multiQuoteSelection = multiQuoteNumreponses,
                                 onToggleMultiQuote = onToggleMultiQuote,
@@ -1441,6 +1448,8 @@ private fun TopicLoadedContent(
     onDeleteRequest: (numreponse: Int) -> Unit = {},
     /** #382 — double-tap anywhere on the list refreshes the current page (RF1 parity). */
     onDoubleTapRefresh: () -> Unit = {},
+    /** #879 — filtered search : « résultats suivants » footer tap. */
+    onSearchNextResults: () -> Unit = {},
     listState: LazyListState,
     // #291 — selection state + toggle for the post menu's multi-quote entry.
     multiQuoteSelection: List<Int> = emptyList(),
@@ -1743,7 +1752,29 @@ private fun TopicLoadedContent(
         // across an insertion — a reader parked on the marker would keep it in view while a
         // freshly fetched post lands above the viewport, unseen. Positional identity is
         // correct for a stateless sentinel.
-        if (topic.page == topic.totalPages) {
+        if (state.search.showingFilteredResults) {
+            // #879 — the page on screen is a FILTERED result list : its pager belongs to the
+            // search. The canonical boundary cards are suppressed (their onOpenPage would leave
+            // the search silently) ; instead the footer offers the next RESULT page, or states
+            // the end of the results.
+            // Gate finding 3 — the footer tells Loading, retry and true end apart : hidden while a
+            // fetch is in flight ; after a FAILED next-page fetch the pager is untouched, so the
+            // « more » card stays and doubles as the retry affordance ; the end marker is only
+            // truthful once Done with no page left.
+            if (state.search.status != TopicSearchStatus.Loading) {
+                item {
+                    if (state.search.hasMoreFilteredResults) {
+                        SearchMoreResultsCard(
+                            resultPage = state.search.resultPage,
+                            resultTotalPages = state.search.resultTotalPages,
+                            onNext = onSearchNextResults,
+                        )
+                    } else if (state.search.status == TopicSearchStatus.Done) {
+                        EndOfSearchResultsCard()
+                    }
+                }
+            }
+        } else if (topic.page == topic.totalPages) {
             item {
                 EndOfTopicCard()
             }
@@ -1958,6 +1989,65 @@ private fun PageBoundaryCard(donePage: Int, onNextPage: () -> Unit) {
             }
             RedfaceVectorIcon(resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_chevron_right)
         }
+    }
+}
+
+/**
+ * #879 — footer of a FILTERED search-result page when more result pages exist. Same actionable
+ * card language as [PageBoundaryCard] (filled primaryContainer = « there is more ») but the tap
+ * re-submits the SEARCH with `p = resultPage + 1` — never the canonical pager.
+ */
+@Composable
+private fun SearchMoreResultsCard(resultPage: Int, resultTotalPages: Int, onNext: () -> Unit) {
+    Card(
+        onClick = onNext,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(
+                        R.string.topic_search_results_page_done,
+                        resultPage,
+                        resultTotalPages,
+                    ),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    text = stringResource(R.string.topic_search_results_next),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            RedfaceVectorIcon(resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_chevron_right)
+        }
+    }
+}
+
+/**
+ * #879 — quiet outline marker closing a filtered result list (mirrors [EndOfTopicCard]'s calm
+ * language : end of RESULTS, not of the topic).
+ */
+@Composable
+private fun EndOfSearchResultsCard() {
+    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = stringResource(R.string.topic_search_results_list_end),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+        )
     }
 }
 

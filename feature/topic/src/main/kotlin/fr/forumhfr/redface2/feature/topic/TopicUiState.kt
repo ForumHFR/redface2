@@ -191,7 +191,40 @@ data class TopicSearchUiState(
     val status: TopicSearchStatus = TopicSearchStatus.Idle,
     val canGoPreviousResult: Boolean = false,
     val canGoNextResult: Boolean = false,
+    /**
+     * #879 — `true` while the page ON SCREEN is a FILTERED transsearch result list. Set by the
+     * filtered render, cleared whenever a normal-load path takes the page back
+     * (`takeOverFromSearch`). Gates the search-results footer (« résultats suivants ») and
+     * SUPPRESSES the canonical PageBoundary/EndOfTopic cards, whose `onOpenPage` would silently
+     * leave the search.
+     */
+    val showingFilteredResults: Boolean = false,
+    /**
+     * #879 — pager of the filtered RESULT list (HFR paginates transsearch like a topic). This is
+     * the search's OWN pager — the canonical `availablePages` is never touched by it. `resultPage`
+     * / `resultTotalPages` come from the transsearch reply ; « résultats suivants » re-submits
+     * with `p = resultPage + 1`.
+     */
+    val resultPage: Int = 1,
+    val resultTotalPages: Int = 1,
+    /**
+     * #879 (gate finding 1) — the criteria the displayed result list was actually SUBMITTED with.
+     * The pager belongs to that submission, not to the live editable fields : « résultats
+     * suivants » re-submits THESE, so editing the bar (or flipping « Filtrer ») after page 1 can
+     * never fetch « page 2 of a different search ».
+     */
+    val resultWord: String = "",
+    val resultSpseudo: String = "",
 ) {
+    /**
+     * #879 — more filtered result pages are reachable. Deliberately PAGER-based only (gate
+     * finding 3) : during Loading the footer is simply hidden by the screen, and after a failed
+     * next-page fetch the pager is untouched — the card stays and doubles as the retry
+     * affordance. `EndOfSearchResultsCard` is only truthful on `Done && !hasMore`.
+     */
+    val hasMoreFilteredResults: Boolean
+        get() = showingFilteredResults && resultPage < resultTotalPages
+
     /** HFR needs at least a term or an author ; the submit button is disabled otherwise. */
     val canSubmit: Boolean get() = word.isNotBlank() || spseudo.isNotBlank()
 }
@@ -215,6 +248,9 @@ sealed interface TopicIntent {
      * scroll effect, so the user keeps their reading position.
      */
     data object Refresh : TopicIntent
+
+    /** #879 — filtered search : fetch the next page of the result list (footer card). */
+    data object SearchNextResultsPage : TopicIntent
 
     /**
      * #292 — confirmed deletion of one of the user's own (normal) posts. The screen shows a
@@ -299,6 +335,13 @@ sealed interface TopicEffect {
      * the current `Topic.posts` list.
      */
     data class ScrollToPost(val numreponse: Int) : TopicEffect
+
+    /**
+     * #879 (gate finding 2) — a NEW page of filtered search results replaced the list content in
+     * place : without an explicit reposition the LazyListState keeps page N's end offset and the
+     * first results of page N+1 open off-screen. Sent on every filtered render (fresh + next).
+     */
+    data object ScrollToTopOfResults : TopicEffect
 
     /**
      * Issue #200 — emitted after a plain reply submit when HFR's success URL anchors

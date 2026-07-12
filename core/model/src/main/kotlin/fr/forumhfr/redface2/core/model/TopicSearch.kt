@@ -85,6 +85,13 @@ data class TopicSearchRequest(
     val onlyMatches: Boolean,
     val currentNum: String? = null,
     val isStep: Boolean = false,
+    /**
+     * #879 — page of the transsearch RESULTS to fetch (HFR's `p` form field, historically frozen
+     * to 1 : only the first page of a filtered result list was ever reachable, so late matches
+     * were silently dropped). The result pager is OWN to the search — never the canonical topic
+     * pager. Fresh submits send 1 ; « résultats suivants » re-submits with the next page.
+     */
+    val page: Int = 1,
 ) {
     /** HFR needs at least a term or an author ; an all-blank search is meaningless. */
     val isMeaningful: Boolean get() = word.isNotBlank() || spseudo.isNotBlank()

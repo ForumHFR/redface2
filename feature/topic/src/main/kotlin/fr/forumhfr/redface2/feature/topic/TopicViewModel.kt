@@ -215,6 +215,9 @@ class TopicViewModel @AssistedInject constructor(
             .launchIn(viewModelScope)
     }
 
+    @Suppress("CyclomaticComplexMethod") // MVI dispatcher : one branch per intent, no logic here —
+    // splitting the when by domain would only scatter the single entry point (same rationale as the
+    // class-level LargeClass suppress, #809/#879).
     fun send(intent: TopicIntent) {
         when (intent) {
             // Retry goes through the cache-aside path even after a post-submit force
@@ -234,6 +237,7 @@ class TopicViewModel @AssistedInject constructor(
             is TopicIntent.SearchOnlyMatchesChanged ->
                 _state.update { it.copy(search = it.search.copy(onlyMatches = intent.onlyMatches)) }
             TopicIntent.SubmitSearch -> submitSearch()
+            TopicIntent.SearchNextResultsPage -> searchNextResultsPage()
             TopicIntent.NextResult -> nextResult()
             TopicIntent.PrevResult -> prevResult()
         }
@@ -901,6 +905,13 @@ class TopicViewModel @AssistedInject constructor(
                     status = if (s.status == TopicSearchStatus.Loading) TopicSearchStatus.Idle else s.status,
                     canGoPreviousResult = false,
                     canGoNextResult = false,
+                    // #879 — a normal load owns the page again : the filtered-results footer and
+                    // its pager are stale, reset them (transverse risk : state paginé mal remis).
+                    showingFilteredResults = false,
+                    resultPage = 1,
+                    resultTotalPages = 1,
+                    resultWord = "",
+                    resultSpseudo = "",
                 ),
             )
         }
@@ -957,6 +968,30 @@ class TopicViewModel @AssistedInject constructor(
         if (!current.search.canSubmit || !request.isMeaningful) return
         resetSearchCursors()
         launchSearch(request, isFresh = true)
+    }
+
+    /**
+     * #879 — fetch the NEXT page of a FILTERED result list (« résultats suivants » footer). A plain
+     * re-submit of the same criteria with `p = resultPage + 1` ; latest-wins via the same
+     * generation token as every search. The form is re-read from the page on screen (a transsearch
+     * reply carries its own form).
+     */
+    private fun searchNextResultsPage() {
+        val current = _state.value
+        val form = (current.mode as? TopicUiState.Mode.Loaded)?.topic?.searchForm
+        // One combined gate : more pages announced + a usable form on the rendered result page.
+        if (!current.search.hasMoreFilteredResults || form == null || !form.canSearch) return
+        val request = TopicSearchRequest(
+            form = form,
+            // Gate finding 1 — the pager belongs to the SUBMITTED search : page N+1 is fetched
+            // with the frozen criteria, whatever the (editable) bar currently shows.
+            word = current.search.resultWord,
+            spseudo = current.search.resultSpseudo,
+            onlyMatches = true,
+            page = current.search.resultPage + 1,
+        )
+        if (!request.isMeaningful) return
+        launchSearch(request, isFresh = false)
     }
 
     /**
@@ -1040,6 +1075,9 @@ class TopicViewModel @AssistedInject constructor(
                     topic,
                     isFresh = isFresh,
                     rewindToIndex = rewindToIndex,
+                    requestedPage = request.page,
+                    submittedWord = request.word,
+                    submittedSpseudo = request.spseudo,
                     onlyMatches = request.onlyMatches,
                 )
             } catch (cancellation: CancellationException) {
@@ -1074,14 +1112,36 @@ class TopicViewModel @AssistedInject constructor(
         topic: Topic,
         isFresh: Boolean,
         rewindToIndex: Int?,
+        // #879 — the result page this reply was asked for (anti-loop clamp in filtered mode).
+        requestedPage: Int,
+        // #879 (gate finding 1) — the criteria of THIS submission, frozen into the state with the
+        // filtered pager so the footer can never mix a new bar content with an old pager.
+        submittedWord: String,
+        submittedSpseudo: String,
         // Snapshot of the MODE the request was launched with — NOT the live toggle, which the user
         // may have flipped mid-flight (Codex review : that would apply a non-filtered reply as
         // filtered or vice-versa).
         onlyMatches: Boolean,
     ) {
         if (onlyMatches) {
-            // Matches-only page: it is the whole result set, no scroll / cursor navigation.
-            renderSearchPage(topic, TopicSearchStatus.Done, canPrev = false, canNext = false)
+            // #879 — the filtered page is ONE page of the result list ; its pager (topic.page /
+            // topic.totalPages) is the SEARCH's, never the canonical one. Anti-loop guard (3C) :
+            // a reply that did not land on the requested page (HFR re-served an earlier one)
+            // clamps the total to what was actually reached — « résultats suivants » disappears
+            // instead of looping on the same page.
+            val reachedTotal = if (requestedPage > topic.page) topic.page else topic.totalPages
+            renderSearchPage(
+                topic,
+                TopicSearchStatus.Done,
+                canPrev = false,
+                canNext = false,
+                filteredPager = topic.page to reachedTotal,
+                // Gate finding 1 — freeze the SUBMITTED criteria with the pager they belong to.
+                submittedCriteria = submittedWord to submittedSpseudo,
+            )
+            // Gate finding 2 — the list content was replaced in place : reposition at the top so
+            // the first results of this page are visible (fresh AND next-page renders alike).
+            _effects.send(TopicEffect.ScrollToTopOfResults)
             return
         }
         // `landed` = the returned cursor IF it is a real post on the page. A null cursor, or one
@@ -1151,7 +1211,16 @@ class TopicViewModel @AssistedInject constructor(
      * and the prev/next affordances, keeping the previously-known [TopicUiState.availablePages] (the
      * transsearch pager is not the canonical topic pager) and never scheduling a prefetch off it.
      */
-    private fun renderSearchPage(topic: Topic, status: TopicSearchStatus, canPrev: Boolean, canNext: Boolean) {
+    private fun renderSearchPage(
+        topic: Topic,
+        status: TopicSearchStatus,
+        canPrev: Boolean,
+        canNext: Boolean,
+        // #879 — non-null ONLY for a filtered render : (page, total) of the RESULT list.
+        filteredPager: Pair<Int, Int>? = null,
+        // #879 (gate finding 1) — the criteria the filtered list was submitted with.
+        submittedCriteria: Pair<String, String>? = null,
+    ) {
         _state.update {
             it.copy(
                 mode = loadedMode(topic),
@@ -1159,6 +1228,11 @@ class TopicViewModel @AssistedInject constructor(
                     status = status,
                     canGoPreviousResult = canPrev,
                     canGoNextResult = canNext,
+                    showingFilteredResults = filteredPager != null,
+                    resultPage = filteredPager?.first ?: 1,
+                    resultTotalPages = filteredPager?.second ?: 1,
+                    resultWord = submittedCriteria?.first ?: "",
+                    resultSpseudo = submittedCriteria?.second ?: "",
                 ),
             )
         }
