@@ -16,6 +16,15 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.28.1` — `internal` (dev) — 2026-07-13
+
+**Stale-while-switching** (#910, PR #911 — retour immédiat de XaTriX sur la 0.28.0 : « ça saute/flash toujours sur une page non connue »).
+
+### Vue topic
+- **Plus de squelette flashé sur un changement de page rapide** : la page quittée reste affichée (hairline discrète) pendant que la nouvelle charge ; le squelette n'apparaît que si le chargement dépasse ~250 ms. Une page en cache Room (session antérieure) bascule sans aucun flash.
+- La pilule ne dit plus jamais « Chargement… » par-dessus un contenu affiché ; la barre (loupe, repli auto-hide, titre) ne change plus d'état pendant le chargement d'un switch.
+- Gardes : un switch échoué affiche l'erreur (jamais un état figé) ; pull-to-refresh inactif pendant la transition.
+
 ## `0.28.0` — `internal` (dev) — 2026-07-12
 
 **Zéro flash au changement de page** (#895 étapes 4-5, PRs #905/#907/#908 — le fond du chantier, après les quick wins de 0.27.3).

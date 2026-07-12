@@ -1,4 +1,3 @@
-Redface 2 v0.28.0 — dev.
+Redface 2 v0.28.1 — dev.
 
-- Page changes no longer flash: the topic is one retained screen, and already-read pages reopen instantly at your exact position.
-- Back after "go to quoted post" returns exactly where you left, even chained.
+- No more skeleton flash on fast page changes: the previous page stays on screen while the new one loads (the skeleton only appears past 250 ms).

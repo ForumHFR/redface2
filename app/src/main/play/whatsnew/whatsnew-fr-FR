@@ -1,4 +1,3 @@
-Redface 2 v0.28.0 — dev.
+Redface 2 v0.28.1 — dev.
 
-- Plus aucun flash au changement de page : le topic est un seul écran, les pages déjà lues se rouvrent instantanément à la position exacte.
-- Le retour après « aller au message cité » revient exactement au point de départ, même en chaîne.
+- Plus de squelette flashé sur un changement de page rapide : l'ancienne page reste affichée pendant que la nouvelle charge (le squelette n'apparaît qu'au-delà de 250 ms).
