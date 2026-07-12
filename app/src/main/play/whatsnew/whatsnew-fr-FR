@@ -1,5 +1,4 @@
-Redface 2 v0.27.3 — dev.
+Redface 2 v0.27.4 — dev.
 
-- Changement de page : la barre affiche « page X / Y » du contenu à l'écran au lieu de « Chargement… » quand la page vient du cache.
-- Fine barre de progression sous la top bar pendant l'actualisation, sans décalage de mise en page.
-- Préchargement des pages voisines sans requête réseau inutile quand la page est déjà en cache.
+- Sélecteur de smileys : les petits smileys perso s'affichent à leur taille réelle, plus jamais agrandis et flous.
+- La recherche du panneau smileys rouvre avec le curseur à la fin du mot conservé.

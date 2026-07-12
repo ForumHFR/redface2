@@ -1,5 +1,4 @@
-Redface 2 v0.27.3 — dev.
+Redface 2 v0.27.4 — dev.
 
-- Page changes: the top bar shows "page X / Y" for the on-screen content instead of "Loading…" when the page comes from cache.
-- Thin progress hairline under the top bar while a cached page refreshes, with no layout shift.
-- Neighbor-page prefetch no longer hits the network when the page is already cached.
+- Smiley picker: small custom smileys render at their native size, never upscaled and blurry.
+- The picker search reopens with the caret at the end of the preserved word.
