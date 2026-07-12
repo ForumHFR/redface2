@@ -56,14 +56,17 @@ class TopicSearchRepositoryImpl @Inject constructor(
             spseudo = request.spseudo,
             onlyMatches = request.onlyMatches,
             hashCheck = request.form.hashCheck,
-            // #546 — on ne renvoie JAMAIS firstnum (le client omet firstnum+dep quand firstnum=null) :
-            // avec firstnum HFR ancre la recherche en avant de la page courante et rate les matches
-            // antérieurs ; sans firstnum elle couvre tout le topic — vérifié live #546/bug tinc 2788609.
-            // Fresh comme step l'omettent : la recherche fraîche trouve le 1er match du topic entier,
-            // puis next/prev avance via currentnum.
-            firstnum = null,
+            // #546/#879 — la sémantique du point de départ est PAR MODE (arbitrage cadrage) :
+            // - FILTRÉ (liste des matches, défaut) : tout le topic → firstnum OMIS. Avec firstnum
+            //   HFR ancre EN AVANT et rate les matches antérieurs (vérifié live #546, bug tinc
+            //   2788609 « aucun résultat alors que le web en a »).
+            // - NON FILTRÉ (occurrence suivante) : parité web #879 — le fresh part de la page
+            //   courante (firstnum = 1er post de la page affichée) ; le STEP l'omet TOUJOURS
+            //   (le renvoyer ré-ancre HFR sur le 1er match et le curseur n'avance plus).
+            firstnum = if (!request.onlyMatches && !request.isStep) request.form.firstnum else null,
             owntopic = request.form.owntopic,
             currentnum = request.currentNum,
+            p = request.page,
         )
         if (html.hasNoSearchResults()) {
             // Chantier B (#546) — HFR rendered « aucune réponse n'a été trouvée » (a frequent term

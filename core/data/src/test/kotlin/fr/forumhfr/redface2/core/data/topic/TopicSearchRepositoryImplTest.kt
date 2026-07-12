@@ -31,7 +31,7 @@ import org.junit.Test
 class TopicSearchRepositoryImplTest {
 
     @Test
-    fun `forwards every form field and the filter flag, but never firstnum (whole-topic search)`() = runTest {
+    fun `filtered search forwards every form field and covers the whole topic (no firstnum)`() = runTest {
         val hfrClient = mockk<HfrClient>()
         coEvery {
             hfrClient.searchInTopic(
@@ -44,6 +44,7 @@ class TopicSearchRepositoryImplTest {
                 firstnum = any(),
                 owntopic = any(),
                 currentnum = any(),
+                p = any(),
             )
         } returns fixture("topic_page_single.html")
 
@@ -66,23 +67,24 @@ class TopicSearchRepositoryImplTest {
                 spseudo = "XaTriX",
                 onlyMatches = true,
                 hashCheck = "tok",
-                // #546 (bug tinc 2788609) — a FRESH search must NOT send firstnum: with firstnum HFR
-                // anchors the search ahead of the current page and misses earlier matches. firstnum=null
-                // makes it cover the whole topic from the start, even though form.firstnum is non-null.
+                // #546/#879 (per-mode semantics) — a FILTERED search lists ALL the matches of the
+                // topic : firstnum stays null (with it HFR anchors ahead and misses earlier
+                // matches — bug tinc 2788609), even though form.firstnum is non-null.
                 firstnum = null,
                 owntopic = 0,
                 currentnum = null,
+                p = 1,
             )
         }
     }
 
     @Test
-    fun `carries the navigation cursor and owntopic verbatim, still omitting firstnum`() = runTest {
+    fun `non-filtered fresh anchors on the current page and carries owntopic verbatim (#879)`() = runTest {
         val hfrClient = mockk<HfrClient>()
         coEvery {
             hfrClient.searchInTopic(
                 cat = any(), topicId = any(), word = any(), spseudo = any(), onlyMatches = any(),
-                hashCheck = any(), firstnum = any(), owntopic = any(), currentnum = any(),
+                hashCheck = any(), firstnum = any(), owntopic = any(), currentnum = any(), p = any(),
             )
         } returns fixture("topic_page_single.html")
 
@@ -97,24 +99,26 @@ class TopicSearchRepositoryImplTest {
         )
 
         coVerify(exactly = 1) {
-            // owntopic + currentnum forwarded verbatim ; firstnum dropped (#546 whole-topic search).
+            // owntopic + currentnum forwarded verbatim ; #879 web parity — a NON-FILTERED fresh
+            // (isStep=false) anchors on the current page : firstnum = form.firstnum.
             hfrClient.searchInTopic(
                 cat = 32, topicId = 7, word = "", spseudo = "someone", onlyMatches = false,
-                hashCheck = "tok", firstnum = null, owntopic = 1, currentnum = "16300",
+                hashCheck = "tok", firstnum = 16244, owntopic = 1, currentnum = "16300",
+                p = 1,
             )
         }
     }
 
     @Test
     fun `omits firstnum on a navigation step and forwards currentnum so HFR advances the cursor`() = runTest {
-        // #546 — a STEP request (isStep=true) drops firstnum so HFR does not re-anchor on the first match,
-        // and advances via currentnum. Since the bug-tinc fix, a FRESH search ALSO drops firstnum (whole
-        // topic) — both modes pass firstnum=null ; only currentnum tells fresh (null) from step here.
+        // #546/#879 — a STEP request (isStep=true) ALWAYS drops firstnum, whatever the mode :
+        // re-sending it re-anchors HFR on the first match and the cursor never advances
+        // (live-verified stepping bug). Only the non-filtered FRESH sends firstnum (web parity).
         val hfrClient = mockk<HfrClient>()
         coEvery {
             hfrClient.searchInTopic(
                 cat = any(), topicId = any(), word = any(), spseudo = any(), onlyMatches = any(),
-                hashCheck = any(), firstnum = any(), owntopic = any(), currentnum = any(),
+                hashCheck = any(), firstnum = any(), owntopic = any(), currentnum = any(), p = any(),
             )
         } returns fixture("topic_page_single.html")
 
@@ -133,6 +137,37 @@ class TopicSearchRepositoryImplTest {
             hfrClient.searchInTopic(
                 cat = 23, topicId = 35395, word = "betatest", spseudo = "", onlyMatches = false,
                 hashCheck = "tok", firstnum = null, owntopic = 0, currentnum = "2786594",
+                p = 1,
+            )
+        }
+    }
+
+    @Test
+    fun `forwards the requested result page as p (#879 filtered pagination)`() = runTest {
+        val hfrClient = mockk<HfrClient>()
+        coEvery {
+            hfrClient.searchInTopic(
+                cat = any(), topicId = any(), word = any(), spseudo = any(), onlyMatches = any(),
+                hashCheck = any(), firstnum = any(), owntopic = any(), currentnum = any(), p = any(),
+            )
+        } returns fixture("topic_page_single.html")
+
+        buildRepository(hfrClient).searchInTopic(
+            TopicSearchRequest(
+                form = TopicSearchForm(hashCheck = "tok", topicId = 35395, cat = 23, firstnum = 2783602),
+                word = "betatest",
+                spseudo = "",
+                onlyMatches = true,
+                page = 3,
+            ),
+        )
+
+        coVerify(exactly = 1) {
+            hfrClient.searchInTopic(
+                cat = 23, topicId = 35395, word = "betatest", spseudo = "", onlyMatches = true,
+                hashCheck = "tok", firstnum = null, owntopic = 0, currentnum = null,
+                // #879 — the historically frozen p=1 made result pages beyond the first unreachable.
+                p = 3,
             )
         }
     }
@@ -151,7 +186,7 @@ class TopicSearchRepositoryImplTest {
         coEvery {
             hfrClient.searchInTopic(
                 cat = any(), topicId = any(), word = any(), spseudo = any(), onlyMatches = any(),
-                hashCheck = any(), firstnum = any(), owntopic = any(), currentnum = any(),
+                hashCheck = any(), firstnum = any(), owntopic = any(), currentnum = any(), p = any(),
             )
         } returns noResultPage
 
@@ -178,7 +213,7 @@ class TopicSearchRepositoryImplTest {
         coEvery {
             hfrClient.searchInTopic(
                 cat = any(), topicId = any(), word = any(), spseudo = any(), onlyMatches = any(),
-                hashCheck = any(), firstnum = any(), owntopic = any(), currentnum = any(),
+                hashCheck = any(), firstnum = any(), owntopic = any(), currentnum = any(), p = any(),
             )
         } returns fixture("topic_page_single.html")
         val diagnostics = DiagnosticsLog()
@@ -207,7 +242,7 @@ class TopicSearchRepositoryImplTest {
         coEvery {
             hfrClient.searchInTopic(
                 cat = any(), topicId = any(), word = any(), spseudo = any(), onlyMatches = any(),
-                hashCheck = any(), firstnum = any(), owntopic = any(), currentnum = any(),
+                hashCheck = any(), firstnum = any(), owntopic = any(), currentnum = any(), p = any(),
             )
         } throws SessionExpiredException("<redacted>")
 

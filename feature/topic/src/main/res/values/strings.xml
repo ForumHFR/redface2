@@ -46,6 +46,10 @@
     <string name="topic_search_only_matches">Filtrer (résultats uniquement)</string>
     <string name="topic_search_submit">Rechercher</string>
     <string name="topic_search_failed">La recherche dans le sujet a échoué.</string>
+    <!-- #879 — pagination de la liste de résultats FILTRÉS (pager propre à la recherche). -->
+    <string name="topic_search_results_page_done">Résultats — page %1$d / %2$d</string>
+    <string name="topic_search_results_next">Afficher les résultats suivants</string>
+    <string name="topic_search_results_list_end">Fin des résultats de la recherche</string>
     <!-- Chantier B (#546) — navigation entre résultats + cas « aucun résultat ». -->
     <string name="topic_search_no_results">Aucun résultat</string>
     <string name="topic_search_prev_result">Résultat précédent</string>

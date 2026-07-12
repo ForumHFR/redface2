@@ -1172,6 +1172,184 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `#879 filtered results expose their own pager and fetch the next page on demand`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
+        val page1 = fakeTopic(page = 1, totalPages = 3, title = "results-p1", searchForm = form)
+        val page2 = fakeTopic(page = 2, totalPages = 3, title = "results-p2", searchForm = form)
+        val searchRepo = FakeTopicSearchRepository()
+        searchRepo.responder = { req -> if (req.page >= 2) page2 else page1 }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(flow { emit(fakeTopic(1, 5, searchForm = form)) }),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("iwds"))
+        viewModel.send(TopicIntent.SubmitSearch)
+
+        // The filtered reply carries the RESULT pager — own to the search, canonical pager intact.
+        assertEquals("results-p1", assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic.title)
+        assertEquals(true, viewModel.state.value.search.showingFilteredResults)
+        assertEquals(1, viewModel.state.value.search.resultPage)
+        assertEquals(3, viewModel.state.value.search.resultTotalPages)
+        assertEquals(true, viewModel.state.value.search.hasMoreFilteredResults)
+        assertEquals(listOf(1, 2, 3, 4, 5), viewModel.state.value.availablePages)
+
+        viewModel.send(TopicIntent.SearchNextResultsPage)
+
+        assertEquals(2, searchRepo.requests.size)
+        assertEquals("the footer must re-submit with p = resultPage + 1", 2, searchRepo.requests.last().page)
+        assertEquals(true, searchRepo.requests.last().onlyMatches)
+        assertEquals("results-p2", assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic.title)
+        assertEquals(2, viewModel.state.value.search.resultPage)
+        assertEquals(true, viewModel.state.value.search.hasMoreFilteredResults)
+    }
+
+    @Test
+    fun `#879 the footer re-submits the FROZEN criteria, not the edited bar (gate finding 1)`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
+        val results = fakeTopic(page = 1, totalPages = 3, title = "results", searchForm = form)
+        val searchRepo = FakeTopicSearchRepository(result = results)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(flow { emit(fakeTopic(1, 5, searchForm = form)) }),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("iwds"))
+        viewModel.send(TopicIntent.SubmitSearch)
+
+        // The user edits the bar WITHOUT re-submitting, then taps the footer.
+        viewModel.send(TopicIntent.SearchWordChanged("autre chose"))
+        viewModel.send(TopicIntent.SearchNextResultsPage)
+
+        assertEquals(2, searchRepo.requests.size)
+        assertEquals(
+            "page 2 must belong to the SUBMITTED search, never the edited bar",
+            "iwds",
+            searchRepo.requests.last().word,
+        )
+        assertEquals(2, searchRepo.requests.last().page)
+    }
+
+    @Test
+    fun `#879 every filtered render repositions at the top of the results (gate finding 2)`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
+        val results = fakeTopic(page = 1, totalPages = 3, title = "results", searchForm = form)
+        val searchRepo = FakeTopicSearchRepository(result = results)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(flow { emit(fakeTopic(1, 5, searchForm = form)) }),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("iwds"))
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.SubmitSearch)
+            assertEquals(TopicEffect.ScrollToTopOfResults, awaitItem())
+            viewModel.send(TopicIntent.SearchNextResultsPage)
+            assertEquals(TopicEffect.ScrollToTopOfResults, awaitItem())
+        }
+    }
+
+    @Test
+    fun `#879 a failed next-page fetch keeps the pager so the footer stays as retry (gate finding 3)`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
+        val page1 = fakeTopic(page = 1, totalPages = 3, title = "results-p1", searchForm = form)
+        val searchRepo = FakeTopicSearchRepository()
+        searchRepo.responder = { req ->
+            if (req.page >= 2) throw IOException("boom") else page1
+        }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(flow { emit(fakeTopic(1, 5, searchForm = form)) }),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("iwds"))
+        viewModel.send(TopicIntent.SubmitSearch)
+        assertEquals(true, viewModel.state.value.search.hasMoreFilteredResults)
+
+        viewModel.send(TopicIntent.SearchNextResultsPage)
+
+        // The fetch failed : the pager is untouched — the « more » card doubles as retry.
+        assertEquals(1, viewModel.state.value.search.resultPage)
+        assertEquals(true, viewModel.state.value.search.hasMoreFilteredResults)
+        assertEquals(true, viewModel.state.value.search.showingFilteredResults)
+    }
+
+    @Test
+    fun `#879 anti-loop — a filtered reply that did not advance clamps the results pager`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
+        // HFR mis-reports : the reply to the p=2 request re-serves page 1 (total still 3).
+        val page1 = fakeTopic(page = 1, totalPages = 3, title = "results-p1", searchForm = form)
+        val searchRepo = FakeTopicSearchRepository(result = page1)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(flow { emit(fakeTopic(1, 5, searchForm = form)) }),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("iwds"))
+        viewModel.send(TopicIntent.SubmitSearch)
+        assertEquals(true, viewModel.state.value.search.hasMoreFilteredResults)
+
+        viewModel.send(TopicIntent.SearchNextResultsPage)
+
+        // The reply landed on page 1 < requested 2 → the total is clamped to what was reached :
+        // the footer disappears instead of looping on the same page forever.
+        assertEquals(1, viewModel.state.value.search.resultPage)
+        assertEquals(1, viewModel.state.value.search.resultTotalPages)
+        assertEquals(false, viewModel.state.value.search.hasMoreFilteredResults)
+    }
+
+    @Test
+    fun `#879 a normal load resets the filtered results pager`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
+        val results = fakeTopic(page = 1, totalPages = 3, title = "results", searchForm = form)
+        val searchRepo = FakeTopicSearchRepository(result = results)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(
+                    flow { emit(fakeTopic(1, 5, searchForm = form)) },
+                    flow { emit(fakeTopic(1, 5, title = "normal-again", searchForm = form)) },
+                ),
+                refreshTopicsToReturn = listOf(fakeTopic(1, 5, title = "refreshed", searchForm = form)),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("iwds"))
+        viewModel.send(TopicIntent.SubmitSearch)
+        assertEquals(true, viewModel.state.value.search.showingFilteredResults)
+
+        viewModel.send(TopicIntent.Refresh)
+
+        // A normal-load owner reset the search pager : footer gone, no stale « résultats suivants ».
+        assertEquals(false, viewModel.state.value.search.showingFilteredResults)
+        assertEquals(1, viewModel.state.value.search.resultPage)
+        assertEquals(false, viewModel.state.value.search.hasMoreFilteredResults)
+    }
+
+    @Test
     fun `SubmitSearch does not POST when neither term nor author is set`() = runTest {
         val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 1)
         val searchRepo = FakeTopicSearchRepository(result = fakeTopic(1, 1))
