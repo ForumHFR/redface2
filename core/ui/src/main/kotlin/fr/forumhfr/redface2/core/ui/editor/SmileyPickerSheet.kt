@@ -98,14 +98,12 @@ fun SmileyPickerSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                // #900 — header density pass (tinc, DEV #2790993) : the « Smileys » title line is
+                // gone (the Standard/Wiki tabs already name the surface), spacing tightened
+                // 12 → 8 dp. Every touch target keeps its 48 dp (tabs, cells).
                 .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(
-                text = stringResource(R.string.editor_smiley_title),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
             PrimaryTabRow(selectedTabIndex = tabIndex) {
                 Tab(
                     selected = tabIndex == 0,
@@ -171,7 +169,9 @@ private fun WikiTabContent(
                 if (textChanged) onQueryChange(newValue.text)
             },
             singleLine = true,
-            label = { Text(stringResource(R.string.editor_smiley_search_label)) },
+            // #900 — placeholder rather than a floating label : the reserved label headroom was
+            // pure vertical loss in a sheet whose only field is this search box.
+            placeholder = { Text(stringResource(R.string.editor_smiley_search_label)) },
             modifier = Modifier
                 .fillMaxWidth()
                 .focusRequester(searchFocus),
@@ -232,8 +232,10 @@ private fun SmileyGrid(items: List<EditorSmiley>, onSmileyClicked: (String) -> U
             .fillMaxWidth()
             // Cap the grid height inside the bottom sheet so it does not eat the whole
             // screen on small devices ; the sheet's own scrollable container takes over
-            // beyond this point.
-            .heightIn(max = 320.dp),
+            // beyond this point. #900 — the header slimmed by ~one row's worth (title gone,
+            // label → placeholder), re-invested here : the sheet's total height is unchanged
+            // but the grid shows more smileys at once.
+            .heightIn(max = 376.dp),
     ) {
         items(items = items, key = { it.token to it.imageUrl }) { smiley ->
             SmileyCell(smiley = smiley, onClick = { onSmileyClicked(smiley.token) })
