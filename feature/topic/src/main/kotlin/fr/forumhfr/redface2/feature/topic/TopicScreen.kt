@@ -1097,7 +1097,10 @@ internal fun TopicContent(
  */
 @Composable
 private fun topicBarPageIndicator(state: TopicUiState, loaded: TopicUiState.Mode.Loaded?): String = when {
-    loaded != null -> stringResource(
+    // #877 — a provisional page is the instant cache emission (possibly a stale total, or an
+    // anonymous prefetch row) : keep « Chargement… » until the settled emission lands, so the
+    // pill never flashes a wrong « page X / Y ». The repository guarantees termination.
+    loaded != null && !loaded.provisional -> stringResource(
         R.string.topic_page_indicator,
         loaded.topic.page,
         loaded.topic.totalPages,
@@ -1118,8 +1121,8 @@ private val TopBarExpandedTitleExtraHeight = 24.dp
 
 /**
  * #285/#284 + Chantier C (#546) — the topic top app bar (title + page counter + back) plus the
- * intra-topic search affordance : a search icon in `actions` (only when the loaded page exposes a
- * usable, authenticated transsearch form) that opens the [TopicSearchBar] directly beneath the bar.
+ * intra-topic search affordance : a search icon in `actions` (authenticated + page on screen —
+ * #877 : NOT gated on the transient form) that opens the [TopicSearchBar] directly beneath the bar.
  * Extracted from `TopicContent` to keep that builder under detekt's cyclomatic-complexity cap.
  * Internal (not private) so the Robolectric UI test can drive the #772 title expansion directly,
  * same pattern as [TopicPostCard].
@@ -1221,7 +1224,9 @@ internal fun TopicTopBar(
                 }
             },
             actions = {
-                if (state.canSearchInTopic && !state.search.isActive) {
+                // #877 — gated on canOpenSearch (auth + page à l'écran), PAS sur le form transient :
+                // les émissions cache n'en portent pas et faisaient disparaître la Loupe.
+                if (state.canOpenSearch && !state.search.isActive) {
                     IconButton(
                         onClick = { onIntent(TopicIntent.OpenSearch) },
                         modifier = Modifier.semantics { contentDescription = searchLabel },
