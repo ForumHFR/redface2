@@ -369,8 +369,32 @@ sealed interface TopicEffect {
      * (force-refreshed) page so the user can see their freshly-published reply at the
      * bottom. Distinct from [ScrollToPost] because we don't know the new numreponse
      * — the parser couldn't extract it from the `#bas` fragment.
+     *
+     * Gate #895 r3 — [page] scopes the landing : the screen re-validates it against the CURRENT
+     * `state.request.page` and DROPS a stale effect (a buffered landing consumed after a page
+     * switch must never scroll the new page — the ViewModel's atomicity cannot cover the channel
+     * and the UI consumer). [ScrollToPost] needs no scope : its numreponse lives on exactly one
+     * page, so a stale one simply resolves to « absent » on the new page.
      */
-    data object ScrollToEndOfPage : TopicEffect
+    data class ScrollToEndOfPage(val page: Int) : TopicEffect
+
+    /**
+     * #895 (étape 4) — land back on a previously visited page at the exact reading position the
+     * user left it (raw `LazyListState` primitives, cf. [TopicScrollAnchor]). Emitted by the
+     * in-ViewModel page engine when a page switch resolves its landing to a saved anchor
+     * (revisit / #782 jump return). Unwired until the navigation switch-over (PR 2) : the
+     * route-replace paths never emit it. [page] : same stale-drop contract as [ScrollToEndOfPage].
+     */
+    data class ScrollToAnchor(val anchor: TopicScrollAnchor, val page: Int) : TopicEffect
+
+    /**
+     * #895 (étape 4) — land at the top of a freshly-switched page (no scrollTo, no saved anchor,
+     * not a `page - 1` reading step). The explicit default landing of the in-ViewModel page
+     * engine — without it a page switch inside one entry would keep the previous page's scroll
+     * offset (the entry, and its `LazyListState`, now survive the switch). [page] : same
+     * stale-drop contract as [ScrollToEndOfPage].
+     */
+    data class ScrollToTop(val page: Int) : TopicEffect
 
     /**
      * Issue #200 — emitted when the post-submit force refresh (`refreshTopicPage`) fails.

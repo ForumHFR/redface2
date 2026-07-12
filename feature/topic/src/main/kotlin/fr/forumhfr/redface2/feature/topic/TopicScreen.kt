@@ -419,15 +419,51 @@ fun TopicScreen(
                     viewModel.state.first { it.mode is TopicUiState.Mode.Loaded }
                     lazyListState.scrollToItem(0)
                 }
-                TopicEffect.ScrollToEndOfPage -> {
+                is TopicEffect.ScrollToEndOfPage -> {
                     // Issue #200 — post-reply landing : HFR anchored `#bas`, the parser couldn't
                     // extract a numreponse, so we land on the last item of the freshly-refreshed
                     // page. The new post is by definition the last one HFR served on this page.
-                    val loadedMode = viewModel.state.first { it.mode is TopicUiState.Mode.Loaded }.mode
-                            as TopicUiState.Mode.Loaded
-                    if (loadedMode.topic.posts.isNotEmpty()) {
+                    // Gate #895 r3/r6 — the landing is page-scoped and the wait completes when the
+                    // page either LOADS or is ABANDONED (switch to another page) : a stale effect —
+                    // whether already stale on consumption or superseded mid-wait — can never wedge
+                    // this sequential collector. The scroll only fires if the page still matches
+                    // and actually loaded.
+                    val landed = viewModel.state.first {
+                        it.request.page != effect.page || it.mode is TopicUiState.Mode.Loaded
+                    }
+                    val loadedMode = landed.mode as? TopicUiState.Mode.Loaded
+                    if (
+                        landed.request.page == effect.page &&
+                        loadedMode != null &&
+                        loadedMode.topic.posts.isNotEmpty()
+                    ) {
                         // +1 for the header card (same offset rationale as ScrollToPost above).
                         lazyListState.scrollToItem(loadedMode.topic.posts.size)
+                    }
+                }
+                is TopicEffect.ScrollToAnchor -> {
+                    // #895 étape 4 — revisit / jump-return landing : restore the saved reading
+                    // position (raw LazyListState primitives ; clamps to bounds if the content
+                    // changed). Unwired until the navigation switch-over — only the in-VM page
+                    // engine emits it. Page-scoped (gate r3/r6) : wait for loaded-or-abandoned,
+                    // scroll only if the page still matches and loaded.
+                    val landed = viewModel.state.first {
+                        it.request.page != effect.page || it.mode is TopicUiState.Mode.Loaded
+                    }
+                    if (landed.request.page == effect.page && landed.mode is TopicUiState.Mode.Loaded) {
+                        lazyListState.scrollToItem(effect.anchor.index, effect.anchor.offset)
+                    }
+                }
+                is TopicEffect.ScrollToTop -> {
+                    // #895 étape 4 — default landing of a freshly-switched page : the entry (and
+                    // its LazyListState) now survive the switch, so the reset must be explicit.
+                    // Page-scoped (gate r3/r6) : wait for loaded-or-abandoned, scroll only if the
+                    // page still matches and loaded.
+                    val landed = viewModel.state.first {
+                        it.request.page != effect.page || it.mode is TopicUiState.Mode.Loaded
+                    }
+                    if (landed.request.page == effect.page && landed.mode is TopicUiState.Mode.Loaded) {
+                        lazyListState.scrollToItem(0)
                     }
                 }
                 TopicEffect.PostSubmitRefreshFailed -> {

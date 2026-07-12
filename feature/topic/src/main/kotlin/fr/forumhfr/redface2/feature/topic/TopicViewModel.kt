@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.topic
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.tracing.Trace
@@ -46,10 +47,15 @@ import kotlinx.coroutines.withTimeoutOrNull
  * [TopicEffect.ScrollToPost] when a deep link asks the screen to scroll to a
  * `numreponse` and that post is present in the loaded page.
  *
- * Pagination remains route-driven : tapping a page button goes through `onOpenPage`
- * which `RedfaceNavigation` translates into a back-stack `replace` (not a `push`),
- * so the back button climbs back to the caller (forum / flags), not through a
- * synthetic chain of pages.
+ * #895 (étape 4) — this ViewModel OWNS intra-topic pagination. `TopicRoute.page` is only the
+ * initial entry ; `state.request.page` is the canonical current page, restored from
+ * [SavedStateHandle] across process death. Page changes go through the internal switch engine
+ * ([switchToPage] / [goToPost] / [returnFromJump] / [applySubmitResult]) : departure anchor saved,
+ * owner generation bumped (latest-wins), in-flight work cancelled, LRU memory snapshot activated
+ * atomically when available (no Loading flash), landing resolved by priority (explicit post >
+ * post-submit bottom > saved anchor > `page - 1` bottom step (#412) > top) and dispatched on the
+ * first matching Loaded. Until the navigation switch-over lands (PR 2), `RedfaceNavigation` still
+ * replaces the `TopicRoute` in place — the engine is exercised by tests only.
  */
 @HiltViewModel(assistedFactory = TopicViewModel.Factory::class)
 // LongParameterList: the ViewModel aggregates its injected repositories, one per concern.
@@ -64,6 +70,11 @@ class TopicViewModel @AssistedInject constructor(
     // `state.request`) so every later read — loads, retry, refresh, page indicator, highlight —
     // sees the actual page. Mutated in exactly one place ([resolveScrollToPageThenLoad]).
     @Assisted private var request: TopicRequest,
+    // #895 (étape 4) — canonical current page + one-shot consumption markers, so a process death
+    // neither loses the page the user had switched to nor replays an already-consumed entry
+    // intention (scrollTo / submitSignal / forceRefresh / resolveScrollToPage). Plain Hilt
+    // dependency : @HiltViewModel supports SavedStateHandle alongside assisted params.
+    private val savedStateHandle: SavedStateHandle,
     private val topicRepository: TopicRepository,
     private val authRepository: AuthRepository,
     private val userPreferencesRepository: UserPreferencesRepository,
@@ -106,14 +117,80 @@ class TopicViewModel @AssistedInject constructor(
     private var searchFormJob: Job? = null
 
     /**
-     * Chantier C (#546) — monotonic token guarding against a stale `transsearch` write.
-     * Incremented whenever ANY flow that owns the page (a normal load, refresh, force-refresh,
-     * post-delete refetch or a new search) takes over. [submitSearch] snapshots it before the POST
-     * and only applies the returned page + final `search.status` while the token is still current —
-     * so a slow `transsearch` reply can never clobber a more recent normal page (latest-wins strict).
-     * Symmetric with cancelling [searchJob] at the head of every normal-load path.
+     * Chantier C (#546), generalized by #895 étape 4 — monotonic token guarding against ANY stale
+     * async write on the page. Incremented whenever a flow that owns the page (a normal load,
+     * refresh, force-refresh, post-delete refetch, a new search — and now a PAGE SWITCH) takes
+     * over. Every async producer ([submitSearch], the form fetch, the page-load collect, the
+     * submit refresh, the landing dispatch) snapshots it before suspending and only applies its
+     * result while the token is still current — latest-wins strict, per the #895 cadrage (F4 :
+     * one common generation for page changes, `loadJob.cancel()` alone is not enough).
      */
-    private var searchGeneration: Int = 0
+    private var ownerGeneration: Int = 0
+
+    // ─── #895 étape 4 — in-ViewModel pagination engine ───────────────────────────
+
+    /**
+     * F2 — LRU memory snapshots of TERMINAL page emissions (raw [Topic], the blacklist filter is
+     * recomputed at activation through [loadedMode]). Bounded to [MAX_PAGE_SNAPSHOTS] terminal
+     * pages ; access-ordered so revisits refresh recency. Provisional emissions are displayed but
+     * never recorded (they must not replace a terminal snapshot) ; `transsearch` result pages are
+     * never recorded either (they are a search VIEW of the topic, not a canonical page).
+     */
+    private val pageSnapshots = object : LinkedHashMap<Int, Topic>(
+        SNAPSHOTS_INITIAL_CAPACITY,
+        SNAPSHOTS_LOAD_FACTOR,
+        true,
+    ) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, Topic>): Boolean =
+            size > MAX_PAGE_SNAPSHOTS
+    }
+
+    /**
+     * F3 — reading anchors per visited page (raw LazyListState primitives, [TopicScrollAnchor]).
+     * The screen reports the current page's anchor through [reportPageAnchor] and hands the
+     * departure anchor to the switch intents ; a revisit whose landing resolves to a saved anchor
+     * emits [TopicEffect.ScrollToAnchor]. RAM map for visited pages ; the CURRENT page's anchor is
+     * mirrored to [SavedStateHandle] (primitives only) so a process death restores the position.
+     */
+    private val pageAnchors = mutableMapOf<Int, TopicScrollAnchor>()
+
+    /**
+     * #782 — quote-jump return stack, now owned by the ViewModel (F1) : each [goToPost] pushes the
+     * departure `{page, tap-time anchor}`, [returnFromJump] pops and lands back on it. Transient by
+     * design (never saved — a serialized chain would replay stale returns, PR #420 stance) ; a
+     * MANUAL page switch clears it (browser-like, same rule as today's `onOpenPage`).
+     */
+    private val jumpStack = ArrayDeque<TopicJumpFrame>()
+
+    /**
+     * F3/F4 — the landing owed to the page on screen, dispatched on the first matching Loaded
+     * then cleared (one landing per switch/entry). A [PendingLanding.Post] whose target is not on
+     * the page stays pending for the next emission (historical scrollTo retry) ; any newer switch
+     * REPLACES it through [armLanding]. Gate Sol PR1 : the armed landing CARRIES its owner
+     * `(generation, page)` — [dispatchPendingLanding] refuses a stale pair, and the
+     * post-suspension clear is a COMPARE-and-clear, so a landing armed by a newer owner while
+     * `_effects.send` was suspended is never blindly erased. A same-page re-own (Retry / refresh /
+     * search takeover) re-tags the landing instead of dropping it ([becomePageOwner]).
+     * [ArmedLanding.initialScrollTo] marks the INITIAL route `scrollTo` : its dispatch or its
+     * supersession persists [KEY_SCROLL_TO_CONSUMED] (Sol point 5 : `route.scrollTo` is
+     * exclusively an ENTRY intention, never replayed after process death).
+     */
+    private var pendingLanding: ArmedLanding? = null
+
+    private data class ArmedLanding(
+        val landing: PendingLanding,
+        val generation: Int,
+        val page: Int,
+        val initialScrollTo: Boolean = false,
+    )
+
+    /**
+     * #226 anti-chase as an internal budget (Sol point 3) : [applySubmitResult] arms ONE redirect ;
+     * the overflow detection consumes it BEFORE switching to the freshly-created last page, and
+     * that landing is terminal — a concurrent post bumping `totalPages` during the refresh can
+     * never start a moving-tail chase.
+     */
+    private var postSubmitRedirectBudget: Int = 0
 
     /**
      * Chantier B (#546) — client-side cursor history for next/previous result navigation in
@@ -127,13 +204,23 @@ class TopicViewModel @AssistedInject constructor(
     private var searchCursorIndex = -1
 
     /**
-     * Tracks whether the current value of [TopicRequest.scrollTo] has already been
-     * dispatched to the screen as a [TopicEffect.ScrollToPost]. Once true, a subsequent
-     * refresh of the same page will not re-scroll — the user may have scrolled away
-     * and re-snapping would steal focus. A new TopicRoute (different page) creates a
-     * new ViewModel so the flag resets naturally.
+     * #895 étape 4 — the landing model of the switch engine (F3 priority made explicit). One value
+     * per switch/entry, dispatched by [dispatchPendingLanding] on the first matching Loaded :
+     * - [Post] → [TopicEffect.ScrollToPost] once the numreponse is on the page (stays pending
+     *   through emissions of the same generation otherwise — historical scrollTo behaviour) ;
+     * - [Anchor] → [TopicEffect.ScrollToAnchor] (revisit / #782 return / process restore) ;
+     * - [Bottom] → [TopicEffect.ScrollToEndOfPage] (post-submit `#bas`, #412 `page - 1` step) ;
+     * - [Top] → [TopicEffect.ScrollToTop] (default landing of a fresh page).
      */
-    private var scrollEffectEmitted: Boolean = false
+    private sealed interface PendingLanding {
+        data class Post(val numreponse: Int) : PendingLanding
+        data class Anchor(val anchor: TopicScrollAnchor) : PendingLanding
+        data object Bottom : PendingLanding
+        data object Top : PendingLanding
+    }
+
+    /** #782 — one frame of the quote-jump return stack : the departure page + tap-time anchor. */
+    private data class TopicJumpFrame(val page: Int, val anchor: TopicScrollAnchor?)
 
     /**
      * Async-trace cookie for the `rf2.topic.first_content` section. The section starts when
@@ -154,19 +241,58 @@ class TopicViewModel @AssistedInject constructor(
         // contract) seeds [blockedCanonicals] before the load below computes the initial hidden set —
         // a blocked post therefore never flashes before it is hidden, even on the force-refresh path.
         observeBlockedCanonicals()
-        val untrustedPageTarget = request.resolveScrollToPage && request.scrollTo != null
-        if (request.submitSignal != null) {
+        // #895 F1 — the canonical current page survives process death : the SavedState page
+        // (written by every switch and at init) or an already-resolved #750 page wins over the
+        // route's initial page. A config change never reaches this code (the ViewModel survives).
+        val canonicalPage = savedStateHandle.get<Int>(KEY_CURRENT_PAGE)
+            ?: savedStateHandle.get<Int>(KEY_RESOLVED_PAGE)
+        if (canonicalPage != null && canonicalPage != request.page) {
+            request = request.copy(page = canonicalPage)
+            _state.update { it.copy(request = request) }
+        }
+        // F3 — the current page's reading anchor is the one primitive pair persisted ; it seeds
+        // the RAM anchor map so the restore landing (below) can resolve to it.
+        savedStateHandle.get<Int>(KEY_ANCHOR_INDEX)?.let { index ->
+            pageAnchors[request.page] =
+                TopicScrollAnchor(index, savedStateHandle.get<Int>(KEY_ANCHOR_OFFSET) ?: 0)
+        }
+        // Sol points 4-5 — ENTRY intentions are consumable one-shots : an already-consumed
+        // scrollTo / submitSignal never replays after process death ; an interrupted one resumes.
+        val initialScrollTo = request.scrollTo
+            ?.takeIf { savedStateHandle.get<Boolean>(KEY_SCROLL_TO_CONSUMED) != true }
+        val pendingSubmit = request.submitSignal
+            ?.takeIf { it != savedStateHandle.get<Long>(KEY_SUBMIT_CONSUMED) }
+        val untrustedPageTarget = request.resolveScrollToPage && initialScrollTo != null &&
+            canonicalPage == null
+        // Gate Sol PR1 (bloquant 1) — the canonical page is only persisted once it is TRUSTED :
+        // never before an unresolved #750 probe, or a process death mid-resolution would freeze
+        // the untrusted route page as canonical and the resolution would never replay.
+        if (!untrustedPageTarget) {
+            savedStateHandle[KEY_CURRENT_PAGE] = request.page
+        }
+        // The entry landing (armed by the chosen load path AFTER it takes ownership — arming
+        // before the ownership bump would tag it with a stale generation).
+        val entryLanding: PendingLanding? = when {
+            initialScrollTo != null -> PendingLanding.Post(initialScrollTo)
+            // Issue #200 — plain reply : HFR anchors `#bas`, no numreponse ; land at the end of
+            // the force-refreshed page where the freshly-published reply lives.
+            pendingSubmit != null -> PendingLanding.Bottom
+            // Process restore : land back on the persisted reading position, if any.
+            canonicalPage != null -> pageAnchors[request.page]?.let { PendingLanding.Anchor(it) }
+            else -> null
+        }
+        val entryLandingIsScrollTo = initialScrollTo != null
+        when {
             // Issue #200 — the user just published a reply / quote / edit / edit-FP and the
             // navigation host signalled us to skip the cache so the freshly-published post
             // is actually visible. Without this short-circuit, `observeTopicPage` would
             // emit a stale cached page that doesn't contain the new post (it was created
             // server-side after the cache was populated).
-            forceRefreshCurrentPage()
-        } else if (untrustedPageTarget) {
+            pendingSubmit != null ->
+                forceRefreshCurrentPage(pendingSubmit, entryLanding, entryLandingIsScrollTo)
             // #750 — email deep link: `page` is a lie (always 1), resolve the real one first.
-            resolveScrollToPageThenLoad()
-        } else {
-            loadCurrentPage()
+            untrustedPageTarget -> resolveScrollToPageThenLoad(entryLanding, entryLandingIsScrollTo)
+            else -> loadCurrentPage(entryLanding, entryLandingIsScrollTo)
         }
         // #220 — gate the write affordances on the live auth state, not just `canReply`.
         // A logged-out user may still hold a stale cached `canReply = true` row (the topic
@@ -314,14 +440,15 @@ class TopicViewModel @AssistedInject constructor(
      */
     private fun refresh() {
         if (_state.value.mode !is TopicUiState.Mode.Loaded || _state.value.isRefreshing) return
-        takeOverFromSearch()
-        loadJob?.cancel()
-        prefetchJob?.cancel()
-        prefetchedPage = null
+        becomePageOwner()
         _state.update { it.copy(isRefreshing = true) }
+        // Gate Sol PR1 r2 (bloquant 1) — same ownership guard as every other async producer :
+        // a reply landing after a page switch must never write over the new owner's page.
+        val generation = ownerGeneration
         loadJob = viewModelScope.launch {
             try {
                 val topic = topicRepository.refreshTopicPage(request.cat, request.post, request.page)
+                if (generation != ownerGeneration) return@launch
                 _state.update {
                     it.copy(
                         mode = loadedMode(topic),
@@ -329,6 +456,7 @@ class TopicViewModel @AssistedInject constructor(
                         search = it.search.capturingAnchor(topic),
                     )
                 }
+                recordSnapshot(topic)
                 // Re-arm the page+1 warmup, like `loadCurrentPage` (l. ~219). Unlike the post-submit
                 // `forceRefreshCurrentPage` (which deliberately skips it), a manual mid-page pull is
                 // exactly when the user keeps reading forward, so re-warming page+1 restores the
@@ -337,11 +465,17 @@ class TopicViewModel @AssistedInject constructor(
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (@Suppress("TooGenericExceptionCaught") refreshError: Exception) {
-                // Cache-first: keep the page currently on screen and invite a retry via a Toast.
+                // Cache-first: keep the page currently on screen and invite a retry via a Toast —
+                // unless a newer owner took the page meanwhile (stale toast suppressed).
                 android.util.Log.w(LOG_TAG, "Manual refresh failed", refreshError)
-                _effects.send(TopicEffect.RefreshFailed)
+                if (generation == ownerGeneration) _effects.trySend(TopicEffect.RefreshFailed)
             } finally {
-                _state.update { it.copy(isRefreshing = false) }
+                // Gate Sol PR1 r3 (bloquant 3) — only the still-current owner clears its spinner :
+                // a superseded refresh must not cut a NEWER refresh's indicator (the takeover
+                // itself already reset the stale one in becomePageOwner).
+                if (generation == ownerGeneration) {
+                    _state.update { it.copy(isRefreshing = false) }
+                }
             }
         }
     }
@@ -378,9 +512,15 @@ class TopicViewModel @AssistedInject constructor(
      * behaviour, never worse. Runs at most once (init-only branch); a config change keeps the
      * ViewModel, a route replace builds a fresh one without the flag.
      */
-    private fun resolveScrollToPageThenLoad() {
+    private fun resolveScrollToPageThenLoad(
+        entryLanding: PendingLanding?,
+        entryLandingIsScrollTo: Boolean,
+    ) {
         val scrollTo = requireNotNull(request.scrollTo) { "resolveScrollToPageThenLoad requires scrollTo" }
         _state.update { it.copy(mode = TopicUiState.Mode.Loading) }
+        // Gate Sol PR1 r2 (bloquant 1) — a switch / submit arriving DURING the probe owns the
+        // page : the late resolution must neither adopt its page nor restart the load.
+        val generation = ownerGeneration
         viewModelScope.launch {
             val outcome = runCatching {
                 withTimeoutOrNull(RESOLVE_TIMEOUT_MS) {
@@ -392,25 +532,110 @@ class TopicViewModel @AssistedInject constructor(
                 }
             }
             (outcome.exceptionOrNull() as? CancellationException)?.let { throw it }
+            if (generation != ownerGeneration) return@launch
             val resolved = outcome.getOrNull()
-            if (resolved != null && resolved != request.page) {
-                request = request.copy(page = resolved)
-                _state.update { it.copy(request = request) }
+            if (resolved != null) {
+                // Sol point 4 — #750 is consumed by STORING the resolved canonical page : a
+                // process death after this point restores the real page and never re-probes ;
+                // an interrupted probe (no stored page yet — gate Sol PR1 bloquant 1, the init
+                // deliberately did NOT persist the untrusted route page) re-runs, never worse.
+                savedStateHandle[KEY_RESOLVED_PAGE] = resolved
+                savedStateHandle[KEY_CURRENT_PAGE] = resolved
+                if (resolved != request.page) {
+                    request = request.copy(page = resolved)
+                    _state.update { it.copy(request = request) }
+                }
             }
-            loadCurrentPage()
+            // A FAILED probe deliberately persists nothing : the untrusted page loads as-is
+            // (pre-#750 behaviour, never worse) but a later process restore re-probes — the
+            // degraded outcome is not frozen as canonical. Any subsequent switch persists.
+            loadCurrentPage(entryLanding, entryLandingIsScrollTo)
         }
     }
 
-    private fun loadCurrentPage() {
+    private fun loadCurrentPage(
+        entryLanding: PendingLanding? = null,
+        entryLandingIsScrollTo: Boolean = false,
+    ) {
+        becomePageOwner()
+        if (entryLanding != null) {
+            armLanding(entryLanding, initialScrollTo = entryLandingIsScrollTo)
+        }
+        startPageLoad(showLoading = true)
+    }
+
+    /**
+     * #895 étape 4 — the takeover prologue every path that (re)claims the page runs first : cancel
+     * the in-flight search / form fetch / load / prefetch and bump [ownerGeneration] (via
+     * [takeOverFromSearch]) so any late reply is dropped. Extracted so [internalSwitch] can take
+     * ownership BEFORE arming its landing and activating a snapshot — the collect it then starts
+     * must not bump the generation a second time.
+     */
+    private fun becomePageOwner() {
         takeOverFromSearch()
         loadJob?.cancel()
         prefetchJob?.cancel()
         prefetchedPage = null
+        reclaimRefreshIndicator()
+        // Gate Sol PR1 — a SAME-PAGE re-own (Retry, refresh, search takeover) keeps the
+        // not-yet-dispatched landing alive by re-tagging it to the new generation (historical
+        // scrollTo retry across Retry) ; a page change drops it — the switch paths re-arm
+        // explicitly right after.
+        pendingLanding = pendingLanding
+            ?.takeIf { it.page == request.page }
+            ?.copy(generation = ownerGeneration)
+    }
+
+    /**
+     * Gate Sol PR1 r3/r4 — the pull-to-refresh spinner belongs to the OUTGOING owner : EVERY
+     * takeover (page switch, normal load, AND a search claiming the page through [launchSearch])
+     * resets it immediately ; the superseded refresh's finally (generation-guarded) then rightly
+     * refuses to touch a newer owner's indicator. Without the search path a spinner could stay
+     * stuck forever — `refresh()` guards on `isRefreshing`, blocking every future pull (gate r4).
+     */
+    private fun reclaimRefreshIndicator() {
+        if (_state.value.isRefreshing) {
+            _state.update { it.copy(isRefreshing = false) }
+        }
+    }
+
+    /**
+     * Gate Sol PR1 — the ONLY writer of [pendingLanding] besides [becomePageOwner]'s re-tag :
+     * tags the landing with the CURRENT `(generation, page)` (callers arm AFTER taking ownership
+     * and updating the canonical page) and persists the consumption of a superseded initial
+     * scrollTo (any newer navigation supersedes the entry intention, Sol point 5).
+     */
+    private fun armLanding(landing: PendingLanding?, initialScrollTo: Boolean = false) {
+        val previous = pendingLanding
+        if (previous?.initialScrollTo == true) {
+            savedStateHandle[KEY_SCROLL_TO_CONSUMED] = true
+        }
+        pendingLanding = landing?.let {
+            ArmedLanding(it, ownerGeneration, request.page, initialScrollTo)
+        }
+    }
+
+    /**
+     * #895 étape 4 — shared cache-aside collection of the CURRENT canonical page. Callers run
+     * [becomePageOwner] first. [showLoading] is `false` when the switch engine already activated a
+     * memory snapshot : the collect then refreshes the page IN PLACE (provisional pill + hairline,
+     * quick win 3) instead of flashing the skeleton — removing that flash is the point of #895.
+     */
+    private fun startPageLoad(showLoading: Boolean) {
         beginFirstContentSection()
-        _state.update { it.copy(mode = TopicUiState.Mode.Loading) }
+        if (showLoading) {
+            _state.update { it.copy(mode = TopicUiState.Mode.Loading) }
+        }
+        // #231 made consumable (Sol point 4) : the TTL bypass applies until its first TERMINAL
+        // fresh emission, then never replays across process death ; interrupted → resumes.
+        val effectiveForceRefresh = request.forceRefresh &&
+            savedStateHandle.get<Boolean>(KEY_FORCE_REFRESH_DONE) != true
+        // F4 — belt over the job cancellation : a page switch bumps the owner generation, so an
+        // emission raced from the previous owner can never write over the new page.
+        val generation = ownerGeneration
         loadJob = viewModelScope.launch {
             topicRepository
-                .observeTopicPage(request.cat, request.post, request.page, forceRefresh = request.forceRefresh)
+                .observeTopicPage(request.cat, request.post, request.page, forceRefresh = effectiveForceRefresh)
                 // #509 — the blacklist is owned by the independent observeBlockedCanonicals collector
                 // (launched in init), NOT combined here: it has already seeded blockedCanonicals by the
                 // time this load runs (its first emission is synchronous, documented contract), so the
@@ -441,6 +666,8 @@ class TopicViewModel @AssistedInject constructor(
                     endFirstContentSectionIfNeeded()
                 }
                 .collect { emission ->
+                    // F4 — drop an emission raced from a previous owner (page switch / takeover).
+                    if (generation != ownerGeneration) return@collect
                     val topic = emission.topic
                     _state.update {
                         it.copy(
@@ -459,7 +686,15 @@ class TopicViewModel @AssistedInject constructor(
                     // (stale-cache then refresh) already see `firstContentInFlight = false`
                     // and the helper short-circuits.
                     endFirstContentSectionIfNeeded()
-                    maybeEmitScroll(topic.posts.map { it.numreponse })
+                    if (!emission.provisional) {
+                        // F2 — only TERMINAL emissions become memory snapshots ; a provisional
+                        // page may be displayed but must never replace a terminal snapshot.
+                        recordSnapshot(topic)
+                        if (effectiveForceRefresh) {
+                            savedStateHandle[KEY_FORCE_REFRESH_DONE] = true
+                        }
+                    }
+                    dispatchPendingLanding(topic)
                     maybeSchedulePrefetch(totalPages = topic.totalPages)
                 }
         }
@@ -498,25 +733,302 @@ class TopicViewModel @AssistedInject constructor(
             .toSet()
     }
 
-    private suspend fun maybeEmitScroll(visiblePosts: List<Int>) {
-        if (scrollEffectEmitted) return
-        val target = request.scrollTo
-        when {
-            target != null && target in visiblePosts -> {
-                _effects.send(TopicEffect.ScrollToPost(target))
-                scrollEffectEmitted = true
+    /**
+     * #895 étape 4 — dispatch the landing owed to the page on screen, once, on the first Loaded
+     * of the owning generation. A [PendingLanding.Post] whose numreponse is not on [topic] stays
+     * pending (the next emission of the SAME generation may contain it — the historical scrollTo
+     * retry) ; every other landing dispatches unconditionally. A landing armed by a superseded
+     * owner is dropped without effect.
+     */
+    private fun dispatchPendingLanding(topic: Topic) {
+        // Gate Sol PR1 (bloquant 2) — refuse a stale pair : a dispatch reached from an untagged
+        // path (same-page jump, snapshot activation) may run after a newer navigation replaced
+        // the owner ; the armed landing knows who it belongs to.
+        val armed = pendingLanding
+            ?.takeIf { it.generation == ownerGeneration && it.page == request.page }
+            ?: return
+        val effect = when (val landing = armed.landing) {
+            // A Post target absent from the page stays pending : the next emission of the same
+            // owner may contain it (historical scrollTo retry) — hence the nullable effect.
+            is PendingLanding.Post ->
+                TopicEffect.ScrollToPost(landing.numreponse)
+                    .takeIf { topic.posts.any { post -> post.numreponse == landing.numreponse } }
+            is PendingLanding.Anchor -> TopicEffect.ScrollToAnchor(landing.anchor, armed.page)
+            PendingLanding.Bottom -> TopicEffect.ScrollToEndOfPage(armed.page)
+            PendingLanding.Top -> TopicEffect.ScrollToTop(armed.page)
+        } ?: return
+        // Gate Sol PR1 r2 (bloquant 2) — the validity check and the delivery must be ATOMIC : a
+        // suspending `send` opens a window where a newer owner supersedes the landing while the
+        // stale effect is still delivered on the new page. `trySend` never suspends (the channel
+        // is BUFFERED), so on the Main-confined ViewModel nothing can interleave between the
+        // `(generation, page)` check above and the delivery. A full buffer (never observed : the
+        // screen collects eagerly) keeps the landing pending for the next emission.
+        if (_effects.trySend(effect).isSuccess) {
+            clearLanding()
+        }
+    }
+
+    /**
+     * Clear the pending landing ; when it was the INITIAL route `scrollTo`, persist the
+     * consumption so a process death never replays the deep-link scroll (Sol point 5).
+     */
+    private fun clearLanding() {
+        val armed = pendingLanding ?: return
+        pendingLanding = null
+        if (armed.initialScrollTo) {
+            savedStateHandle[KEY_SCROLL_TO_CONSUMED] = true
+        }
+    }
+
+    /**
+     * F2 — record a TERMINAL emission of the CURRENT canonical page into the LRU snapshot map.
+     * The page guard drops late replies raced from a previous page ; `transsearch` renders never
+     * call this (a search view is not a canonical page).
+     */
+    private fun recordSnapshot(topic: Topic) {
+        if (topic.page != request.page) return
+        pageSnapshots[topic.page] = topic
+    }
+
+    // ─── #895 étape 4 — page switch engine (unbranched until the navigation PR) ──
+
+    /**
+     * F1/F3 — the screen reports the CURRENT page's reading anchor (on scroll settle / departure).
+     * Feeds the RAM anchor map (revisit landings) and mirrors the primitives into the
+     * [SavedStateHandle] so a process death restores the position of the page being read.
+     */
+    fun reportPageAnchor(anchor: TopicScrollAnchor) {
+        pageAnchors[request.page] = anchor
+        savedStateHandle[KEY_ANCHOR_INDEX] = anchor.index
+        savedStateHandle[KEY_ANCHOR_OFFSET] = anchor.offset
+    }
+
+    /**
+     * F1 — MANUAL page change (pager, ‹/› FABs, swipe, boundary cards, page picker). Clears the
+     * #782 jump chain (browser-like, same rule as today's `onOpenPage`). Landing : saved anchor
+     * of the target if any, else bottom on a strict « page - 1 » reading step (#412), else top.
+     */
+    fun switchToPage(target: Int, departureAnchor: TopicScrollAnchor? = null) {
+        if (target == request.page || target < 1) return
+        jumpStack.clear()
+        internalSwitch(
+            target = target,
+            departureAnchor = departureAnchor,
+            landing = null,
+            bottomLandingEligible = target == request.page - 1,
+        )
+    }
+
+    /**
+     * #699/#782 — jump to a cited post : push the departure `{page, tap-time anchor}` on the jump
+     * chain, switch when needed and land on [numreponse]. A same-page jump dispatches against the
+     * page already on screen (no reload — the historical route replace rebuilt everything).
+     */
+    fun goToPost(targetPage: Int, numreponse: Int, departureAnchor: TopicScrollAnchor? = null) {
+        if (jumpStack.size >= JUMP_STACK_MAX) jumpStack.removeFirst()
+        jumpStack.addLast(TopicJumpFrame(request.page, departureAnchor))
+        if (targetPage == request.page) {
+            departureAnchor?.let { reportPageAnchor(it) }
+            armLanding(PendingLanding.Post(numreponse))
+            dispatchLandingAgainstScreen()
+            return
+        }
+        internalSwitch(targetPage, departureAnchor, landing = PendingLanding.Post(numreponse))
+    }
+
+    /**
+     * #782 — unwind ONE quote jump : land back on the departure page at the tap-time anchor.
+     * Returns `false` when the chain is empty — the caller (screen back handling) then lets the
+     * system back leave the topic. A return is never a « page - 1 » reading step (no bottom).
+     */
+    fun returnFromJump(departureAnchor: TopicScrollAnchor? = null): Boolean {
+        val frame = jumpStack.removeLastOrNull() ?: return false
+        val landing = frame.anchor?.let { PendingLanding.Anchor(it) }
+        if (frame.page == request.page) {
+            departureAnchor?.let { reportPageAnchor(it) }
+            armLanding(
+                landing
+                    ?: pageAnchors[frame.page]?.let { PendingLanding.Anchor(it) }
+                    ?: PendingLanding.Top,
+            )
+            dispatchLandingAgainstScreen()
+        } else {
+            internalSwitch(frame.page, departureAnchor, landing = landing)
+        }
+        return true
+    }
+
+    /**
+     * Post-submit result delivered to THIS retained ViewModel (Sol GO, option A) : the editor /
+     * quick-reply sheet publishes `{targetPage, scrollTo}` after a successful POST ; the target
+     * falls back on the CANONICAL current page (never the route page). Arms the single #226
+     * redirect budget, dirties the target snapshot and force-fetches it — landing `scrollTo`
+     * (quote / edit) or bottom (`#bas`, plain reply).
+     */
+    fun applySubmitResult(targetPage: Int?, scrollTo: Int?) {
+        postSubmitRedirectBudget = 1
+        val target = targetPage ?: request.page
+        // F2 — the submitted-to page is dirty : its snapshot must never serve again as terminal.
+        pageSnapshots.remove(target)
+        jumpStack.clear()
+        performSubmitRefresh(target, scrollTo)
+    }
+
+    /**
+     * F4 — the shared switch machinery : anchor saved, ownership taken (generation bump + cancels),
+     * entry intentions superseded, canonical page updated, landing armed by priority, memory
+     * snapshot activated atomically (no Loading) else skeleton, then the cache-aside collect.
+     */
+    private fun internalSwitch(
+        target: Int,
+        departureAnchor: TopicScrollAnchor?,
+        landing: PendingLanding?,
+        bottomLandingEligible: Boolean = false,
+    ) {
+        // F4 step 1 — save the departure anchor before anything else.
+        departureAnchor?.let { pageAnchors[request.page] = it }
+        // Steps 2-3 — new owner : generation bump + cancel search / form fetch / load / prefetch.
+        becomePageOwner()
+        // A navigation supersedes the #231 catch-up (entry intention of the ENTRY page) ; the
+        // initial scrollTo supersession is handled by armLanding below (Sol points 4-5).
+        savedStateHandle[KEY_FORCE_REFRESH_DONE] = true
+        // Step 4 — the canonical current page (route stays untouched, F1).
+        updateCanonicalPage(target)
+        // Step 5 — landing by priority (F3) : explicit > saved anchor > page-1 bottom > top.
+        // Armed AFTER the ownership bump and the page update, so it carries the right tags.
+        armLanding(
+            landing
+                ?: pageAnchors[target]?.let { PendingLanding.Anchor(it) }
+                ?: if (bottomLandingEligible) PendingLanding.Bottom else PendingLanding.Top,
+        )
+        // Steps 6-8 — activate the terminal memory snapshot atomically (blacklist recomputed
+        // through loadedMode, F2) and refresh in place ; a miss shows the skeleton.
+        val snapshot = pageSnapshots[target]
+        if (snapshot != null) {
+            _state.update {
+                it.copy(
+                    mode = loadedMode(snapshot),
+                    availablePages = (1..snapshot.totalPages).toList(),
+                    search = it.search.capturingAnchor(snapshot),
+                )
             }
-            // Issue #200 — plain reply path: HFR anchors `#bas` and the parser leaves
-            // `scrollTo` null. We still got told this is a post-submit reload via
-            // `submitSignal`, so we scroll to the end of the (force-refreshed) page where
-            // the freshly-published reply lives. Gate on `submitSignal != null` to avoid
-            // any chance of stealing focus on a normal deep-link load that happens to
-            // arrive with `scrollTo = null`.
-            target == null && request.submitSignal != null -> {
-                _effects.send(TopicEffect.ScrollToEndOfPage)
-                scrollEffectEmitted = true
+            dispatchLandingAgainstScreen()
+            startPageLoad(showLoading = false)
+        } else {
+            startPageLoad(showLoading = true)
+        }
+    }
+
+    /**
+     * Dispatch the pending landing against the page already on screen (same-page / snapshot).
+     * Synchronous since the r2 gate : [dispatchPendingLanding] no longer suspends, so there is no
+     * untagged coroutine racing a newer navigation.
+     */
+    private fun dispatchLandingAgainstScreen() {
+        val loaded = _state.value.mode as? TopicUiState.Mode.Loaded ?: return
+        dispatchPendingLanding(loaded.topic)
+    }
+
+    /**
+     * Sol point 3 — the post-submit force fetch of the retained ViewModel, #226 anti-chase
+     * included : the freshly-created-last-page redirect happens INTERNALLY (one switch, budget
+     * consumed BEFORE it) and its landing is terminal. The current content stays on screen while
+     * the same page refreshes (zero-flash) ; switching to another page without a snapshot shows
+     * the skeleton (its content is unknown).
+     *
+     * konsist:bypass-prefetch-guard — deliberate authenticated refetch following an explicit
+     * submit result ; ownership taken via [becomePageOwner] (which cancels the anonymous warmup),
+     * never an anonymous prefetch escalating to authenticated.
+     */
+    private fun performSubmitRefresh(initialTarget: Int, scrollTo: Int?) {
+        becomePageOwner()
+        savedStateHandle[KEY_FORCE_REFRESH_DONE] = true
+        adoptSubmitTarget(initialTarget, scrollTo)
+        val generation = ownerGeneration
+        loadJob = viewModelScope.launch {
+            // Gate Sol PR1 (récursion fragile → ITÉRATIF) : the #226 redirect continues INSIDE
+            // this job under the SAME ownership — no self-cancelling re-own mid-coroutine.
+            var target = initialTarget
+            while (true) {
+                try {
+                    val topic = topicRepository.refreshTopicPage(request.cat, request.post, target)
+                    if (generation != ownerGeneration) return@launch
+                    _state.update {
+                        it.copy(
+                            mode = loadedMode(topic),
+                            availablePages = (1..topic.totalPages).toList(),
+                            search = it.search.capturingAnchor(topic),
+                        )
+                    }
+                    // #226 — plain-reply overflow : the reply created a page past the target.
+                    // Consume the single redirect budget and land on the real last page ; that
+                    // landing can never redirect again (anti-chase), whatever a concurrent
+                    // poster does.
+                    if (scrollTo == null && topic.totalPages > target && postSubmitRedirectBudget > 0) {
+                        postSubmitRedirectBudget = 0
+                        pageSnapshots.remove(target)
+                        pageSnapshots.remove(topic.totalPages)
+                        target = topic.totalPages
+                        adoptSubmitTarget(target, scrollTo = null)
+                        continue
+                    }
+                    recordSnapshot(topic)
+                    dispatchPendingLanding(topic)
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (@Suppress("TooGenericExceptionCaught") refreshError: Exception) {
+                    // Same contract as the historical post-submit failure : HFR accepted the POST,
+                    // tell the user, drop the landing (no scroll on a stale page) and fall back to
+                    // the cache-aside path with a Retry affordance.
+                    android.util.Log.w(LOG_TAG, "Submit-result refresh failed", refreshError)
+                    if (generation != ownerGeneration) return@launch
+                    _effects.trySend(TopicEffect.PostSubmitRefreshFailed)
+                    clearLanding()
+                    startPageLoad(showLoading = _state.value.mode !is TopicUiState.Mode.Loaded)
+                }
+                return@launch
             }
         }
+    }
+
+    /**
+     * Adopt [target] as the canonical submit-landing page : canonical page updated, content kept
+     * on screen when it already shows something (zero-flash on the common same-page reply), the
+     * skeleton only when the target's content is unknown, landing re-armed for the new page.
+     */
+    private fun adoptSubmitTarget(target: Int, scrollTo: Int?) {
+        if (target != request.page) {
+            updateCanonicalPage(target)
+            // A cross-page submit landing shows the skeleton unless a snapshot can bridge the
+            // fetch — the dirty eviction in [applySubmitResult] only removed the TARGET page.
+            if (pageSnapshots[target] == null) {
+                _state.update { it.copy(mode = TopicUiState.Mode.Loading) }
+            }
+        } else if (_state.value.mode !is TopicUiState.Mode.Loaded) {
+            _state.update { it.copy(mode = TopicUiState.Mode.Loading) }
+        }
+        armLanding(scrollTo?.let { PendingLanding.Post(it) } ?: PendingLanding.Bottom)
+    }
+
+    /**
+     * F1 — the single writer of the canonical current page outside init : `request`/state,
+     * [KEY_CURRENT_PAGE], and the persisted anchor keys (they described the DEPARTED page).
+     */
+    private fun updateCanonicalPage(target: Int) {
+        request = request.copy(page = target)
+        savedStateHandle[KEY_CURRENT_PAGE] = target
+        // Gate Sol PR1 r2 (réserve) — the persisted anchor must describe the NEW current page :
+        // a known RAM anchor is copied immediately (a process death before the screen's next
+        // reportPageAnchor would otherwise lose the restorable position) ; unknown → cleared.
+        val known = pageAnchors[target]
+        if (known != null) {
+            savedStateHandle[KEY_ANCHOR_INDEX] = known.index
+            savedStateHandle[KEY_ANCHOR_OFFSET] = known.offset
+        } else {
+            savedStateHandle.remove<Int>(KEY_ANCHOR_INDEX)
+            savedStateHandle.remove<Int>(KEY_ANCHOR_OFFSET)
+        }
+        _state.update { it.copy(request = request) }
     }
 
     /**
@@ -533,16 +1045,28 @@ class TopicViewModel @AssistedInject constructor(
      * authenticated refetch following an explicit submit signal from the navigation host,
      * not an anonymous warmup escalating to authenticated.
      */
-    private fun forceRefreshCurrentPage() {
-        takeOverFromSearch()
-        loadJob?.cancel()
-        prefetchJob?.cancel()
-        prefetchedPage = null
+    private fun forceRefreshCurrentPage(
+        signal: Long,
+        entryLanding: PendingLanding?,
+        entryLandingIsScrollTo: Boolean,
+    ) {
+        becomePageOwner()
+        armLanding(entryLanding, initialScrollTo = entryLandingIsScrollTo)
         beginFirstContentSection()
         _state.update { it.copy(mode = TopicUiState.Mode.Loading) }
+        // Gate Sol PR1 (bloquant 2) — same ownership guard as every other async producer.
+        val generation = ownerGeneration
         loadJob = viewModelScope.launch {
             try {
                 val topic = topicRepository.refreshTopicPage(request.cat, request.post, request.page)
+                if (generation != ownerGeneration) return@launch
+                // Sol point 4 — the submit entry intention is consumed on COMPLETION (success or
+                // handled failure below) : an interrupted force-fetch resumes after process death
+                // (idempotent GET), a completed one never replays. Gate Sol PR1 (bloquant 3) — a
+                // successful AUTHENTICATED refresh also satisfies the #231 catch-up : mark it done
+                // too, or the TTL bypass would replay through startPageLoad after process death.
+                savedStateHandle[KEY_SUBMIT_CONSUMED] = signal
+                savedStateHandle[KEY_FORCE_REFRESH_DONE] = true
                 _state.update {
                     it.copy(
                         mode = loadedMode(topic),
@@ -550,6 +1074,7 @@ class TopicViewModel @AssistedInject constructor(
                     )
                 }
                 endFirstContentSectionIfNeeded()
+                recordSnapshot(topic)
                 // #226 — plain-reply overflow: the reply created a new page but HFR anchored the page
                 // the form was on (request.page). The force-refreshed page reports the up-to-date
                 // totalPages; if it now exceeds request.page (plain reply → scrollTo null; quote/edit
@@ -571,7 +1096,7 @@ class TopicViewModel @AssistedInject constructor(
                     _effects.send(TopicEffect.NavigateToLastPage(topic.totalPages))
                     return@launch
                 }
-                maybeEmitScroll(topic.posts.map { it.numreponse })
+                dispatchPendingLanding(topic)
                 // Skip the page+1 warmup here — the user just submitted and is unlikely to need
                 // page+1 immediately; the next normal navigation will trigger the warmup through
                 // `loadCurrentPage` as usual.
@@ -579,15 +1104,17 @@ class TopicViewModel @AssistedInject constructor(
                 throw cancellation
             } catch (@Suppress("TooGenericExceptionCaught") refreshError: Exception) {
                 // Force-refresh failed — log, tell the user HFR did accept the post even though
-                // the local view may be stale (Toast in the screen, cf. TopicScreen.kt), and short-circuit the
-                // scroll-effect machinery so the cache-aside fallback we hand off to does NOT
+                // the local view may be stale (Toast in the screen, cf. TopicScreen.kt), and drop the
+                // pending landing so the cache-aside fallback we hand off to does NOT
                 // re-trigger `ScrollToEndOfPage` on a stale page (which would scroll the user to
                 // some pre-submit "last post" and confuse them into thinking they're looking at
                 // their fresh reply). Then hand off to the cache-aside path so the user at least
                 // sees a previously-cached page with a Retry affordance.
                 android.util.Log.w(LOG_TAG, "Force refresh failed for post-submit reload", refreshError)
-                _effects.send(TopicEffect.PostSubmitRefreshFailed)
-                scrollEffectEmitted = true
+                if (generation != ownerGeneration) return@launch
+                savedStateHandle[KEY_SUBMIT_CONSUMED] = signal
+                _effects.trySend(TopicEffect.PostSubmitRefreshFailed)
+                clearLanding()
                 endFirstContentSectionIfNeeded()
                 loadCurrentPage()
             }
@@ -667,14 +1194,14 @@ class TopicViewModel @AssistedInject constructor(
             _state.update { it.copy(deletingNumreponse = null) }
             when (result) {
                 is DeletePostResult.Success -> {
-                    _effects.send(TopicEffect.PostDeleted)
+                    _effects.trySend(TopicEffect.PostDeleted)
                     // A normal-post delete keeps the topic alive → refresh so the post vanishes. A
                     // whole-topic delete (first post) would 404 on reload, so we skip the refetch and
                     // leave the page; the UI never offers delete on the first post today.
                     if (!result.deletedWholeTopic) refreshAfterDelete()
                 }
                 is DeletePostResult.Failure ->
-                    _effects.send(TopicEffect.PostDeleteFailed(result.reason.toDeleteFailureReason()))
+                    _effects.trySend(TopicEffect.PostDeleteFailed(result.reason.toDeleteFailureReason()))
             }
         }
     }
@@ -691,25 +1218,28 @@ class TopicViewModel @AssistedInject constructor(
      * user-confirmed deletion, not an anonymous warmup escalating to authenticated.
      */
     private fun refreshAfterDelete() {
-        takeOverFromSearch()
-        loadJob?.cancel()
-        prefetchJob?.cancel()
-        prefetchedPage = null
+        becomePageOwner()
+        // F2 — a deletion can shift the whole pagination : every memory snapshot is suspect.
+        pageSnapshots.clear()
         _state.update { it.copy(mode = TopicUiState.Mode.Loading) }
+        // Gate Sol PR1 r2 (bloquant 1) — ownership guard, like every other async producer.
+        val generation = ownerGeneration
         loadJob = viewModelScope.launch {
             try {
                 val topic = topicRepository.refreshTopicPage(request.cat, request.post, request.page)
+                if (generation != ownerGeneration) return@launch
                 _state.update {
                     it.copy(
                         mode = loadedMode(topic),
                         availablePages = (1..topic.totalPages).toList(),
                     )
                 }
+                recordSnapshot(topic)
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (@Suppress("TooGenericExceptionCaught") refreshError: Exception) {
                 android.util.Log.w(LOG_TAG, "Post-delete refresh failed", refreshError)
-                loadCurrentPage()
+                if (generation == ownerGeneration) loadCurrentPage()
             }
         }
     }
@@ -756,7 +1286,7 @@ class TopicViewModel @AssistedInject constructor(
             if (flag != null) {
                 _removeTopicFlagState.value = RemoveTopicFlagState.Confirming(flag)
             } else {
-                _effects.send(TopicEffect.TopicFlagNotFound)
+                _effects.trySend(TopicEffect.TopicFlagNotFound)
                 _removeTopicFlagState.value = RemoveTopicFlagState.Idle
             }
         }
@@ -789,7 +1319,7 @@ class TopicViewModel @AssistedInject constructor(
                         if (raised is CancellationException) throw raised
                         Result.failure(raised)
                     }
-                _effects.send(
+                _effects.trySend(
                     if (result.isSuccess) TopicEffect.TopicFlagRemoved else TopicEffect.TopicFlagRemovalFailed,
                 )
             } finally {
@@ -837,27 +1367,27 @@ class TopicViewModel @AssistedInject constructor(
         // Snapshot the request AND the generation token : `request` is a var (page changes mutate
         // it), and `request == fetchedFor` alone cannot tell two successive owners of the SAME
         // page apart (a refresh or a search taking over between our launch and our landing). Every
-        // owner change bumps `searchGeneration` (takeOverFromSearch / launchSearch), so a stale
+        // owner change bumps `ownerGeneration` (takeOverFromSearch / launchSearch), so a stale
         // form-fetch reply is dropped exactly like a stale transsearch reply (gate finding, #877).
         val fetchedFor = request
-        val generation = searchGeneration
+        val generation = ownerGeneration
         searchFormJob = viewModelScope.launch {
             runCatching {
                 topicRepository.refreshTopicPage(fetchedFor.cat, fetchedFor.post, fetchedFor.page)
             }.onSuccess { fresh ->
-                _state.update { state ->
-                    // Latest-wins : same page still on screen AND no newer owner took over.
-                    if (state.mode is TopicUiState.Mode.Loaded &&
-                        request == fetchedFor &&
-                        generation == searchGeneration
-                    ) {
+                // Latest-wins : same page still on screen AND no newer owner took over.
+                val stillCurrent = _state.value.mode is TopicUiState.Mode.Loaded &&
+                    request == fetchedFor &&
+                    generation == ownerGeneration
+                if (stillCurrent) {
+                    _state.update { state ->
                         state.copy(
                             mode = loadedMode(fresh),
                             availablePages = (1..fresh.totalPages).toList(),
                         )
-                    } else {
-                        state
                     }
+                    // F2 — a fresh authenticated render of the current page is terminal : record it.
+                    recordSnapshot(fresh)
                 }
             }
         }
@@ -879,7 +1409,7 @@ class TopicViewModel @AssistedInject constructor(
     }
 
     /**
-     * Cancel any in-flight intra-topic search and bump [searchGeneration] so a `transsearch` reply
+     * Cancel any in-flight intra-topic search and bump [ownerGeneration] so a `transsearch` reply
      * that is still on the wire is dropped on arrival. Called at the head of every normal-load path
      * (load / refresh / force-refresh / post-delete) so a stale search result can never overwrite a
      * more recent normal page (latest-wins strict).
@@ -895,7 +1425,7 @@ class TopicViewModel @AssistedInject constructor(
         // #877 — a form fetch tied to the outgoing page is moot (its inject guard would drop the
         // result anyway) : cancel it so it does not waste a network round-trip.
         searchFormJob?.cancel()
-        searchGeneration++
+        ownerGeneration++
         // A normal-load path owns the page now, so the result cursor history is stale: a later
         // next/prev would step from a position that no longer matches what is on screen. Reset it
         // and clear the navigation affordances. (Covers closeSearch, which routes through here.)
@@ -976,6 +1506,9 @@ class TopicViewModel @AssistedInject constructor(
         val anchor = if (current.search.fromStart) 0 else form?.firstnum ?: current.search.sessionAnchor
         if (form == null || !form.canSearch || anchor == null) {
             if (current.search.canSubmit) {
+                // Gate r5 — SearchFailed is a GUARANTEED functional effect : own coroutine whose
+                // suspending send is its terminal (and only) operation ; the form re-fetch below
+                // runs independently and never races the delivery.
                 viewModelScope.launch { _effects.send(TopicEffect.SearchFailed) }
                 ensureSearchForm()
             }
@@ -1099,13 +1632,15 @@ class TopicViewModel @AssistedInject constructor(
         searchJob?.cancel()
         loadJob?.cancel()
         prefetchJob?.cancel()
-        val generation = ++searchGeneration
+        // Gate r4 (bloquant 1) — a search takeover supersedes an in-flight pull-to-refresh too.
+        reclaimRefreshIndicator()
+        val generation = ++ownerGeneration
         _state.update { it.copy(search = it.search.copy(status = TopicSearchStatus.Loading)) }
         searchJob = viewModelScope.launch {
             try {
                 val topic = topicSearchRepository.searchInTopic(request)
                 // Drop a stale reply: a newer normal load / refresh / search bumped the generation.
-                if (generation != searchGeneration) return@launch
+                if (generation != ownerGeneration) return@launch
                 applySearchResult(
                     topic,
                     isFresh = isFresh,
@@ -1116,7 +1651,7 @@ class TopicViewModel @AssistedInject constructor(
                 throw cancellation
             } catch (noResults: NoTopicSearchResultsException) {
                 android.util.Log.i(LOG_TAG, "Intra-topic search returned no result", noResults)
-                if (generation != searchGeneration) return@launch
+                if (generation != ownerGeneration) return@launch
                 if (request.onlyMatches && !isFresh) {
                     // #894 — an empty FILTERED CONTINUATION (matches deleted since the previous
                     // batch advertised the cursor) is the END of the results, never « Aucun
@@ -1136,11 +1671,12 @@ class TopicViewModel @AssistedInject constructor(
                 signalNoLanding(isFresh, rewindToIndex)
             } catch (@Suppress("TooGenericExceptionCaught") searchError: Exception) {
                 android.util.Log.w(LOG_TAG, "Intra-topic search failed", searchError)
-                if (generation != searchGeneration) return@launch
-                _effects.send(TopicEffect.SearchFailed)
-                // The current page is still on screen — just mark the search as failed so the user can
-                // retry or close it.
+                if (generation != ownerGeneration) return@launch
+                // The current page is still on screen — just mark the search as failed so the user
+                // can retry or close it. Status FIRST : the suspending send must be the terminal
+                // operation (gate r4 — no vulnerable write after a suspension).
                 _state.update { it.copy(search = it.search.copy(status = TopicSearchStatus.Error)) }
+                _effects.send(TopicEffect.SearchFailed)
             }
         }
     }
@@ -1368,5 +1904,26 @@ class TopicViewModel @AssistedInject constructor(
         // SearchViewModel.RESOLVE_TIMEOUT_MS (#277): degrade to the untrusted page
         // rather than hold the first load hostage on a degraded network.
         private const val RESOLVE_TIMEOUT_MS: Long = 3_000
+
+        // ─── #895 étape 4 — page engine ──────────────────────────────────────────
+
+        // F2 — LRU bound : « toutes les pages est une fuite lente ; 3 est trop agressif pour les
+        // allers-retours et citations » (cadrage Sol). 5 terminal pages ≈ a reading window of
+        // two back-and-forths plus a quote jump.
+        private const val MAX_PAGE_SNAPSHOTS = 5
+        private const val SNAPSHOTS_INITIAL_CAPACITY = 8
+        private const val SNAPSHOTS_LOAD_FACTOR = 0.75f
+
+        // #782 — same cap as the historical `:app` TopicJumpStack (TOPIC_JUMP_STACK_MAX).
+        private const val JUMP_STACK_MAX = 8
+
+        // SavedStateHandle keys (F1/F3 + Sol points 4-5) — primitives only, never a Kotlin map.
+        private const val KEY_CURRENT_PAGE = "topic.currentPage"
+        private const val KEY_RESOLVED_PAGE = "topic.resolvedPage"
+        private const val KEY_ANCHOR_INDEX = "topic.anchorIndex"
+        private const val KEY_ANCHOR_OFFSET = "topic.anchorOffset"
+        private const val KEY_SCROLL_TO_CONSUMED = "topic.scrollToConsumed"
+        private const val KEY_SUBMIT_CONSUMED = "topic.submitConsumed"
+        private const val KEY_FORCE_REFRESH_DONE = "topic.forceRefreshDone"
     }
 }
