@@ -2857,6 +2857,41 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `closing a failed search after a transition takeover reloads the canonical page (#913)`() = runTest {
+        // Verdict Sol (loupe/#910) : loupe tapped during the grace, search submitted during the
+        // transition (takeover kills the switch load), search FAILS, bar closed → the target must
+        // be reloaded ; the old « no results → no reload » path left the departed page displayed
+        // with the canonical page elsewhere and NO load in flight (the #907-forbidden state).
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 1)
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flow { emit(fakeTopic(2, 5, title = "departed", searchForm = form)) },
+                flow { kotlinx.coroutines.awaitCancellation() },
+                flow { emit(fakeTopic(3, 5, title = "target")) },
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = FakeTopicSearchRepository(error = IllegalStateException("boom")),
+        )
+
+        viewModel.switchToPage(3)
+        // Mid-grace : departed page displayed (Loaded provisional), canonical = 3, loupe active.
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("x"))
+        viewModel.send(TopicIntent.SubmitSearch)
+        assertEquals(TopicSearchStatus.Error, viewModel.state.value.search.status)
+
+        viewModel.send(TopicIntent.CloseSearch)
+
+        val landed = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+        assertEquals("closing the failed search reloaded the CANONICAL page", "target", landed.topic.title)
+        assertEquals(3, viewModel.state.value.request.page)
+    }
+
+    @Test
     fun `pull-to-refresh is a no-op while the displayed page is not the canonical one (#910)`() = runTest {
         val repository = FakeTopicRepository(
             flowsToReturn = listOf(
