@@ -1,6 +1,6 @@
-Redface 2 v0.27.0 — dev.
+Redface 2 v0.27.1 — dev.
 
-- Long-press a topic's title to remove its flag without going back to the list.
-- Post menu: "Send a PM" to the author, with the composer prefilled.
-- Quote: the cursor now starts below the quoted block.
-- The "Quote cards" setting is now labelled experimental.
+- Topic view: stable top bar while pages load ("Loading…", no stale page number).
+- In-topic search: the filter now covers the whole topic, results are paginated.
+- "Quoted xN" badge: server-side counter, across all pages.
+- Quick reply → full screen: the caret stays visible above the keyboard.

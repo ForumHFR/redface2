@@ -1,6 +1,6 @@
-Redface 2 v0.27.0 — dev.
+Redface 2 v0.27.1 — dev.
 
-- Appui long sur le titre d'un sujet : retirer son drapeau sans repasser par la liste.
-- Menu d'un post : « Envoyer un MP » à l'auteur, composeur pré-rempli.
-- Citer : le curseur démarre sous la citation.
-- Le réglage « Citations en cartes » est marqué expérimental.
+- Vue topic : top bar stable pendant les chargements (« Chargement… », plus de numéro périmé).
+- Recherche dans le sujet : le filtre couvre tout le sujet, résultats paginés.
+- Badge « cité ×N » : compteur serveur, toutes pages confondues.
+- Réponse rapide → plein écran : le curseur reste visible au-dessus du clavier.
