@@ -33,7 +33,12 @@ package fr.forumhfr.redface2.core.model
  * @property topicId the `post` hidden field — the topic id.
  * @property cat the topic's category id.
  * @property firstnum the `numreponse` of the first message on the page the form was rendered on.
- *   HFR uses it as the search anchor ; forwarded verbatim.
+ *   HFR uses it as the search anchor (« search from the current page onwards ») ; forwarded
+ *   verbatim. **Nullable since #894** : the field is only present in the form of a NORMAL topic
+ *   page — a `transsearch` RESPONSE ships a form with `currentnum` but NO `firstnum` input
+ *   (verified live 2026-07-12, anonymous AND authenticated). A null must never be silently
+ *   promoted to « search the whole topic » on a fresh submit — the caller either reuses the
+ *   anchor it captured from the last real topic page, or fails explicitly.
  * @property owntopic the `owntopic` flag verbatim from the form (`0` on a normal topic, `1` observed
  *   on the cat-IA owned-topic capture). Wire detail, kept as-is.
  * @property currentNum the server-side navigation cursor parsed from the form's `currentnum` hidden
@@ -47,7 +52,7 @@ data class TopicSearchForm(
     val hashCheck: String,
     val topicId: Int,
     val cat: Int,
-    val firstnum: Int,
+    val firstnum: Int?,
     val owntopic: Int = 0,
     val currentNum: Int? = null,
 ) {
