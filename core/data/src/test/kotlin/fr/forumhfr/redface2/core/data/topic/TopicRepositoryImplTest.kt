@@ -233,6 +233,26 @@ class TopicRepositoryImplTest {
             FetchMode.AUTHENTICATED,
             afterPrefetch!!.authMode,
         )
+        // #895 (quick win 2) — the prefetch must not even HIT the network for a cached page :
+        // its purpose is warming pages never visited. Only the auth warm-up request counts.
+        assertEquals("prefetch over a cached page must be a network no-op", 1, server.requestCount)
+    }
+
+    @Test
+    fun `prefetch skips the network when ANY row exists, even a stale ANONYMOUS one (#895)`() = runTest {
+        // Cold cache → a first anonymous prefetch lands the ANON row (1 request).
+        server.enqueue(MockResponse().setBody(fixtureHtml("topic_page_single.html")))
+        repository(now = Instant.parse("2026-04-26T18:00:00Z")).prefetch(1, 999_395, 1)
+        assertEquals(FetchMode.ANONYMOUS, dao.getTopicPage(1, 999_395, 1)!!.authMode)
+        assertEquals(1, server.requestCount)
+
+        // A much later re-prefetch (row long past the TTL) must STILL skip : re-fetching an anon
+        // row buys nothing — reading it always triggers the authenticated refetch anyway.
+        server.enqueue(MockResponse().setBody(fixtureHtml("topic_page_single.html")))
+        repository(now = Instant.parse("2026-04-26T19:30:00Z")).prefetch(1, 999_395, 1)
+
+        assertEquals("no second network request for an already-cached page", 1, server.requestCount)
+        assertEquals(FetchMode.ANONYMOUS, dao.getTopicPage(1, 999_395, 1)!!.authMode)
     }
 
     @Test

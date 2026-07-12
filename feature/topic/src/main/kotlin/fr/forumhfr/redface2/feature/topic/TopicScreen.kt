@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.systemGestures
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
@@ -40,6 +41,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -78,6 +80,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -1103,11 +1106,15 @@ internal fun TopicContent(
  * while Loading shows a plain « Chargement… ».
  */
 @Composable
-private fun topicBarPageIndicator(state: TopicUiState, loaded: TopicUiState.Mode.Loaded?): String = when {
-    // #877 — a provisional page is the instant cache emission (possibly a stale total, or an
-    // anonymous prefetch row) : keep « Chargement… » until the settled emission lands, so the
-    // pill never flashes a wrong « page X / Y ». The repository guarantees termination.
-    loaded != null && !loaded.provisional -> stringResource(
+internal fun topicBarPageIndicator(state: TopicUiState, loaded: TopicUiState.Mode.Loaded?): String = when {
+    // #895 (quick win 3, revisite du choix #877) — a PROVISIONAL page is the instant cache
+    // emission : its pagination describes EXACTLY the content on screen, so show it. Replacing
+    // known information with « Chargement… » was the residual flash the maintainer reported —
+    // the in-flight refresh is signalled by the discreet progress hairline under the bar (and
+    // the a11y description), never by blanking the pill. The #877 guarantee stands : this is the
+    // REQUESTED page's own row (never the previous page's number), and « Chargement… » remains
+    // for the pure Loading mode below.
+    loaded != null -> stringResource(
         R.string.topic_page_indicator,
         loaded.topic.page,
         loaded.topic.totalPages,
@@ -1125,6 +1132,55 @@ private fun topicBarPageIndicator(state: TopicUiState, loaded: TopicUiState.Mode
 // #772 — extra room for the title's second line (titleMedium line height) while the title is
 // expanded; the small M3 top app bar keeps a fixed container height and would clip it otherwise.
 private val TopBarExpandedTitleExtraHeight = 24.dp
+
+// #895 — the discreet under-bar refresh hairline (visible only while the displayed page is
+// provisional). The 2 dp strip is permanently reserved so it never shifts the list.
+private val TopBarRefreshHairlineHeight = 2.dp
+
+/**
+ * #895 — the top-bar page pill. Shows the pagination OF THE DISPLAYED CONTENT (provisional cache
+ * included — replacing known information with « Chargement… » was the reported flash) ; while the
+ * page is provisional, screen readers get « page X sur Y, actualisation en cours » as the
+ * equivalent of the visual hairline. No liveRegion : announcing cache-then-settled twice per
+ * navigation would be pure noise (cadrage Sol).
+ */
+@Composable
+private fun TopicBarPagePill(
+    text: String,
+    loaded: TopicUiState.Mode.Loaded?,
+    pagePickerLabel: String,
+    onOpenPagePicker: () -> Unit,
+) {
+    val refreshingLabel = loaded?.takeIf { it.provisional }?.let {
+        stringResource(
+            R.string.topic_page_indicator_refreshing_a11y,
+            it.topic.page,
+            it.topic.totalPages,
+        )
+    }
+    val base = if (loaded != null) {
+        Modifier.clickable(onClickLabel = pagePickerLabel, onClick = onOpenPagePicker)
+    } else {
+        Modifier
+    }
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelMedium,
+        color = if (loaded != null) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
+        modifier = if (refreshingLabel != null) {
+            base.semantics { contentDescription = refreshingLabel }
+        } else {
+            base
+        },
+    )
+}
+
+/** #895 — test tag of the provisional-refresh hairline under the top bar. */
+const val TOPIC_REFRESH_HAIRLINE_TAG = "topic_refresh_hairline"
 
 /**
  * #285/#284 + Chantier C (#546) — the topic top app bar (title + page counter + back) plus the
@@ -1200,19 +1256,11 @@ internal fun TopicTopBar(
                             )
                             .semantics { stateDescription = titleStateLabel },
                     )
-                    Text(
+                    TopicBarPagePill(
                         text = barPageIndicator,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = if (loaded != null) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                        modifier = if (loaded != null) {
-                            Modifier.clickable(onClickLabel = pagePickerLabel) { pagePickerOpen = true }
-                        } else {
-                            Modifier
-                        },
+                        loaded = loaded,
+                        pagePickerLabel = pagePickerLabel,
+                        onOpenPagePicker = { pagePickerOpen = true },
                     )
                 }
             },
@@ -1251,6 +1299,24 @@ internal fun TopicTopBar(
             },
             scrollBehavior = scrollBehavior,
         )
+        // #895 (quick win 3) — discreet refresh signal : a 2 dp hairline under the bar while the
+        // displayed page is provisional (cache on screen, authenticated refresh in flight). The
+        // strip is ALWAYS reserved (transparent when settled) so its appearance never shifts the
+        // list below — this PR exists to remove flashes, not to add one.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(TopBarRefreshHairlineHeight),
+        ) {
+            if (loaded?.provisional == true) {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(TopBarRefreshHairlineHeight)
+                        .testTag(TOPIC_REFRESH_HAIRLINE_TAG),
+                )
+            }
+        }
         if (state.search.isActive) {
             TopicSearchBar(search = state.search, onIntent = onIntent)
         }
