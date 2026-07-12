@@ -16,6 +16,18 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.27.1` — `internal` (dev) — 2026-07-12
+
+**Lot de 4 fixes Vue Topic** (#877, #879, #880, #863 — cadrage groupé, gate Codex par PR, dogfood émulateur de chaque flux dont migration Room v14→v15 en conditions réelles).
+
+### Vue Topic
+- #877 : **top bar stable pendant les chargements** (PR #889) — la pilule affiche « Chargement… » tant que la page est provisoire (fini le numéro de page périmé pendant les transitions), la loupe reste visible en mode chargé authentifié, fetch du formulaire de recherche latest-wins.
+- #879 : **recherche intra-topic conforme au contrat transsearch** (PR #891) — le mode filtré couvre TOUT le sujet (plus d'ancrage à la page courante), pagination des résultats filtrés (« résultats suivants ») avec critères figés à la soumission et retour en tête de liste.
+- #863 : **badge « cité ×N » = compteur serveur** (PR #892) — « Message cité N fois », cross-pages et autoritaire, persisté en cache (migration Room v15) ; l'index local limité à la page courante est supprimé.
+
+### Éditeur & réponse rapide
+- #880 : **le curseur reste visible au-dessus du clavier** à l'escalade réponse rapide → plein écran (PR #890) — le suivi du caret se re-déclenche quand le clavier finit de s'installer.
+
 ## `0.27.0` — `internal` (dev) — 2026-07-12
 
 **Lot d'arbitrages et reliquats de la phase** (#792, #809, #881, #805-exp — cadrage + gates Codex par PR, review multi-angles sur #809, dogfood émulateur de chaque flux).
