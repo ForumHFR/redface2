@@ -1903,7 +1903,9 @@ private fun TopicLoadedContent(
             // Phase 2D (#147) — « Modifier » is exposed by HFR only on the
             // user's own posts of an unlocked topic. Same canReply gate as
             // Citer (#213) to refuse a read-only topic (no reply form).
-            val editAction: (() -> Unit)? = if (shouldShowEditAction(topic, post, state.isAuthenticated)) {
+            val editAction: (() -> Unit)? = if (
+                shouldShowEditAction(topic, post, state.isAuthenticated, state.connectedPseudo)
+            ) {
                 { onEdit(topic.subcat, topic.page, post.numreponse) }
             } else {
                 null
@@ -2024,7 +2026,7 @@ private fun TopicLoadedContent(
         val menuDeleteAction: (() -> Unit)? = if (
             state.deletingNumreponse == null &&
             !isFirstPostOfTopic(topic, post) &&
-            shouldShowDeleteAction(topic, post, state.isAuthenticated)
+            shouldShowDeleteAction(topic, post, state.isAuthenticated, state.connectedPseudo)
         ) {
             { onDeleteRequest(post.numreponse) }
         } else {
@@ -2036,7 +2038,7 @@ private fun TopicLoadedContent(
         // so its natural home is that post's contextual menu.
         val menuEditFirstPostAction: (() -> Unit)? = if (
             isFirstPostOfTopic(topic, post) &&
-            shouldShowEditFirstPost(topic, state.isAuthenticated)
+            shouldShowEditFirstPost(topic, state.isAuthenticated, state.connectedPseudo)
         ) {
             { onEditFirstPost(topic.subcat, topic.page, topic.posts.first().numreponse) }
         } else {
@@ -2061,7 +2063,9 @@ private fun TopicLoadedContent(
             },
             // #792 — « Envoyer un MP » : auth-gated, never on own posts, real profiles only
             // (« Publicité » rows are not messageable). Carries the author pseudo to `:app`.
-            onSendPrivateMessage = if (shouldShowSendPrivateMessage(post, state.isAuthenticated)) {
+            onSendPrivateMessage = if (
+                shouldShowSendPrivateMessage(post, state.isAuthenticated, state.connectedPseudo)
+            ) {
                 { onSendPrivateMessage(post.author) }
             } else {
                 null
@@ -2078,7 +2082,9 @@ private fun TopicLoadedContent(
             // either way `numreponse in hiddenNumreponses` tells whether the author is blacklisted, so
             // the entry flips between Masquer / Ne plus masquer. Hidden for the user's own posts.
             authorBlocked = post.numreponse in hiddenNumreponses,
-            onToggleBlockAuthor = if (post.isOwnPost) {
+            // #509 + #545 — never offer self-masking, including when the toolbar-blind parser
+            // could not flag the post as own (affichoutils=0 profiles).
+            onToggleBlockAuthor = if (isOwnPostEffective(post, state.connectedPseudo)) {
                 null
             } else {
                 { onSetAuthorBlocked(post.author, post.numreponse !in hiddenNumreponses) }
@@ -3530,11 +3536,25 @@ internal fun shouldShowQuoteAction(topic: Topic, isAuthenticated: Boolean): Bool
 // logged-in surface), never on the user's own posts, and only for authors with a real HFR
 // profile (`profileId != null` : « Publicité » rows and anonymous reads are not messageable —
 // same gate as the profile hero). Topic lock is irrelevant : the MP leaves the topic entirely.
-internal fun shouldShowSendPrivateMessage(post: Post, isAuthenticated: Boolean): Boolean =
-    isAuthenticated && !post.isOwnPost && post.profileId != null
+internal fun shouldShowSendPrivateMessage(
+    post: Post,
+    isAuthenticated: Boolean,
+    connectedPseudo: String?,
+): Boolean =
+    isAuthenticated && !isOwnPostEffective(post, connectedPseudo) && post.profileId != null
 
-internal fun shouldShowEditAction(topic: Topic, post: Post, isAuthenticated: Boolean): Boolean =
-    post.isEditable && topic.canReply && isAuthenticated
+// #545 — `post.isEditable` is blind when the profile disables « Affichage des outils »
+// (affichoutils=0 : HFR strips the whole toolbar), so ownership-by-pseudo is an OR-fallback.
+// HFR's edit form itself works regardless of the option — only the link was missing.
+internal fun shouldShowEditAction(
+    topic: Topic,
+    post: Post,
+    isAuthenticated: Boolean,
+    connectedPseudo: String?,
+): Boolean =
+    (post.isEditable || isOwnPostBySession(post, connectedPseudo)) &&
+        topic.canReply &&
+        isAuthenticated
 
 // #292 — « Supprimer » shares the « Modifier » gate: HFR exposes deletion through the same edit
 // form, so any post the user can edit, they can delete. The first-post exclusion (deleting it would
@@ -3548,8 +3568,15 @@ internal fun shouldShowEditAction(topic: Topic, post: Post, isAuthenticated: Boo
 internal fun shouldShowLastReadMarker(request: TopicRequest, numreponse: Int): Boolean =
     request.forceRefresh && request.scrollTo == numreponse
 
-internal fun shouldShowDeleteAction(topic: Topic, post: Post, isAuthenticated: Boolean): Boolean =
-    post.isEditable && topic.canReply && isAuthenticated
+internal fun shouldShowDeleteAction(
+    topic: Topic,
+    post: Post,
+    isAuthenticated: Boolean,
+    connectedPseudo: String?,
+): Boolean =
+    (post.isEditable || isOwnPostBySession(post, connectedPseudo)) &&
+        topic.canReply &&
+        isAuthenticated
 
 // #292 — the topic's first post is `topic.posts.first()` on page 1. Deleting it would remove the whole
 // topic (out of scope for this MVP), so the call site excludes it from the delete affordance. Position
@@ -3561,10 +3588,19 @@ internal fun isFirstPostOfTopic(topic: Topic, post: Post): Boolean =
 // Phase 2D #148 / #220 — « Modifier le premier message ». 6-way conjunction by design: auth,
 // FP ownership, postable topic, a real sub-category (FP recategorise is NOT relaxed for subcat=0,
 // cf. #213), page 1 (the FP lives there), non-empty posts. Each clause guards a distinct invariant.
+// #545 — `isFirstPostOwner` is parser-derived from the FIRST post's edit link, itself absent for
+// affichoutils=0 profiles ; ownership-by-pseudo of that same first post is the OR-fallback.
 @Suppress("ComplexCondition")
-internal fun shouldShowEditFirstPost(topic: Topic, isAuthenticated: Boolean): Boolean =
+internal fun shouldShowEditFirstPost(
+    topic: Topic,
+    isAuthenticated: Boolean,
+    connectedPseudo: String?,
+): Boolean =
     isAuthenticated &&
-        topic.isFirstPostOwner &&
+        (
+            topic.isFirstPostOwner ||
+                topic.posts.firstOrNull()?.let { isOwnPostBySession(it, connectedPseudo) } == true
+            ) &&
         topic.canReply &&
         topic.subcat > 0 &&
         topic.page == 1 &&
