@@ -291,7 +291,14 @@ class TopicViewModel @AssistedInject constructor(
         // at submit. Symmetric with the « Créer topic » FAB (CategoryViewModel.canCreateTopic).
         authRepository.observeAuthState()
             .onEach { authState ->
-                _state.update { it.copy(isAuthenticated = authState is AuthState.Authenticated) }
+                _state.update {
+                    it.copy(
+                        isAuthenticated = authState is AuthState.Authenticated,
+                        // #545 — carry the session pseudo for the ownership fallback (profiles
+                        // with affichoutils=0 get no toolbar : isEditable/isOwnPost are blind).
+                        connectedPseudo = (authState as? AuthState.Authenticated)?.pseudo,
+                    )
+                }
             }
             .launchIn(viewModelScope)
         // Build 89 follow-up — mirror the top-bar auto-hide preference into state so the screen
@@ -1164,7 +1171,9 @@ class TopicViewModel @AssistedInject constructor(
         // sub-category, cf. EditPostContext), so only the SUBCAT_UNKNOWN sentinel (-1) is rejected.
         val post = topic.posts.firstOrNull { it.numreponse == numreponse }
         val isFirstPost = topic.page == 1 && numreponse == topic.posts.firstOrNull()?.numreponse
-        if (post != null && !isFirstPost && post.isEditable && topic.canReply &&
+        val ownedPost = post != null &&
+            (post.isEditable || isOwnPostBySession(post, _state.value.connectedPseudo))
+        if (ownedPost && !isFirstPost && topic.canReply &&
             _state.value.isAuthenticated && topic.subcat >= 0
         ) {
             runDeletion(numreponse, topic.subcat)

@@ -21,6 +21,13 @@ data class TopicUiState(
      */
     val isAuthenticated: Boolean = false,
     /**
+     * #545 — pseudo of the authenticated session, `null` while anonymous. Feeds the ownership
+     * fallback [isOwnPostBySession] : profiles with `affichoutils=0` get no post toolbar from
+     * HFR, so `Post.isEditable`/`Post.isOwnPost` are blind there and the gates need the session
+     * pseudo to recognise the user's own posts by author instead.
+     */
+    val connectedPseudo: String? = null,
+    /**
      * #292 — `numreponse` of the post whose deletion is currently in flight, or `null` when no
      * delete is running. Drives the per-post « Supprimer » affordance (disabled / busy) and guards
      * against a double-submit. Cleared when the delete settles (success or failure).
