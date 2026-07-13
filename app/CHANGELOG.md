@@ -16,6 +16,15 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.29.1` — `internal` (dev) — 2026-07-13
+
+**Trio multiquote** (#868/#869/#870, PR #920 — le lot retenu de la nuit, mergé après dogfood émulateur complet des 8 contrats du cadrage, au matin post-reboot).
+
+### Vue topic / composer
+- **#868 — le FAB « Citer N » survit** à l'ouverture de l'éditeur + retour sans envoi : le panier n'est plus vidé à l'OUVERTURE mais à l'**envoi réussi** d'une session qui l'a consommé (flag explicite porté par le chemin d'ouverture — « Citer » simple, réponse, édition et échecs d'envoi ne le vident jamais ; « Tout vider » reste le reset manuel).
+- **#869 — le compteur repart de N**, plus jamais de reset à 1 après un aller-retour.
+- **#870 — plus de citations fantômes** : la feuille de réponse remet ses citations exactement au set livré à chaque ouverture (plus de fusion avec une session précédente).
+
 ## `0.29.0` — `internal` (dev) — 2026-07-13
 
 **Lot de nuit 12→13/07** (#813 images fantômes, #862 épinglés drapeaux, trio éditeur #873/#900/#872, garde citation #583, fix loupe #913 de la veille). Chantiers cadrés + gatés hors-bande (GPT-5.6 Sol) ; vérification visuelle émulateur non réalisée cette nuit (hôte KVM HS — reboot machine requis), couverture par tests JVM/Robolectric + fixtures serveur réelles.

@@ -1,7 +1,3 @@
-Redface 2 v0.29.0 — dev.
+Redface 2 v0.29.1 — dev.
 
-- Ghost images now recover on pull-to-refresh.
-- Pinned topics finally show up in the flag lists.
-- The editor preview renders standard smileys.
-- A failed quote prefill blocks the send instead of silently posting without it.
-- Misc: denser smiley panel, editor label, search icon consistency.
+- Multiquote fixed: the "Quote N" basket survives editor round-trips (no more vanishing FAB or counter reset), and the reply sheet no longer shows ghost quotes from a previous session. The basket only clears on a successful send.

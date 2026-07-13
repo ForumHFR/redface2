@@ -1,7 +1,3 @@
-Redface 2 v0.29.0 — dev.
+Redface 2 v0.29.1 — dev.
 
-- Les images qui ne s'affichaient jamais se récupèrent d'un tirer-pour-rafraîchir.
-- Les sujets épinglés apparaissent enfin dans les listes de drapeaux.
-- L'aperçu de l'éditeur affiche les smileys standards.
-- Une citation qui échoue bloque l'envoi au lieu de poster sans le bloc cité.
-- Divers : panneau smileys plus dense, libellé éditeur, loupe de recherche.
+- Multiquote réparé : le panier « Citer N » survit aux allers-retours avec l'éditeur (plus de FAB disparu ni de compteur reparti à 1), et la feuille de réponse n'affiche plus de citations fantômes d'une session précédente. Le panier ne se vide qu'à l'envoi réussi.
