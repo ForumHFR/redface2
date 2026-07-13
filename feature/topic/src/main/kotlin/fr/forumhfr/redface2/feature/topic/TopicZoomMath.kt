@@ -1,28 +1,39 @@
 package fr.forumhfr.redface2.feature.topic
 
+import kotlin.math.atanh
+import kotlin.math.tanh
+
 internal const val MIN_ZOOM_SCALE = 1f
 internal const val MAX_ZOOM_SCALE = 2.5f
 internal const val ZOOM_RELEASE_SNAP_THRESHOLD = 1.03f
-internal const val ZOOM_RUBBER_BAND_RESISTANCE = 0.25f
+
+/** Maximum displayed overshoot past [MAX_ZOOM_SCALE] while the fingers keep squeezing. */
+internal const val ZOOM_RUBBER_BAND_RANGE = 0.25f
+
+// atanh(x) diverges at |x| = 1: displayed scales at the saturation asymptote are clamped just
+// inside it so the inversion in pinchStep stays finite.
+private const val RUBBER_BAND_INVERSION_CEILING = 0.999999f
 
 /**
  * Display scale for the global magnifier gesture (#182).
  *
  * The floor is hard: pinching below 1× never shrinks the topic. Up to [MAX_ZOOM_SCALE], the raw
- * gesture scale is preserved. Past that ceiling, a linear rubber band keeps the mapping continuous
- * and strictly monotone while applying [ZOOM_RUBBER_BAND_RESISTANCE] to any excess. The linear form
- * is deliberately invertible: [pinchStep] can recover the logical raw scale before applying the next
- * incremental zoom factor, so an already-resisted scale is not resisted a second time.
+ * gesture scale is preserved. Past that ceiling, a SATURATING tanh rubber band (the PageSwipe
+ * overpull pattern) bounds the displayed scale under `MAX + ZOOM_RUBBER_BAND_RANGE`: an unbounded
+ * band let a hard squeeze keep growing the scale, and the centroid anchoring then kept scrolling
+ * the list — the screen visibly drifted「by itself」at deep zoom (S25 field report, POC iter 1).
+ * tanh is invertible on its range: [pinchStep] recovers the logical raw scale before applying the
+ * next incremental zoom factor, so an already-resisted scale is not resisted a second time.
  *
- * The rubber band is visual gesture feedback, not a persisted bound. [resolveScaleOnRelease] restores
- * the 2.5× ceiling when the fingers lift.
+ * The rubber band is visual gesture feedback, not a persisted bound. [resolveScaleOnRelease]
+ * restores the 2.5× ceiling when the fingers lift.
  */
 internal fun clampScaleDuringPinch(raw: Float): Float {
     require(raw.isFinite()) { "raw must be finite" }
     return when {
         raw <= MIN_ZOOM_SCALE -> MIN_ZOOM_SCALE
         raw <= MAX_ZOOM_SCALE -> raw
-        else -> MAX_ZOOM_SCALE + (raw - MAX_ZOOM_SCALE) * ZOOM_RUBBER_BAND_RESISTANCE
+        else -> MAX_ZOOM_SCALE + ZOOM_RUBBER_BAND_RANGE * tanh(raw - MAX_ZOOM_SCALE)
     }
 }
 
@@ -134,7 +145,9 @@ private fun rawScaleForDisplayedScale(scale: Float): Float =
     if (scale <= MAX_ZOOM_SCALE) {
         scale
     } else {
-        MAX_ZOOM_SCALE + (scale - MAX_ZOOM_SCALE) / ZOOM_RUBBER_BAND_RESISTANCE
+        val saturation = ((scale - MAX_ZOOM_SCALE) / ZOOM_RUBBER_BAND_RANGE)
+            .coerceAtMost(RUBBER_BAND_INVERSION_CEILING)
+        MAX_ZOOM_SCALE + atanh(saturation)
     }
 
 private fun minPanX(scale: Float, widthPx: Float): Float = widthPx * (MIN_ZOOM_SCALE - scale)
