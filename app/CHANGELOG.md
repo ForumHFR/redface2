@@ -16,6 +16,19 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.29.2` — `internal` (dev) — 2026-07-13
+
+**Batch autonome de l'après-midi** (5 chantiers, gates croisés Claude Fable 5 ↔ GPT 5.6 Sol : deux fixes codés par Sol et gatés par Claude, trois l'inverse).
+
+### Fixes
+- **#918 — recherche globale** : la rangée d'onglets catégories ne disparaît plus après une bascule de catégorie (HFR n'embarque pas le pivot dans les réponses mono-catégorie ; il est désormais conservé). [codé par Sol]
+- **#545 — édition de ses propres posts** : les profils HFR avec « Affichage des outils » désactivée (affichoutils=0) retrouvent Modifier/Supprimer — l'ownership est reconnu par le pseudo de session quand HFR ne sert pas la toolbar (cause reproduite live ; les gardes MP-à-soi/auto-masquage suivent).
+- **#532 — lignes vides alignées sur le web** : contrat serveur capturé live (HFR compresse : n lignes vides → floor(n/2)+1 visibles, sans plafond) ; l'app sous-rendait ces runs depuis #466. Rendu visible sur les posts multi-paragraphes. [codé par Sol]
+- **#872 (a) — libellé « Contenu BBCode »** : épinglé au-dessus du viewport scrollable des éditeurs plein écran — il ne peut plus être rogné par le scroll d'ouverture, à aucun fontScale (nom accessible conservé via la sémantique du champ).
+
+### Améliorations
+- **#900 (volet 2) — panneau smileys** : la grille se cale sur 62 % de la hauteur d'écran (plancher 320 dp) — la feuille atteint ~3/4 de l'écran (mesuré 73,8 % au dogfood), réponse au retour de CharLee.
+
 ## `0.29.1` — `internal` (dev) — 2026-07-13
 
 **Trio multiquote** (#868/#869/#870, PR #920 — le lot retenu de la nuit, mergé après dogfood émulateur complet des 8 contrats du cadrage, au matin post-reboot).

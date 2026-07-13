@@ -1,3 +1,6 @@
-Redface 2 v0.29.1 — dev.
+Redface 2 v0.29.2 — dev.
 
-- Multiquote réparé : le panier « Citer N » survit aux allers-retours avec l'éditeur (plus de FAB disparu ni de compteur reparti à 1), et la feuille de réponse n'affiche plus de citations fantômes d'une session précédente. Le panier ne se vide qu'à l'envoi réussi.
+- Recherche : les onglets de catégories ne disparaissent plus après un changement de catégorie.
+- Édition : Modifier/Supprimer réapparaissent sur vos propres posts si votre profil HFR masque les outils.
+- Lecture : l'espacement des lignes vides suit désormais exactement le rendu du site web.
+- Éditeur : le libellé « Contenu BBCode » n'est plus tronqué, et le panneau smileys occupe ~3/4 de l'écran.
