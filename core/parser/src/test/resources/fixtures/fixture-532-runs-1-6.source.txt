@@ -1,0 +1,5 @@
+Capture: forum.hardware.fr live, 2026-07-13
+Provenance: corps de post fourni par le mainteneur pour l'issue #532 ; URL, catégorie et numreponse non fournis.
+Contenu: runs source de 1, 2, 3, 4 et 6 lignes vides entre M1 et M6 ; M0/M1 vérifie le <br /> intra-paragraphe.
+Nettoyage: prose de fin retirée ; la séquence utile des balises <p>/<br /> et des &nbsp; est inchangée.
+Encodage: capture annoncée latin-1 ; contenu utile ASCII après nettoyage.

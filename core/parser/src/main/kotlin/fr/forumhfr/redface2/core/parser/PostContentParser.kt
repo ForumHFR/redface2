@@ -101,12 +101,11 @@ class PostContentParser {
             pendingParagraph = false
         }
 
-        // #466 — count of orphan `&nbsp;` (U+00A0) carried by the last top-level whitespace-only
-        // text node, kept pending until we know what follows it. HFR always emits at LEAST one
-        // `&nbsp;` between two sibling <p> (the structural paragraph separator, ~all pages), and
-        // an EXTRA `&nbsp;` for each blank line the author typed in between. So a run of N drives
-        // (N - 1) rendered empty lines ; a lone separator (N == 1) keeps the current behaviour
-        // (two distinct Paragraph blocks). See `parseParagraphContainer`.
+        // #466/#532 — count of orphan `&nbsp;` (U+00A0) carried by the last top-level
+        // whitespace-only text node, kept pending until we know what follows it. Live captures for
+        // #532 establish that EVERY `&nbsp;` between two sibling <p> represents one visible blank
+        // line; a leading <br> in the following <p> represents one more. See
+        // `parseParagraphContainer` for the AST newline conversion.
         var pendingNbsp = 0
 
         nodes.forEach { node ->
@@ -197,24 +196,22 @@ class PostContentParser {
     }
 
     /**
-     * #466 — folds the orphan `&nbsp;` run separating two `<p>` into rendered empty lines.
+     * #466/#532 — folds the orphan `&nbsp;` run separating two `<p>` into rendered empty lines.
      *
-     * HFR encodes a deliberate blank line BETWEEN two paragraphs as an EXTRA `&nbsp;` in the
-     * orphan text node separating the two `<p>` (the very first `&nbsp;` is the structural
-     * separator HFR always emits between any two sibling `<p>`). The parser used to swallow that
-     * whitespace and emit each `<p>` as its own Paragraph block, losing the empty lines (the
-     * "lignes sautées" bug, suite of #333/#280 — the earlier fix only covered the
-     * `<br />&nbsp;<br />` shape, not the `</p>&nbsp;…&nbsp;<p>` one).
+     * Live HFR captures for #532 establish the server contract: every orphan `&nbsp;` between two
+     * sibling `<p>` is one visible blank line, and a `<br>` at the very start of the following `<p>`
+     * adds one more. Compose renders N [PostInline.LineBreak] nodes between non-empty text lines as
+     * N - 1 empty typographic lines, so the AST needs one boundary break in addition to the visible
+     * blank-line count.
      *
      * An inline-only `<p>` (HFR never nests a block table/container directly inside a `<p>`,
      * verified across the fixtures) is accumulated into the running paragraph buffer rather than
      * sub-parsed, so the NEXT `<p>` can decide to merge with it:
-     *  - when at least one EXTRA `&nbsp;` is pending (run ≥ 2) and the running paragraph already
-     *    holds real content, the boundary is kept inside ONE paragraph as [pendingNbsp] LineBreaks
-     *    — one for the paragraph boundary itself plus (pendingNbsp - 1) for the authored empty
-     *    lines. They sit strictly between two text runs, so the #333 edge-trim never touches them.
-     *  - otherwise (lone `&nbsp;` separator, or an empty running paragraph) the running paragraph
-     *    is flushed first, so two ordinary paragraphs stay two distinct Paragraph blocks as before.
+     *  - when at least one `&nbsp;` is pending and the running paragraph already holds real content,
+     *    the two `<p>` bodies are kept in ONE paragraph. The separator contributes
+     *    `pendingNbsp + 1` LineBreaks, plus one if the next `<p>` starts with `<br>`.
+     *  - otherwise (no `&nbsp;`, or an empty running paragraph) the running paragraph is flushed
+     *    first, so unrelated paragraphs stay distinct blocks.
      *
      * A `<p>` that does carry a nested block keeps the legacy path: flush, then sub-parse so the
      * inner block surfaces.
@@ -240,7 +237,7 @@ class PostContentParser {
         // Only fold the `&nbsp;` separator into empty lines when the buffer is genuinely the body of
         // a PREVIOUS inline-only <p> ([pendingParagraph]) — NOT arbitrary buffered inline content.
         // `<strong>A</strong>&nbsp;&nbsp;<p>B</p>` must stay two blocks, not merge (#466 Codex review).
-        val mergeable = pendingNbsp >= 2 && pendingParagraph && paragraph.any { it.isNonBlank() }
+        val mergeable = pendingNbsp > 0 && pendingParagraph && paragraph.any { it.isNonBlank() }
         if (mergeable) {
             // #466 (Codex review) — drop a trailing border <br> on the first paragraph so its edge
             // break does not pile onto the separator breaks below (the legacy sub-parse edge-trimmed
@@ -248,7 +245,9 @@ class PostContentParser {
             while (paragraph.isNotEmpty() && paragraph.last().isBlankOrBreak()) {
                 paragraph.removeAt(paragraph.lastIndex)
             }
-            repeat(pendingNbsp) { paragraph += PostInline.LineBreak }
+            val leadingParagraphBreak = children.firstOrNull().isLineBreakElement()
+            val separatorBreakCount = pendingNbsp + 1 + if (leadingParagraphBreak) 1 else 0
+            repeat(separatorBreakCount) { paragraph += PostInline.LineBreak }
         } else {
             // Close the previous paragraph as its own block, then accumulate this <p>'s inline
             // content into the now-empty buffer so a following <p> can still merge with it (#466).
@@ -256,9 +255,9 @@ class PostContentParser {
         }
         // Accumulate the <p> body inline, honouring the same per-node classification as the block
         // path: a nested <br> stays a LineBreak and an ignored node (e.g. a `clear: both` spacer
-        // div) is dropped. EDGE-trim leading/trailing breaks (#466 Codex review): the real fixture
-        // has `<p><br />Pour…`, whose leading border <br> would otherwise render an extra empty line
-        // — only INTERIOR breaks (the author's line structure) survive, matching flushParagraph #333.
+        // div) is dropped. EDGE-trim leading/trailing breaks (#466 Codex review): a leading <br> is
+        // represented exactly once in separatorBreakCount when paragraphs merge, while unrelated
+        // paragraph edges keep the legacy trim. Only INTERIOR breaks remain in the parsed body.
         val merged = buildList {
             children.forEach { child ->
                 when (classifyNode(child)) {
@@ -304,11 +303,11 @@ class PostContentParser {
 
     private fun classifyNonElement(node: Node): NodeKind = when {
         node !is TextNode -> NodeKind.IGNORE
-        // #466 — a whitespace-only text node carrying at least one `&nbsp;` (U+00A0) is HFR's
-        // inter-paragraph separator, possibly inflated with one extra `&nbsp;` per authored empty
-        // line. It is BLANK_TEXT so parseBlocks can fold the run into rendered line breaks instead
-        // of swallowing it. A whitespace text node WITHOUT `&nbsp;` stays INLINE: it is genuine
-        // word spacing inside a paragraph and must survive between two text runs.
+        // #466/#532 — a whitespace-only text node carrying at least one `&nbsp;` (U+00A0) can be
+        // HFR's compressed inter-paragraph empty-line run. It is BLANK_TEXT so parseBlocks can defer
+        // the decision until it sees the following node. A whitespace text node WITHOUT `&nbsp;`
+        // stays INLINE: it is genuine word spacing inside a paragraph and must survive between two
+        // text runs.
         node.wholeText.isBlank() && node.wholeText.any { it == NBSP } -> NodeKind.BLANK_TEXT
         else -> NodeKind.INLINE
     }
