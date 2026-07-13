@@ -60,6 +60,115 @@ internal fun panXRange(scale: Float, widthPx: Float): ClosedFloatingPointRange<F
 }
 
 /**
+ * Vertical translation allowed by #182 for a top-left transform origin. At 1x, or when
+ * [viewportHeightPx] is zero, both endpoints are zero. [scale] must be at least 1x and
+ * [viewportHeightPx] non-negative.
+ */
+internal fun panYRange(
+    scale: Float,
+    viewportHeightPx: Float,
+): ClosedFloatingPointRange<Float> {
+    requireScaleAndHeight(scale, viewportHeightPx)
+    return viewportHeightPx * (MIN_ZOOM_SCALE - scale)..0f
+}
+
+/**
+ * Pure downward distribution for the #182 vertical axis. [panYNew] is in screen pixels;
+ * [listRequestViewportPx] is an unscaled viewport-pixel delta for `dispatchRawDelta`.
+ */
+internal data class VerticalDistribution(
+    val panYNew: Float,
+    val listRequestViewportPx: Float,
+)
+
+/**
+ * First phase of an upward content move: converts a non-negative screen-pixel delta into the
+ * unscaled viewport pixels requested from the list. The split is necessary because the list's
+ * consumed value is only available after the caller performs the `dispatchRawDelta` side effect;
+ * [upwardPanYAfterScroll] keeps the second phase pure and independently testable.
+ */
+internal fun upwardListRequestViewportPx(
+    deltaScreenPx: Float,
+    scale: Float,
+): Float {
+    requireNonNegativeScreenDelta(deltaScreenPx)
+    requireScale(scale)
+    return deltaScreenPx / scale
+}
+
+/**
+ * Second phase of an upward content move. The real list scroll is preferred; only its unconsumed
+ * screen-pixel remainder moves [panYOld] toward the lower bound. [consumedViewportPx] is the
+ * finite value actually returned by the list and is deliberately not clamped here. The output is
+ * clamped at both ends so a momentarily invalid pan is repaired even when the list consumes all.
+ */
+internal fun upwardPanYAfterScroll(
+    deltaScreenPx: Float,
+    consumedViewportPx: Float,
+    panYOld: Float,
+    scale: Float,
+    viewportHeightPx: Float,
+): Float {
+    requireNonNegativeScreenDelta(deltaScreenPx)
+    require(consumedViewportPx.isFinite()) { "consumedViewportPx must be finite" }
+    require(panYOld.isFinite()) { "panYOld must be finite" }
+    val range = panYRange(scale, viewportHeightPx)
+    val unconsumedScreenPx = deltaScreenPx - consumedViewportPx * scale
+    return (panYOld - unconsumedScreenPx).coerceIn(range)
+}
+
+/**
+ * Distributes a negative screen-pixel content delta by unwinding vertical layer translation
+ * before requesting any backward list scroll. Unlike the upward path, this can stay one pure
+ * phase because the list request is fully known before the caller performs its side effect.
+ *
+ * The pan is clamped at both bounds, and its signed contribution is measured from the actual
+ * [panYOld], not from a pre-clamped copy. An input above zero is offset by an extra backward list
+ * request. If a repair from below the lower bound exceeds the requested move, no opposite list
+ * request is emitted and the displacement is best-effort. The list request is in viewport pixels.
+ */
+internal fun downwardDistribution(
+    deltaScreenPx: Float,
+    panYOld: Float,
+    scale: Float,
+    viewportHeightPx: Float,
+): VerticalDistribution {
+    require(deltaScreenPx.isFinite() && deltaScreenPx < 0f) {
+        "deltaScreenPx must be finite and negative"
+    }
+    require(panYOld.isFinite()) { "panYOld must be finite" }
+    val range = panYRange(scale, viewportHeightPx)
+    val downScreenPx = -deltaScreenPx
+    val panYNew = (panYOld + downScreenPx).coerceIn(range)
+    val usedByPanYScreenPx = panYNew - panYOld
+    val remainingScreenPx = downScreenPx - usedByPanYScreenPx
+    val listRequestViewportPx =
+        if (remainingScreenPx > 0f) -remainingScreenPx / scale else 0f
+    return VerticalDistribution(panYNew, listRequestViewportPx)
+}
+
+/**
+ * Screen-space drift of the content point that was under [anchorY] before a scale step. [panYNew]
+ * is the already re-clamped layer translation for [scaleNew]. A positive result means that the
+ * point landed below the anchor and the caller must move content upward by that many screen pixels.
+ */
+internal fun anchoredVerticalDrift(
+    anchorY: Float,
+    panYOld: Float,
+    scaleOld: Float,
+    scaleNew: Float,
+    panYNew: Float,
+): Float {
+    require(anchorY.isFinite()) { "anchorY must be finite" }
+    require(panYOld.isFinite()) { "panYOld must be finite" }
+    requireScale(scaleOld)
+    requireScale(scaleNew)
+    require(panYNew.isFinite()) { "panYNew must be finite" }
+    val viewportY = (anchorY - panYOld) / scaleOld
+    return viewportY * scaleNew + panYNew - anchorY
+}
+
+/**
  * Zoom draw-layer state of the #182 magnifier: a uniform [scale] with a top-left transform origin
  * and a horizontal-only [panX] translation. There is deliberately no vertical translation — the
  * vertical axis is navigated by REAL list scrolling (the lazy list cannot reveal uncomposed items
@@ -151,6 +260,23 @@ private fun rawScaleForDisplayedScale(scale: Float): Float =
     }
 
 private fun minPanX(scale: Float, widthPx: Float): Float = widthPx * (MIN_ZOOM_SCALE - scale)
+
+private fun requireScale(scale: Float) {
+    require(scale.isFinite() && scale >= MIN_ZOOM_SCALE) { "scale must be finite and at least 1" }
+}
+
+private fun requireScaleAndHeight(scale: Float, viewportHeightPx: Float) {
+    requireScale(scale)
+    require(viewportHeightPx.isFinite() && viewportHeightPx >= 0f) {
+        "viewportHeightPx must be finite and non-negative"
+    }
+}
+
+private fun requireNonNegativeScreenDelta(deltaScreenPx: Float) {
+    require(deltaScreenPx.isFinite() && deltaScreenPx >= 0f) {
+        "deltaScreenPx must be finite and non-negative"
+    }
+}
 
 private fun requireScaleAndWidth(scale: Float, widthPx: Float) {
     require(scale.isFinite() && scale >= MIN_ZOOM_SCALE) { "scale must be finite and at least 1" }
