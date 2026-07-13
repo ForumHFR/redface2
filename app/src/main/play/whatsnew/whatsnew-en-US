@@ -1,3 +1,6 @@
-Redface 2 v0.29.1 — dev.
+Redface 2 v0.29.2 — dev.
 
-- Multiquote fixed: the "Quote N" basket survives editor round-trips (no more vanishing FAB or counter reset), and the reply sheet no longer shows ghost quotes from a previous session. The basket only clears on a successful send.
+- Search: category tabs no longer vanish after switching categories.
+- Editing: Edit/Delete come back on your own posts when your HFR profile hides the toolbar.
+- Reading: blank-line spacing now matches the website rendering exactly.
+- Editor: the "Contenu BBCode" label is never truncated anymore, and the smiley panel now uses ~3/4 of the screen.
