@@ -36,6 +36,7 @@ import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
@@ -95,17 +96,18 @@ fun SmileyPickerSheet(
         LaunchedEffect(state.query.isNotEmpty()) {
             if (state.query.isNotEmpty()) tabIndex = 1
         }
+        val sheetTitle = stringResource(R.string.editor_smiley_title)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+                // #900 — header density pass (tinc, DEV #2790993) : the VISIBLE « Smileys » title
+                // line is gone (the Standard/Wiki tabs already name the surface visually), spacing
+                // tightened 12 → 8 dp. The sheet keeps an ACCESSIBLE name through paneTitle —
+                // TalkBack still announces the surface (gate Sol r1). Touch targets keep 48 dp.
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .semantics { paneTitle = sheetTitle },
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(
-                text = stringResource(R.string.editor_smiley_title),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
             PrimaryTabRow(selectedTabIndex = tabIndex) {
                 Tab(
                     selected = tabIndex == 0,
@@ -171,6 +173,10 @@ private fun WikiTabContent(
                 if (textChanged) onQueryChange(newValue.text)
             },
             singleLine = true,
+            // #900 r1 (gate Sol) — the label STAYS a label : a placeholder disappears once the
+            // user typed, losing the field's persistent name (a11y + context). The header gain
+            // comes from the removed title line alone ; the placeholder/grid-cap leg of the
+            // density pass is deferred to a short-screen/fontScale visual check (émulateur).
             label = { Text(stringResource(R.string.editor_smiley_search_label)) },
             modifier = Modifier
                 .fillMaxWidth()
@@ -232,7 +238,9 @@ private fun SmileyGrid(items: List<EditorSmiley>, onSmileyClicked: (String) -> U
             .fillMaxWidth()
             // Cap the grid height inside the bottom sheet so it does not eat the whole
             // screen on small devices ; the sheet's own scrollable container takes over
-            // beyond this point.
+            // beyond this point. #900 keeps this cap UNCHANGED for now (gate Sol r1 : raising
+            // it needs a short-screen + fontScale proof, émulateur requis) — the density gain
+            // ships as the removed title line.
             .heightIn(max = 320.dp),
     ) {
         items(items = items, key = { it.token to it.imageUrl }) { smiley ->

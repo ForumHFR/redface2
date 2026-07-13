@@ -1,8 +1,10 @@
 package fr.forumhfr.redface2.core.parser
 
+import fr.forumhfr.redface2.core.model.BUILTIN_HFR_SMILEYS
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
+import fr.forumhfr.redface2.core.model.SmileyKind
 
 /**
  * Best-effort BBCode → [PostContent] parser for the Phase 2B editor preview.
@@ -439,6 +441,65 @@ class BbcodeContentParser {
                 out += current
             }
         }
+        // #873 — smiley pass AFTER the text merge : the tokenizer may fragment a `[:name]` run
+        // across several Text tokens (the `[` open is rejected as a tag), so scanning any earlier
+        // would miss smileys straddling fragments. Runs only on final paragraph/inline content —
+        // raw-text blocks (fixed/code) never reach collapseInlines, exactly like the web.
+        return splitSmileysInTexts(out)
+    }
+
+    /** #873 — expand every [PostInline.Text] into `Text | Smiley` runs, other nodes untouched. */
+    private fun splitSmileysInTexts(inlines: List<PostInline>): List<PostInline> =
+        inlines.flatMap { node ->
+            if (node is PostInline.Text) splitSmileyRuns(node.value) else listOf(node)
+        }
+
+    /**
+     * #873 — detect the two HFR smiley syntaxes inside a plain-text run for the editor preview :
+     *
+     *  - **builtin `:code:`** — candidates are proposed by [BUILTIN_CANDIDATE_REGEX] then validated
+     *    by EXACT membership in [BuiltinSmileyUrls] (built from `BUILTIN_HFR_SMILEYS`) : `:30:` in
+     *    « 10:30:45 » is a candidate but not a token, so it stays text. The punctuation emoticons
+     *    (`:)`, `:D`, `:o`, `:/`) are deliberately NOT scanned — in free text they are ambiguous
+     *    (URLs, code, prose) and a wrong hit is worse in a preview than a missing sprite.
+     *  - **perso `[:name]`** — unambiguous bracket syntax (names may carry spaces/accents/`:N`
+     *    variants). Emitted with `imageUrl = null` : the sprite URL is NOT derivable from the name
+     *    (shard directories), so the renderer keeps showing the typed token — no regression, and a
+     *    resolution channel (picker-fed registry) can land separately.
+     */
+    private fun splitSmileyRuns(text: String): List<PostInline> {
+        val out = mutableListOf<PostInline>()
+        var cursor = 0
+        var match = SMILEY_CANDIDATE_REGEX.find(text)
+        while (match != null) {
+            val candidate = match.value
+            val smiley = when {
+                candidate.startsWith("[:") -> PostInline.Smiley(
+                    kind = SmileyKind.Perso(candidate.removeSurrounding("[:", "]")),
+                    imageUrl = null,
+                )
+                else -> BuiltinSmileyUrls[candidate]?.let { url ->
+                    PostInline.Smiley(kind = SmileyKind.Builtin(candidate), imageUrl = url)
+                }
+            }
+            val searchFrom: Int
+            if (smiley == null) {
+                // Rejected candidate (not a real token) : resume INSIDE it, not after it —
+                // a non-overlapping skip would eat the shared colon and mask a genuine token
+                // right behind (`:inconnu:jap:` must still render `:jap:` — gate Sol r1).
+                searchFrom = match.range.first + 1
+            } else {
+                if (match.range.first > cursor) {
+                    out += PostInline.Text(text.substring(cursor, match.range.first))
+                }
+                out += smiley
+                cursor = match.range.last + 1
+                searchFrom = cursor
+            }
+            match = if (searchFrom < text.length) SMILEY_CANDIDATE_REGEX.find(text, searchFrom) else null
+        }
+        if (out.isEmpty()) return listOf(PostInline.Text(text))
+        if (cursor < text.length) out += PostInline.Text(text.substring(cursor))
         return out
     }
 
@@ -448,6 +509,19 @@ class BbcodeContentParser {
 
     private companion object {
         val EMPTY_AST: PostContent = PostContent(blocks = emptyList())
+
+        /**
+         * #873 — one regex proposes candidates for BOTH syntaxes, membership then validates :
+         * `\[:[^\[\]]+]` = perso bracket runs, `:[A-Za-z0-9_?]+:` = word-form builtin codes
+         * (`:pt1cable:` has a digit, `:??:` question marks). Punctuation emoticons (`:)`, `:D`)
+         * are intentionally not candidates — cf. [splitSmileyRuns].
+         */
+        val SMILEY_CANDIDATE_REGEX = Regex("""\[:[^\[\]]+]|:[A-Za-z0-9_?]+:""")
+
+        /** #873 — word-form builtin tokens only, mapped to their canonical sprite URL. */
+        val BuiltinSmileyUrls: Map<String, String> = BUILTIN_HFR_SMILEYS
+            .filter { SMILEY_CANDIDATE_REGEX.matches(it.token) }
+            .associate { it.token to it.imageUrl }
 
         /**
          * Tag names handled at block level (paragraph flush + dedicated block node).
