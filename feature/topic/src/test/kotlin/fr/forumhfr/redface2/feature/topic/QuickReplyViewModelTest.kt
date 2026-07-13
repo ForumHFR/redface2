@@ -316,14 +316,30 @@ class QuickReplyViewModelTest {
     }
 
     @Test
-    fun `onSheetOpened appends idempotently after the cards the VM already holds`() = runTest {
+    fun `reopening resets the cards to exactly the delivered set (870)`() = runTest {
+        // #870 — the VM outlives the sheet : cards from a PREVIOUS session must not merge into a
+        // new opening (they desynchronised the sheet from the « Citer N » FAB). The selection is
+        // safe in the hoisted basket (#868/#869 : it now survives until an actual send).
         val viewModel = quickReplyViewModel()
         viewModel.onQuoteAdded(preview(303, "carol"))
-        // Re-opening with an overlap (303) must neither duplicate nor reorder the existing card.
-        viewModel.onSheetOpened(listOf(preview(101, "alice"), preview(303, "carol")))
+        viewModel.onSheetOpened(listOf(preview(101, "alice"), preview(202, "bob")))
         advanceUntilIdle()
 
-        assertEquals(listOf(303, 101), viewModel.state.value.quotes.map { it.numreponse })
+        assertEquals(listOf(101, 202), viewModel.state.value.quotes.map { it.numreponse })
+    }
+
+    @Test
+    fun `reopening with no quotes drops the stale cards and keeps the draft text (870)`() = runTest {
+        val draftStore = FakeQuickReplyDraftStore(initialBody = "brouillon")
+        val viewModel = quickReplyViewModel(draftStore = draftStore)
+        viewModel.onQuoteAdded(preview(303, "carol"))
+        // A plain « Répondre » reopening delivers nothing : the previous session's cards must not
+        // resurrect, while the #405 draft text is untouched (its row stays the source of truth).
+        viewModel.onSheetOpened()
+        advanceUntilIdle()
+
+        assertTrue("stale cards must not survive a fresh opening", viewModel.state.value.quotes.isEmpty())
+        assertEquals("brouillon", viewModel.state.value.text.text)
     }
 
     // ----- #805 : cartes OFF (défaut production) — [quotemsg] inline dans le champ ----------
@@ -445,9 +461,11 @@ class QuickReplyViewModelTest {
     }
 
     @Test
-    fun `stale cards from a previous ON session are folded into the inline insert`() = runTest {
-        // Gate Codex (finding 1) — the VM outlives the sheet : cards armed while the preference
-        // was ON must not re-render (nor re-arm the cards submit path) after a flip to OFF.
+    fun `stale cards from a previous ON session are dropped by an OFF opening (870)`() = runTest {
+        // #870 supersedes the gate-Codex fold (finding 1 of #805) : stale cards are DROPPED, not
+        // folded — the delivered set is the session, and the citation selection now survives in
+        // the hoisted basket (#868/#869), so nothing the user selected is lost. The OFF opening
+        // still never re-arms the cards submit path.
         val repository = FakeQuickReplyRepository()
         val viewModel = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
         viewModel.onQuoteAdded(preview(101, "alice"))
@@ -458,7 +476,7 @@ class QuickReplyViewModelTest {
         val state = viewModel.state.value
         assertTrue("no card survives an OFF opening", state.quotes.isEmpty())
         assertEquals(
-            "[quotemsg=101]corps[/quotemsg]\n\n[quotemsg=202]corps[/quotemsg]\n",
+            "[quotemsg=202]corps[/quotemsg]\n",
             state.text.text,
         )
     }

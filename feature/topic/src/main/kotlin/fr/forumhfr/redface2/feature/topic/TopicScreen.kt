@@ -159,9 +159,15 @@ fun TopicScreen(
      * (#790): the sheet JUST wrote the #405 row, so the editor auto-applies it (appending to any
      * typed text) WITHOUT a banner — re-proposing a draft the user is visibly continuing would be
      * noise. Defaults to a no-op for non-topic callers (previews/tests never escalate).
+     * #868-#870 — `consumesBasket` forwards the sheet session's basket consumption : true only when
+     * the escalated sheet was opened by « Citer N » (its successful submit then empties the basket).
      */
-    onEscalateToFullEditor: (subcat: Int, page: Int, quotes: List<QuotedPostPreview>) -> Unit =
-        { _, _, _ -> },
+    onEscalateToFullEditor: (
+        subcat: Int,
+        page: Int,
+        quotes: List<QuotedPostPreview>,
+        consumesBasket: Boolean,
+    ) -> Unit = { _, _, _, _ -> },
     /**
      * Open the editor in edit mode (Phase 2D, #147). HFR exposes the edit link on
      * the post's left toolbar only when the post belongs to the current user and
@@ -912,8 +918,13 @@ internal fun TopicContent(
     onReply: (subcat: Int, page: Int, quotes: List<QuotedPostPreview>) -> Unit,
     // #843 — the quick-reply sheet's escalation (resumeSharedDraft = true, silent append) ; distinct
     // from [onReply] which is a COLD full-editor open (resumeSharedDraft = false → restore banner).
-    onEscalateToFullEditor: (subcat: Int, page: Int, quotes: List<QuotedPostPreview>) -> Unit =
-        { _, _, _ -> },
+    // #868-#870 — carries the session's basket consumption (cf. TopicScreen KDoc).
+    onEscalateToFullEditor: (
+        subcat: Int,
+        page: Int,
+        quotes: List<QuotedPostPreview>,
+        consumesBasket: Boolean,
+    ) -> Unit = { _, _, _, _ -> },
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
@@ -1047,6 +1058,10 @@ internal fun TopicContent(
                     when (writingSurfaceFor(state.writingSurfacePreset, quoteCount = selection.size)) {
                         WritingSurface.FULL_EDITOR -> onMultiQuote(subcat, page)
                         WritingSurface.SHEET -> {
+                            // #868/#869 — the basket is NO LONGER cleared here : closing the sheet
+                            // without sending keeps the selection armed (the « Citer N » FAB and
+                            // counter survive a cancel). The clear happens on the sheet's
+                            // SubmitSucceeded (or its escalation's) via consumesBasket below.
                             quickReplyFor = QuickReplyLaunch(
                                 request = QuickReplyRequest(
                                     cat = state.request.cat,
@@ -1055,8 +1070,8 @@ internal fun TopicContent(
                                     page = page,
                                 ),
                                 initialQuotes = selection,
+                                consumesBasket = true,
                             )
-                            onClearMultiQuote()
                         }
                     }
                 },
@@ -1192,10 +1207,21 @@ internal fun TopicContent(
             onEscalate = { quotes ->
                 quickReplyFor = null
                 // #843 — genuine escalation: resumeSharedDraft = true (silent append), NOT the cold
-                // onReply path which surfaces the restore banner.
-                onEscalateToFullEditor(launch.request.subcat, launch.request.page, quotes)
+                // onReply path which surfaces the restore banner. #868-#870 — the escalated editor
+                // inherits this session's basket consumption.
+                onEscalateToFullEditor(
+                    launch.request.subcat,
+                    launch.request.page,
+                    quotes,
+                    launch.consumesBasket,
+                )
             },
             onSubmitted = { targetPage, scrollTo ->
+                // #868/#869 — a SUCCESSFUL send of a basket-consuming session (« Citer N » ≤ 2)
+                // finally consumes the selection ; a dismiss/cancel above never does.
+                if (launch.consumesBasket) {
+                    onClearMultiQuote()
+                }
                 quickReplyFor = null
                 onQuickReplySubmitted(targetPage, scrollTo)
             },
@@ -3439,6 +3465,13 @@ private fun ReplyFab(onClick: () -> Unit) {
 internal data class QuickReplyLaunch(
     val request: QuickReplyRequest,
     val initialQuotes: List<QuotedPostPreview> = emptyList(),
+    /**
+     * #868-#870 — true only when this opening consumed the hoisted multi-quote basket
+     * (« Citer N » under the sheet threshold) : a successful submit of THIS session (or of its
+     * full-screen escalation) then empties the basket. « Citer » simple and the reply FAB leave
+     * the basket alone — they never shipped it.
+     */
+    val consumesBasket: Boolean = false,
 )
 
 /** #806 — the two composition surfaces a write tap can open. */
