@@ -470,7 +470,8 @@ class BbcodeContentParser {
     private fun splitSmileyRuns(text: String): List<PostInline> {
         val out = mutableListOf<PostInline>()
         var cursor = 0
-        SMILEY_CANDIDATE_REGEX.findAll(text).forEach { match ->
+        var match = SMILEY_CANDIDATE_REGEX.find(text)
+        while (match != null) {
             val candidate = match.value
             val smiley = when {
                 candidate.startsWith("[:") -> PostInline.Smiley(
@@ -480,12 +481,22 @@ class BbcodeContentParser {
                 else -> BuiltinSmileyUrls[candidate]?.let { url ->
                     PostInline.Smiley(kind = SmileyKind.Builtin(candidate), imageUrl = url)
                 }
-            } ?: return@forEach
-            if (match.range.first > cursor) {
-                out += PostInline.Text(text.substring(cursor, match.range.first))
             }
-            out += smiley
-            cursor = match.range.last + 1
+            val searchFrom: Int
+            if (smiley == null) {
+                // Rejected candidate (not a real token) : resume INSIDE it, not after it —
+                // a non-overlapping skip would eat the shared colon and mask a genuine token
+                // right behind (`:inconnu:jap:` must still render `:jap:` — gate Sol r1).
+                searchFrom = match.range.first + 1
+            } else {
+                if (match.range.first > cursor) {
+                    out += PostInline.Text(text.substring(cursor, match.range.first))
+                }
+                out += smiley
+                cursor = match.range.last + 1
+                searchFrom = cursor
+            }
+            match = if (searchFrom < text.length) SMILEY_CANDIDATE_REGEX.find(text, searchFrom) else null
         }
         if (out.isEmpty()) return listOf(PostInline.Text(text))
         if (cursor < text.length) out += PostInline.Text(text.substring(cursor))

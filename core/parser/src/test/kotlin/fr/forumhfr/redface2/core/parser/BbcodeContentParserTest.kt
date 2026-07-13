@@ -494,4 +494,57 @@ class BbcodeContentParserTest {
         val paragraph = ast.blocks.single() as PostBlock.Paragraph
         assertEquals(2, paragraph.inlines.count { it is PostInline.Smiley })
     }
+
+    @Test
+    fun `a rejected candidate does not mask a genuine token sharing its colon (segmentation)`() {
+        // Gate Sol r1 — non-overlapping scanning ate the shared colon : `:inconnu:` (rejected)
+        // consumed the `:` that opens `:jap:`. The scan must resume INSIDE a rejected candidate.
+        val ast = parser.parse(":inconnu:jap: ok")
+        val paragraph = ast.blocks.single() as PostBlock.Paragraph
+        assertEquals(
+            listOf(
+                PostInline.Text(":inconnu"),
+                PostInline.Smiley(
+                    kind = SmileyKind.Builtin(":jap:"),
+                    imageUrl = "https://forum-images.hardware.fr/icones/smilies/jap.gif",
+                ),
+                PostInline.Text(" ok"),
+            ),
+            paragraph.inlines,
+        )
+    }
+
+    @Test
+    fun `a smiley inside a link label keeps the link and converts the sprite`() {
+        val ast = parser.parse("[url=https://example.com]regarde :jap:[/url]")
+        val paragraph = ast.blocks.single() as PostBlock.Paragraph
+        val link = paragraph.inlines.single() as PostInline.Link
+        assertEquals("https://example.com", link.url)
+        assertEquals(
+            listOf(
+                PostInline.Text("regarde "),
+                PostInline.Smiley(
+                    kind = SmileyKind.Builtin(":jap:"),
+                    imageUrl = "https://forum-images.hardware.fr/icones/smilies/jap.gif",
+                ),
+            ),
+            link.children,
+        )
+    }
+
+    @Test
+    fun `invariant - exactly the punctuation emoticons are excluded from the preview scan`() {
+        // Makes the deliberate exclusion EXPLICIT (gate Sol r1) : every word-form builtin token is
+        // scannable ; the ambiguous punctuation emoticons — and only them — are left as text. A
+        // future addition to BUILTIN_HFR_SMILEYS lands on the right side of the line or fails here.
+        val wordForm = Regex("""(?::[A-Za-z0-9_?]+:|\[:[^\[\]]+])""")
+        val excluded = fr.forumhfr.redface2.core.model.BUILTIN_HFR_SMILEYS
+            .map { it.token }
+            .filterNot { wordForm.matches(it) }
+            .toSet()
+        assertEquals(
+            setOf(":)", ":(", ":D", ";)", ":o", ":p", ":'("),
+            excluded,
+        )
+    }
 }
