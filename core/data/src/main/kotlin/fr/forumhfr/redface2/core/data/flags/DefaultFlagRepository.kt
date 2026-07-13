@@ -162,8 +162,16 @@ class DefaultFlagRepository @Inject constructor(
     override suspend fun refresh(type: FlagType) {
         // #862 — an EXPLICIT refresh opens a new sweep generation : the shared topics/last sweep
         // is a coalescing device for one refresh burst, never a temporal cache — a user who just
-        // flagged a sticky and pulls must see it (gate Sol r2, no business TTL).
-        synchronized(stickySweeps) { sweepGeneration++ }
+        // flagged a sticky and pulls must see it (gate Sol r2, no business TTL). The bump is
+        // idempotent PER BURST (gate Sol r3) : it only fires when the current generation has
+        // already materialised a sweep, so several refresh(type) calls of one global pull —
+        // arriving before their first sweep exists — land in the SAME new generation and share
+        // one Deferred, while a later pull (its generation's sweep exists) re-probes.
+        synchronized(stickySweeps) {
+            if (stickySweeps.keys.any { it.sweepGeneration == sweepGeneration }) {
+                sweepGeneration++
+            }
+        }
         val refreshesForType = refreshes.getValue(type)
         refreshesForType.emit(FlagsResult.Loading)
         val userId = currentUserId()
@@ -351,6 +359,10 @@ class DefaultFlagRepository @Inject constructor(
 
     private suspend fun fetch(type: FlagType, userId: String): FlagsResult = withContext(ioDispatcher) {
         val startGeneration = synchronized(cachedSuccesses) { sessionGeneration }
+        // #862 (gate Sol r3) — capture the SWEEP generation too : a fetch that started under an
+        // older burst must never join a newer burst's sweep (it would publish a mix of old bucket
+        // rows + new supplement, and holes would leak across generations).
+        val startSweepGeneration = synchronized(stickySweeps) { sweepGeneration }
         val result = runCatching {
             val cats = loadCategories()
             val bucket = type.toBucket()
@@ -379,6 +391,7 @@ class DefaultFlagRepository @Inject constructor(
                     alreadyPresent = bucketFlags,
                     userId = userId,
                     sessionGen = startGeneration,
+                    sweepGen = startSweepGeneration,
                 )
                 (bucketFlags + stickySupplement)
                     // Per-category fan-out concatenates results in cat-iteration order — without a
@@ -530,16 +543,19 @@ class DefaultFlagRepository @Inject constructor(
      * #862 widened the scope from no-subcategory cats to ALL cats (~19 parallel GETs per refresh,
      * same order of magnitude as the bucket fan-out itself) — the drop was proven category-wide.
      */
+    @Suppress("LongParameterList") // generation guards ride the fetch context — a holder would obscure them
     private suspend fun fetchStickyFlagSupplement(
         cats: List<Category>,
         type: FlagType,
         alreadyPresent: List<Flag>,
         userId: String,
         sessionGen: Int,
+        sweepGen: Int,
     ): List<Flag> {
-        // A stale session generation (post-clearSessionCache caller) or an empty catalogue both
-        // degrade to « no supplement » — never create a sweep for a logged-out account.
-        val sweep = if (cats.isEmpty()) null else stickySweep(cats, userId, sessionGen)
+        // A stale generation (post-clearSessionCache caller, or a fetch that started under an
+        // older refresh burst) or an empty catalogue all degrade to « no supplement » — never
+        // create a sweep for a logged-out account, never join a newer burst's sweep.
+        val sweep = if (cats.isEmpty()) null else stickySweep(cats, userId, sessionGen, sweepGen)
         if (sweep == null) return emptyList()
         val present = alreadyPresent.mapTo(mutableSetOf()) { it.cat to it.topicId }
         val bodies = try {
@@ -582,12 +598,16 @@ class DefaultFlagRepository @Inject constructor(
         cats: List<Category>,
         userId: String,
         sessionGen: Int,
+        sweepGen: Int,
     ): Deferred<Map<Int, String?>>? = synchronized(stickySweeps) {
         val currentSessionGen = synchronized(cachedSuccesses) { sessionGeneration }
         if (sessionGen != currentSessionGen) return@synchronized null
+        // Gate Sol r3 — a fetch that started under an older burst is refused (it degrades to an
+        // empty supplement) exactly like a stale session : generations never mix.
+        if (sweepGen != sweepGeneration) return@synchronized null
         val key = SweepKey(
             sessionGeneration = sessionGen,
-            sweepGeneration = sweepGeneration,
+            sweepGeneration = sweepGen,
             userId = userId,
             catIds = cats.map { it.id },
         )

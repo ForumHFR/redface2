@@ -439,6 +439,101 @@ class DefaultFlagRepositoryTest {
     }
 
     @Test
+    fun `refreshes of one burst share one sweep - the generation bump is idempotent per burst - 862`() = runTest {
+        // #862 gate Sol r3 — a global pull calls refresh(type) for several types : arriving before
+        // their burst's first sweep exists, none of them bumps the generation, so they share ONE
+        // topics/last Deferred (19 GETs per burst, never 19 × types).
+        val catalogue = listOf(
+            Category(id = 13, name = "Discussions", forceSubcat = true, subcategoryCount = 15),
+        )
+        val gate = CompletableDeferred<Unit>()
+        val apiClient = mockk<HfrApiClient>()
+        coEvery {
+            apiClient.getCategoryFlagTopics(
+                cat = 13, bucket = any(), page = any(), resultsPerPage = any(), useAuth = true,
+            )
+        } coAnswers {
+            gate.await()
+            EMPTY_PAGE
+        }
+        coEvery {
+            apiClient.getTopicList(cat = 13, subcat = null, page = any(), resultsPerPage = any(), useAuth = true)
+        } returns fixture("rest_cat13_topics_last_sticky_favorite.json")
+        val repo = buildRepository(apiClient, stubForumRepository(catalogue))
+
+        val cyan = launch { repo.refresh(FlagType.CYAN) }
+        runCurrent()
+        val favorite = launch { repo.refresh(FlagType.FAVORITE) }
+        runCurrent()
+        gate.complete(Unit)
+        cyan.join()
+        favorite.join()
+
+        coVerify(exactly = 1) {
+            apiClient.getTopicList(cat = 13, subcat = null, page = any(), resultsPerPage = any(), useAuth = true)
+        }
+    }
+
+    @Test
+    fun `a fetch that started under an older burst never joins a newer sweep - 862`() = runTest {
+        // #862 gate Sol r3 — generations never mix : a fetch that captured burst N degrades to an
+        // empty supplement once a refresh opened burst N+1, instead of publishing « old bucket
+        // rows + new supplement ».
+        val catalogue = listOf(
+            Category(id = 13, name = "Discussions", forceSubcat = true, subcategoryCount = 15),
+        )
+        val cyanGate = CompletableDeferred<Unit>()
+        val apiClient = mockk<HfrApiClient>()
+        coEvery {
+            apiClient.getCategoryFlagTopics(
+                cat = 13, bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true,
+            )
+        } coAnswers {
+            cyanGate.await()
+            EMPTY_PAGE
+        }
+        coEvery {
+            apiClient.getCategoryFlagTopics(
+                cat = 13, bucket = HfrRestFlagBucket.FAVORITES,
+                page = any(), resultsPerPage = any(), useAuth = true,
+            )
+        } returns EMPTY_PAGE
+        coEvery {
+            apiClient.getTopicList(cat = 13, subcat = null, page = any(), resultsPerPage = any(), useAuth = true)
+        } returns fixture("rest_cat13_topics_last_sticky_favorite.json")
+        val repo = buildRepository(apiClient, stubForumRepository(catalogue))
+
+        // 1. FAVORITE completes → burst 0's sweep exists.
+        repo.observe(FlagType.FAVORITE).test {
+            assertEquals(FlagsResult.Loading, awaitItem())
+            awaitItem()
+            cancelAndIgnoreRemainingEvents()
+        }
+        // 2. CYAN starts under burst 0, held inside its bucket call.
+        var cyanResult: FlagsResult? = null
+        val cyanJob = launch {
+            cyanResult = repo.observe(FlagType.CYAN).first { it is FlagsResult.Success }
+        }
+        runCurrent()
+        // 3. An explicit refresh opens burst 1 (burst 0's sweep exists → bump) and completes.
+        repo.refresh(FlagType.FAVORITE)
+        // 4. CYAN resumes : its captured burst 0 is stale → refused, bucket-only result.
+        cyanGate.complete(Unit)
+        cyanJob.join()
+
+        val cyanFlags = (cyanResult as FlagsResult.Success).flags
+        assertTrue(
+            "the stale-burst CYAN fetch must not pick the newer sweep's sticky",
+            cyanFlags.none { it.topicId == 100_217 },
+        )
+        // Two sweeps ran (burst 0 by the first FAVORITE, burst 1 by the refresh) ; CYAN created none.
+        coVerify(exactly = 2) {
+            apiClient.getTopicList(cat = 13, subcat = null, page = any(), resultsPerPage = any(), useAuth = true)
+        }
+    }
+
+    @Test
     fun `a sticky already returned by the bucket is not duplicated by the supplement - 251`() = runTest {
         // #251 — dedup by (cat, topicId): if a no-subcat cat's bucket DID return the sticky, the
         // topics/last supplement must not add a second copy.
