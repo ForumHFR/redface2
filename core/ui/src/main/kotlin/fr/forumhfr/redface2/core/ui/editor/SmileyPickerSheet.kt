@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -229,6 +230,14 @@ private fun WikiTabContent(
 
 @Composable
 private fun SmileyGrid(items: List<EditorSmiley>, onSmileyClicked: (String) -> Unit) {
+    // #900 volet 2 (CharLee, TU #2791061) — the grid cap scales with the screen so the sheet
+    // reaches ~3/4 of a phone display instead of the fixed 320 dp, which wasted the bottom half
+    // on tall screens. The 320 dp FLOOR keeps short screens (landscape, split-screen) exactly at
+    // the previous behaviour — the night gate's condition (Sol r1) : never LESS room than before,
+    // and the M3 sheet still clamps itself to the window insets beyond that. The fraction leaves
+    // headroom for the sheet chrome (tabs + search field), which grows with fontScale on its own.
+    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+    val gridHeightCap = maxOf(SMILEY_GRID_MIN_HEIGHT_CAP, screenHeight * SMILEY_GRID_SCREEN_FRACTION)
     LazyVerticalGrid(
         // #236 — denser grid: smaller min cell (was 64.dp) packs more smileys per row.
         columns = GridCells.Adaptive(minSize = 48.dp),
@@ -236,12 +245,7 @@ private fun SmileyGrid(items: List<EditorSmiley>, onSmileyClicked: (String) -> U
         verticalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier
             .fillMaxWidth()
-            // Cap the grid height inside the bottom sheet so it does not eat the whole
-            // screen on small devices ; the sheet's own scrollable container takes over
-            // beyond this point. #900 keeps this cap UNCHANGED for now (gate Sol r1 : raising
-            // it needs a short-screen + fontScale proof, émulateur requis) — the density gain
-            // ships as the removed title line.
-            .heightIn(max = 320.dp),
+            .heightIn(max = gridHeightCap),
     ) {
         items(items = items, key = { it.token to it.imageUrl }) { smiley ->
             SmileyCell(smiley = smiley, onClick = { onSmileyClicked(smiley.token) })
@@ -335,3 +339,12 @@ internal fun smileyCellImageSize(source: EditorSmileySource, measuredPx: IntSize
  * perso, and the per-axis cap of a measured one.
  */
 internal const val WIKI_CELL_IMAGE_SIZE_DP = 44
+
+/**
+ * #900 volet 2 — the grid's height budget : [SMILEY_GRID_SCREEN_FRACTION] of the screen height,
+ * floored at the historical 320 dp so short screens (landscape, split-screen) never get LESS grid
+ * than before. 0.62 of the height plus the sheet chrome (tabs, search field, paddings) lands the
+ * whole sheet around three quarters of a typical phone display (CharLee's ask, TU #2791061).
+ */
+private val SMILEY_GRID_MIN_HEIGHT_CAP = 320.dp
+private const val SMILEY_GRID_SCREEN_FRACTION = 0.62f
