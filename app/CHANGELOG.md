@@ -16,6 +16,23 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.29.0` — `internal` (dev) — 2026-07-13
+
+**Lot de nuit 12→13/07** (#813 images fantômes, #862 épinglés drapeaux, trio éditeur #873/#900/#872, garde citation #583, fix loupe #913 de la veille). Chantiers cadrés + gatés hors-bande (GPT-5.6 Sol) ; vérification visuelle émulateur non réalisée cette nuit (hôte KVM HS — reboot machine requis), couverture par tests JVM/Robolectric + fixtures serveur réelles.
+
+### Vue topic
+- **#813 — les images fantômes se récupèrent** : une image inline dont le premier chargement a échoué (hébergeur en panne, coupure) restait un carré quasi invisible jusqu'à « citer puis revenir ». Le tirer-pour-rafraîchir (et le double-tap) relance désormais mesure ET chargement. (PR #919)
+- **#913 — la loupe de recherche reste cohérente** après la fermeture d'une recherche pendant une transition de page (reliquat de la veille). (PR #914)
+
+### Drapeaux
+- **#862 — les sujets épinglés flaggés apparaissent dans les listes** (favoris/cyan/rouges) : le serveur les omet de ses buckets dans TOUTES les catégories (prouvé par captures) ; le supplément `topics/last` couvre maintenant les 19 catégories, en UN balayage partagé par les trois types (barrière de génération au refresh — cadrage Sol 5 rounds). (PR #922)
+
+### Éditeur
+- **#873 — l'aperçu affiche les smileys standards** (`:jap:`, `:lol:`, `:pt1cable:`… — 51 tokens), validés contre la table canonique (pas de faux positifs type `10:30:45`). Les persos `[:name]` restent en texte (résolution d'URL = suivi) ; les émoticônes ponctuation (`:)`, `:D`) volontairement non converties en aperçu. (PR #921)
+- **#900 — panneau smileys wiki compacté** : ligne de titre retirée (les onglets nomment la surface, TalkBack garde une annonce paneTitle) — une rangée de plus visible. (PR #921)
+- **#872 — le libellé « Contenu BBCode » ne se rogne plus** aux grandes tailles de police (réservation du label indexée sur l'échelle de police). (PR #921)
+- **#583 — une citation qui ne se matérialise pas bloque l'envoi** (erreur retryable) au lieu de poster silencieusement SANS le bloc cité. (PR #922)
+
 ## `0.28.1` — `internal` (dev) — 2026-07-13
 
 **Stale-while-switching** (#910, PR #911 — retour immédiat de XaTriX sur la 0.28.0 : « ça saute/flash toujours sur une page non connue »).

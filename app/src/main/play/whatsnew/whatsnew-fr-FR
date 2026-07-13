@@ -1,3 +1,7 @@
-Redface 2 v0.28.1 — dev.
+Redface 2 v0.29.0 — dev.
 
-- Plus de squelette flashé sur un changement de page rapide : l'ancienne page reste affichée pendant que la nouvelle charge (le squelette n'apparaît qu'au-delà de 250 ms).
+- Les images qui ne s'affichaient jamais se récupèrent d'un tirer-pour-rafraîchir.
+- Les sujets épinglés apparaissent enfin dans les listes de drapeaux.
+- L'aperçu de l'éditeur affiche les smileys standards.
+- Une citation qui échoue bloque l'envoi au lieu de poster sans le bloc cité.
+- Divers : panneau smileys plus dense, libellé éditeur, loupe de recherche.

@@ -1,3 +1,7 @@
-Redface 2 v0.28.1 — dev.
+Redface 2 v0.29.0 — dev.
 
-- No more skeleton flash on fast page changes: the previous page stays on screen while the new one loads (the skeleton only appears past 250 ms).
+- Ghost images now recover on pull-to-refresh.
+- Pinned topics finally show up in the flag lists.
+- The editor preview renders standard smileys.
+- A failed quote prefill blocks the send instead of silently posting without it.
+- Misc: denser smiley panel, editor label, search icon consistency.
