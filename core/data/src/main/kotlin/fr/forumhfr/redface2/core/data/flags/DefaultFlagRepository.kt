@@ -352,13 +352,18 @@ class DefaultFlagRepository @Inject constructor(
                 val bucketFlags = cats.map { category ->
                     async { fetchAllPages(cat = category.id, bucket = bucket, type = type) }
                 }.awaitAll().flatten()
-                // #251 — the per-cat flag buckets DROP flagged STICKY topics in categories with no
-                // subcategory (proven on cat 32 « IA »). Supplement from `topics/last` for those cats
-                // only (cheap: ~1-3 cats) and merge, deduplicated, BEFORE the global sort + cache so
-                // the sticky survives the next refresh. Best-effort by design (see
-                // [fetchStickyFlagSupplement]) — a marginal sticky must not fail the whole screen.
+                // #251/#862 — the per-cat flag buckets DROP flagged STICKY topics in EVERY
+                // category, not just the no-subcategory ones (#251's proof was cat 32 « IA » ;
+                // #862 re-proved it live on cat 13 « Discussions » : a favorite flag on the sticky
+                // « Rappel droits d'auteurs » is absent from `topics/favorites/` while
+                // `topics/last/` at CATEGORY level carries it with `flag_owntopic=3` — including
+                // stickies scoped to subcategories, fixture rest_cat13). Supplement from
+                // `topics/last` for ALL cats (~19 parallel best-effort GETs) and merge,
+                // deduplicated, BEFORE the global sort + cache so the sticky survives the next
+                // refresh. A marginal sticky must not fail the whole screen (see
+                // [fetchStickyFlagSupplement]).
                 val stickySupplement = fetchStickyFlagSupplement(
-                    cats = cats.filter { it.subcategoryCount == 0 },
+                    cats = cats,
                     type = type,
                     alreadyPresent = bucketFlags,
                 )
@@ -494,13 +499,14 @@ class DefaultFlagRepository @Inject constructor(
     }
 
     /**
-     * #251 — best-effort supplement for flagged STICKY topics the per-cat flag buckets drop in
-     * categories WITHOUT a subcategory (proven on cat 32 « IA »: its sticky « Règles » topic carries
-     * a cyan flag but is absent from `topics/participated/`, present in `topics/last/`). For each such
-     * [cats] entry, reads page 1 of `categories/{cat}/topics/last/` (authenticated — `flag_owntopic`
-     * and `is_read` are per-user) and keeps the sticky rows whose flag routes to [type]
-     * ([RestFlagMappers.toStickyFlags]). Rows already in [alreadyPresent] (same `(cat, topicId)`) are
-     * dropped to avoid duplicates with the bucket fan-out.
+     * #251/#862 — best-effort supplement for flagged STICKY topics the per-cat flag buckets drop
+     * (server-side : proven on cat 32 « IA » for a no-subcat cyan, re-proven live 2026-07-13 on
+     * cat 13 « Discussions » for a favorite — the sticky is absent from its bucket but present in
+     * CATEGORY-level `topics/last/` with its `flag_owntopic`, subcategory-scoped stickies
+     * included). For each [cats] entry, reads page 1 of `categories/{cat}/topics/last/`
+     * (authenticated — `flag_owntopic` and `is_read` are per-user) and keeps the sticky rows whose
+     * flag routes to [type] ([RestFlagMappers.toStickyFlags]). Rows already in [alreadyPresent]
+     * (same `(cat, topicId)`) are dropped to avoid duplicates with the bucket fan-out.
      *
      * Best-effort (#251 Codex gate): although it runs in the SAME `coroutineScope` as the bucket
      * fan-out, each cat's `topics/last` call is wrapped in its own `runCatching`, so a network/JSON
@@ -508,8 +514,8 @@ class DefaultFlagRepository @Inject constructor(
      * sticky is not worth turning the screen into a "Réessayer" error. (A `CancellationException` is
      * rethrown, not swallowed, to keep structured concurrency intact.) Page 1 only:
      * stickies always head the listing, so deeper pages would be pure network noise for this fix.
-     * Scoped to no-subcategory cats only, where the drop is proven; a [Category.subcategoryCount]
-     * filter at the call site keeps the cost to ~1-3 extra REST GETs per refresh.
+     * #862 widened the scope from no-subcategory cats to ALL cats (~19 parallel GETs per refresh,
+     * same order of magnitude as the bucket fan-out itself) — the drop was proven category-wide.
      */
     private suspend fun fetchStickyFlagSupplement(
         cats: List<Category>,

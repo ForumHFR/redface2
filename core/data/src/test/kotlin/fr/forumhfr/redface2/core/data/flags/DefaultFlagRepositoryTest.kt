@@ -340,6 +340,41 @@ class DefaultFlagRepositoryTest {
     }
 
     @Test
+    fun `a favorite sticky in a category WITH subcategories is recovered from topics-last - 862`() = runTest {
+        // #862 — the drop is category-wide, not a no-subcat quirk : proven live 2026-07-13 on
+        // cat 13 « Discussions » (15 subcats). The favorites bucket came back EMPTY while
+        // CATEGORY-level topics/last carried the flagged sticky « Rappel droits d'auteurs »
+        // (id=100217, flag_owntopic=3, hosted in subcat 422) — both captured as-is. The #251
+        // supplement, widened to all cats, must recover it.
+        val catalogue = listOf(
+            Category(id = 13, name = "Discussions", forceSubcat = true, subcategoryCount = 15),
+        )
+        val apiClient = mockk<HfrApiClient>()
+        coEvery {
+            apiClient.getCategoryFlagTopics(
+                cat = 13, bucket = HfrRestFlagBucket.FAVORITES,
+                page = any(), resultsPerPage = any(), useAuth = true,
+            )
+        } returns fixture("rest_cat13_favorites_empty_despite_sticky.json")
+        coEvery {
+            apiClient.getTopicList(cat = 13, subcat = null, page = any(), resultsPerPage = any(), useAuth = true)
+        } returns fixture("rest_cat13_topics_last_sticky_favorite.json")
+        val repo = buildRepository(apiClient, stubForumRepository(catalogue))
+
+        repo.observe(FlagType.FAVORITE).test {
+            assertEquals(FlagsResult.Loading, awaitItem())
+            val success = awaitItem() as FlagsResult.Success
+            val sticky = success.flags.single { it.cat == 13 && it.topicId == 100_217 }
+            assertEquals(FlagType.FAVORITE, sticky.type)
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify {
+            apiClient.getTopicList(cat = 13, subcat = null, page = 1, resultsPerPage = 50, useAuth = true)
+        }
+    }
+
+    @Test
     fun `a sticky already returned by the bucket is not duplicated by the supplement - 251`() = runTest {
         // #251 — dedup by (cat, topicId): if a no-subcat cat's bucket DID return the sticky, the
         // topics/last supplement must not add a second copy.
