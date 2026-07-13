@@ -198,6 +198,97 @@ class BbcodeTextFieldViewportTest {
         .value()
 
     @Test
+    fun `pinned label stays fully visible after the viewport scrolled to an end-of-text caret (#872)`() {
+        // The morning re-report of #872 : with the editor compressed (draft banner + IME) and a
+        // restored draft, the open-time caret-follow scrolls the #275/#410 viewport to the LAST
+        // line — the old FLOATING label (drawn inside the viewport) parked half-clipped at its
+        // top edge, at fontScale 1. The pinned label lives ABOVE the scrollable, so it must
+        // remain fully visible whatever the scroll position.
+        lateinit var value: MutableState<TextFieldValue>
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                Surface(color = MaterialTheme.colorScheme.surface) {
+                    // 180.dp ≈ the crushed budget left to the field once the banner and the IME
+                    // have eaten a short display (thibw's screenshot).
+                    Box(Modifier.size(320.dp, 180.dp)) {
+                        value = remember {
+                            mutableStateOf(
+                                TextFieldValue(
+                                    text = (1..80).joinToString("\n") { "ligne $it" },
+                                    selection = TextRange.Zero,
+                                ),
+                            )
+                        }
+                        BbcodeTextField(
+                            value = value.value,
+                            onValueChange = { value.value = it },
+                            label = "Contenu BBCode",
+                            modifier = Modifier.fillMaxSize(),
+                            fillViewport = true,
+                        )
+                    }
+                }
+            }
+        }
+
+        composeTestRule.onNode(hasSetTextAction()).requestFocus()
+        composeTestRule.waitForIdle()
+        // Reproduce the trigger : caret to the end → the viewport scrolls to the bottom.
+        composeTestRule.runOnIdle {
+            value.value = value.value.copy(selection = TextRange(value.value.text.length))
+        }
+        composeTestRule.waitForIdle()
+        assertTrue(
+            "the viewport must actually be scrolled for the repro to be meaningful",
+            scrollValue(BBCODE_FIELD_VIEWPORT_TAG) > 0f,
+        )
+
+        val label = composeTestRule.onNodeWithTag(BBCODE_FIELD_PINNED_LABEL_TAG)
+            .fetchSemanticsNode()
+        val viewport = composeTestRule.onNodeWithTag(BBCODE_FIELD_VIEWPORT_TAG)
+            .fetchSemanticsNode()
+        val labelBottom = label.positionInRoot.y + label.size.height
+        assertTrue(
+            "the pinned label renders entirely ABOVE the scrollable viewport " +
+                "(label=${label.positionInRoot.y}..$labelBottom " +
+                "viewportTop=${viewport.positionInRoot.y})",
+            label.positionInRoot.y >= 0f && labelBottom <= viewport.positionInRoot.y,
+        )
+    }
+
+    @Test
+    fun `pinned-label mode keeps an accessible name on the field (#872, gate Sol)`() {
+        setFieldContent(text = "court")
+
+        val field = composeTestRule.onNode(hasSetTextAction()).fetchSemanticsNode()
+        val description = field.config[SemanticsProperties.ContentDescription]
+        assertTrue(
+            "the field must expose the label as its accessible name (got $description)",
+            description.contains("Message"),
+        )
+    }
+
+    @Test
+    fun `default mode keeps the floating label (no pinned line)`() {
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                Surface(color = MaterialTheme.colorScheme.surface) {
+                    Box(Modifier.size(320.dp, 400.dp)) {
+                        BbcodeTextField(
+                            value = TextFieldValue("court"),
+                            onValueChange = {},
+                            label = "Message",
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+            }
+        }
+
+        composeTestRule.onNodeWithTag(BBCODE_FIELD_PINNED_LABEL_TAG).assertDoesNotExist()
+    }
+
+    @Test
     fun `default mode keeps the plain bounded field`() {
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
