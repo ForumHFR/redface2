@@ -33,7 +33,8 @@
 |---|---|
 | 2026-07-13 | Dossier remis (options A/B/C/E, matrice, plan). **En attente de la réponse formelle à la Question n°1.** |
 | 2026-07-13 | Signal provisoire du décideur : **A d'abord** ; prévision **A + C (+ correctif S/M/L)** ensuite — C et S/M/L pas tout de suite. |
-| — | Décision formelle : _à inscrire ici (date + périmètre), puis ouvrir les issues d'exécution avec les critères d'acceptation recopiés de ce draft._ |
+| 2026-07-13 | **Décision formelle (canal direct, soir)** : périmètre immédiat = **A seul**, exécuté en 3 issues aux critères recopiés d'ici : [#935](https://github.com/ForumHFR/redface2/issues/935) POC A bloquant · [#936](https://github.com/ForumHFR/redface2/issues/936) durcissement multi-touch · [#937](https://github.com/ForumHFR/redface2/issues/937) A-loupe production. Différé confirmé : package complet A + C + correctif S/M/L dans un second temps (l'architecture ne doit pas les gêner). |
+| 2026-07-13 | Validation de préparation (Sol xhigh) : **PRÊT-AVEC-AJUSTEMENTS**, intégrés aux issues — issues autonomes, règle d'arrêt dans #935, S10e = condition de gate, hypothèses des 8 micro-arbitrages posées avant POC, validateur final distinct de l'auteur, annonce DEV avant toute mise à disposition testeurs. Correction de pré-requis PTR (voir §2.1, nota). |
 
 ### La Question n°1 (celle qui commande tout)
 
@@ -155,8 +156,12 @@ n'en perdre aucune ; le POC les tranche avec preuve) :
 
 Pré-requis techniques déjà identifiés : `topicPageSwipe` doit ABANDONNER sur multi-touch même
 après slop (il ne relit pas `enabled()` en cours de drag) — première tranche testée de A ;
-`PostListScaffold` doit exposer `userScrollEnabled` ; `PullToRefreshBox(enabled = scale == 1f)`
-(paramètre existant) ; `selectable = false` à >1× (seam existant).
+`PostListScaffold` doit exposer `userScrollEnabled` ; suspension du PTR via
+`Modifier.pullToRefresh(enabled = scale == 1f)` au call-site (`Box` + `Indicator` remplaçant le
+wrapper) — **corrigé le 13/07 (§7.2, le réel prime)** : `PullToRefreshBox` en material3 1.4.0
+(la version du BOM 2026.05.01, vérifiée dans le sources.jar officiel) n'expose PAS `enabled`,
+contrairement à ce qu'affirmait ce draft, et un simple gate dans `onRefresh` serait insuffisant
+(geste consommé, indicateur armé) ; `selectable = false` à >1× (seam existant).
 
 ### 2.2 Contrat B (repli instruit — exécutable sans nouveau dossier)
 
