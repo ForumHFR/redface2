@@ -533,18 +533,22 @@ class BbcodeContentParserTest {
     }
 
     @Test
-    fun `invariant - exactly the punctuation emoticons are excluded from the preview scan`() {
-        // Makes the deliberate exclusion EXPLICIT (gate Sol r1) : every word-form builtin token is
-        // scannable ; the ambiguous punctuation emoticons — and only them — are left as text. A
-        // future addition to BUILTIN_HFR_SMILEYS lands on the right side of the line or fails here.
-        val wordForm = Regex("""(?::[A-Za-z0-9_?]+:|\[:[^\[\]]+])""")
-        val excluded = fr.forumhfr.redface2.core.model.BUILTIN_HFR_SMILEYS
-            .map { it.token }
-            .filterNot { wordForm.matches(it) }
-            .toSet()
-        assertEquals(
-            setOf(":)", ":(", ":D", ";)", ":o", ":p", ":'("),
-            excluded,
-        )
+    fun `invariant - the parser converts every builtin token except the 7 punctuation emoticons`() {
+        // Makes the deliberate exclusion EXPLICIT by exercising the REAL scan (gate Sol r2 — a
+        // copied regex would not fail if SMILEY_CANDIDATE_REGEX drifted) : every word-form builtin
+        // token must convert through parse(), the ambiguous punctuation emoticons — and only
+        // them — must stay text. A future BUILTIN_HFR_SMILEYS addition lands on the right side of
+        // the line or fails here.
+        val punctuationEmoticons = setOf(":)", ":(", ":D", ";)", ":o", ":p", ":'(")
+        fr.forumhfr.redface2.core.model.BUILTIN_HFR_SMILEYS.forEach { smiley ->
+            val ast = parser.parse("avant ${smiley.token} après")
+            val paragraph = ast.blocks.single() as PostBlock.Paragraph
+            val converted = paragraph.inlines.any { it is PostInline.Smiley }
+            if (smiley.token in punctuationEmoticons) {
+                assertTrue("token ${smiley.token} doit rester du texte", !converted)
+            } else {
+                assertTrue("token ${smiley.token} doit devenir un sprite", converted)
+            }
+        }
     }
 }
