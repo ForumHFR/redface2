@@ -64,6 +64,22 @@ class ReplyQuoteMaterializerTest {
     }
 
     @Test
+    fun `a blank SINGLE-quote prefill fails the fetch instead of posting without the quote - 583`() {
+        // #583 — the single-quote path used to return the form untouched : a 200-OK response with
+        // a BLANK prefill silently posted the reply WITHOUT its quote block (HFR resolves the
+        // prefill by numrep alone — page/p ignored, contract proven live 2026-07-12). It must fail
+        // like the multi-quote path does, keeping the caller's retryable error.
+        val repository = RecordingReplyRepository(blankFor = setOf(101))
+        val materializer = ReplyQuoteMaterializer(repository)
+
+        assertThrows(IllegalStateException::class.java) {
+            runBlocking {
+                materializer.fetchFormWithQuotes(quoteContext(quotedNumreponse = 101), emptyList())
+            }
+        }
+    }
+
+    @Test
     fun `a non-quote context ignores extras`() = runBlocking {
         val repository = RecordingReplyRepository()
         val materializer = ReplyQuoteMaterializer(repository)
