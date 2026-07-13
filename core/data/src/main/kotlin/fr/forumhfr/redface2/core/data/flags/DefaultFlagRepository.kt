@@ -160,6 +160,10 @@ class DefaultFlagRepository @Inject constructor(
     }
 
     override suspend fun refresh(type: FlagType) {
+        // #862 — an EXPLICIT refresh opens a new sweep generation : the shared topics/last sweep
+        // is a coalescing device for one refresh burst, never a temporal cache — a user who just
+        // flagged a sticky and pulls must see it (gate Sol r2, no business TTL).
+        synchronized(stickySweeps) { sweepGeneration++ }
         val refreshesForType = refreshes.getValue(type)
         refreshesForType.emit(FlagsResult.Loading)
         val userId = currentUserId()
@@ -187,7 +191,7 @@ class DefaultFlagRepository @Inject constructor(
         }
         // #862 — same rule for the shared topics/last sweep : never reused across accounts.
         synchronized(stickySweeps) {
-            stickySweeps.values.forEach { it.bodies.cancel() }
+            stickySweeps.values.forEach { it.cancel() }
             stickySweeps.clear()
         }
     }
@@ -374,6 +378,7 @@ class DefaultFlagRepository @Inject constructor(
                     type = type,
                     alreadyPresent = bucketFlags,
                     userId = userId,
+                    sessionGen = startGeneration,
                 )
                 (bucketFlags + stickySupplement)
                     // Per-category fan-out concatenates results in cat-iteration order — without a
@@ -530,11 +535,15 @@ class DefaultFlagRepository @Inject constructor(
         type: FlagType,
         alreadyPresent: List<Flag>,
         userId: String,
+        sessionGen: Int,
     ): List<Flag> {
-        if (cats.isEmpty()) return emptyList()
+        // A stale session generation (post-clearSessionCache caller) or an empty catalogue both
+        // degrade to « no supplement » — never create a sweep for a logged-out account.
+        val sweep = if (cats.isEmpty()) null else stickySweep(cats, userId, sessionGen)
+        if (sweep == null) return emptyList()
         val present = alreadyPresent.mapTo(mutableSetOf()) { it.cat to it.topicId }
         val bodies = try {
-            stickySweep(cats, userId).await()
+            sweep.await()
         } catch (cancellation: CancellationException) {
             // Distinguish « the sweep was cancelled » (session change — degrade, best-effort)
             // from « WE were cancelled » (structured concurrency — rethrow).
@@ -556,57 +565,78 @@ class DefaultFlagRepository @Inject constructor(
     }
 
     /**
-     * #862 (gate Sol) — ONE `topics/last` sweep per refresh burst, SHARED by the three flag types :
-     * per-type sweeps would issue 3 × ~19 largely identical GETs on a full refresh (57 instead
-     * of 19). Keyed by user (a sweep must never be awaited across accounts — same rule as
-     * [inFlightFetches]) and retained [STICKY_SWEEP_TTL_MILLIS] : the types' near-simultaneous
-     * fetches reuse the in-flight/fresh sweep, while a later manual refresh gets fresh data.
-     * Runs in [fetchScope] so the caller that LOSES a tab-switch race does not cancel the sweep
-     * a sibling type still awaits ; [clearSessionCache] cancels and drops it with the rest of the
-     * session state. Per-cat failures degrade to a null body (best-effort, #251).
+     * #862 (gate Sol r2) — ONE `topics/last` sweep per REFRESH GENERATION, shared by the three
+     * flag types : per-type sweeps would issue 3 × ~19 largely identical GETs on a full refresh
+     * (57 instead of 19). This is a COALESCING device, never a temporal cache (no TTL, no wall
+     * clock) : the sweep is keyed by (session generation, sweep generation, user, category-set
+     * signature) — the types of one burst share exactly one [Deferred] ; an explicit [refresh]
+     * bumps [sweepGeneration] so a manual pull always re-probes ; a partially failed sweep only
+     * ever serves its own generation ; a stale post-[clearSessionCache] caller (its captured
+     * session generation no longer matches) gets `null` and degrades instead of creating a sweep
+     * for a logged-out account. Runs in [fetchScope] so the caller that LOSES a tab-switch race
+     * does not cancel the sweep a sibling type still awaits ; [clearSessionCache] cancels and
+     * drops everything. Per-cat failures degrade to a null body (best-effort, #251). Older
+     * generations' entries are pruned WITHOUT cancel (their awaiters finish, the refs are dropped).
      */
-    private fun stickySweep(cats: List<Category>, userId: String): Deferred<Map<Int, String?>> =
-        synchronized(stickySweeps) {
-            val now = System.currentTimeMillis()
-            val cached = stickySweeps[userId]
-            if (cached != null && now - cached.atMillis < STICKY_SWEEP_TTL_MILLIS && !cached.bodies.isCancelled) {
-                cached.bodies
-            } else {
-                fetchScope.async {
-                    coroutineScope {
-                        cats.map { category ->
-                            async {
-                                category.id to runCatching {
-                                    apiClient.getTopicList(
-                                        cat = category.id,
-                                        subcat = null,
-                                        page = 1,
-                                        resultsPerPage = DEFAULT_RESULTS_PER_PAGE,
-                                        useAuth = true,
-                                    )
-                                }.getOrElse { throwable ->
-                                    // Never swallow a coroutine cancellation as a best-effort
-                                    // "miss" — rethrow it so structured concurrency stays intact
-                                    // (#251 Codex review). Only network failures degrade to null.
-                                    if (throwable is CancellationException) throw throwable
-                                    Log.w(
-                                        LOG_TAG,
-                                        "Sticky sweep failed for cat=${category.id} (best-effort)",
-                                        throwable,
-                                    )
-                                    null
-                                }
+    private fun stickySweep(
+        cats: List<Category>,
+        userId: String,
+        sessionGen: Int,
+    ): Deferred<Map<Int, String?>>? = synchronized(stickySweeps) {
+        val currentSessionGen = synchronized(cachedSuccesses) { sessionGeneration }
+        if (sessionGen != currentSessionGen) return@synchronized null
+        val key = SweepKey(
+            sessionGeneration = sessionGen,
+            sweepGeneration = sweepGeneration,
+            userId = userId,
+            catIds = cats.map { it.id },
+        )
+        stickySweeps[key] ?: run {
+            stickySweeps.keys.filter { it != key }.forEach(stickySweeps::remove)
+            fetchScope.async {
+                coroutineScope {
+                    cats.map { category ->
+                        async {
+                            category.id to runCatching {
+                                apiClient.getTopicList(
+                                    cat = category.id,
+                                    subcat = null,
+                                    page = 1,
+                                    resultsPerPage = DEFAULT_RESULTS_PER_PAGE,
+                                    useAuth = true,
+                                )
+                            }.getOrElse { throwable ->
+                                // Never swallow a coroutine cancellation as a best-effort
+                                // "miss" — rethrow it so structured concurrency stays intact
+                                // (#251 Codex review). Only network failures degrade to null.
+                                if (throwable is CancellationException) throw throwable
+                                Log.w(
+                                    LOG_TAG,
+                                    "Sticky sweep failed for cat=${category.id} (best-effort)",
+                                    throwable,
+                                )
+                                null
                             }
-                        }.awaitAll().toMap()
-                    }
-                }.also { stickySweeps[userId] = StickySweep(atMillis = now, bodies = it) }
-            }
+                        }
+                    }.awaitAll().toMap()
+                }
+            }.also { stickySweeps[key] = it }
         }
+    }
 
-    /** #862 — a shared `topics/last` sweep : raw per-cat bodies (null = that cat's GET failed). */
-    private data class StickySweep(val atMillis: Long, val bodies: Deferred<Map<Int, String?>>)
+    /** #862 — identity of one shared sweep : session + refresh burst + account + category set. */
+    private data class SweepKey(
+        val sessionGeneration: Int,
+        val sweepGeneration: Int,
+        val userId: String,
+        val catIds: List<Int>,
+    )
 
-    private val stickySweeps: MutableMap<String, StickySweep> = mutableMapOf()
+    private val stickySweeps: MutableMap<SweepKey, Deferred<Map<Int, String?>>> = mutableMapOf()
+
+    // #862 — bumped by every explicit [refresh] under the stickySweeps lock : a manual pull is a
+    // NEW generation, never served by the previous burst's sweep.
+    private var sweepGeneration = 0
 
     private fun FlagType.toBucket(): HfrRestFlagBucket = when (this) {
         FlagType.CYAN -> HfrRestFlagBucket.PARTICIPATED
@@ -618,14 +648,6 @@ class DefaultFlagRepository @Inject constructor(
         const val LOG_TAG = "FlagRepository"
         const val DEFAULT_RESULTS_PER_PAGE = 50
         const val MAX_PAGES = 100
-
-        /**
-         * #862 — how long a completed `topics/last` sweep keeps serving the sibling flag types.
-         * A full refresh fires the three types within milliseconds of each other ; 10 s covers
-         * that burst (and screen-load auto-refreshes) while a user-driven pull minutes later
-         * still fetches fresh sticky flags.
-         */
-        const val STICKY_SWEEP_TTL_MILLIS = 10_000L
     }
 }
 
