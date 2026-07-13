@@ -439,36 +439,54 @@ class DefaultFlagRepositoryTest {
     }
 
     @Test
-    fun `refreshes of one burst share one sweep - the generation bump is idempotent per burst - 862`() = runTest {
-        // #862 gate Sol r3 — a global pull calls refresh(type) for several types : arriving before
-        // their burst's first sweep exists, none of them bumps the generation, so they share ONE
-        // topics/last Deferred (19 GETs per burst, never 19 × types).
+    fun `an old in-flight fetch never joins the sweep of a newer explicit refresh - 862`() = runTest {
+        // #862 gate Sol r4 counter-case — an observe-triggered fetch is held BEFORE any sweep
+        // exists ; an explicit refresh arrives. refresh() is a strict generation barrier
+        // (unconditional bump) : the old fetch, resuming after the pull, must degrade to a
+        // bucket-only result instead of sharing the pull's fresh sweep (old bucket rows + new
+        // supplement must never mix).
         val catalogue = listOf(
             Category(id = 13, name = "Discussions", forceSubcat = true, subcategoryCount = 15),
         )
-        val gate = CompletableDeferred<Unit>()
+        val cyanGate = CompletableDeferred<Unit>()
         val apiClient = mockk<HfrApiClient>()
         coEvery {
             apiClient.getCategoryFlagTopics(
-                cat = 13, bucket = any(), page = any(), resultsPerPage = any(), useAuth = true,
+                cat = 13, bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true,
             )
         } coAnswers {
-            gate.await()
+            cyanGate.await()
             EMPTY_PAGE
         }
+        coEvery {
+            apiClient.getCategoryFlagTopics(
+                cat = 13, bucket = HfrRestFlagBucket.FAVORITES,
+                page = any(), resultsPerPage = any(), useAuth = true,
+            )
+        } returns EMPTY_PAGE
         coEvery {
             apiClient.getTopicList(cat = 13, subcat = null, page = any(), resultsPerPage = any(), useAuth = true)
         } returns fixture("rest_cat13_topics_last_sticky_favorite.json")
         val repo = buildRepository(apiClient, stubForumRepository(catalogue))
 
-        val cyan = launch { repo.refresh(FlagType.CYAN) }
+        // 1. CYAN starts under generation 0, held in its bucket call — no sweep exists yet.
+        var cyanResult: FlagsResult? = null
+        val cyanJob = launch {
+            cyanResult = repo.observe(FlagType.CYAN).first { it is FlagsResult.Success }
+        }
         runCurrent()
-        val favorite = launch { repo.refresh(FlagType.FAVORITE) }
-        runCurrent()
-        gate.complete(Unit)
-        cyan.join()
-        favorite.join()
+        // 2. Explicit refresh : new generation, creates THE only sweep of this test.
+        repo.refresh(FlagType.FAVORITE)
+        // 3. CYAN resumes with its captured generation → refused, bucket-only.
+        cyanGate.complete(Unit)
+        cyanJob.join()
 
+        val cyanFlags = (cyanResult as FlagsResult.Success).flags
+        assertTrue(
+            "the pre-pull CYAN fetch must not pick the pull's sticky supplement",
+            cyanFlags.none { it.topicId == 100_217 },
+        )
         coVerify(exactly = 1) {
             apiClient.getTopicList(cat = 13, subcat = null, page = any(), resultsPerPage = any(), useAuth = true)
         }

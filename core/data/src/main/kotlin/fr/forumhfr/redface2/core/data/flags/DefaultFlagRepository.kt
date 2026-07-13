@@ -160,18 +160,17 @@ class DefaultFlagRepository @Inject constructor(
     }
 
     override suspend fun refresh(type: FlagType) {
-        // #862 — an EXPLICIT refresh opens a new sweep generation : the shared topics/last sweep
-        // is a coalescing device for one refresh burst, never a temporal cache — a user who just
-        // flagged a sticky and pulls must see it (gate Sol r2, no business TTL). The bump is
-        // idempotent PER BURST (gate Sol r3) : it only fires when the current generation has
-        // already materialised a sweep, so several refresh(type) calls of one global pull —
-        // arriving before their first sweep exists — land in the SAME new generation and share
-        // one Deferred, while a later pull (its generation's sweep exists) re-probes.
-        synchronized(stickySweeps) {
-            if (stickySweeps.keys.any { it.sweepGeneration == sweepGeneration }) {
-                sweepGeneration++
-            }
-        }
+        // #862 — an EXPLICIT refresh is a strict GENERATION BARRIER for the shared topics/last
+        // sweep (a coalescing device, never a temporal cache — gate Sol r2/r4) : it ALWAYS opens a
+        // new generation, so (a) the pull re-probes (a just-flagged sticky shows up), and (b) any
+        // OLDER fetch still in flight — even one that has not reached its sweep yet — is refused
+        // by the generation capture and degrades to a bucket-only result instead of mixing its old
+        // bucket rows with this pull's fresh supplement. Sharing is reserved for the natural burst
+        // that exists in the app today : the per-type observe() fan-in at screen load (no refresh
+        // involved, one generation by construction — the only two refresh call-sites are per-tab,
+        // FlagsViewModel). If #743 ever introduces a GLOBAL multi-type pull, it must open ONE
+        // generation for the pull (a repository-level refreshAll), not call this per type.
+        synchronized(stickySweeps) { sweepGeneration++ }
         val refreshesForType = refreshes.getValue(type)
         refreshesForType.emit(FlagsResult.Loading)
         val userId = currentUserId()
