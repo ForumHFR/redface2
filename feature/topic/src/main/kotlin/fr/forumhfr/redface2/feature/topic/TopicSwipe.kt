@@ -8,12 +8,16 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
-import androidx.compose.foundation.gestures.horizontalDrag
 import androidx.compose.runtime.MutableFloatState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.AwaitPointerEventScope
+import androidx.compose.ui.input.pointer.PointerId
+import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.input.pointer.changedToDownIgnoreConsumed
+import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
@@ -186,11 +190,13 @@ internal fun Modifier.topicPageSwipe(
                 var armed = false
                 velocityTracker.addPosition(drag.uptimeMillis, drag.position)
                 dragOffset.floatValue = followOffsetFor(totalDx, commitDistancePx, currentPage, totalPages())
-                // `horizontalDrag` returns false when the drag is CANCELLED — e.g. a descendant
-                // horizontal scroller (a wide `[fixed]` code block, the page grid) takes the pointer
-                // over after we crossed slop. Honour it: a taken-over gesture must NOT navigate.
-                val completed = horizontalDrag(drag.id) { change ->
+                // #936 — [trackHorizontalDrag] replaces `horizontalDrag(drag.id)`: the helper
+                // never hands the full event back, so a SECOND pointer landing mid-drag stayed
+                // invisible until something else consumed our pointer. Any outcome but COMPLETED
+                // cancels into the same spring-back, before any velocity/commit computation.
+                val outcome = trackHorizontalDrag(drag.id) { change ->
                     totalDx += change.positionChange().x
+                    // VelocityTracker feed unchanged: the PRIMARY pointer only.
                     velocityTracker.addPosition(change.uptimeMillis, change.position)
                     val offset = followOffsetFor(totalDx, commitDistancePx, currentPage, totalPages())
                     dragOffset.floatValue = offset // synchronous, no coroutine, no allocation
@@ -199,7 +205,7 @@ internal fun Modifier.topicPageSwipe(
                     armed = nowArmed
                     change.consume()
                 }
-                if (!completed) {
+                if (outcome != DragOutcome.COMPLETED) {
                     releaseJob = springBackTo(animationScope, release, dragOffset)
                     return@awaitEachGesture
                 }
@@ -251,6 +257,49 @@ internal class TopicSwipeHandlers(
     val leftGestureInsetPx: () -> Int,
     val rightGestureInsetPx: () -> Int,
 )
+
+/** How a tracked drag ended — anything but [COMPLETED] must cancel into the spring-back. */
+private enum class DragOutcome { MULTI_TOUCH, TAKEN_OVER, COMPLETED }
+
+/**
+ * #936 — the drag event loop of [topicPageSwipe]. Contract: any secondary contact during an
+ * uncommitted drag cancels the swipe — even past the commit distance (armed ≠ committed), with NO
+ * pointer transfer. The multi-touch check reads the raw pointer TOPOLOGY (a down on another id,
+ * consumption ignored) BEFORE looking at `isConsumed`, so the outcome never depends on what
+ * another detector (e.g. the #182 magnifier, Initial pass) did with the event; the cancelling
+ * event is deliberately NOT consumed (the second finger belongs to whoever claims it next).
+ * Scope pinned on the issue: post-slop only — before slop no swipe exists yet (no translation,
+ * no arming), the natural slop race decides.
+ */
+private suspend fun AwaitPointerEventScope.trackHorizontalDrag(
+    dragId: PointerId,
+    onMove: (PointerInputChange) -> Unit,
+): DragOutcome {
+    var outcome: DragOutcome? = null
+    while (outcome == null) {
+        val event = awaitPointerEvent()
+        val change = event.changes.firstOrNull { it.id == dragId }
+        when {
+            // Topology FIRST: catches the secondary down even when the SAME event also carries
+            // the primary up (no transfer — an armed swipe is not committed).
+            event.changes.any { it.id != dragId && it.changedToDownIgnoreConsumed() } ->
+                outcome = DragOutcome.MULTI_TOUCH
+            // The primary pointer vanished from the stream without an up: cancel, never hang
+            // (gate Sol r1 — `Unit` here left the loop suspended forever).
+            change == null -> outcome = DragOutcome.TAKEN_OVER
+            // Up BEFORE isConsumed, like the former horizontalDrag: a consumed up still ENDS the
+            // drag normally (gate Sol r1 — it was misclassified as a takeover).
+            change.changedToUpIgnoreConsumed() -> outcome = DragOutcome.COMPLETED
+            // Taken over by a descendant horizontal scroller (a wide `[fixed]` code block, the
+            // page grid) — same cancellation semantics as the former horizontalDrag.
+            change.isConsumed -> outcome = DragOutcome.TAKEN_OVER
+            // HORIZONTAL movement only (gate Sol r1): `positionChanged()` also accepted purely
+            // vertical deltas, stealing the list scroll and skewing the horizontal velocity.
+            change.positionChange().x != 0f -> onMove(change)
+        }
+    }
+    return outcome
+}
 
 /** Spring the page back to rest (cancel / no-commit), streaming the animation into [dragOffset]. */
 private fun springBackTo(
