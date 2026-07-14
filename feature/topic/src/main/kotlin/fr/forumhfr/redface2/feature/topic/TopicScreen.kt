@@ -93,6 +93,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -1252,9 +1253,13 @@ internal fun TopicContent(
                                 modifier = Modifier
                                     .align(Alignment.TopEnd)
                                     .padding(12.dp)
-                                    // #937 — a11y : 48 dp minimum touch target + named action.
+                                    // #937 — a11y : 48 dp minimum touch target, named action,
+                                    // explicit button role (validation 5.5).
                                     .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
-                                    .semantics { contentDescription = zoomResetDescription },
+                                    .semantics {
+                                        contentDescription = zoomResetDescription
+                                        role = Role.Button
+                                    },
                             ) {
                                 Box(
                                     contentAlignment = Alignment.Center,

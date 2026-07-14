@@ -91,11 +91,17 @@ internal class TopicZoomState(private val animationScope: CoroutineScope) {
     /**
      * #937 framing (Sol) — the previous page's state must not keep mutating the SHARED LazyList
      * after `remember(pageKey)` replaced it : a 200 ms settle outliving its composition would
-     * scroll the NEW page. Called from a DisposableEffect in [rememberTopicZoomState].
+     * scroll the NEW page. Called from a DisposableEffect in [rememberTopicZoomState]. The floats
+     * are also parked at rest (validation 5.5) : a cancelled mid-settle state must never be left
+     * partially animated — every other cancellation path hands control to a new pilot (engage),
+     * this one has none.
      */
     fun cancelJobs() {
         releaseJob?.cancel()
         stopFlingJob?.cancel()
+        scale.floatValue = 1f
+        panX.floatValue = 0f
+        panY.floatValue = 0f
     }
 
     /**
@@ -307,7 +313,9 @@ private fun applyPanFrame(
     event: PointerEvent,
     widthPx: Float,
 ) {
-    val change = event.changes.first { it.pressed }
+    // firstOrNull (validation 5.5) : a transient frame where every pointer just lifted must not
+    // crash — the release branch of the loop handles it on the next event.
+    val change = event.changes.firstOrNull { it.pressed } ?: return
     val delta = change.position - change.previousPosition
     val scale = state.scale.floatValue
     state.panX.floatValue = panStep(state.panX.floatValue, delta.x, scale, widthPx)
