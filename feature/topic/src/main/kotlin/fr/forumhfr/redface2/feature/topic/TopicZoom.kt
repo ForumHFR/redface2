@@ -16,6 +16,8 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.AwaitPointerEventScope
+import androidx.compose.ui.input.pointer.PointerEvent
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import kotlinx.coroutines.CoroutineScope
@@ -236,90 +238,7 @@ internal fun Modifier.topicMagnifier(
         if (state.zoomed) firstDown.consume()
         state.viewportWidthPx = size.width.toFloat()
         state.viewportHeightPx = size.height.toFloat()
-        var engaged = false
-        while (true) {
-            val event = awaitPointerEvent(PointerEventPass.Initial)
-            val pressed = event.changes.count { it.pressed }
-            if (pressed == 0) {
-                // Matrix finding (bench, line « pinch après swipe armé ») : when both fingers lift
-                // in the SAME frame, exiting without consuming lets a sibling detector see ITS
-                // pointer released cleanly — the armed page swipe then completes and COMMITS the
-                // accumulated offset. An engaged magnifier owns the whole gesture, ups included.
-                if (engaged) event.changes.forEach { it.consume() }
-                break
-            }
-            when {
-                pressed >= 2 -> {
-                    if (!engaged) {
-                        // Engage on the SECOND pointer only: a plain tap must not freeze an
-                        // in-flight snap animation, but a new pinch interrupts it (hypothesis 8).
-                        // The fling stop is SEQUENCED with the controlled mutations by the
-                        // engage/buffer contract in TopicZoomState (#937 framing, Sol).
-                        state.engage(listState)
-                        engaged = true
-                    }
-                    // calculateZoom guards its degenerate cases, but a non-positive ratio would
-                    // trip pinchStep's precondition mid-gesture — neutralise it defensively.
-                    val zoom = event.calculateZoom().takeIf { it > 0f } ?: 1f
-                    // PREVIOUS centroid (gate Sol r1) : pinchStep anchors around the pre-move
-                    // position, then the centroid translation is applied once through `pan`.
-                    // Anchoring on the CURRENT centroid would re-inject the translation with the
-                    // wrong base (1×→2×, centroid 400→500 : panX must be −300, not −400) and the
-                    // matrix would measure a pinch that slides under the fingers.
-                    val centroid = event.calculateCentroid(useCurrent = false)
-                    val pan = event.calculatePan()
-                    val scaleOld = state.scale.floatValue
-                    val panYOld = state.panY.floatValue
-                    val zoomStep = pinchStep(
-                        current = state.currentTransform(),
-                        centroidX = centroid.x,
-                        centroidY = centroid.y,
-                        zoomFactor = zoom,
-                        widthPx = size.width.toFloat(),
-                    )
-                    // X anchoring + new scale come from the tested math; the step's scrollByPx is
-                    // superseded by the panY-aware drift below (bottom-edge contract amendment).
-                    state.apply(zoomStep)
-                    val scale = state.scale.floatValue
-                    state.panX.floatValue =
-                        panStep(state.panX.floatValue, pan.x, scale, size.width.toFloat())
-                    // Y drift of the content point under the (previous) centroid, panY included:
-                    // where it would land minus the finger — moved back up, finger pan folded in.
-                    val viewportY = (centroid.y - panYOld) / scaleOld
-                    val drift = viewportY * scale + state.panY.floatValue - centroid.y
-                    state.moveContentUp(drift - pan.y, listState)
-                    state.lastAnchorX = centroid.x + pan.x
-                    state.lastAnchorY = centroid.y + pan.y
-                    event.changes.forEach { it.consume() }
-                }
-                engaged || state.zoomed -> {
-                    // One-finger pan while zoomed — and, once ENGAGED, capture is held until the
-                    // last `up` even if the scale came back to exactly 1× mid-gesture (gate Sol
-                    // r1) : releasing the consumption there would let swipe/scroll/PTR re-engage
-                    // in the middle of the same physical gesture. At 1× the controlled path
-                    // degrades gracefully (panX clamped to 0, dispatchRawDelta 1:1).
-                    if (!engaged) {
-                        // Same engage/buffer contract as the pinch branch.
-                        state.engage(listState)
-                        engaged = true
-                    }
-                    val change = event.changes.first { it.pressed }
-                    val delta = change.position - change.previousPosition
-                    val scale = state.scale.floatValue
-                    state.panX.floatValue =
-                        panStep(state.panX.floatValue, delta.x, scale, size.width.toFloat())
-                    state.moveContentUp(-delta.y, listState)
-                    state.lastAnchorX = change.position.x
-                    state.lastAnchorY = change.position.y
-                    event.changes.forEach { it.consume() }
-                }
-                else -> {
-                    // 1× single pointer: observe WITHOUT consuming — every existing gesture stays
-                    // intact, and a second pointer landing mid-drag (armed swipe included) still
-                    // upgrades this same gesture into a pinch on the next event.
-                }
-            }
-        }
+        val engaged = trackMagnifierGesture(state, listState)
         if (!engaged) return@awaitEachGesture
         // Release: snap near-rest scales back to 1×, cap rubber-banded ones — ANCHORED on the last
         // gesture position so the settle never jumps (panX converges into [0,0] on a snap to 1×).
@@ -330,4 +249,109 @@ internal fun Modifier.topicMagnifier(
             listState = listState,
         )
     }
+}
+
+/**
+ * The magnifier event loop — Initial pass, one iteration per pointer event. Returns whether the
+ * gesture ever ENGAGED (2nd pointer, or one-finger while zoomed). Once engaged, capture is held
+ * until the last `up` even if the scale came back to exactly 1× mid-gesture (gate Sol r1) — and
+ * the final up frame is consumed too (bench matrix finding : both fingers lifting in the SAME
+ * frame otherwise let an armed sibling swipe complete and COMMIT).
+ */
+private suspend fun AwaitPointerEventScope.trackMagnifierGesture(
+    state: TopicZoomState,
+    listState: LazyListState,
+): Boolean {
+    var engaged = false
+    while (true) {
+        val event = awaitPointerEvent(PointerEventPass.Initial)
+        val released = event.changes.none { it.pressed }
+        if (released && engaged) event.changes.forEach { it.consume() }
+        if (released) return engaged
+        engaged = handleMagnifierFrame(state, listState, event, engaged)
+    }
+}
+
+/**
+ * One pointer frame of the magnifier. Engages on the SECOND pointer — a plain tap must not freeze
+ * an in-flight snap animation, but a new pinch interrupts it (hypothesis 8) — or on one finger
+ * while already zoomed. The fling stop is SEQUENCED with the controlled mutations by the
+ * engage/buffer contract in TopicZoomState (#937 framing, Sol). A 1× single pointer observes
+ * WITHOUT consuming : every existing gesture stays intact, and a second pointer landing mid-drag
+ * (armed swipe included) still upgrades this same gesture into a pinch on the next event. At 1×
+ * while engaged, the controlled pan degrades gracefully (panX clamped to 0, dispatchRawDelta 1:1).
+ */
+private fun AwaitPointerEventScope.handleMagnifierFrame(
+    state: TopicZoomState,
+    listState: LazyListState,
+    event: PointerEvent,
+    wasEngaged: Boolean,
+): Boolean {
+    val pressed = event.changes.count { it.pressed }
+    val engaging = pressed >= 2 || wasEngaged || state.zoomed
+    if (!engaging) return false
+    if (!wasEngaged) state.engage(listState)
+    if (pressed >= 2) {
+        applyPinchFrame(state, listState, event, size.width.toFloat())
+    } else {
+        applyPanFrame(state, listState, event, size.width.toFloat())
+    }
+    event.changes.forEach { it.consume() }
+    return true
+}
+
+/** One one-finger pan frame while zoomed: bounded panX, real list scroll on Y (÷ scale). */
+private fun applyPanFrame(
+    state: TopicZoomState,
+    listState: LazyListState,
+    event: PointerEvent,
+    widthPx: Float,
+) {
+    val change = event.changes.first { it.pressed }
+    val delta = change.position - change.previousPosition
+    val scale = state.scale.floatValue
+    state.panX.floatValue = panStep(state.panX.floatValue, delta.x, scale, widthPx)
+    state.moveContentUp(-delta.y, listState)
+    state.lastAnchorX = change.position.x
+    state.lastAnchorY = change.position.y
+}
+
+/**
+ * One pinch frame: anchored scale step (tested math) + finger pan folded in. The PREVIOUS
+ * centroid anchors the step (gate Sol r1) : pinchStep works around the pre-move position, then
+ * the centroid translation is applied once through `pan` — anchoring on the CURRENT centroid
+ * would re-inject the translation with the wrong base (1×→2×, centroid 400→500 : panX must be
+ * −300, not −400) and the pinch would slide under the fingers. The step's scrollByPx is
+ * superseded by the panY-aware drift (bottom-edge contract amendment).
+ */
+private fun applyPinchFrame(
+    state: TopicZoomState,
+    listState: LazyListState,
+    event: PointerEvent,
+    widthPx: Float,
+) {
+    // calculateZoom guards its degenerate cases, but a non-positive ratio would trip
+    // pinchStep's precondition mid-gesture — neutralise it defensively.
+    val zoom = event.calculateZoom().takeIf { it > 0f } ?: 1f
+    val centroid = event.calculateCentroid(useCurrent = false)
+    val pan = event.calculatePan()
+    val scaleOld = state.scale.floatValue
+    val panYOld = state.panY.floatValue
+    val zoomStep = pinchStep(
+        current = state.currentTransform(),
+        centroidX = centroid.x,
+        centroidY = centroid.y,
+        zoomFactor = zoom,
+        widthPx = widthPx,
+    )
+    state.apply(zoomStep)
+    val scale = state.scale.floatValue
+    state.panX.floatValue = panStep(state.panX.floatValue, pan.x, scale, widthPx)
+    // Y drift of the content point under the (previous) centroid, panY included: where it
+    // would land minus the finger — moved back up, finger pan folded in.
+    val viewportY = (centroid.y - panYOld) / scaleOld
+    val drift = viewportY * scale + state.panY.floatValue - centroid.y
+    state.moveContentUp(drift - pan.y, listState)
+    state.lastAnchorX = centroid.x + pan.x
+    state.lastAnchorY = centroid.y + pan.y
 }
