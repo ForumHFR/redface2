@@ -56,7 +56,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.minimumInteractiveComponentSize
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.pullToRefresh
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -64,8 +66,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -75,6 +79,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -87,6 +93,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -1118,16 +1125,37 @@ internal fun TopicContent(
                 }
 
                 is TopicUiState.Mode.Loaded -> {
-                    // #335 — pull-to-refresh only wraps the loaded content (Loading/Error don't need
-                    // it). PullToRefreshBox layers a vertical nested-scroll connection on top of the
-                    // top-bar enterAlways behaviour (#338) and the horizontal page swipe (#282); the
-                    // pull only engages on overscroll at the top of the list, so the read position is
-                    // preserved on refresh (the ViewModel emits no scroll effect).
-                    PullToRefreshBox(
-                        isRefreshing = state.isRefreshing,
-                        // #813 — user refresh also clears + re-probes failed media measurements.
-                        onRefresh = refreshWithMediaRetry,
-                        modifier = Modifier.fillMaxSize(),
+                    // #182 (#937) — magnifier state hoisted above the pull-to-refresh wrapper:
+                    // the PTR suspension, the selection gate (LocalTopicZoomed) and the reset chip
+                    // read it here; the gesture and the draw layer consume it in TopicLoadedContent.
+                    val zoomAnimationScope = rememberCoroutineScope()
+                    val zoomState = rememberTopicZoomState(
+                        // Full route identity (§2.1) — two topics on the same page number must
+                        // never share a zoom ; a page change of the same topic resets too.
+                        pageKey = Triple(state.request.cat, state.request.post, mode.topic.page),
+                        animationScope = zoomAnimationScope,
+                    )
+                    // derivedStateOf: the composition only recomposes on the 1× ↔ zoomed TRANSITION,
+                    // never per pinch frame (scale/panX are read in the draw phase only).
+                    val isZoomed by remember(zoomState) { derivedStateOf { zoomState.zoomed } }
+                    // #335 — pull-to-refresh only wraps the loaded content; the pull only engages on
+                    // overscroll at the top of the list, so the read position is preserved on refresh.
+                    // POC #182 : PullToRefreshBox (m3 1.4.0) does not expose `enabled`, so the wrapper
+                    // becomes the low-level Modifier.pullToRefresh + the default Indicator — the pull
+                    // gesture is fully suspended while zoomed (a gate in onRefresh would be too late:
+                    // the gesture would still be consumed and the indicator armed).
+                    val pullToRefreshState = rememberPullToRefreshState()
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .pullToRefresh(
+                                isRefreshing = state.isRefreshing,
+                                state = pullToRefreshState,
+                                enabled = !isZoomed,
+                                // #813 — user refresh also clears + re-probes failed media
+                                // measurements.
+                                onRefresh = refreshWithMediaRetry,
+                            ),
                     ) {
                         // #300/#351 — the intra-page scrollbar now rides inside PostListScaffold
                         // (overlaying the list's right edge, outside the scrolled element), so the
@@ -1138,11 +1166,16 @@ internal fun TopicContent(
                         // is provided to the post renderers so QuoteBlock masks a citation OF a
                         // blocked author. Scoped to the reading list only — the quick-reply sheet
                         // and editor previews (outside this provider) keep the empty default.
-                        CompositionLocalProvider(LocalBlockedQuoteAuthors provides mode.blockedQuoteAuthors) {
+                        CompositionLocalProvider(
+                            LocalBlockedQuoteAuthors provides mode.blockedQuoteAuthors,
+                            // POC #182 — suspends text selection in the post cards while zoomed.
+                            LocalTopicZoomed provides isZoomed,
+                        ) {
                             TopicLoadedContent(
                                 state = state,
                                 topic = mode.topic,
                                 hiddenNumreponses = mode.hiddenNumreponses,
+                                zoomState = zoomState,
                                 // #604 lot 2 / #806 — « Citer » opens the quick-reply sheet with the
                                 // card pre-armed (1-citation session), unless the preset routes any
                                 // citation to the full-screen editor (decision at tap time). #843 —
@@ -1193,6 +1226,51 @@ internal fun TopicContent(
                                 // #813 — explicit-refresh retry for ghost inline images.
                                 mediaRefreshGeneration = mediaRefreshGeneration,
                             )
+                        }
+                        PullToRefreshDefaults.Indicator(
+                            state = pullToRefreshState,
+                            isRefreshing = state.isRefreshing,
+                            modifier = Modifier.align(Alignment.TopCenter),
+                        )
+                        if (isZoomed) {
+                            // #182 — discreet, always-visible reset affordance while zoomed
+                            // (contract RESET). Chrome: stays OUTSIDE the zoomed layer.
+                            val zoomResetDescription = stringResource(R.string.topic_zoom_reset)
+                            Surface(
+                                onClick = {
+                                    // Anchored on the viewport centre: the content the reader is
+                                    // looking at stays put while the scale animates back to 1×.
+                                    zoomState.settleAnchoredTo(
+                                        targetScale = 1f,
+                                        anchorX = zoomState.viewportWidthPx / 2f,
+                                        anchorY = zoomState.viewportHeightPx / 2f,
+                                        listState = listState,
+                                    )
+                                },
+                                shape = MaterialTheme.shapes.large,
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                shadowElevation = 3.dp,
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(12.dp)
+                                    // #937 — a11y : 48 dp minimum touch target, named action,
+                                    // explicit button role (validation 5.5).
+                                    .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+                                    .semantics {
+                                        contentDescription = zoomResetDescription
+                                        role = Role.Button
+                                    },
+                            ) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
+                                ) {
+                                    Text(
+                                        text = stringResource(R.string.topic_zoom_reset_chip),
+                                        style = MaterialTheme.typography.labelLarge,
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -1671,6 +1749,9 @@ private fun TopicLoadedContent(
     /** #879 — filtered search : « résultats suivants » footer tap. */
     onSearchNextResults: () -> Unit = {},
     listState: LazyListState,
+    // POC #182 (#935) — magnifier state: the gesture + draw layer attach to the list here, and
+    // swipe/double-tap/list-scroll are suspended while zoomed.
+    zoomState: TopicZoomState,
     // #291 — selection state + toggle for the post menu's multi-quote entry.
     multiQuoteSelection: List<Int> = emptyList(),
     onToggleMultiQuote: (preview: QuotedPostPreview) -> Unit = {},
@@ -1764,7 +1845,11 @@ private fun TopicLoadedContent(
     // interrupting the transition → frozen screen. The lambda reads `lifecycle.currentState` live, so
     // the gesture (whose pointerInput does not re-key on this) always sees the current state.
     val entryLifecycle = LocalLifecycleOwner.current.lifecycle
-    val swipeEnabled: () -> Boolean = { entryLifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) }
+    // POC #182 — the page swipe (and its edge hint) are suspended while zoomed. Gesture-time read
+    // through the lambda: no recomposition per pinch frame.
+    val swipeEnabled: () -> Boolean = {
+        entryLifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && !zoomState.zoomed
+    }
     // #752 — system-gesture band widths for the swipe's start dead-zone, resolved here (composable)
     // and handed as ALWAYS-FRESH lambdas (rememberUpdatedState) so the currentPage-keyed
     // pointerInput sees rotation/split-screen changes ; px conversion happens per gesture.
@@ -1783,8 +1868,13 @@ private fun TopicLoadedContent(
     // (#300/#351). The swipe machinery stays feature-owned and is threaded through `listModifier`,
     // applied to the LazyColumn itself (so the list follows the finger and the scrollbar overlay stays
     // fixed); the contentPadding / verticalArrangement / scrollbar gate are passed unchanged.
+    // POC #182 — native list scrolling is suspended while zoomed: the vertical axis is driven by
+    // the magnifier's controlled dispatchRawDelta (screen deltas divided by scale — 1:1 under the
+    // finger). derivedStateOf: recomposes on the 1× ↔ zoomed transition only.
+    val zoomSuspendsScroll by remember(zoomState) { derivedStateOf { zoomState.zoomed } }
     PostListScaffold(
         listState = listState,
+        userScrollEnabled = !zoomSuspendsScroll,
         // #283 — extra bottom padding so the last post's right-aligned actions clear the floating
         // bottom-action cluster (the Scaffold FAB slot floats over the content). Harmless extra
         // breathing room when the cluster is absent (anon + single page).
@@ -1795,6 +1885,12 @@ private fun TopicLoadedContent(
         // a denser feed, cf. the #287 density feedback).
         verticalArrangement = Arrangement.spacedBy(8.dp),
         listModifier = Modifier
+            // POC #182 (#935) — the magnifier gesture listens FIRST (Initial pass) so that, once
+            // pinching, consuming the moves starves the sibling swipe / child scrollers below. It
+            // must also sit BEFORE the zoom graphicsLayer at the end of this chain: centroids are
+            // read in the untransformed local space that TopicZoomMath models (same coordinate
+            // rule as topicPageSwipe).
+            .topicMagnifier(zoomState, listState)
             // #285 — system-bar insets (status + navigation) are now consumed by the Scaffold/TopAppBar
             // in TopicContent and applied via the content Surface's padding(innerPadding); the list no
             // longer adds statusBarsPadding()/navigationBarsPadding() here to avoid double-insetting.
@@ -1844,10 +1940,30 @@ private fun TopicLoadedContent(
             .pointerInput(Unit) {
                 detectTapGestures(
                     onDoubleTap = {
-                        haptics.performHapticFeedback(HapticFeedbackType.Confirm)
-                        onDoubleTapRefresh()
+                        // #182 — double-tap refresh is suspended while zoomed (contract ZOOMÉ).
+                        // The magnifier already consumes the down on its Initial pass while
+                        // zoomed (replied mode), so this guard is DEFENSE IN DEPTH — it keeps
+                        // the suspension correct even if the modifier stacking ever changes.
+                        if (!zoomState.zoomed) {
+                            haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+                            onDoubleTapRefresh()
+                        }
                     },
                 )
+            }
+            // POC #182 — the zoom draw layer, LAST in the chain (innermost): the magnifier and the
+            // swipe read their pointers in untransformed space, and the swipe's own translation
+            // layer (identity while zoomed — the swipe is suspended) composes OUTSIDE this scale.
+            // Top-left origin per the contract; scale/panX are frame-state reads (no recomposition).
+            .graphicsLayer {
+                val zoomScale = zoomState.scale.floatValue
+                scaleX = zoomScale
+                scaleY = zoomScale
+                translationX = zoomState.panX.floatValue
+                // Bounded complement of the real scroll at the bottom edge (contract amendment,
+                // POC iter 1) — never exposes uncomposed content, see TopicZoomState.panY.
+                translationY = zoomState.panY.floatValue
+                transformOrigin = TransformOrigin(0f, 0f)
             },
     ) {
         item {
@@ -2676,7 +2792,9 @@ internal fun TopicPostCard(
                 CompositionLocalProvider(LocalPostImageActions provides imageActions) {
                     PostRenderer(
                         content = post.content,
-                        selectable = true,
+                        // POC #182 — selection is suspended while the magnifier is engaged (>1×);
+                        // topic posts are selectable at rest (#281).
+                        selectable = !LocalTopicZoomed.current,
                         onGoToCitedPost = onGoToCitedPost,
                         mediaRefreshGeneration = mediaRefreshGeneration,
                     )
