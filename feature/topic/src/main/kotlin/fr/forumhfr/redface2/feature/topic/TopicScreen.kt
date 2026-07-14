@@ -1940,8 +1940,10 @@ private fun TopicLoadedContent(
             .pointerInput(Unit) {
                 detectTapGestures(
                     onDoubleTap = {
-                        // POC #182 — double-tap refresh is suspended while zoomed (contract ZOOMÉ);
-                        // taps are not consumed by the magnifier, so the gate lives here.
+                        // #182 — double-tap refresh is suspended while zoomed (contract ZOOMÉ).
+                        // The magnifier already consumes the down on its Initial pass while
+                        // zoomed (replied mode), so this guard is DEFENSE IN DEPTH — it keeps
+                        // the suspension correct even if the modifier stacking ever changes.
                         if (!zoomState.zoomed) {
                             haptics.performHapticFeedback(HapticFeedbackType.Confirm)
                             onDoubleTapRefresh()

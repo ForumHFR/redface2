@@ -81,11 +81,25 @@ internal class TopicZoomState(private val animationScope: CoroutineScope) {
     private var stopFlingJob: Job? = null
     private var pendingDeltaScreenPx = 0f
 
+    /**
+     * True while a magnifier gesture owns the transform (review finding) : the reset chip sits
+     * OUTSIDE the gesture area, so a third finger can tap it mid-pinch — without this guard its
+     * settle and the live gesture would both write scale/pan and dispatch scroll deltas.
+     */
+    var gestureEngaged = false
+        private set
+
     /** Called once per gesture, when the magnifier takes ownership (2nd pointer or zoomed pan). */
     fun engage(listState: LazyListState) {
         releaseJob?.cancel()
         pendingDeltaScreenPx = 0f
+        gestureEngaged = true
         stopFlingJob = animationScope.launch { listState.stopScroll() }
+    }
+
+    /** Called when the gesture releases its last pointer — the settle may then take over. */
+    fun releaseGesture() {
+        gestureEngaged = false
     }
 
     /**
@@ -147,22 +161,20 @@ internal class TopicZoomState(private val animationScope: CoroutineScope) {
     }
 
     private fun applyContentDelta(deltaScreenPx: Float, listState: LazyListState) {
+        // Delegates to the PURE TopicZoomMath vertical distribution (review finding : the tested
+        // functions must be the ones the gesture executes — no hand-inlined twin).
         val s = scale.floatValue
-        val minPanY = viewportHeightPx * (1f - s)
         if (deltaScreenPx >= 0f) {
-            val consumed = listState.dispatchRawDelta(deltaScreenPx / s)
-            val rest = deltaScreenPx - consumed * s
-            panY.floatValue = (panY.floatValue - rest).coerceIn(minPanY, 0f)
+            val consumed = listState.dispatchRawDelta(upwardListRequestViewportPx(deltaScreenPx, s))
+            panY.floatValue =
+                upwardPanYAfterScroll(deltaScreenPx, consumed, panY.floatValue, s, viewportHeightPx)
         } else {
-            val down = -deltaScreenPx
-            // Both bounds on the unwind (gate Sol) : equivalent under the invariant, robust if the
-            // state ever lands momentarily out of range (e.g. a reclamp raced a frame).
-            val oldPanY = panY.floatValue
-            val newPanY = (oldPanY + down).coerceIn(minPanY, 0f)
-            val usedByPanY = newPanY - oldPanY
-            panY.floatValue = newPanY
-            val remaining = down - usedByPanY
-            if (remaining > 0f) listState.dispatchRawDelta(-remaining / s)
+            val distribution =
+                downwardDistribution(deltaScreenPx, panY.floatValue, s, viewportHeightPx)
+            panY.floatValue = distribution.panYNew
+            if (distribution.listRequestViewportPx != 0f) {
+                listState.dispatchRawDelta(distribution.listRequestViewportPx)
+            }
         }
     }
 
@@ -175,6 +187,9 @@ internal class TopicZoomState(private val animationScope: CoroutineScope) {
      * per-event pinch correction. Interruptible: a new pinch cancels [releaseJob].
      */
     fun settleAnchoredTo(targetScale: Float, anchorX: Float, anchorY: Float, listState: LazyListState) {
+        // The live gesture wins (review finding) : a chip tap landing mid-pinch must not start a
+        // second producer — the gesture's own release will settle.
+        if (gestureEngaged) return
         if (targetScale == scale.floatValue) return
         releaseJob?.cancel()
         val fromScale = scale.floatValue
@@ -189,10 +204,12 @@ internal class TopicZoomState(private val animationScope: CoroutineScope) {
                 val viewportX = (anchorX - panX.floatValue) / prevScale
                 panX.floatValue = (anchorX - viewportX * frameScale)
                     .coerceIn(panXRange(frameScale, widthPx))
-                val viewportY = (anchorY - panY.floatValue) / prevScale
+                val panYOld = panY.floatValue
                 scale.floatValue = frameScale
                 reclampPanY()
-                val drift = viewportY * frameScale + panY.floatValue - anchorY
+                // Pure drift (review finding — same function the math tests pin).
+                val drift =
+                    anchoredVerticalDrift(anchorY, panYOld, prevScale, frameScale, panY.floatValue)
                 moveContentUp(drift, listState)
                 prevScale = frameScale
             }
@@ -245,6 +262,7 @@ internal fun Modifier.topicMagnifier(
         state.viewportWidthPx = size.width.toFloat()
         state.viewportHeightPx = size.height.toFloat()
         val engaged = trackMagnifierGesture(state, listState)
+        state.releaseGesture()
         if (!engaged) return@awaitEachGesture
         // Release: snap near-rest scales back to 1×, cap rubber-banded ones — ANCHORED on the last
         // gesture position so the settle never jumps (panX converges into [0,0] on a snap to 1×).
