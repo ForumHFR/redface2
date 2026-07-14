@@ -1,6 +1,5 @@
-Redface 2 v0.29.2 — dev.
+Redface 2 v0.30.0 — dev.
 
-- Search: category tabs no longer vanish after switching categories.
-- Editing: Edit/Delete come back on your own posts when your HFR profile hides the toolbar.
-- Reading: blank-line spacing now matches the website rendering exactly.
-- Editor: the "Contenu BBCode" label is never truncated anymore, and the smiley panel now uses ~3/4 of the screen.
+- Pinch-to-zoom: global reading magnifier in topics (RF1 spirit) — pinch to zoom, one finger to pan, 1x button to reset.
+- While zoomed: read-only (taps inert), zoom out to interact — details on the DEV thread.
+- Page swipe hardened against multi-touch.
