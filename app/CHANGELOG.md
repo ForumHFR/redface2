@@ -16,6 +16,15 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.30.0` — `internal` (dev) — 2026-07-15
+
+Chantier pinch-to-zoom #182 (option A) — POC #935 GO (3 relevés, matrices émulateur + S10e), durcissement #936, production #937.
+
+- **Loupe globale de lecture** : pinch-to-zoom graphique éphémère de la page topic (esprit RF1) — plafond 2,5×, rubber-band saturant, pan 1 doigt (Y = vrai scroll + complément borné au bord bas), chip « 1× », reset au changement de page/sujet (#182, #935, #937).
+- Pendant le zoom : swipe de page, pull-to-refresh, double-tap refresh et sélection suspendus ; **taps/appuis longs inertes (mode replié annoncé sur le fil DEV)** — dézoomer pour interagir.
+- `topicPageSwipe` : annulation multi-touch native (2e doigt pendant un drag non commité = spring-back, jamais de navigation) (#936).
+- 32 tests ajoutés (maths de mapping, matrice de gestes, multi-touch swipe) ; gates croisés Sol/gpt-5.5/review Claude indépendante.
+
 ## `0.29.2` — `internal` (dev) — 2026-07-13
 
 **Batch autonome de l'après-midi** (5 chantiers, gates croisés Claude Fable 5 ↔ GPT 5.6 Sol : deux fixes codés par Sol et gatés par Claude, trois l'inverse).

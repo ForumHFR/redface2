@@ -1,6 +1,5 @@
-Redface 2 v0.29.2 — dev.
+Redface 2 v0.30.0 — dev.
 
-- Recherche : les onglets de catégories ne disparaissent plus après un changement de catégorie.
-- Édition : Modifier/Supprimer réapparaissent sur vos propres posts si votre profil HFR masque les outils.
-- Lecture : l'espacement des lignes vides suit désormais exactement le rendu du site web.
-- Éditeur : le libellé « Contenu BBCode » n'est plus tronqué, et le panneau smileys occupe ~3/4 de l'écran.
+- Pinch-to-zoom : loupe globale de lecture dans les sujets (esprit RF1) — pincez pour zoomer, un doigt pour naviguer, bouton 1x pour revenir.
+- Pendant le zoom : lecture seule (taps inactifs), dézoomez pour interagir — détails sur le fil DEV.
+- Swipe de page durci contre le multi-touch.
