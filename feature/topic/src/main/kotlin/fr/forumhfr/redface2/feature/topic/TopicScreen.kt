@@ -1124,12 +1124,14 @@ internal fun TopicContent(
                 }
 
                 is TopicUiState.Mode.Loaded -> {
-                    // POC #182 (#935) — magnifier state hoisted above the pull-to-refresh wrapper:
+                    // #182 (#937) — magnifier state hoisted above the pull-to-refresh wrapper:
                     // the PTR suspension, the selection gate (LocalTopicZoomed) and the reset chip
                     // read it here; the gesture and the draw layer consume it in TopicLoadedContent.
                     val zoomAnimationScope = rememberCoroutineScope()
                     val zoomState = rememberTopicZoomState(
-                        pageKey = mode.topic.page,
+                        // Full route identity (§2.1) — two topics on the same page number must
+                        // never share a zoom ; a page change of the same topic resets too.
+                        pageKey = Triple(state.request.cat, state.request.post, mode.topic.page),
                         animationScope = zoomAnimationScope,
                     )
                     // derivedStateOf: the composition only recomposes on the 1× ↔ zoomed TRANSITION,
@@ -1230,8 +1232,9 @@ internal fun TopicContent(
                             modifier = Modifier.align(Alignment.TopCenter),
                         )
                         if (isZoomed) {
-                            // POC #182 — discreet, always-visible reset affordance while zoomed
+                            // #182 — discreet, always-visible reset affordance while zoomed
                             // (contract RESET). Chrome: stays OUTSIDE the zoomed layer.
+                            val zoomResetDescription = stringResource(R.string.topic_zoom_reset)
                             Surface(
                                 onClick = {
                                     // Anchored on the viewport centre: the content the reader is
@@ -1248,13 +1251,20 @@ internal fun TopicContent(
                                 shadowElevation = 3.dp,
                                 modifier = Modifier
                                     .align(Alignment.TopEnd)
-                                    .padding(12.dp),
+                                    .padding(12.dp)
+                                    // #937 — a11y : 48 dp minimum touch target + named action.
+                                    .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+                                    .semantics { contentDescription = zoomResetDescription },
                             ) {
-                                Text(
-                                    text = "1×",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                )
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
+                                ) {
+                                    Text(
+                                        text = stringResource(R.string.topic_zoom_reset_chip),
+                                        style = MaterialTheme.typography.labelLarge,
+                                    )
+                                }
                             }
                         }
                     }

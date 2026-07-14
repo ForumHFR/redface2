@@ -11,6 +11,7 @@ import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.stopScroll
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
@@ -26,8 +27,11 @@ import kotlinx.coroutines.launch
 // production tranche (#937) will re-derive from the POC relevé. Contract summary (§2.1):
 // 1× = every existing gesture intact ; PINCHING = a second pointer cancels any uncommitted swipe,
 // scale anchors the content under the centroid ; ZOOMED = one-finger pan (X = bounded layer
-// translation, Y = REAL list scrolling) while swipe/PTR/double-tap/selection are suspended ;
-// release ≤ 1.03 snaps back to rest ; reset on page/topic change (composition-keyed state).
+// translation, Y = real list scrolling + bounded panY complement at the bottom edge) while
+// swipe/PTR/double-tap/selection are suspended AND taps/long-presses are deterministically INERT
+// (REPLIED MODE, acted at POC iter 2 : child hit-testing does not follow the draw-only layer —
+// interact = reset via the chip or the snap, then tap) ; release ≤ 1.03 snaps back to rest ;
+// reset on page AND topic change (state keyed on the full route identity).
 
 private const val ZOOM_SNAP_MILLIS = 200
 
@@ -66,12 +70,30 @@ internal class TopicZoomState(private val animationScope: CoroutineScope) {
     var releaseJob: Job? = null
 
     /**
-     * Gate Sol (panY amendment) : a LazyList fling still running when the magnifier engages would
-     * be a SECOND producer mutating the scroll under our dispatchRawDelta corrections. One-shot
-     * cancellation via a UserInput-priority no-op scroll session.
+     * #937 framing (Sol) — a live LazyList fling is a SECOND producer racing our controlled
+     * scroll mutations. `stopScroll` is suspend and [AwaitPointerEventScope] is a RESTRICTED
+     * suspension scope (the compiler forbids calling it inline in the gesture), so the stop runs
+     * on [animationScope] and [moveContentUp] BUFFERS list deltas until it has completed —
+     * sequenced, no delta lost, never two producers.
      */
-    fun stopListFling(listState: LazyListState) {
-        animationScope.launch { listState.stopScroll() }
+    private var stopFlingJob: Job? = null
+    private var pendingDeltaScreenPx = 0f
+
+    /** Called once per gesture, when the magnifier takes ownership (2nd pointer or zoomed pan). */
+    fun engage(listState: LazyListState) {
+        releaseJob?.cancel()
+        pendingDeltaScreenPx = 0f
+        stopFlingJob = animationScope.launch { listState.stopScroll() }
+    }
+
+    /**
+     * #937 framing (Sol) — the previous page's state must not keep mutating the SHARED LazyList
+     * after `remember(pageKey)` replaced it : a 200 ms settle outliving its composition would
+     * scroll the NEW page. Called from a DisposableEffect in [rememberTopicZoomState].
+     */
+    fun cancelJobs() {
+        releaseJob?.cancel()
+        stopFlingJob?.cancel()
     }
 
     /**
@@ -105,6 +127,18 @@ internal class TopicZoomState(private val animationScope: CoroutineScope) {
      * engaged while scroll headroom exists in the visible direction.
      */
     fun moveContentUp(deltaScreenPx: Float, listState: LazyListState) {
+        // Fling stop still in flight : buffer instead of racing it (see [engage]).
+        val stop = stopFlingJob
+        if (stop != null && !stop.isCompleted) {
+            pendingDeltaScreenPx += deltaScreenPx
+            return
+        }
+        val delta = deltaScreenPx + pendingDeltaScreenPx
+        pendingDeltaScreenPx = 0f
+        applyContentDelta(delta, listState)
+    }
+
+    private fun applyContentDelta(deltaScreenPx: Float, listState: LazyListState) {
         val s = scale.floatValue
         val minPanY = viewportHeightPx * (1f - s)
         if (deltaScreenPx >= 0f) {
@@ -159,23 +193,32 @@ internal class TopicZoomState(private val animationScope: CoroutineScope) {
 }
 
 @Composable
-internal fun rememberTopicZoomState(pageKey: Int, animationScope: CoroutineScope): TopicZoomState =
-    // Keyed on the loaded page: since #895 the topic composition survives page changes, so the
-    // reset-on-page-change contract hangs on this key. A topic change replaces the whole route
-    // (fresh composition), covering the reset-on-topic-change leg.
-    remember(pageKey) { TopicZoomState(animationScope) }
+internal fun rememberTopicZoomState(pageKey: Any, animationScope: CoroutineScope): TopicZoomState {
+    // Keyed on the FULL route identity (cat, post, page) — never the page alone : since #895 the
+    // topic composition survives page changes of the SAME topic, and two topics at the same page
+    // must not share a zoom (§2.1). The DisposableEffect cancels the replaced state's animation
+    // jobs : they run on the composition-scoped animationScope, which SURVIVES the key change —
+    // an orphaned 200 ms settle would keep scrolling the new page (#937 framing, Sol).
+    val state = remember(pageKey) { TopicZoomState(animationScope) }
+    DisposableEffect(state) {
+        onDispose { state.cancelJobs() }
+    }
+    return state
+}
 
 /**
- * POC #182 — the magnifier gesture. Listens on the INITIAL pass so that, once a second pointer is
+ * #182 — the magnifier gesture. Listens on the INITIAL pass so that, once a second pointer is
  * down, consuming the position changes starves every child/sibling detector in their Main pass:
- * the in-flight page swipe sees consumed changes and cancels into its spring-back (experimental
- * cancellation — the tested hardening is #936), the list stops scrolling, PTR never engages.
- * Plain taps are NOT consumed (down/up pass through), which is exactly the « nominal mode »
- * hypothesis of the #935 matrix (taps/long-press preserved at > 1×) — measured, not assumed.
+ * the in-flight page swipe cancels into its spring-back (its own native multi-touch defense is
+ * #936 — this consumption is defense in depth), the list stops scrolling, PTR never engages.
+ * While ZOOMED, the down itself is consumed (REPLIED MODE) : taps and long-presses are
+ * deterministically inert at > 1× — child hit-testing does not follow the draw-only layer, so a
+ * zoomed tap would land on untransformed coordinates (dead at best, an invisible neighbour at
+ * worst). Interaction path at > 1× = reset (chip or snap) then tap.
  *
  * Sits BEFORE the zoom graphicsLayer in the modifier chain (same coordinate rule as
  * `topicPageSwipe`): centroids are read in the untransformed local space that `TopicZoomMath`
- * models. One state mutation set per pointer event; frame coalescing is asserted at the relevé.
+ * models. One state mutation set per pointer event.
  */
 internal fun Modifier.topicMagnifier(
     state: TopicZoomState,
@@ -210,8 +253,9 @@ internal fun Modifier.topicMagnifier(
                     if (!engaged) {
                         // Engage on the SECOND pointer only: a plain tap must not freeze an
                         // in-flight snap animation, but a new pinch interrupts it (hypothesis 8).
-                        state.releaseJob?.cancel()
-                        state.stopListFling(listState)
+                        // The fling stop is SEQUENCED with the controlled mutations by the
+                        // engage/buffer contract in TopicZoomState (#937 framing, Sol).
+                        state.engage(listState)
                         engaged = true
                     }
                     // calculateZoom guards its degenerate cases, but a non-positive ratio would
@@ -255,8 +299,8 @@ internal fun Modifier.topicMagnifier(
                     // in the middle of the same physical gesture. At 1× the controlled path
                     // degrades gracefully (panX clamped to 0, dispatchRawDelta 1:1).
                     if (!engaged) {
-                        state.releaseJob?.cancel()
-                        state.stopListFling(listState)
+                        // Same engage/buffer contract as the pinch branch.
+                        state.engage(listState)
                         engaged = true
                     }
                     val change = event.changes.first { it.pressed }
