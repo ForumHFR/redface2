@@ -70,7 +70,15 @@ fun SettingsAccountAboutScreen(
             HorizontalDivider()
             RedfaceSettingsSection(stringResource(R.string.settings_about_version))
             Text(
-                text = stringResource(R.string.settings_about_version_value, versionName, versionCode),
+                // Sideloaded debug builds (versionName stamped `+debug.<sha>`) have NO ship build
+                // number — the app-v ledger stamps releases only, and the literal versionCode is a
+                // CD safety floor (72), not a build identity. Showing « (build 72) » there misled
+                // testers ; the SHA-stamped versionName alone is the honest identity.
+                text = if (versionName.contains("+debug.")) {
+                    versionName
+                } else {
+                    stringResource(R.string.settings_about_version_value, versionName, versionCode)
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
