@@ -16,6 +16,15 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.32.0` — `internal` (dev) — 2026-07-15
+
+Décision produit #951 : la feuille de réponse rapide n'est pas correctement terminée.
+
+- Éditeur : la **feuille de réponse rapide passe en expérimental** (opt-in). Le défaut de
+  « Surface d'écriture » devient **« Toujours plein écran »** ; les deux presets feuille sont
+  étiquetés « (expérimental) » dans les réglages (pattern #805). Les utilisateurs qui avaient
+  déjà choisi un preset gardent leur choix.
+
 ## `0.31.0` — `internal` (dev) — 2026-07-15
 
 Premier lot du chantier couleurs #883 (arbitrage XaTriX sur la galerie V2 : la refonte

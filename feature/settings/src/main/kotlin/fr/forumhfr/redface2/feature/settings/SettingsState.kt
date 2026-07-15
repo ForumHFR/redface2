@@ -185,9 +185,9 @@ data class SettingsState(
     val quoteCardsEnabledTouchedLocally: Boolean = false,
     // #806 — which surface a write action in a topic opens (sheet / sheet-except-quotes / full
     // editor). Enum, so the same bespoke optimistic-flip shape as [editorImageInsert]. Default
-    // SHEET (the 0.25.1 behaviour). Distinct from [quoteCardsEnabled], which governs the quote
-    // RENDERING inside whichever surface opens.
-    val writingSurfacePreset: WritingSurfacePreset = WritingSurfacePreset.SHEET,
+    // FULL_EDITOR since the quick-reply sheet is experimental opt-in (#951). Distinct from
+    // [quoteCardsEnabled], which governs the quote RENDERING inside whichever surface opens.
+    val writingSurfacePreset: WritingSurfacePreset = WritingSurfacePreset.FULL_EDITOR,
     val isUpdatingWritingSurfacePreset: Boolean = false,
     val writingSurfacePresetError: Boolean = false,
     val writingSurfacePresetTouchedLocally: Boolean = false,

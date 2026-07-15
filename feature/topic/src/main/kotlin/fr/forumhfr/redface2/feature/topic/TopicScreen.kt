@@ -3610,12 +3610,12 @@ internal enum class WritingSurface { SHEET, FULL_EDITOR }
  * #806 — which surface a write tap opens, from the user's [preset] and the number of citations the
  * tap carries (0 for the reply FAB, 1 for « Citer », the basket size for « Citer N »).
  *
- * - [WritingSurfacePreset.SHEET] (default) keeps the 0.25.1 routing exactly : the quick-reply
- *   sheet, except a multi-quote basket of [MULTI_QUOTE_FULL_EDITOR_THRESHOLD]+ cards (mockup P3 :
- *   « le cas qui force le plein écran », #604 lot 3) — up to that the sheet stays comfortable with
- *   the keyboard open.
+ * - [WritingSurfacePreset.SHEET] (experimental opt-in, #951) keeps the 0.25.1 routing exactly :
+ *   the quick-reply sheet, except a multi-quote basket of [MULTI_QUOTE_FULL_EDITOR_THRESHOLD]+
+ *   cards (mockup P3 : « le cas qui force le plein écran », #604 lot 3) — up to that the sheet
+ *   stays comfortable with the keyboard open.
  * - [WritingSurfacePreset.SHEET_EXCEPT_QUOTES] : any citation (1..N) opens the full-screen editor.
- * - [WritingSurfacePreset.FULL_EDITOR] : always the full-screen editor.
+ * - [WritingSurfacePreset.FULL_EDITOR] (default since #951) : always the full-screen editor.
  *
  * Pure so the routing table is unit-testable ([MultiQuoteRoutingTest]).
  */

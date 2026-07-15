@@ -367,11 +367,11 @@ class DataStoreUserPreferencesRepository @Inject constructor(
 
     override fun observeWritingSurfacePreset(): Flow<WritingSurfacePreset> =
         dataStore.data
-            // Default SHEET (#806): the 0.25.1 behaviour — quick-reply sheet everywhere, with the
-            // 3+ multi-quote threshold escalating to the full-screen editor.
+            // Default FULL_EDITOR (#951): the quick-reply sheet is experimental opt-in — users
+            // who explicitly picked a sheet preset keep it (stored value wins over the default).
             .map(::readWritingSurfacePreset)
             .distinctUntilChanged()
-            .catch { emit(WritingSurfacePreset.SHEET) }
+            .catch { emit(WritingSurfacePreset.FULL_EDITOR) }
 
     override suspend fun setWritingSurfacePreset(preset: WritingSurfacePreset) {
         persist {
@@ -777,11 +777,11 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             ?.let { stored -> runCatching { EditorImageInsert.valueOf(stored) }.getOrNull() }
             ?: EditorImageInsert.REDUCED
 
-    /** Reads [KEY_WRITING_SURFACE_PRESET] defensively; unknown / corrupt value → [WritingSurfacePreset.SHEET]. */
+    /** Reads [KEY_WRITING_SURFACE_PRESET] defensively; unknown / corrupt value → [WritingSurfacePreset.FULL_EDITOR]. */
     private fun readWritingSurfacePreset(prefs: Preferences): WritingSurfacePreset =
         prefs[KEY_WRITING_SURFACE_PRESET]
             ?.let { stored -> runCatching { WritingSurfacePreset.valueOf(stored) }.getOrNull() }
-            ?: WritingSurfacePreset.SHEET
+            ?: WritingSurfacePreset.FULL_EDITOR
 
     /**
      * Reads [KEY_DISPLAY_DENSITY] defensively (#287): an unknown / corrupt stored value (older

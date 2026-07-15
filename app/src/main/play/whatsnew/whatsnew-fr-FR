@@ -1,3 +1,3 @@
-Redface 2 v0.31.0 — dev.
+Redface 2 v0.32.0 — dev.
 
-- Fini le jaune : l'accent tertiaire passe à l'ardoise sur toutes les palettes (bande du post ciblé, bouton d'envoi armé, citations imbriquées).
+- La feuille de réponse rapide passe en expérimental (pas finalisée) : répondre et citer ouvrent désormais l'éditeur plein écran par défaut. La feuille reste activable dans Réglages > Surface d'écriture.
