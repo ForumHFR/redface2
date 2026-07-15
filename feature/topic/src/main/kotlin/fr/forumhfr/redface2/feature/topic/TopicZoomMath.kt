@@ -4,7 +4,10 @@ import kotlin.math.atanh
 import kotlin.math.tanh
 
 internal const val MIN_ZOOM_SCALE = 1f
-internal const val MAX_ZOOM_SCALE = 2.5f
+// 2.5f at first delivery ; raised to 3f on unanimous community feedback (0.30.0, DEV
+// thread — thibw/Deadlock/Dintr-un lemn/nicko/tinc). Beyond 3x the 1024 px inline decode cap
+// shows (blur) : deeper inspection is the image viewer's job (#182-C), not the magnifier's.
+internal const val MAX_ZOOM_SCALE = 3f
 internal const val ZOOM_RELEASE_SNAP_THRESHOLD = 1.03f
 
 /** Maximum displayed overshoot past [MAX_ZOOM_SCALE] while the fingers keep squeezing. */

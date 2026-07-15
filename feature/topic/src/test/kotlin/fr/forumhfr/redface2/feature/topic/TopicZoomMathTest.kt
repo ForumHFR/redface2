@@ -10,7 +10,7 @@ class TopicZoomMathTest {
 
     @Test
     fun `pinch keeps the content under the centroid fixed on screen`() {
-        val rubberedScale = clampScaleDuringPinch(raw = 3f)
+        val rubberedScale = clampScaleDuringPinch(raw = 3.5f)
         val cases = listOf(
             PinchCase(
                 label = "zoom in from rest",
@@ -139,13 +139,13 @@ class TopicZoomMathTest {
         assertTrue(justPastJoin > atJoin)
         assertEquals(atJoin, justPastJoin, 0.00011f)
 
-        val rawScales = listOf(2.5f, 2.6f, 3f, 4f, 10f)
+        val rawScales = listOf(3f, 3.1f, 3.5f, 4f, 10f)
         val displayScales = rawScales.map(::clampScaleDuringPinch)
         displayScales.zipWithNext().forEach { (first, second) ->
             assertTrue("rubber band must stay monotone: $first then $second", second > first)
         }
-        assertTrue(clampScaleDuringPinch(raw = 3f) > MAX_ZOOM_SCALE)
-        assertTrue(clampScaleDuringPinch(raw = 3f) < 3f)
+        assertTrue(clampScaleDuringPinch(raw = 3.5f) > MAX_ZOOM_SCALE)
+        assertTrue(clampScaleDuringPinch(raw = 3.5f) < 3.5f)
     }
 
     @Test
@@ -154,13 +154,13 @@ class TopicZoomMathTest {
         assertEquals(1f, resolveScaleOnRelease(gestureScale = 1.03f), TOLERANCE)
         assertEquals(1.0301f, resolveScaleOnRelease(gestureScale = 1.0301f), TOLERANCE)
         assertEquals(1.8f, resolveScaleOnRelease(gestureScale = 1.8f), TOLERANCE)
-        assertEquals(2.5f, resolveScaleOnRelease(gestureScale = 2.5f), TOLERANCE)
-        assertEquals(2.5f, resolveScaleOnRelease(gestureScale = 2.8f), TOLERANCE)
+        assertEquals(3f, resolveScaleOnRelease(gestureScale = 3f), TOLERANCE)
+        assertEquals(3f, resolveScaleOnRelease(gestureScale = 3.4f), TOLERANCE)
     }
 
     @Test
     fun `incremental factors remain directional in the rubber band`() {
-        val scaleOld = clampScaleDuringPinch(raw = 3f)
+        val scaleOld = clampScaleDuringPinch(raw = 3.5f)
         val rubbered = ZoomTransform(scale = scaleOld, panX = -500f)
         val noOp = pinchStep(rubbered, 400f, 700f, 1f, 1000f)
         val zoomIn = pinchStep(rubbered, 400f, 700f, 1.01f, 1000f)

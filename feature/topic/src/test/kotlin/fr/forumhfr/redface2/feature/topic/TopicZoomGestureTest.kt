@@ -399,4 +399,85 @@ class TopicZoomGestureTest {
         val panX = zoomState.panX.floatValue
         assertTrue("panX must stay bounded", panX <= 0f && panX >= 1080f * (1f - scale) - 1f)
     }
+
+    @Test
+    fun `a fast zoomed pan release glides on after the finger lifts`() {
+        mount()
+        pinchOut()
+        compose.waitForIdle()
+        // Fast one-finger pan up : high release velocity.
+        compose.onNodeWithTag("zoom").performTouchInput {
+            down(0, center + Offset(0f, 300f))
+            repeat(6) { moveBy(0, Offset(0f, -90f)) }
+            up(0)
+        }
+        val atRelease = listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
+        compose.mainClock.advanceTimeBy(600)
+        compose.waitForIdle()
+        val afterDecay = listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
+
+        assertNotEquals("the damped glide must keep scrolling after the lift", atRelease, afterDecay)
+        val settled = afterDecay
+        compose.mainClock.advanceTimeBy(1500)
+        compose.waitForIdle()
+        assertEquals(
+            "the strong friction must have stopped the glide well within ~600ms",
+            settled,
+            listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset,
+        )
+    }
+
+    @Test
+    fun `a gesture that pinched never flings on release`() {
+        mount()
+        compose.onNodeWithTag("zoom").performTouchInput {
+            down(0, center - Offset(0f, 150f))
+            down(1, center + Offset(0f, 150f))
+            repeat(6) { i ->
+                val gap = 300f + 300f * (i + 1) / 6
+                updatePointerTo(0, center - Offset(0f, gap / 2f))
+                updatePointerTo(1, center + Offset(0f, gap / 2f))
+                move()
+            }
+            up(1)
+            // Same gesture continues as a FAST pan : hadPinch is latched, no fling allowed.
+            repeat(6) { moveBy(0, Offset(0f, -90f)) }
+            up(0)
+        }
+        compose.waitForIdle()
+        val atRelease = listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
+        compose.mainClock.advanceTimeBy(600)
+        compose.waitForIdle()
+
+        assertEquals(
+            "a mixed pinch-pan gesture must stop dead at the lift (no RF1 sucette)",
+            atRelease,
+            listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset,
+        )
+    }
+
+    @Test
+    fun `a slow zoomed pan release does not fling`() {
+        mount()
+        pinchOut()
+        compose.waitForIdle()
+        compose.onNodeWithTag("zoom").performTouchInput {
+            down(0, center + Offset(0f, 300f))
+            repeat(6) {
+                advanceEventTime(120)
+                moveBy(0, Offset(0f, -30f))
+            }
+            up(0)
+        }
+        compose.waitForIdle()
+        val atRelease = listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
+        compose.mainClock.advanceTimeBy(600)
+        compose.waitForIdle()
+
+        assertEquals(
+            "below the velocity threshold the pan must stop with the finger",
+            atRelease,
+            listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset,
+        )
+    }
 }
