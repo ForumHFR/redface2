@@ -1076,10 +1076,11 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
-    fun `observeWritingSurfacePreset defaults to SHEET on an empty store`() = runTest(dispatcher) {
-        // #806 — SHEET is the default (the 0.25.1 behaviour), never the enum's first ordinal by chance.
+    fun `observeWritingSurfacePreset defaults to FULL_EDITOR on an empty store`() = runTest(dispatcher) {
+        // #951 — FULL_EDITOR is the default (the quick-reply sheet is experimental opt-in),
+        // never the enum's first ordinal by chance.
         repository.observeWritingSurfacePreset().test {
-            assertEquals(WritingSurfacePreset.SHEET, awaitItem())
+            assertEquals(WritingSurfacePreset.FULL_EDITOR, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -1100,12 +1101,12 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
-    fun `corrupt writing_surface_preset value falls back to SHEET instead of crashing`() = runTest(dispatcher) {
-        // An unknown value (older build / manual edit) must degrade to SHEET, not crash valueOf.
+    fun `corrupt writing_surface_preset value falls back to FULL_EDITOR instead of crashing`() = runTest(dispatcher) {
+        // An unknown value (older build / manual edit) must degrade to FULL_EDITOR, not crash valueOf.
         dataStore.edit { prefs -> prefs[stringPreferencesKey("writing_surface_preset")] = "HOLODECK" }
 
         repository.observeWritingSurfacePreset().test {
-            assertEquals(WritingSurfacePreset.SHEET, awaitItem())
+            assertEquals(WritingSurfacePreset.FULL_EDITOR, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
     }

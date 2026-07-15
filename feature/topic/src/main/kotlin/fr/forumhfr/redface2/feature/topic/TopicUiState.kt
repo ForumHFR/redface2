@@ -65,10 +65,10 @@ data class TopicUiState(
      * #806 — mirrors `UserPreferencesRepository.observeWritingSurfacePreset()`. Feeds
      * [writingSurfaceFor] AT TAP TIME on the three write entry points (reply FAB, « Citer »,
      * « Citer N ») to pick the quick-reply sheet or the full-screen editor. Default
-     * [WritingSurfacePreset.SHEET] = the 0.25.1 behaviour. A preset change never migrates an
-     * already-open sheet (the decision is only ever taken on the next tap).
+     * [WritingSurfacePreset.FULL_EDITOR] since the sheet is experimental opt-in (#951). A preset
+     * change never migrates an already-open sheet (the decision is only ever taken on the next tap).
      */
-    val writingSurfacePreset: WritingSurfacePreset = WritingSurfacePreset.SHEET,
+    val writingSurfacePreset: WritingSurfacePreset = WritingSurfacePreset.FULL_EDITOR,
     /**
      * #335 — `true` while a manual pull-to-refresh of the current page is in flight. Drives the
      * Material3 `PullToRefreshBox` spinner. Set on the `Refresh` intent, cleared in the refresh

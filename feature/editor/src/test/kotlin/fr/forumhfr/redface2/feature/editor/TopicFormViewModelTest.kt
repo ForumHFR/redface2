@@ -1507,7 +1507,7 @@ class TopicFormViewModelTest {
 
         // #806 — the writing-surface preset routes taps in :feature:topic, not here; default stub.
         override fun observeWritingSurfacePreset(): Flow<WritingSurfacePreset> =
-            MutableStateFlow(WritingSurfacePreset.SHEET)
+            MutableStateFlow(WritingSurfacePreset.FULL_EDITOR)
 
         override suspend fun setWritingSurfacePreset(preset: WritingSurfacePreset) = Unit
 

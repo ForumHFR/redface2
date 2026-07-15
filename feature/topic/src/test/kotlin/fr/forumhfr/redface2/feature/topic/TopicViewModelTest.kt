@@ -682,7 +682,7 @@ class TopicViewModelTest {
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
             userPreferencesRepository = FakeUserPreferencesRepository(),
         )
-        assertEquals(WritingSurfacePreset.SHEET, default.state.value.writingSurfacePreset)
+        assertEquals(WritingSurfacePreset.FULL_EDITOR, default.state.value.writingSurfacePreset)
     }
 
     @Test
@@ -3726,8 +3726,9 @@ internal class FakeUserPreferencesRepository(
     private val confirmBeforePosting: Boolean = false,
     // #805 — quote rendering in the composer; false mirrors the production default (inline BBCode).
     private val quoteCardsEnabled: Boolean = false,
-    // #806 — writing-surface preset; SHEET mirrors the production default (0.25.1 behaviour).
-    private val writingSurfacePreset: WritingSurfacePreset = WritingSurfacePreset.SHEET,
+    // #951 — writing-surface preset; FULL_EDITOR mirrors the production default (the
+    // quick-reply sheet is experimental opt-in).
+    private val writingSurfacePreset: WritingSurfacePreset = WritingSurfacePreset.FULL_EDITOR,
 ) : UserPreferencesRepository {
     override fun observeProxyConfig(): Flow<ProxyConfig> = MutableStateFlow(ProxyConfig())
 

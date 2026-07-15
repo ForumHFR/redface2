@@ -252,15 +252,16 @@ interface UserPreferencesRepository {
 
     /**
      * #806 — which composition surface a write action in a topic opens (reply FAB, « Citer »,
-     * « Citer N »). Default [WritingSurfacePreset.SHEET] = the 0.25.1 behaviour exactly (quick-reply
-     * sheet everywhere, 3+ multi-quote escalating to the full-screen editor). The preset decides the
-     * surface only — quote RENDERING stays [observeQuoteCardsEnabled] (#805). A corrupt / unknown
-     * stored value degrades to the default. Observed by `:feature:topic` (decision at tap time, an
-     * open sheet is never migrated), chosen in Settings (« Édition et publication »).
+     * « Citer N »). Default [WritingSurfacePreset.FULL_EDITOR] since the quick-reply sheet moved
+     * to experimental status (#951) — the sheet presets stay available as opt-in. The preset
+     * decides the surface only — quote RENDERING stays [observeQuoteCardsEnabled] (#805). A
+     * corrupt / unknown stored value degrades to the default. Observed by `:feature:topic`
+     * (decision at tap time, an open sheet is never migrated), chosen in Settings
+     * (« Édition et publication »).
      */
     fun observeWritingSurfacePreset(): Flow<WritingSurfacePreset>
 
-    /** Persists [observeWritingSurfacePreset]. Default [WritingSurfacePreset.SHEET] until the first call. */
+    /** Persists [observeWritingSurfacePreset]. Default [WritingSurfacePreset.FULL_EDITOR] until the first call. */
     suspend fun setWritingSurfacePreset(preset: WritingSurfacePreset)
 
     /**
