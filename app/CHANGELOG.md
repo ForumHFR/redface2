@@ -16,6 +16,17 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.31.0` — `internal` (dev) — 2026-07-15
+
+Premier lot du chantier couleurs #883 (arbitrage XaTriX sur la galerie V2 : la refonte
+complète des palettes part en phase suivante, seul le tertiaire change maintenant).
+
+- Thème : l'accent tertiaire **ambre** (« jaune ») est remplacé par une **ardoise** dans les
+  5 palettes (Rose clair/sombre, AMOLED, Rouge REDFACE1 clair/sombre). Visible sur la bande du
+  post ciblé (ancre de scroll), le bouton d'envoi armé, les barres des citations imbriquées
+  alternées et le badge sticky/lock des listes forum. Le jaune des drapeaux favoris
+  (FlagPalette) est découplé et ne change pas.
+
 ## `0.30.1` — `internal` (dev) — 2026-07-15
 
 Lot v1.1 de la loupe — retours communautaires 0.30.0 (fil DEV), même journée.
