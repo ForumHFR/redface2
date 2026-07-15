@@ -1,6 +1,9 @@
 package fr.forumhfr.redface2.feature.topic
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationState
+import androidx.compose.animation.core.animateDecay
+import androidx.compose.animation.core.exponentialDecay
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -16,10 +19,12 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerEvent
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -36,6 +41,18 @@ import kotlinx.coroutines.launch
 // reset on page AND topic change (state keyed on the full route identity).
 
 private const val ZOOM_SNAP_MILLIS = 200
+
+// v1.1 damped Y fling (community feedback on 0.30.0 : the zoomed pan felt « collant »). STRONG
+// friction — the sold contract is « a quick, bounded glide », deliberately shorter than a list
+// fling ; XaTriX pinned the axis (Y only : the X range is ~1.5 screens at 3×, a glide there
+// would just slam the bound). Values from the Sol framing, dp-based (density-independent).
+private const val FLING_FRICTION_MULTIPLIER = 3f
+private val FLING_MIN_VELOCITY = 500.dp
+private val FLING_MAX_VELOCITY = 4000.dp
+private val FLING_STOP_VELOCITY = 10.dp
+
+/** Frames of ~zero EFFECTIVE displacement (list + panY both saturated) before the decay stops. */
+private const val FLING_BLOCKED_FRAMES = 2
 
 /**
  * #182 — true while the reader is magnified (> 1×). NO LONGER wired to the `selectable` seam :
@@ -151,32 +168,75 @@ internal class TopicZoomState(private val animationScope: CoroutineScope) {
      * edge). Downward: panY unwinds back to 0 FIRST, then the list scrolls — panY is never left
      * engaged while scroll headroom exists in the visible direction.
      */
-    fun moveContentUp(deltaScreenPx: Float, listState: LazyListState) {
+    /** Returns the EFFECTIVE screen displacement (list + panY) — the fling's blocked detector. */
+    fun moveContentUp(deltaScreenPx: Float, listState: LazyListState): Float {
         // Fling stop still in flight : buffer instead of racing it (see [engage]).
         val stop = stopFlingJob
         if (stop != null && !stop.isCompleted) {
             pendingDeltaScreenPx += deltaScreenPx
-            return
+            return 0f
         }
         val delta = deltaScreenPx + pendingDeltaScreenPx
         pendingDeltaScreenPx = 0f
-        applyContentDelta(delta, listState)
+        return applyContentDelta(delta, listState)
     }
 
-    private fun applyContentDelta(deltaScreenPx: Float, listState: LazyListState) {
+    private fun applyContentDelta(deltaScreenPx: Float, listState: LazyListState): Float {
         // Delegates to the PURE TopicZoomMath vertical distribution (review finding : the tested
         // functions must be the ones the gesture executes — no hand-inlined twin).
         val s = scale.floatValue
-        if (deltaScreenPx >= 0f) {
+        val panYBefore = panY.floatValue
+        return if (deltaScreenPx >= 0f) {
             val consumed = listState.dispatchRawDelta(upwardListRequestViewportPx(deltaScreenPx, s))
             panY.floatValue =
                 upwardPanYAfterScroll(deltaScreenPx, consumed, panY.floatValue, s, viewportHeightPx)
+            consumed * s + (panYBefore - panY.floatValue)
         } else {
             val distribution =
                 downwardDistribution(deltaScreenPx, panY.floatValue, s, viewportHeightPx)
             panY.floatValue = distribution.panYNew
+            var consumedViewport = 0f
             if (distribution.listRequestViewportPx != 0f) {
-                listState.dispatchRawDelta(distribution.listRequestViewportPx)
+                consumedViewport = listState.dispatchRawDelta(distribution.listRequestViewportPx)
+            }
+            consumedViewport * s + (panYBefore - panY.floatValue)
+        }
+    }
+
+    /**
+     * v1.1 — damped vertical glide after a PAN-ONLY gesture (never after a pinch : hadPinch is
+     * latched in the gesture, Sol framing). Sequenced AFTER the engage-time stopScroll (join) so
+     * the decay is the only scroll producer ; stops early after [FLING_BLOCKED_FRAMES] frames of
+     * ~zero effective displacement (both bounds saturated). Interruption : engage() and the reset
+     * chip both cancel [releaseJob] — one cosmetic decay frame may land before the cancellation
+     * takes effect (main-thread sequencing), harmless because every mutation stays bounded.
+     */
+    fun startFling(
+        velocityYPx: Float,
+        stopVelocityPx: Float,
+        listState: LazyListState,
+    ) {
+        releaseJob?.cancel()
+        releaseJob = animationScope.launch {
+            stopFlingJob?.join()
+            var previous = 0f
+            var blockedFrames = 0
+            AnimationState(initialValue = 0f, initialVelocity = velocityYPx).animateDecay(
+                exponentialDecay(
+                    frictionMultiplier = FLING_FRICTION_MULTIPLIER,
+                    absVelocityThreshold = stopVelocityPx,
+                ),
+            ) {
+                val dy = value - previous
+                previous = value
+                // Finger semantics : the glide continues the finger, moveContentUp(-dy) like the
+                // pan frames (moveContentUp already distributes and divides by the scale).
+                val effective = moveContentUp(-dy, listState)
+                if (kotlin.math.abs(effective) < 0.5f && kotlin.math.abs(dy) >= 0.5f) {
+                    if (++blockedFrames >= FLING_BLOCKED_FRAMES) cancelAnimation()
+                } else {
+                    blockedFrames = 0
+                }
             }
         }
     }
@@ -264,18 +324,43 @@ internal fun Modifier.topicMagnifier(
         if (state.zoomed) firstDown.consume()
         state.viewportWidthPx = size.width.toFloat()
         state.viewportHeightPx = size.height.toFloat()
-        val engaged = trackMagnifierGesture(state, listState)
+        val tracking = MagnifierGestureTracking()
+        val engaged = trackMagnifierGesture(state, listState, tracking)
         state.releaseGesture()
         if (!engaged) return@awaitEachGesture
-        // Release: snap near-rest scales back to 1×, cap rubber-banded ones — ANCHORED on the last
-        // gesture position so the settle never jumps (panX converges into [0,0] on a snap to 1×).
-        state.settleAnchoredTo(
-            targetScale = resolveScaleOnRelease(state.scale.floatValue),
-            anchorX = state.lastAnchorX,
-            anchorY = state.lastAnchorY,
-            listState = listState,
-        )
+        val settledScale = resolveScaleOnRelease(state.scale.floatValue)
+        if (settledScale != state.scale.floatValue) {
+            // Snap near-rest scales back to 1×, cap rubber-banded ones — ANCHORED on the last
+            // gesture position so the settle never jumps (panX converges into [0,0] at 1×).
+            state.settleAnchoredTo(
+                targetScale = settledScale,
+                anchorX = state.lastAnchorX,
+                anchorY = state.lastAnchorY,
+                listState = listState,
+            )
+        } else if (state.zoomed && !tracking.hadPinch) {
+            // v1.1 — damped glide, PAN-ONLY gestures (Sol framing : a mixed pinch→pan gesture is
+            // latched out — a fling right after a scale change is the RF1 « sucette » feel).
+            val velocityY = tracking.velocityTracker.calculateVelocity().y
+            val minPx = FLING_MIN_VELOCITY.toPx()
+            val maxPx = FLING_MAX_VELOCITY.toPx()
+            if (kotlin.math.abs(velocityY) >= minPx) {
+                state.startFling(
+                    velocityYPx = velocityY.coerceIn(-maxPx, maxPx),
+                    stopVelocityPx = FLING_STOP_VELOCITY.toPx(),
+                    listState = listState,
+                )
+            }
+        }
     }
+}
+
+/** Per-gesture tracking for the release arbitration (settle vs damped glide). */
+private class MagnifierGestureTracking {
+    val velocityTracker = VelocityTracker()
+
+    /** Latched at the first two-pointer frame — a gesture that ever pinched never flings (Sol). */
+    var hadPinch = false
 }
 
 /**
@@ -288,6 +373,7 @@ internal fun Modifier.topicMagnifier(
 private suspend fun AwaitPointerEventScope.trackMagnifierGesture(
     state: TopicZoomState,
     listState: LazyListState,
+    tracking: MagnifierGestureTracking,
 ): Boolean {
     var engaged = false
     while (true) {
@@ -295,7 +381,7 @@ private suspend fun AwaitPointerEventScope.trackMagnifierGesture(
         val released = event.changes.none { it.pressed }
         if (released && engaged) event.changes.forEach { it.consume() }
         if (released) return engaged
-        engaged = handleMagnifierFrame(state, listState, event, engaged)
+        engaged = handleMagnifierFrame(state, listState, event, engaged, tracking)
     }
 }
 
@@ -313,15 +399,21 @@ private fun AwaitPointerEventScope.handleMagnifierFrame(
     listState: LazyListState,
     event: PointerEvent,
     wasEngaged: Boolean,
+    tracking: MagnifierGestureTracking,
 ): Boolean {
     val pressed = event.changes.count { it.pressed }
     val engaging = pressed >= 2 || wasEngaged || state.zoomed
     if (!engaging) return false
     if (!wasEngaged) state.engage(listState)
     if (pressed >= 2) {
+        if (!tracking.hadPinch) {
+            // Latch + reset : no velocity inherited from before/inside the pinch (Sol framing).
+            tracking.hadPinch = true
+            tracking.velocityTracker.resetTracking()
+        }
         applyPinchFrame(state, listState, event, size.width.toFloat())
     } else {
-        applyPanFrame(state, listState, event, size.width.toFloat())
+        applyPanFrame(state, listState, event, size.width.toFloat(), tracking)
     }
     event.changes.forEach { it.consume() }
     return true
@@ -333,10 +425,12 @@ private fun applyPanFrame(
     listState: LazyListState,
     event: PointerEvent,
     widthPx: Float,
+    tracking: MagnifierGestureTracking,
 ) {
     // firstOrNull (validation 5.5) : a transient frame where every pointer just lifted must not
     // crash — the release branch of the loop handles it on the next event.
     val change = event.changes.firstOrNull { it.pressed } ?: return
+    tracking.velocityTracker.addPosition(change.uptimeMillis, change.position)
     val delta = change.position - change.previousPosition
     val scale = state.scale.floatValue
     state.panX.floatValue = panStep(state.panX.floatValue, delta.x, scale, widthPx)

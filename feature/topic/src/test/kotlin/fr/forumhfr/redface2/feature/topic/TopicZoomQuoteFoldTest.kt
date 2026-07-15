@@ -50,7 +50,9 @@ class TopicZoomQuoteFoldTest {
     private lateinit var zoomState: TopicZoomState
 
     private fun longQuoteContent(): PostContent {
-        val longText = buildString { repeat(30) { append("Ligne de citation numéro $it assez longue pour dépasser le seuil. ") } }
+        val longText = buildString {
+            repeat(30) { append("Ligne de citation numéro $it assez longue pour dépasser le seuil. ") }
+        }
         return PostContent(
             blocks = listOf(
                 PostBlock.Quote(
