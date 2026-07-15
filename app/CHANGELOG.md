@@ -16,6 +16,14 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.30.1` — `internal` (dev) — 2026-07-15
+
+Lot v1.1 de la loupe — retours communautaires 0.30.0 (fil DEV), même journée.
+
+- Loupe : plafond de zoom relevé à **3×** (demande unanime) ; au-delà, place au futur viewer d'images.
+- Loupe : **glisse verticale amortie** après un déplacement zoomé (décélération rapide, bornée, jamais après un pincement — le « lancer en sucette » de RF1 est structurellement impossible) (#182).
+- Fix #946 : pincer sur une citation dépliée ne la replie plus (le changement structurel du mode replié jetait l'état des citations).
+
 ## `0.30.0` — `internal` (dev) — 2026-07-15
 
 Chantier pinch-to-zoom #182 (option A) — POC #935 GO (3 relevés, matrices émulateur + S10e), durcissement #936, production #937.

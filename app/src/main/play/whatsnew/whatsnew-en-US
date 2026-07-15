@@ -1,5 +1,4 @@
-Redface 2 v0.30.0 — dev.
+Redface 2 v0.30.1 — dev.
 
-- Pinch-to-zoom: global reading magnifier in topics (RF1 spirit) — pinch to zoom, one finger to pan, 1x button to reset.
-- While zoomed: read-only (taps inert), zoom out to interact — details on the DEV thread.
-- Page swipe hardened against multi-touch.
+- Magnifier: max zoom raised to 3x (unanimous request) and damped vertical glide while panning zoomed.
+- Pinching an expanded quote no longer folds it back.
