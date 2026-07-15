@@ -1,5 +1,4 @@
-Redface 2 v0.30.0 — dev.
+Redface 2 v0.30.1 — dev.
 
-- Pinch-to-zoom : loupe globale de lecture dans les sujets (esprit RF1) — pincez pour zoomer, un doigt pour naviguer, bouton 1x pour revenir.
-- Pendant le zoom : lecture seule (taps inactifs), dézoomez pour interagir — détails sur le fil DEV.
-- Swipe de page durci contre le multi-touch.
+- Loupe : zoom max relevé à 3x (demande unanime) et glisse verticale amortie au déplacement zoomé.
+- Pincer sur une citation dépliée ne la replie plus.
