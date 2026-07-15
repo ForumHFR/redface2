@@ -1166,10 +1166,11 @@ internal fun TopicContent(
                         // is provided to the post renderers so QuoteBlock masks a citation OF a
                         // blocked author. Scoped to the reading list only — the quick-reply sheet
                         // and editor previews (outside this provider) keep the empty default.
+                        // #946 — LocalTopicZoomed is deliberately NOT provided here any more :
+                        // its only consumer was the `selectable` flip, whose structural swap
+                        // destroyed the posts' saveable state on every zoom engage.
                         CompositionLocalProvider(
                             LocalBlockedQuoteAuthors provides mode.blockedQuoteAuthors,
-                            // POC #182 — suspends text selection in the post cards while zoomed.
-                            LocalTopicZoomed provides isZoomed,
                         ) {
                             TopicLoadedContent(
                                 state = state,
@@ -2792,9 +2793,13 @@ internal fun TopicPostCard(
                 CompositionLocalProvider(LocalPostImageActions provides imageActions) {
                     PostRenderer(
                         content = post.content,
-                        // POC #182 — selection is suspended while the magnifier is engaged (>1×);
-                        // topic posts are selectable at rest (#281).
-                        selectable = !LocalTopicZoomed.current,
+                        // #946 — `selectable` must NOT depend on the zoom: flipping it swaps the
+                        // SelectionContainer in/out of the tree, which STRUCTURALLY recreates the
+                        // whole post subtree and throws away every rememberSaveable below it (the
+                        // expanded long quotes collapsed on pinch, proven by the field logs and
+                        // TopicZoomQuoteFoldTest). Selection stays inert at >1× anyway: the
+                        // magnifier consumes the down (replied mode), no selection can start.
+                        selectable = true,
                         onGoToCitedPost = onGoToCitedPost,
                         mediaRefreshGeneration = mediaRefreshGeneration,
                     )

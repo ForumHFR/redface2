@@ -38,8 +38,11 @@ import kotlinx.coroutines.launch
 private const val ZOOM_SNAP_MILLIS = 200
 
 /**
- * POC #182 — true while the reader is magnified (> 1×). Read by the post cards to suspend text
- * selection (the `selectable` seam) without threading a parameter through the whole call chain.
+ * #182 — true while the reader is magnified (> 1×). NO LONGER wired to the `selectable` seam :
+ * flipping `selectable` with the zoom swapped the SelectionContainer in/out of the tree, which
+ * structurally recreated the post subtree and threw away every rememberSaveable below it (#946 —
+ * expanded long quotes collapsed on pinch). Selection stays inert at >1× through the replied
+ * mode (the magnifier consumes the down). Kept for tests and potential non-structural consumers.
  */
 internal val LocalTopicZoomed = compositionLocalOf { false }
 
