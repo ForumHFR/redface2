@@ -1,3 +1,3 @@
-Redface 2 v0.32.0 — dev.
+Redface 2 v0.33.0 — dev.
 
-- La feuille de réponse rapide passe en expérimental (pas finalisée) : répondre et citer ouvrent désormais l'éditeur plein écran par défaut. La feuille reste activable dans Réglages > Surface d'écriture.
+- Vue Topic : la rangée d'actions du post passe à une hauteur tactile conforme (48 dp) et la pastille « Ajouté à la citation » disparaît. Résultat : plus aucun décalage du post au tap « + Citer », et un peu plus de contenu à l'écran.

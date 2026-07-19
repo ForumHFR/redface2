@@ -16,6 +16,16 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.33.0` — `internal` (dev) — 2026-07-19
+
+Premier lot du chantier « barres » #882 (P1) — deux reviews indépendantes (Codex GO + code-review
+multi-agents, aucune issue retenue).
+
+- Vue Topic : la **rangée d'actions du post** (Répondre, Citer, etc.) passe à une hauteur de
+  **48 dp réels** (cible tactile conforme) et la **pill dynamique « Ajouté à la citation »** est
+  supprimée. Résultat : **zéro décalage de mise en page** au tap « + Citer » (plus de saut du post)
+  et un gain d'environ **16 dp par post** en préset Confort.
+
 ## `0.32.0` — `internal` (dev) — 2026-07-15
 
 Décision produit #951 : la feuille de réponse rapide n'est pas correctement terminée.
