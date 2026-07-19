@@ -1,3 +1,3 @@
-Redface 2 v0.32.0 — dev.
+Redface 2 v0.33.0 — dev.
 
-- The quick-reply sheet is now experimental (not feature-complete): reply and quote open the full-screen editor by default. The sheet stays available in Settings > Writing surface.
+- Topic view: the post action row now uses a proper 48 dp touch target and the "Added to quote" pill is gone. Result: no more layout shift when tapping "+ Quote", and a bit more content on screen.
