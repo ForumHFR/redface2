@@ -1500,9 +1500,9 @@ private fun collectMeasurableSmileyUrl(inline: PostInline, urls: MutableSet<Stri
  *
  * #256 — URLs carrying the `hfr-cc-image=true` marker are EXCLUDED: their box is pinned by the
  * [imageDisplayBox] fast-path (never read from the measurement cache), so probing them would only
- * spend a useless network round-trip. Block promotion is unaffected: an unmeasured URL never trips
- * [shouldPromoteImagesToBlocks], which is exactly the intended always-inline treatment for a marked
- * emoji.
+ * spend a useless network round-trip. Topology is unaffected: since #957 inline/bloc is decided by
+ * the STRUCTURE ([partitionParagraph], contract v1.4 §2), never by measurement — a cc emoji in
+ * prose stays inline by construction.
  */
 internal fun collectMeasurableImageUrls(inlines: List<PostInline>): Set<String> {
     val urls = LinkedHashSet<String>()
@@ -1557,7 +1557,7 @@ private fun smileyDisplayBox(
  * size via the unified web-parity policy [imageParityDisplaySize]: no upscale, height capped to
  * [IMAGE_MAX_HEIGHT_UNITS] (web `max-height: 200px`), width capped to the relative
  * `0.9 × contentWidth` ([maxWidthSp], web `max-width: 90%`) — the former absolute 240 sp width cap
- * is gone, see [IMAGE_PROMOTION_WIDTH_UNITS].
+ * is gone since #610 (it survived only as the measured-promotion threshold, removed in #957).
  *
  * #253 — while the measurement is in flight (cold cache / miss) it falls back to a small square of
  * [INLINE_IMAGE_MIN_HEIGHT_SP] (≈ one text line) rather than the old 240×180 bucket. With
@@ -1628,65 +1628,7 @@ internal fun imageDisplayBox(
     return InlineMediaBox((capped.width + horizontalPaddingSp).sp, capped.height.sp)
 }
 
-/** #224/#257 — an image eligible for block promotion, paired with its enclosing `[url=…]` link (if any). */
-internal data class PromotedImage(val image: PostInline.InlineImage, val linkUrl: String?)
 
-/**
- * #224 (option B) / #257 — if a paragraph's only meaningful content is image(s) (a single posted image
- * the parser kept inline because of a stray sibling, or a gallery of several), return them in order,
- * each paired with the URL of its enclosing `[url=…]` link if there is one, so they can be promoted to
- * centred blocks (each on its own line — since #610 the block size equals the inline size, promotion
- * is layout semantics only). Blank text and line breaks are ignored.
- *
- * Returns null when the paragraph has any other meaningful inline (non-blank text, a smiley): genuine
- * prose keeps its inline image treatment. A link wrapping ONLY an image is fine — #257 promotes it to a
- * block that opens the link on tap, so the "click to enlarge" tap-through is preserved (before #257 a
- * linked image was kept inline → the link stayed a text-span affair).
- * A link wrapping image **+** text still counts as other content → null (stays inline prose).
- */
-@Suppress("CyclomaticComplexMethod") // exhaustive when over the PostInline sealed type, like appendInline
-internal fun imageOnlyParagraphImages(inlines: List<PostInline>): List<PromotedImage>? {
-    val images = mutableListOf<PromotedImage>()
-    var hasOtherContent = false
-    fun walk(list: List<PostInline>, linkUrl: String?) {
-        list.forEach { inline ->
-            when (inline) {
-                is PostInline.InlineImage -> images += PromotedImage(inline, linkUrl)
-                is PostInline.Text -> if (inline.value.isNotBlank()) hasOtherContent = true
-                PostInline.LineBreak -> Unit
-                is PostInline.Smiley -> hasOtherContent = true
-                is PostInline.Strong -> walk(inline.children, linkUrl)
-                is PostInline.Emphasis -> walk(inline.children, linkUrl)
-                is PostInline.Underline -> walk(inline.children, linkUrl)
-                is PostInline.Strike -> walk(inline.children, linkUrl)
-                is PostInline.Color -> walk(inline.children, linkUrl)
-                is PostInline.Link -> walk(inline.children, inline.url)
-            }
-        }
-    }
-    walk(inlines, linkUrl = null)
-    return images.takeIf { it.isNotEmpty() && !hasOtherContent }
-}
-
-/**
- * #224 (option B) — promote an image-only paragraph to blocks only once at least one image has
- * measured larger than the promotion thresholds (a real posted photo, not an emoji / small reaction:
- * a 16×16 cc-image never trips this and keeps its inline treatment). Returns false while every size
- * is unknown (cold) so promotion only kicks in after measurement.
- *
- * #610 — inline and block now SIZE identically ([imageParityDisplaySize]), so promotion is purely
- * layout semantics: the image gets its own centred line, the block loading/error UX, and the #257
- * link tap-through. The thresholds keep their pre-#610 calibration
- * ([IMAGE_PROMOTION_WIDTH_UNITS] = the former absolute inline width cap, [IMAGE_MAX_HEIGHT_UNITS]
- * = the shared parity height cap).
- */
-internal fun shouldPromoteImagesToBlocks(
-    images: List<PromotedImage>,
-    measured: Map<String, IntSize?>,
-): Boolean = images.any { promoted ->
-    val size = measured[promoted.image.url] ?: return@any false
-    size.width > IMAGE_PROMOTION_WIDTH_UNITS || size.height > IMAGE_MAX_HEIGHT_UNITS
-}
 
 /** True when [inlines] contains at least one renderable inline media (a smiley with a URL, or an image). */
 private fun hasInlineMedia(inlines: List<PostInline>): Boolean = inlines.any { inline ->

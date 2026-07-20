@@ -117,7 +117,6 @@ internal object PostMediaDisplayPolicy {
      * [blockImageDisplaySize] (web-parity `max-width:90% / max-height:200`, no upscale), replacing
      * the former full-width fit clamped to this [160, 480] dp range.
      */
-    val blockImageMaxHeight: Dp = 480.dp
     val blockImageMinHeight: Dp = 160.dp
 
     fun smileyBox(smiley: PostInline.Smiley): InlineMediaBox = when (smiley.kind) {
@@ -136,8 +135,8 @@ internal object PostMediaDisplayPolicy {
      * caller pass the mobile-recalibrated [blockImageMaxHeightDp] (`max(400, 0.5 × screenHeightDp)`) so
      * a square/portrait photo reaches ~90 % width instead of being squeezed to ~48 % by a 200 dp cap
      * with no web basis. Before #610: a measured block image FILLED the column width — upscaling any
-     * source narrower than the column — with its height `width × h/w` clamped to the [blockImageMinHeight]
-     * / [blockImageMaxHeight] (160/480 dp) slot; it now renders at its capped NATIVE size.
+     * source narrower than the column — with its height `width × h/w` clamped to the legacy grow-on-load
+     * slot; it now renders at its capped NATIVE size (cold slot = §6 v1.4 since #957).
      *
      * [measured] is `null` for a not-yet-measured image — a cold cache before the measure effect lands,
      * or a measurement failure (dead host / 404). Both the paragraph effect (#175/#224) and, since the
@@ -271,8 +270,8 @@ internal const val IMAGE_MAX_HEIGHT_UNITS = 200
 
 /**
  * #842 — mobile-recalibrated height cap (in **dp**) for the BLOCK `[img]` path, replacing the flat
- * [IMAGE_MAX_HEIGHT_UNITS] that #610 applied there. Real photos land on the block path (promoted at
- * width ≥ [IMAGE_PROMOTION_WIDTH_UNITS]); the cap is now relative to the viewport height so it scales
+ * [IMAGE_MAX_HEIGHT_UNITS] that #610 applied there. Real photos land on the block path (a structural
+ * MediaRun since #957 — contract v1.4 §2); the cap is relative to the viewport height so it scales
  * with the device while still guarding against a 4000×3000 RAW screenshot blowing up the post:
  * `max(400 dp, 0.5 × screenHeightDp)`. The 400 dp floor keeps a near-square image at ~90 % width on a
  * typical ~410 dp-wide phone (there the 90 % width cap ≈ 370 dp binds first, so the height cap no
@@ -288,17 +287,6 @@ internal fun blockImageMaxHeightDp(screenHeightDp: Int): Int = maxOf(
     (screenHeightDp * BLOCK_IMAGE_MAX_HEIGHT_SCREEN_FRACTION).roundToInt(),
 )
 
-/**
- * #610 — block-promotion width threshold. Before #610 this was `INLINE_IMAGE_MAX_WIDTH_SP` (240), the
- * ABSOLUTE inline display width cap; the display cap is now the RELATIVE `0.9 × contentWidth` (web
- * `max-width: 90%`, [SMILEY_RELATIVE_MAX_WIDTH_FRACTION]) applied renderer-side, so no absolute width
- * cap exists any more (before → after: an image measured 300 px wide rendered 240 sp wide; it now
- * renders 300 sp, or `0.9 × container` if narrower). The 240 value survives ONLY as the
- * `shouldPromoteImagesToBlocks` "this is a real photo" width threshold: with #610 sizing identical on
- * both paths, promotion is purely layout semantics (own centred line, block loading/error UX, #257
- * tap-through), and the threshold keeps its pre-#610 calibration.
- */
-internal const val IMAGE_PROMOTION_WIDTH_UNITS = 240
 
 /**
  * #257/#610 — fixed decode size (px) for an inline `[img]`: the render request decodes at this bound
