@@ -64,8 +64,12 @@ class PostRendererImageLongPressTest {
     @Before
     fun installFakeImageLoader() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        // #959 — the inline fixture must stay ABOVE the 48 dp platform minimum touch target once
+        // rendered at its native physical size (§3): 400×300 px at density 3 = 133×100 dp. A
+        // smaller bitmap gets the legitimate platform touch-target EXPANSION, which would make
+        // the padding-strip hitbox tests observe the expansion instead of the §5 bitmap hitbox.
         val engine = FakeImageLoaderEngine.Builder()
-            .intercept(inlineUrl, ColorImage(0xFF2E7D32.toInt(), width = 80, height = 60))
+            .intercept(inlineUrl, ColorImage(0xFF2E7D32.toInt(), width = 400, height = 300))
             .intercept(blockUrl, ColorImage(0xFF1565C0.toInt(), width = 400, height = 300))
             .intercept(ccUrl, ColorImage(0xFFF9A825.toInt(), width = 16, height = 16))
             .build()

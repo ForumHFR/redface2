@@ -24,12 +24,12 @@ import kotlin.math.roundToInt
  *
  * `[img]` — inline AND block — follows ONE policy since #610, the HFR-web parity rule
  * `img { max-width: 90%; max-height: 200px }` ([imageParityDisplaySize]): measured intrinsic native
- * size, no upscale, height capped to [IMAGE_MAX_HEIGHT_UNITS], width capped to the relative
+ * size, no upscale, height capped to [INLINE_IMAGE_MAX_HEIGHT_SP], width capped to the relative
  * `0.9 × contentWidth`. The inline path (`imageDisplayBox` in PostRenderer, #224 option A) applies it
  * in **sp** via the same `IntrinsicMediaSizeCache`; the block path ([blockImageDisplaySize]) applies
  * it in **dp** — so a lone posted photo and the same photo inside prose render at the same size (the
  * pre-#610 divergence was the issue). The **production cold fallback** (unmeasured inline `[img]`) is
- * the one-line [INLINE_IMAGE_MIN_HEIGHT_SP] square in `imageDisplayBox` (#253, no giant Fit flash).
+ * the one-line [INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP] square in `imageDisplayBox` (#253, no giant Fit flash).
  * The fixed 240×180 [inlineImage] bucket is now only the **default `collectInlineMedia` resolver**
  * (legacy bucket exercised by tests), not the runtime fallback. This kills the empty frame around a
  * small reaction image, the overflow in a narrow quote, and the full-width blow-up of block images.
@@ -52,7 +52,7 @@ internal object PostMediaDisplayPolicy {
     /**
      * Inline `[img]` uses [ContentScale.Fit] (like smileys) so the bitmap **fills** its placeholder
      * box. The no-upscale decision lives in the BOX sizing ([imageDisplayBox]: measured intrinsic,
-     * capped, floored to [INLINE_IMAGE_MIN_HEIGHT_SP]) — not the content scale. With `Inside` a tiny
+     * capped, floored to [INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP]) — not the content scale. With `Inside` a tiny
      * 16×16 cc-image emoji stayed 16×16 centred in its floored box (illegible in dogfood); `Fit` scales
      * it up to fill the box, while a large photo still scales DOWN into its capped box.
      */
@@ -96,7 +96,7 @@ internal object PostMediaDisplayPolicy {
      *
      * Since #224 option A this is **no longer the runtime sizing**: production `[img]` size is the
      * measured intrinsic native size (no-upscale + capped) from `imageDisplayBox`, and the production
-     * cold fallback (unmeasured) is the [INLINE_IMAGE_MIN_HEIGHT_SP] square (#253). This bucket now only
+     * cold fallback (unmeasured) is the [INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP] square (#253). This bucket now only
      * serves as the **default `collectInlineMedia` resolver** (the legacy value exercised by tests).
      */
     val inlineImage: InlineMediaBox = InlineMediaBox(
@@ -131,7 +131,7 @@ internal object PostMediaDisplayPolicy {
     fun blockImageDisplaySize(
         measured: PixelSize?,
         availableWidthDp: Float,
-        maxHeightDp: Int = IMAGE_MAX_HEIGHT_UNITS,
+        maxHeightDp: Int = INLINE_IMAGE_MAX_HEIGHT_SP,
     ): PixelSize? {
         val size = measured?.takeIf { it.width > 0 && it.height > 0 }
         if (size == null || availableWidthDp <= 0f) return null
@@ -288,11 +288,11 @@ internal val persoColdFallbackSize = PixelSize(70, 50)
  * reaction image never grows tall enough to break the text flow, and small inline sources (cc-image
  * 16×16, reactions) never reach the cap anyway (no upscale).
  */
-internal const val IMAGE_MAX_HEIGHT_UNITS = 200
+internal const val INLINE_IMAGE_MAX_HEIGHT_SP = 200
 
 /**
  * #842 — mobile-recalibrated height cap (in **dp**) for the BLOCK `[img]` path, replacing the flat
- * [IMAGE_MAX_HEIGHT_UNITS] that #610 applied there. Real photos land on the block path (a structural
+ * [INLINE_IMAGE_MAX_HEIGHT_SP] that #610 applied there. Real photos land on the block path (a structural
  * MediaRun since #957 — contract v1.4 §2); the cap is relative to the viewport height so it scales
  * with the device while still guarding against a 4000×3000 RAW screenshot blowing up the post:
  * `max(400 dp, 0.5 × screenHeightDp)`. The 400 dp floor keeps a near-square image at ~90 % width on a
@@ -332,7 +332,7 @@ internal const val INLINE_IMAGE_DECODE_CAP_PX = 1024
  * smaller is floored up to 16 (filled by [inlineImageContentScale] = Fit), anything taller is untouched
  * (no photo blow-up). 16 ≈ one text line (just under bodyMedium's 20sp lineHeight).
  */
-internal const val INLINE_IMAGE_MIN_HEIGHT_SP = 16
+internal const val INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP = 16
 
 /**
  * #175/#224 — the no-upscale + cap policy that replaces the fixed [InlineMediaBox] buckets for inline
@@ -370,7 +370,7 @@ internal fun intrinsicSmileyDisplaySize(
  * #610 — the unified `[img]` display policy shared by the inline path (`imageDisplayBox` in
  * PostRenderer, sp units) and the block path ([PostMediaDisplayPolicy.blockImageDisplaySize], dp
  * units): HFR-web `img { max-width: 90%; max-height: 200px }` parity. No upscale, height capped to
- * [maxHeightUnits] (default [IMAGE_MAX_HEIGHT_UNITS]), width capped to [maxWidthUnits] — the caller
+ * [maxHeightUnits] (default [INLINE_IMAGE_MAX_HEIGHT_SP]), width capped to [maxWidthUnits] — the caller
  * passes the RELATIVE cap (≈ `0.9 ×` its container width, in its own units), the only width limit
  * since #610. A non-positive [maxWidthUnits] applies no width cap (defensive, mirrors [capToWidth]:
  * a zero-width container must not collapse the image to a sliver).
@@ -382,7 +382,7 @@ internal fun intrinsicSmileyDisplaySize(
 internal fun imageParityDisplaySize(
     nativePx: PixelSize,
     maxWidthUnits: Int,
-    maxHeightUnits: Int = IMAGE_MAX_HEIGHT_UNITS,
+    maxHeightUnits: Int = INLINE_IMAGE_MAX_HEIGHT_SP,
 ): PixelSize = intrinsicSmileyDisplaySize(
     nativePx = nativePx,
     maxWidthSp = if (maxWidthUnits > 0) maxWidthUnits else Int.MAX_VALUE,
@@ -403,17 +403,3 @@ internal fun capToWidth(size: PixelSize, maxWidthSp: Int): PixelSize {
     )
 }
 
-/**
- * #224 — scale [size] UP so its height reaches [minHeightSp], preserving aspect ratio, when it is
- * smaller (a no-op otherwise). Counterpart to [capToWidth]: makes a tiny inline `[img]` (cc-image
- * emoji served as 16×16) legible instead of microscopic. The bitmap fills the resulting box via
- * [PostMediaDisplayPolicy.inlineImageContentScale] = Fit. Clamped ≥ 1 per axis.
- */
-internal fun upscaleToMinHeight(size: PixelSize, minHeightSp: Int): PixelSize {
-    if (minHeightSp <= 0 || size.height >= minHeightSp) return size
-    val scale = minHeightSp.toFloat() / size.height.toFloat()
-    return PixelSize(
-        width = (size.width * scale).roundToInt().coerceAtLeast(1),
-        height = minHeightSp,
-    )
-}

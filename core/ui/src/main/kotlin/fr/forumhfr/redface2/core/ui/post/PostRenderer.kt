@@ -82,6 +82,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.TextUnit
@@ -490,15 +491,25 @@ private fun ParagraphProse(
         // `maxWidth` is dp but the media placeholders are sized in sp, so convert to the sp-equivalent
         // (Dp.toSp() divides by fontScale): without this, at fontScale > 1 a `0.9 × maxWidth` sp cap
         // renders ~fontScale× wider than the container and overflows a narrow quote (Codex review #246).
-        val maxMediaWidthSp = with(LocalDensity.current) {
+        val density = LocalDensity.current
+        val maxMediaWidthSp = with(density) {
             (maxWidth.toSp().value * SMILEY_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
         }
+        // #959 (§3) — the CONTENT-IMAGE caps, in PHYSICAL px (the sizing equation works px-only,
+        // cadrage Sol r1): fImage × container width, and the 200 sp inline height cap at the
+        // current density × fontScale. Converted once here — the only place density is known.
+        val maxImageWidthPx = with(density) {
+            (maxWidth.toPx() * IMAGE_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
+        }
+        val maxImageHeightPx = with(density) { INLINE_IMAGE_MAX_HEIGHT_SP.sp.toPx() }.roundToInt()
         // §4 v1.4 (#957) — total horizontal placeholder padding of a content image (4 dp/side),
         // converted once to the sp placeholder unit at the current density/fontScale.
-        val inlineImagePaddingSp = with(LocalDensity.current) {
+        val inlineImagePaddingSp = with(density) {
             (INLINE_IMAGE_HORIZONTAL_PADDING * 2).toSp().value.roundToInt()
         }
-        val inlineContent = remember(inlines, measuredSizes, deadSmileyUrls, maxMediaWidthSp) {
+        val inlineContent = remember(
+            inlines, measuredSizes, deadSmileyUrls, maxMediaWidthSp, maxImageWidthPx, maxImageHeightPx, density,
+        ) {
             collectInlineMedia(
                 inlines,
                 smileyBox = { smiley ->
@@ -512,7 +523,10 @@ private fun ParagraphProse(
                     }
                 },
                 imageBox = { image ->
-                    imageDisplayBox(image, measuredSizes, maxMediaWidthSp, inlineImagePaddingSp)
+                    imageDisplayBox(
+                        image, measuredSizes, maxMediaWidthSp,
+                        maxImageWidthPx, maxImageHeightPx, density, inlineImagePaddingSp,
+                    )
                 },
                 deadSmileyUrls = deadSmileyUrls,
             )
@@ -1749,31 +1763,39 @@ private fun smileyDisplayBox(
 }
 
 /**
- * #224 (option A) / #610 — resolve an inline `[img]` placeholder box from its measured intrinsic
- * size via the unified web-parity policy [imageParityDisplaySize]: no upscale, height capped to
- * [IMAGE_MAX_HEIGHT_UNITS] (web `max-height: 200px`), width capped to the relative
- * `0.9 × contentWidth` ([maxWidthSp], web `max-width: 90%`) — the former absolute 240 sp width cap
- * is gone since #610 (it survived only as the measured-promotion threshold, removed in #957).
+ * #959 (Lot 3, contrat v1.5 §3) — resolve an inline `[img]` placeholder box. The MEASURED path is
+ * density-aware and works entirely in PHYSICAL pixels through [imageDisplaySizePx] (no-upscale =
+ * 1 source px never spreads past 1 screen px; the pre-#959 "native px as sp" model upscaled every
+ * bitmap by ×density): the caller passes the caps in px ([maxImageWidthPx] = fImage × container,
+ * [maxImageHeightPx] = 200 sp in px) and the result converts back to sp HERE, through [density]
+ * (÷ density × fontScale), so the physical size is stable under any density/fontScale. The
+ * legibility floor is GONE from the measured path (cadrage Sol r1):
+ * [INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP] only shapes the placeholder SLOTS below.
  *
- * #253 — while the measurement is in flight (cold cache / miss) it falls back to a small square of
- * [INLINE_IMAGE_MIN_HEIGHT_SP] (≈ one text line) rather than the old 240×180 bucket. With
- * `ContentScale.Fit` filling the box, a 240×180 cold box upscaled a 16×16 cc-image emoji to a giant
- * 180×180 flash until the measurement landed; a min-height square means the dominant cold case (the
- * 16×16 emoji) is already at its final size — zero flash — and any larger image just grows from a
- * one-line slot once measured instead of shrinking from a giant one. Still relative-capped so even
+ * #253 — while the measurement is in flight (cold cache / miss) the SLOT falls back to a small
+ * square of [INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP] (≈ one text line, sp: it is a text-line
+ * hitbox, not an image size) rather than the old 240×180 bucket — the dominant cold case (a
+ * 16×16 emoji) is already at its final size, zero flash. Still relative-capped ([maxWidthSp]) so
  * the fallback never overflows a narrow quote. Mirrors [smileyDisplayBox].
  *
  * #256 — a URL carrying the `hfr-cc-image=true` marker short-circuits ALL of the above: fixed
  * one-line square, no measurement involved (see [isCcImageUrl] and the fast-path comment below).
  */
+// ReturnCount: three early-exit guards (cc fast-path, cold slot, measured) read better flat.
+@Suppress("LongParameterList", "ReturnCount")
 internal fun imageDisplayBox(
     image: PostInline.InlineImage,
     measured: Map<String, IntSize?>,
+    // Relative cap of the sp-based placeholder SLOTS (cc fast-path + cold square) — unchanged.
     maxWidthSp: Int,
+    // §3 px caps of the MEASURED path: fImage × container width, and the 200 sp inline height,
+    // both converted to physical px by the caller (the only place density is known).
+    maxImageWidthPx: Int,
+    maxImageHeightPx: Int,
+    // px→sp boundary conversion of the measured result (density × fontScale).
+    density: Density,
     // §4 v1.4 (#957) — TOTAL horizontal padding (4 dp each side, sp-converted by the caller)
-    // added to the PLACEHOLDER of a content image ; the bitmap box keeps its HISTORICAL capped
-    // size untouched (sizing is Lot 3), so a width-capped placeholder exceeds the relative cap
-    // by these 8 sp — bounded, cf. the return-site comment. Zero for cc-images.
+    // added to the PLACEHOLDER of a content image; the bitmap box is untouched. Zero for cc.
     horizontalPaddingSp: Int = 0,
 ): InlineMediaBox {
     // #256 — render-time fast-path: a URL carrying the `hfr-cc-image=true` marker declares itself a
@@ -1786,44 +1808,32 @@ internal fun imageDisplayBox(
     // container. Everything else (AST, link semantics, MediaCounter, §2 topology) is untouched.
     if (isCcImageUrl(image.url)) {
         val fixed = capToWidth(
-            PixelSize(INLINE_IMAGE_MIN_HEIGHT_SP, INLINE_IMAGE_MIN_HEIGHT_SP),
+            PixelSize(INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP, INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP),
             maxWidthSp,
         )
         return InlineMediaBox(fixed.width.sp, fixed.height.sp)
     }
     val size = measured[image.url]
-    val base = if (size != null) {
-        // #610 web-parity sizing (no upscale, height ≤ IMAGE_MAX_HEIGHT_UNITS, width ≤ the relative
-        // maxWidthSp cap), then the #253 min-height floor so a SUB-16 low-res source can't render
-        // below ~one text line. A cc-image emoji (16×16) sits exactly at the floor → kept native (per
-        // @XaaT dogfood); only smaller sources get enlarged. NB: the floor only grows the BOX — the
-        // bitmap fills it via ContentScale.Fit.
-        //
-        // Re-apply the parity caps AFTER the floor: a very wide/short source (e.g. 250×10) floored to
-        // height 16 grows to ~400×16 — potentially past the relative width cap. The second pass clamps
-        // that back, so the box never exceeds the caps for any aspect ratio (Codex review #246). The
-        // floor stays the one sanctioned upscale, now bounded by the relative cap instead of the
-        // former absolute 240 sp cap (#610).
-        imageParityDisplaySize(
-            upscaleToMinHeight(
-                imageParityDisplaySize(
-                    PixelSize(size.width, size.height),
-                    maxWidthUnits = maxWidthSp,
-                ),
-                INLINE_IMAGE_MIN_HEIGHT_SP,
-            ),
-            maxWidthUnits = maxWidthSp,
+    if (size == null) {
+        // #253 cold-fallback SLOT: a one-line square, not the 240×180 bucket (no giant Fit flash).
+        val cold = capToWidth(
+            PixelSize(INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP, INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP),
+            maxWidthSp,
         )
-    } else {
-        // #253 cold-fallback: a one-line square, not the 240×180 bucket (no giant Fit upscale flash).
-        PixelSize(INLINE_IMAGE_MIN_HEIGHT_SP, INLINE_IMAGE_MIN_HEIGHT_SP)
+        return InlineMediaBox((cold.width + horizontalPaddingSp).sp, cold.height.sp)
     }
-    val capped = capToWidth(base, maxWidthSp)
-    // §4 — the PLACEHOLDER alone carries the +4 dp/side ; the BITMAP keeps its historical capped
-    // size EXACTLY (gate r1 : sizing is Lot 3 — a capped 800×400 stays 0,9×avail wide, never
-    // shrunk to fit padding inside the cap). The placeholder may thus exceed the 0,9 cap by the
-    // 8 sp padding — bounded and harmless at any realistic quote width.
-    return InlineMediaBox((capped.width + horizontalPaddingSp).sp, capped.height.sp)
+    // §3 — the physical-pixel equation (single scale, height derived from the rounded width),
+    // then the px→sp boundary conversion; §4 padding rides the PLACEHOLDER width only.
+    // The conversion is the explicit LINEAR px/(density × fontScale) — deterministic and exact
+    // under test; the text stack multiplies sp back by density × fontScale at layout, so the
+    // on-screen box is the computed physical size. (Int.toSp() does NOT fold fontScale in, and
+    // the Dp.toSp() route is non-linear on API 34+ — both would drift the physical invariant.)
+    val px = imageDisplaySizePx(size, maxImageWidthPx, maxImageHeightPx)
+    val spPerPx = 1f / (density.density * density.fontScale)
+    return InlineMediaBox(
+        placeholderWidth = (px.width * spPerPx + horizontalPaddingSp).sp,
+        placeholderHeight = (px.height * spPerPx).sp,
+    )
 }
 
 

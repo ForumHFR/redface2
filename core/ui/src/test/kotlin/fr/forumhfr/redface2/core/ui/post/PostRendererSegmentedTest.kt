@@ -178,19 +178,21 @@ class PostRendererSegmentedTest {
         }
         val p1 = composeTestRule.onNodeWithContentDescription("p1").getBoundsInRoot()
         val p2 = composeTestRule.onNodeWithContentDescription("p2").getBoundsInRoot()
-        // Le nœud décrit est le BITMAP (après le padding interne du placeholder élargi) : sa
-        // largeur reste 80 sp (=80 dp à fontScale 1) — le §4 n'écrase pas le contenu — et les
-        // placeholders adjacents laissent 4 dp + 4 dp = 8 dp entre les deux bitmaps.
-        assertEquals(80f, p1.w, 1.1f)
+        // #959 (§3) — le nœud décrit est le BITMAP à sa taille PHYSIQUE native : 80 px à
+        // densité 3 = 26,7 dp (fini le « px natif = sp » qui rendait 80 dp) ; les placeholders
+        // adjacents laissent toujours 4 dp + 4 dp = 8 dp entre les deux bitmaps (§4 intact).
+        assertEquals(80f / 3f, p1.w, 1.1f)
         assertEquals(8f, (p2.left - p1.right).value, 1.6f)
     }
 
     @Test
-    fun `a width-capped inline bitmap keeps its historical size - padding widens the placeholder only`() {
-        // Gate r1, bloquant : un 800×400 mesuré rendait 324×162 (cap 0,9×360 = 324) AVANT le §4 ;
-        // le padding ne doit PAS le rétrécir à 316×158. Le nœud décrit est le bitmap.
+    fun `a width-capped inline bitmap fills the fImage cap - padding widens the placeholder only`() {
+        // #959 (§3 px physiques + fImage 0,95) : un 4000×2000 mesuré est cappé par la largeur
+        // fImage — 0,95×360 dp×3 = 1026 px → 342 dp, h dérivée = round(1026×2000/4000) = 513 px
+        // = 171 dp. Le padding §4 ne rétrécit PAS le bitmap (il élargit le placeholder seul).
+        // Le nœud décrit est le bitmap.
         val cache = DefaultIntrinsicMediaSizeCache()
-        cache.putSuccess(imgA, IntSize(800, 400))
+        cache.putSuccess(imgA, IntSize(4000, 2000))
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides cache) {
@@ -201,8 +203,8 @@ class PostRendererSegmentedTest {
             }
         }
         val bounds = composeTestRule.onNodeWithContentDescription("plafonnee").getBoundsInRoot()
-        assertEquals(324f, bounds.w, 1.1f)
-        assertEquals(162f, bounds.h, 1.1f)
+        assertEquals(342f, bounds.w, 1.1f)
+        assertEquals(171f, bounds.h, 1.1f)
     }
 
     // ---------- §6 cold + tailles mesurées inchangées ----------

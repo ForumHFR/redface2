@@ -39,7 +39,7 @@ class PostMediaDisplayPolicyTest {
     }
 
     // #249 / #610 — block-image display size: the exact web-parity box (no upscale, width ≤ 90% of
-    // the column, height ≤ IMAGE_MAX_HEIGHT_UNITS), null when the size is unknown/invalid (legacy
+    // the column, height ≤ INLINE_IMAGE_MAX_HEIGHT_SP), null when the size is unknown/invalid (legacy
     // placeholder slot). Doubles as the anti-CLS reservation (#249): the box is final pre-bitmap.
 
     @Test
@@ -50,7 +50,7 @@ class PostMediaDisplayPolicyTest {
             measured = PixelSize(width = 400, height = 300),
             availableWidthDp = 400f,
         )
-        assertEquals(PixelSize(267, IMAGE_MAX_HEIGHT_UNITS), size)
+        assertEquals(PixelSize(267, INLINE_IMAGE_MAX_HEIGHT_SP), size)
     }
 
     @Test
@@ -74,7 +74,7 @@ class PostMediaDisplayPolicyTest {
             measured = PixelSize(width = 360, height = 640),
             availableWidthDp = 400f,
         )
-        assertEquals(PixelSize(113, IMAGE_MAX_HEIGHT_UNITS), size)
+        assertEquals(PixelSize(113, INLINE_IMAGE_MAX_HEIGHT_SP), size)
     }
 
     @Test
@@ -115,7 +115,7 @@ class PostMediaDisplayPolicyTest {
         assertEquals(PixelSize(80, 60), imageParityDisplaySize(PixelSize(80, 60), maxWidthUnits = 360))
         // height cap (web max-height:200px).
         assertEquals(
-            PixelSize(113, IMAGE_MAX_HEIGHT_UNITS),
+            PixelSize(113, INLINE_IMAGE_MAX_HEIGHT_SP),
             imageParityDisplaySize(PixelSize(360, 640), maxWidthUnits = 360),
         )
         // width cap (the caller's 0.9 × container).
@@ -123,7 +123,7 @@ class PostMediaDisplayPolicyTest {
         // non-positive width cap = no width cap (defensive, mirrors capToWidth): only the height
         // cap applies → 2000×500 scaled by 200/500 → 800×200.
         assertEquals(
-            PixelSize(800, IMAGE_MAX_HEIGHT_UNITS),
+            PixelSize(800, INLINE_IMAGE_MAX_HEIGHT_SP),
             imageParityDisplaySize(PixelSize(2000, 500), maxWidthUnits = 0),
         )
     }
