@@ -196,6 +196,24 @@ class PostMediaSegmentationTest {
     }
 
     @Test
+    fun `singleton isolated inside a transparent wrapper is a block - gate r1`() {
+        // Gate #956 r1, correction 1 : text + Strong(BR + image + BR) + text -> MediaRun,
+        // the image's STRUCTURAL neighbours are the wrapped LineBreaks.
+        val wrapped = PostInline.Strong(listOf(br, img(1), br))
+        val out = partitionParagraph(listOf(text("avant"), wrapped, text("après")))
+        assertEquals("IMI", kinds(out))
+        assertEquals(listOf("1"), runUrls(out[1]))
+    }
+
+    @Test
+    fun `singleton inside a wrapper directly against text stays inline`() {
+        // Flattened neighbours are the surrounding texts : no isolation.
+        val wrapped = PostInline.Strong(listOf(img(1)))
+        val out = partitionParagraph(listOf(text("avant"), wrapped, text("après")))
+        assertEquals("I", kinds(out))
+    }
+
+    @Test
     fun `wrapper containing text is a boundary`() {
         val boldText = PostInline.Strong(listOf(text("titre")))
         val out = partitionParagraph(listOf(img(1), br, boldText, br, img(2)))

@@ -85,7 +85,7 @@ internal fun partitionParagraph(inlines: List<PostInline>): List<ParagraphSegmen
 
             // Singleton : BLOCK only when isolated (G1) on the ORIGINAL sequence — the image's
             // nearest non-blank neighbour on each side is a paragraph frontier or a LineBreak.
-            isSingletonIsolated(inlines, members, index) -> {
+            isSingletonIsolated(inlines, images.single().image) -> {
                 flushProse()
                 segments += ParagraphSegment.MediaRun(images)
             }
@@ -101,24 +101,36 @@ internal fun partitionParagraph(inlines: List<PostInline>): List<ParagraphSegmen
 }
 
 /**
- * G1 isolation, evaluated on the ORIGINAL paragraph sequence before any consumption : from the
- * single image of the run, walk outwards skipping ONLY blank text ; both sides must reach a
- * [PostInline.LineBreak] or the paragraph frontier (cadrage #956, condition 1).
+ * G1 isolation, evaluated on the ORIGINAL paragraph sequence before any consumption, FROM THE
+ * IMAGE ITSELF : the paragraph is flattened through the transparent containers (style wrappers
+ * and links — gate #956 r1 : `text + Strong(BR + image + BR) + text` must see the BRs as the
+ * image's structural neighbours), then we walk outwards from the image skipping ONLY blank
+ * text ; both sides must reach a [PostInline.LineBreak] or the paragraph frontier.
  */
-private fun isSingletonIsolated(
-    inlines: List<PostInline>,
-    members: List<PostInline>,
-    runStart: Int,
-): Boolean {
-    val imageOffset = members.indexOfFirst { collectRunImages(it).isNotEmpty() }
-    val imageIndex = runStart + imageOffset
+private fun isSingletonIsolated(inlines: List<PostInline>, image: PostInline.InlineImage): Boolean {
+    val flat = mutableListOf<PostInline>()
+    fun flatten(nodes: List<PostInline>) {
+        nodes.forEach { node ->
+            when (node) {
+                is PostInline.Strong -> flatten(node.children)
+                is PostInline.Emphasis -> flatten(node.children)
+                is PostInline.Underline -> flatten(node.children)
+                is PostInline.Strike -> flatten(node.children)
+                is PostInline.Color -> flatten(node.children)
+                is PostInline.Link -> flatten(node.children)
+                else -> flat += node
+            }
+        }
+    }
+    flatten(inlines)
+    val imageIndex = flat.indexOfFirst { it === image }
 
     fun qualifies(from: Int, step: Int, frontier: Int): Boolean {
         var i = from
-        while (i != frontier && (inlines[i] as? PostInline.Text)?.value?.isBlank() == true) i += step
-        return i == frontier || inlines[i] is PostInline.LineBreak
+        while (i != frontier && (flat[i] as? PostInline.Text)?.value?.isBlank() == true) i += step
+        return i == frontier || flat[i] is PostInline.LineBreak
     }
-    return qualifies(imageIndex - 1, -1, -1) && qualifies(imageIndex + 1, +1, inlines.size)
+    return qualifies(imageIndex - 1, -1, -1) && qualifies(imageIndex + 1, +1, flat.size)
 }
 
 /** §2.1 membership. cc-images (#256) and smileys (#175) are boundaries, never members. */
