@@ -258,14 +258,6 @@ class PostMediaDisplayPolicyTest {
     }
 
     @Test
-    fun `block image min height is 160dp`() {
-        // #610 — UNMEASURED placeholder slot only: reserves a stable visual slot during
-        // SubcomposeAsyncImage loading/error so the UX stays visible and the layout jump is bounded
-        // (cf. PR #126 Codex review). A measured image uses its exact blockImageDisplaySize box.
-        assertEquals(160.dp, PostMediaDisplayPolicy.blockImageMinHeight)
-    }
-
-    @Test
     fun `cold block slot follows the v1_4 formula`() {
         // #957 — §6 cold : width 0,9×available ; height min(cap, max(160, 0,75×width)).
         val (w, h) = coldBlockSlotDp(availableWidthDp = 360f, capBlocDp = 400f)

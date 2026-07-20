@@ -11,8 +11,9 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
-import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.IntSize
@@ -23,12 +24,15 @@ import coil3.ColorImage
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import coil3.annotation.DelicateCoilApi
+import coil3.intercept.Interceptor
+import coil3.request.ImageResult
 import coil3.test.FakeImageLoaderEngine
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.parser.TopicPageParser
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -181,7 +185,47 @@ class PostRendererSegmentedTest {
         assertEquals(8f, (p2.left - p1.right).value, 1.6f)
     }
 
+    @Test
+    fun `a width-capped inline bitmap keeps its historical size - padding widens the placeholder only`() {
+        // Gate r1, bloquant : un 800×400 mesuré rendait 324×162 (cap 0,9×360 = 324) AVANT le §4 ;
+        // le padding ne doit PAS le rétrécir à 316×158. Le nœud décrit est le bitmap.
+        val cache = DefaultIntrinsicMediaSizeCache()
+        cache.putSuccess(imgA, IntSize(800, 400))
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides cache) {
+                    PostRenderer(
+                        content = paragraph(text("avant "), img(imgA, "plafonnee"), text(" après")),
+                    )
+                }
+            }
+        }
+        val bounds = composeTestRule.onNodeWithContentDescription("plafonnee").getBoundsInRoot()
+        assertEquals(324f, bounds.w, 1.1f)
+        assertEquals(162f, bounds.h, 1.1f)
+    }
+
     // ---------- §6 cold + tailles mesurées inchangées ----------
+
+    @Test
+    @Config(sdk = [34], qualifiers = "w360dp-h916dp-xxhdpi")
+    fun `measured PORTRAIT block uses the legacy height cap - not the cold slot`() {
+        // Témoin discriminant (gate r1) : sur h916dp, cap mesuré legacy = max(400, 458) = 458 →
+        // 800×1200 rend 305×458 (height-bound). Le slot cold §6 donnerait 324×243 : le test
+        // 800×600 (324×243) coïncide avec le cold et ne prouvait PAS la séparation des chemins.
+        val cache = DefaultIntrinsicMediaSizeCache()
+        cache.putSuccess(imgA, IntSize(800, 1200))
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides cache) {
+                    PostRenderer(content = paragraph(img(imgA, "portrait")))
+                }
+            }
+        }
+        val bounds = composeTestRule.onNodeWithContentDescription("portrait").getBoundsInRoot()
+        assertEquals(305f, bounds.w, 2f)
+        assertEquals(458f, bounds.h, 2f)
+    }
 
     @Test
     fun `measured block keeps the exact legacy parity size`() {
@@ -204,6 +248,9 @@ class PostRendererSegmentedTest {
     // ---------- fixture réelle : la torture tinc (13.1) ----------
 
     @Test
+    // Viewport haut : les 5 blocs cold (243 dp chacun) débordent un écran de 780 dp et les
+    // nœuds hors viewport rapportent des bounds nulles — le banc réel se scrolle, pas ce test.
+    @Config(sdk = [34], qualifiers = "w360dp-h2400dp-xxhdpi")
     fun `tinc post renders two spaced galleries with fragments in place`() {
         val html = requireNotNull(
             javaClass.getResource("/fixtures/topic_page_banc_images_876.html"),
@@ -215,15 +262,21 @@ class PostRendererSegmentedTest {
                 ?.filterIsInstance<PostInline.Text>()?.any { it.value.startsWith("POST 13") } == true
         }
         setPost(post13)
-        // 5 images bloc top-level (galerie 3 + galerie 2), fragments préservés.
-        composeTestRule.onNodeWithText("6", substring = false).assertExists()
-        composeTestRule.onNodeWithText("filles", substring = false).assertExists()
-        val blocks = composeTestRule.onAllNodesWithContentDescription("", substring = true)
-        // Les 5 images de contenu du paragraphe principal existent (le spoiler reste fermé).
-        val described = (0 until 5).mapNotNull { idx ->
-            runCatching { blocks[idx].getBoundsInRoot() }.getOrNull()
-        }
-        assertTrue(described.size >= 2)
+        // EXACTEMENT 5 images bloc top-level (galerie 3 + galerie 2 — le spoiler fermé ne
+        // compose pas sa galerie de 2), comptées par le seam structurel BLOCK_IMAGE_TEST_TAG.
+        val blocks = composeTestRule.onAllNodesWithTag(BLOCK_IMAGE_TEST_TAG)
+        blocks.assertCountEquals(5)
+        val boxes = (0 until 5).map { blocks[it].getBoundsInRoot() }
+        // Ordre vertical strict du run order (a11y) + §4 : 8 dp DANS chaque galerie.
+        boxes.zipWithNext().forEach { (upper, lower) -> assertTrue(upper.bottom <= lower.top) }
+        assertEquals(8f, (boxes[1].top - boxes[0].bottom).value, 0.51f)
+        assertEquals(8f, (boxes[2].top - boxes[1].bottom).value, 0.51f)
+        assertEquals(8f, (boxes[4].top - boxes[3].bottom).value, 0.51f)
+        // Fragments préservés À LEUR PLACE : « 6 » entre les deux galeries, « filles » après.
+        val six = composeTestRule.onNodeWithText("6", substring = false).getBoundsInRoot()
+        val filles = composeTestRule.onNodeWithText("filles", substring = false).getBoundsInRoot()
+        assertTrue(six.top >= boxes[2].bottom && six.bottom <= boxes[3].top)
+        assertTrue(filles.top >= boxes[4].bottom)
     }
 
     // ---------- conteneurs : quote réduite + spoiler révélé ----------
@@ -300,44 +353,81 @@ class PostRendererSegmentedTest {
 
     // ---------- #813 : retry d'un MediaRun via la génération ----------
 
+    /** Toutes les URLs demandées au loader, cumulées à travers les swaps d'engine. */
+    private val requestedUrls = CopyOnWriteArrayList<String>()
+
     @OptIn(DelicateCoilApi::class)
-    @Test
-    fun `bumping the refresh generation recreates the block painter`() {
+    private fun installBlockLoader(serve: Boolean, url: String) {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val deadUrl = "https://exemple.invalid/morte.png"
-        // Round 1 : le loader ne connaît pas l'URL → erreur réseau simulée par un engine vide.
+        val builder = FakeImageLoaderEngine.Builder()
+        if (serve) builder.intercept(url, ColorImage(0xFFFF5722.toInt(), width = 200, height = 100))
+        // sinon : URL non interceptée → ErrorResult Coil = le mode d'échec de production.
+        val engine = builder.build()
+        val counter = object : Interceptor {
+            override suspend fun intercept(chain: Interceptor.Chain): ImageResult {
+                (chain.request.data as? String)?.let(requestedUrls::add)
+                return chain.proceed()
+            }
+        }
         SingletonImageLoader.setUnsafe(
             ImageLoader.Builder(context).components {
-                add(
-                    FakeImageLoaderEngine.Builder()
-                        .default(ColorImage(0xFF000000.toInt(), width = 1, height = 1))
-                        .build(),
-                )
+                add(counter)
+                add(engine)
             }.build(),
         )
+    }
+
+    @Test
+    fun `explicit refresh recovers a dead BLOCK image - probe, painter and exact box`() {
+        // Parité #813 côté bloc (gate r1) : le même chemin clear + bump que l'inline
+        // (PostRendererGhostImageRecoveryTest) doit relancer la probe ET recréer le painter.
+        val deadUrl = "https://exemple.invalid/morte.png"
+        installBlockLoader(serve = false, url = deadUrl)
+        val cache = DefaultIntrinsicMediaSizeCache()
         var generation by mutableIntStateOf(0)
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                PostRenderer(
-                    content = paragraph(img(deadUrl, "retry")),
-                    mediaRefreshGeneration = generation,
-                )
+                CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides cache) {
+                    PostRenderer(
+                        content = paragraph(img(deadUrl, "retry")),
+                        mediaRefreshGeneration = generation,
+                    )
+                }
             }
         }
-        composeTestRule.onNodeWithContentDescription("retry").assertExists()
-        // Round 2 : nouveau loader qui SERT l'URL + bump → le nœud painter est recréé et charge.
-        SingletonImageLoader.setUnsafe(
-            ImageLoader.Builder(context).components {
-                add(
-                    FakeImageLoaderEngine.Builder()
-                        .intercept(deadUrl, ColorImage(0xFFFF5722.toInt(), width = 200, height = 100))
-                        .build(),
-                )
-            }.build(),
-        )
-        generation += 1
+        // Round 1 — échec RÉEL : probe memoïsée en échec, painter en erreur → slot d'erreur
+        // visible dans la boîte cold §6.
+        composeTestRule.waitUntil(timeoutMillis = 5_000) {
+            cache.isFailureFresh(deadUrl, System.currentTimeMillis())
+        }
+        composeTestRule.onNodeWithText("Image indisponible", substring = true).assertExists()
+        // Bounds via le seam : en état d'erreur le slot remplace le contenu décrit.
+        val cold = composeTestRule.onNodeWithTag(BLOCK_IMAGE_TEST_TAG).getBoundsInRoot()
+        assertEquals(324f, cold.w, 2f)
+        assertEquals(243f, cold.h, 2f)
+
+        // Round 2 — l'hébergeur revient, refresh explicite : clear PUIS bump (ordre production).
+        installBlockLoader(serve = true, url = deadUrl)
         composeTestRule.waitForIdle()
+        val requestsBefore = requestedUrls.count { it == deadUrl }
+        composeTestRule.runOnIdle {
+            cache.clearFailures()
+            generation++
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.waitUntil(timeoutMillis = 5_000) { cache.get(deadUrl) != null }
+        composeTestRule.runOnIdle {}
+        // Boîte mesurée EXACTE (200×100 sous les caps → natif), plus d'erreur affichée,
+        // et le contenu décrit est revenu (painter en succès).
         composeTestRule.onNodeWithContentDescription("retry").assertExists()
+        val healed = composeTestRule.onNodeWithTag(BLOCK_IMAGE_TEST_TAG).getBoundsInRoot()
+        assertEquals(200f, healed.w, 2f)
+        assertEquals(100f, healed.h, 2f)
+        composeTestRule.onNodeWithText("Image indisponible", substring = true).assertDoesNotExist()
+        // ≥ 2 nouvelles requêtes : la re-probe ET le painter recréé par key(generation).
+        composeTestRule.waitUntil(timeoutMillis = 5_000) {
+            requestedUrls.count { it == deadUrl } >= requestsBefore + 2
+        }
     }
 
     // ---------- fast-path : paragraphe sans run ----------

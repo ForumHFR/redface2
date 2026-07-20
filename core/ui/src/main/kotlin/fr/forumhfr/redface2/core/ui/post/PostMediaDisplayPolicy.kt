@@ -1,7 +1,6 @@
 package fr.forumhfr.redface2.core.ui.post
 
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -104,21 +103,6 @@ internal object PostMediaDisplayPolicy {
         placeholderHeight = 180.sp,
     )
 
-    /**
-     * Legacy slot for an UNMEASURED block-level `[img]` (cold cache before the measure effect lands,
-     * or a measurement failure — dead host / 404). Only that placeholder path still uses this pair:
-     * while loading or on error the bitmap has no intrinsic size yet, so without [blockImageMinHeight]
-     * the container would collapse to the height of the loading label (~16dp), making the
-     * loading/error UX barely visible AND causing a layout jump when the bitmap finally resolves.
-     * The min reserves a stable visual slot; the max keeps a load-without-measurement in check
-     * (cf. issue #109 review by Codex on PR #126).
-     *
-     * #610 — a MEASURED block image no longer touches this slot: it renders at its exact
-     * [blockImageDisplaySize] (web-parity `max-width:90% / max-height:200`, no upscale), replacing
-     * the former full-width fit clamped to this [160, 480] dp range.
-     */
-    val blockImageMinHeight: Dp = 160.dp
-
     fun smileyBox(smiley: PostInline.Smiley): InlineMediaBox = when (smiley.kind) {
         is SmileyKind.Builtin -> builtinSmiley
         is SmileyKind.Perso -> persoSmiley
@@ -141,7 +125,7 @@ internal object PostMediaDisplayPolicy {
      * [measured] is `null` for a not-yet-measured image — a cold cache before the measure effect lands,
      * or a measurement failure (dead host / 404). Both the paragraph effect (#175/#224) and, since the
      * #249 follow-up, the standalone `PostBlock.Image` effect feed the cache; callers fall back to the
-     * legacy [blockImageMinHeight]-anchored slot until (or unless) a size lands.
+     * deterministic §6 COLD slot (v1.4, #957) until (or unless) a size lands.
      */
     fun blockImageDisplaySize(
         measured: PixelSize?,

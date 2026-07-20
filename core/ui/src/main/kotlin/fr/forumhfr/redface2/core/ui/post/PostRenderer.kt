@@ -58,6 +58,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.onLongClick
@@ -952,7 +953,8 @@ private fun ImageBlock(block: PostBlock.Image) = BlockImage(url = block.url, des
 
 /**
  * Centred, bounded block image on its own line. The home of a standalone `PostBlock.Image`, and
- * (since #224 option B) of a large image promoted out of an image-only paragraph.
+ * (#876/#957, contract v1.4 §2) of every [ParagraphSegment.MediaRun] image — the STRUCTURAL
+ * topology replaced the former measured promotion (#224 option B, removed in this lot).
  *
  * When [linkUrl] is non-null the image was posted as `[url=…][img]` (the "click to enlarge" pattern):
  * the whole block is tappable and opens that URL (#257), so a linked image gets the block treatment
@@ -960,11 +962,11 @@ private fun ImageBlock(block: PostBlock.Image) = BlockImage(url = block.url, des
  *
  * #610/#842 — a MEASURED image renders in a box of EXACTLY its parity display size
  * ([PostMediaDisplayPolicy.blockImageDisplaySize]: native size, no upscale, width ≤ 90% of the
- * column, height ≤ the mobile-recalibrated [blockImageMaxHeightDp]), centred. Before #610 the
- * container FILLED the column width — upscaling any narrower source — with its height clamped to the
- * legacy [160, 480] dp slot; that slot now only
- * hosts a not-yet-measured image (cold cache / failed measurement). Bounded either way, so a
- * 4000×3000 RAW screenshot can't blow up the post and destroy the scroll position.
+ * column, height ≤ the mobile-recalibrated [blockImageMaxHeightDp]), centred. A not-yet-measured
+ * image (cold cache / failed measurement) sits in the deterministic §6 COLD slot
+ * ([coldBlockSlotDp], since #957 — formerly the legacy [160, 480] dp grow-on-load slot).
+ * Bounded either way, so a 4000×3000 RAW screenshot can't blow up the post and destroy the
+ * scroll position.
  *
  * #249 — anti-CLS survives the #610 unification: the exact box is computed BEFORE the bitmap arrives
  * (same measured-intrinsic cache as #175/#224), so the shimmer placeholder occupies the loaded
@@ -1077,6 +1079,10 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
         // #610 — the exact parity box centres via the BoxWithConstraints contentAlignment; no
         // fillMaxWidth here (the pre-#610 full-width shape is gone).
         val containerModifier = sizeModifier
+            // Structural test seam (#957 gate) : lets bounds-level tests COUNT the block images of
+            // a rendered post — descriptions are often null on HFR `[img]`, so the a11y tree alone
+            // cannot enumerate them. testTag is invisible to TalkBack.
+            .testTag(BLOCK_IMAGE_TEST_TAG)
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             .then(interactionModifier)
@@ -1594,7 +1600,6 @@ internal fun imageDisplayBox(
         )
         return InlineMediaBox(fixed.width.sp, fixed.height.sp)
     }
-    val contentMaxWidthSp = (maxWidthSp - horizontalPaddingSp).coerceAtLeast(INLINE_IMAGE_MIN_HEIGHT_SP)
     val size = measured[image.url]
     val base = if (size != null) {
         // #610 web-parity sizing (no upscale, height ≤ IMAGE_MAX_HEIGHT_UNITS, width ≤ the relative
@@ -1612,19 +1617,21 @@ internal fun imageDisplayBox(
             upscaleToMinHeight(
                 imageParityDisplaySize(
                     PixelSize(size.width, size.height),
-                    maxWidthUnits = contentMaxWidthSp,
+                    maxWidthUnits = maxWidthSp,
                 ),
                 INLINE_IMAGE_MIN_HEIGHT_SP,
             ),
-            maxWidthUnits = contentMaxWidthSp,
+            maxWidthUnits = maxWidthSp,
         )
     } else {
         // #253 cold-fallback: a one-line square, not the 240×180 bucket (no giant Fit upscale flash).
         PixelSize(INLINE_IMAGE_MIN_HEIGHT_SP, INLINE_IMAGE_MIN_HEIGHT_SP)
     }
-    val capped = capToWidth(base, contentMaxWidthSp)
-    // §4 — the PLACEHOLDER carries the +4 dp/side ; the bitmap keeps the capped size exactly
-    // (padding applied inside imageInlineContent), so total ≤ the relative cap by construction.
+    val capped = capToWidth(base, maxWidthSp)
+    // §4 — the PLACEHOLDER alone carries the +4 dp/side ; the BITMAP keeps its historical capped
+    // size EXACTLY (gate r1 : sizing is Lot 3 — a capped 800×400 stays 0,9×avail wide, never
+    // shrunk to fit padding inside the cap). The placeholder may thus exceed the 0,9 cap by the
+    // 8 sp padding — bounded and harmless at any realistic quote width.
     return InlineMediaBox((capped.width + horizontalPaddingSp).sp, capped.height.sp)
 }
 
@@ -1937,3 +1944,6 @@ private class MediaCounter {
 
 /** §4 v1.4 (#957) — horizontal padding of an inline CONTENT image, each side. */
 internal val INLINE_IMAGE_HORIZONTAL_PADDING = 4.dp
+
+/** Structural test seam on every [BlockImage] node (#957) — see the modifier-site comment. */
+internal const val BLOCK_IMAGE_TEST_TAG = "PostBlockImage"

@@ -711,8 +711,9 @@ private fun RemoveTopicFlagConfirmDialog(
  * #197 — keep [target] anchored at the top of the viewport while upstream block images settle.
  *
  * An UNMEASURED `PostBlock.Image` (cold intrinsic cache) renders a `SubcomposeAsyncImage` that
- * starts at `blockImageMinHeight` (160.dp) while loading/erroring and settles to its exact
- * web-parity box (`blockImageDisplaySize`, ≤ 200.dp tall since #610) once the intrinsic size lands.
+ * starts in the deterministic §6 COLD slot (`coldBlockSlotDp`, since #957 — formerly the
+ * `blockImageMinHeight` 160.dp grow-on-load slot) while loading/erroring and settles to its exact
+ * web-parity box (`blockImageDisplaySize`) once the intrinsic size lands.
  * Any block image in a post *above* the deep-link target shifts the cumulative scroll offset (in
  * either direction) *after* the initial one-shot `scrollToItem`, leaving the target scrolled
  * off-screen. A warm cache sizes the box exactly before the first measure (#249), which is why #197
