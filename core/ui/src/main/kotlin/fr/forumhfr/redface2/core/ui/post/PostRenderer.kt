@@ -993,7 +993,11 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
     // paragraph effect uses; the SnapshotStateMap write then recomposes this block onto the exact-box
     // path.
     val platformContext = LocalPlatformContext.current
-    LaunchedEffect(url, sizeCache, platformContext) {
+    // #813 parity (gate #957 r1, bloquant) : a structurally-promoted image now renders here, so
+    // the block path must honour the screen-owned refresh generation exactly like the inline
+    // path — the measure effect re-keys AND the painter node is recreated on an explicit refresh.
+    val mediaRefreshGeneration = LocalMediaRefreshGeneration.current
+    LaunchedEffect(url, sizeCache, platformContext, mediaRefreshGeneration) {
         measureAndCacheIntrinsicMediaSize(
             url = url,
             cache = sizeCache,
@@ -1020,10 +1024,13 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
         val sizeModifier = if (displaySize != null) {
             Modifier.size(displaySize.width.dp, displaySize.height.dp)
         } else {
-            Modifier
-                .fillMaxWidth()
-                .defaultMinSize(minHeight = PostMediaDisplayPolicy.blockImageMinHeight)
-                .heightIn(max = PostMediaDisplayPolicy.blockImageMaxHeight)
+            // §6 COLD slot (v1.4, [AMENDEMENT-Lot0-3]) : deterministic box before any dimension is
+            // known — width 0,9 × available, height min(capBloc, max(160 dp, 0,75 × width)) with
+            // capBloc = clamped USEFUL window height (host-read insets). Replaces the legacy
+            // min/max grow-on-load slot ; the MEASURED path above keeps its legacy cap until Lot 3.
+            val coldCapDp = rememberBlockImageColdCapDp()
+            val (coldWidth, coldHeight) = coldBlockSlotDp(maxWidth.value, coldCapDp)
+            Modifier.size(coldWidth.dp, coldHeight.dp)
         }
         // #831 — contextual image menu on long-press. The tap contract is preserved EXACTLY (Codex
         // framing, firm reserve): a linked image (#257) keeps its tap-through and gains the
@@ -1081,6 +1088,10 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
                 .crossfade(animationsEnabled)
                 .build()
         }
+        // #813 — key() on the refresh generation recreates the painter node on an explicit user
+        // refresh (parity with the inline path ; the remembered request may keep its instance,
+        // the painter holds the error state).
+        key(mediaRefreshGeneration) {
         SubcomposeAsyncImage(
             model = request,
             contentDescription = description,
@@ -1091,16 +1102,14 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
                 // min-height placeholder — NOT fillMaxSize, which would balloon to the max slot and then
                 // collapse to the loaded intrinsic height (a visible shift, Codex review). The legacy
                 // min→intrinsic grow on load remains for these rare unmeasured images.
-                val shimmerModifier = if (displaySize != null) {
-                    Modifier.fillMaxSize()
-                } else {
-                    Modifier.fillMaxWidth().height(PostMediaDisplayPolicy.blockImageMinHeight)
-                }
-                ImageShimmer(animated = animationsEnabled, modifier = shimmerModifier)
+                // Both branches now have an exactly-sized box (measured parity OR the §6 cold
+                // slot), so the shimmer always fills it — no min-height grow-on-load remnant.
+                ImageShimmer(animated = animationsEnabled, modifier = Modifier.fillMaxSize())
             },
             error = { ImageBlockError(description) },
             success = { SubcomposeAsyncImageContent() },
         )
+        }
     }
 }
 
