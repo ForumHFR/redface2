@@ -455,7 +455,7 @@ private fun ThreadMessages(
  * is a topic affordance; PostRenderer defaults selection OFF, the MP keeps it).
  */
 @Composable
-private fun MessageCard(message: Post) {
+internal fun MessageCard(message: Post) {
     PostCardShell(
         header = {
             PostIdentityHeader(
