@@ -7,8 +7,8 @@ import androidx.compose.runtime.staticCompositionLocalOf
  * ([description]) and, for a `[url=…][img]` linked image (#257), the wrapping [linkUrl].
  *
  * Built at gesture time from the frozen content models (`PostInline.InlineImage`,
- * `PostBlock.Image`, promoted gallery images) — the on-disk `PostContent` contract is never
- * touched. A data class so gesture keys (`Modifier.pointerInput`) compare by value.
+ * `PostBlock.Image`, structural `MediaRun` gallery images since #957) — the on-disk `PostContent`
+ * contract is never touched. A data class so gesture keys (`Modifier.pointerInput`) compare by value.
  */
 data class PostImageTarget(
     val url: String,
@@ -26,7 +26,7 @@ class PostImageActions(
 
 /**
  * #831 — CompositionLocal wiring [PostImageActions] into the two image render paths of
- * [PostRenderer] (inline `[img]` and block/promoted images). Same `staticCompositionLocalOf`
+ * [PostRenderer] (inline `[img]` and block images, standalone or MediaRun). Same `staticCompositionLocalOf`
  * rationale as `LocalFoldLongQuotes` (DisplayMetrics.kt): the value changes only when the hosting
  * surface swaps its handler, so scoped reads without fine-grained tracking are the right trade.
  *

@@ -983,14 +983,14 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
     val animationsEnabled = rememberAnimationsEnabled()
 
     // #249 — reserve the exact final box from the measured intrinsic size when known. The cache is fed by
-    // the #175/#224 paragraph measure effect (promoted images) AND, since #249 follow-up, by the effect
-    // just below for standalone PostBlock.Image. Until a measurement lands (cold cache) it is null and the
-    // legacy min/max slot is used for that first frame.
+    // the #175/#224 paragraph measure effect AND, since #249 follow-up, by the effect just below for
+    // standalone PostBlock.Image. Until a measurement lands (cold cache) it is null and the §6 COLD
+    // slot (v1.4, #957) is used for that first frame.
     val sizeCache = LocalIntrinsicMediaSizeCache.current
     val measured: IntSize? = sizeCache.get(url)
     // #249 follow-up — a standalone PostBlock.Image is NOT covered by the paragraph measure effect, so
     // without this its intrinsic size never lands in the cache: blockImageDisplaySize stays null, the
-    // image falls into the legacy min/max slot and loses both the exact parity box (#610) and the
+    // image stays in the §6 cold slot forever and loses both the exact parity box (#610) and the
     // reserved loading space (#249 anti-CLS). Measure it here through the same guarded seam the
     // paragraph effect uses; the SnapshotStateMap write then recomposes this block onto the exact-box
     // path.
@@ -1022,7 +1022,7 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
         )
         // #610/#249/#842 — the EXACT parity box when measured (no upscale, ≤ 90% width, ≤ the
         // mobile-recalibrated height cap; anti-CLS: it is also the reserved loading slot), else the
-        // legacy full-width min/max slot.
+        // deterministic §6 cold slot below.
         val sizeModifier = if (displaySize != null) {
             Modifier.size(displaySize.width.dp, displaySize.height.dp)
         } else {
@@ -1104,12 +1104,9 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
             contentScale = ContentScale.Fit,
             modifier = containerModifier,
             loading = {
-                // Measured: fill the exact parity box (#610). Unmeasured (max-only constraint): a STABLE
-                // min-height placeholder — NOT fillMaxSize, which would balloon to the max slot and then
-                // collapse to the loaded intrinsic height (a visible shift, Codex review). The legacy
-                // min→intrinsic grow on load remains for these rare unmeasured images.
-                // Both branches now have an exactly-sized box (measured parity OR the §6 cold
-                // slot), so the shimmer always fills it — no min-height grow-on-load remnant.
+                // Both branches have an exactly-sized box (measured parity #610 OR the §6 cold
+                // slot #957), so the shimmer always fills it — the legacy min→intrinsic
+                // grow-on-load is gone with the min/max slot.
                 ImageShimmer(animated = animationsEnabled, modifier = Modifier.fillMaxSize())
             },
             error = { ImageBlockError(description) },
@@ -1581,8 +1578,9 @@ internal fun imageDisplayBox(
     measured: Map<String, IntSize?>,
     maxWidthSp: Int,
     // §4 v1.4 (#957) — TOTAL horizontal padding (4 dp each side, sp-converted by the caller)
-    // added to the PLACEHOLDER of a content image ; the bitmap box itself is computed against
-    // the reduced width so the total never exceeds the relative cap. Zero for cc-images.
+    // added to the PLACEHOLDER of a content image ; the bitmap box keeps its HISTORICAL capped
+    // size untouched (sizing is Lot 3), so a width-capped placeholder exceeds the relative cap
+    // by these 8 sp — bounded, cf. the return-site comment. Zero for cc-images.
     horizontalPaddingSp: Int = 0,
 ): InlineMediaBox {
     // #256 — render-time fast-path: a URL carrying the `hfr-cc-image=true` marker declares itself a
@@ -1592,7 +1590,7 @@ internal fun imageDisplayBox(
     // marker, not the measurement, is the contract (matching + duplicate rules in [isCcImageUrl]).
     // The companion exclusion in [collectMeasurableImageUrl] skips the async probe for these URLs
     // entirely. Still relative-capped so even this square cannot overflow a pathologically narrow
-    // container. Everything else (AST, link semantics, MediaCounter, promotion) is untouched.
+    // container. Everything else (AST, link semantics, MediaCounter, §2 topology) is untouched.
     if (isCcImageUrl(image.url)) {
         val fixed = capToWidth(
             PixelSize(INLINE_IMAGE_MIN_HEIGHT_SP, INLINE_IMAGE_MIN_HEIGHT_SP),
