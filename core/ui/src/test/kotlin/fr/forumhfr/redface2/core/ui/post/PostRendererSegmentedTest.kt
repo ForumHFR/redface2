@@ -46,8 +46,8 @@ import org.robolectric.annotation.GraphicsMode
 /**
  * #876/#957 (Lot 1B) — the SEGMENTED renderer : structural topology (contract v1.4 §2) wired
  * into [ParagraphBlock], §4 spacing, §6 cold box, #813 parity on the block path, and the
- * four-host non-regression posture (current behaviour characterized — full inertia and
- * Role.Link are the Lot 2 target). Screen : 360×780 dp (w360dp qualifier), insets 0 in
+ * four-host posture. Since #958 (Lot 2, §5) the null hosts are TOTALLY inert (see the inert-block
+ * test below, Role.Image the a11y target). Screen : 360×780 dp (w360dp qualifier), insets 0 in
  * Robolectric → cold cap = min(780, max(400, 390)) = 400 dp.
  */
 @RunWith(RobolectricTestRunner::class)
@@ -323,14 +323,17 @@ class PostRendererSegmentedTest {
     // ---------- hôtes : non-régression de l'EXISTANT (cible Lot 2 hors périmètre) ----------
 
     @Test
-    fun `linked block without provider keeps its historical tap and no long press`() {
+    fun `linked block without provider is totally inert - Lot 2 target`() {
+        // #958 Lot 2 (§5 matrice) : sur un hôte null (MP/aperçu/signature) une image BLOC liée est
+        // TOTALEMENT inerte — plus de tap (invère la caractérisation Lot 1B), pas de long-press,
+        // pas de Role.Link. Les liens TEXTE restent vivants (couverts par leur propre LinkAnnotation).
         setPost(
             paragraph(
                 PostInline.Link(url = "https://example.org/full", children = listOf(img(imgA, "liee"))),
             ),
         )
         composeTestRule.onNodeWithContentDescription("liee")
-            .assert(SemanticsMatcher.keyIsDefined(SemanticsActions.OnClick))
+            .assert(SemanticsMatcher.keyNotDefined(SemanticsActions.OnClick))
             .assert(SemanticsMatcher.keyNotDefined(SemanticsActions.OnLongClick))
     }
 

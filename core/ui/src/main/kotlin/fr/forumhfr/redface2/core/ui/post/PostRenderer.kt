@@ -1034,45 +1034,49 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
             val (coldWidth, coldHeight) = coldBlockSlotDp(maxWidth.value, coldCapDp)
             Modifier.size(coldWidth.dp, coldHeight.dp)
         }
-        // #831 — contextual image menu on long-press. The tap contract is preserved EXACTLY (Codex
-        // framing, firm reserve): a linked image (#257) keeps its tap-through and gains the
-        // long-press through ONE combinedClickable (a tap already exists there); an unlinked block
-        // image gets a long-press-ONLY handler (no onClick — its tap stays inert as before). When
-        // the surface provides no actions (MP threads, editor preview, signatures: default null),
-        // or the URL is not actionable (data:/blob:/empty), the historical modifiers are
-        // reproduced verbatim.
-        val imageActions = LocalPostImageActions.current?.takeIf { isEligiblePostImageUrl(url) }
+        // #831/#958 (Lot 2, §5) — contextual image menu on long-press + linked-image tap, BOTH gated
+        // by the host capability below. A linked image (#257) gains its tap-through (opens linkUrl)
+        // AND the long-press menu through ONE combinedClickable; an unlinked eligible image gets a
+        // long-press-ONLY handler. When the surface provides no actions (MP threads, editor preview,
+        // signatures: default null) the image is TOTALLY inert (no tap even if linked) — the Lot 2
+        // §5 target. data:/blob:/empty URLs are never menu-eligible.
+        // #958 Lot 2 (§5) — the HOST capability (LocalPostImageActions != null) gates ALL image
+        // interaction. On the three null hosts (MP, editor preview, signature) the block image is
+        // TOTALLY inert — no tap (even linked), no long-press, no interactive role (matrice §5).
+        // Two independent gates (Sol reserve): the TAP-to-open-link depends on `linkUrl != null`
+        // (NOT on the image URL's menu-eligibility) ; the long-press MENU depends on the image URL
+        // being eligible. Role.Image + onClickLabel « Ouvrir l'image » ([AMENDEMENT-Lot2-2] : Role.Link
+        // does not exist in Compose 1.11.x ; the onClickLabel announces the link-open to TalkBack).
+        val host = LocalPostImageActions.current
+        val tapOpensLink = host != null && linkUrl != null
+        val menuEligible = host != null && isEligiblePostImageUrl(url)
+        val optionsLabel = stringResource(R.string.post_image_options_action)
         val interactionModifier = when {
-            imageActions != null && linkUrl != null ->
-                // Role.Image (not Button): the element IS an image that opens its full version on
-                // tap; the localized labels carry both actions for TalkBack. combinedClickable
-                // brings the built-in long-press haptics (#436 precedent, MultiQuoteFab).
+            tapOpensLink && menuEligible ->
                 Modifier.combinedClickable(
                     role = Role.Image,
                     onClickLabel = openLabel,
-                    onLongClickLabel = stringResource(R.string.post_image_options_action),
+                    onLongClickLabel = optionsLabel,
                     onLongClick = {
-                        imageActions.onLongPress(
-                            PostImageTarget(url = url, description = description, linkUrl = linkUrl),
-                        )
+                        host.onLongPress(PostImageTarget(url = url, description = description, linkUrl = linkUrl))
                     },
                 ) {
                     runCatching { uriHandler.openUri(linkUrl) }
                 }
 
-            imageActions != null -> Modifier.postImageLongPress(
-                actions = imageActions,
-                target = PostImageTarget(url = url, description = description, linkUrl = null),
-                haptics = LocalHapticFeedback.current,
-                optionsLabel = stringResource(R.string.post_image_options_action),
-            )
-
-            linkUrl != null ->
-                // Role.Image (not Button): the element IS an image that opens its full version on
-                // tap; the localized onClickLabel carries the action for TalkBack.
+            tapOpensLink ->
+                // Linked image whose own URL is not menu-eligible (e.g. data:) : tap still opens
+                // the link, no long-press menu.
                 Modifier.clickable(role = Role.Image, onClickLabel = openLabel) {
                     runCatching { uriHandler.openUri(linkUrl) }
                 }
+
+            menuEligible -> Modifier.postImageLongPress(
+                actions = host,
+                target = PostImageTarget(url = url, description = description, linkUrl = null),
+                haptics = LocalHapticFeedback.current,
+                optionsLabel = optionsLabel,
+            )
 
             else -> Modifier
         }
