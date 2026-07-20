@@ -53,7 +53,6 @@ import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -975,8 +974,8 @@ private fun ImageBlock(block: PostBlock.Image) = BlockImage(url = block.url, des
  * AND keeps its tap-through instead of being kept as a small inline thumbnail.
  *
  * #610/#842 — a MEASURED image renders in a box of EXACTLY its parity display size
- * ([PostMediaDisplayPolicy.blockImageDisplaySize]: native size, no upscale, width ≤ 90% of the
- * column, height ≤ the mobile-recalibrated [blockImageMaxHeightDp]), centred. A not-yet-measured
+ * ([imageDisplaySizePx] §3: native PHYSICAL size, no upscale, width ≤ fImage × column, height ≤
+ * the clamped useful-height cap [rememberBlockImageColdCapDp]), centred. A not-yet-measured
  * image (cold cache / failed measurement) sits in the deterministic §6 COLD slot
  * ([coldBlockSlotDp], since #957 — formerly the legacy [160, 480] dp grow-on-load slot).
  * Bounded either way, so a 4000×3000 RAW screenshot can't blow up the post and destroy the
@@ -1003,7 +1002,7 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
     val sizeCache = LocalIntrinsicMediaSizeCache.current
     val measured: IntSize? = sizeCache.get(url)
     // #249 follow-up — a standalone PostBlock.Image is NOT covered by the paragraph measure effect, so
-    // without this its intrinsic size never lands in the cache: blockImageDisplaySize stays null, the
+    // without this its intrinsic size never lands in the cache: the measured box never resolves, the
     // image stays in the §6 cold slot forever and loses both the exact parity box (#610) and the
     // reserved loading space (#249 anti-CLS). Measure it here through the same guarded seam the
     // paragraph effect uses; the SnapshotStateMap write then recomposes this block onto the exact-box
@@ -1025,27 +1024,30 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
     // #842 — the block height cap is recalibrated for mobile (relative to the viewport), read here
     // where the screen height is known; #610's flat 200 dp squeezed square/portrait photos to ~48 %
     // width on phones (the width cap ≈ 90 % never got a chance to bind).
-    val screenHeightDp = LocalConfiguration.current.screenHeightDp
+    // #959 (§3, [Lot0-3]) — the MEASURED path now shares the CLAMPED useful-height cap with the
+    // cold slot (the window-following metric the host reads from containerSize + insets); the
+    // legacy screen-fraction cap (#842, `max(400, 0.5 × screenHeightDp)`) is gone — it could
+    // exceed a short window (split-screen) where the clamp follows it.
+    val capBlocDp = rememberBlockImageColdCapDp()
+    val blockDensity = LocalDensity.current
     // contentAlignment centres the (usually narrower-than-column, #610) exact box on its own line —
     // the same visual centring the pre-#610 full-width Fit letterboxing produced.
     BoxWithConstraints(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        val displaySize = PostMediaDisplayPolicy.blockImageDisplaySize(
-            measured = measured?.let { PixelSize(it.width, it.height) },
-            availableWidthDp = maxWidth.value,
-            maxHeightDp = blockImageMaxHeightDp(screenHeightDp),
-        )
-        // #610/#249/#842 — the EXACT parity box when measured (no upscale, ≤ 90% width, ≤ the
-        // mobile-recalibrated height cap; anti-CLS: it is also the reserved loading slot), else the
-        // deterministic §6 cold slot below.
-        val sizeModifier = if (displaySize != null) {
-            Modifier.size(displaySize.width.dp, displaySize.height.dp)
+        // #959 (§3) — the measured box is the PHYSICAL-pixel equation (imageDisplaySizePx: single
+        // scale, height derived from the rounded width, no physical upscale), caps converted to px
+        // here and the result converted back to dp at this Compose boundary; anti-CLS: it is also
+        // the reserved loading slot. Cold falls back to the deterministic §6 slot below.
+        val sizeModifier = if (measured != null) {
+            with(blockDensity) {
+                val maxWidthPx = (maxWidth.toPx() * IMAGE_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
+                val maxHeightPx = capBlocDp.dp.roundToPx()
+                val px = imageDisplaySizePx(measured, maxWidthPx, maxHeightPx)
+                Modifier.size(px.width.toDp(), px.height.toDp())
+            }
         } else {
             // §6 COLD slot (v1.4, [AMENDEMENT-Lot0-3]) : deterministic box before any dimension is
-            // known — width 0,9 × available, height min(capBloc, max(160 dp, 0,75 × width)) with
-            // capBloc = clamped USEFUL window height (host-read insets). Replaces the legacy
-            // min/max grow-on-load slot ; the MEASURED path above keeps its legacy cap until Lot 3.
-            val coldCapDp = rememberBlockImageColdCapDp()
-            val (coldWidth, coldHeight) = coldBlockSlotDp(maxWidth.value, coldCapDp)
+            // known — width fImage × available, height min(capBloc, max(160 dp, 0,75 × width)).
+            val (coldWidth, coldHeight) = coldBlockSlotDp(maxWidth.value, capBlocDp)
             Modifier.size(coldWidth.dp, coldHeight.dp)
         }
         // #831/#958 (Lot 2, §5) — contextual image menu on long-press + linked-image tap, BOTH gated

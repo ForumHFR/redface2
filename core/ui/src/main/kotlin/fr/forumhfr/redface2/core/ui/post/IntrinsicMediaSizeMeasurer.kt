@@ -44,7 +44,7 @@ internal suspend fun measureIntrinsicMediaSize(
             // INEXACT is REQUIRED here (Codex review): Coil's default EXACT precision would UPSCALE a
             // source smaller than the probe (a 16×16 emoji, a 70×50 smiley) up to 1024 before reporting
             // image.width/height — measuring small media as huge and breaking imageDisplayBox and
-            // blockImageDisplaySize sizing. INEXACT lets Coil report the native size for sources ≤ probe.
+            // block sizing. INEXACT lets Coil report the native size for sources ≤ probe.
             .precision(Precision.INEXACT)
             .build(),
     )

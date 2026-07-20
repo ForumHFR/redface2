@@ -14,7 +14,7 @@ import kotlin.math.roundToInt
  * ([AMENDEMENT-Lot0-3], formulation Sol) : the HOST-side composable reads the window
  * container and the per-edge occupied insets, the PURE functions below do the arithmetic
  * (JVM-testable, no Compose types). Applied to the COLD §6 slot ONLY in this lot — the
- * MEASURED path keeps the legacy `blockImageMaxHeightDp` cap untouched until Lot 3
+ * MEASURED path shares this clamped cap since #959 (Lot 3)
  * (cadrage #957 r4, résolution minimale actée r5).
  */
 

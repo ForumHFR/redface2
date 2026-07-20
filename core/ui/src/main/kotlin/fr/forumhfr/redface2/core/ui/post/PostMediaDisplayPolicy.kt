@@ -22,13 +22,12 @@ import kotlin.math.roundToInt
  * small size directly, while perso smileys use the 70×50 cold-cache fallback while measurement is
  * in flight (and as the default `collectInlineMedia` resolver in tests).
  *
- * `[img]` — inline AND block — follows ONE policy since #610, the HFR-web parity rule
- * `img { max-width: 90%; max-height: 200px }` ([imageParityDisplaySize]): measured intrinsic native
- * size, no upscale, height capped to [INLINE_IMAGE_MAX_HEIGHT_SP], width capped to the relative
- * `0.9 × contentWidth`. The inline path (`imageDisplayBox` in PostRenderer, #224 option A) applies it
- * in **sp** via the same `IntrinsicMediaSizeCache`; the block path ([blockImageDisplaySize]) applies
- * it in **dp** — so a lone posted photo and the same photo inside prose render at the same size (the
- * pre-#610 divergence was the issue). The **production cold fallback** (unmeasured inline `[img]`) is
+ * `[img]` — inline AND block — follows ONE policy since #959 (contrat v1.5 §3), the PHYSICAL-pixel
+ * equation [imageDisplaySizePx]: measured intrinsic native size, no physical upscale, height capped
+ * (inline [INLINE_IMAGE_MAX_HEIGHT_SP] in px, block the clamped useful-height cap), width capped to
+ * fImage × container ([IMAGE_RELATIVE_MAX_WIDTH_FRACTION]). Both paths convert their caps to px
+ * before the equation and convert the result back (sp inline / dp block) at the Compose
+ * boundary. The **production cold fallback** (unmeasured inline `[img]`) is
  * the one-line [INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP] square in `imageDisplayBox` (#253, no giant Fit flash).
  * The fixed 240×180 [inlineImage] bucket is now only the **default `collectInlineMedia` resolver**
  * (legacy bucket exercised by tests), not the runtime fallback. This kills the empty frame around a
@@ -107,36 +106,6 @@ internal object PostMediaDisplayPolicy {
     fun smileyBox(smiley: PostInline.Smiley): InlineMediaBox = when (smiley.kind) {
         is SmileyKind.Builtin -> builtinSmiley
         is SmileyKind.Perso -> persoSmiley
-    }
-
-    /**
-     * #249/#610 — exact display size (in **dp** units) for a MEASURED block `[img]`, computed BEFORE
-     * the bitmap arrives so the container occupies exactly the slot the loaded image will fill, hence
-     * zero layout shift (anti-CLS, #249) when it crossfades in.
-     *
-     * #610/#842 — the size is the unified parity policy ([imageParityDisplaySize]): native size, no
-     * upscale, width ≤ [SMILEY_RELATIVE_MAX_WIDTH_FRACTION] × [availableWidthDp] (web `max-width: 90%`),
-     * height ≤ [maxHeightDp]. #610 passed a flat 200 here (matching the inline sp cap); #842 lets the
-     * caller pass the mobile-recalibrated [blockImageMaxHeightDp] (`max(400, 0.5 × screenHeightDp)`) so
-     * a square/portrait photo reaches ~90 % width instead of being squeezed to ~48 % by a 200 dp cap
-     * with no web basis. Before #610: a measured block image FILLED the column width — upscaling any
-     * source narrower than the column — with its height `width × h/w` clamped to the legacy grow-on-load
-     * slot; it now renders at its capped NATIVE size (cold slot = §6 v1.4 since #957).
-     *
-     * [measured] is `null` for a not-yet-measured image — a cold cache before the measure effect lands,
-     * or a measurement failure (dead host / 404). Both the paragraph effect (#175/#224) and, since the
-     * #249 follow-up, the standalone `PostBlock.Image` effect feed the cache; callers fall back to the
-     * deterministic §6 COLD slot (v1.4, #957) until (or unless) a size lands.
-     */
-    fun blockImageDisplaySize(
-        measured: PixelSize?,
-        availableWidthDp: Float,
-        maxHeightDp: Int = INLINE_IMAGE_MAX_HEIGHT_SP,
-    ): PixelSize? {
-        val size = measured?.takeIf { it.width > 0 && it.height > 0 }
-        if (size == null || availableWidthDp <= 0f) return null
-        val maxWidthDp = (availableWidthDp * SMILEY_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
-        return imageParityDisplaySize(size, maxWidthUnits = maxWidthDp, maxHeightUnits = maxHeightDp)
     }
 
     /**
@@ -250,7 +219,7 @@ internal const val IMAGE_RELATIVE_MAX_WIDTH_FRACTION = 0.95f
  * (1 source px never spreads past 1 screen px), which is the whole density-aware point of the
  * lot. The HOSTS convert their caps (sp/dp → px) BEFORE calling and convert the result back at
  * the Compose boundary — no px↔dp/sp comparison ever happens in the policy (cadrage Sol r1).
- * A non-positive [maxWidthPx] applies no width cap (defensive, mirrors [imageParityDisplaySize]:
+ * A non-positive [maxWidthPx] applies no width cap (defensive:
  * a zero-width container must not collapse the image). Both axes floor to 1 px AFTER the
  * derivation, so a degenerate rounded-to-zero width yields a 1×1 slot — never a layout bomb.
  * Smileys keep [intrinsicSmileyDisplaySize] strictly unchanged (§9: 240/70/0.9 untouchable).
@@ -277,8 +246,8 @@ internal val builtinPreseedSize = PixelSize(16, 16)
 internal val persoColdFallbackSize = PixelSize(70, 50)
 
 /**
- * Height cap for the INLINE `[img]` path and the pure/legacy default of [imageParityDisplaySize]
- * (native px treated as logical units, fed as `.sp` inline so the image tracks the text size).
+ * Height cap for the INLINE `[img]` path (200 sp, converted to physical px by the host before
+ * the §3 equation since #959).
  *
  * #610 originally applied this same 200 to BOTH paths as `img { max-height: 200px }` "web parity".
  * #842 walked that back for the BLOCK path only (see [blockImageMaxHeightDp]): the HFR fixtures carry
@@ -289,26 +258,6 @@ internal val persoColdFallbackSize = PixelSize(70, 50)
  * 16×16, reactions) never reach the cap anyway (no upscale).
  */
 internal const val INLINE_IMAGE_MAX_HEIGHT_SP = 200
-
-/**
- * #842 — mobile-recalibrated height cap (in **dp**) for the BLOCK `[img]` path, replacing the flat
- * [INLINE_IMAGE_MAX_HEIGHT_SP] that #610 applied there. Real photos land on the block path (a structural
- * MediaRun since #957 — contract v1.4 §2); the cap is relative to the viewport height so it scales
- * with the device while still guarding against a 4000×3000 RAW screenshot blowing up the post:
- * `max(400 dp, 0.5 × screenHeightDp)`. The 400 dp floor keeps a near-square image at ~90 % width on a
- * typical ~410 dp-wide phone (there the 90 % width cap ≈ 370 dp binds first, so the height cap no
- * longer bites), instead of re-creating a visible height cap. Pure so the caller
- * (`PostRenderer.BlockImage`, which knows `screenHeightDp` via `LocalConfiguration`) stays a one-liner
- * and the recalibration is JVM-testable.
- */
-internal const val BLOCK_IMAGE_MAX_HEIGHT_FLOOR_DP = 400
-internal const val BLOCK_IMAGE_MAX_HEIGHT_SCREEN_FRACTION = 0.5f
-
-internal fun blockImageMaxHeightDp(screenHeightDp: Int): Int = maxOf(
-    BLOCK_IMAGE_MAX_HEIGHT_FLOOR_DP,
-    (screenHeightDp * BLOCK_IMAGE_MAX_HEIGHT_SCREEN_FRACTION).roundToInt(),
-)
-
 
 /**
  * #257/#610 — fixed decode size (px) for an inline `[img]`: the render request decodes at this bound
@@ -365,29 +314,6 @@ internal fun intrinsicSmileyDisplaySize(
         height = (nativePx.height * scale).roundToInt().coerceAtLeast(1),
     )
 }
-
-/**
- * #610 — the unified `[img]` display policy shared by the inline path (`imageDisplayBox` in
- * PostRenderer, sp units) and the block path ([PostMediaDisplayPolicy.blockImageDisplaySize], dp
- * units): HFR-web `img { max-width: 90%; max-height: 200px }` parity. No upscale, height capped to
- * [maxHeightUnits] (default [INLINE_IMAGE_MAX_HEIGHT_SP]), width capped to [maxWidthUnits] — the caller
- * passes the RELATIVE cap (≈ `0.9 ×` its container width, in its own units), the only width limit
- * since #610. A non-positive [maxWidthUnits] applies no width cap (defensive, mirrors [capToWidth]:
- * a zero-width container must not collapse the image to a sliver).
- *
- * Thin wrapper over [intrinsicSmileyDisplaySize] (same math: uniform scale ≤ 1, ≥ 1 px per axis),
- * named separately so `[img]` call sites read as the #610 contract and can evolve independently of
- * the smiley caps.
- */
-internal fun imageParityDisplaySize(
-    nativePx: PixelSize,
-    maxWidthUnits: Int,
-    maxHeightUnits: Int = INLINE_IMAGE_MAX_HEIGHT_SP,
-): PixelSize = intrinsicSmileyDisplaySize(
-    nativePx = nativePx,
-    maxWidthSp = if (maxWidthUnits > 0) maxWidthUnits else Int.MAX_VALUE,
-    maxHeightSp = maxHeightUnits,
-)
 
 /**
  * #175 — scale [size] down so its width fits [maxWidthSp] (the relative cap, ≈90% of the content
