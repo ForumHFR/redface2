@@ -1,3 +1,3 @@
-Redface 2 v0.34.0 — dev.
+Redface 2 v0.34.1 — dev.
 
-- Images pass (contract v1.4): first batch shipped — the internal inline/block segmentation policy is in place, tested against the 45-case bench. No visible change in this build: the new rendering lands in the next batch.
+- Images pass, the visible batch: galleries as spaced blocks (no more glued images), small standalone images as clean blocks, mid-sentence images kept in the text flow, text fragments between galleries preserved. Fine sizing and error states come in the next batches.
