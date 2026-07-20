@@ -56,6 +56,10 @@ dependencies {
     implementation(libs.coil.network.okhttp)
 
     testImplementation(libs.junit4)
+    // #956 (passe images, Lot 1A) — the segmentation policy tests parse the REAL bench fixture
+    // (charte : fixtures from live HFR, they dictate exhaustiveness). Test-only dependency on the
+    // parser's MAIN classes ; the fixture HTML itself lives in THIS module's test resources.
+    testImplementation(project(":core:parser"))
     // #175 — FakeImageLoaderEngine + ColorImage(width,height) give deterministic intrinsic-size
     // measurements under Robolectric (no network/decode), and runTest drives the suspend measure.
     testImplementation(libs.coil.test)
