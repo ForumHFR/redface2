@@ -1,3 +1,3 @@
-Redface 2 v0.34.0 — dev.
+Redface 2 v0.34.1 — dev.
 
-- Passe images (contrat v1.4) : premier lot livré — la mécanique interne de découpage des images (inline/bloc décidé par la structure du post) est en place et testée sur le banc de 45 cas. Aucun changement visible dans cette version : le nouveau rendu arrive au lot suivant.
+- Passe images, le lot visible : galeries en blocs espacés (fini les images collées), petites images isolées en blocs nets, images en pleine phrase maintenues dans le texte, fragments entre galeries préservés. Tailles fines et états d'erreur aux lots suivants.
