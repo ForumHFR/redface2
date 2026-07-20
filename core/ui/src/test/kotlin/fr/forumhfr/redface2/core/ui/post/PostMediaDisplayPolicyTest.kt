@@ -259,10 +259,11 @@ class PostMediaDisplayPolicyTest {
 
     @Test
     fun `cold block slot follows the v1_4 formula`() {
-        // #957 — §6 cold : width 0,9×available ; height min(cap, max(160, 0,75×width)).
+        // #957 — §6 cold : width fImage×available ; height min(cap, max(160, 0,75×width)).
+        // #959/[AMENDEMENT-v1.5-1] — fImage = 0,95 (was 0,9) : 360×0,95 = 342, h = 0,75×342.
         val (w, h) = coldBlockSlotDp(availableWidthDp = 360f, capBlocDp = 400f)
-        assertEquals(324f, w, 0.01f)
-        assertEquals(243f, h, 0.01f)
+        assertEquals(342f, w, 0.01f)
+        assertEquals(256.5f, h, 0.01f)
         // Plancher 160 sur une colonne étroite ; cap qui borde en split-screen (E11 : 301 dp).
         assertEquals(160f, coldBlockSlotDp(120f, 400f).second, 0.01f)
         assertEquals(301f, coldBlockSlotDp(800f, 301f).second, 0.01f)

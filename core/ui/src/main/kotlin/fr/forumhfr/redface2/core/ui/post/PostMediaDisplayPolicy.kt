@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.ui.post
 
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -228,6 +229,43 @@ internal const val SMILEY_MAX_WIDTH_SP = 240
  * overlapping the text in a narrow quote — and it stays correct as the width shrinks with quote depth.
  */
 internal const val SMILEY_RELATIVE_MAX_WIDTH_FRACTION = 0.9f
+
+/**
+ * #959/[AMENDEMENT-v1.5-1] (D1 approuvée XaTriX) — the DEDICATED relative width cap of content
+ * images (`fImage`), applied identically on the three image paths: inline ([imageDisplayBox]),
+ * measured block ([PostMediaDisplayPolicy.blockImageDisplaySize]) and the cold block slot
+ * (`COLD_BLOCK_WIDTH_FRACTION` is a LOCKED alias of this constant — single source of truth,
+ * pinned by test). 0.95 is an assumed product divergence from the web `max-width:90%` (better
+ * use of narrow phone columns). The smiley cap stays a separate 0.9
+ * ([SMILEY_RELATIVE_MAX_WIDTH_FRACTION], §9 untouchable).
+ */
+internal const val IMAGE_RELATIVE_MAX_WIDTH_FRACTION = 0.95f
+
+/**
+ * #959 (Lot 3, contrat v1.5 §3) — the DEDICATED content-image sizing equation, all in PHYSICAL
+ * pixels: `scale = min(1, maxWidthPx/w, maxHeightPx/h)`, the width rounds, and the height
+ * DERIVES from the ROUNDED width by the native ratio — never rounded independently (§3 letter;
+ * the derived height may exceed the height cap by one pixel, accepted: the caps constrain the
+ * SCALE, not the rounded result). No-upscale comes from the `1` term — in physical pixels
+ * (1 source px never spreads past 1 screen px), which is the whole density-aware point of the
+ * lot. The HOSTS convert their caps (sp/dp → px) BEFORE calling and convert the result back at
+ * the Compose boundary — no px↔dp/sp comparison ever happens in the policy (cadrage Sol r1).
+ * A non-positive [maxWidthPx] applies no width cap (defensive, mirrors [imageParityDisplaySize]:
+ * a zero-width container must not collapse the image). Both axes floor to 1 px AFTER the
+ * derivation, so a degenerate rounded-to-zero width yields a 1×1 slot — never a layout bomb.
+ * Smileys keep [intrinsicSmileyDisplaySize] strictly unchanged (§9: 240/70/0.9 untouchable).
+ */
+internal fun imageDisplaySizePx(nativePx: IntSize, maxWidthPx: Int, maxHeightPx: Int): IntSize {
+    require(nativePx.width > 0 && nativePx.height > 0) { "nativePx must be positive" }
+    val scale = minOf(
+        1f,
+        if (maxWidthPx > 0) maxWidthPx.toFloat() / nativePx.width else 1f,
+        maxHeightPx.toFloat() / nativePx.height,
+    )
+    val width = (nativePx.width * scale).roundToInt()
+    val height = (width.toFloat() * nativePx.height / nativePx.width).roundToInt()
+    return IntSize(width.coerceAtLeast(1), height.coerceAtLeast(1))
+}
 
 /**
  * #175 — provisional placeholder sizes used while a perso smiley's intrinsic size is still being

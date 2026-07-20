@@ -33,7 +33,9 @@ internal fun coldBlockSlotDp(availableWidthDp: Float, capBlocDp: Float): Pair<Fl
     return width to height
 }
 
-internal const val COLD_BLOCK_WIDTH_FRACTION = 0.9f
+// #959/[AMENDEMENT-v1.5-1] — locked alias of the dedicated image width fraction (single source
+// of truth; the equality is pinned by ImageDisplaySizePolicyTest).
+internal const val COLD_BLOCK_WIDTH_FRACTION = IMAGE_RELATIVE_MAX_WIDTH_FRACTION
 internal const val COLD_BLOCK_MIN_HEIGHT_DP = 160f
 internal const val COLD_BLOCK_RATIO = 0.75f
 

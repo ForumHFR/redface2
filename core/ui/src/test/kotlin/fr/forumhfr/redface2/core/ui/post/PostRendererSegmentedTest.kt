@@ -405,9 +405,10 @@ class PostRendererSegmentedTest {
         }
         composeTestRule.onNodeWithText("Image indisponible", substring = true).assertExists()
         // Bounds via le seam : en état d'erreur le slot remplace le contenu décrit.
+        // #959/[AMENDEMENT-v1.5-1] — fImage = 0,95 : 360×0,95 = 342, h = 0,75×342 = 256,5.
         val cold = composeTestRule.onNodeWithTag(BLOCK_IMAGE_TEST_TAG).getBoundsInRoot()
-        assertEquals(324f, cold.w, 2f)
-        assertEquals(243f, cold.h, 2f)
+        assertEquals(342f, cold.w, 2f)
+        assertEquals(256.5f, cold.h, 2f)
 
         // Round 2 — l'hébergeur revient, refresh explicite : clear PUIS bump (ordre production).
         installBlockLoader(serve = true, url = deadUrl)
