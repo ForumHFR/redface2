@@ -266,10 +266,23 @@ class PostMediaDisplayPolicyTest {
     }
 
     @Test
-    fun `block image max height is 480dp`() {
-        // #610 — UNMEASURED slot cap only (load-without-measurement can't blow up the post). The
-        // measured path caps at IMAGE_MAX_HEIGHT_UNITS (200) via blockImageDisplaySize.
-        assertEquals(480.dp, PostMediaDisplayPolicy.blockImageMaxHeight)
+    fun `cold block slot follows the v1_4 formula`() {
+        // #957 — §6 cold : width 0,9×available ; height min(cap, max(160, 0,75×width)).
+        val (w, h) = coldBlockSlotDp(availableWidthDp = 360f, capBlocDp = 400f)
+        assertEquals(324f, w, 0.01f)
+        assertEquals(243f, h, 0.01f)
+        // Plancher 160 sur une colonne étroite ; cap qui borde en split-screen (E11 : 301 dp).
+        assertEquals(160f, coldBlockSlotDp(120f, 400f).second, 0.01f)
+        assertEquals(301f, coldBlockSlotDp(800f, 301f).second, 0.01f)
+    }
+
+    @Test
+    fun `cold cap px clamps the useful window height per amendement Lot0-3`() {
+        // S10e split réel (E11) : utile 903 px @3.0, plancher 400dp=1200px → cap = 903 (301 dp).
+        assertEquals(903, blockImageColdCapPx(usefulHeightPx = 903, floor400DpPx = 1200))
+        // Portrait S10e : utile 1950 px, plancher 1200 → max(1200, 975) = 1200.
+        assertEquals(1200, blockImageColdCapPx(usefulHeightPx = 1950, floor400DpPx = 1200))
+        assertEquals(0, usefulWindowHeightPx(100, 60, 60))
     }
 
     @Test
