@@ -1,3 +1,3 @@
-Redface 2 v0.34.1 — dev.
+Redface 2 v0.34.2 — dev.
 
-- Images pass, the visible batch: galleries as spaced blocks (no more glued images), small standalone images as clean blocks, mid-sentence images kept in the text flow, text fragments between galleries preserved. Fine sizing and error states come in the next batches.
+- Images pass, interactions: tapping a linked thumbnail opens its full version, long-press for the image menu — including mid-sentence (the link no longer swallows the gesture). Images go neutral in PMs, editor preview and signatures. Screen-reader announcements refined (HFR alt, accurate actions).
