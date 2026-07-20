@@ -2,7 +2,14 @@ Fixture : topic_page_banc_images_876.html
 Sujet   : [Redface 2] Banc de test images (#876) — cat=10 (Programmation), post=148760, page=1
 Posts   : 14 posts XaTelitte (numreponse 2539082-2539099) + 4 AAF XaTriX + 2 réponses nicko
 Capture : 2026-07-19, ANONYME (sans cookies), après synchronisation du banc avec le contrat
-          images v1.4 (45 cas, errata + cas 14.1 EXIF + attendus 10.1/10.2 précisés) :
+          images v1.4 (45 cas, errata + cas 14.1 EXIF + attendus 10.1/10.2 précisés).
+          CANAL : curl direct — DIVERGENCE DOCUMENTÉE avec contributing.md : la règle
+          « hfr_read … output=path écrit le HTML brut » ne correspond pas au comportement
+          réel de hfr-mcp v1.2.0, dont output= écrit la REPRÉSENTATION PARSÉE (~15 Ko,
+          vérifié le 20/07 sur ce même topic), inutilisable comme fixture parser. curl est
+          le seul canal produisant le HTML brut (précédent : les fixtures existantes du
+          repo, ex. topic_page_single.html). Divergence fichée pour correction de la règle
+          ou évolution de hfr-mcp. Commande :
           curl -sL --compressed -A "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0" \
             "https://forum.hardware.fr/forum2.php?config=hfr.inc&cat=10&post=148760&page=1"
 Caveats : capture anonyme → les champs hash_check sont VIDES nativement (aucune redaction
