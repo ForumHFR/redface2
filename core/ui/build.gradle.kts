@@ -79,5 +79,14 @@ dependencies {
     // `core/ui/build/outputs/roborazzi/` (gitignored via the `**/build/` rule).
     testImplementation(libs.roborazzi)
     testImplementation(libs.roborazzi.compose)
+    // #958 (Lot 2) — SPIKE instrumenté : la garde « pas de tap image pendant une sélection
+    // texte active » ne peut PAS se tester sous Robolectric (crash magnifier). androidTest connecté
+    // (S10e) sur du contenu synthétique — voir SelectionTapSpikeTest. Runner déjà fourni par la
+    // convention (testInstrumentationRunner AndroidJUnitRunner).
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.coil.test)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
