@@ -11,9 +11,10 @@ import java.net.URLDecoder
  * The check is **render-time only** and applies to the ORIGINAL URL carried by the AST (the
  * `:core:parser` `sanitizeImageHref` preserves the query string verbatim, and any redirect target —
  * e.g. `raw.githubusercontent.com` — is a Coil concern that never reaches this code). It never
- * alters the AST, the link semantics, the MediaCounter symmetry or the block-promotion path: its
- * only consumers are the inline SIZING fast-path in `imageDisplayBox` and the measurement-probe
- * exclusion in `collectMeasurableImageUrl` (both in PostRenderer).
+ * alters the AST, the link semantics, the MediaCounter symmetry or the §2 structural topology
+ * (`partitionParagraph` has its own cc-marker boundary rule): its only consumers are the inline
+ * SIZING fast-path in `imageDisplayBox` and the measurement-probe exclusion in
+ * `collectMeasurableImageUrl` (both in PostRenderer).
  *
  * Matching contract (pure JVM, no `android.net.Uri` — `:core:ui` unit tests run on the JVM):
  *  - only the **query** component is inspected: the substring between the first `?` and the first

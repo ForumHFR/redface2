@@ -139,10 +139,10 @@ class PostRendererImageLongPressTest {
 
     @Test
     fun `long press on a promoted linked image reaches the handler with the link URL`() {
-        // The [url=…][img] shape from the field (Codex review: this non-regression was missing):
-        // an image-only paragraph whose image measures past the inline caps is promoted to a
-        // block (#224/#257) carrying its enclosing link — the ONE path that combines a tap
-        // (browser) and the #831 long-press on the same node.
+        // The [url=…][img] shape from the field: since #957 an isolated image-only link is a
+        // STRUCTURAL MediaRun (contract v1.4 §2 — no measurement involved) rendered as a block
+        // carrying its enclosing link — the ONE path that combines a tap (browser) and the
+        // #831 long-press on the same node.
         var received: PostImageTarget? = null
         val cache = DefaultIntrinsicMediaSizeCache()
         cache.putSuccess(blockUrl, androidx.compose.ui.unit.IntSize(800, 600))

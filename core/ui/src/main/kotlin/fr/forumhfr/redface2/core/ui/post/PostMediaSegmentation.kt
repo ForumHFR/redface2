@@ -8,10 +8,10 @@ import fr.forumhfr.redface2.core.model.PostInline
  * the inline/block decision is taken on the AST STRUCTURE alone — measured dimensions never
  * participate (they only size, §3, later lots).
  *
- * This policy is NOT wired to any renderer in this lot (no production call-site) : it is the
- * mechanical foundation for the segmented renderer (Lot 1B). Types are DERIVED, UI-side data —
- * the persisted [fr.forumhfr.redface2.core.model.PostContent] model (pinned for Room) is
- * untouched.
+ * Wired into `ParagraphBlock` since #957 (Lot 1B) : the renderer maps [InlineSegment] to the
+ * historical prose path and [MediaRun] to spaced `BlockImage` columns (§4). Types are DERIVED,
+ * UI-side data — the persisted [fr.forumhfr.redface2.core.model.PostContent] model (pinned for
+ * Room) is untouched.
  *
  * Contract rules implemented (v1.4 §2.1/§2.2) :
  * - A MediaRun is a MAXIMAL sequence of : content images (cc-image marker excluded, #256) ;

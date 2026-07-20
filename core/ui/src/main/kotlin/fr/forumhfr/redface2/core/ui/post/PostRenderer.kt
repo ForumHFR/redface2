@@ -58,6 +58,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.onLongClick
@@ -421,30 +422,62 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
         }
     }
 
-    // #224 (option B) — a paragraph whose only content is image(s) (a gallery, or a lone posted image
-    // the parser kept inline because of a stray sibling) is promoted to centred blocks once a
-    // measurement shows at least one is larger than the promotion thresholds. Since #610 the block
-    // SIZE equals the inline size (unified parity policy): promotion only buys the layout semantics
-    // (own centred line, block loading/error UX, #257 tap-through). cc-image emoji / small reactions
-    // never trip the threshold, so they keep their inline flow. The measure LaunchedEffect above
-    // feeds the same cache the threshold reads.
-    val galleryImages = remember(inlines) { imageOnlyParagraphImages(inlines) }
-    if (galleryImages != null && shouldPromoteImagesToBlocks(galleryImages, measuredSizes)) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            galleryImages.forEach { promoted ->
-                BlockImage(
-                    url = promoted.image.url,
-                    description = promoted.image.description,
-                    linkUrl = promoted.linkUrl,
-                )
-            }
-        }
+    // #876/#957 (Lot 1B) — STRUCTURAL topology (frozen contract v1.4 §2) : the paragraph is
+    // partitioned by the pure Lot-1A policy ; measured sizes never decide inline/bloc anymore
+    // (`shouldPromoteImagesToBlocks` and its threshold are gone, §9). No MediaRun → fast-path :
+    // the ORIGINAL inlines render through the historical prose path, byte-for-byte unchanged.
+    val segments = remember(inlines) { partitionParagraph(inlines) }
+    if (segments.none { it is ParagraphSegment.MediaRun }) {
+        ParagraphProse(inlines, annotated, measuredSizes, deadSmileyUrls)
         return
     }
+    // §4 — ONE spacing mechanism : 8 dp between a run and its neighbour segment (outer Column),
+    // 8 dp between the images of a run (inner Column). Each prose segment rebuilds its own
+    // INVARIANT AnnotatedString with the same remember keys as the paragraph-level one (#175).
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        segments.forEach { segment ->
+            when (segment) {
+                is ParagraphSegment.InlineSegment -> {
+                    val segmentAnnotated = remember(segment.inlines, linkStyles, imageAlt, ignoreColors, isDark) {
+                        buildInlineText(segment.inlines, linkStyles, imageAlt, ignoreColors, isDark)
+                    }
+                    if (segmentAnnotated.text.isNotBlank() || hasInlineMedia(segment.inlines)) {
+                        ParagraphProse(segment.inlines, segmentAnnotated, measuredSizes, deadSmileyUrls)
+                    }
+                }
 
+                is ParagraphSegment.MediaRun -> Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    segment.images.forEach { runImage ->
+                        BlockImage(
+                            url = runImage.image.url,
+                            description = runImage.image.description,
+                            linkUrl = runImage.linkUrl,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * #957 — the historical prose path of [ParagraphBlock], extracted VERBATIM (no nested
+ * SelectionContainer : selection wrapping stays at the PostRenderer level). Renders one
+ * [ParagraphSegment.InlineSegment] (or the whole paragraph on the no-run fast-path).
+ */
+@Composable
+private fun ParagraphProse(
+    inlines: List<PostInline>,
+    annotated: AnnotatedString,
+    measuredSizes: Map<String, IntSize?>,
+    deadSmileyUrls: Set<String>,
+) {
     // Two guards against a tall/large inline smiley overlapping the text:
     //  - width: cap each smiley to RF1's `img { max-width: 90% }` of the content width (read from
     //    BoxWithConstraints, which shrinks with quote depth) so it never overflows a narrow quote;
@@ -460,6 +493,11 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
         val maxMediaWidthSp = with(LocalDensity.current) {
             (maxWidth.toSp().value * SMILEY_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
         }
+        // §4 v1.4 (#957) — total horizontal placeholder padding of a content image (4 dp/side),
+        // converted once to the sp placeholder unit at the current density/fontScale.
+        val inlineImagePaddingSp = with(LocalDensity.current) {
+            (INLINE_IMAGE_HORIZONTAL_PADDING * 2).toSp().value.roundToInt()
+        }
         val inlineContent = remember(inlines, measuredSizes, deadSmileyUrls, maxMediaWidthSp) {
             collectInlineMedia(
                 inlines,
@@ -473,7 +511,9 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
                         smileyDisplayBox(smiley, measuredSizes, maxMediaWidthSp)
                     }
                 },
-                imageBox = { image -> imageDisplayBox(image, measuredSizes, maxMediaWidthSp) },
+                imageBox = { image ->
+                    imageDisplayBox(image, measuredSizes, maxMediaWidthSp, inlineImagePaddingSp)
+                },
                 deadSmileyUrls = deadSmileyUrls,
             )
         }
@@ -913,7 +953,8 @@ private fun ImageBlock(block: PostBlock.Image) = BlockImage(url = block.url, des
 
 /**
  * Centred, bounded block image on its own line. The home of a standalone `PostBlock.Image`, and
- * (since #224 option B) of a large image promoted out of an image-only paragraph.
+ * (#876/#957, contract v1.4 §2) of every [ParagraphSegment.MediaRun] image — the STRUCTURAL
+ * topology replaced the former measured promotion (#224 option B, removed in this lot).
  *
  * When [linkUrl] is non-null the image was posted as `[url=…][img]` (the "click to enlarge" pattern):
  * the whole block is tappable and opens that URL (#257), so a linked image gets the block treatment
@@ -921,11 +962,11 @@ private fun ImageBlock(block: PostBlock.Image) = BlockImage(url = block.url, des
  *
  * #610/#842 — a MEASURED image renders in a box of EXACTLY its parity display size
  * ([PostMediaDisplayPolicy.blockImageDisplaySize]: native size, no upscale, width ≤ 90% of the
- * column, height ≤ the mobile-recalibrated [blockImageMaxHeightDp]), centred. Before #610 the
- * container FILLED the column width — upscaling any narrower source — with its height clamped to the
- * legacy [160, 480] dp slot; that slot now only
- * hosts a not-yet-measured image (cold cache / failed measurement). Bounded either way, so a
- * 4000×3000 RAW screenshot can't blow up the post and destroy the scroll position.
+ * column, height ≤ the mobile-recalibrated [blockImageMaxHeightDp]), centred. A not-yet-measured
+ * image (cold cache / failed measurement) sits in the deterministic §6 COLD slot
+ * ([coldBlockSlotDp], since #957 — formerly the legacy [160, 480] dp grow-on-load slot).
+ * Bounded either way, so a 4000×3000 RAW screenshot can't blow up the post and destroy the
+ * scroll position.
  *
  * #249 — anti-CLS survives the #610 unification: the exact box is computed BEFORE the bitmap arrives
  * (same measured-intrinsic cache as #175/#224), so the shimmer placeholder occupies the loaded
@@ -942,19 +983,23 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
     val animationsEnabled = rememberAnimationsEnabled()
 
     // #249 — reserve the exact final box from the measured intrinsic size when known. The cache is fed by
-    // the #175/#224 paragraph measure effect (promoted images) AND, since #249 follow-up, by the effect
-    // just below for standalone PostBlock.Image. Until a measurement lands (cold cache) it is null and the
-    // legacy min/max slot is used for that first frame.
+    // the #175/#224 paragraph measure effect AND, since #249 follow-up, by the effect just below for
+    // standalone PostBlock.Image. Until a measurement lands (cold cache) it is null and the §6 COLD
+    // slot (v1.4, #957) is used for that first frame.
     val sizeCache = LocalIntrinsicMediaSizeCache.current
     val measured: IntSize? = sizeCache.get(url)
     // #249 follow-up — a standalone PostBlock.Image is NOT covered by the paragraph measure effect, so
     // without this its intrinsic size never lands in the cache: blockImageDisplaySize stays null, the
-    // image falls into the legacy min/max slot and loses both the exact parity box (#610) and the
+    // image stays in the §6 cold slot forever and loses both the exact parity box (#610) and the
     // reserved loading space (#249 anti-CLS). Measure it here through the same guarded seam the
     // paragraph effect uses; the SnapshotStateMap write then recomposes this block onto the exact-box
     // path.
     val platformContext = LocalPlatformContext.current
-    LaunchedEffect(url, sizeCache, platformContext) {
+    // #813 parity (gate #957 r1, bloquant) : a structurally-promoted image now renders here, so
+    // the block path must honour the screen-owned refresh generation exactly like the inline
+    // path — the measure effect re-keys AND the painter node is recreated on an explicit refresh.
+    val mediaRefreshGeneration = LocalMediaRefreshGeneration.current
+    LaunchedEffect(url, sizeCache, platformContext, mediaRefreshGeneration) {
         measureAndCacheIntrinsicMediaSize(
             url = url,
             cache = sizeCache,
@@ -977,14 +1022,17 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
         )
         // #610/#249/#842 — the EXACT parity box when measured (no upscale, ≤ 90% width, ≤ the
         // mobile-recalibrated height cap; anti-CLS: it is also the reserved loading slot), else the
-        // legacy full-width min/max slot.
+        // deterministic §6 cold slot below.
         val sizeModifier = if (displaySize != null) {
             Modifier.size(displaySize.width.dp, displaySize.height.dp)
         } else {
-            Modifier
-                .fillMaxWidth()
-                .defaultMinSize(minHeight = PostMediaDisplayPolicy.blockImageMinHeight)
-                .heightIn(max = PostMediaDisplayPolicy.blockImageMaxHeight)
+            // §6 COLD slot (v1.4, [AMENDEMENT-Lot0-3]) : deterministic box before any dimension is
+            // known — width 0,9 × available, height min(capBloc, max(160 dp, 0,75 × width)) with
+            // capBloc = clamped USEFUL window height (host-read insets). Replaces the legacy
+            // min/max grow-on-load slot ; the MEASURED path above keeps its legacy cap until Lot 3.
+            val coldCapDp = rememberBlockImageColdCapDp()
+            val (coldWidth, coldHeight) = coldBlockSlotDp(maxWidth.value, coldCapDp)
+            Modifier.size(coldWidth.dp, coldHeight.dp)
         }
         // #831 — contextual image menu on long-press. The tap contract is preserved EXACTLY (Codex
         // framing, firm reserve): a linked image (#257) keeps its tap-through and gains the
@@ -1031,6 +1079,10 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
         // #610 — the exact parity box centres via the BoxWithConstraints contentAlignment; no
         // fillMaxWidth here (the pre-#610 full-width shape is gone).
         val containerModifier = sizeModifier
+            // Structural test seam (#957 gate) : lets bounds-level tests COUNT the block images of
+            // a rendered post — descriptions are often null on HFR `[img]`, so the a11y tree alone
+            // cannot enumerate them. testTag is invisible to TalkBack.
+            .testTag(BLOCK_IMAGE_TEST_TAG)
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             .then(interactionModifier)
@@ -1042,26 +1094,25 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
                 .crossfade(animationsEnabled)
                 .build()
         }
+        // #813 — key() on the refresh generation recreates the painter node on an explicit user
+        // refresh (parity with the inline path ; the remembered request may keep its instance,
+        // the painter holds the error state).
+        key(mediaRefreshGeneration) {
         SubcomposeAsyncImage(
             model = request,
             contentDescription = description,
             contentScale = ContentScale.Fit,
             modifier = containerModifier,
             loading = {
-                // Measured: fill the exact parity box (#610). Unmeasured (max-only constraint): a STABLE
-                // min-height placeholder — NOT fillMaxSize, which would balloon to the max slot and then
-                // collapse to the loaded intrinsic height (a visible shift, Codex review). The legacy
-                // min→intrinsic grow on load remains for these rare unmeasured images.
-                val shimmerModifier = if (displaySize != null) {
-                    Modifier.fillMaxSize()
-                } else {
-                    Modifier.fillMaxWidth().height(PostMediaDisplayPolicy.blockImageMinHeight)
-                }
-                ImageShimmer(animated = animationsEnabled, modifier = shimmerModifier)
+                // Both branches have an exactly-sized box (measured parity #610 OR the §6 cold
+                // slot #957), so the shimmer always fills it — the legacy min→intrinsic
+                // grow-on-load is gone with the min/max slot.
+                ImageShimmer(animated = animationsEnabled, modifier = Modifier.fillMaxSize())
             },
             error = { ImageBlockError(description) },
             success = { SubcomposeAsyncImageContent() },
         )
+        }
     }
 }
 
@@ -1452,9 +1503,9 @@ private fun collectMeasurableSmileyUrl(inline: PostInline, urls: MutableSet<Stri
  *
  * #256 — URLs carrying the `hfr-cc-image=true` marker are EXCLUDED: their box is pinned by the
  * [imageDisplayBox] fast-path (never read from the measurement cache), so probing them would only
- * spend a useless network round-trip. Block promotion is unaffected: an unmeasured URL never trips
- * [shouldPromoteImagesToBlocks], which is exactly the intended always-inline treatment for a marked
- * emoji.
+ * spend a useless network round-trip. Topology is unaffected: since #957 inline/bloc is decided by
+ * the STRUCTURE ([partitionParagraph], contract v1.4 §2), never by measurement — a cc emoji in
+ * prose stays inline by construction.
  */
 internal fun collectMeasurableImageUrls(inlines: List<PostInline>): Set<String> {
     val urls = LinkedHashSet<String>()
@@ -1509,7 +1560,7 @@ private fun smileyDisplayBox(
  * size via the unified web-parity policy [imageParityDisplaySize]: no upscale, height capped to
  * [IMAGE_MAX_HEIGHT_UNITS] (web `max-height: 200px`), width capped to the relative
  * `0.9 × contentWidth` ([maxWidthSp], web `max-width: 90%`) — the former absolute 240 sp width cap
- * is gone, see [IMAGE_PROMOTION_WIDTH_UNITS].
+ * is gone since #610 (it survived only as the measured-promotion threshold, removed in #957).
  *
  * #253 — while the measurement is in flight (cold cache / miss) it falls back to a small square of
  * [INLINE_IMAGE_MIN_HEIGHT_SP] (≈ one text line) rather than the old 240×180 bucket. With
@@ -1526,6 +1577,11 @@ internal fun imageDisplayBox(
     image: PostInline.InlineImage,
     measured: Map<String, IntSize?>,
     maxWidthSp: Int,
+    // §4 v1.4 (#957) — TOTAL horizontal padding (4 dp each side, sp-converted by the caller)
+    // added to the PLACEHOLDER of a content image ; the bitmap box keeps its HISTORICAL capped
+    // size untouched (sizing is Lot 3), so a width-capped placeholder exceeds the relative cap
+    // by these 8 sp — bounded, cf. the return-site comment. Zero for cc-images.
+    horizontalPaddingSp: Int = 0,
 ): InlineMediaBox {
     // #256 — render-time fast-path: a URL carrying the `hfr-cc-image=true` marker declares itself a
     // community cc-image emoji (a one-line glyph). Pin its box to the one-line square immediately —
@@ -1534,7 +1590,7 @@ internal fun imageDisplayBox(
     // marker, not the measurement, is the contract (matching + duplicate rules in [isCcImageUrl]).
     // The companion exclusion in [collectMeasurableImageUrl] skips the async probe for these URLs
     // entirely. Still relative-capped so even this square cannot overflow a pathologically narrow
-    // container. Everything else (AST, link semantics, MediaCounter, promotion) is untouched.
+    // container. Everything else (AST, link semantics, MediaCounter, §2 topology) is untouched.
     if (isCcImageUrl(image.url)) {
         val fixed = capToWidth(
             PixelSize(INLINE_IMAGE_MIN_HEIGHT_SP, INLINE_IMAGE_MIN_HEIGHT_SP),
@@ -1570,68 +1626,14 @@ internal fun imageDisplayBox(
         PixelSize(INLINE_IMAGE_MIN_HEIGHT_SP, INLINE_IMAGE_MIN_HEIGHT_SP)
     }
     val capped = capToWidth(base, maxWidthSp)
-    return InlineMediaBox(capped.width.sp, capped.height.sp)
+    // §4 — the PLACEHOLDER alone carries the +4 dp/side ; the BITMAP keeps its historical capped
+    // size EXACTLY (gate r1 : sizing is Lot 3 — a capped 800×400 stays 0,9×avail wide, never
+    // shrunk to fit padding inside the cap). The placeholder may thus exceed the 0,9 cap by the
+    // 8 sp padding — bounded and harmless at any realistic quote width.
+    return InlineMediaBox((capped.width + horizontalPaddingSp).sp, capped.height.sp)
 }
 
-/** #224/#257 — an image eligible for block promotion, paired with its enclosing `[url=…]` link (if any). */
-internal data class PromotedImage(val image: PostInline.InlineImage, val linkUrl: String?)
 
-/**
- * #224 (option B) / #257 — if a paragraph's only meaningful content is image(s) (a single posted image
- * the parser kept inline because of a stray sibling, or a gallery of several), return them in order,
- * each paired with the URL of its enclosing `[url=…]` link if there is one, so they can be promoted to
- * centred blocks (each on its own line — since #610 the block size equals the inline size, promotion
- * is layout semantics only). Blank text and line breaks are ignored.
- *
- * Returns null when the paragraph has any other meaningful inline (non-blank text, a smiley): genuine
- * prose keeps its inline image treatment. A link wrapping ONLY an image is fine — #257 promotes it to a
- * block that opens the link on tap, so the "click to enlarge" tap-through is preserved (before #257 a
- * linked image was kept inline → the link stayed a text-span affair).
- * A link wrapping image **+** text still counts as other content → null (stays inline prose).
- */
-@Suppress("CyclomaticComplexMethod") // exhaustive when over the PostInline sealed type, like appendInline
-internal fun imageOnlyParagraphImages(inlines: List<PostInline>): List<PromotedImage>? {
-    val images = mutableListOf<PromotedImage>()
-    var hasOtherContent = false
-    fun walk(list: List<PostInline>, linkUrl: String?) {
-        list.forEach { inline ->
-            when (inline) {
-                is PostInline.InlineImage -> images += PromotedImage(inline, linkUrl)
-                is PostInline.Text -> if (inline.value.isNotBlank()) hasOtherContent = true
-                PostInline.LineBreak -> Unit
-                is PostInline.Smiley -> hasOtherContent = true
-                is PostInline.Strong -> walk(inline.children, linkUrl)
-                is PostInline.Emphasis -> walk(inline.children, linkUrl)
-                is PostInline.Underline -> walk(inline.children, linkUrl)
-                is PostInline.Strike -> walk(inline.children, linkUrl)
-                is PostInline.Color -> walk(inline.children, linkUrl)
-                is PostInline.Link -> walk(inline.children, inline.url)
-            }
-        }
-    }
-    walk(inlines, linkUrl = null)
-    return images.takeIf { it.isNotEmpty() && !hasOtherContent }
-}
-
-/**
- * #224 (option B) — promote an image-only paragraph to blocks only once at least one image has
- * measured larger than the promotion thresholds (a real posted photo, not an emoji / small reaction:
- * a 16×16 cc-image never trips this and keeps its inline treatment). Returns false while every size
- * is unknown (cold) so promotion only kicks in after measurement.
- *
- * #610 — inline and block now SIZE identically ([imageParityDisplaySize]), so promotion is purely
- * layout semantics: the image gets its own centred line, the block loading/error UX, and the #257
- * link tap-through. The thresholds keep their pre-#610 calibration
- * ([IMAGE_PROMOTION_WIDTH_UNITS] = the former absolute inline width cap, [IMAGE_MAX_HEIGHT_UNITS]
- * = the shared parity height cap).
- */
-internal fun shouldPromoteImagesToBlocks(
-    images: List<PromotedImage>,
-    measured: Map<String, IntSize?>,
-): Boolean = images.any { promoted ->
-    val size = measured[promoted.image.url] ?: return@any false
-    size.width > IMAGE_PROMOTION_WIDTH_UNITS || size.height > IMAGE_MAX_HEIGHT_UNITS
-}
 
 /** True when [inlines] contains at least one renderable inline media (a smiley with a URL, or an image). */
 private fun hasInlineMedia(inlines: List<PostInline>): Boolean = inlines.any { inline ->
@@ -1709,12 +1711,21 @@ internal fun imageInlineContent(image: PostInline.InlineImage, box: InlineMediaB
         // instance — the painter, not the request, holds the error state). Deliberately key()
         // rather than betting on ImageRequest equality semantics — Compose-native, deterministic.
         // A healthy image reloads from Coil's memory cache, so a bump costs no visible flash.
+        // §4 v1.4 (#957) — content images get 4 dp of horizontal breathing on EACH side inside
+        // the widened placeholder (bitmap box unchanged) ; cc-images keep their exact square.
+        // The long-press hitbox stays on the FULL placeholder (modifier order: gesture wraps
+        // the padding).
+        val paddingModifier = if (isCcImageUrl(image.url)) {
+            Modifier
+        } else {
+            Modifier.padding(horizontal = INLINE_IMAGE_HORIZONTAL_PADDING)
+        }
         key(LocalMediaRefreshGeneration.current) {
             AsyncImage(
                 model = request,
                 contentDescription = image.description,
                 contentScale = PostMediaDisplayPolicy.inlineImageContentScale,
-                modifier = Modifier.fillMaxSize().then(longPressModifier),
+                modifier = Modifier.fillMaxSize().then(longPressModifier).then(paddingModifier),
             )
         }
     }
@@ -1928,3 +1939,9 @@ private class MediaCounter {
     fun nextImage(): String = "post-image-${image++}"
     fun nextSmiley(): String = "post-smiley-${smiley++}"
 }
+
+/** §4 v1.4 (#957) — horizontal padding of an inline CONTENT image, each side. */
+internal val INLINE_IMAGE_HORIZONTAL_PADDING = 4.dp
+
+/** Structural test seam on every [BlockImage] node (#957) — see the modifier-site comment. */
+internal const val BLOCK_IMAGE_TEST_TAG = "PostBlockImage"
