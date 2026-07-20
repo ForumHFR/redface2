@@ -108,21 +108,7 @@ internal fun partitionParagraph(inlines: List<PostInline>): List<ParagraphSegmen
  * text ; both sides must reach a [PostInline.LineBreak] or the paragraph frontier.
  */
 private fun isSingletonIsolated(inlines: List<PostInline>, image: PostInline.InlineImage): Boolean {
-    val flat = mutableListOf<PostInline>()
-    fun flatten(nodes: List<PostInline>) {
-        nodes.forEach { node ->
-            when (node) {
-                is PostInline.Strong -> flatten(node.children)
-                is PostInline.Emphasis -> flatten(node.children)
-                is PostInline.Underline -> flatten(node.children)
-                is PostInline.Strike -> flatten(node.children)
-                is PostInline.Color -> flatten(node.children)
-                is PostInline.Link -> flatten(node.children)
-                else -> flat += node
-            }
-        }
-    }
-    flatten(inlines)
+    val flat = flattenTransparent(inlines)
     val imageIndex = flat.indexOfFirst { it === image }
 
     fun qualifies(from: Int, step: Int, frontier: Int): Boolean {
@@ -132,6 +118,20 @@ private fun isSingletonIsolated(inlines: List<PostInline>, image: PostInline.Inl
     }
     return qualifies(imageIndex - 1, -1, -1) && qualifies(imageIndex + 1, +1, flat.size)
 }
+
+/** Depth-first linearisation through the transparent containers (style wrappers, links). */
+private fun flattenTransparent(nodes: List<PostInline>): List<PostInline> =
+    nodes.flatMap { node ->
+        when (node) {
+            is PostInline.Strong -> flattenTransparent(node.children)
+            is PostInline.Emphasis -> flattenTransparent(node.children)
+            is PostInline.Underline -> flattenTransparent(node.children)
+            is PostInline.Strike -> flattenTransparent(node.children)
+            is PostInline.Color -> flattenTransparent(node.children)
+            is PostInline.Link -> flattenTransparent(node.children)
+            else -> listOf(node)
+        }
+    }
 
 /** §2.1 membership. cc-images (#256) and smileys (#175) are boundaries, never members. */
 private fun isRunMember(inline: PostInline): Boolean = when (inline) {
