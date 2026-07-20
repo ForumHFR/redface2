@@ -85,7 +85,7 @@ internal fun partitionParagraph(inlines: List<PostInline>): List<ParagraphSegmen
 
             // Singleton : BLOCK only when isolated (G1) on the ORIGINAL sequence — the image's
             // nearest non-blank neighbour on each side is a paragraph frontier or a LineBreak.
-            isSingletonIsolated(inlines, members, index, end) -> {
+            isSingletonIsolated(inlines, members, index) -> {
                 flushProse()
                 segments += ParagraphSegment.MediaRun(images)
             }
@@ -109,22 +109,14 @@ private fun isSingletonIsolated(
     inlines: List<PostInline>,
     members: List<PostInline>,
     runStart: Int,
-    runEnd: Int,
 ): Boolean {
     val imageOffset = members.indexOfFirst { collectRunImages(it).isNotEmpty() }
     val imageIndex = runStart + imageOffset
 
     fun qualifies(from: Int, step: Int, frontier: Int): Boolean {
         var i = from
-        while (i != frontier) {
-            val neighbour = inlines[i]
-            when {
-                neighbour is PostInline.LineBreak -> return true
-                neighbour is PostInline.Text && neighbour.value.isBlank() -> i += step
-                else -> return false
-            }
-        }
-        return true // paragraph frontier reached.
+        while (i != frontier && (inlines[i] as? PostInline.Text)?.value?.isBlank() == true) i += step
+        return i == frontier || inlines[i] is PostInline.LineBreak
     }
     return qualifies(imageIndex - 1, -1, -1) && qualifies(imageIndex + 1, +1, inlines.size)
 }

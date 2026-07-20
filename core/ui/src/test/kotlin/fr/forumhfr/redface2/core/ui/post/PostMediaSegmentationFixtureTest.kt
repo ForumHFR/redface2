@@ -219,7 +219,14 @@ class PostMediaSegmentationFixtureTest {
             .filterIsInstance<fr.forumhfr.redface2.core.model.PostInline.Link>()
         assertTrue(links.any { it.url.contains("530332") && !hasImage(it) })
         // 8.3 : le lien mixte reste entier en prose.
-        assertTrue(links.any { hasImage(it) && it.children.any { c -> c is fr.forumhfr.redface2.core.model.PostInline.Text && c.value.isNotBlank() } })
+        val mixed = links.filter(::hasImage)
+        assertTrue(
+            mixed.any { link ->
+                link.children.any { c ->
+                    c is fr.forumhfr.redface2.core.model.PostInline.Text && c.value.isNotBlank()
+                }
+            },
+        )
     }
 
     // ---------- post 9 : GIF ----------
@@ -233,7 +240,12 @@ class PostMediaSegmentationFixtureTest {
         assertEquals(listOf("530335", "530336"), ids(runs[2])) // 9.4
         // 9.1 : le petit GIF en phrase reste prose.
         val prose = partitioned(post(9)).filterIsInstance<InlineSegment>().flatMap { it.inlines }
-        assertTrue(prose.any { it is fr.forumhfr.redface2.core.model.PostInline.InlineImage && it.url.contains("530335") })
+        assertTrue(
+            prose.any {
+                it is fr.forumhfr.redface2.core.model.PostInline.InlineImage &&
+                    it.url.contains("530335")
+            },
+        )
     }
 
     // ---------- post 10 : exotiques et erreurs ----------
