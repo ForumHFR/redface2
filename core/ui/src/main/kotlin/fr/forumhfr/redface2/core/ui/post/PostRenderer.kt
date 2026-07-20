@@ -1368,8 +1368,21 @@ private fun AnnotatedString.Builder.appendInline(
             }
         }
 
-        is PostInline.Link -> withLink(LinkAnnotation.Url(inline.url, linkStyles)) {
-            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors, isDark)
+        // #958 Lot 2 (§5/G3) — a link whose subtree carries a CONTENT image is SPLIT: the image
+        // placeholder leaves the LinkAnnotation (its interaction moves to the image node, see
+        // imageInlineContent), while text, smileys and cc-images (#256) stay under lazily-opened
+        // link ranges (never an empty one). A link without content image keeps today's single
+        // range — text links and the #256 fast-path are structurally untouched.
+        is PostInline.Link -> if (containsContentImage(inline.children)) {
+            val run = LinkRunState(inline.url, linkStyles)
+            appendLinkedInlinesSplit(
+                inline.children, run, emptyList(), linkStyles, media, imageAlt, ignoreColors, isDark,
+            )
+            run.closeIfOpen(this)
+        } else {
+            withLink(LinkAnnotation.Url(inline.url, linkStyles)) {
+                appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors, isDark)
+            }
         }
 
         is PostInline.InlineImage -> appendInlineContent(media.nextImage(), inline.description ?: imageAlt)
@@ -1382,6 +1395,168 @@ private fun AnnotatedString.Builder.appendInline(
             }
         }
     }
+}
+
+/**
+ * #958 Lot 2 (§5) — true when the subtree carries at least one CONTENT image (an
+ * [PostInline.InlineImage] without the #256 cc marker). Decides whether a [PostInline.Link]
+ * needs the LinkAnnotation split.
+ */
+private fun containsContentImage(inlines: List<PostInline>): Boolean = inlines.any { inline ->
+    when (inline) {
+        is PostInline.InlineImage -> !isCcImageUrl(inline.url)
+        is PostInline.Strong -> containsContentImage(inline.children)
+        is PostInline.Emphasis -> containsContentImage(inline.children)
+        is PostInline.Underline -> containsContentImage(inline.children)
+        is PostInline.Strike -> containsContentImage(inline.children)
+        is PostInline.Color -> containsContentImage(inline.children)
+        is PostInline.Link -> containsContentImage(inline.children)
+        else -> false
+    }
+}
+
+/**
+ * Lazily-opened LinkAnnotation range over the split traversal ([appendLinkedInlinesSplit]):
+ * opened at the first link-carried leaf, closed before a content image — adjacent images or
+ * images at the link edges thus never leave an EMPTY link range behind. The open/close always
+ * happens with a balanced style stack ([withStyles] wraps each leaf), so pop(openIndex) never
+ * cuts a style range.
+ */
+private class LinkRunState(private val url: String, private val styles: TextLinkStyles) {
+    private var openIndex = -1
+
+    fun ensureOpen(builder: AnnotatedString.Builder) {
+        if (openIndex < 0) openIndex = builder.pushLink(LinkAnnotation.Url(url, styles))
+    }
+
+    fun closeIfOpen(builder: AnnotatedString.Builder) {
+        if (openIndex >= 0) {
+            builder.pop(openIndex)
+            openIndex = -1
+        }
+    }
+}
+
+// LongParameterList: recursive walker — the same threaded context as appendInline, plus the run.
+@Suppress("LongParameterList")
+private fun AnnotatedString.Builder.appendLinkedInlinesSplit(
+    inlines: List<PostInline>,
+    run: LinkRunState,
+    spanStyles: List<SpanStyle>,
+    linkStyles: TextLinkStyles,
+    media: MediaCounter,
+    imageAlt: String,
+    ignoreColors: Boolean,
+    isDark: Boolean,
+) {
+    inlines.forEach { inline ->
+        when (inline) {
+            // The content image leaves the link range; the generic walker appends its placeholder
+            // (single append path = MediaCounter symmetry). cc-images are link-carried (#256).
+            is PostInline.InlineImage -> if (isCcImageUrl(inline.url)) {
+                carryUnderLink(inline, run, spanStyles, linkStyles, media, imageAlt, ignoreColors, isDark)
+            } else {
+                run.closeIfOpen(this)
+                appendInline(inline, linkStyles, media, imageAlt, ignoreColors, isDark)
+            }
+
+            // A nested [url] (not produced by the parser — defensive): seal the outer run and let
+            // the generic path decide again under the INNER url.
+            is PostInline.Link -> {
+                run.closeIfOpen(this)
+                appendInline(inline, linkStyles, media, imageAlt, ignoreColors, isDark)
+            }
+
+            is PostInline.Strong -> splitOrCarryContainer(
+                inline, inline.children, SpanStyle(fontWeight = FontWeight.Bold),
+                run, spanStyles, linkStyles, media, imageAlt, ignoreColors, isDark,
+            )
+
+            is PostInline.Emphasis -> splitOrCarryContainer(
+                inline, inline.children, SpanStyle(fontStyle = FontStyle.Italic),
+                run, spanStyles, linkStyles, media, imageAlt, ignoreColors, isDark,
+            )
+
+            is PostInline.Underline -> splitOrCarryContainer(
+                inline, inline.children, SpanStyle(textDecoration = TextDecoration.Underline),
+                run, spanStyles, linkStyles, media, imageAlt, ignoreColors, isDark,
+            )
+
+            is PostInline.Strike -> splitOrCarryContainer(
+                inline, inline.children, SpanStyle(textDecoration = TextDecoration.LineThrough),
+                run, spanStyles, linkStyles, media, imageAlt, ignoreColors, isDark,
+            )
+
+            // Mirrors the #553/#(state-hygiene) colour handling of appendInline: dropped when
+            // ignored, otherwise clamped for legibility on the current theme.
+            is PostInline.Color -> splitOrCarryContainer(
+                inline, inline.children,
+                if (ignoreColors) null else SpanStyle(color = ensureReadableColor(parseColor(inline.colorHex), isDark)),
+                run, spanStyles, linkStyles, media, imageAlt, ignoreColors, isDark,
+            )
+
+            // Text, LineBreak, Smiley — link-carried leaves.
+            else -> carryUnderLink(inline, run, spanStyles, linkStyles, media, imageAlt, ignoreColors, isDark)
+        }
+    }
+}
+
+/**
+ * One styled container inside the split traversal: recurse (accumulating [style]) only when its
+ * subtree still carries a content image; an image-free subtree is appended whole through the
+ * untouched generic walker, INSIDE the link range — keeping its nested style ranges intact.
+ */
+@Suppress("LongParameterList") // Same threaded context as the split walker.
+private fun AnnotatedString.Builder.splitOrCarryContainer(
+    container: PostInline,
+    children: List<PostInline>,
+    style: SpanStyle?,
+    run: LinkRunState,
+    spanStyles: List<SpanStyle>,
+    linkStyles: TextLinkStyles,
+    media: MediaCounter,
+    imageAlt: String,
+    ignoreColors: Boolean,
+    isDark: Boolean,
+) {
+    if (containsContentImage(children)) {
+        appendLinkedInlinesSplit(
+            children, run, spanStyles + listOfNotNull(style), linkStyles, media, imageAlt, ignoreColors, isDark,
+        )
+    } else {
+        carryUnderLink(container, run, spanStyles, linkStyles, media, imageAlt, ignoreColors, isDark)
+    }
+}
+
+/**
+ * Appends one image-free inline (leaf or whole subtree) INSIDE the link range, through the
+ * untouched generic walker. [spanStyles] re-applies the styles of the containers the split had to
+ * cut through — per-leaf ranges, visually identical to the nested ranges they replace.
+ */
+@Suppress("LongParameterList") // Same threaded context as the split walker.
+private fun AnnotatedString.Builder.carryUnderLink(
+    inline: PostInline,
+    run: LinkRunState,
+    spanStyles: List<SpanStyle>,
+    linkStyles: TextLinkStyles,
+    media: MediaCounter,
+    imageAlt: String,
+    ignoreColors: Boolean,
+    isDark: Boolean,
+) {
+    run.ensureOpen(this)
+    withStyles(spanStyles) { appendInline(inline, linkStyles, media, imageAlt, ignoreColors, isDark) }
+}
+
+private inline fun AnnotatedString.Builder.withStyles(styles: List<SpanStyle>, block: () -> Unit) {
+    if (styles.isEmpty()) {
+        block()
+        return
+    }
+    val anchor = pushStyle(styles.first())
+    for (i in 1 until styles.size) pushStyle(styles[i])
+    block()
+    pop(anchor)
 }
 
 /**
@@ -1410,11 +1585,21 @@ private fun walkInlinesForMedia(
     smileyBox: (PostInline.Smiley) -> InlineMediaBox,
     imageBox: (PostInline.InlineImage) -> InlineMediaBox,
     deadSmileyUrls: Set<String>,
+    // #958 Lot 2 (§5) — the URL of the enclosing [PostInline.Link], threaded down so the image
+    // node of a linked CONTENT image can own the tap the LinkAnnotation split took away from the
+    // text machinery (see appendInline / imageInlineContent).
+    activeLinkUrl: String? = null,
 ) {
     inlines.forEach { inline ->
         when (inline) {
             is PostInline.InlineImage ->
-                out += media.nextImage() to imageInlineContent(inline, imageBox(inline))
+                out += media.nextImage() to imageInlineContent(
+                    inline,
+                    imageBox(inline),
+                    // A cc-image (#256) stays under the LinkAnnotation and must not gain a tap
+                    // surface of its own through the split.
+                    linkUrl = activeLinkUrl?.takeUnless { isCcImageUrl(inline.url) },
+                )
 
             is PostInline.Smiley -> {
                 val url = inline.imageUrl ?: return@forEach
@@ -1423,17 +1608,17 @@ private fun walkInlinesForMedia(
             }
 
             is PostInline.Strong ->
-                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls)
+                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls, activeLinkUrl)
             is PostInline.Emphasis ->
-                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls)
+                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls, activeLinkUrl)
             is PostInline.Underline ->
-                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls)
+                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls, activeLinkUrl)
             is PostInline.Strike ->
-                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls)
+                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls, activeLinkUrl)
             is PostInline.Color ->
-                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls)
+                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls, activeLinkUrl)
             is PostInline.Link ->
-                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls)
+                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls, inline.url)
             else -> Unit
         }
     }
@@ -1654,7 +1839,13 @@ private fun hasInlineMedia(inlines: List<PostInline>): Boolean = inlines.any { i
     }
 }
 
-internal fun imageInlineContent(image: PostInline.InlineImage, box: InlineMediaBox): InlineTextContent {
+internal fun imageInlineContent(
+    image: PostInline.InlineImage,
+    box: InlineMediaBox,
+    // #958 Lot 2 (§5) — the URL of the enclosing link, when the LinkAnnotation split moved the
+    // tap from the text machinery onto this image node (content images only — never cc-images).
+    linkUrl: String? = null,
+): InlineTextContent {
     return InlineTextContent(
         placeholder = Placeholder(
             width = box.placeholderWidth,
@@ -1690,25 +1881,56 @@ internal fun imageInlineContent(image: PostInline.InlineImage, box: InlineMediaB
                 .precision(Precision.INEXACT)
                 .build()
         }
-        // #831 — the hosting surface (topic reading) may provide image actions; the lambda of an
-        // InlineTextContent is @Composable, so the CompositionLocal is read HERE, without touching
-        // the invariant AnnotatedString (#175) nor the remember keys of ParagraphBlock. Codex
-        // framing (firm reserve): LONG-PRESS ONLY — no combinedClickable / no-op onClick on inline
-        // images, which would eat the tap and disturb text selection around the image. The
-        // long-press detector does claim the initial down, which is precisely what keeps the
-        // parent SelectionContainer (#281) from starting a word selection under a finger resting
-        // on the image; selection drags STARTED on the surrounding text still travel across the
-        // image unaffected, and taps outside the image keep their behaviour.
-        val imageActions = LocalPostImageActions.current
-        val longPressModifier = if (imageActions != null && isEligiblePostImageUrl(image.url)) {
-            Modifier.postImageLongPress(
-                actions = imageActions,
+        // #831/#958 (Lot 2, §5) — the lambda of an InlineTextContent is @Composable, so the
+        // CompositionLocals are read HERE, without touching the invariant AnnotatedString (#175)
+        // nor the remember keys of ParagraphBlock. The HOST capability (LocalPostImageActions
+        // != null) gates ALL interaction of a content image: on the three null hosts (MP, editor
+        // preview, signature) the image is TOTALLY inert — no tap even when [linkUrl] is set, no
+        // long-press, no interactive role. Two independent gates (Sol reserve): the TAP-to-open-
+        // link depends on `linkUrl != null` (threaded from the LinkAnnotation split), the
+        // long-press MENU on the image URL's eligibility; both live in ONE combinedClickable, so
+        // tap and long-press are mutually exclusive by construction. Role.Image + onClickLabel
+        // « Ouvrir l'image » ([AMENDEMENT-Lot2-2] : Role.Link does not exist in Compose 1.11.x).
+        // The pre-#958 "long-press only, never install an onClick" Codex reserve is superseded by
+        // [AMENDEMENT-Lot2-1]: the device spike proved a tap reaches a clickable child even under
+        // an active selection, so a linked image now opens its link and clears the selection
+        // exactly like a text link. Selection drags STARTED on the surrounding text still travel
+        // across the image unaffected.
+        val host = LocalPostImageActions.current
+        val tapOpensLink = host != null && linkUrl != null
+        val menuEligible = host != null && isEligiblePostImageUrl(image.url)
+        val uriHandler = LocalUriHandler.current
+        val openLabel = stringResource(R.string.post_image_open_link)
+        val optionsLabel = stringResource(R.string.post_image_options_action)
+        val interactionModifier = when {
+            tapOpensLink && menuEligible -> Modifier.combinedClickable(
+                role = Role.Image,
+                onClickLabel = openLabel,
+                onLongClickLabel = optionsLabel,
+                onLongClick = {
+                    host.onLongPress(
+                        PostImageTarget(url = image.url, description = image.description, linkUrl = linkUrl),
+                    )
+                },
+            ) {
+                runCatching { uriHandler.openUri(linkUrl) }
+            }
+
+            tapOpensLink ->
+                // Linked image whose own URL is not menu-eligible (e.g. data:) : the tap still
+                // opens the link, no long-press menu.
+                Modifier.clickable(role = Role.Image, onClickLabel = openLabel) {
+                    runCatching { uriHandler.openUri(linkUrl) }
+                }
+
+            menuEligible -> Modifier.postImageLongPress(
+                actions = host,
                 target = PostImageTarget(url = image.url, description = image.description, linkUrl = null),
                 haptics = LocalHapticFeedback.current,
-                optionsLabel = stringResource(R.string.post_image_options_action),
+                optionsLabel = optionsLabel,
             )
-        } else {
-            Modifier
+
+            else -> Modifier
         }
         // #813 — key() on the refresh generation recreates the AsyncImage node on an explicit user
         // refresh: a painter stuck in error restarts its load (the remembered request may keep its
@@ -1717,20 +1939,27 @@ internal fun imageInlineContent(image: PostInline.InlineImage, box: InlineMediaB
         // A healthy image reloads from Coil's memory cache, so a bump costs no visible flash.
         // §4 v1.4 (#957) — content images get 4 dp of horizontal breathing on EACH side inside
         // the widened placeholder (bitmap box unchanged) ; cc-images keep their exact square.
-        // The long-press hitbox stays on the FULL placeholder (modifier order: gesture wraps
-        // the padding).
+        // #958 (§5, Sol firm reserve) : the HITBOX is the BITMAP — the 4 dp strip must stay inert.
+        // Chaining the gesture AFTER `padding` in the SAME layout node does NOT achieve that: a
+        // pointer-input modifier still receives touches on the whole node's bounds (verified by
+        // spike under the compose test harness — intra-node sub-geometry does not gate hit
+        // testing). Hit testing BETWEEN layout nodes is geometric, so the padding lives on a
+        // parent box and the gesture on the image's own node; the padding-strip test in
+        // PostRendererImageLongPressTest pins the behaviour.
         val paddingModifier = if (isCcImageUrl(image.url)) {
             Modifier
         } else {
             Modifier.padding(horizontal = INLINE_IMAGE_HORIZONTAL_PADDING)
         }
         key(LocalMediaRefreshGeneration.current) {
-            AsyncImage(
-                model = request,
-                contentDescription = image.description,
-                contentScale = PostMediaDisplayPolicy.inlineImageContentScale,
-                modifier = Modifier.fillMaxSize().then(longPressModifier).then(paddingModifier),
-            )
+            Box(Modifier.fillMaxSize().then(paddingModifier)) {
+                AsyncImage(
+                    model = request,
+                    contentDescription = image.description,
+                    contentScale = PostMediaDisplayPolicy.inlineImageContentScale,
+                    modifier = Modifier.fillMaxSize().then(interactionModifier),
+                )
+            }
         }
     }
 }
