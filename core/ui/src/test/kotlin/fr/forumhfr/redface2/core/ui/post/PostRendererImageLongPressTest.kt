@@ -11,6 +11,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -374,6 +375,97 @@ class PostRendererImageLongPressTest {
 
         node.performTouchInput { click(center) }
         assertEquals(fullLinkUrl, uriHandler.opened)
+    }
+
+    @Test
+    fun `the text run of a split link stays tappable next to the image`() {
+        // Frontier 11.1 — the SPLIT must not kill the text side of the link: the text run keeps
+        // its LinkAnnotation (pinned structurally in PostRendererLinkSplitTest) AND the text link
+        // machinery still opens it. The link text starts the paragraph, so a tap near the line
+        // start/bottom (the text rides the line bottom next to a tall placeholder) hits its range.
+        val uriHandler = RecordingUriHandler()
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(
+                    LocalPostImageActions provides PostImageActions(onLongPress = {}),
+                    LocalUriHandler provides uriHandler,
+                ) {
+                    PostRenderer(
+                        content = PostContent(
+                            blocks = listOf(
+                                PostBlock.Paragraph(
+                                    inlines = listOf(
+                                        PostInline.Link(
+                                            url = fullLinkUrl,
+                                            children = listOf(
+                                                PostInline.Text("lien "),
+                                                PostInline.InlineImage(url = inlineUrl, description = "photo"),
+                                            ),
+                                        ),
+                                        PostInline.Text(" suite"),
+                                    ),
+                                ),
+                            ),
+                        ),
+                        selectable = false,
+                    )
+                }
+            }
+        }
+
+        composeTestRule.onNode(hasText("lien", substring = true))
+            .performTouchInput { click(Offset(20f, height - 20f)) }
+
+        assertEquals(fullLinkUrl, uriHandler.opened)
+    }
+
+    @Test
+    fun `long-press in the padding strip of a linked inline image opens nothing`() {
+        // Frontier 11.1 — the long-press hitbox is the bitmap too: in the 4 dp strip neither the
+        // menu nor the link may trigger.
+        var received: PostImageTarget? = null
+        val uriHandler = RecordingUriHandler()
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(
+                    LocalPostImageActions provides PostImageActions(onLongPress = { received = it }),
+                    LocalUriHandler provides uriHandler,
+                ) {
+                    PostRenderer(content = linkedInlineImageContent(), selectable = false)
+                }
+            }
+        }
+
+        val stripPx = with(composeTestRule.density) { INLINE_IMAGE_HORIZONTAL_PADDING.toPx() }
+        composeTestRule.onNodeWithContentDescription("photo")
+            .performTouchInput { longClick(Offset(-stripPx / 2f, center.y)) }
+
+        assertNull("no menu from the padding strip", received)
+        assertNull("no link from the padding strip", uriHandler.opened)
+    }
+
+    @Test
+    fun `the long-press hitbox of an unlinked inline image is the bitmap not the placeholder`() {
+        // INVERSION of the pre-#958 behaviour ("the long-press hitbox stays on the FULL
+        // placeholder"): the §4 padding strip is inert for the menu-only path as well.
+        var received: PostImageTarget? = null
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(
+                    LocalPostImageActions provides PostImageActions(onLongPress = { received = it }),
+                ) {
+                    PostRenderer(content = inlineImageContent(inlineUrl), selectable = false)
+                }
+            }
+        }
+
+        val stripPx = with(composeTestRule.density) { INLINE_IMAGE_HORIZONTAL_PADDING.toPx() }
+        val node = composeTestRule.onNodeWithContentDescription("photo")
+        node.performTouchInput { longClick(Offset(-stripPx / 2f, center.y)) }
+        assertNull("no menu from the padding strip", received)
+
+        node.performTouchInput { longClick(center) }
+        assertEquals(inlineUrl, received?.url)
     }
 
     @Test

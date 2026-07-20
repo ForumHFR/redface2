@@ -27,11 +27,13 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * #958 (Lot 2) — SPIKE de la garde sélection (cadrage Sol, blocueur). Question : quand une
- * sélection de texte est ACTIVE dans un [SelectionContainer], un `clickable`/`combinedClickable`
- * enfant reçoit-il son tap, ou le premier tap est-il CONSOMMÉ par la machinerie de sélection
- * (effacement) ? Robolectric ne peut pas (crash magnifier) → instrumenté connecté (S10e), contenu
- * synthétique, aucun réseau. Les compteurs sont écrits dans logcat (tag SPIKE958).
+ * #958 (Lot 2) — né spike de la garde sélection (cadrage Sol), désormais le test DURABLE de
+ * [AMENDEMENT-Lot2-1] : quand une sélection de texte est ACTIVE dans un [SelectionContainer], un
+ * `clickable`/`combinedClickable` enfant REÇOIT son premier tap (`afterFirst == 1`) — Compose ne
+ * consomme pas le tap, aucune garde « sélection active » n'est possible en stable 1.11.x, donc le
+ * tap sur une image liée ouvre son lien et referme la sélection, comme un lien texte (§5 amendé).
+ * Robolectric ne peut pas l'exécuter (crash magnifier) → instrumenté connecté (S10e), contenu
+ * synthétique, aucun réseau. Les compteurs sont aussi écrits dans logcat (tag SPIKE958).
  */
 @RunWith(AndroidJUnit4::class)
 @OptIn(ExperimentalTestApi::class)
