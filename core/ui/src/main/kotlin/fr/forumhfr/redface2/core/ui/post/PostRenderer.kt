@@ -1104,7 +1104,11 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
         key(mediaRefreshGeneration) {
         SubcomposeAsyncImage(
             model = request,
-            contentDescription = description,
+            // A11Y-2 (annexe a11y #876) — the HFR alt when present, otherwise the localized
+            // generic fallback; never null, never the raw URL. The error slot swaps in the
+            // contractual error wording (ImageBlockError) on the same containing node.
+            contentDescription = description?.takeIf(String::isNotBlank)
+                ?: stringResource(R.string.post_inline_image_alt),
             contentScale = ContentScale.Fit,
             modifier = containerModifier,
             loading = {
@@ -1955,7 +1959,10 @@ internal fun imageInlineContent(
             Box(Modifier.fillMaxSize().then(paddingModifier)) {
                 AsyncImage(
                     model = request,
-                    contentDescription = image.description,
+                    // A11Y-2 (annexe a11y #876) — the HFR alt when present, otherwise the
+                    // localized generic fallback; never null, never the raw URL.
+                    contentDescription = image.description?.takeIf(String::isNotBlank)
+                        ?: stringResource(R.string.post_inline_image_alt),
                     contentScale = PostMediaDisplayPolicy.inlineImageContentScale,
                     modifier = Modifier.fillMaxSize().then(interactionModifier),
                 )
