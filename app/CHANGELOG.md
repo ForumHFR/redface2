@@ -16,6 +16,17 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.34.0` — `internal` (dev) — 2026-07-20
+
+Premier lot applicatif de la passe images (#876, contrat v1.4 gelé) — Lot 1A (#956, PR #964).
+
+- Ajouté : policy pure de segmentation `InlineSegment`/`MediaRun` (topologie inline/bloc
+  décidée par la structure de l'AST, contrat §2) + 48 tests dont 14 sur la fixture réelle
+  du banc images (topic 148760, 45 cas). AUCUN changement visuel : la policy n'est pas
+  encore branchée au renderer (Lot 1B).
+- Fixture `topic_page_banc_images_876.html` + provenance ; divergence de canal de capture
+  fichée #963.
+
 ## `0.33.0` — `internal` (dev) — 2026-07-19
 
 Premier lot du chantier « barres » #882 (P1) — deux reviews indépendantes (Codex GO + code-review

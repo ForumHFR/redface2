@@ -1,3 +1,3 @@
-Redface 2 v0.33.0 — dev.
+Redface 2 v0.34.0 — dev.
 
-- Topic view: the post action row now uses a proper 48 dp touch target and the "Added to quote" pill is gone. Result: no more layout shift when tapping "+ Quote", and a bit more content on screen.
+- Images pass (contract v1.4): first batch shipped — the internal inline/block segmentation policy is in place, tested against the 45-case bench. No visible change in this build: the new rendering lands in the next batch.
