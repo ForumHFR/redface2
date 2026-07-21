@@ -98,22 +98,28 @@ internal class MediaAttemptLedger(
 
     /**
      * Settles a failure (starts its TTL). A stale-generation settlement is discarded; an unknown
-     * URL creates its entry (render-time writers never reserve).
+     * URL creates its entry (render-time writers never reserve). MONOTONIC (Sol P1): a settled
+     * success is terminal — a late concurrent failure (render-time writers can race) never
+     * demotes it (lock #4).
      */
     fun settleFailure(url: String, generation: Int, kind: MediaAttemptKind, nowMillis: Long) {
         synchronized(lock) {
             val entry = entries[url] ?: UrlEntry()
             if (entry.generation != generation) return
+            if (entry.axis(kind) == AxisState.Succeeded) return
             entries[url] = entry.withAxis(kind, AxisState.Failed(nowMillis))
         }
     }
 
     /**
      * C1 — returns the current generation of [url], atomically opening a NEW one (once) when at
-     * least one failed axis has expired: only the EXPIRED failures reset to untried; a fresh
-     * failure on the other axis keeps blocking until its own expiry (it rides the new
-     * generation as-is, still denied by [tryReserve] and still fresh for [isFailedFresh]).
-     * Succeeded axes are never touched — a G2 "probe KO, painter OK" URL is stable forever.
+     * least one failed axis has expired: the EXPIRED failures reset to untried, and so does any
+     * IN-FLIGHT reservation (Sol P1 blocker 1: it belonged to the dying generation — its
+     * settlement will be discarded by lock #5, so leaving it in place would freeze the axis
+     * forever, nobody able to reserve again). A fresh failure on the other axis keeps blocking
+     * until its own expiry (it rides the new generation as-is, still denied by [tryReserve] and
+     * still fresh for [isFailedFresh]). Succeeded axes are never touched — a G2 "probe KO,
+     * painter OK" URL is stable forever.
      */
     fun consultGeneration(url: String, nowMillis: Long): Int = synchronized(lock) {
         val entry = entries[url] ?: return 0
@@ -121,10 +127,13 @@ internal class MediaAttemptLedger(
             state is AxisState.Failed && nowMillis - state.atMillis >= failureTtlMillis
         }
         if (!expired(entry.probe) && !expired(entry.painter)) return entry.generation
+        val released = { state: AxisState ->
+            if (expired(state) || state is AxisState.InFlight) AxisState.Untried else state
+        }
         val advanced = entry.copy(
             generation = entry.generation + 1,
-            probe = if (expired(entry.probe)) AxisState.Untried else entry.probe,
-            painter = if (expired(entry.painter)) AxisState.Untried else entry.painter,
+            probe = released(entry.probe),
+            painter = released(entry.painter),
         )
         entries[url] = advanced
         advanced.generation

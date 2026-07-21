@@ -20,6 +20,7 @@ import coil3.test.FakeImageLoaderEngine
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
+import fr.forumhfr.redface2.core.model.SmileyKind
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.Assert.assertEquals
@@ -56,6 +57,7 @@ class PostRendererMediaLedgerTest {
 
     private val deadUrl = "https://images.example.org/dead-photo.jpg"
     private val healthyUrl = "https://images.example.org/healthy-photo.jpg"
+    private val deadSmileyUrl = "https://forum-images.hardware.fr/images/perso/dead.gif"
 
     private val appContext: Context = ApplicationProvider.getApplicationContext()
 
@@ -73,12 +75,14 @@ class PostRendererMediaLedgerTest {
         val engine = FakeImageLoaderEngine.Builder()
             .intercept(deadUrl, ColorImage(0xFF1565C0.toInt(), width = 320, height = 240))
             .intercept(healthyUrl, ColorImage(0xFF2E7D32.toInt(), width = 320, height = 240))
+            .intercept(deadSmileyUrl, ColorImage(0xFFF9A825.toInt(), width = 70, height = 50))
             .build()
+        val deadWhileToggled = setOf(deadUrl, deadSmileyUrl)
         val gate = object : Interceptor {
             override suspend fun intercept(chain: Interceptor.Chain): ImageResult {
                 val url = chain.request.data as? String
                 url?.let(requestedUrls::add)
-                if (url == deadUrl && !serveDead) {
+                if (url in deadWhileToggled && !serveDead) {
                     // The production failure mode: the host is down until the toggle flips.
                     return ErrorResult(
                         image = null,
@@ -171,6 +175,38 @@ class PostRendererMediaLedgerTest {
         composeTestRule.waitForIdle()
         composeTestRule.runOnIdle {}
         assertEquals("a fresh failure must gate every new occurrence", before, requestCount(deadUrl))
+    }
+
+    @Test
+    fun `two occurrences of the same dead smiley attempt the painter once`() {
+        // Sol P1 blocker 2: the smiley pipeline obeys V2 too — N on-screen occurrences of the
+        // same sprite share ONE painter attempt per generation (plus the perso measurement
+        // probe). The dead-token swap only kicks in AFTER the first settlement, so the
+        // concurrent first-composition window is exactly what the reservation must close.
+        installLoader()
+        val ledger = MediaAttemptLedger()
+        val smiley = PostInline.Smiley(kind = SmileyKind.Perso(name = "dead"), imageUrl = deadSmileyUrl)
+        setContent(ledger, DefaultIntrinsicMediaSizeCache()) {
+            listOf(
+                PostBlock.Paragraph(inlines = listOf(PostInline.Text("un "), smiley)),
+                PostBlock.Paragraph(inlines = listOf(PostInline.Text("deux "), smiley)),
+            )
+        }
+        // The PROBE failure lands and flips both occurrences onto the dead-token path (#416) —
+        // which may dispose the granted painter attempt before it settles (clean rollback), so
+        // only the probe axis is guaranteed to settle. The V2 invariant is the REQUEST count:
+        // one probe + AT MOST one painter (the pre-gate pipeline fired one painter per
+        // occurrence: 3 requests).
+        composeTestRule.waitUntil(timeoutMillis = 5_000) {
+            ledger.isFailedFresh(deadSmileyUrl, MediaAttemptKind.PROBE, System.currentTimeMillis())
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.runOnIdle {}
+        val requests = requestCount(deadSmileyUrl)
+        assertTrue(
+            "two smiley occurrences must never fire more than one probe + one painter (was $requests)",
+            requests <= 2,
+        )
     }
 
     @Test

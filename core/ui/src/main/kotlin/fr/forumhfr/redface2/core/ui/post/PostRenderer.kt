@@ -2136,38 +2136,54 @@ internal fun smileyInlineContent(
             )
             return@InlineTextContent
         }
-        SubcomposeAsyncImage(
-            model = smiley.imageUrl,
-            contentDescription = description,
-            contentScale = PostMediaDisplayPolicy.smileyContentScale,
-            modifier = Modifier.fillMaxSize(),
-            success = { SubcomposeAsyncImageContent() },
-            error = {
-                // #416 — first failure of a sprite that was NOT known dead when this content was
-                // built (builtins are never measured ; a perso can die between measure and render).
-                // Record the failure (#960: PAINTER axis of the ledger — a render-time writer is
-                // always current, no reservation) so the paragraph recomposes onto the dead-token
-                // path above (readable, body-sized) ; the tiny ellipsised token below is only the
-                // transient frame between this error and that recomposition.
-                val ledger = LocalMediaAttemptLedger.current
-                val url = smiley.imageUrl
-                if (url != null) {
-                    LaunchedEffect(url) {
-                        val now = System.currentTimeMillis()
-                        if (!ledger.isFailedFresh(url, MediaAttemptKind.PAINTER, now)) {
-                            ledger.settleFailure(url, ledger.generationOf(url), MediaAttemptKind.PAINTER, now)
-                        }
-                    }
-                }
-                Text(
-                    text = description,
-                    fontSize = 10.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            },
-        )
+        val url = smiley.imageUrl
+        if (url == null) {
+            // No sprite URL: same visual as the historical model-null error slot, without the
+            // pointless painter machinery.
+            TransientSmileyToken(description)
+            return@InlineTextContent
+        }
+        // #960 (§6, Sol P1 blocker 2) — the smiley painter obeys V2 like every media: ONE painter
+        // attempt per (url, generation), the concurrent occurrences of a sprite hold an empty
+        // box for the frame(s) until the winner settles. A granted failure settles through
+        // onState and the paragraph recomposes onto the dead-token path above (#416 — readable,
+        // body-sized); the tiny ellipsised token below only covers the transient frames.
+        val attempt = rememberPainterAttempt(url)
+        when {
+            attempt.failedFresh -> TransientSmileyToken(description)
+
+            attempt.renderPainter -> SubcomposeAsyncImage(
+                model = url,
+                contentDescription = description,
+                contentScale = PostMediaDisplayPolicy.smileyContentScale,
+                modifier = Modifier.fillMaxSize(),
+                success = { state ->
+                    SideEffect { attempt.onState(state) }
+                    SubcomposeAsyncImageContent()
+                },
+                error = { state ->
+                    SideEffect { attempt.onState(state) }
+                    TransientSmileyToken(description)
+                },
+            )
+
+            else -> Unit // grant pending / another occurrence's attempt in flight
+        }
     }
+}
+
+/**
+ * #416 — tiny ellipsised stand-in for a sprite whose failure is not yet reflected by the
+ * paragraph's dead-token path (the readable body-sized swap happens on the next recomposition).
+ */
+@Composable
+private fun TransientSmileyToken(description: String) {
+    Text(
+        text = description,
+        fontSize = 10.sp,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 /** #416 — body-sized token for a dead sprite (bodyMedium is 14 sp ; keep in sync with the box). */

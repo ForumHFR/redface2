@@ -145,6 +145,56 @@ class MediaAttemptLedgerTest {
         assertFalse("the succeeded painter is terminal", l.tryReserve(url, advanced, MediaAttemptKind.PAINTER))
     }
 
+    // ---------- blockers Sol P1 : InFlight périmé libéré par C1, monotonie des règlements ----------
+
+    @Test
+    fun `advancing the generation releases the OTHER axis's stale in-flight reservation`() {
+        // Sol P1 blocker 1: probe failed+expired while a slow painter is still in flight —
+        // consulting advances the generation; the stale painter reservation must NOT survive it
+        // (its settlement is discarded by V5, so nobody would ever free the axis again).
+        val l = ledger()
+        val gen = l.generationOf(url)
+        l.tryReserve(url, gen, MediaAttemptKind.PROBE)
+        l.settleFailure(url, gen, MediaAttemptKind.PROBE, nowMillis = 0L)
+        l.tryReserve(url, gen, MediaAttemptKind.PAINTER) // slow attempt, still in flight
+
+        val advanced = l.consultGeneration(url, nowMillis = 61_000L)
+        assertEquals(gen + 1, advanced)
+        assertTrue("the expired probe reopens", l.tryReserve(url, advanced, MediaAttemptKind.PROBE))
+        assertTrue(
+            "the stale in-flight painter must reopen too — a stale reservation can never be settled",
+            l.tryReserve(url, advanced, MediaAttemptKind.PAINTER),
+        )
+    }
+
+    @Test
+    fun `advancing the generation releases a stale in-flight probe as well`() {
+        val l = ledger()
+        val gen = l.generationOf(url)
+        l.tryReserve(url, gen, MediaAttemptKind.PAINTER)
+        l.settleFailure(url, gen, MediaAttemptKind.PAINTER, nowMillis = 0L)
+        l.tryReserve(url, gen, MediaAttemptKind.PROBE) // slow probe, still in flight
+
+        val advanced = l.consultGeneration(url, nowMillis = 61_000L)
+        assertEquals(gen + 1, advanced)
+        assertTrue(l.tryReserve(url, advanced, MediaAttemptKind.PAINTER))
+        assertTrue(l.tryReserve(url, advanced, MediaAttemptKind.PROBE))
+    }
+
+    @Test
+    fun `a failure settlement never demotes a terminal success`() {
+        // Sol P1 blocker 2: settlements must be monotonic — with concurrent render-time writers
+        // (smiley occurrences) a late failure could otherwise destroy a terminal success (V4).
+        val l = ledger()
+        val gen = l.generationOf(url)
+        l.settleSuccess(url, gen, MediaAttemptKind.PAINTER)
+        l.settleFailure(url, gen, MediaAttemptKind.PAINTER, nowMillis = 1_000L)
+        assertTrue("the success is terminal", l.hasSucceeded(url, MediaAttemptKind.PAINTER))
+        assertFalse(l.isFailedFresh(url, MediaAttemptKind.PAINTER, nowMillis = 2_000L))
+        // And the axis stays terminal for reservations too.
+        assertFalse(l.tryReserve(url, gen, MediaAttemptKind.PAINTER))
+    }
+
     // ---------- lectures d'état pour le gate painter (P1b) ----------
 
     @Test
