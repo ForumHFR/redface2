@@ -1852,19 +1852,21 @@ internal fun imageDisplayBox(
     }
     // §3 — the physical-pixel equation (single scale, height derived from the rounded width),
     // then the px→sp boundary conversion; §4 padding rides the PLACEHOLDER width only.
-    // The conversion is the explicit LINEAR px/(density × fontScale) — deterministic and exact
-    // under test; the text stack multiplies sp back by density × fontScale at layout, so the
-    // on-screen box is the computed physical size. (Int.toSp() does NOT fold fontScale in, and
-    // the Dp.toSp() route is non-linear on API 34+ — both would drift the physical invariant.)
+    // Gate Sol r1 (blocker #3): the conversion is the REAL Compose inverse — px → dp (÷density,
+    // linear) then [Density]'s own Dp.toSp(), which on API 34+ goes through the platform's
+    // NON-LINEAR font-scaling table. The text stack applies the same table forward at layout,
+    // so the round-trip lands back on the computed physical pixels exactly. (A hand-rolled
+    // linear px/(density×fontScale) drifted at fontScale > 1 on API 34+ — refused.)
     val px = imageDisplaySizePx(size, maxImageWidthPx, maxImageHeightPx)
-    val spPerPx = 1f / (density.density * density.fontScale)
-    return InlineMediaBox(
-        placeholderWidth = (px.width * spPerPx + horizontalPaddingSp).sp,
-        placeholderHeight = (px.height * spPerPx).sp,
-        // §7 — the decode size travels WITH the display box: same native pair, same displayed
-        // width, so the request key flips exactly when the decode target changes.
-        decodeSize = decodeSizePx(px.width, size),
-    )
+    return with(density) {
+        InlineMediaBox(
+            placeholderWidth = (px.width.toDp().toSp().value + horizontalPaddingSp).sp,
+            placeholderHeight = px.height.toDp().toSp(),
+            // §7 — the decode size travels WITH the display box: same native pair, same displayed
+            // width, so the request key flips exactly when the decode target changes.
+            decodeSize = decodeSizePx(px.width, size),
+        )
+    }
 }
 
 

@@ -57,6 +57,7 @@ class PostRendererImageLongPressTest {
 
     private val inlineUrl = "https://rehost.diberie.com/Picture/Get/f/inline.png"
     private val blockUrl = "https://rehost.diberie.com/Picture/Get/f/block.png"
+    private val smallUrl = "https://rehost.diberie.com/Picture/Get/f/small.png"
     private val ccUrl = "https://example.org/emojis-micro/1f600.png?hfr-cc-image=true"
     private val fullLinkUrl = "https://example.org/full"
 
@@ -71,6 +72,7 @@ class PostRendererImageLongPressTest {
         val engine = FakeImageLoaderEngine.Builder()
             .intercept(inlineUrl, ColorImage(0xFF2E7D32.toInt(), width = 400, height = 300))
             .intercept(blockUrl, ColorImage(0xFF1565C0.toInt(), width = 400, height = 300))
+            .intercept(smallUrl, ColorImage(0xFF8E24AA.toInt(), width = 80, height = 60))
             .intercept(ccUrl, ColorImage(0xFFF9A825.toInt(), width = 16, height = 16))
             .build()
         SingletonImageLoader.setUnsafe(ImageLoader.Builder(context).components { add(engine) }.build())
@@ -470,6 +472,33 @@ class PostRendererImageLongPressTest {
 
         node.performTouchInput { longClick(center) }
         assertEquals(inlineUrl, received?.url)
+    }
+
+    @Test
+    fun `a small linked image keeps the platform touch-target expansion - AMENDEMENT-Lot3-1`() {
+        // §5 amendé ([AMENDEMENT-Lot3-1], gate Sol Lot 3) : une image de contenu rendue SOUS le
+        // minimum touch target plateforme (48 dp — ici 80×60 px = 26,7×20 dp @d3) reçoit
+        // l'EXPANSION de cible tactile a11y d'Android : un tap dans la bande de padding, HORS
+        // du bitmap mais dans la cible étendue, déclenche quand même l'action. La « hitbox =
+        // bitmap » du Lot 2 s'entend AU-DELÀ de ce minimum (les tests de frontière stricte
+        // utilisent des fixtures ≥ 48 dp).
+        val uriHandler = RecordingUriHandler()
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(
+                    LocalPostImageActions provides PostImageActions(onLongPress = {}),
+                    LocalUriHandler provides uriHandler,
+                ) {
+                    PostRenderer(content = linkedInlineImageContent(smallUrl), selectable = false)
+                }
+            }
+        }
+
+        val stripPx = with(composeTestRule.density) { INLINE_IMAGE_HORIZONTAL_PADDING.toPx() }
+        composeTestRule.onNodeWithContentDescription("photo")
+            .performTouchInput { click(Offset(-stripPx / 2f, center.y)) }
+
+        assertEquals(fullLinkUrl, uriHandler.opened)
     }
 
     @Test

@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.ui.post
 
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.sp
 import fr.forumhfr.redface2.core.model.PostInline
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -61,18 +62,43 @@ class InlineImageDisplayBoxTest {
     }
 
     @Test
-    fun `fontScale keeps the physical size stable - the sp box shrinks accordingly`() {
-        // 100 px at density 1 / fontScale 2 → 50 sp placeholder; the text stack multiplies sp by
-        // fontScale at layout, so the on-screen box is back to 100 physical px. Bigger text does
-        // NOT blow bitmaps up.
+    fun `fontScale keeps the physical size stable - the density round-trip is exact`() {
+        // Gate Sol r1 (blocker #3) — THE invariant, robust to any font-scaling table: converting
+        // the sp placeholder forward exactly like the text stack does (sp → dp → px through the
+        // SAME density) lands back on the computed physical pixels. At fontScale 2 the Android
+        // factory density carries the REAL non-linear converter (1:1 in the large-value region —
+        // a linear ÷fontScale assumption is exactly what drifted).
+        val density = Density(1f, 2f)
         val b = box(
             measured = IntSize(100, 100),
             maxImageWidthPx = 400,
             maxImageHeightPx = 400,
-            density = Density(1f, 2f),
+            density = density,
         )
-        assertEquals(50f, b.placeholderWidth.value, TOLERANCE)
-        assertEquals(50f, b.placeholderHeight.value, TOLERANCE)
+        val roundTripPx = with(density) { b.placeholderHeight.toDp().toPx() }
+        assertEquals(100f, roundTripPx, TOLERANCE)
+    }
+
+    @Test
+    fun `the boundary conversion uses the density's REAL inverse font scaling - not a linear division`() {
+        // Gate Sol r1 (blocker #3): API 34+ densities convert Dp↔Sp through a NON-linear platform
+        // table. The box must go through the Density's OWN Dp.toSp() so the text stack's forward
+        // conversion lands back on the computed physical pixels. A density with a pseudo-table
+        // (÷2.5 instead of the linear ÷2) exposes any hand-rolled linear division.
+        val nonLinear = object : Density {
+            override val density: Float = 1f
+            override val fontScale: Float = 2f
+            override fun androidx.compose.ui.unit.Dp.toSp(): androidx.compose.ui.unit.TextUnit =
+                (value / 2.5f).sp
+        }
+        val b = box(
+            measured = IntSize(100, 100),
+            maxImageWidthPx = 400,
+            maxImageHeightPx = 400,
+            density = nonLinear,
+        )
+        assertEquals(40f, b.placeholderWidth.value, TOLERANCE)
+        assertEquals(40f, b.placeholderHeight.value, TOLERANCE)
     }
 
     @Test

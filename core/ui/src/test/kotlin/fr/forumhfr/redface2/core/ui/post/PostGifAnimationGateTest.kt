@@ -56,13 +56,19 @@ class PostGifAnimationGateTest {
     private class FakeAnimatedDrawable : Drawable(), Animatable {
         var running = false
             private set
+        var starts = 0
+            private set
+        var stops = 0
+            private set
 
         override fun start() {
             running = true
+            starts++
         }
 
         override fun stop() {
             running = false
+            stops++
         }
 
         override fun isRunning(): Boolean = running
@@ -155,6 +161,47 @@ class PostGifAnimationGateTest {
         setGifPost(topSpacerDp = 2000)
         composeTestRule.waitForIdle()
         assertFalse("an off-window gif must not animate", drawable.running)
+    }
+
+    @Test
+    fun `a VISIBLE animating gif stops when pushed out of the window`() {
+        // Mini-gate P4 (Sol r1): the off-window test must prove the TRANSITION — animated while
+        // visible, then an EFFECTIVE stop() once the bounds leave the window (not just "already
+        // stopped off-screen").
+        val drawable = FakeAnimatedDrawable()
+        installLoader(drawable)
+        val cache = measuredCache()
+        val pushed = androidx.compose.runtime.mutableStateOf(false)
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides cache) {
+                    Column {
+                        if (pushed.value) Spacer(Modifier.height(2000.dp))
+                        PostRenderer(
+                            content = PostContent(
+                                blocks = listOf(
+                                    PostBlock.Paragraph(
+                                        inlines = listOf(
+                                            PostInline.InlineImage(url = gifUrl, description = "anim"),
+                                            PostInline.Text(" gif"),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+        composeTestRule.waitForIdle()
+        assertTrue("the gif must animate while visible", drawable.running)
+        val startsWhileVisible = drawable.starts
+        assertTrue("at least one start while visible", startsWhileVisible >= 1)
+
+        composeTestRule.runOnUiThread { pushed.value = true }
+        composeTestRule.waitForIdle()
+        assertFalse("the gif must STOP once pushed out of the window", drawable.running)
+        assertTrue("an effective stop() must have fired on exit", drawable.stops >= 1)
     }
 
     @Test

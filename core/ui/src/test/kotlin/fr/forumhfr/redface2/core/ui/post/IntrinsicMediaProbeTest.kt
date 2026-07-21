@@ -113,6 +113,28 @@ class IntrinsicMediaProbeTest {
     }
 
     @Test
+    fun `a REAL gif probes successfully - the exif read must never fail the whole probe`() = runTest {
+        // Gate Sol r1 (blocker #1): ExifInterface does not support GIF — an unguarded call made
+        // the probe fail, so a real GIF never got a measured box (nor an animation). The classic
+        // minimal transparent 1×1 GIF89a exercises the real decoder path end to end.
+        val gifBytes = byteArrayOf(
+            0x47, 0x49, 0x46, 0x38, 0x39, 0x61, // "GIF89a"
+            0x01, 0x00, 0x01, 0x00, 0x80.toByte(), 0x00, 0x00, // 1×1, 2-colour palette
+            0x00, 0x00, 0x00, 0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(), // palette
+            0x21, 0xF9.toByte(), 0x04, 0x01, 0x00, 0x00, 0x00, 0x00, // GCE
+            0x2C, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, // image descriptor
+            0x02, 0x02, 0x44, 0x01, 0x00, // image data
+            0x3B, // trailer
+        )
+        val file = File.createTempFile("probe", ".gif").apply {
+            writeBytes(gifBytes)
+            deleteOnExit()
+        }
+        val size = measureIntrinsicMediaSize(file.absolutePath, context, loader())
+        assertEquals(IntSize(1, 1), size)
+    }
+
+    @Test
     fun `an unreadable source reports null - same failure contract as before`() = runTest {
         val file = File.createTempFile("probe", ".png").apply {
             writeText("not an image")

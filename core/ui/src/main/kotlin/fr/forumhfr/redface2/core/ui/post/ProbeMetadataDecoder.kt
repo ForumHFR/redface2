@@ -41,20 +41,25 @@ internal class ProbeMetadataDecoder(private val source: ImageSource) : Decoder {
         check(bounds.outWidth > 0 && bounds.outHeight > 0) {
             "not a decodable image (bounds ${bounds.outWidth}x${bounds.outHeight})"
         }
-        val swapped = source.source().peek().inputStream().use { input ->
-            when (ExifInterface(input).getAttributeInt(
-                ExifInterface.TAG_ORIENTATION,
-                ExifInterface.ORIENTATION_NORMAL,
-            )) {
-                ExifInterface.ORIENTATION_ROTATE_90,
-                ExifInterface.ORIENTATION_ROTATE_270,
-                ExifInterface.ORIENTATION_TRANSPOSE,
-                ExifInterface.ORIENTATION_TRANSVERSE,
-                -> true
+        // Gate Sol r1 (blocker #1): ExifInterface does NOT support every format BitmapFactory
+        // decodes (a GIF makes its constructor throw) — an unguarded call failed the WHOLE probe
+        // and a real GIF never got a box nor an animation. No EXIF metadata = normal orientation.
+        val swapped = runCatching {
+            source.source().peek().inputStream().use { input ->
+                when (ExifInterface(input).getAttributeInt(
+                    ExifInterface.TAG_ORIENTATION,
+                    ExifInterface.ORIENTATION_NORMAL,
+                )) {
+                    ExifInterface.ORIENTATION_ROTATE_90,
+                    ExifInterface.ORIENTATION_ROTATE_270,
+                    ExifInterface.ORIENTATION_TRANSPOSE,
+                    ExifInterface.ORIENTATION_TRANSVERSE,
+                    -> true
 
-                else -> false
+                    else -> false
+                }
             }
-        }
+        }.getOrDefault(false)
         val width = if (swapped) bounds.outHeight else bounds.outWidth
         val height = if (swapped) bounds.outWidth else bounds.outHeight
         return DecodeResult(image = ProbeMetadataImage(width, height), isSampled = false)
