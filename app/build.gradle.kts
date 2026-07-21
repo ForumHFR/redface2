@@ -234,9 +234,13 @@ dependencies {
     // coil-network-okhttp for the `AsyncImage` call sites.
     implementation(libs.coil.core)
     implementation(libs.coil.gif)
+    // #960 P4 — SVG [img] payloads: decoder registered in the same singleton config.
+    implementation(libs.coil.svg)
     implementation(libs.coil.network.okhttp)
 
     testImplementation(libs.junit4)
+    testImplementation(libs.coil.core)
+    testImplementation(libs.coil.svg)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.mockk)
     testImplementation(libs.konsist)
