@@ -3,34 +3,32 @@ package fr.forumhfr.redface2.core.ui.post
 import androidx.compose.ui.unit.IntSize
 import coil3.ImageLoader
 import coil3.PlatformContext
+import coil3.request.CachePolicy
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
-import coil3.size.Precision
-import coil3.size.Scale
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 
 /**
- * #175/#257 — probe a media's dimensions via a **bounded** Coil decode (aspect ratio + size class).
+ * #175/#257/#959 — probe a media's NATIVE ORIENTED dimensions via a **header-only** decode
+ * ([ProbeMetadataDecoder], attached per request — cadrage Sol Lot 3, Q1 option b).
  *
- * Requests a [INTRINSIC_PROBE_SIZE_PX]-bounded `FIT` decode (NOT `Size.ORIGINAL`), then reads
- * `coil3.Image.width/height`. `Size.ORIGINAL` fully decoded a large photo at source resolution **just
- * to read its dimensions** — slow and memory-heavy on every measurable image, on top of the render
- * decode (#257). A 1024-bounded decode is far cheaper and still answers everything the callers need:
- *  - **aspect ratio** — preserved by Coil's uniform downsample, used by `imageDisplayBox`;
- *  - **size class** ("larger than the inline caps?") — all inline caps (≤ 240×200 sp) are well below
- *    1024, so a source exceeding them still reports a width/height past the cap after probing.
- * A source ≤ 1024 px (every smiley, most inline images) decodes at native size, unchanged from before.
- * `execute()` is main-safe (Coil dispatches its own I/O); the caller invokes it from a `LaunchedEffect`
- * and caches the result by URL. Returns `null` on error / non-positive dimensions.
+ * The pre-#959 probe requested a 1024-bounded FIT decode and read `image.width/height` from the
+ * decoded bitmap — which CLIPPED the reported dimensions of any source past the bound (measured:
+ * 4000×3000 → 1024×768, EXIF 900×1200 → 768×1024), violating §3 "the probe must never clip the
+ * reported native dimensions". The header-only decoder reads the bounds (and EXIF orientation)
+ * without ever allocating the bitmap — cheaper than the old bounded decode AND exact at any size.
  *
- * NB (#175 conversion): the returned px are CSS/logical-pixel equivalents — fed to the placeholder as
- * `.sp` directly (`70px → 70.sp`), NOT divided by screen density.
+ * The memory cache is disabled BOTH ways on this request: the metadata pseudo-image must never be
+ * served to a render request (and a cached render bitmap must not short-circuit the probe with
+ * its possibly-resized dimensions — the §3 "first valid pair" authority stays with the probe).
+ * The disk cache stays active: the downloaded bytes serve the subsequent render decode.
+ * `execute()` is main-safe (Coil dispatches its own I/O); the caller invokes it from a
+ * `LaunchedEffect` and caches the result by URL. Returns `null` on error / non-positive
+ * dimensions. The returned pair is in SOURCE PIXELS — the §3 equation consumes it as physical px.
  */
-internal const val INTRINSIC_PROBE_SIZE_PX = 1024
-
 internal suspend fun measureIntrinsicMediaSize(
     url: String,
     context: PlatformContext,
@@ -39,13 +37,8 @@ internal suspend fun measureIntrinsicMediaSize(
     val result = imageLoader.execute(
         ImageRequest.Builder(context)
             .data(url)
-            .size(INTRINSIC_PROBE_SIZE_PX)
-            .scale(Scale.FIT)
-            // INEXACT is REQUIRED here (Codex review): Coil's default EXACT precision would UPSCALE a
-            // source smaller than the probe (a 16×16 emoji, a 70×50 smiley) up to 1024 before reporting
-            // image.width/height — measuring small media as huge and breaking imageDisplayBox and
-            // block sizing. INEXACT lets Coil report the native size for sources ≤ probe.
-            .precision(Precision.INEXACT)
+            .decoderFactory(ProbeMetadataDecoder.Factory)
+            .memoryCachePolicy(CachePolicy.DISABLED)
             .build(),
     )
     val image = (result as? SuccessResult)?.image ?: return null

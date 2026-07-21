@@ -268,9 +268,8 @@ internal const val INLINE_IMAGE_MAX_HEIGHT_SP = 200
  * realistic phone density/fontScale, stays cheap to decode and cache, and Coil never decodes past the
  * source, so a small image still decodes at native.
  *
- * Distinct from `INTRINSIC_PROBE_SIZE_PX` (also 1024): that one bounds the **measure** probe in
- * `IntrinsicMediaSizeMeasurer`, this one bounds the **render** decode here. Same value, different role —
- * don't merge them.
+ * Render-decode bound only (#959: the measure probe is header-only now, unbounded and exact —
+ * see `ProbeMetadataDecoder`); this constant disappears with the §7 decode calculator (P3).
  */
 internal const val INLINE_IMAGE_DECODE_CAP_PX = 1024
 
