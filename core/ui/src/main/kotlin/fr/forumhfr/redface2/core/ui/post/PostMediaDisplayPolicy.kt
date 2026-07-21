@@ -134,6 +134,11 @@ internal object PostMediaDisplayPolicy {
 internal data class InlineMediaBox(
     val placeholderWidth: TextUnit,
     val placeholderHeight: TextUnit,
+    // #959 (§7) — the decode size computed NEXT to the §3 display size (measured content images
+    // only; null for slots, smileys and cc). Carried here so the InlineTextContent consumes it
+    // without re-deriving native dimensions, and so the request key changes exactly when the
+    // decode target does (cold→measured = one new decode).
+    val decodeSize: IntSize? = null,
 )
 
 /**
@@ -224,6 +229,37 @@ internal const val IMAGE_RELATIVE_MAX_WIDTH_FRACTION = 0.95f
  * derivation, so a degenerate rounded-to-zero width yields a 1×1 slot — never a layout bomb.
  * Smileys keep [intrinsicSmileyDisplaySize] strictly unchanged (§9: 240/70/0.9 untouchable).
  */
+/**
+ * #959 (Lot 3, contrat v1.5 §7) — the density-aware DECODE size, common to the inline and block
+ * paths (replaces the flat 1024 bound). Exact order (cadrage Sol): start from the §3 displayed
+ * width in physical px (the host ceils — Int in); extend the width to the next INCLUSIVE 256
+ * bucket; if the bucketed width or its derived height exceeds [DECODE_MAX_PX] or the native
+ * pair, shrink by ONE common factor until both fit (ratio preserved); the width's final rounding
+ * is cap-safe (floor), and the height derives from the FINAL width by the native ratio (clamped
+ * to the caps if its own rounding would overshoot by one — this is a decode size, the caps win).
+ * Both axes floor to 1 px.
+ */
+internal fun decodeSizePx(displayedWidthPx: Int, nativePx: IntSize): IntSize {
+    require(nativePx.width > 0 && nativePx.height > 0) { "nativePx must be positive" }
+    val bucketed = ((displayedWidthPx.coerceAtLeast(1) + DECODE_BUCKET_PX - 1) / DECODE_BUCKET_PX) *
+        DECODE_BUCKET_PX
+    val maxWidth = minOf(DECODE_MAX_PX, nativePx.width)
+    val maxHeight = minOf(DECODE_MAX_PX, nativePx.height)
+    val derivedHeight = bucketed.toFloat() * nativePx.height / nativePx.width
+    val factor = minOf(1f, maxWidth.toFloat() / bucketed, maxHeight / derivedHeight)
+    val width = kotlin.math.floor(bucketed * factor).toInt().coerceAtLeast(1)
+    val height = (width.toFloat() * nativePx.height / nativePx.width).roundToInt()
+        .coerceAtMost(maxHeight)
+        .coerceAtLeast(1)
+    return IntSize(width, height)
+}
+
+/** §7 — decode bucket granularity (px). */
+internal const val DECODE_BUCKET_PX = 256
+
+/** §7 — hard decode bound per axis (px): a 2048² ARGB bitmap is the 16 MiB budget ceiling (E5). */
+internal const val DECODE_MAX_PX = 2048
+
 internal fun imageDisplaySizePx(nativePx: IntSize, maxWidthPx: Int, maxHeightPx: Int): IntSize {
     require(nativePx.width > 0 && nativePx.height > 0) { "nativePx must be positive" }
     val scale = minOf(
@@ -258,20 +294,6 @@ internal val persoColdFallbackSize = PixelSize(70, 50)
  * 16×16, reactions) never reach the cap anyway (no upscale).
  */
 internal const val INLINE_IMAGE_MAX_HEIGHT_SP = 200
-
-/**
- * #257/#610 — fixed decode size (px) for an inline `[img]`: the render request decodes at this bound
- * (INEXACT Fit) so Coil produces ONE stable bitmap that survives the cold→measured box growth without
- * a re-decode + pixelated upscale. Before #610 the request size derived from the absolute 240×200 sp
- * display cap converted to px (density × fontScale) and clamped here; that width cap is now relative
- * to the container, so the request uses this flat bound directly — it covers `0.9 × container` at any
- * realistic phone density/fontScale, stays cheap to decode and cache, and Coil never decodes past the
- * source, so a small image still decodes at native.
- *
- * Render-decode bound only (#959: the measure probe is header-only now, unbounded and exact —
- * see `ProbeMetadataDecoder`); this constant disappears with the §7 decode calculator (P3).
- */
-internal const val INLINE_IMAGE_DECODE_CAP_PX = 1024
 
 /**
  * #224/#253 — minimum display **height** (sp) for an inline `[img]`, so a sub-16 low-res source can't

@@ -989,6 +989,9 @@ private fun ImageBlock(block: PostBlock.Image) = BlockImage(url = block.url, des
  * silent empty Box. Animations honour the system reduce-motion preference
  * ([rememberAnimationsEnabled]).
  */
+// CyclomaticComplexMethod: the §3/§6/§7 sizing states × the §5 interaction gates are all
+// contractual branches of ONE render seam — splitting them would scatter the contract.
+@Suppress("CyclomaticComplexMethod")
 @Composable
 private fun BlockImage(url: String, description: String?, linkUrl: String? = null) {
     val uriHandler = LocalUriHandler.current
@@ -1037,13 +1040,15 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
         // scale, height derived from the rounded width, no physical upscale), caps converted to px
         // here and the result converted back to dp at this Compose boundary; anti-CLS: it is also
         // the reserved loading slot. Cold falls back to the deterministic §6 slot below.
-        val sizeModifier = if (measured != null) {
+        val displayPx = measured?.let {
             with(blockDensity) {
                 val maxWidthPx = (maxWidth.toPx() * IMAGE_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
                 val maxHeightPx = capBlocDp.dp.roundToPx()
-                val px = imageDisplaySizePx(measured, maxWidthPx, maxHeightPx)
-                Modifier.size(px.width.toDp(), px.height.toDp())
+                imageDisplaySizePx(it, maxWidthPx, maxHeightPx)
             }
+        }
+        val sizeModifier = if (displayPx != null) {
+            with(blockDensity) { Modifier.size(displayPx.width.toDp(), displayPx.height.toDp()) }
         } else {
             // §6 COLD slot (v1.4, [AMENDEMENT-Lot0-3]) : deterministic box before any dimension is
             // known — width fImage × available, height min(capBloc, max(160 dp, 0,75 × width)).
@@ -1106,12 +1111,23 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             .then(interactionModifier)
-        val request = remember(url, animationsEnabled, platformContext) {
+        // #959 (§7) — measured: decode at the explicit calculator size, KEYED into the remember so
+        // cold→measured recreates request + painter (exactly one new decode). Cold: constraint-
+        // driven as before (the §6 slot is fixed until the measurement lands).
+        val decodeSize = measured?.let { decodeSizePx(displayPx!!.width, it) }
+        val request = remember(url, animationsEnabled, platformContext, decodeSize) {
             ImageRequest.Builder(platformContext)
                 .data(url)
                 // #249 — fondu natif Coil dans la box déjà dimensionnée → zéro saut. Désactivé quand le
                 // système demande de réduire les animations (apparition directe, §4 de l'issue).
                 .crossfade(animationsEnabled)
+                .apply {
+                    if (decodeSize != null) {
+                        size(decodeSize.width, decodeSize.height)
+                        scale(Scale.FIT)
+                        precision(Precision.INEXACT)
+                    }
+                }
                 .build()
         }
         // #813 — key() on the refresh generation recreates the painter node on an explicit user
@@ -1835,6 +1851,9 @@ internal fun imageDisplayBox(
     return InlineMediaBox(
         placeholderWidth = (px.width * spPerPx + horizontalPaddingSp).sp,
         placeholderHeight = (px.height * spPerPx).sp,
+        // §7 — the decode size travels WITH the display box: same native pair, same displayed
+        // width, so the request key flips exactly when the decode target changes.
+        decodeSize = decodeSizePx(px.width, size),
     )
 }
 
@@ -1877,22 +1896,24 @@ internal fun imageInlineContent(
         // tracks the sp-based placeholder under any fontScale; the no-upscale rule lives in the BOX
         // sizing (imageDisplayBox), not the content scale.
         //
-        // #257/#610 — decode at a STABLE size (the flat INLINE_IMAGE_DECODE_CAP_PX bound) instead of
-        // letting Coil resolve the size from the placeholder constraints. The box grows from the
-        // cold-fallback square to the measured size when the measurement lands; with constraint-driven
-        // sizing Coil re-decodes at the new size and, meanwhile, paints the previous tiny bitmap
-        // upscaled → pixelated. A fixed decode size keeps ONE sharp bitmap that Fit scales into
-        // whatever box (Coil never upscales the decode past the source, so a small image still decodes
-        // at native). Before #610 the size derived from the absolute 240×200 sp display cap in px;
-        // that width cap is now relative to the container, so the request uses the flat px bound
-        // directly (still covers 0.9 × container at any realistic phone density/fontScale). The
-        // request is remembered so a measurement landing doesn't rebuild it. Smileys keep their own
-        // (much smaller) path — this cap is photo-sized.
+        // #257/#610/#959 — decode at the EXPLICIT §7 size instead of letting Coil resolve it from
+        // the placeholder constraints (constraint-driven sizing re-decoded on every box change and
+        // painted the previous tiny bitmap upscaled → pixelated). Smileys keep their own (much
+        // smaller) path.
         val context = LocalPlatformContext.current
-        val request = remember(image.url, context) {
+        // #959 (§7) — the decode size is the calculator's output carried by the box (bucketed
+        // width, common-factor caps, height derived from the final width). It KEYS the remember:
+        // cold→measured flips the key and recreates request + painter = exactly one new decode
+        // (Sol r1 blocker #4 — no reliance on the refresh generation alone). The cold/cc slots
+        // (decodeSize == null) decode at one 256 bucket — the slot is a one-line square, and the
+        // measured request takes over as soon as the header-only probe lands.
+        val request = remember(image.url, context, box.decodeSize) {
             ImageRequest.Builder(context)
                 .data(image.url)
-                .size(INLINE_IMAGE_DECODE_CAP_PX, INLINE_IMAGE_DECODE_CAP_PX)
+                .size(
+                    box.decodeSize?.width ?: DECODE_BUCKET_PX,
+                    box.decodeSize?.height ?: DECODE_BUCKET_PX,
+                )
                 .scale(Scale.FIT)
                 .precision(Precision.INEXACT)
                 .build()
