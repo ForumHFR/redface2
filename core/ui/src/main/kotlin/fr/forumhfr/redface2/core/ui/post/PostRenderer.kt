@@ -24,6 +24,7 @@ import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Card
+import androidx.compose.material3.Icon
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -59,6 +60,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -1135,12 +1137,27 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
         // recreates the attempt (its remember keys the url's generation), hence the painter.
         val attempt = rememberPainterAttempt(url)
         when {
-            attempt.failedFresh ->
-                // A11Y-5 — the error state keeps the reserved box (anti-CLS) and swaps in the
-                // contractual wording (post_image_error[_with_alt]) on the same containing node.
-                Box(modifier = containerModifier, contentAlignment = Alignment.Center) {
+            attempt.failedFresh -> {
+                // §6 P3 — error state INSIDE the reserved box (anti-CLS, A11Y-5: contractual
+                // wording on the same containing node) + the UNIVERSAL per-URL manual retry
+                // (Role.Button « Réessayer » → new generation). Deliberately independent of the
+                // §5 host capability: the §5 matrix gates the interactions of a RENDERED image
+                // (link tap, long-press menu — none installed here); the slot's single action is
+                // the retry, mechanically effective in every host through the ambient ledger.
+                val retryLabel = stringResource(R.string.post_image_retry_action)
+                Box(
+                    modifier = sizeModifier
+                        .testTag(BLOCK_IMAGE_TEST_TAG)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                        .clickable(role = Role.Button, onClickLabel = retryLabel) {
+                            ledger.retryUrl(url)
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
                     ImageBlockError(description)
                 }
+            }
 
             attempt.renderPainter -> SubcomposeAsyncImage(
                 model = request,
@@ -2033,19 +2050,13 @@ internal fun imageInlineContent(
         val attempt = rememberPainterAttempt(image.url)
         val showPainter = !attempt.failedFresh && attempt.renderPainter
         // A11Y-2 (annexe a11y #876) — the HFR alt when present, otherwise the localized generic
-        // fallback; never null, never the raw URL. When the gate withholds the painter (fresh
-        // failure / attempt pending) the BOX carries the same description so the media never
-        // disappears from the semantics tree.
+        // fallback; never null, never the raw URL. When the gate withholds the painter the BOX
+        // carries a description so the media never disappears from the semantics tree.
         val alt = image.description?.takeIf(String::isNotBlank)
             ?: stringResource(R.string.post_inline_image_alt)
-        Box(
-            Modifier
-                .fillMaxSize()
-                .then(paddingModifier)
-                .then(if (showPainter) Modifier else Modifier.semantics { contentDescription = alt }),
-        ) {
-            if (showPainter) {
-                AsyncImage(
+        Box(Modifier.fillMaxSize().then(paddingModifier)) {
+            when {
+                showPainter -> AsyncImage(
                     model = request,
                     contentDescription = alt,
                     contentScale = PostMediaDisplayPolicy.inlineImageContentScale,
@@ -2058,10 +2069,48 @@ internal fun imageInlineContent(
                         .then(gifGate?.modifier ?: Modifier)
                         .then(interactionModifier),
                 )
+
+                // §6 P3 — inline error slot INSIDE the reserved placeholder (anti-CLS) + the
+                // universal per-URL manual retry, same stance as the block slot above.
+                attempt.failedFresh -> InlineImageErrorSlot(url = image.url, description = image.description)
+
+                // Attempt pending / another occurrence in flight: hold the placeholder.
+                else -> Box(Modifier.fillMaxSize().semantics { contentDescription = alt })
             }
         }
     }
 }
+
+/**
+ * #960 P3 (§6) — the INLINE error slot: broken-image glyph in the reserved placeholder, the
+ * localized error description (A11Y-5) and the universal Role.Button retry (« Réessayer » → new
+ * generation for THIS url only). Independent of the §5 host capability — see the block slot.
+ */
+@Composable
+private fun InlineImageErrorSlot(url: String, description: String?) {
+    val ledger = LocalMediaAttemptLedger.current
+    val errorText = description?.takeIf(String::isNotBlank)
+        ?.let { stringResource(R.string.post_image_error_with_alt, it) }
+        ?: stringResource(R.string.post_image_error)
+    val retryLabel = stringResource(R.string.post_image_retry_action)
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clickable(role = Role.Button, onClickLabel = retryLabel) { ledger.retryUrl(url) }
+            .semantics { contentDescription = errorText },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            painter = painterResource(R.drawable.ic_ms_broken_image),
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.fillMaxSize(INLINE_ERROR_GLYPH_FRACTION),
+        )
+    }
+}
+
+/** §6 P3 — the broken-image glyph fills most of the slot while keeping a breathing margin. */
+private const val INLINE_ERROR_GLYPH_FRACTION = 0.8f
 
 /**
  * #831 — long-press-ONLY gesture + a11y surface for a post image. Deliberately NOT a

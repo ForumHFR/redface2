@@ -121,7 +121,12 @@ class PostRendererGhostImageRecoveryTest {
             ledger.isFailedFresh(ghostUrl, MediaAttemptKind.PROBE, System.currentTimeMillis())
         }
         composeTestRule.waitForIdle()
-        val coldHeight = composeTestRule.onNodeWithContentDescription("photo").getBoundsInRoot().height
+        // #960 P3 — during the failure the node is the error slot (error description).
+        val errorWithAlt = appContext.getString(
+            fr.forumhfr.redface2.core.ui.R.string.post_image_error_with_alt,
+            "photo",
+        )
+        val coldHeight = composeTestRule.onNodeWithContentDescription(errorWithAlt).getBoundsInRoot().height
         assertTrue(
             "cold ghost box must stay around the one-line square (was $coldHeight)",
             coldHeight <= 24.dp,
