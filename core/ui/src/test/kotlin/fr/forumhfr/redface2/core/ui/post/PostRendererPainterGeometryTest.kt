@@ -152,6 +152,29 @@ class PostRendererPainterGeometryTest {
     }
 
     @Test
+    fun `an evicted G2 geometry self-heals through the pipeline`() {
+        // Sol P2 blocker (O1): with maxEntries=1, depositing another url evicts the G2 geometry
+        // while both axes are terminal. The snapshot eviction recomposes the paragraph (cold box,
+        // decode-size flip → recreated painter request), and the re-rendered painter's success
+        // must REDEPOSIT the immutable pair — the §6 locked slot survives eviction.
+        installLoader(painterImage = ColorImage(0xFF6A1B9A.toInt(), width = 320, height = 240))
+        val ledger = MediaAttemptLedger()
+        val cache = DefaultIntrinsicMediaSizeCache(maxEntries = 1)
+        setContent(ledger, cache)
+        composeTestRule.waitUntil(timeoutMillis = 5_000) { cache.get(g2Url) != null }
+        composeTestRule.waitForIdle()
+
+        composeTestRule.runOnIdle { cache.putSuccess("https://images.example.org/evictor.jpg", IntSize(1, 1)) }
+        composeTestRule.waitForIdle()
+
+        composeTestRule.waitUntil(timeoutMillis = 5_000) { cache.get(g2Url) != null }
+        assertEquals("the immutable pair must be redeposited", IntSize(320, 240), cache.get(g2Url))
+        composeTestRule.runOnIdle {}
+        val healedHeight = composeTestRule.onNodeWithContentDescription("photo").getBoundsInRoot().height
+        assertTrue("the box must recover its §3 size (was $healedHeight)", healedHeight > 60.dp)
+    }
+
+    @Test
     fun `a painter success without usable geometry keeps the cold box and the probe retryable`() {
         // ColorImage without explicit dimensions reports -1×-1 (unbounded) — a success carrying
         // no usable geometry (§6: « aucune dimension exploitable → boîte cold CONSERVÉE »).

@@ -61,19 +61,29 @@ internal class PainterAttempt(
         if (ledger.tryReserve(url, generation, MediaAttemptKind.PAINTER)) granted = true
     }
 
-    /** Settles the granted attempt on the painter's terminal states; loading/empty are ignored. */
+    /**
+     * Settles the granted attempt on the painter's terminal states; loading/empty are ignored.
+     * The GEOMETRY deposit (G2) runs on EVERY success — granted, settled or terminal — because
+     * the pair is immutable-true and the deposit is idempotent first-pair: this is what heals a
+     * FIFO-evicted cache entry when a terminal painter re-renders (Sol P2, O1 — the §6 locked
+     * slot survives eviction), and the §7 re-decode's callback can never apply a second
+     * correction through it.
+     */
     fun onState(state: AsyncImagePainter.State) {
-        if (!granted || settled) return
         when (state) {
             is AsyncImagePainter.State.Success -> {
-                settled = true
-                ledger.settleSuccess(url, generation, MediaAttemptKind.PAINTER)
                 settlePainterGeometry(state)
+                if (granted && !settled) {
+                    settled = true
+                    ledger.settleSuccess(url, generation, MediaAttemptKind.PAINTER)
+                }
             }
 
             is AsyncImagePainter.State.Error -> {
-                settled = true
-                ledger.settleFailure(url, generation, MediaAttemptKind.PAINTER, System.currentTimeMillis())
+                if (granted && !settled) {
+                    settled = true
+                    ledger.settleFailure(url, generation, MediaAttemptKind.PAINTER, System.currentTimeMillis())
+                }
             }
 
             else -> Unit

@@ -141,6 +141,22 @@ internal class MediaAttemptLedger(
     }
 
     /**
+     * #960 P2 (Sol, O1) — eviction repair: the measurement cache lost [url]'s geometry (FIFO
+     * eviction) while the PROBE axis is terminally succeeded, so nothing would ever re-measure
+     * it and the §6 locked slot would degrade to the cold box forever. Returns EXACTLY a
+     * succeeded probe axis to untried — same generation (this is a repair, not a user retry:
+     * no negative purge, the painter axis is never touched). Only the measurer calls this,
+     * only when it observes `cache.get(url) == null` against a succeeded probe.
+     */
+    fun reopenForLostGeometry(url: String) {
+        synchronized(lock) {
+            val entry = entries[url] ?: return
+            if (entry.probe != AxisState.Succeeded) return
+            entries[url] = entry.copy(probe = AxisState.Untried)
+        }
+    }
+
+    /**
      * Rolls back a reservation whose attempt was CANCELLED before settling (effect disposed,
      * screen left) — a cancelled try is not a try, the axis returns to untried so a later
      * occurrence may attempt again. Only the exact in-flight state of the SAME generation is

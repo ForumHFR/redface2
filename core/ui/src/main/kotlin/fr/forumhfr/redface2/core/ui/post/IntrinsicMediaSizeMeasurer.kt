@@ -117,10 +117,13 @@ private suspend fun probeUnderReservation(
     probe: suspend (String, PlatformContext, ImageLoader) -> IntSize?,
     nowMillis: Long,
 ) {
+    // Eviction repair (Sol P2, O1): the caller only reaches this point when the cache has no
+    // geometry for [url]; a terminally-succeeded probe axis then has no backing truth anymore
+    // (FIFO eviction) and must reopen, or the §6 locked slot would stay cold forever.
+    if (ledger.hasSucceeded(url, MediaAttemptKind.PROBE)) ledger.reopenForLostGeometry(url)
     // C1 — consulting may open a new generation when the recorded failure has expired; the
     // reservation is then taken against the CURRENT generation. A denied reservation means the
-    // axis already settled this generation (e.g. a terminal success whose cache entry was
-    // evicted) — nothing to do.
+    // axis settled while this caller raced through the guards — nothing to do.
     val generation = ledger.consultGeneration(url, nowMillis)
     if (!ledger.tryReserve(url, generation, MediaAttemptKind.PROBE)) return
     var settled = false

@@ -218,6 +218,35 @@ class MediaAttemptLedgerTest {
         assertTrue(l.isFailedFresh(url, MediaAttemptKind.PAINTER, nowMillis = 2_000L))
     }
 
+    // ---------- réparation d'éviction (Sol P2 : le slot §6 survit au FIFO du cache) ----------
+
+    @Test
+    fun `reopenForLostGeometry returns a terminal probe to untried - painter untouched`() {
+        val l = ledger()
+        val gen = l.generationOf(url)
+        l.tryReserve(url, gen, MediaAttemptKind.PROBE)
+        l.settleSuccess(url, gen, MediaAttemptKind.PROBE)
+        l.tryReserve(url, gen, MediaAttemptKind.PAINTER)
+        l.settleSuccess(url, gen, MediaAttemptKind.PAINTER)
+        // The measurement cache evicted the url's geometry (FIFO): the probe's terminal success
+        // no longer has a backing truth — the measurer may reopen exactly that axis.
+        l.reopenForLostGeometry(url)
+        assertTrue("the probe may re-measure", l.tryReserve(url, gen, MediaAttemptKind.PROBE))
+        assertFalse("the painter stays terminal", l.tryReserve(url, gen, MediaAttemptKind.PAINTER))
+        assertEquals("no generation bump — this is a repair, not a retry", gen, l.generationOf(url))
+    }
+
+    @Test
+    fun `reopenForLostGeometry never touches a non-succeeded probe`() {
+        val l = ledger()
+        val gen = l.generationOf(url)
+        l.tryReserve(url, gen, MediaAttemptKind.PROBE)
+        l.settleFailure(url, gen, MediaAttemptKind.PROBE, nowMillis = 0L)
+        l.reopenForLostGeometry(url)
+        assertFalse("a fresh failure keeps blocking", l.tryReserve(url, gen, MediaAttemptKind.PROBE))
+        assertTrue(l.isFailedFresh(url, MediaAttemptKind.PROBE, nowMillis = 1_000L))
+    }
+
     // ---------- rollback d'annulation (verrou #5 : personne ne reste suspendu) ----------
 
     @Test
