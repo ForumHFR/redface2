@@ -16,8 +16,9 @@ import org.robolectric.RuntimeEnvironment
  * « formats exotiques affichés »: the header-only probe cannot read SVG bounds by design, the
  * painter decodes and the G2 protocol takes the geometry from it). Coil 3 service-loads the
  * decoders of classpath artifacts, so this pins the ROSTER available to the app's loader —
- * removing the coil-gif/coil-svg dependency (or the explicit adds with service loading off)
- * trips it either way.
+ * removing the coil-gif/coil-svg DEPENDENCY trips it; the explicit adds in RedfaceApplication
+ * are documentation + belt for a disabled service loader and are NOT individually pinned here
+ * (with service loading active the roster stays green without them — Sol P4).
  */
 @RunWith(RobolectricTestRunner::class)
 class RedfaceApplicationImageLoaderTest {
