@@ -2,7 +2,9 @@ package fr.forumhfr.redface2.core.ui.post
 
 import androidx.compose.ui.unit.IntSize
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -22,6 +24,23 @@ class IntrinsicMediaSizeCacheTest {
     @Test
     fun `unmeasured url returns null`() {
         assertNull(DefaultIntrinsicMediaSizeCache().get("never"))
+    }
+
+    @Test
+    fun `putSuccessIfAbsent deposits on a miss and reports it`() {
+        val cache = DefaultIntrinsicMediaSizeCache()
+        assertTrue(cache.putSuccessIfAbsent("u", IntSize(320, 240)))
+        assertEquals(IntSize(320, 240), cache.get("u"))
+    }
+
+    @Test
+    fun `putSuccessIfAbsent never overwrites the first valid pair`() {
+        // §3/§6 (G2): the FIRST valid oriented pair fixes the box — no second correction when
+        // the other source (probe vs painter) later disagrees.
+        val cache = DefaultIntrinsicMediaSizeCache()
+        cache.putSuccess("u", IntSize(800, 600))
+        assertFalse(cache.putSuccessIfAbsent("u", IntSize(320, 240)))
+        assertEquals(IntSize(800, 600), cache.get("u"))
     }
 
     @Test

@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.ui.post
 
+import android.util.Log
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -8,7 +9,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.unit.IntSize
 import coil3.compose.AsyncImagePainter
+
+/** Log tag of the §3 geometry-disagreement diagnostics (first valid pair keeps the authority). */
+internal const val MEDIA_GEOMETRY_LOG_TAG = "PostMediaGeometry"
 
 /**
  * #960 (§6) — the PAINTER-axis gate of ONE on-screen occurrence of a media url. Reads the
@@ -31,6 +36,7 @@ import coil3.compose.AsyncImagePainter
 @Stable
 internal class PainterAttempt(
     private val ledger: MediaAttemptLedger,
+    private val cache: IntrinsicMediaSizeCache,
     private val url: String,
     private val generation: Int,
 ) {
@@ -62,6 +68,7 @@ internal class PainterAttempt(
             is AsyncImagePainter.State.Success -> {
                 settled = true
                 ledger.settleSuccess(url, generation, MediaAttemptKind.PAINTER)
+                settlePainterGeometry(state)
             }
 
             is AsyncImagePainter.State.Error -> {
@@ -71,6 +78,30 @@ internal class PainterAttempt(
 
             else -> Unit
         }
+    }
+
+    /**
+     * #960 P2 — G2 (contrat v1.5 §6, « probe KO, painter OK »): the painter's ORIENTED image
+     * dimensions (`coil3.Image.width/height`, the §3 normative source) produce THE unique box
+     * correction when they are the FIRST valid pair (`putSuccessIfAbsent` — a later disagreeing
+     * pair is logged, never applied), and settle the PROBE axis too: the measurement need is
+     * met, the url becomes stable forever (no TTL advancement, no replayed probe). A success
+     * WITHOUT usable geometry deposits nothing and leaves the probe axis retryable (C1) — §6
+     * « aucune dimension exploitable → boîte cold CONSERVÉE ».
+     */
+    private fun settlePainterGeometry(state: AsyncImagePainter.State.Success) {
+        val image = state.result.image
+        if (image.width <= 0 || image.height <= 0) return
+        val painterSize = IntSize(image.width, image.height)
+        val deposited = cache.putSuccessIfAbsent(url, painterSize)
+        if (!deposited && cache.get(url) != painterSize) {
+            Log.d(
+                MEDIA_GEOMETRY_LOG_TAG,
+                "geometry disagreement for $url: kept=${cache.get(url)} painter=$painterSize " +
+                    "(first valid pair wins, §3)",
+            )
+        }
+        ledger.settleSuccess(url, generation, MediaAttemptKind.PROBE)
     }
 
     fun rollbackIfUnsettled() {
@@ -86,8 +117,9 @@ internal class PainterAttempt(
 @Composable
 internal fun rememberPainterAttempt(url: String): PainterAttempt {
     val ledger = LocalMediaAttemptLedger.current
+    val cache = LocalIntrinsicMediaSizeCache.current
     val generation = ledger.generationOf(url)
-    val attempt = remember(ledger, url, generation) { PainterAttempt(ledger, url, generation) }
+    val attempt = remember(ledger, cache, url, generation) { PainterAttempt(ledger, cache, url, generation) }
     // Keyed on failedFresh too: when a recomposition observes the failure EXPIRED (fresh → false)
     // the effect re-runs and the reservation path consults C1 — reopening the axis in a new
     // generation instead of leaving a no-longer-fresh, still-failed axis stuck on the placeholder.

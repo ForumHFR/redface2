@@ -53,7 +53,10 @@ class PostGifAnimationGateTest {
 
     private val gifUrl = "https://rehost.diberie.com/Picture/Get/f/anim.gif"
 
-    private class FakeAnimatedDrawable : Drawable(), Animatable {
+    private class FakeAnimatedDrawable(
+        private val intrinsicW: Int = 400,
+        private val intrinsicH: Int = 300,
+    ) : Drawable(), Animatable {
         var running = false
             private set
         var starts = 0
@@ -78,8 +81,8 @@ class PostGifAnimationGateTest {
 
         @Deprecated("Deprecated in Java")
         override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
-        override fun getIntrinsicWidth(): Int = 400
-        override fun getIntrinsicHeight(): Int = 300
+        override fun getIntrinsicWidth(): Int = intrinsicW
+        override fun getIntrinsicHeight(): Int = intrinsicH
     }
 
     @OptIn(coil3.annotation.DelicateCoilApi::class)
@@ -145,7 +148,11 @@ class PostGifAnimationGateTest {
 
     @Test
     fun `a cold content gif does not animate before its first native pair`() {
-        val drawable = FakeAnimatedDrawable()
+        // #960 P2 (G2): a painter WITH intrinsic dimensions now legitimately fixes the box
+        // (« probe KO, painter OK » §6) and the gif may animate — so the true COLD state (no
+        // native pair from ANY source) needs a dimensionless drawable (§6 « aucune dimension
+        // exploitable → boîte cold conservée », the gate must hold the animation).
+        val drawable = FakeAnimatedDrawable(intrinsicW = -1, intrinsicH = -1)
         installLoader(drawable)
         // Failure-seeded LEDGER (probe axis, #960): the measurement never lands, the box stays
         // the cold slot — the painter axis stays open so the gif still loads into it.

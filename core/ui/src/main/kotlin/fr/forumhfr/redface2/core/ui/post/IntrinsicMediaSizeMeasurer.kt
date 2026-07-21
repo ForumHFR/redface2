@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.ui.post
 
+import android.util.Log
 import androidx.compose.ui.unit.IntSize
 import coil3.ImageLoader
 import coil3.PlatformContext
@@ -129,7 +130,15 @@ private suspend fun probeUnderReservation(
         // dead effect.
         currentCoroutineContext().ensureActive()
         if (size != null) {
-            cache.putSuccess(url, size)
+            // §3/§6 — first-pair authority: a concurrent G2 painter deposit may have fixed the
+            // box already; the probe's disagreeing pair is then logged, never applied.
+            val deposited = cache.putSuccessIfAbsent(url, size)
+            if (!deposited && cache.get(url) != size) {
+                Log.d(
+                    MEDIA_GEOMETRY_LOG_TAG,
+                    "geometry disagreement for $url: kept=${cache.get(url)} probe=$size (first valid pair wins, §3)",
+                )
+            }
             ledger.settleSuccess(url, generation, MediaAttemptKind.PROBE)
         } else {
             ledger.settleFailure(url, generation, MediaAttemptKind.PROBE, System.currentTimeMillis())

@@ -28,6 +28,15 @@ internal interface IntrinsicMediaSizeCache {
     fun get(url: String): IntSize?
 
     fun putSuccess(url: String, size: IntSize)
+
+    /**
+     * #960 P2 (§3/§6) — atomic first-pair deposit: stores [size] ONLY when [url] has no entry
+     * yet and reports whether it did. The FIRST valid oriented pair (probe or painter, G2) fixes
+     * the box; a later disagreeing pair must never apply a second correction. Both production
+     * writers (the probe seam and the painter's G2 settlement) go through this, so their race
+     * cannot overwrite the authority.
+     */
+    fun putSuccessIfAbsent(url: String, size: IntSize): Boolean
 }
 
 /**
@@ -55,6 +64,14 @@ internal class DefaultIntrinsicMediaSizeCache(
                 val evicted = insertionOrder.removeFirst()
                 entries.remove(evicted)
             }
+        }
+    }
+
+    override fun putSuccessIfAbsent(url: String, size: IntSize): Boolean {
+        synchronized(lock) {
+            if (entries.containsKey(url)) return false
+            putSuccess(url, size)
+            return true
         }
     }
 

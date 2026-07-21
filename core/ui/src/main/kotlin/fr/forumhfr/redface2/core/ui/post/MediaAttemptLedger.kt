@@ -85,8 +85,9 @@ internal class MediaAttemptLedger(
 
     /**
      * Settles a success — terminal for the axis. A stale-generation settlement is discarded; a
-     * settlement for an unknown URL creates its entry (render-time writers never reserve — their
-     * attempt is always current, e.g. the smiley error slot).
+     * settlement for an unknown URL creates its entry rather than dropping it (belt: every
+     * production writer reserves first since the P1 smiley gate, but a truthful outcome must
+     * never be lost to a missing entry — e.g. the G2 probe settlement derived from a painter).
      */
     fun settleSuccess(url: String, generation: Int, kind: MediaAttemptKind) {
         synchronized(lock) {
@@ -98,9 +99,9 @@ internal class MediaAttemptLedger(
 
     /**
      * Settles a failure (starts its TTL). A stale-generation settlement is discarded; an unknown
-     * URL creates its entry (render-time writers never reserve). MONOTONIC (Sol P1): a settled
-     * success is terminal — a late concurrent failure (render-time writers can race) never
-     * demotes it (lock #4).
+     * URL creates its entry rather than dropping it (same belt as [settleSuccess]). MONOTONIC
+     * (Sol P1): a settled success is terminal — a late concurrent failure never demotes it
+     * (lock #4).
      */
     fun settleFailure(url: String, generation: Int, kind: MediaAttemptKind, nowMillis: Long) {
         synchronized(lock) {
