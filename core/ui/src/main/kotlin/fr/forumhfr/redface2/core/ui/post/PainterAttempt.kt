@@ -67,7 +67,9 @@ internal class PainterAttempt(
      * the pair is immutable-true and the deposit is idempotent first-pair: this is what heals a
      * FIFO-evicted cache entry when a terminal painter re-renders (Sol P2, O1 — the §6 locked
      * slot survives eviction), and the §7 re-decode's callback can never apply a second
-     * correction through it.
+     * correction through it. Guard asymmetry (deliberate, Sol P2): the PAINTER settlement is
+     * grant- AND generation-guarded; the G2-derived PROBE settlement is generation-guarded ONLY
+     * (any truthful painter success may satisfy the measurement need, grant or not).
      */
     fun onState(state: AsyncImagePainter.State) {
         when (state) {
