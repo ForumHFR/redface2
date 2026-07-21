@@ -51,6 +51,8 @@ dependencies {
     implementation(libs.coil.compose)
     // #959 — EXIF orientation read by the header-only intrinsic probe (ProbeMetadataDecoder).
     implementation(libs.androidx.exifinterface)
+    // #959 — Lifecycle.currentStateAsState() gates GIF animation on RESUMED (§3 GIF).
+    implementation(libs.androidx.lifecycle.runtime.compose)
     // Coil 3 split the network fetcher out of coil-compose. Without this dependency, AsyncImage
     // resolves http(s) models to a no-op and every smiley / inline / block image stays on its
     // placeholder. The dependency must reach :app's runtime classpath, so it lives here next to

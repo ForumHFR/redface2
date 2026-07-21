@@ -34,6 +34,7 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -1103,11 +1104,15 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
         }
         // #610 — the exact parity box centres via the BoxWithConstraints contentAlignment; no
         // fillMaxWidth here (the pre-#610 full-width shape is gone).
+        // #959 (§3 GIF) — block images are always content images (a cc is never promoted, §2
+        // cc-marker boundary rule): gate the animation on (measured box, window bounds, RESUMED).
+        val gifGate = rememberGifAnimationGate(boxReady = measured != null)
         val containerModifier = sizeModifier
             // Structural test seam (#957 gate) : lets bounds-level tests COUNT the block images of
             // a rendered post — descriptions are often null on HFR `[img]`, so the a11y tree alone
             // cannot enumerate them. testTag is invisible to TalkBack.
             .testTag(BLOCK_IMAGE_TEST_TAG)
+            .then(gifGate.modifier)
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             .then(interactionModifier)
@@ -1150,7 +1155,12 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
                 ImageShimmer(animated = animationsEnabled, modifier = Modifier.fillMaxSize())
             },
             error = { ImageBlockError(description) },
-            success = { SubcomposeAsyncImageContent() },
+            success = { state ->
+                // #959 (§3 GIF) — hand the Animatable behind the result to the gate; SideEffect:
+                // never write snapshot state during composition.
+                SideEffect { gifGate.onState(state) }
+                SubcomposeAsyncImageContent()
+            },
         )
         }
     }
@@ -1988,6 +1998,14 @@ internal fun imageInlineContent(
         } else {
             Modifier.padding(horizontal = INLINE_IMAGE_HORIZONTAL_PADDING)
         }
+        // #959 (§3 GIF) — the animation gate wraps CONTENT images only; a cc-image keeps its
+        // historical ungated path (#256). `decodeSize != null` is exactly "the first native pair
+        // landed": a cold GIF must not start before its box is final.
+        val gifGate = if (isCcImageUrl(image.url)) {
+            null
+        } else {
+            rememberGifAnimationGate(boxReady = box.decodeSize != null)
+        }
         key(LocalMediaRefreshGeneration.current) {
             Box(Modifier.fillMaxSize().then(paddingModifier)) {
                 AsyncImage(
@@ -1997,7 +2015,11 @@ internal fun imageInlineContent(
                     contentDescription = image.description?.takeIf(String::isNotBlank)
                         ?: stringResource(R.string.post_inline_image_alt),
                     contentScale = PostMediaDisplayPolicy.inlineImageContentScale,
-                    modifier = Modifier.fillMaxSize().then(interactionModifier),
+                    onState = gifGate?.onState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(gifGate?.modifier ?: Modifier)
+                        .then(interactionModifier),
                 )
             }
         }
