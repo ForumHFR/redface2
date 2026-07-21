@@ -174,6 +174,38 @@ class PostRendererMediaLedgerTest {
     }
 
     @Test
+    fun `an expired painter failure re-attempts through the gate - C1, no infinite placeholder`() {
+        // Probe OK + painter KO (the C2/AVIF shape): after the negative TTL expires, the next
+        // recomposition must CONSULT the ledger (C1 opens a new generation) and re-attempt the
+        // painter — the pre-#960 behaviour surfaced the stale error painter forever, and a naive
+        // gate would hold an infinite placeholder (failure no longer fresh, axis still failed).
+        installLoader()
+        val ledger = MediaAttemptLedger(failureTtlMillis = 400L)
+        var epoch by mutableStateOf(0)
+        setContent(ledger, DefaultIntrinsicMediaSizeCache()) {
+            // The epoch read makes the block recompose on demand without structural changes.
+            listOf(inlineImageParagraph(deadUrl, prefix = "epoch $epoch "))
+        }
+        composeTestRule.waitUntil(timeoutMillis = 5_000) {
+            ledger.isFailedFresh(deadUrl, MediaAttemptKind.PAINTER, System.currentTimeMillis())
+        }
+        composeTestRule.waitForIdle()
+        val before = requestCount(deadUrl)
+
+        // The host recovers and the TTL expires while the screen sits still.
+        serveDead = true
+        Thread.sleep(500L)
+        // A plain recomposition (no structural change, no manual retry) reaches the gate…
+        composeTestRule.runOnIdle { epoch++ }
+        composeTestRule.waitForIdle()
+        // …which must consult C1, reopen the expired axes and re-attempt: the painter recovers.
+        composeTestRule.waitUntil(timeoutMillis = 5_000) {
+            ledger.hasSucceeded(deadUrl, MediaAttemptKind.PAINTER)
+        }
+        assertTrue("the recovered painter must have re-requested", requestCount(deadUrl) > before)
+    }
+
+    @Test
     fun `retryFailedUrls retries the dead url and never touches the healthy one`() {
         installLoader()
         val ledger = MediaAttemptLedger()

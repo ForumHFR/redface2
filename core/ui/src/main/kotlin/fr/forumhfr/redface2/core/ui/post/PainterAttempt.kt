@@ -46,6 +46,12 @@ internal class PainterAttempt(
         get() = granted || ledger.hasSucceeded(url, MediaAttemptKind.PAINTER)
 
     fun reserveIfUntried() {
+        // C1 — consulting may reopen EXPIRED failed axes into a NEW generation (never the current
+        // one). When it does, this attempt is stale: the ledger's snapshot write recomposes the
+        // occurrence, which remembers a fresh attempt for the new generation and reserves there —
+        // without this consultation an expired painter failure would hold the placeholder forever
+        // (failure no longer fresh, axis still failed, nobody allowed to re-attempt).
+        if (ledger.consultGeneration(url, System.currentTimeMillis()) != generation) return
         if (ledger.tryReserve(url, generation, MediaAttemptKind.PAINTER)) granted = true
     }
 
@@ -82,7 +88,13 @@ internal fun rememberPainterAttempt(url: String): PainterAttempt {
     val ledger = LocalMediaAttemptLedger.current
     val generation = ledger.generationOf(url)
     val attempt = remember(ledger, url, generation) { PainterAttempt(ledger, url, generation) }
-    LaunchedEffect(attempt) { attempt.reserveIfUntried() }
+    // Keyed on failedFresh too: when a recomposition observes the failure EXPIRED (fresh → false)
+    // the effect re-runs and the reservation path consults C1 — reopening the axis in a new
+    // generation instead of leaving a no-longer-fresh, still-failed axis stuck on the placeholder.
+    val failedFresh = attempt.failedFresh
+    LaunchedEffect(attempt, failedFresh) {
+        if (!failedFresh) attempt.reserveIfUntried()
+    }
     DisposableEffect(attempt) { onDispose { attempt.rollbackIfUnsettled() } }
     return attempt
 }
