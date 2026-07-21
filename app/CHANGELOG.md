@@ -16,7 +16,22 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
-## `0.34.2` — `local` — 2026-07-21
+## `0.34.3` — `local` — 2026-07-21
+
+Le sizing & décodage density-aware — Lot 3 (#959) de la passe images (#876, contrat
+v1.5 §3/§7/§9) : équation unique en PIXELS PHYSIQUES (no-upscale réel : 1 px source ≤
+1 px écran, hauteur dérivée de la largeur arrondie), fraction de largeur dédiée
+`fImage = 0,95` sur les 3 chemins ([AMENDEMENT-v1.5-1], levier A #884), cap hauteur
+bloc CLAMPÉ à la fenêtre utile (le legacy écran disparaît), probe intrinsèque
+header-only (fini l'écrêtage 1024 des grandes photos — B8 ; EXIF gardé, GIF réels
+OK), décodage §7 par buckets 256/facteur commun ≤ 2048 avec la taille DANS les clés
+de requêtes (netteté — bug nicko #842), GIF gatés (boîte finale ∧ viewport réel ∧
+RESUMED — prefetch et arrière-plan figés), floor 16 sp retiré du chemin mesuré
+(slots cold/cc seulement). [AMENDEMENT-Lot3-1] : hitbox au-delà du minimum touch
+target plateforme (a11y, approbation a posteriori). Gates Sol : cadrage r2 GO,
+mini-gate P2 GO, gate final r2 GO.
+
+## `0.34.2` — `internal` (dev) — 2026-07-21
 
 Les interactions images — Lot 2 (#958) de la passe images (#876, contrat v1.5 §5) :
 tap sur une image liée = ouvre le lien, appui long = menu image, désormais AUSSI pour
