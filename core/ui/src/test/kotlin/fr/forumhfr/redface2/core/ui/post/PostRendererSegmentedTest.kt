@@ -127,12 +127,18 @@ class PostRendererSegmentedTest {
 
     @Test
     fun `isolated singleton renders as a block without any measurement`() {
-        // Structural : no size cache seeded — the block box is the deterministic §6 cold slot.
-        setPost(paragraph(text("titre"), br, img(imgA, "seule"), br, text("fin")))
-        val bounds = composeTestRule.onNodeWithContentDescription("seule").getBoundsInRoot()
-        // Cold : width = 0,9 × available ; height = max(160, 0,75 × width) (cap 400 non atteint).
+        // Structural : URL MORTE (non interceptée → la mesure échoue) pour que la boîte RESTE le
+        // slot cold §6 déterministe — avec une URL servie, la mesure aboutit en cours de test et
+        // la boîte devient la taille physique mesurée (le pré-#959 ne le voyait pas : ses valeurs
+        // mesurées coïncidaient avec le cold).
+        val deadCold = "https://images.example.org/never-served/cold.png"
+        setPost(paragraph(text("titre"), br, img(deadCold, "seule"), br, text("fin")))
+        // Le painter en échec bascule le slot en état erreur (la description devient le wording
+        // d'erreur) : viser le seam structurel du bloc, stable dans tous les états.
+        val bounds = composeTestRule.onNodeWithTag(BLOCK_IMAGE_TEST_TAG).getBoundsInRoot()
+        // Cold : width = fImage(0,95) × available ; height = max(160, 0,75 × width).
         val width = bounds.w
-        assertTrue("cold width ~0.9×container, was $width", width in 300f..340f)
+        assertTrue("cold width ~0.95×container, was $width", width in 320f..355f)
         assertEquals(width * 0.75f, bounds.h, 1f)
     }
 
@@ -178,19 +184,21 @@ class PostRendererSegmentedTest {
         }
         val p1 = composeTestRule.onNodeWithContentDescription("p1").getBoundsInRoot()
         val p2 = composeTestRule.onNodeWithContentDescription("p2").getBoundsInRoot()
-        // Le nœud décrit est le BITMAP (après le padding interne du placeholder élargi) : sa
-        // largeur reste 80 sp (=80 dp à fontScale 1) — le §4 n'écrase pas le contenu — et les
-        // placeholders adjacents laissent 4 dp + 4 dp = 8 dp entre les deux bitmaps.
-        assertEquals(80f, p1.w, 1.1f)
+        // #959 (§3) — le nœud décrit est le BITMAP à sa taille PHYSIQUE native : 80 px à
+        // densité 3 = 26,7 dp (fini le « px natif = sp » qui rendait 80 dp) ; les placeholders
+        // adjacents laissent toujours 4 dp + 4 dp = 8 dp entre les deux bitmaps (§4 intact).
+        assertEquals(80f / 3f, p1.w, 1.1f)
         assertEquals(8f, (p2.left - p1.right).value, 1.6f)
     }
 
     @Test
-    fun `a width-capped inline bitmap keeps its historical size - padding widens the placeholder only`() {
-        // Gate r1, bloquant : un 800×400 mesuré rendait 324×162 (cap 0,9×360 = 324) AVANT le §4 ;
-        // le padding ne doit PAS le rétrécir à 316×158. Le nœud décrit est le bitmap.
+    fun `a width-capped inline bitmap fills the fImage cap - padding widens the placeholder only`() {
+        // #959 (§3 px physiques + fImage 0,95) : un 4000×2000 mesuré est cappé par la largeur
+        // fImage — 0,95×360 dp×3 = 1026 px → 342 dp, h dérivée = round(1026×2000/4000) = 513 px
+        // = 171 dp. Le padding §4 ne rétrécit PAS le bitmap (il élargit le placeholder seul).
+        // Le nœud décrit est le bitmap.
         val cache = DefaultIntrinsicMediaSizeCache()
-        cache.putSuccess(imgA, IntSize(800, 400))
+        cache.putSuccess(imgA, IntSize(4000, 2000))
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides cache) {
@@ -201,20 +209,20 @@ class PostRendererSegmentedTest {
             }
         }
         val bounds = composeTestRule.onNodeWithContentDescription("plafonnee").getBoundsInRoot()
-        assertEquals(324f, bounds.w, 1.1f)
-        assertEquals(162f, bounds.h, 1.1f)
+        assertEquals(342f, bounds.w, 1.1f)
+        assertEquals(171f, bounds.h, 1.1f)
     }
 
     // ---------- §6 cold + tailles mesurées inchangées ----------
 
     @Test
     @Config(sdk = [34], qualifiers = "w360dp-h916dp-xxhdpi")
-    fun `measured PORTRAIT block uses the legacy height cap - not the cold slot`() {
-        // Témoin discriminant (gate r1) : sur h916dp, cap mesuré legacy = max(400, 458) = 458 →
-        // 800×1200 rend 305×458 (height-bound). Le slot cold §6 donnerait 324×243 : le test
-        // 800×600 (324×243) coïncide avec le cold et ne prouvait PAS la séparation des chemins.
+    fun `measured PORTRAIT block is capped by the clamped useful-height cap - not the cold slot`() {
+        // #959 (§3) — 1600×2400 px sur h916dp utile (@Config méthode, insets Robolectric = 0) :
+        // capBloc clampé = min(916, max(400, 458)) = 458 dp = 1374 px @d3 → scale = 0,5725 →
+        // 916×1374 px = 305,3×458 dp (height-bound). Le cold §6 donnerait 342×256,5 : séparés.
         val cache = DefaultIntrinsicMediaSizeCache()
-        cache.putSuccess(imgA, IntSize(800, 1200))
+        cache.putSuccess(imgA, IntSize(1600, 2400))
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides cache) {
@@ -223,12 +231,51 @@ class PostRendererSegmentedTest {
             }
         }
         val bounds = composeTestRule.onNodeWithContentDescription("portrait").getBoundsInRoot()
-        assertEquals(305f, bounds.w, 2f)
+        assertEquals(305.3f, bounds.w, 2f)
         assertEquals(458f, bounds.h, 2f)
     }
 
     @Test
-    fun `measured block keeps the exact legacy parity size`() {
+    @Config(sdk = [34], qualifiers = "w360dp-h350dp-xxhdpi")
+    fun `measured block follows the WINDOW in a short window - the legacy screen cap is gone`() {
+        // #959 (§3, [Lot0-3]) — LE témoin discriminant clampé vs legacy : fenêtre utile 350 dp →
+        // capBloc = min(350, max(400, 175)) = 350 dp = 1050 px ; le cap legacy
+        // max(400, 0,5×350) = 400 dp aurait DÉPASSÉ la fenêtre. 1600×2400 px → scale =
+        // 1050/2400 = 0,4375 → 700×1050 px = 233,3×350 dp.
+        val cache = DefaultIntrinsicMediaSizeCache()
+        cache.putSuccess(imgA, IntSize(1600, 2400))
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides cache) {
+                    PostRenderer(content = paragraph(img(imgA, "courte")))
+                }
+            }
+        }
+        val bounds = composeTestRule.onNodeWithContentDescription("courte").getBoundsInRoot()
+        assertEquals(233.3f, bounds.w, 2f)
+        assertEquals(350f, bounds.h, 2f)
+    }
+
+    @Test
+    fun `measured block is capped by the fImage width fraction`() {
+        // #959 — 4000×3000 px : maxW = 0,95×360dp×3 = 1026 px → 342 dp ; h dérivée =
+        // round(1026×3000/4000) = 770 px ≈ 256,7 dp (le cap hauteur 1200 px ne borde pas).
+        val cache = DefaultIntrinsicMediaSizeCache()
+        cache.putSuccess(imgA, IntSize(4000, 3000))
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides cache) {
+                    PostRenderer(content = paragraph(img(imgA, "large")))
+                }
+            }
+        }
+        val bounds = composeTestRule.onNodeWithContentDescription("large").getBoundsInRoot()
+        assertEquals(342f, bounds.w, 2f)
+        assertEquals(256.7f, bounds.h, 2f)
+    }
+
+    @Test
+    fun `measured block renders at its native physical size`() {
         val cache = DefaultIntrinsicMediaSizeCache()
         cache.putSuccess(imgA, IntSize(800, 600))
         composeTestRule.setContent {
@@ -239,10 +286,10 @@ class PostRendererSegmentedTest {
             }
         }
         val bounds = composeTestRule.onNodeWithContentDescription("mesuree").getBoundsInRoot()
-        // Legacy parity (Lot 3 seulement pour le nouveau sizing) : available≈360, 0.9→324 ;
-        // cap hauteur legacy max(400, 0.5×780)=400 ; scale=min(1,324/800,400/600)=0.405 → 324×243.
-        assertEquals(324f, bounds.w, 2f)
-        assertEquals(243f, bounds.h, 2f)
+        // #959 (§3) — natif physique : 800×600 px sous les deux caps (1026 px / 1200 px) →
+        // aucun scaling, 800×600 px = 266,7×200 dp @d3 (fini le « px natif = dp » 324×243).
+        assertEquals(266.7f, bounds.w, 2f)
+        assertEquals(200f, bounds.h, 2f)
     }
 
     // ---------- fixture réelle : la torture tinc (13.1) ----------
@@ -405,9 +452,10 @@ class PostRendererSegmentedTest {
         }
         composeTestRule.onNodeWithText("Image indisponible", substring = true).assertExists()
         // Bounds via le seam : en état d'erreur le slot remplace le contenu décrit.
+        // #959/[AMENDEMENT-v1.5-1] — fImage = 0,95 : 360×0,95 = 342, h = 0,75×342 = 256,5.
         val cold = composeTestRule.onNodeWithTag(BLOCK_IMAGE_TEST_TAG).getBoundsInRoot()
-        assertEquals(324f, cold.w, 2f)
-        assertEquals(243f, cold.h, 2f)
+        assertEquals(342f, cold.w, 2f)
+        assertEquals(256.5f, cold.h, 2f)
 
         // Round 2 — l'hébergeur revient, refresh explicite : clear PUIS bump (ordre production).
         installBlockLoader(serve = true, url = deadUrl)
@@ -424,8 +472,9 @@ class PostRendererSegmentedTest {
         // et le contenu décrit est revenu (painter en succès).
         composeTestRule.onNodeWithContentDescription("retry").assertExists()
         val healed = composeTestRule.onNodeWithTag(BLOCK_IMAGE_TEST_TAG).getBoundsInRoot()
-        assertEquals(200f, healed.w, 2f)
-        assertEquals(100f, healed.h, 2f)
+        // #959 (§3) — 200×100 px servis = 66,7×33,3 dp @d3 (taille physique native).
+        assertEquals(66.7f, healed.w, 2f)
+        assertEquals(33.3f, healed.h, 2f)
         composeTestRule.onNodeWithText("Image indisponible", substring = true).assertDoesNotExist()
         // ≥ 2 nouvelles requêtes : la re-probe ET le painter recréé par key(generation).
         composeTestRule.waitUntil(timeoutMillis = 5_000) {

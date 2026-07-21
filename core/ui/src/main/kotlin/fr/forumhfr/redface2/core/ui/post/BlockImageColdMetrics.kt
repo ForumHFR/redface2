@@ -14,7 +14,7 @@ import kotlin.math.roundToInt
  * ([AMENDEMENT-Lot0-3], formulation Sol) : the HOST-side composable reads the window
  * container and the per-edge occupied insets, the PURE functions below do the arithmetic
  * (JVM-testable, no Compose types). Applied to the COLD §6 slot ONLY in this lot — the
- * MEASURED path keeps the legacy `blockImageMaxHeightDp` cap untouched until Lot 3
+ * MEASURED path shares this clamped cap since #959 (Lot 3)
  * (cadrage #957 r4, résolution minimale actée r5).
  */
 
@@ -33,7 +33,9 @@ internal fun coldBlockSlotDp(availableWidthDp: Float, capBlocDp: Float): Pair<Fl
     return width to height
 }
 
-internal const val COLD_BLOCK_WIDTH_FRACTION = 0.9f
+// #959/[AMENDEMENT-v1.5-1] — locked alias of the dedicated image width fraction (single source
+// of truth; the equality is pinned by ImageDisplaySizePolicyTest).
+internal const val COLD_BLOCK_WIDTH_FRACTION = IMAGE_RELATIVE_MAX_WIDTH_FRACTION
 internal const val COLD_BLOCK_MIN_HEIGHT_DP = 160f
 internal const val COLD_BLOCK_RATIO = 0.75f
 
