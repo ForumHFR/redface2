@@ -46,30 +46,38 @@ internal suspend fun measureIntrinsicMediaSize(
 }
 
 /**
- * #249 follow-up — measure [url] and store the outcome in [cache], but ONLY when it is neither already
- * known nor a fresh failure. Single shared seam for every caller that feeds the intrinsic-size cache:
- * the paragraph measure effect (#175/#224 — smileys + inline images) AND the standalone `PostBlock.Image`
- * effect. Keeping one implementation prevents the two paths from drifting (e.g. one forgetting the
- * [IntrinsicMediaSizeCache.isFailureFresh] guard and re-probing a dead host every recomposition).
+ * #249 follow-up / #960 (§6) — measure [url], store a success in [cache] and settle the outcome on
+ * the PROBE axis of [ledger]. Single shared seam for every caller that feeds the intrinsic-size
+ * cache: the paragraph measure effect (#175/#224 — smileys + inline images) AND the standalone
+ * `PostBlock.Image` effect. Keeping one implementation prevents the two paths from drifting.
  *
- * Idempotent: a cached success / fresh failure short-circuits without a probe, so once the first result
- * lands the `SnapshotStateMap` write recomposes readers and subsequent calls no-op.
+ * The ledger is the single source of truth for failures and generations (#960, Sol r3):
+ *  - a cached success or a FRESH probe failure short-circuits without a probe;
+ *  - consulting the generation applies C1 (an EXPIRED failure atomically opens a new generation);
+ *  - the probe runs only under a granted reservation — ONE attempt per (URL, generation), the
+ *    settlement carries the reserved generation so a stale result (the user retried mid-probe)
+ *    is discarded by the ledger instead of the legacy failure-epoch guard;
+ *  - a CANCELLED probe rolls its reservation back (a cancelled try is not a try) — nothing keeps
+ *    the axis in-flight forever.
  *
  * The cache guard is a non-atomic check-then-act, so two callers racing on the SAME cold URL (the
- * BlockImage effect vs the paragraph effect, or two on-screen copies) could each start a probe before
- * the first result lands. [inFlightMeasurements] de-dupes that window: the first caller wins the URL,
- * the others AWAIT its ticket then re-run the guard. The await (not a fire-and-forget no-op) matters
- * for #813: when a refresh generation bump cancels the winning effect mid-probe, a plain "loser
- * returns" would leave the URL cold with nobody left to probe it until the next refresh — the loser
- * waking up on the ticket re-checks the cache and becomes the new winner. A CANCELLED winner records
- * nothing (a cancelled probe is not a dead host), so its late unwind can never overwrite a fresh
- * success either. Process-wide like [ProcessIntrinsicMediaSizeCache]; keyed by URL.
+ * BlockImage effect vs the paragraph effect, or two on-screen copies) could each consult before
+ * the first result lands; the reservation makes the race harmless, and [inFlightMeasurements]
+ * keeps the LOSER AWAITING the winner's ticket instead of returning: when a generation bump
+ * cancels the winning effect mid-probe, a plain "loser returns" would leave the URL cold with
+ * nobody left to probe it (#813) — the loser waking up on the ticket re-runs the guards and
+ * becomes the new winner (the rollback reopened the axis). Process-wide; keyed by URL.
  */
 private val inFlightMeasurements = ConcurrentHashMap<String, CompletableDeferred<Unit>>()
 
+// LongParameterList: the trailing `probe` is a test-only seam (cancellation-race pins); the five
+// real parameters are the url + its pipeline collaborators — grouping them would be a one-call
+// holder class with no other purpose.
+@Suppress("LongParameterList")
 internal suspend fun measureAndCacheIntrinsicMediaSize(
     url: String,
     cache: IntrinsicMediaSizeCache,
+    ledger: MediaAttemptLedger,
     context: PlatformContext,
     imageLoader: ImageLoader,
     // Injectable for the cancellation-race tests only — production callers keep the default.
@@ -77,32 +85,59 @@ internal suspend fun measureAndCacheIntrinsicMediaSize(
 ) {
     while (true) {
         val now = System.currentTimeMillis()
-        if (cache.get(url) != null || cache.isFailureFresh(url, now)) return
-        // #813 — capture the failure epoch BEFORE probing: if the user refreshes (clearFailures)
-        // while this probe is in flight, its failure result is STALE — exactly the outage the user
-        // is retrying — and must not be re-deposited on top of the clear. Compose only cancels the
-        // old measure effect at the next recomposition, so this window is real, not theoretical.
-        val epoch = cache.failureEpoch()
+        if (cache.get(url) != null || ledger.isFailedFresh(url, MediaAttemptKind.PROBE, now)) return
         val ticket = CompletableDeferred<Unit>()
         val winner = inFlightMeasurements.putIfAbsent(url, ticket)
         if (winner != null) {
             // Lost the race — wait for the in-flight probe to settle (result OR cancellation),
-            // then loop: a landed result short-circuits on the guard, a cancelled probe left the
-            // URL cold and this caller takes over.
+            // then loop: a landed result short-circuits on the guards, a cancelled probe rolled
+            // its reservation back and this caller takes over.
             winner.await()
             continue
         }
         try {
-            val size = probe(url, context, imageLoader)
-            // Belt for a probe that swallowed cancellation: never publish a result on behalf of a
-            // dead effect (the epoch guard below covers failures; a success is always welcome, but
-            // only from a live coroutine).
-            currentCoroutineContext().ensureActive()
-            if (size != null) cache.putSuccess(url, size) else cache.putFailureIfEpoch(url, now, epoch)
-            return
+            probeUnderReservation(url, cache, ledger, context, imageLoader, probe, now)
         } finally {
             inFlightMeasurements.remove(url, ticket)
             ticket.complete(Unit)
         }
+        return
+    }
+}
+
+// LongParameterList: private tail of the seam above — same collaborators, same rationale.
+@Suppress("LongParameterList")
+private suspend fun probeUnderReservation(
+    url: String,
+    cache: IntrinsicMediaSizeCache,
+    ledger: MediaAttemptLedger,
+    context: PlatformContext,
+    imageLoader: ImageLoader,
+    probe: suspend (String, PlatformContext, ImageLoader) -> IntSize?,
+    nowMillis: Long,
+) {
+    // C1 — consulting may open a new generation when the recorded failure has expired; the
+    // reservation is then taken against the CURRENT generation. A denied reservation means the
+    // axis already settled this generation (e.g. a terminal success whose cache entry was
+    // evicted) — nothing to do.
+    val generation = ledger.consultGeneration(url, nowMillis)
+    if (!ledger.tryReserve(url, generation, MediaAttemptKind.PROBE)) return
+    var settled = false
+    try {
+        val size = probe(url, context, imageLoader)
+        // Belt for a probe that swallowed cancellation: never publish a result on behalf of a
+        // dead effect.
+        currentCoroutineContext().ensureActive()
+        if (size != null) {
+            cache.putSuccess(url, size)
+            ledger.settleSuccess(url, generation, MediaAttemptKind.PROBE)
+        } else {
+            ledger.settleFailure(url, generation, MediaAttemptKind.PROBE, System.currentTimeMillis())
+        }
+        settled = true
+    } finally {
+        // A cancelled try is not a try: reopen the axis so the awaiting loser (or the next
+        // occurrence) may attempt again.
+        if (!settled) ledger.rollbackReservation(url, generation, MediaAttemptKind.PROBE)
     }
 }

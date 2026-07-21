@@ -4,9 +4,6 @@ import android.content.Context
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -35,17 +32,17 @@ import org.robolectric.annotation.GraphicsMode
 
 /**
  * #813 — a ghost inline image (its first measurement failed: dead host, transient outage) must
- * become recoverable through the screen's EXPLICIT refresh path: `clearPostMediaMeasurementFailures()`
- * then a `mediaRefreshGeneration` bump — WITHOUT disposing the composition (the historical
- * work-around was « citer puis revenir », which disposed the whole topic composition).
+ * become recoverable through the screen's EXPLICIT refresh path — since #960 the scoped ledger
+ * retry (`retryFailedUrls`) — WITHOUT disposing the composition (the historical work-around was
+ * « citer puis revenir », which disposed the whole topic composition).
  *
  * Two pins, matching the two ghost mechanisms:
  *  - the placeholder BOX grows from the 16 sp cold square to the measured size (the measure effect
- *    relaunched — it never did on refresh before, `inlines` being structurally equal);
- *  - the PAINTER actually re-attempts its load (what `key(generation)` buys) — proven by counting
- *    the loader requests for the URL, pixel capture being unreliable for Coil drawings under this
- *    harness. After the bump the URL must be requested at least twice more: the re-probe AND the
- *    recreated painter. Without `key()` only the probe re-fires.
+ *    relaunched — keyed on the url's ledger generation, bumped by the retry);
+ *  - the PAINTER actually re-attempts its load (the retry recreates the gated painter attempt) —
+ *    proven by counting the loader requests for the URL, pixel capture being unreliable for Coil
+ *    drawings under this harness. After the retry the URL must be requested at least twice more:
+ *    the re-probe AND the recreated painter.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w360dp-h780dp-xxhdpi")
@@ -88,15 +85,18 @@ class PostRendererGhostImageRecoveryTest {
     private fun ghostRequestCount(): Int = requestedUrls.count { it == ghostUrl }
 
     @Test
-    fun `explicit refresh (clear + generation bump) recovers a ghost inline image in place`() {
+    fun `explicit scoped retry recovers a ghost inline image in place`() {
         installLoader(serveGhost = false)
         val cache = DefaultIntrinsicMediaSizeCache()
-        var generation by mutableIntStateOf(0)
+        val ledger = MediaAttemptLedger()
 
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 Surface(color = MaterialTheme.colorScheme.surface) {
-                    CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides cache) {
+                    CompositionLocalProvider(
+                        LocalIntrinsicMediaSizeCache provides cache,
+                        LocalMediaAttemptLedger provides ledger,
+                    ) {
                         PostRenderer(
                             content = PostContent(
                                 blocks = listOf(
@@ -110,34 +110,33 @@ class PostRendererGhostImageRecoveryTest {
                                     ),
                                 ),
                             ),
-                            mediaRefreshGeneration = generation,
                         )
                     }
                 }
             }
         }
 
-        // Phase 1 — the probe fails and is memoized; the box stays the 16 sp cold square.
+        // Phase 1 — the probe fails and settles on the ledger; the box stays the 16 sp cold square.
         composeTestRule.waitUntil(timeoutMillis = 5_000) {
-            cache.isFailureFresh(ghostUrl, System.currentTimeMillis())
+            ledger.isFailedFresh(ghostUrl, MediaAttemptKind.PROBE, System.currentTimeMillis())
         }
+        composeTestRule.waitForIdle()
         val coldHeight = composeTestRule.onNodeWithContentDescription("photo").getBoundsInRoot().height
         assertTrue(
             "cold ghost box must stay around the one-line square (was $coldHeight)",
             coldHeight <= 24.dp,
         )
 
-        // Phase 2 — the outage recovers, the user pulls to refresh: the screen clears the memoized
-        // failures FIRST, then bumps the generation (the production order in TopicContent).
+        // Phase 2 — the outage recovers, the user pulls to refresh: the screen retries the failed
+        // urls of its posts through the scoped ledger seam (the #960 production path).
         installLoader(serveGhost = true)
         composeTestRule.waitForIdle()
         val requestsBeforeRefresh = ghostRequestCount()
         composeTestRule.runOnIdle {
-            cache.clearFailures()
-            generation++
+            ledger.retryFailedUrls(setOf(ghostUrl))
         }
-        // Apply the recomposition so the keyed measure effect actually relaunches — under
-        // Robolectric, waitUntil's polling alone does not reliably drive that application.
+        // Apply the recomposition so the generation-keyed measure effect actually relaunches —
+        // under Robolectric, waitUntil's polling alone does not reliably drive that application.
         composeTestRule.waitForIdle()
 
         // Same composition (nothing was disposed) : the paragraph re-probes, the box grows.
@@ -151,9 +150,9 @@ class PostRendererGhostImageRecoveryTest {
             grownHeight > 60.dp,
         )
 
-        // Painter proof (Sol gate r1) : the refresh must trigger BOTH the re-probe and a fresh
-        // painter load — ≥ 2 new loader requests for the URL. Without key(generation) the stuck
-        // error painter never re-requests and only the probe (+1) fires.
+        // Painter proof (Sol gate r1) : the retry must trigger BOTH the re-probe and a fresh
+        // painter load — ≥ 2 new loader requests for the URL. Without the recreated painter
+        // attempt the stuck error painter never re-requests and only the probe (+1) fires.
         composeTestRule.waitUntil(timeoutMillis = 5_000) {
             ghostRequestCount() >= requestsBeforeRefresh + 2
         }

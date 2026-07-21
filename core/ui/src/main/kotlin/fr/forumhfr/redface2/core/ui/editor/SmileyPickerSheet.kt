@@ -51,6 +51,7 @@ import fr.forumhfr.redface2.core.model.BUILTIN_HFR_SMILEYS
 import fr.forumhfr.redface2.core.model.EditorSmiley
 import fr.forumhfr.redface2.core.model.EditorSmileySource
 import fr.forumhfr.redface2.core.ui.post.LocalIntrinsicMediaSizeCache
+import fr.forumhfr.redface2.core.ui.post.LocalMediaAttemptLedger
 import fr.forumhfr.redface2.core.ui.post.PixelSize
 import fr.forumhfr.redface2.core.ui.post.intrinsicSmileyDisplaySize
 import fr.forumhfr.redface2.core.ui.post.measureAndCacheIntrinsicMediaSize
@@ -263,12 +264,17 @@ private fun SmileyCell(smiley: EditorSmiley, onClick: () -> Unit) {
     // (known ~16 px sprites, same contract as the posts). The cache read is a tracked snapshot
     // read : the cell recomposes at the measured size the moment the probe lands.
     val sizeCache = LocalIntrinsicMediaSizeCache.current
+    // #960 — the shared measurement seam settles probe outcomes on the ambient attempt ledger
+    // (single source of truth for failures) ; the picker keeps its fire-once effect, the ledger's
+    // TTL/generations only matter to the posts' retry pipeline.
+    val ledger = LocalMediaAttemptLedger.current
     val platformContext = LocalPlatformContext.current
     if (smiley.source == EditorSmileySource.WIKI) {
         LaunchedEffect(smiley.imageUrl) {
             measureAndCacheIntrinsicMediaSize(
                 url = smiley.imageUrl,
                 cache = sizeCache,
+                ledger = ledger,
                 context = platformContext,
                 imageLoader = SingletonImageLoader.get(platformContext),
             )

@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.ui.post
 
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.snapshots.SnapshotStateMap
+import androidx.compose.runtime.staticCompositionLocalOf
 
 /** #960 (§6) — the two independent attempt axes of a media URL. */
 internal enum class MediaAttemptKind { PROBE, PAINTER }
@@ -65,6 +66,10 @@ internal class MediaAttemptLedger(
         return nowMillis - failed.atMillis < failureTtlMillis
     }
 
+    /** True when [kind] settled as a success — terminal, drives the "render from cache" branch. */
+    fun hasSucceeded(url: String, kind: MediaAttemptKind): Boolean =
+        entries[url]?.axis(kind) == AxisState.Succeeded
+
     /**
      * Atomically grants THE single attempt of ([url], [generation], [kind]). Denied when the
      * generation is stale or the axis already carries any state (in-flight, failed, succeeded).
@@ -78,19 +83,26 @@ internal class MediaAttemptLedger(
             true
         }
 
-    /** Settles a success — terminal for the axis. A stale-generation settlement is discarded. */
+    /**
+     * Settles a success — terminal for the axis. A stale-generation settlement is discarded; a
+     * settlement for an unknown URL creates its entry (render-time writers never reserve — their
+     * attempt is always current, e.g. the smiley error slot).
+     */
     fun settleSuccess(url: String, generation: Int, kind: MediaAttemptKind) {
         synchronized(lock) {
-            val entry = entries[url] ?: return
+            val entry = entries[url] ?: UrlEntry()
             if (entry.generation != generation) return
             entries[url] = entry.withAxis(kind, AxisState.Succeeded)
         }
     }
 
-    /** Settles a failure (starts its TTL). A stale-generation settlement is discarded. */
+    /**
+     * Settles a failure (starts its TTL). A stale-generation settlement is discarded; an unknown
+     * URL creates its entry (render-time writers never reserve).
+     */
     fun settleFailure(url: String, generation: Int, kind: MediaAttemptKind, nowMillis: Long) {
         synchronized(lock) {
-            val entry = entries[url] ?: return
+            val entry = entries[url] ?: UrlEntry()
             if (entry.generation != generation) return
             entries[url] = entry.withAxis(kind, AxisState.Failed(nowMillis))
         }
@@ -116,6 +128,22 @@ internal class MediaAttemptLedger(
         )
         entries[url] = advanced
         advanced.generation
+    }
+
+    /**
+     * Rolls back a reservation whose attempt was CANCELLED before settling (effect disposed,
+     * screen left) — a cancelled try is not a try, the axis returns to untried so a later
+     * occurrence may attempt again. Only the exact in-flight state of the SAME generation is
+     * rolled back: a fresh generation's state (reopened, re-attempted, settled) is never
+     * clobbered by a late rollback (lock #5).
+     */
+    fun rollbackReservation(url: String, generation: Int, kind: MediaAttemptKind) {
+        synchronized(lock) {
+            val entry = entries[url] ?: return
+            val heldReservation = entry.generation == generation &&
+                entry.axis(kind) == AxisState.InFlight(generation)
+            if (heldReservation) entries[url] = entry.withAxis(kind, AxisState.Untried)
+        }
     }
 
     /**
@@ -156,3 +184,19 @@ internal class MediaAttemptLedger(
         const val FAILURE_TTL_MILLIS = 60_000L
     }
 }
+
+/**
+ * Process-wide default ledger. Like [ProcessIntrinsicMediaSizeCache] it lives above the
+ * composition (attempt memory survives recomposition, LazyColumn recycling and navigation) and
+ * does NOT survive process death — acceptable, a fresh process retries everything once anyway.
+ */
+internal object ProcessMediaAttemptLedger {
+    val instance = MediaAttemptLedger()
+}
+
+/**
+ * #960 (§6) — exposes the [MediaAttemptLedger] to the post renderer. Defaults to the process-wide
+ * singleton so no wiring is required at the app entry point; tests inject a fresh instance via
+ * `CompositionLocalProvider` for deterministic attempt counting.
+ */
+internal val LocalMediaAttemptLedger = staticCompositionLocalOf { ProcessMediaAttemptLedger.instance }

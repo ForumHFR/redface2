@@ -145,6 +145,56 @@ class MediaAttemptLedgerTest {
         assertFalse("the succeeded painter is terminal", l.tryReserve(url, advanced, MediaAttemptKind.PAINTER))
     }
 
+    // ---------- lectures d'état pour le gate painter (P1b) ----------
+
+    @Test
+    fun `hasSucceeded reads the terminal axis state`() {
+        val l = ledger()
+        val gen = l.generationOf(url)
+        assertFalse(l.hasSucceeded(url, MediaAttemptKind.PAINTER))
+        l.tryReserve(url, gen, MediaAttemptKind.PAINTER)
+        assertFalse("in-flight is not succeeded", l.hasSucceeded(url, MediaAttemptKind.PAINTER))
+        l.settleSuccess(url, gen, MediaAttemptKind.PAINTER)
+        assertTrue(l.hasSucceeded(url, MediaAttemptKind.PAINTER))
+        assertFalse("axes are independent", l.hasSucceeded(url, MediaAttemptKind.PROBE))
+    }
+
+    @Test
+    fun `a render-time settlement without a reservation creates the entry`() {
+        // The smiley error slot settles at render time (its painter attempt is always current,
+        // never reserved) — the settlement must not be silently dropped for an unknown URL.
+        val l = ledger()
+        l.settleFailure(url, l.generationOf(url), MediaAttemptKind.PAINTER, nowMillis = 1_000L)
+        assertTrue(l.isFailedFresh(url, MediaAttemptKind.PAINTER, nowMillis = 2_000L))
+    }
+
+    // ---------- rollback d'annulation (verrou #5 : personne ne reste suspendu) ----------
+
+    @Test
+    fun `a cancelled attempt rolls back its reservation - a cancelled try is not a try`() {
+        val l = ledger()
+        val gen = l.generationOf(url)
+        assertTrue(l.tryReserve(url, gen, MediaAttemptKind.PROBE))
+        // The winning coroutine is cancelled before settling (screen left, effect disposed):
+        // its finally MUST roll the axis back so the URL is not in-flight forever.
+        l.rollbackReservation(url, gen, MediaAttemptKind.PROBE)
+        assertTrue("the next occurrence may attempt again", l.tryReserve(url, gen, MediaAttemptKind.PROBE))
+    }
+
+    @Test
+    fun `a stale rollback never clobbers a fresh generation's state`() {
+        val l = ledger()
+        val gen = l.generationOf(url)
+        assertTrue(l.tryReserve(url, gen, MediaAttemptKind.PAINTER))
+        l.retryUrl(url) // fresh generation reopened the axis already
+        val fresh = l.generationOf(url)
+        assertTrue(l.tryReserve(url, fresh, MediaAttemptKind.PAINTER))
+        l.settleSuccess(url, fresh, MediaAttemptKind.PAINTER)
+        // The old generation's late rollback must be discarded (the axis is succeeded now).
+        l.rollbackReservation(url, gen, MediaAttemptKind.PAINTER)
+        assertFalse(l.tryReserve(url, fresh, MediaAttemptKind.PAINTER))
+    }
+
     // ---------- retry manuel + refresh scopé (verrou #1) ----------
 
     @Test

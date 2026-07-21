@@ -61,6 +61,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
@@ -283,44 +284,29 @@ fun PostRenderer(
     // quote's header. Null (default) keeps the header inert — only the topic reading surface wires
     // it (the editor preview, MP threads and signatures have nowhere meaningful to navigate).
     onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
-    // #813 — screen-owned retry generation for inline media. The hosting screen bumps it on an
-    // explicit user refresh (AFTER clearPostMediaMeasurementFailures()) so paragraphs re-probe
-    // failed measurements and inline painters restart — a ghost image (16 sp cold box / stuck
-    // error painter) becomes recoverable without leaving the screen. Default 0 = never bumped,
-    // the exact previous behaviour for surfaces without a refresh affordance (preview, MP,
-    // signatures). Explicit parameter at this entry point (it is screen state, not ambient
-    // context); distributed below via a private CompositionLocal like the file's other
-    // cross-cutting render context, so the recursive quote/spoiler chain stays untouched.
-    mediaRefreshGeneration: Int = 0,
+    // #813/#960 — media failure/retry state is NOT a parameter anymore: the per-URL
+    // MediaAttemptLedger (ambient, process-wide) carries it, and the hosting screen retries
+    // through the scoped public seam `retryFailedPostMedia(urls)` instead of the pre-#960
+    // screen-owned refresh-generation bump.
 ) {
-    CompositionLocalProvider(LocalMediaRefreshGeneration provides mediaRefreshGeneration) {
-        if (selectable) {
-            // #281 — allow selecting / copying a post's text. The SelectionContainer is wrapped at this
-            // ENTRY POINT only, never inside the recursive PostBlocksRenderer (Quote/Spoiler): a nested
-            // SelectionContainer silently breaks selection. Links (LinkAnnotation.Url) stay tappable
-            // inside a SelectionContainer; inline media carry a U+FFFC placeholder that can pollute a
-            // copied selection spanning them (known, acceptable limitation).
-            SelectionContainer(modifier = modifier) {
-                PostBlocksRenderer(blocks = content.blocks, quoteDepth = 0, onGoToCitedPost = onGoToCitedPost)
-            }
-        } else {
-            PostBlocksRenderer(
-                blocks = content.blocks,
-                modifier = modifier,
-                quoteDepth = 0,
-                onGoToCitedPost = onGoToCitedPost,
-            )
+    if (selectable) {
+        // #281 — allow selecting / copying a post's text. The SelectionContainer is wrapped at this
+        // ENTRY POINT only, never inside the recursive PostBlocksRenderer (Quote/Spoiler): a nested
+        // SelectionContainer silently breaks selection. Links (LinkAnnotation.Url) stay tappable
+        // inside a SelectionContainer; inline media carry a U+FFFC placeholder that can pollute a
+        // copied selection spanning them (known, acceptable limitation).
+        SelectionContainer(modifier = modifier) {
+            PostBlocksRenderer(blocks = content.blocks, quoteDepth = 0, onGoToCitedPost = onGoToCitedPost)
         }
+    } else {
+        PostBlocksRenderer(
+            blocks = content.blocks,
+            modifier = modifier,
+            quoteDepth = 0,
+            onGoToCitedPost = onGoToCitedPost,
+        )
     }
 }
-
-/**
- * #813 — internal distribution of [PostRenderer]'s `mediaRefreshGeneration` parameter to the
- * paragraph measure effect and the inline image painters, across the recursive quote/spoiler
- * renderers. `compositionLocalOf` (not static): the value changes at runtime on user refresh and
- * only the readers (media paragraphs) must recompose.
- */
-private val LocalMediaRefreshGeneration = compositionLocalOf { 0 }
 
 @Composable
 private fun PostBlocksRenderer(
@@ -399,27 +385,32 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
 
     // #416 — a smiley URL with a FRESH FAILURE on record is DEAD (HFR's BBCode engine turns any
     // unknown `:code:` into an <img> that 404s) : its token replaces the sprite as body-sized text.
-    // Failures land from two writers — the #175 measurement effect below (perso smileys) and the
-    // render-time error slot of smileyInlineContent (builtins, which are deliberately not measured).
-    // isFailureFresh reads the same SnapshotStateMap as the sizes, so a failure landing recomposes
-    // this block ; the AnnotatedString stays invariant (#175 pivot), only the inline-content map
-    // and the placeholder box change.
+    // Failures land from two writers — the #175 measurement effect below (perso smileys, PROBE
+    // axis) and the render-time error slot of smileyInlineContent (builtins, which are
+    // deliberately not measured — PAINTER axis) — so BOTH axes of the #960 ledger are consulted.
+    // The reads track the ledger's SnapshotStateMap, so a failure landing recomposes this block ;
+    // the AnnotatedString stays invariant (#175 pivot), only the inline-content map and the
+    // placeholder box change.
+    val ledger = LocalMediaAttemptLedger.current
     val allSmileyUrls = remember(inlines) { collectSmileyUrls(inlines) }
-    val deadSmileyUrls: Set<String> =
-        allSmileyUrls.filterTo(HashSet()) { sizeCache.isFailureFresh(it, System.currentTimeMillis()) }
+    val deadSmileyUrls: Set<String> = allSmileyUrls.filterTo(HashSet()) {
+        val now = System.currentTimeMillis()
+        ledger.isFailedFresh(it, MediaAttemptKind.PROBE, now) ||
+            ledger.isFailedFresh(it, MediaAttemptKind.PAINTER, now)
+    }
 
     // Measure the not-yet-known URLs. Coil's execute() is a main-safe suspend call (it dispatches its
     // own I/O), and reuses the shared SingletonImageLoader caches the rendering AsyncImage hits — so no
-    // double network fetch. A dead URL is recorded as a failure (TTL) so it is not re-fetched.
-    // #813 — the refresh generation keys the effect too: a re-parsed page yields a structurally
-    // EQUAL `inlines` (remember keeps the same set instance), so without it the effect never
-    // relaunched on pull-to-refresh and an expired failure TTL was never even re-consulted.
+    // double network fetch. A dead URL settles a PROBE failure on the ledger (TTL) so it is not
+    // re-fetched. #813/#960 — the urls' ledger GENERATIONS key the effect (tracked reads): a
+    // re-parsed page yields a structurally EQUAL `inlines` (remember keeps the same set instance),
+    // so without them the effect never relaunched after a scoped retry bumped a failed url.
     val platformContext = LocalPlatformContext.current
-    val mediaRefreshGeneration = LocalMediaRefreshGeneration.current
-    LaunchedEffect(measurableUrls, mediaRefreshGeneration) {
+    val mediaGenerations = measurableUrls.map { ledger.generationOf(it) }
+    LaunchedEffect(measurableUrls, mediaGenerations) {
         val loader = SingletonImageLoader.get(platformContext)
         measurableUrls.forEach { url ->
-            measureAndCacheIntrinsicMediaSize(url, sizeCache, platformContext, loader)
+            measureAndCacheIntrinsicMediaSize(url, sizeCache, ledger, platformContext, loader)
         }
     }
 
@@ -1012,14 +1003,17 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
     // paragraph effect uses; the SnapshotStateMap write then recomposes this block onto the exact-box
     // path.
     val platformContext = LocalPlatformContext.current
-    // #813 parity (gate #957 r1, bloquant) : a structurally-promoted image now renders here, so
-    // the block path must honour the screen-owned refresh generation exactly like the inline
-    // path — the measure effect re-keys AND the painter node is recreated on an explicit refresh.
-    val mediaRefreshGeneration = LocalMediaRefreshGeneration.current
-    LaunchedEffect(url, sizeCache, platformContext, mediaRefreshGeneration) {
+    // #813/#960 parity (gate #957 r1, bloquant) : a structurally-promoted image renders here, so
+    // the block path must honour the ledger exactly like the inline path — the measure effect
+    // re-keys on the url's GENERATION (tracked read) and the painter attempt below is recreated
+    // on a scoped retry.
+    val ledger = LocalMediaAttemptLedger.current
+    val mediaGeneration = ledger.generationOf(url)
+    LaunchedEffect(url, sizeCache, platformContext, mediaGeneration) {
         measureAndCacheIntrinsicMediaSize(
             url = url,
             cache = sizeCache,
+            ledger = ledger,
             context = platformContext,
             imageLoader = SingletonImageLoader.get(platformContext),
         )
@@ -1135,33 +1129,57 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
                 }
                 .build()
         }
-        // #813 — key() on the refresh generation recreates the painter node on an explicit user
-        // refresh (parity with the inline path ; the remembered request may keep its instance,
-        // the painter holds the error state).
-        key(mediaRefreshGeneration) {
-        SubcomposeAsyncImage(
-            model = request,
-            // A11Y-2 (annexe a11y #876) — the HFR alt when present, otherwise the localized
-            // generic fallback; never null, never the raw URL. The error slot swaps in the
-            // contractual error wording (ImageBlockError) on the same containing node.
-            contentDescription = description?.takeIf(String::isNotBlank)
-                ?: stringResource(R.string.post_inline_image_alt),
-            contentScale = ContentScale.Fit,
-            modifier = containerModifier,
-            loading = {
-                // Both branches have an exactly-sized box (measured parity #610 OR the §6 cold
-                // slot #957), so the shimmer always fills it — the legacy min→intrinsic
-                // grow-on-load is gone with the min/max slot.
-                ImageShimmer(animated = animationsEnabled, modifier = Modifier.fillMaxSize())
-            },
-            error = { ImageBlockError(description) },
-            success = { state ->
-                // #959 (§3 GIF) — hand the Animatable behind the result to the gate; SideEffect:
-                // never write snapshot state during composition.
-                SideEffect { gifGate.onState(state) }
-                SubcomposeAsyncImageContent()
-            },
-        )
+        // #960 (§6) — the painter ATTEMPT gates the node (replaces the pre-#960 screen-wide
+        // key(refreshGeneration) bump): a fresh failure composes the §6 error state WITHOUT any
+        // painter — no network re-attempt per occurrence or recomposition — and a scoped retry
+        // recreates the attempt (its remember keys the url's generation), hence the painter.
+        val attempt = rememberPainterAttempt(url)
+        when {
+            attempt.failedFresh ->
+                // A11Y-5 — the error state keeps the reserved box (anti-CLS) and swaps in the
+                // contractual wording (post_image_error[_with_alt]) on the same containing node.
+                Box(modifier = containerModifier, contentAlignment = Alignment.Center) {
+                    ImageBlockError(description)
+                }
+
+            attempt.renderPainter -> SubcomposeAsyncImage(
+                model = request,
+                // A11Y-2 (annexe a11y #876) — the HFR alt when present, otherwise the localized
+                // generic fallback; never null, never the raw URL. The error slot swaps in the
+                // contractual error wording (ImageBlockError) on the same containing node.
+                contentDescription = description?.takeIf(String::isNotBlank)
+                    ?: stringResource(R.string.post_inline_image_alt),
+                contentScale = ContentScale.Fit,
+                modifier = containerModifier,
+                loading = {
+                    // Both branches have an exactly-sized box (measured parity #610 OR the §6 cold
+                    // slot #957), so the shimmer always fills it — the legacy min→intrinsic
+                    // grow-on-load is gone with the min/max slot.
+                    ImageShimmer(animated = animationsEnabled, modifier = Modifier.fillMaxSize())
+                },
+                error = { state ->
+                    // The settlement recomposes this node onto the failedFresh branch above; this
+                    // slot only covers the transient frame in between (same wording). SideEffect:
+                    // never write snapshot state during composition.
+                    SideEffect { attempt.onState(state) }
+                    ImageBlockError(description)
+                },
+                success = { state ->
+                    // #959 (§3 GIF) — hand the Animatable behind the result to the gate.
+                    SideEffect {
+                        gifGate.onState(state)
+                        attempt.onState(state)
+                    }
+                    SubcomposeAsyncImageContent()
+                },
+            )
+
+            else ->
+                // Grant pending (first frame) or another occurrence's attempt in flight: hold the
+                // reserved box with the loading treatment until the ledger settles.
+                Box(modifier = containerModifier) {
+                    ImageShimmer(animated = animationsEnabled, modifier = Modifier.fillMaxSize())
+                }
         }
     }
 }
@@ -1886,6 +1904,10 @@ private fun hasInlineMedia(inlines: List<PostInline>): Boolean = inlines.any { i
     }
 }
 
+// CyclomaticComplexMethod: like BlockImage above, the §3/§6/§7 sizing states × the §5 interaction
+// gates × the #960 painter-attempt gate are all contractual branches of ONE render seam —
+// splitting them would scatter the contract.
+@Suppress("CyclomaticComplexMethod")
 internal fun imageInlineContent(
     image: PostInline.InlineImage,
     box: InlineMediaBox,
@@ -1981,11 +2003,6 @@ internal fun imageInlineContent(
 
             else -> Modifier
         }
-        // #813 — key() on the refresh generation recreates the AsyncImage node on an explicit user
-        // refresh: a painter stuck in error restarts its load (the remembered request may keep its
-        // instance — the painter, not the request, holds the error state). Deliberately key()
-        // rather than betting on ImageRequest equality semantics — Compose-native, deterministic.
-        // A healthy image reloads from Coil's memory cache, so a bump costs no visible flash.
         // §4 v1.4 (#957) — content images get 4 dp of horizontal breathing on EACH side inside
         // the widened placeholder (bitmap box unchanged) ; cc-images keep their exact square.
         // #958 (§5, Sol firm reserve) : the HITBOX is the BITMAP — the 4 dp strip must stay inert.
@@ -2008,16 +2025,34 @@ internal fun imageInlineContent(
         } else {
             rememberGifAnimationGate(boxReady = box.decodeSize != null)
         }
-        key(LocalMediaRefreshGeneration.current) {
-            Box(Modifier.fillMaxSize().then(paddingModifier)) {
+        // #960 (§6) — the painter ATTEMPT gates the node (replaces the pre-#960 screen-wide
+        // key(refreshGeneration) bump): a fresh failure keeps the placeholder box WITHOUT any
+        // painter — no network re-attempt per occurrence or recomposition (P3 will put the §6
+        // error slot + manual retry here) — and a scoped retry recreates the attempt (its
+        // remember keys the url's generation), hence a fresh AsyncImage node.
+        val attempt = rememberPainterAttempt(image.url)
+        val showPainter = !attempt.failedFresh && attempt.renderPainter
+        // A11Y-2 (annexe a11y #876) — the HFR alt when present, otherwise the localized generic
+        // fallback; never null, never the raw URL. When the gate withholds the painter (fresh
+        // failure / attempt pending) the BOX carries the same description so the media never
+        // disappears from the semantics tree.
+        val alt = image.description?.takeIf(String::isNotBlank)
+            ?: stringResource(R.string.post_inline_image_alt)
+        Box(
+            Modifier
+                .fillMaxSize()
+                .then(paddingModifier)
+                .then(if (showPainter) Modifier else Modifier.semantics { contentDescription = alt }),
+        ) {
+            if (showPainter) {
                 AsyncImage(
                     model = request,
-                    // A11Y-2 (annexe a11y #876) — the HFR alt when present, otherwise the
-                    // localized generic fallback; never null, never the raw URL.
-                    contentDescription = image.description?.takeIf(String::isNotBlank)
-                        ?: stringResource(R.string.post_inline_image_alt),
+                    contentDescription = alt,
                     contentScale = PostMediaDisplayPolicy.inlineImageContentScale,
-                    onState = gifGate?.onState,
+                    onState = { state ->
+                        attempt.onState(state)
+                        gifGate?.onState?.invoke(state)
+                    },
                     modifier = Modifier
                         .fillMaxSize()
                         .then(gifGate?.modifier ?: Modifier)
@@ -2110,15 +2145,17 @@ internal fun smileyInlineContent(
             error = {
                 // #416 — first failure of a sprite that was NOT known dead when this content was
                 // built (builtins are never measured ; a perso can die between measure and render).
-                // Record the failure so the paragraph recomposes onto the dead-token path above
-                // (readable, body-sized) ; the tiny ellipsised token below is only the transient
-                // frame between this error and that recomposition.
-                val cache = LocalIntrinsicMediaSizeCache.current
+                // Record the failure (#960: PAINTER axis of the ledger — a render-time writer is
+                // always current, no reservation) so the paragraph recomposes onto the dead-token
+                // path above (readable, body-sized) ; the tiny ellipsised token below is only the
+                // transient frame between this error and that recomposition.
+                val ledger = LocalMediaAttemptLedger.current
                 val url = smiley.imageUrl
                 if (url != null) {
                     LaunchedEffect(url) {
-                        if (!cache.isFailureFresh(url, System.currentTimeMillis())) {
-                            cache.putFailure(url, System.currentTimeMillis())
+                        val now = System.currentTimeMillis()
+                        if (!ledger.isFailedFresh(url, MediaAttemptKind.PAINTER, now)) {
+                            ledger.settleFailure(url, ledger.generationOf(url), MediaAttemptKind.PAINTER, now)
                         }
                     }
                 }

@@ -96,13 +96,17 @@ class PostGifAnimationGateTest {
 
     private fun setGifPost(
         cache: IntrinsicMediaSizeCache = measuredCache(),
+        ledger: MediaAttemptLedger = MediaAttemptLedger(),
         topSpacerDp: Int = 0,
         lifecycleOwner: LifecycleOwner? = null,
     ) {
         composeTestRule.setContent {
             val content = @androidx.compose.runtime.Composable {
                 RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                    CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides cache) {
+                    CompositionLocalProvider(
+                        LocalIntrinsicMediaSizeCache provides cache,
+                        LocalMediaAttemptLedger provides ledger,
+                    ) {
                         Column {
                             if (topSpacerDp > 0) Spacer(Modifier.height(topSpacerDp.dp))
                             PostRenderer(
@@ -143,11 +147,12 @@ class PostGifAnimationGateTest {
     fun `a cold content gif does not animate before its first native pair`() {
         val drawable = FakeAnimatedDrawable()
         installLoader(drawable)
-        // Failure-seeded cache: the measurement never lands, the box stays the cold slot.
-        val cache = DefaultIntrinsicMediaSizeCache().apply {
-            putFailureIfEpoch(gifUrl, System.currentTimeMillis(), failureEpoch())
+        // Failure-seeded LEDGER (probe axis, #960): the measurement never lands, the box stays
+        // the cold slot — the painter axis stays open so the gif still loads into it.
+        val ledger = MediaAttemptLedger().apply {
+            settleFailure(gifUrl, generationOf(gifUrl), MediaAttemptKind.PROBE, System.currentTimeMillis())
         }
-        setGifPost(cache = cache)
+        setGifPost(cache = DefaultIntrinsicMediaSizeCache(), ledger = ledger)
         composeTestRule.waitForIdle()
         assertFalse("a gif without a final box must not animate", drawable.running)
     }
