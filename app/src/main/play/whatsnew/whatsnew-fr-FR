@@ -1,3 +1,3 @@
-Redface 2 v0.34.3 — dev.
+Redface 2 v0.34.4 — dev.
 
-- Passe images, tailles fines : plus aucun flou (décodage à la taille affichée réelle de l'écran), plus d'agrandissement artificiel — chaque image s'affiche au plus à sa taille native. Les GIF ne s'animent que visibles à l'écran (économie batterie), et les dimensions des grandes photos ne sont plus tronquées.
+- Passe images, états d'erreur : une image morte affiche désormais un vrai état d'erreur (plus de case vide silencieuse) et se retente d'un simple tap « Réessayer ». Le tirer-pour-rafraîchir ne recharge que les images en échec. Les SVG s'affichent ; l'AVIF suit le décodeur de votre appareil (état d'erreur propre sinon).

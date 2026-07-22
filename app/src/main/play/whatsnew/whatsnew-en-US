@@ -1,3 +1,3 @@
-Redface 2 v0.34.3 — dev.
+Redface 2 v0.34.4 — dev.
 
-- Images pass, fine sizing: no more blur (decoding at the real on-screen size), no artificial upscaling — every image renders at its native size at most. GIFs only animate while visible on screen (battery friendly), and large photos no longer get their dimensions clipped.
+- Image pass, error states: a dead image now shows a real error slot (no more silent empty box) and retries with a single "Retry" tap. Pull-to-refresh only reloads the images that actually failed. SVGs now render; AVIF follows your device decoder (clean error state otherwise).
