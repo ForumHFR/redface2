@@ -14,47 +14,29 @@ import androidx.compose.ui.unit.IntSize
  * lands) triggers recomposition of the paragraphs reading that URL, which then rebuild their
  * placeholders at the final size.
  *
- * Failures are memoized too (with a TTL): a dead host / 404 must not be re-fetched on every
- * recomposition or LazyColumn re-entry — without this the cold-cache placeholder path would flood
- * the network. After [failureTtlMillis] a failed URL may be retried (a transient outage recovers).
+ * SUCCESSES ONLY (#960): measurement FAILURES — their TTL, their retry generations, their
+ * clear-on-refresh protocol — live in the [MediaAttemptLedger], the single source of truth for
+ * every media attempt (probe AND painter axes). The pre-#960 failure memoization this cache
+ * carried (putFailure / failure epoch / clearFailures) is gone with it.
  *
  * Lives in `:core:ui` (no Hilt — the module has no DI) and is exposed via a process-wide singleton +
  * a CompositionLocal so tests can inject a pre-filled fake. Not persisted (Room/DataStore): the
  * Coil disk cache makes a cold-start re-measure cheap, and `PostContent` stays frozen.
  */
 internal interface IntrinsicMediaSizeCache {
-    /** Measured native size for [url], or `null` if not yet measured (or only a failure is recorded). */
+    /** Measured native size for [url], or `null` if not yet measured. */
     fun get(url: String): IntSize?
-
-    /** `true` when a measurement failure for [url] is still within [failureTtlMillis] of [nowMillis]. */
-    fun isFailureFresh(url: String, nowMillis: Long): Boolean
 
     fun putSuccess(url: String, size: IntSize)
 
     /**
-     * Unconditional failure record — for RENDER-TIME writers only (the smiley error slot): their
-     * painter attempt is always current, a disposed painter never fires late. Async probes must
-     * use [putFailureIfEpoch] instead.
+     * #960 P2 (§3/§6) — atomic first-pair deposit: stores [size] ONLY when [url] has no entry
+     * yet and reports whether it did. The FIRST valid oriented pair (probe or painter, G2) fixes
+     * the box; a later disagreeing pair must never apply a second correction. Both production
+     * writers (the probe seam and the painter's G2 settlement) go through this, so their race
+     * cannot overwrite the authority.
      */
-    fun putFailure(url: String, nowMillis: Long)
-
-    /**
-     * #813 — monotonic epoch bumped by [clearFailures]. An async probe captures it BEFORE probing
-     * and hands it back to [putFailureIfEpoch] : a probe that was already in flight when the user
-     * refreshed (its cancellation only lands at the next recomposition) can then no longer deposit
-     * a stale failure on top of the clear — the ghost would otherwise survive the refresh.
-     */
-    fun failureEpoch(): Int
-
-    /** Records the failure ONLY when no [clearFailures] happened since [epoch] was captured. */
-    fun putFailureIfEpoch(url: String, nowMillis: Long, epoch: Int)
-
-    /**
-     * #813 — drop every memoized failure (successes are kept: native sizes are immutable) and bump
-     * the failure epoch. Called on an explicit user refresh so a transient outage does not leave
-     * ghost images pinned to the cold fallback box until the TTL happens to be re-consulted.
-     */
-    fun clearFailures()
+    fun putSuccessIfAbsent(url: String, size: IntSize): Boolean
 }
 
 /**
@@ -66,56 +48,18 @@ internal interface IntrinsicMediaSizeCache {
  */
 internal class DefaultIntrinsicMediaSizeCache(
     private val maxEntries: Int = DEFAULT_MAX_ENTRIES,
-    private val failureTtlMillis: Long = DEFAULT_FAILURE_TTL_MILLIS,
 ) : IntrinsicMediaSizeCache {
 
-    private sealed interface Entry {
-        data class Success(val size: IntSize) : Entry
-        data class Failure(val atMillis: Long) : Entry
-    }
-
-    private val entries = mutableStateMapOf<String, Entry>()
+    private val entries = mutableStateMapOf<String, IntSize>()
     private val insertionOrder = ArrayDeque<String>()
     private val lock = Any()
 
-    // #813 — bumped under [lock] by clearFailures; compared under the SAME lock in
-    // putFailureIfEpoch so "clear then stale write" can never interleave.
-    private var epoch = 0
+    override fun get(url: String): IntSize? = entries[url]
 
-    override fun get(url: String): IntSize? = (entries[url] as? Entry.Success)?.size
-
-    override fun isFailureFresh(url: String, nowMillis: Long): Boolean {
-        val failure = entries[url] as? Entry.Failure ?: return false
-        return nowMillis - failure.atMillis < failureTtlMillis
-    }
-
-    override fun putSuccess(url: String, size: IntSize) = put(url, Entry.Success(size))
-
-    override fun putFailure(url: String, nowMillis: Long) = put(url, Entry.Failure(nowMillis))
-
-    override fun failureEpoch(): Int = synchronized(lock) { epoch }
-
-    override fun putFailureIfEpoch(url: String, nowMillis: Long, epoch: Int) {
-        synchronized(lock) {
-            if (this.epoch == epoch) put(url, Entry.Failure(nowMillis))
-        }
-    }
-
-    override fun clearFailures() {
-        synchronized(lock) {
-            epoch++
-            val failed = entries.filterValues { it is Entry.Failure }.keys
-            failed.forEach { url ->
-                entries.remove(url)
-                insertionOrder.remove(url)
-            }
-        }
-    }
-
-    private fun put(url: String, entry: Entry) {
+    override fun putSuccess(url: String, size: IntSize) {
         synchronized(lock) {
             if (!entries.containsKey(url)) insertionOrder.addLast(url)
-            entries[url] = entry
+            entries[url] = size
             while (insertionOrder.size > maxEntries) {
                 val evicted = insertionOrder.removeFirst()
                 entries.remove(evicted)
@@ -123,9 +67,16 @@ internal class DefaultIntrinsicMediaSizeCache(
         }
     }
 
+    override fun putSuccessIfAbsent(url: String, size: IntSize): Boolean {
+        synchronized(lock) {
+            if (entries.containsKey(url)) return false
+            putSuccess(url, size)
+            return true
+        }
+    }
+
     internal companion object {
         const val DEFAULT_MAX_ENTRIES = 1024
-        const val DEFAULT_FAILURE_TTL_MILLIS = 60_000L
     }
 }
 
@@ -143,14 +94,4 @@ internal object ProcessIntrinsicMediaSizeCache :
  */
 internal val LocalIntrinsicMediaSizeCache = staticCompositionLocalOf<IntrinsicMediaSizeCache> {
     ProcessIntrinsicMediaSizeCache
-}
-
-/**
- * #813 — public seam for the hosting screens (:feature modules cannot see the internal cache):
- * drop the memoized measurement failures so the next measure pass re-probes them. Call it on an
- * explicit user refresh, BEFORE bumping the media-refresh generation passed to [PostRenderer] —
- * clearing after the bump would let the relaunched effect re-read a still-fresh failure.
- */
-fun clearPostMediaMeasurementFailures() {
-    ProcessIntrinsicMediaSizeCache.clearFailures()
 }

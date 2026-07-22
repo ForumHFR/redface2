@@ -552,8 +552,12 @@ class PostRendererImageLongPressTest {
         }
 
         // Same rationale as the no-actions case: the missing OnLongClick semantics pins the
-        // ineligible URL's inertness without poking the base selection machinery.
-        composeTestRule.onNodeWithContentDescription("photo")
+        // ineligible URL's inertness without poking the base selection machinery. The data: url
+        // is not served by the fake loader, so the node is the #960 P3 ERROR slot (whose single
+        // action is the per-URL retry — never the §5 long-press menu pinned here).
+        val errorWithAlt = ApplicationProvider.getApplicationContext<android.content.Context>()
+            .getString(fr.forumhfr.redface2.core.ui.R.string.post_image_error_with_alt, "photo")
+        composeTestRule.onNodeWithContentDescription(errorWithAlt)
             .assert(SemanticsMatcher.keyNotDefined(SemanticsActions.OnLongClick))
 
         assertNull(received)

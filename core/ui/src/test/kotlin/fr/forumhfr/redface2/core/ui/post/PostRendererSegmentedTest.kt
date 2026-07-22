@@ -2,9 +2,6 @@ package fr.forumhfr.redface2.core.ui.post
 
 import android.content.Context
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
@@ -429,27 +426,30 @@ class PostRendererSegmentedTest {
 
     @Test
     fun `explicit refresh recovers a dead BLOCK image - probe, painter and exact box`() {
-        // Parité #813 côté bloc (gate r1) : le même chemin clear + bump que l'inline
+        // Parité #813/#960 côté bloc (gate r1) : le même retry scopé que l'inline
         // (PostRendererGhostImageRecoveryTest) doit relancer la probe ET recréer le painter.
         val deadUrl = "https://exemple.invalid/morte.png"
         installBlockLoader(serve = false, url = deadUrl)
         val cache = DefaultIntrinsicMediaSizeCache()
-        var generation by mutableIntStateOf(0)
+        val ledger = MediaAttemptLedger()
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides cache) {
-                    PostRenderer(
-                        content = paragraph(img(deadUrl, "retry")),
-                        mediaRefreshGeneration = generation,
-                    )
+                CompositionLocalProvider(
+                    LocalIntrinsicMediaSizeCache provides cache,
+                    LocalMediaAttemptLedger provides ledger,
+                ) {
+                    PostRenderer(content = paragraph(img(deadUrl, "retry")))
                 }
             }
         }
-        // Round 1 — échec RÉEL : probe memoïsée en échec, painter en erreur → slot d'erreur
-        // visible dans la boîte cold §6.
+        // Round 1 — échec RÉEL réglé sur les DEUX axes du ledger : probe en échec (boîte cold
+        // conservée) et painter en échec → slot d'erreur §6 visible dans la boîte cold.
         composeTestRule.waitUntil(timeoutMillis = 5_000) {
-            cache.isFailureFresh(deadUrl, System.currentTimeMillis())
+            val now = System.currentTimeMillis()
+            ledger.isFailedFresh(deadUrl, MediaAttemptKind.PROBE, now) &&
+                ledger.isFailedFresh(deadUrl, MediaAttemptKind.PAINTER, now)
         }
+        composeTestRule.waitForIdle()
         composeTestRule.onNodeWithText("Image indisponible", substring = true).assertExists()
         // Bounds via le seam : en état d'erreur le slot remplace le contenu décrit.
         // #959/[AMENDEMENT-v1.5-1] — fImage = 0,95 : 360×0,95 = 342, h = 0,75×342 = 256,5.
@@ -457,13 +457,13 @@ class PostRendererSegmentedTest {
         assertEquals(342f, cold.w, 2f)
         assertEquals(256.5f, cold.h, 2f)
 
-        // Round 2 — l'hébergeur revient, refresh explicite : clear PUIS bump (ordre production).
+        // Round 2 — l'hébergeur revient, refresh explicite : le retry scopé du ledger (#960)
+        // rouvre les deux axes de la SEULE url en échec.
         installBlockLoader(serve = true, url = deadUrl)
         composeTestRule.waitForIdle()
         val requestsBefore = requestedUrls.count { it == deadUrl }
         composeTestRule.runOnIdle {
-            cache.clearFailures()
-            generation++
+            ledger.retryFailedUrls(setOf(deadUrl))
         }
         composeTestRule.waitForIdle()
         composeTestRule.waitUntil(timeoutMillis = 5_000) { cache.get(deadUrl) != null }
@@ -476,7 +476,7 @@ class PostRendererSegmentedTest {
         assertEquals(66.7f, healed.w, 2f)
         assertEquals(33.3f, healed.h, 2f)
         composeTestRule.onNodeWithText("Image indisponible", substring = true).assertDoesNotExist()
-        // ≥ 2 nouvelles requêtes : la re-probe ET le painter recréé par key(generation).
+        // ≥ 2 nouvelles requêtes : la re-probe ET le painter recréé (attempt re-keyé par génération).
         composeTestRule.waitUntil(timeoutMillis = 5_000) {
             requestedUrls.count { it == deadUrl } >= requestsBefore + 2
         }

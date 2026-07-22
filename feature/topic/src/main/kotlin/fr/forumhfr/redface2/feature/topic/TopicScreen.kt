@@ -127,7 +127,8 @@ import fr.forumhfr.redface2.core.ui.post.PostImageActions
 import fr.forumhfr.redface2.core.ui.post.PostImageTarget
 import fr.forumhfr.redface2.core.ui.post.PostListScaffold
 import fr.forumhfr.redface2.core.ui.post.PostRenderer
-import fr.forumhfr.redface2.core.ui.post.clearPostMediaMeasurementFailures
+import fr.forumhfr.redface2.core.ui.post.collectPostMediaUrls
+import fr.forumhfr.redface2.core.ui.post.retryFailedPostMedia
 import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 import fr.forumhfr.redface2.core.ui.theme.LocalIgnoreInlineColors
@@ -966,15 +967,14 @@ internal fun TopicContent(
     // the title falls back to the cached hint (or a generic label) and the counter to « Chargement… »
     // — never a page total that has not been parsed yet (#622).
     val loaded = state.mode as? TopicUiState.Mode.Loaded
-    // #813 — media-retry generation for the post renderers, bumped on each EXPLICIT user refresh
-    // (pull-to-refresh, double-tap) so ghost inline images re-probe (failed measure) and restart
-    // their painter. Failures are cleared BEFORE the bump (Sol framing) — the other order would let
-    // the relaunched measure effect re-read a still-fresh failure and skip the probe. Saveable so a
-    // config change mid-session keeps the count monotonic (a fresh composition retries on its own).
-    var mediaRefreshGeneration by rememberSaveable { mutableIntStateOf(0) }
+    // #813/#960 — an EXPLICIT user refresh (pull-to-refresh, double-tap) retries the media that
+    // FAILED among the displayed posts' urls, strictly scoped (Sol r3, lock #1): the ledger bumps
+    // only the failed urls' generations, so healthy images are never re-probed nor re-decoded.
+    // Replaces the pre-#960 process-wide clear + screen-owned refresh-generation bump.
     val refreshWithMediaRetry = {
-        clearPostMediaMeasurementFailures()
-        mediaRefreshGeneration++
+        loaded?.let { mode ->
+            retryFailedPostMedia(mode.topic.posts.flatMapTo(HashSet()) { collectPostMediaUrls(it.content) })
+        }
         onIntent(TopicIntent.Refresh)
     }
     // #411 — bottom action cluster hides on scroll-down, re-appears on scroll-up (RF1 parity).
@@ -1226,8 +1226,6 @@ internal fun TopicContent(
                                 },
                                 pollManualExpanded = pollManualExpanded,
                                 onPollExpansionChanged = onPollExpansionChanged,
-                                // #813 — explicit-refresh retry for ghost inline images.
-                                mediaRefreshGeneration = mediaRefreshGeneration,
                             )
                         }
                         PullToRefreshDefaults.Indicator(
@@ -1764,8 +1762,6 @@ private fun TopicLoadedContent(
     // callback recording a tap on the poll card. Threaded down to the header card's poll.
     pollManualExpanded: Boolean? = null,
     onPollExpansionChanged: (Boolean) -> Unit = {},
-    /** #813 — screen-owned media-retry generation, threaded to each card's body renderer. */
-    mediaRefreshGeneration: Int = 0,
 ) {
     // Scroll-anchor (#104 follow-up): the post the reader was sent to (quote link, deep link, last-read).
     // Marked by tinting ONLY its identity band with tertiaryContainer (XaTriX: the left-rail attempt was
@@ -2079,8 +2075,6 @@ private fun TopicLoadedContent(
                         onToggleMultiQuote = multiQuoteToggle,
                         // #831 — long-press on a post image opens the image contextual menu.
                         onImageLongPress = postImageActions.onLongPress,
-                        // #813 — explicit-refresh retry for ghost inline images.
-                        mediaRefreshGeneration = mediaRefreshGeneration,
                     )
                 }
                 if (showLastReadMarker) {
@@ -2708,13 +2702,6 @@ internal fun TopicPostCard(
      * Null (previews/tests) leaves every image inert.
      */
     onImageLongPress: ((PostImageTarget) -> Unit)? = null,
-    /**
-     * #813 — screen-owned media-retry generation, forwarded to the BODY [PostRenderer] : bumped by
-     * the screen on an explicit user refresh so ghost inline images (failed measure/painter)
-     * re-probe without leaving the screen. The signature render keeps the default 0 (inert images,
-     * same stance as [onImageLongPress]). Default 0 for previews/tests.
-     */
-    mediaRefreshGeneration: Int = 0,
 ) {
     // #287 — structural spacing from the active density preset (Comfort = the historical rhythm).
     val m = LocalDisplayMetrics.current
@@ -2805,7 +2792,6 @@ internal fun TopicPostCard(
                         // magnifier consumes the down (replied mode), no selection can start.
                         selectable = true,
                         onGoToCitedPost = onGoToCitedPost,
-                        mediaRefreshGeneration = mediaRefreshGeneration,
                     )
                 }
                 // #330 — the author signature (web parity), gated by the reading preference. Rendered

@@ -37,9 +37,9 @@ import org.robolectric.annotation.GraphicsMode
  *  - A11Y-5 : the cold/error slot is the SAME semantics node as the final image — a failed
  *    painter never removes the node from the reading order;
  *  - A11Y-1 : one node per image, document order;
- *  - A11Y-3/-4 : no phantom action — in particular NO retry action is announced anywhere
- *    (no host has a per-image retry callback; `mediaRefreshGeneration` is a screen-level
- *    counter, not a retry affordance), and null hosts announce nothing at all.
+ *  - A11Y-3/-4 : no phantom action — every announced action is effective. Since #960 P3 the
+ *    error slot DOES announce a per-URL retry (universal, ledger-backed — see
+ *    PostRendererErrorRetryTest); the phantom-action pin here covers the non-error states.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w360dp-h780dp-xxhdpi")
@@ -117,7 +117,9 @@ class PostRendererImageA11yTest {
     }
 
     @Test
-    fun `a failed inline image keeps its semantics node and description - A11Y-5`() {
+    fun `a failed inline image keeps its semantics node with the error description - A11Y-5`() {
+        // #960 P3 — the inline error slot swaps the description for the CONTRACTUAL error
+        // wording carrying the alt (annexe a11y, États §6) — the node itself survives.
         setPost(
             paragraph(
                 PostInline.Text("regarde "),
@@ -125,7 +127,9 @@ class PostRendererImageA11yTest {
             ),
         )
 
-        composeTestRule.onNodeWithContentDescription("morte").assertExists()
+        val errorWithAlt = ApplicationProvider.getApplicationContext<Context>()
+            .getString(R.string.post_image_error_with_alt, "morte")
+        composeTestRule.onNodeWithContentDescription(errorWithAlt).assertExists()
     }
 
     @Test
@@ -152,8 +156,11 @@ class PostRendererImageA11yTest {
             ),
         )
 
+        val errorSecond = ApplicationProvider.getApplicationContext<Context>()
+            .getString(R.string.post_image_error_with_alt, "deuxieme")
         val first = composeTestRule.onNodeWithContentDescription("premiere").getBoundsInRoot()
-        val second = composeTestRule.onNodeWithContentDescription("deuxieme").getBoundsInRoot()
+        // #960 P3 — the failed slot carries the error description (annexe a11y, États §6).
+        val second = composeTestRule.onNodeWithContentDescription(errorSecond).getBoundsInRoot()
         val third = composeTestRule.onNodeWithContentDescription("troisieme").getBoundsInRoot()
         // Same line, reading order = visual order: strictly increasing left edges.
         assertTrue("failed image must keep its slot between its neighbours", first.left < second.left)
@@ -161,7 +168,10 @@ class PostRendererImageA11yTest {
     }
 
     @Test
-    fun `a failed image on a null host announces no action at all - A11Y-4`() {
+    fun `a failed image on a null host announces the retry and nothing else - A11Y-4`() {
+        // #960 P3 — the error slot's SINGLE action is the universal per-URL retry (Role.Button
+        // « Réessayer ») — even on a null host, and even for a LINKED image: the §5 matrix
+        // (link tap, long-press menu) gates a RENDERED image, never the error slot.
         setPost(
             paragraph(
                 PostInline.Text("regarde "),
@@ -173,18 +183,26 @@ class PostRendererImageA11yTest {
             host = null,
         )
 
-        composeTestRule.onNodeWithContentDescription("morte")
-            .assert(SemanticsMatcher.keyNotDefined(SemanticsActions.OnClick))
-            .assert(SemanticsMatcher.keyNotDefined(SemanticsActions.OnLongClick))
+        val errorWithAlt = ApplicationProvider.getApplicationContext<Context>()
+            .getString(R.string.post_image_error_with_alt, "morte")
+        val node = composeTestRule.onNodeWithContentDescription(errorWithAlt)
+        node.assert(
+            SemanticsMatcher("click action labelled with the retry wording") { n ->
+                n.config.getOrElseNullable(SemanticsActions.OnClick) { null }
+                    ?.label?.contains("Réessayer", ignoreCase = true) == true
+            },
+        )
+        node.assert(SemanticsMatcher.keyNotDefined(SemanticsActions.OnLongClick))
     }
 
     @Test
-    fun `no retry action is ever announced - A11Y-3`() {
-        // No host has a per-image retry callback (annexe a11y, decision « retry »): a click
-        // action labelled with the retry wording anywhere in the tree would be a phantom action.
+    fun `no retry action is announced on HEALTHY images - A11Y-3`() {
+        // #960 P3 inverted the Lot 2 « never announced » pin for the ERROR slot only (per-URL
+        // ledger retry, universal — PostRendererErrorRetryTest). A healthy image must still
+        // announce NO retry: the wording on a working image would be a phantom action.
         setPost(
-            PostBlock.Image(url = deadUrl, description = "morte"),
-            paragraph(PostInline.InlineImage(url = deadUrl, description = "morte aussi")),
+            PostBlock.Image(url = servedUrl, description = "servie"),
+            paragraph(PostInline.InlineImage(url = secondServedUrl, description = "servie aussi")),
         )
 
         val retryLabelled = SemanticsMatcher("has a retry-labelled click action") { node ->
