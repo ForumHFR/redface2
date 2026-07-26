@@ -19,3 +19,10 @@ internal data class IntrinsicMediaMetadata(
     val size: IntSize,
     val mimeType: String?,
 )
+
+/**
+ * §8 — the probe MIME that makes a BLOCK content media eligible for the display profile
+ * (`eligibleGifBloc`). Static GIFs (GIF8 container) match too: animation is not discriminable
+ * at the probe. Compared against [IntrinsicMediaMetadata.mimeType] ONLY — never a URL extension.
+ */
+internal const val GIF_MIME_TYPE = "image/gif"
