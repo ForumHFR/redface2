@@ -16,6 +16,16 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.35.0` — `local` — 2026-07-26
+
+Agrandissement des GIF (#973, [AMENDEMENT-v1.5-2] au contrat images, arbitrage XaTriX) :
+nouveau réglage « Agrandissement des GIF » (Réglages → Affichage) — S (×1, net) / M (×1,5) /
+L (×2,5), **défaut M**. S'applique aux GIF de contenu en bloc uniquement (identifiés par le
+MIME réel de la probe, jamais l'extension d'URL) ; les images normales, smileys, cc-images et
+GIF inline ne changent pas ; les caps de largeur/hauteur continuent de borner le résultat ;
+le décodage reste au natif (agrandissement au dessin, net à ×1). Répond aux retours de
+l'appel à tests tailles (GIF trop petits depuis le no-upscale strict).
+
 ## `0.34.6` — `local` — 2026-07-26
 
 Fixes pré-promotion (#953, bloquants F2/F3/F5/F6 de la review beta) : la réponse rapide
