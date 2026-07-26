@@ -510,6 +510,22 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeTopicFullWidthPosts(): Flow<Boolean> =
+        dataStore.data
+            // Default `false` (#884): the inset card is the historical layout; full-width posts
+            // are the opt-in for edge-to-edge reading.
+            .map { prefs -> prefs[KEY_TOPIC_FULL_WIDTH_POSTS] ?: false }
+            .distinctUntilChanged()
+            .catch { emit(false) }
+
+    override suspend fun setTopicFullWidthPosts(enabled: Boolean) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_TOPIC_FULL_WIDTH_POSTS] = enabled
+            }
+        }
+    }
+
     override fun observeShowScrollbar(): Flow<Boolean> =
         dataStore.data
             // Default `true` (#105): the reading scrollbar is the historical behaviour; hiding it is
@@ -1028,6 +1044,9 @@ class DataStoreUserPreferencesRepository @Inject constructor(
 
         // #332 — fold long top-level citations by default (default true = historical fold; opt-out).
         val KEY_FOLD_LONG_QUOTES = booleanPreferencesKey("fold_long_quotes")
+
+        // #884 — render topic posts full-width / edge-to-edge (default false = historical card inset).
+        val KEY_TOPIC_FULL_WIDTH_POSTS = booleanPreferencesKey("topic_full_width_posts")
 
         // #105 — show the intra-page reading scrollbar (default true = historical; opt-out).
         val KEY_SHOW_SCROLLBAR = booleanPreferencesKey("show_scrollbar")
