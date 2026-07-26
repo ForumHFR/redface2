@@ -21,6 +21,7 @@ import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import java.io.IOException
 import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -149,19 +150,29 @@ class QuickReplyViewModel @AssistedInject constructor(
     /** #405 — the SAME key the full-screen reply editor uses for this topic. */
     private val draftKey: String = EditorDraftKey.reply(request.cat, request.topicId)
 
-    /** #405 — account snapshotted at open so a mid-edit switch can't cross-write drafts. */
-    private var draftOwner: String? = null
+    /**
+     * #405 / #953 F2 — the account the CURRENT opening session's draft reads/writes ride.
+     * Re-snapshotted at EVERY sheet opening : the VM is nav-entry-scoped and outlives the sheet,
+     * so a single construction-time capture would replay account A's owner after a switch to
+     * account B (B would read A's private row, and B's submit would sweep it). One
+     * [CompletableDeferred] per session — draft tasks capture their session synchronously at
+     * scheduling and await the owner inside, so a deferred write (autosave debounce, dismiss
+     * flush, submit delete) from a PREVIOUS session can never ride the owner re-snapshotted by
+     * the next opening.
+     */
+    private var sessionOwner: CompletableDeferred<String?> = CompletableDeferred()
 
     /** #312 — mirror of the persisted « Confirmation avant publication » preference. */
     private var confirmBeforePosting: Boolean = false
 
-    /** Owner snapshot + form warm-up ; joined by every draft read/write so they never race it. */
-    private val initJob: Job = viewModelScope.launch {
-        draftOwner = draftStore.currentOwner()
-        prefetchForm()
-    }
-
     init {
+        // Initial owner snapshot + form warm-up — covers sessions started before any
+        // [onSheetOpened] (typing can begin as soon as the VM exists).
+        val initialSession = sessionOwner
+        viewModelScope.launch {
+            initialSession.complete(draftStore.currentOwner())
+            prefetchForm()
+        }
         viewModelScope.launch {
             userPreferencesRepository.observeConfirmBeforePosting().collect { enabled ->
                 confirmBeforePosting = enabled
@@ -188,9 +199,18 @@ class QuickReplyViewModel @AssistedInject constructor(
     fun onSheetOpened(initialQuotes: List<QuotedPostPreview> = emptyList()) {
         materializeJob?.cancel()
         openJob?.cancel()
+        // #953 F2 — a fresh owner snapshot per opening, swapped in synchronously : everything
+        // this session schedules rides THIS deferred, while tasks the previous session already
+        // scheduled keep the deferred (hence the owner) of theirs.
+        val opening = CompletableDeferred<String?>()
+        sessionOwner = opening
+        viewModelScope.launch {
+            // Deliberately NOT part of [openJob] : a rapid re-open cancels the seeding below,
+            // but every session's owner must still resolve (a dismiss flush may already await it).
+            opening.complete(draftStore.currentOwner())
+        }
         openJob = viewModelScope.launch {
-            initJob.join()
-            val body = draftStore.load(draftOwner, draftKey)?.body.orEmpty()
+            val body = draftStore.load(opening.await(), draftKey)?.body.orEmpty()
             _state.update {
                 it.copy(text = TextFieldValue(text = body, selection = TextRange(body.length)))
             }
@@ -329,8 +349,9 @@ class QuickReplyViewModel @AssistedInject constructor(
         // hand over a row without the citation the user just asked for.
         if (_state.value.isPreparingQuotes) return
         autosaveJob?.cancel()
+        val session = sessionOwner
         viewModelScope.launch {
-            saveDraftNow()
+            saveDraftNow(session.await())
             _effects.send(QuickReplyEffect.EscalateToFullEditor(_state.value.quotes))
         }
     }
@@ -345,24 +366,27 @@ class QuickReplyViewModel @AssistedInject constructor(
         // n°2) — the user abandoned it; the flush below only persists what the field showed.
         materializeJob?.cancel()
         autosaveJob?.cancel()
-        viewModelScope.launch { saveDraftNow() }
+        // #953 F2 — the flush rides the owner of the session being DISMISSED (captured now),
+        // never the one a subsequent re-opening may re-snapshot before the write lands.
+        val session = sessionOwner
+        viewModelScope.launch { saveDraftNow(session.await()) }
     }
 
     private fun scheduleAutosave() {
         autosaveJob?.cancel()
+        val session = sessionOwner
         autosaveJob = viewModelScope.launch {
             delay(AUTOSAVE_DEBOUNCE_MS)
-            saveDraftNow()
+            saveDraftNow(session.await())
         }
     }
 
-    private suspend fun saveDraftNow() {
-        initJob.join()
+    private suspend fun saveDraftNow(owner: String?) {
         val body = _state.value.text.text
         if (body.isBlank()) {
-            draftStore.delete(draftOwner, draftKey)
+            draftStore.delete(owner, draftKey)
         } else {
-            draftStore.save(draftOwner, draftKey, EditorDraftStore.Draft(body = body))
+            draftStore.save(owner, draftKey, EditorDraftStore.Draft(body = body))
         }
     }
 
@@ -377,6 +401,9 @@ class QuickReplyViewModel @AssistedInject constructor(
     private fun submit() {
         if (submitJob?.isActive == true) return
         _state.update { it.copy(isSubmitting = true, submitError = null) }
+        // #953 F2 — the post-success draft delete rides the owner of the session that SUBMITTED,
+        // even if the sheet is reopened (and the owner re-snapshotted) while the POST is in flight.
+        val session = sessionOwner
         submitJob = viewModelScope.launch {
             val outcome = runCatching {
                 val quotes = _state.value.quotes
@@ -418,19 +445,22 @@ class QuickReplyViewModel @AssistedInject constructor(
                 }
             }
             outcome.fold(
-                onSuccess = { result -> handleSubmitOutcome(result) },
+                onSuccess = { result -> handleSubmitOutcome(result, session) },
                 onFailure = ::handleSubmitFailure,
             )
         }
     }
 
-    private suspend fun handleSubmitOutcome(result: ReplySubmitResult) {
+    private suspend fun handleSubmitOutcome(
+        result: ReplySubmitResult,
+        session: CompletableDeferred<String?>,
+    ) {
         when (result) {
             is ReplySubmitResult.Success -> {
                 // Same contract as the full editor: the draft dies with the successful POST,
                 // awaited so a process death cannot resurrect an already-published reply.
                 autosaveJob?.cancel()
-                draftStore.delete(draftOwner, draftKey)
+                draftStore.delete(session.await(), draftKey)
                 _state.update { QuickReplyUiState() }
                 _effects.send(
                     QuickReplyEffect.SubmitSucceeded(
