@@ -1158,6 +1158,26 @@ class TopicFormViewModelTest {
         assertEquals(null, viewModel.state.value.uploadError)
     }
 
+    @Test
+    fun `SubmitClicked is inert while an image upload is in flight (#953 F5)`() = runTest {
+        // Mirror of the PostEditor guard : a tap on « Envoyer » must not race the in-flight
+        // upload and POST before the [img] markup is inserted.
+        val gate = CompletableDeferred<Unit>()
+        val uploads = FakeUploadRepository().apply { uploadGate = gate }
+        val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT, uploadRepository = uploads)
+        testScheduler.advanceUntilIdle()
+        viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Mon titre")))
+        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Mon corps")))
+        viewModel.submit(TopicFormIntent.ImagesPicked(listOf("content://pick/1")))
+        assertTrue("sanity: the upload must be in flight", viewModel.state.value.isUploading)
+
+        viewModel.submit(TopicFormIntent.SubmitClicked)
+        gate.complete(Unit)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("no POST may slip through mid-upload", 0, topicFormRepository.newTopicSubmitCalls)
+    }
+
     @Suppress("LongParameterList") // test factory mirroring the ViewModel's injected dependencies.
     private fun newTopicViewModel(
         entrySubcat: Int?,
@@ -1234,11 +1254,14 @@ class TopicFormViewModelTest {
     /** #459 — fake [UploadRepository] ; only [uploadWithCurrentProvider] matters here. */
     private class FakeUploadRepository : UploadRepository {
         var uploadException: Throwable? = null
+        /** When set, holds the upload in flight until the test releases it (mirrors PostEditor's fake). */
+        var uploadGate: CompletableDeferred<Unit>? = null
         var uploadCalls: Int = 0
             private set
 
         override suspend fun uploadWithCurrentProvider(image: ImageUpload, userId: String): UploadedImage {
             uploadCalls += 1
+            uploadGate?.await()
             uploadException?.let { throw it }
             return UploadedImage(
                 provider = UploadProviderId.DIBERIE,

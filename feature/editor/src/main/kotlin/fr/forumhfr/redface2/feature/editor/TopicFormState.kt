@@ -106,8 +106,10 @@ data class TopicFormState(
     /**
      * Submit is allowed when the mode-specific routing context is complete,
      * the user has typed a non-blank subject AND content, the form was
-     * successfully loaded, the session is not anonymous, and we are not
-     * already submitting.
+     * successfully loaded, the session is not anonymous, we are not already
+     * submitting, and no image upload is in flight ([isUploading], #459/#953 F5 —
+     * same guard as [PostEditorState.canSubmit] : a tap on « Envoyer » must not
+     * race the upload and POST before the `[img]` markup is inserted).
      *
      * #213 — the New (create-topic) branch now supports a category WITHOUT a
      * sub-category (e.g. cat IA, cat=32) : when the parsed form carried no
@@ -135,6 +137,7 @@ data class TopicFormState(
                     draft.text.isNotBlank() &&
                     !isLoadingForm &&
                     !isSubmitting &&
+                    !isUploading &&
                     !isAnonymous
             TopicFormMode.New ->
                 cat != null &&
@@ -143,6 +146,7 @@ data class TopicFormState(
                     draft.text.isNotBlank() &&
                     !isLoadingForm &&
                     !isSubmitting &&
+                    !isUploading &&
                     !isAnonymous
         }
 
