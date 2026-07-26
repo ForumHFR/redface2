@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.ui.post
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -12,6 +13,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -45,6 +48,11 @@ import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
  * since the labels are feature strings. [avatarContentDescription] overrides the avatar's TalkBack
  * announcement for a non-personal avatar (e.g. a multi-recipient MP labelled « Interlocuteurs
  * multiples »).
+ *
+ * A11y (#884) : the pseudo line is a TalkBack heading — heading navigation jumps from post to post
+ * on the identity line, on the topic AND the MP. The fallback [Text] carries `heading()` on its own
+ * node; a supplied [pseudo] slot is hosted under a heading wrapper instead (the header cannot mark
+ * the slot's inner nodes). No synthetic contentDescription — nothing is announced twice.
  */
 @Composable
 @Suppress("LongParameterList") // Shared identity slot: avatar/pseudo/date data + 2 clicks + 3 slots.
@@ -92,7 +100,12 @@ fun PostIdentityHeader(
             verticalArrangement = Arrangement.spacedBy(lineSpacing),
         ) {
             if (pseudo != null) {
-                pseudo()
+                // #884 a11y — the caller-supplied pseudo (the topic's index+gold-sheen row) composes
+                // its own nodes, so the header hosts the slot under a heading() wrapper. No
+                // contentDescription is synthesised: the slot's own text stays the sole announcement.
+                Box(modifier = Modifier.semantics { heading() }) {
+                    pseudo()
+                }
             } else {
                 val pseudoModifier = if (onAuthorClick != null) {
                     Modifier.clickable(
@@ -109,7 +122,8 @@ fun PostIdentityHeader(
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = pseudoModifier,
+                    // #884 a11y — heading() rides on the pseudo node itself (best TalkBack target).
+                    modifier = pseudoModifier.semantics { heading() },
                 )
             }
             if (dateTrailing != null) {

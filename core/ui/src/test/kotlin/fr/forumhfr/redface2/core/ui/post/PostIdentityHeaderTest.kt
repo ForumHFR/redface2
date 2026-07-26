@@ -1,7 +1,11 @@
 package fr.forumhfr.redface2.core.ui.post
 
 import androidx.compose.material3.Text
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -20,6 +24,9 @@ import org.robolectric.annotation.Config
  * plain [Text] of the author and a supplied `pseudo` slot replaces it; the optional `trailing` and
  * `subline` slots appear only when supplied; the avatar and author-pseudo clicks fire their
  * callbacks.
+ *
+ * #884 — a11y contract: the pseudo line exposes heading semantics in both branches (fallback [Text]
+ * and caller-supplied slot), so TalkBack heading navigation works on the topic AND the MP.
  */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -97,6 +104,48 @@ class PostIdentityHeaderTest {
 
         composeTestRule.onNodeWithText("trailing").assertDoesNotExist()
         composeTestRule.onNodeWithText("subline").assertDoesNotExist()
+    }
+
+    @Test
+    fun `default pseudo carries heading semantics`() {
+        composeTestRule.setContent {
+            RedfaceTheme {
+                PostIdentityHeader(
+                    author = "MonPseudo",
+                    avatarUrl = null,
+                    dateText = "date",
+                )
+            }
+        }
+
+        // #884 a11y — TalkBack's heading navigation jumps from post to post on the identity line.
+        // The fallback pseudo Text carries heading() itself (no synthetic contentDescription — the
+        // author text IS the announcement, so nothing is spoken twice).
+        composeTestRule.onNodeWithText("MonPseudo")
+            .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading))
+    }
+
+    @Test
+    fun `supplied pseudo slot is hosted under heading semantics`() {
+        composeTestRule.setContent {
+            RedfaceTheme {
+                PostIdentityHeader(
+                    author = "RawAuthor",
+                    avatarUrl = null,
+                    dateText = "date",
+                    pseudo = { Text("CustomPseudo") },
+                )
+            }
+        }
+
+        // #884 a11y — the caller-supplied pseudo (the topic's index+gold-sheen row) cannot mark its
+        // own node from here, so the header wraps the slot in exactly ONE heading node.
+        composeTestRule
+            .onAllNodes(
+                SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading),
+                useUnmergedTree = true,
+            )
+            .assertCountEquals(1)
     }
 
     @Test
