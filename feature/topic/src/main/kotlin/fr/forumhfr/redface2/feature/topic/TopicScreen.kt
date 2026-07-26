@@ -30,7 +30,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.systemGestures
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -125,6 +125,7 @@ import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
 import fr.forumhfr.redface2.core.ui.post.LocalPostImageActions
 import fr.forumhfr.redface2.core.ui.post.PostCardShell
+import fr.forumhfr.redface2.core.ui.post.PostCardShellFlatBottomEdge
 import fr.forumhfr.redface2.core.ui.post.PostIdentityBand
 import fr.forumhfr.redface2.core.ui.post.PostIdentityHeader
 import fr.forumhfr.redface2.core.ui.post.PostImageActions
@@ -1989,10 +1990,13 @@ private fun TopicLoadedContent(
                 )
             }
         }
-        items(
+        // #983 — indexed so a post can tell what FOLLOWS it (cf. TopicFollowingKind below). The key
+        // is unchanged (numreponse), so Lazy's item identity — and every #307/#412 anchor that
+        // depends on it — is untouched.
+        itemsIndexed(
             items = topic.posts,
-            key = { post -> post.numreponse },
-        ) { post ->
+            key = { _, post -> post.numreponse },
+        ) { index, post ->
             // « Citer » is enabled whenever the topic is postable — the `bddpost`
             // reply form was present (#213, same gate as Reply). It does NOT depend
             // on parsing a per-post quote link: HFR identifies the cited post by
@@ -2047,8 +2051,30 @@ private fun TopicLoadedContent(
             // (forceRefresh=false) keeps the #104 band tint alone; the amber arrival flash (#200)
             // is a third, independent layer.
             val showLastReadMarker = shouldShowLastReadMarker(state.request, post.numreponse)
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (post.numreponse in hiddenNumreponses && post.numreponse !in revealedHiddenPosts) {
+            // #983 — the flat shell's closing hairline is drawn only at an ordinary post → ordinary
+            // post boundary: everywhere else the NEXT element brings its own boundary (the separator's
+            // 2.dp rules, a placeholder's card border, a closing island's border) and the two traits
+            // stacked a few dp apart were the reported defect. What follows this post is not always
+            // the next list item — the separator lives inside this very item, and the closing island
+            // (poll / page boundary / end-of-topic / search footer) is a further one, which is why a
+            // trailing post declares NONE rather than guessing which island will close the list.
+            val nextPost = topic.posts.getOrNull(index + 1)
+            val followingKind = when {
+                showLastReadMarker -> TopicFollowingKind.NON_POST
+                nextPost == null -> TopicFollowingKind.NONE
+                isHiddenPost(nextPost, hiddenNumreponses, revealedHiddenPosts) ->
+                    TopicFollowingKind.NON_POST
+                else -> TopicFollowingKind.POST
+            }
+            val flatBottomEdge = if (
+                topicPostRequestsBottomHairline(state.fullWidthPosts, followingKind)
+            ) {
+                PostCardShellFlatBottomEdge.HAIRLINE
+            } else {
+                PostCardShellFlatBottomEdge.NONE
+            }
+            Column(verticalArrangement = topicPostChildrenArrangement(state.fullWidthPosts)) {
+                if (isHiddenPost(post, hiddenNumreponses, revealedHiddenPosts)) {
                     HiddenPostCard(
                         author = post.author,
                         onReveal = { revealedHiddenPosts = revealedHiddenPosts + post.numreponse },
@@ -2085,10 +2111,15 @@ private fun TopicLoadedContent(
                         onImageLongPress = postImageActions.onLongPress,
                         // #884 — « posts en pleine largeur »: boundary-less card, full bleed.
                         flat = state.fullWidthPosts,
+                        // #983 — who closes this post's bottom edge (derived above).
+                        flatBottomEdge = flatBottomEdge,
                     )
                 }
                 if (showLastReadMarker) {
-                    LastReadMarker()
+                    // #983 — the separator owns its own symmetric vertical rhythm in full-width
+                    // (no container adds a gap there), and stays edge to edge like the posts it cuts
+                    // through — it is a rule, not an island card.
+                    LastReadMarker(modifier = Modifier.separatorPadding(state.fullWidthPosts))
                 }
             }
         }
@@ -2238,9 +2269,12 @@ private fun TopicLoadedContent(
 @Composable
 // `internal` (#884): TopicListFullWidthAnchorTest mounts the real marker inside a post item to
 // guard the full-width toggle. Same visibility relaxation as other tested internals.
-internal fun LastReadMarker() {
+// #983 — [modifier] carries the separator's own vertical rhythm in full-width mode
+// (`Modifier.separatorPadding`): no container inserts a gap there, so the marker must be symmetric
+// on its own. It stays traversing (no horizontal inset) — cf. separatorPadding's KDoc.
+internal fun LastReadMarker(modifier: Modifier = Modifier) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -2678,6 +2712,15 @@ internal fun TopicPostCard(
      * Default `false`: the historical card.
      */
     flat: Boolean = false,
+    /**
+     * #983 — forwarded to [PostCardShell]: whether this flat post draws its own closing hairline, or
+     * draws none — because what follows brings its own boundary (separator rule, island border), or
+     * because it is the last post of the page. Derived by the list builder, the only place that knows
+     * the rendered sequence. Ignored when [flat] is false. Default
+     * [PostCardShellFlatBottomEdge.HAIRLINE] — the #884 behaviour, for previews and tests that mount
+     * a lone card.
+     */
+    flatBottomEdge: PostCardShellFlatBottomEdge = PostCardShellFlatBottomEdge.HAIRLINE,
     onQuote: (() -> Unit)?,
     /**
      * #823 — LONG press on « Citer » : opens the full-screen editor directly, a one-shot override
@@ -2740,6 +2783,8 @@ internal fun TopicPostCard(
     PostCardShell(
         // #884 — full-width mode: same node structure, boundary-less rendering (vague 2 contract).
         flat = flat,
+        // #983 — the sequence owner decides who closes this post's bottom edge.
+        flatBottomEdge = flatBottomEdge,
         // #436 — multi-quote selection outline (lot 1), unchanged.
         border = if (multiQuoteSelected) {
             BorderStroke(width = 2.dp, color = MaterialTheme.colorScheme.primary)
@@ -3791,6 +3836,13 @@ internal fun shouldShowEditAction(
 // producer, this gate needs its own dedicated route field — cf. TopicActionGatesTest.
 internal fun shouldShowLastReadMarker(request: TopicRequest, numreponse: Int): Boolean =
     request.forceRefresh && request.scrollTo == numreponse
+
+// #509 → #983 — a post renders as the collapsed blacklist placeholder while its author is hidden
+// AND the reader has not revealed it. Extracted because #983 needs the same predicate on the NEXT
+// post (a placeholder is an island, so the post above it must not draw its hairline), and two
+// copies of a two-clause condition drift.
+internal fun isHiddenPost(post: Post, hidden: Set<Int>, revealed: Set<Int>): Boolean =
+    post.numreponse in hidden && post.numreponse !in revealed
 
 internal fun shouldShowDeleteAction(
     topic: Topic,

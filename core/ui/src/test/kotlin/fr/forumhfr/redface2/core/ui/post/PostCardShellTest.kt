@@ -152,6 +152,31 @@ class PostCardShellTest {
     }
 
     @Test
+    fun `flat mode renders no divider when the sequence owner takes the bottom edge`() {
+        composeTestRule.setContent {
+            RedfaceTheme {
+                PostCardShell(
+                    header = { Text("header") },
+                    body = { Text("body") },
+                    flat = true,
+                    footer = { Text("footer") },
+                    flatBottomEdge = PostCardShellFlatBottomEdge.NONE,
+                )
+            }
+        }
+
+        // #983 — the next rendered element brings its own boundary (a separator rule, an island's
+        // card border): the shell must not stack a second trait a few dp above it. Only the OWNER
+        // of the sequence can know this, so the shell renders the decision, it does not take it.
+        composeTestRule.onNodeWithTag(POST_CARD_SHELL_DIVIDER_TAG, useUnmergedTree = true)
+            .assertDoesNotExist()
+        // The slots are untouched by the edge decision.
+        composeTestRule.onNodeWithText("header").assertIsDisplayed()
+        composeTestRule.onNodeWithText("body").assertIsDisplayed()
+        composeTestRule.onNodeWithText("footer").assertIsDisplayed()
+    }
+
+    @Test
     fun `card mode renders no divider`() {
         composeTestRule.setContent {
             RedfaceTheme {

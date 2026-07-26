@@ -16,6 +16,17 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.35.1` — `local` — 2026-07-26
+
+Correctif du mode « Posts en pleine largeur » (#983, rapporté par styx42) : espacements
+irréguliers et lignes horizontales parasites autour des marqueurs. Le trait de pied d'un post
+n'est plus dessiné que d'un post à un autre — là où le marqueur « Dernier message lu », un
+placeholder de post masqué ou un îlot de fin (fin de sujet, frontière de page, footers de
+recherche) apporte déjà sa propre bordure, il était empilé quelques dp au-dessus d'elle. Et le
+marqueur porte désormais son propre rythme vertical, symétrique (il héritait de 8 dp au-dessus
+et de rien en dessous) ; il reste traversant, à la largeur des posts qu'il sépare. Le mode encart
+est inchangé à l'identique.
+
 ## `0.35.0` — `local` — 2026-07-26
 
 Agrandissement des GIF (#973, [AMENDEMENT-v1.5-2] au contrat images, arbitrage XaTriX) :
