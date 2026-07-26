@@ -294,6 +294,13 @@
     <string name="settings_display_font_scale_medium">Moyenne</string>
     <string name="settings_display_font_scale_large">Grande</string>
     <string name="settings_display_font_scale_persist_failed">Impossible de mémoriser la taille de police. Réessayez.</string>
+    <!-- #973 — profil d'agrandissement des GIF de contenu en bloc (facteurs visibles, exigence XaTriX). -->
+    <string name="settings_display_media_profile_title">Agrandissement des GIF</string>
+    <string name="settings_display_media_profile_intro">Réglez l\'agrandissement des GIF affichés dans les messages.</string>
+    <string name="settings_display_media_profile_small">S (×1, net)</string>
+    <string name="settings_display_media_profile_medium">M (×1,5)</string>
+    <string name="settings_display_media_profile_large">L (×2,5)</string>
+    <string name="settings_display_media_profile_persist_failed">Impossible de mémoriser l\'agrandissement des GIF. Réessayez.</string>
     <!-- #518 — plein écran immersif : masquer la barre de navigation système Android (boutons ou barre gestuelle). -->
     <!-- #666 — afficher/masquer les libellés sous les icônes de la barre de navigation du bas. -->
     <string name="settings_display_nav_bar_section_title">Barre de navigation</string>

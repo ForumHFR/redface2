@@ -7,6 +7,7 @@ import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
+import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
@@ -72,6 +73,14 @@ class AppThemeViewModel @Inject constructor(
     val showScrollbar: StateFlow<Boolean> =
         userPreferencesRepository.observeShowScrollbar()
             .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+    // #973 (§8 [AMENDEMENT-v1.5-2]) — block-GIF display profile, eagerly collected like the
+    // reading presets above (#332 model). No bootstrap mirror (it does not paint the
+    // pre-first-frame window); the seed is the M default and DataStore resolves on the first
+    // Eagerly read (unknown persisted value already falls back to M in the repository).
+    val mediaDisplayProfile: StateFlow<MediaDisplayProfile> =
+        userPreferencesRepository.observeMediaDisplayProfile()
+            .stateIn(viewModelScope, SharingStarted.Eagerly, MediaDisplayProfile.M)
 
     // #666 — show the labels under the bottom-nav icons. Eagerly collected at the shell so the
     // NavigationSuiteScaffold can drop the labels. No bootstrap mirror; seed = the `true` default.

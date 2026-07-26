@@ -87,9 +87,9 @@ class PostRendererImageParityRoborazziTest {
 
     /** Pre-seed the cache with the same native sizes the fake engine serves → synchronous render. */
     private fun seededCache(): IntrinsicMediaSizeCache = DefaultIntrinsicMediaSizeCache().apply {
-        putSuccess(portraitUrl, IntSize(360, 640))
-        putSuccess(smallUrl, IntSize(80, 60))
-        putSuccess(photoUrl, IntSize(4000, 3000))
+        putSuccess(portraitUrl, IntrinsicMediaMetadata(IntSize(360, 640), mimeType = null))
+        putSuccess(smallUrl, IntrinsicMediaMetadata(IntSize(80, 60), mimeType = null))
+        putSuccess(photoUrl, IntrinsicMediaMetadata(IntSize(4000, 3000), mimeType = null))
     }
 
     @Test

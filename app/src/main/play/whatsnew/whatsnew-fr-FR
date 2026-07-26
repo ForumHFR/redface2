@@ -1,4 +1,3 @@
-Redface 2 v0.34.6 — dev.
+Redface 2 v0.35.0 — dev.
 
-- Réponse rapide : votre message survit désormais à une rotation de l'écran pendant l'envoi, et les brouillons sont strictement isolés entre comptes.
-- La création de sujet attend la fin de l'envoi d'image en cours avant de publier.
+- Nouveau réglage « Agrandissement des GIF » (Réglages → Affichage) : S (×1, net), M (×1,5, défaut) ou L (×2,5). Les GIF de forum s'affichent enfin à une taille lisible ; les photos et smileys ne changent pas.

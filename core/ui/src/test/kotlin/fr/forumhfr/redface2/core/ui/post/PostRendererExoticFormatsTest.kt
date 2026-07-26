@@ -111,7 +111,7 @@ class PostRendererExoticFormatsTest {
             "G2 must settle the probe axis from the painter geometry",
             ledger.hasSucceeded(svg.absolutePath, MediaAttemptKind.PROBE),
         )
-        val pair = cache.get(svg.absolutePath)!!
+        val pair = cache.get(svg.absolutePath)!!.size
         assertTrue("a positive pair is deposited (was $pair)", pair.width > 0 && pair.height > 0)
         val ratio = pair.width.toFloat() / pair.height
         assertTrue(

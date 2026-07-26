@@ -28,13 +28,18 @@ import kotlinx.coroutines.ensureActive
  * The disk cache stays active: the downloaded bytes serve the subsequent render decode.
  * `execute()` is main-safe (Coil dispatches its own I/O); the caller invokes it from a
  * `LaunchedEffect` and caches the result by URL. Returns `null` on error / non-positive
- * dimensions. The returned pair is in SOURCE PIXELS — the §3 equation consumes it as physical px.
+ * dimensions. The returned size is in SOURCE PIXELS — the §3 equation consumes it as physical px.
+ *
+ * #973 ([AMENDEMENT-v1.5-2]) — the result is the ATOMIC [IntrinsicMediaMetadata]: the size plus
+ * the MIME the header decode identified (through the [ProbeMetadataImage] carrier). A success
+ * that did not flow through the probe decoder (or an unidentified container) carries a `null`
+ * MIME — never one inferred from the URL. A failed probe returns `null`: no size, no MIME.
  */
 internal suspend fun measureIntrinsicMediaSize(
     url: String,
     context: PlatformContext,
     imageLoader: ImageLoader,
-): IntSize? {
+): IntrinsicMediaMetadata? {
     val result = imageLoader.execute(
         ImageRequest.Builder(context)
             .data(url)
@@ -43,7 +48,14 @@ internal suspend fun measureIntrinsicMediaSize(
             .build(),
     )
     val image = (result as? SuccessResult)?.image ?: return null
-    return if (image.width > 0 && image.height > 0) IntSize(image.width, image.height) else null
+    return if (image.width > 0 && image.height > 0) {
+        IntrinsicMediaMetadata(
+            size = IntSize(image.width, image.height),
+            mimeType = (image as? ProbeMetadataImage)?.mimeType,
+        )
+    } else {
+        null
+    }
 }
 
 /**
@@ -82,7 +94,8 @@ internal suspend fun measureAndCacheIntrinsicMediaSize(
     context: PlatformContext,
     imageLoader: ImageLoader,
     // Injectable for the cancellation-race tests only — production callers keep the default.
-    probe: suspend (String, PlatformContext, ImageLoader) -> IntSize? = ::measureIntrinsicMediaSize,
+    probe: suspend (String, PlatformContext, ImageLoader) -> IntrinsicMediaMetadata? =
+        ::measureIntrinsicMediaSize,
 ) {
     while (true) {
         val now = System.currentTimeMillis()
@@ -114,7 +127,7 @@ private suspend fun probeUnderReservation(
     ledger: MediaAttemptLedger,
     context: PlatformContext,
     imageLoader: ImageLoader,
-    probe: suspend (String, PlatformContext, ImageLoader) -> IntSize?,
+    probe: suspend (String, PlatformContext, ImageLoader) -> IntrinsicMediaMetadata?,
     nowMillis: Long,
 ) {
     // Eviction repair (Sol P2, O1): the caller only reaches this point when the cache has no
@@ -128,18 +141,20 @@ private suspend fun probeUnderReservation(
     if (!ledger.tryReserve(url, generation, MediaAttemptKind.PROBE)) return
     var settled = false
     try {
-        val size = probe(url, context, imageLoader)
+        val metadata = probe(url, context, imageLoader)
         // Belt for a probe that swallowed cancellation: never publish a result on behalf of a
         // dead effect.
         currentCoroutineContext().ensureActive()
-        if (size != null) {
+        if (metadata != null) {
             // §3/§6 — first-pair authority: a concurrent G2 painter deposit may have fixed the
-            // box already; the probe's disagreeing pair is then logged, never applied.
-            val deposited = cache.putSuccessIfAbsent(url, size)
-            if (!deposited && cache.get(url) != size) {
+            // box already; the probe's disagreeing metadata is then logged, never applied —
+            // #973: the MIME included (no late reclassification of a fixed entry).
+            val deposited = cache.putSuccessIfAbsent(url, metadata)
+            if (!deposited && cache.get(url)?.size != metadata.size) {
                 Log.d(
                     MEDIA_GEOMETRY_LOG_TAG,
-                    "geometry disagreement for $url: kept=${cache.get(url)} probe=$size (first valid pair wins, §3)",
+                    "geometry disagreement for $url: kept=${cache.get(url)?.size} probe=${metadata.size} " +
+                        "(first valid pair wins, §3)",
                 )
             }
             ledger.settleSuccess(url, generation, MediaAttemptKind.PROBE)

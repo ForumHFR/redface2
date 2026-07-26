@@ -50,7 +50,13 @@ class PainterAttemptTest {
         val rerendered = PainterAttempt(ledger, cache, url, gen) // never granted
         rerendered.onState(successState(320, 240))
 
-        assertEquals("the geometry must be redeposited", IntSize(320, 240), cache.get(url))
+        // #973 — the painter deposit is the ATOMIC metadata with NO mime: the painter can never
+        // identify the container, only the probe can (MIME absent → non éligible).
+        assertEquals(
+            "the geometry must be redeposited",
+            IntrinsicMediaMetadata(IntSize(320, 240), mimeType = null),
+            cache.get(url),
+        )
         assertTrue(ledger.hasSucceeded(url, MediaAttemptKind.PROBE))
     }
 
@@ -66,9 +72,26 @@ class PainterAttemptTest {
 
         attempt.onState(successState(320, 240)) // the §7 re-decode's callback
 
-        assertEquals("the FIRST pair keeps the authority", IntSize(800, 600), cache.get(url))
+        assertEquals("the FIRST pair keeps the authority", IntSize(800, 600), cache.get(url)?.size)
         assertTrue(ledger.hasSucceeded(url, MediaAttemptKind.PAINTER))
         assertTrue(ledger.hasSucceeded(url, MediaAttemptKind.PROBE))
+    }
+
+    @Test
+    fun `a painter success never updates the probe's mime (no late reclassification)`() {
+        // #973 ([AMENDEMENT-v1.5-2]) — the probe fixed (size, image/gif) atomically; the painter's
+        // later success callback must leave the metadata UNTOUCHED, mime included: « AUCUN
+        // reclassement tardif après fixation de la boîte ».
+        val ledger = MediaAttemptLedger()
+        val cache = DefaultIntrinsicMediaSizeCache()
+        val probed = IntrinsicMediaMetadata(IntSize(400, 300), "image/gif")
+        cache.putSuccessIfAbsent(url, probed)
+        val attempt = PainterAttempt(ledger, cache, url, ledger.generationOf(url))
+        attempt.reserveIfUntried()
+
+        attempt.onState(successState(400, 300))
+
+        assertEquals("the probe's atomic metadata must survive the painter", probed, cache.get(url))
     }
 
     @Test
@@ -85,7 +108,7 @@ class PainterAttemptTest {
 
         attempt.onState(successState(320, 240))
 
-        assertEquals("the immutable geometry stays", IntSize(320, 240), cache.get(url))
+        assertEquals("the immutable geometry stays", IntSize(320, 240), cache.get(url)?.size)
         assertFalse("the stale painter settlement is discarded", ledger.hasSucceeded(url, MediaAttemptKind.PAINTER))
         assertFalse("the stale probe settlement is discarded", ledger.hasSucceeded(url, MediaAttemptKind.PROBE))
         val fresh = ledger.generationOf(url)

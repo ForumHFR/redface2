@@ -2,10 +2,9 @@ package fr.forumhfr.redface2.core.ui.post
 
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.staticCompositionLocalOf
-import androidx.compose.ui.unit.IntSize
 
 /**
- * #175 — process-wide cache of measured intrinsic media sizes, keyed by image URL.
+ * #175 — process-wide cache of measured intrinsic media metadata, keyed by image URL.
  *
  * The URL's native size is immutable, so we measure it once (via [measureIntrinsicMediaSize]) and
  * reuse it for every occurrence across posts/screens — the N copies of the same perso smiley do not
@@ -13,6 +12,10 @@ import androidx.compose.ui.unit.IntSize
  * use their known small size. Backed by a Compose `SnapshotStateMap` so a write (when a measurement
  * lands) triggers recomposition of the paragraphs reading that URL, which then rebuild their
  * placeholders at the final size.
+ *
+ * #973 ([AMENDEMENT-v1.5-2]): the entry is the ATOMIC [IntrinsicMediaMetadata] — the size plus
+ * the probe's MIME, deposited in one write and never patched afterwards (no late
+ * reclassification once the first valid deposit fixed the entry).
  *
  * SUCCESSES ONLY (#960): measurement FAILURES — their TTL, their retry generations, their
  * clear-on-refresh protocol — live in the [MediaAttemptLedger], the single source of truth for
@@ -24,19 +27,20 @@ import androidx.compose.ui.unit.IntSize
  * Coil disk cache makes a cold-start re-measure cheap, and `PostContent` stays frozen.
  */
 internal interface IntrinsicMediaSizeCache {
-    /** Measured native size for [url], or `null` if not yet measured. */
-    fun get(url: String): IntSize?
+    /** Measured metadata (native size + probe MIME) for [url], or `null` if not yet measured. */
+    fun get(url: String): IntrinsicMediaMetadata?
 
-    fun putSuccess(url: String, size: IntSize)
+    fun putSuccess(url: String, metadata: IntrinsicMediaMetadata)
 
     /**
-     * #960 P2 (§3/§6) — atomic first-pair deposit: stores [size] ONLY when [url] has no entry
+     * #960 P2 (§3/§6) — atomic first-pair deposit: stores [metadata] ONLY when [url] has no entry
      * yet and reports whether it did. The FIRST valid oriented pair (probe or painter, G2) fixes
      * the box; a later disagreeing pair must never apply a second correction. Both production
      * writers (the probe seam and the painter's G2 settlement) go through this, so their race
-     * cannot overwrite the authority.
+     * cannot overwrite the authority — #973: the MIME rides the same write, so it can never be
+     * added nor stripped after the entry is fixed.
      */
-    fun putSuccessIfAbsent(url: String, size: IntSize): Boolean
+    fun putSuccessIfAbsent(url: String, metadata: IntrinsicMediaMetadata): Boolean
 }
 
 /**
@@ -50,16 +54,16 @@ internal class DefaultIntrinsicMediaSizeCache(
     private val maxEntries: Int = DEFAULT_MAX_ENTRIES,
 ) : IntrinsicMediaSizeCache {
 
-    private val entries = mutableStateMapOf<String, IntSize>()
+    private val entries = mutableStateMapOf<String, IntrinsicMediaMetadata>()
     private val insertionOrder = ArrayDeque<String>()
     private val lock = Any()
 
-    override fun get(url: String): IntSize? = entries[url]
+    override fun get(url: String): IntrinsicMediaMetadata? = entries[url]
 
-    override fun putSuccess(url: String, size: IntSize) {
+    override fun putSuccess(url: String, metadata: IntrinsicMediaMetadata) {
         synchronized(lock) {
             if (!entries.containsKey(url)) insertionOrder.addLast(url)
-            entries[url] = size
+            entries[url] = metadata
             while (insertionOrder.size > maxEntries) {
                 val evicted = insertionOrder.removeFirst()
                 entries.remove(evicted)
@@ -67,10 +71,10 @@ internal class DefaultIntrinsicMediaSizeCache(
         }
     }
 
-    override fun putSuccessIfAbsent(url: String, size: IntSize): Boolean {
+    override fun putSuccessIfAbsent(url: String, metadata: IntrinsicMediaMetadata): Boolean {
         synchronized(lock) {
             if (entries.containsKey(url)) return false
-            putSuccess(url, size)
+            putSuccess(url, metadata)
             return true
         }
     }

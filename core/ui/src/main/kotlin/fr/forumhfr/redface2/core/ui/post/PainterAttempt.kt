@@ -100,16 +100,20 @@ internal class PainterAttempt(
      * met, the url becomes stable forever (no TTL advancement, no replayed probe). A success
      * WITHOUT usable geometry deposits nothing and leaves the probe axis retryable (C1) — §6
      * « aucune dimension exploitable → boîte cold CONSERVÉE ».
+     *
+     * #973 — the painter deposit carries NO MIME (only the probe's header decode identifies the
+     * container), and `putSuccessIfAbsent` guarantees it can never RECLASSIFY an entry the probe
+     * already fixed — in either direction (« AUCUN reclassement tardif »).
      */
     private fun settlePainterGeometry(state: AsyncImagePainter.State.Success) {
         val image = state.result.image
         if (image.width <= 0 || image.height <= 0) return
         val painterSize = IntSize(image.width, image.height)
-        val deposited = cache.putSuccessIfAbsent(url, painterSize)
-        if (!deposited && cache.get(url) != painterSize) {
+        val deposited = cache.putSuccessIfAbsent(url, IntrinsicMediaMetadata(painterSize, mimeType = null))
+        if (!deposited && cache.get(url)?.size != painterSize) {
             Log.d(
                 MEDIA_GEOMETRY_LOG_TAG,
-                "geometry disagreement for $url: kept=${cache.get(url)} painter=$painterSize " +
+                "geometry disagreement for $url: kept=${cache.get(url)?.size} painter=$painterSize " +
                     "(first valid pair wins, §3)",
             )
         }

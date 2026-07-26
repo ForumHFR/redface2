@@ -10,6 +10,7 @@ import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
+import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
@@ -3894,6 +3895,12 @@ internal class FakeUserPreferencesRepository(
     override fun observeFontScale(): Flow<FontScalePreference> = MutableStateFlow(FontScalePreference.M)
 
     override suspend fun setFontScale(scale: FontScalePreference) = Unit
+
+    // #973 — the block-GIF display profile is irrelevant to TopicViewModel; stubbed at the M default.
+    override fun observeMediaDisplayProfile(): Flow<MediaDisplayProfile> =
+        MutableStateFlow(MediaDisplayProfile.M)
+
+    override suspend fun setMediaDisplayProfile(profile: MediaDisplayProfile) = Unit
 
     override fun observeDebugBoundsOverlay(): Flow<Boolean> = MutableStateFlow(false)
 

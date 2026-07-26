@@ -849,6 +849,8 @@ fun RedfaceApp(intent: Intent?) {
     val foldLongQuotes by themeViewModel.foldLongQuotes.collectAsStateWithLifecycle()
     // #105 — « afficher l'ascenseur » reading preference, provided to the reading scrollbar via RedfaceTheme.
     val showScrollbar by themeViewModel.showScrollbar.collectAsStateWithLifecycle()
+    // #973 — block-GIF display profile (S/M/L), provided to the post renderer via RedfaceTheme.
+    val mediaDisplayProfile by themeViewModel.mediaDisplayProfile.collectAsStateWithLifecycle()
     // #666 — show/hide the labels under the bottom-nav icons (resolved at the shell for the suite below).
     val navBarLabels by themeViewModel.navBarLabels.collectAsStateWithLifecycle()
     // #445 — debug bounds overlay preference (the dev-channel gate + render live in
@@ -914,6 +916,7 @@ fun RedfaceApp(intent: Intent?) {
             fontScale = fontScale,
             foldLongQuotes = foldLongQuotes,
             showScrollbar = showScrollbar,
+            mediaDisplayProfile = mediaDisplayProfile,
         ),
     ) {
         // #458 — cold-start screen, read synchronously from the bootstrap mirror and frozen for

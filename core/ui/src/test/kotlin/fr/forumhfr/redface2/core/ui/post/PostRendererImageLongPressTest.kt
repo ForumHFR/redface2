@@ -186,7 +186,7 @@ class PostRendererImageLongPressTest {
         // #831 long-press on the same node.
         var received: PostImageTarget? = null
         val cache = DefaultIntrinsicMediaSizeCache()
-        cache.putSuccess(blockUrl, androidx.compose.ui.unit.IntSize(800, 600))
+        cache.putSuccess(blockUrl, IntrinsicMediaMetadata(androidx.compose.ui.unit.IntSize(800, 600), mimeType = null))
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 CompositionLocalProvider(

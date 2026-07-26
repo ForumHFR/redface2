@@ -39,8 +39,8 @@ class IntrinsicMediaSizeMeasurerSpikeTest {
             .build()
         val loader = ImageLoader.Builder(context).components { add(engine) }.build()
 
-        assertEquals(IntSize(70, 50), measureIntrinsicMediaSize("https://hfr/perso70x50.gif", context, loader))
-        assertEquals(IntSize(15, 15), measureIntrinsicMediaSize("https://hfr/micro15x15.gif", context, loader))
-        assertEquals(IntSize(16, 16), measureIntrinsicMediaSize("https://hfr/builtin16.gif", context, loader))
+        assertEquals(IntSize(70, 50), measureIntrinsicMediaSize("https://hfr/perso70x50.gif", context, loader)?.size)
+        assertEquals(IntSize(15, 15), measureIntrinsicMediaSize("https://hfr/micro15x15.gif", context, loader)?.size)
+        assertEquals(IntSize(16, 16), measureIntrinsicMediaSize("https://hfr/builtin16.gif", context, loader)?.size)
     }
 }

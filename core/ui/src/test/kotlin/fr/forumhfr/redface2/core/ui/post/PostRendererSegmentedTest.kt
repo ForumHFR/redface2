@@ -163,8 +163,8 @@ class PostRendererSegmentedTest {
     @Test
     fun `two adjacent inline images in a mixed link are 8dp apart`() {
         val cache = DefaultIntrinsicMediaSizeCache()
-        cache.putSuccess(imgA, IntSize(80, 60))
-        cache.putSuccess(imgB, IntSize(80, 60))
+        cache.putSuccess(imgA, IntrinsicMediaMetadata(IntSize(80, 60), mimeType = null))
+        cache.putSuccess(imgB, IntrinsicMediaMetadata(IntSize(80, 60), mimeType = null))
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides cache) {
@@ -195,7 +195,7 @@ class PostRendererSegmentedTest {
         // = 171 dp. Le padding §4 ne rétrécit PAS le bitmap (il élargit le placeholder seul).
         // Le nœud décrit est le bitmap.
         val cache = DefaultIntrinsicMediaSizeCache()
-        cache.putSuccess(imgA, IntSize(4000, 2000))
+        cache.putSuccess(imgA, IntrinsicMediaMetadata(IntSize(4000, 2000), mimeType = null))
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides cache) {
@@ -219,7 +219,7 @@ class PostRendererSegmentedTest {
         // capBloc clampé = min(916, max(400, 458)) = 458 dp = 1374 px @d3 → scale = 0,5725 →
         // 916×1374 px = 305,3×458 dp (height-bound). Le cold §6 donnerait 342×256,5 : séparés.
         val cache = DefaultIntrinsicMediaSizeCache()
-        cache.putSuccess(imgA, IntSize(1600, 2400))
+        cache.putSuccess(imgA, IntrinsicMediaMetadata(IntSize(1600, 2400), mimeType = null))
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides cache) {
@@ -240,7 +240,7 @@ class PostRendererSegmentedTest {
         // max(400, 0,5×350) = 400 dp aurait DÉPASSÉ la fenêtre. 1600×2400 px → scale =
         // 1050/2400 = 0,4375 → 700×1050 px = 233,3×350 dp.
         val cache = DefaultIntrinsicMediaSizeCache()
-        cache.putSuccess(imgA, IntSize(1600, 2400))
+        cache.putSuccess(imgA, IntrinsicMediaMetadata(IntSize(1600, 2400), mimeType = null))
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides cache) {
@@ -258,7 +258,7 @@ class PostRendererSegmentedTest {
         // #959 — 4000×3000 px : maxW = 0,95×360dp×3 = 1026 px → 342 dp ; h dérivée =
         // round(1026×3000/4000) = 770 px ≈ 256,7 dp (le cap hauteur 1200 px ne borde pas).
         val cache = DefaultIntrinsicMediaSizeCache()
-        cache.putSuccess(imgA, IntSize(4000, 3000))
+        cache.putSuccess(imgA, IntrinsicMediaMetadata(IntSize(4000, 3000), mimeType = null))
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides cache) {
@@ -274,7 +274,7 @@ class PostRendererSegmentedTest {
     @Test
     fun `measured block renders at its native physical size`() {
         val cache = DefaultIntrinsicMediaSizeCache()
-        cache.putSuccess(imgA, IntSize(800, 600))
+        cache.putSuccess(imgA, IntrinsicMediaMetadata(IntSize(800, 600), mimeType = null))
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides cache) {

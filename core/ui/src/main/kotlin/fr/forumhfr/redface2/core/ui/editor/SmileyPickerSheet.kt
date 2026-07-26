@@ -280,7 +280,7 @@ private fun SmileyCell(smiley: EditorSmiley, onClick: () -> Unit) {
             )
         }
     }
-    val measuredPx = if (smiley.source == EditorSmileySource.WIKI) sizeCache.get(smiley.imageUrl) else null
+    val measuredPx = if (smiley.source == EditorSmileySource.WIKI) sizeCache.get(smiley.imageUrl)?.size else null
     Box(
         modifier = Modifier
             // #236 — 48.dp keeps the Material minimum touch target while the grid gets denser.

@@ -106,6 +106,7 @@ import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
 import fr.forumhfr.redface2.core.ui.theme.LocalFoldLongQuotes
 import fr.forumhfr.redface2.core.ui.theme.LocalIgnoreInlineColors
+import fr.forumhfr.redface2.core.ui.theme.LocalMediaDisplayProfile
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
@@ -383,7 +384,7 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
     val measurableUrls = remember(inlines) {
         collectMeasurableSmileyUrls(inlines) + collectMeasurableImageUrls(inlines)
     }
-    val measuredSizes: Map<String, IntSize?> = measurableUrls.associateWith { sizeCache.get(it) }
+    val measuredSizes: Map<String, IntSize?> = measurableUrls.associateWith { sizeCache.get(it)?.size }
 
     // #416 — a smiley URL with a FRESH FAILURE on record is DEAD (HFR's BBCode engine turns any
     // unknown `:code:` into an <img> that 404s) : its token replaces the sprite as body-sized text.
@@ -997,7 +998,10 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
     // standalone PostBlock.Image. Until a measurement lands (cold cache) it is null and the §6 COLD
     // slot (v1.4, #957) is used for that first frame.
     val sizeCache = LocalIntrinsicMediaSizeCache.current
-    val measured: IntSize? = sizeCache.get(url)
+    // #973 (§8 [AMENDEMENT-v1.5-2]) — the ATOMIC metadata: the size drives the §3 box, the probe
+    // MIME decides `eligibleGifBloc` below (never the URL extension; null MIME = non-eligible).
+    val metadata: IntrinsicMediaMetadata? = sizeCache.get(url)
+    val measured: IntSize? = metadata?.size
     // #249 follow-up — a standalone PostBlock.Image is NOT covered by the paragraph measure effect, so
     // without this its intrinsic size never lands in the cache: the measured box never resolves, the
     // image stays in the §6 cold slot forever and loses both the exact parity box (#610) and the
@@ -1030,6 +1034,12 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
     // exceed a short window (split-screen) where the clamp follows it.
     val capBlocDp = rememberBlockImageColdCapDp()
     val blockDensity = LocalDensity.current
+    // #973 (§8) — `mEffectif`: an eligible block GIF (probe MIME on the atomic metadata) takes
+    // the display-profile factor as its §3 scale ceiling; everything else keeps the strict 1f.
+    // The COLD path below is untouched by construction: no metadata → no measured box, the §6
+    // slot is deterministic (no dimensions, no MIME — no factor).
+    val mediaDisplayProfile = LocalMediaDisplayProfile.current
+    val scaleCeiling = if (metadata?.mimeType == GIF_MIME_TYPE) mediaDisplayProfile.factor else 1f
     // contentAlignment centres the (usually narrower-than-column, #610) exact box on its own line —
     // the same visual centring the pre-#610 full-width Fit letterboxing produced.
     BoxWithConstraints(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -1041,7 +1051,7 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
             with(blockDensity) {
                 val maxWidthPx = (maxWidth.toPx() * IMAGE_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
                 val maxHeightPx = capBlocDp.dp.roundToPx()
-                imageDisplaySizePx(it, maxWidthPx, maxHeightPx)
+                imageDisplaySizePx(it, maxWidthPx, maxHeightPx, scaleCeiling)
             }
         }
         val sizeModifier = if (displayPx != null) {
