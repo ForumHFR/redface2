@@ -16,6 +16,20 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.34.5` — `local` — 2026-07-26
+
+Réglage « Posts en pleine largeur » — Lot 5 (#884) de la passe images (#876), arbitrage
+XaTriX : optionnel, 2 états, défaut inchangé. Nouveau réglage dans Réglages → Topic :
+en pleine largeur, les posts s'affichent bord à bord (fond plat, bande d'identité sur
+toute la largeur, fine ligne de séparation) au lieu des encarts — plus de place pour le
+texte ET les images (le dimensionnement de la passe images s'applique à la largeur
+gagnée). Les gouttières ne disparaissent qu'entre les posts : sondages, frontières de
+page et fin de sujet gardent leur respiration. Accessibilité : chaque post est un groupe
+TalkBack avec le pseudo en titre (navigation par titres), dans les deux modes. Le mode
+encart par défaut est strictement inchangé (rendu byte-identique).
+
+---
+
 ## `0.34.4` — `local` — 2026-07-22
 
 Les états d'erreur & retry — Lot 4 (#960) de la passe images (#876, contrat v1.5 §6,

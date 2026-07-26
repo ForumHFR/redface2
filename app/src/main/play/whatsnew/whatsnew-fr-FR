@@ -1,3 +1,4 @@
-Redface 2 v0.34.4 — dev.
+Redface 2 v0.34.5 — dev.
 
-- Passe images, états d'erreur : une image morte affiche désormais un vrai état d'erreur (plus de case vide silencieuse) et se retente d'un simple tap « Réessayer ». Le tirer-pour-rafraîchir ne recharge que les images en échec. Les SVG s'affichent ; l'AVIF suit le décodeur de votre appareil (état d'erreur propre sinon).
+- Nouveau réglage « Posts en pleine largeur » (Réglages → Topic) : les messages s'affichent bord à bord, sans encart — plus de place pour le texte et les images. Désactivé par défaut : rien ne change si vous n'y touchez pas.
+- Accessibilité : navigation TalkBack par titres de posts (pseudo), dans les deux modes.

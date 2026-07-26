@@ -832,6 +832,27 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `observeTopicFullWidthPosts defaults to false then persists true and false`() = runTest(dispatcher) {
+        // #884 — the card inset is the historical layout; full-width posts are the opt-in.
+        repository.observeTopicFullWidthPosts().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setTopicFullWidthPosts(true)
+        repository.observeTopicFullWidthPosts().test {
+            assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setTopicFullWidthPosts(false)
+        repository.observeTopicFullWidthPosts().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `observeShowScrollbar defaults to true then persists false and true`() = runTest(dispatcher) {
         // #105 — the reading scrollbar is the historical behaviour; disabling it is the opt-out.
         repository.observeShowScrollbar().test {

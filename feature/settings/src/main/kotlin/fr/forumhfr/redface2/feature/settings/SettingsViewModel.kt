@@ -121,6 +121,11 @@ class SettingsViewModel @Inject constructor(
             apply = { state, value -> state.copy(foldLongQuotes = value) },
         )
         observePreference(
+            flow = userPreferencesRepository.observeTopicFullWidthPosts(),
+            isLocked = { it.isUpdatingFullWidthPosts },
+            apply = { state, value -> state.copy(fullWidthPosts = value) },
+        )
+        observePreference(
             flow = userPreferencesRepository.observeShowScrollbar(),
             isLocked = { it.isUpdatingShowScrollbar },
             apply = { state, value -> state.copy(showScrollbar = value) },
@@ -287,6 +292,7 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.TopicPollsExpandedChanged -> updateTopicPollsExpanded(intent.enabled)
             is SettingsIntent.TopicSignaturesChanged -> updateTopicSignatures(intent.enabled)
             is SettingsIntent.FoldLongQuotesChanged -> updateFoldLongQuotes(intent.enabled)
+            is SettingsIntent.FullWidthPostsChanged -> updateFullWidthPosts(intent.enabled)
             is SettingsIntent.ShowScrollbarChanged -> updateShowScrollbar(intent.enabled)
             is SettingsIntent.NavBarLabelsChanged -> updateNavBarLabels(intent.enabled)
             is SettingsIntent.FunnyEmptyStateChanged -> updateFunnyEmptyState(intent.enabled)
@@ -917,6 +923,33 @@ class SettingsViewModel @Inject constructor(
                 }
             },
             persist = userPreferencesRepository::setFoldLongQuotes,
+        )
+    }
+
+    private fun updateFullWidthPosts(desired: Boolean) {
+        val previous = _state.value.fullWidthPosts
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    fullWidthPosts = desired,
+                    isUpdatingFullWidthPosts = true,
+                    fullWidthPostsError = false,
+                    fullWidthPostsTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(fullWidthPosts = desired, isUpdatingFullWidthPosts = false)
+                } else {
+                    state.copy(
+                        fullWidthPosts = previous,
+                        isUpdatingFullWidthPosts = false,
+                        fullWidthPostsError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setTopicFullWidthPosts,
         )
     }
 

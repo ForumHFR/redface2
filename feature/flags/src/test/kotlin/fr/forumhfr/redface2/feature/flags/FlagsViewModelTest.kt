@@ -2649,6 +2649,10 @@ class FlagsViewModelTest {
 
         override suspend fun setFoldLongQuotes(enabled: Boolean) = Unit
 
+        override fun observeTopicFullWidthPosts(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setTopicFullWidthPosts(enabled: Boolean) = Unit
+
         override fun observeShowScrollbar(): Flow<Boolean> = MutableStateFlow(true)
 
         override suspend fun setShowScrollbar(enabled: Boolean) = Unit

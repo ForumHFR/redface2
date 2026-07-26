@@ -1,3 +1,4 @@
-Redface 2 v0.34.4 — dev.
+Redface 2 v0.34.5 — dev.
 
-- Image pass, error states: a dead image now shows a real error slot (no more silent empty box) and retries with a single "Retry" tap. Pull-to-refresh only reloads the images that actually failed. SVGs now render; AVIF follows your device decoder (clean error state otherwise).
+- New "Full-width posts" setting (Settings → Topic): posts render edge to edge, without the card inset — more room for text and images. Off by default: nothing changes unless you opt in.
+- Accessibility: TalkBack heading navigation per post (author pseudo), in both modes.

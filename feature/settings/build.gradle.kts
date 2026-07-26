@@ -5,6 +5,16 @@ plugins {
 
 android {
     namespace = "fr.forumhfr.redface2.feature.settings"
+
+    testOptions {
+        unitTests {
+            // #884 — SettingsCatalogueFullWidthPostsTest mounts the real catalogue via
+            // `createComposeRule()` and resolves `stringResource`, so the host activity needs the
+            // merged Android resources at JVM unit-test time. Same convention as :feature:topic
+            // and :core:ui (Compose UI tests).
+            isIncludeAndroidResources = true
+        }
+    }
 }
 
 dependencies {
@@ -28,4 +38,14 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.mockk)
     testImplementation(libs.turbine)
+    // #884 — Robolectric hosts `createComposeRule()` on the JVM so the catalogue test can exercise
+    // the full-width-posts row (section placement, search index, tap dispatch, disabled gate)
+    // without a device. The BOM aligns the ui-test artifacts with the production Compose versions;
+    // the ui-test-manifest (debug-only) pulls the Activity surrogate the rule mounts internally.
+    // Same harness as :feature:topic and :core:ui.
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
