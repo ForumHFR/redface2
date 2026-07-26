@@ -14,6 +14,9 @@ import org.junit.Test
  *  - a cat WITHOUT sub-category (`hasSubcategorySelect = false`, e.g. cat IA)
  *    is postable with `subcat = 0`, so submit is allowed even though
  *    `selectedSubcat` is null.
+ *
+ * Also pins the #459 upload guard for BOTH modes (#953 F5) : an in-flight image
+ * upload blocks submit, mirroring [PostEditorState.canSubmit].
  */
 class TopicFormStateTest {
 
@@ -32,6 +35,20 @@ class TopicFormStateTest {
             draft = TextFieldValue("Corps"),
             hasSubcategorySelect = hasSubcategorySelect,
             selectedSubcat = selectedSubcat,
+        )
+
+    private fun editFirstPostState(isUploading: Boolean = false): TopicFormState =
+        TopicFormState(
+            mode = TopicFormMode.EditFirstPost,
+            cat = 23,
+            subcat = 401,
+            topicId = 35395,
+            page = 1,
+            numreponse = 1,
+            subject = TextFieldValue("Titre"),
+            draft = TextFieldValue("Corps"),
+            selectedSubcat = 401,
+            isUploading = isUploading,
         )
 
     @Test
@@ -61,5 +78,18 @@ class TopicFormStateTest {
         val state = newState(hasSubcategorySelect = false, selectedSubcat = null)
             .copy(draft = TextFieldValue(""))
         assertFalse(state.canSubmit)
+    }
+
+    @Test
+    fun `New blocks submit while an image upload is in flight (#953 F5)`() {
+        val state = newState(hasSubcategorySelect = false, selectedSubcat = null)
+            .copy(isUploading = true)
+        assertFalse(state.canSubmit)
+    }
+
+    @Test
+    fun `EditFirstPost blocks submit while an image upload is in flight (#953 F5)`() {
+        assertTrue("sanity: the base EditFirstPost state must be submittable", editFirstPostState().canSubmit)
+        assertFalse(editFirstPostState(isUploading = true).canSubmit)
     }
 }
