@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.topic
 
 import androidx.compose.ui.text.input.TextFieldValue
+import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.write.ReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
@@ -101,6 +102,60 @@ class QuickReplyViewModelTest {
             "brouillon de bob",
             viewModel.state.value.text.text,
         )
+    }
+
+    @Test
+    fun `reopening never exposes the previous account's text, even while the load is in flight`() = runTest {
+        // Gate Sol #953 F2 — the state SEQUENCE across a reopen must never show alice's text to
+        // bob, not even transiently while the new owner's row is still loading (the owner
+        // snapshot is gated to hold the load in flight).
+        val store = FakeQuickReplyDraftStore(initialBody = "brouillon privé d'alice", activeOwner = "alice")
+        val viewModel = quickReplyViewModel(draftStore = store)
+        viewModel.onSheetOpened()
+        advanceUntilIdle()
+        viewModel.onDismissed()
+        advanceUntilIdle()
+
+        store.activeOwner = "bob"
+        store.storedBody = "brouillon de bob"
+        val ownerGate = CompletableDeferred<Unit>()
+        store.ownerGate = ownerGate
+
+        viewModel.state.test {
+            assertEquals("brouillon privé d'alice", awaitItem().text.text) // pre-reopen baseline
+            viewModel.onSheetOpened()
+            // The masking state must land BEFORE the (still-gated) load completes.
+            assertEquals("bob must never see alice's text mid-load", "", awaitItem().text.text)
+            ownerGate.complete(Unit)
+            advanceUntilIdle()
+            assertEquals("brouillon de bob", awaitItem().text.text)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `tasks of a session whose owner never resolved no-op instead of adopting the next account`() = runTest {
+        // Gate Sol #953 F2 — currentOwner() resolving LATE (after an account switch + reopen)
+        // must not let the dead session's deferred writes ride the NEW owner : alice's flushed
+        // text must never land under bob's row, and alice's own row stays untouched.
+        val store = FakeQuickReplyDraftStore(initialBody = "brouillon d'alice", activeOwner = "alice")
+        val ownerGate = CompletableDeferred<Unit>()
+        store.ownerGate = ownerGate
+        val viewModel = quickReplyViewModel(draftStore = store)
+        viewModel.onSheetOpened() // session 1 : owner snapshot still pending
+        viewModel.onTextChanged(TextFieldValue("texte d'alice"))
+        viewModel.onDismissed() // flush scheduled, awaiting session 1's owner
+        advanceUntilIdle()
+
+        store.activeOwner = "bob"
+        viewModel.onSheetOpened() // seals session 1 before its owner ever resolved
+        ownerGate.complete(Unit) // the late resolution must not resurrect session 1's flush
+        advanceUntilIdle()
+
+        assertTrue("a sealed session's writes must no-op", store.savedBodies.isEmpty())
+        assertNull("no row may be created under bob", store.storedBody)
+        store.activeOwner = "alice"
+        assertEquals("alice's row is untouched", "brouillon d'alice", store.storedBody)
     }
 
     @Test
@@ -571,7 +626,13 @@ private class FakeQuickReplyDraftStore(
             if (value == null) bodies.remove(owner) else bodies[owner] = value
         }
 
-    override suspend fun currentOwner(): String? = activeOwner
+    /** When set, [currentOwner] suspends until the test releases it (late-resolution races, gate Sol). */
+    var ownerGate: CompletableDeferred<Unit>? = null
+
+    override suspend fun currentOwner(): String? {
+        ownerGate?.await()
+        return activeOwner
+    }
 
     // Same owner guards as RoomEditorDraftStore (#953 F2) : a session whose captured owner is
     // no longer the active account reads nothing, writes nothing and deletes nothing.

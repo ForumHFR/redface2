@@ -24,7 +24,9 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -158,7 +160,9 @@ class QuickReplyViewModel @AssistedInject constructor(
      * [CompletableDeferred] per session — draft tasks capture their session synchronously at
      * scheduling and await the owner inside, so a deferred write (autosave debounce, dismiss
      * flush, submit delete) from a PREVIOUS session can never ride the owner re-snapshotted by
-     * the next opening.
+     * the next opening. A re-opening additionally SEALS (cancels) the previous session if its
+     * owner never resolved : a late [EditorDraftStore.currentOwner] must not hand the NEXT
+     * account's owner to the dead session's tasks — they no-op instead (gate Sol).
      */
     private var sessionOwner: CompletableDeferred<String?> = CompletableDeferred()
 
@@ -199,14 +203,26 @@ class QuickReplyViewModel @AssistedInject constructor(
     fun onSheetOpened(initialQuotes: List<QuotedPostPreview> = emptyList()) {
         materializeJob?.cancel()
         openJob?.cancel()
-        // #953 F2 — a fresh owner snapshot per opening, swapped in synchronously : everything
-        // this session schedules rides THIS deferred, while tasks the previous session already
-        // scheduled keep the deferred (hence the owner) of theirs.
+        // Gate Sol #953 F2 — seal the previous session : if its owner snapshot never resolved,
+        // its still-pending draft tasks must no-op rather than adopt whatever account the late
+        // currentOwner() read lands on (a no-op on an already-resolved session).
+        sessionOwner.cancel()
+        // Gate Sol #953 F2 + #870 — mask the previous session's content NOW, synchronously :
+        // the sheet must never flash account A's private text while the reopened owner's row is
+        // still loading. Same one-session rule for the cards (#870) : the delivered set IS the
+        // citation session, quotes armed under a previous opening never resurrect (nothing the
+        // user selected is lost — since #868/#869 the hoisted basket survives until an actual
+        // send, so a re-open via « Citer N » re-delivers the full selection).
+        _state.update { it.copy(text = TextFieldValue(""), quotes = emptyList()) }
+        // A fresh owner snapshot per opening, swapped in synchronously : everything this session
+        // schedules rides THIS deferred, while tasks the previous session already scheduled keep
+        // the deferred (hence the owner) of theirs.
         val opening = CompletableDeferred<String?>()
         sessionOwner = opening
         viewModelScope.launch {
             // Deliberately NOT part of [openJob] : a rapid re-open cancels the seeding below,
-            // but every session's owner must still resolve (a dismiss flush may already await it).
+            // but this session's owner must still resolve for its already-scheduled tasks
+            // (unless that re-open sealed the session first — complete() is then a no-op).
             opening.complete(draftStore.currentOwner())
         }
         openJob = viewModelScope.launch {
@@ -214,17 +230,7 @@ class QuickReplyViewModel @AssistedInject constructor(
             _state.update {
                 it.copy(text = TextFieldValue(text = body, selection = TextRange(body.length)))
             }
-            // #870 — the delivered set IS the citation session : quotes armed under a PREVIOUS
-            // sheet session never resurrect on a new opening (they used to merge idempotently,
-            // desynchronising the sheet from the « Citer N » FAB). Nothing the user selected is
-            // lost anymore : since #868/#869 the hoisted basket survives until an actual send, so
-            // a re-open via « Citer N » re-delivers the full selection — which supersedes the old
-            // fold-into-inline behaviour the cards-OFF branch had for the same no-drop reason.
-            if (initialQuotes.isEmpty()) {
-                if (_state.value.quotes.isNotEmpty()) _state.update { it.copy(quotes = emptyList()) }
-                return@launch
-            }
-            _state.update { it.copy(quotes = emptyList()) }
+            if (initialQuotes.isEmpty()) return@launch
             if (userPreferencesRepository.observeQuoteCardsEnabled().first()) {
                 // Through onQuoteAdded : keeps the dedup + #808 cap semantics of a manual add.
                 initialQuotes.forEach(::onQuoteAdded)
@@ -350,9 +356,11 @@ class QuickReplyViewModel @AssistedInject constructor(
         if (_state.value.isPreparingQuotes) return
         autosaveJob?.cancel()
         val session = sessionOwner
+        val body = _state.value.text.text
+        val quotes = _state.value.quotes
         viewModelScope.launch {
-            saveDraftNow(session.await())
-            _effects.send(QuickReplyEffect.EscalateToFullEditor(_state.value.quotes))
+            saveDraftNow(session.await(), body)
+            _effects.send(QuickReplyEffect.EscalateToFullEditor(quotes))
         }
     }
 
@@ -366,23 +374,29 @@ class QuickReplyViewModel @AssistedInject constructor(
         // n°2) — the user abandoned it; the flush below only persists what the field showed.
         materializeJob?.cancel()
         autosaveJob?.cancel()
-        // #953 F2 — the flush rides the owner of the session being DISMISSED (captured now),
-        // never the one a subsequent re-opening may re-snapshot before the write lands.
+        // #953 F2 — owner AND body captured NOW : the flush persists what the DISMISSED session
+        // showed, under the owner of that session — regardless of what a subsequent re-opening
+        // re-snapshots or masks before this write lands. If that re-opening seals this session
+        // before its owner ever resolved, the await cancels the flush : a write with an unknown
+        // owner never happens (gate Sol).
         val session = sessionOwner
-        viewModelScope.launch { saveDraftNow(session.await()) }
+        val body = _state.value.text.text
+        viewModelScope.launch { saveDraftNow(session.await(), body) }
     }
 
     private fun scheduleAutosave() {
         autosaveJob?.cancel()
+        // #953 F2 — same capture-at-scheduling rule as [onDismissed] : session and body belong
+        // to the keystroke that scheduled this debounce, whatever happens before it fires.
         val session = sessionOwner
+        val body = _state.value.text.text
         autosaveJob = viewModelScope.launch {
             delay(AUTOSAVE_DEBOUNCE_MS)
-            saveDraftNow(session.await())
+            saveDraftNow(session.await(), body)
         }
     }
 
-    private suspend fun saveDraftNow(owner: String?) {
-        val body = _state.value.text.text
+    private suspend fun saveDraftNow(owner: String?, body: String) {
         if (body.isBlank()) {
             draftStore.delete(owner, draftKey)
         } else {
@@ -460,7 +474,17 @@ class QuickReplyViewModel @AssistedInject constructor(
                 // Same contract as the full editor: the draft dies with the successful POST,
                 // awaited so a process death cannot resurrect an already-published reply.
                 autosaveJob?.cancel()
-                draftStore.delete(session.await(), draftKey)
+                val owner = try {
+                    session.await()
+                } catch (_: CancellationException) {
+                    // Gate Sol #953 F2 — the session was sealed by a later re-opening before its
+                    // owner ever resolved : the delete no-ops (null owner), but the success flow
+                    // must still complete — HFR already accepted the reply. A genuine cancellation
+                    // of THIS submit still propagates.
+                    currentCoroutineContext().ensureActive()
+                    null
+                }
+                draftStore.delete(owner, draftKey)
                 _state.update { QuickReplyUiState() }
                 _effects.send(
                     QuickReplyEffect.SubmitSucceeded(
