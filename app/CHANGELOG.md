@@ -16,6 +16,16 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.34.6` — `local` — 2026-07-26
+
+Fixes pré-promotion (#953, bloquants F2/F3/F5/F6 de la review beta) : la réponse rapide
+survit à une rotation pendant l'envoi (l'état est restauré, plus de rejet fantôme du
+résultat) ; les brouillons de réponse rapide sont strictement isolés entre comptes
+(re-capture de l'owner à chaque ouverture, sessions scellées, gardes de lecture/suppression
+en base — un compte ne peut plus lire ni effacer le brouillon d'un autre) ; la création de
+topic n'est plus soumise pendant un upload d'image en vol ; la spec navigation reflète le
+défaut plein écran de l'éditeur.
+
 ## `0.34.5` — `local` — 2026-07-26
 
 Réglage « Posts en pleine largeur » — Lot 5 (#884) de la passe images (#876), arbitrage

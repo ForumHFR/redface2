@@ -1,4 +1,4 @@
-Redface 2 v0.34.5 — dev.
+Redface 2 v0.34.6 — dev.
 
-- Nouveau réglage « Posts en pleine largeur » (Réglages → Topic) : les messages s'affichent bord à bord, sans encart — plus de place pour le texte et les images. Désactivé par défaut : rien ne change si vous n'y touchez pas.
-- Accessibilité : navigation TalkBack par titres de posts (pseudo), dans les deux modes.
+- Réponse rapide : votre message survit désormais à une rotation de l'écran pendant l'envoi, et les brouillons sont strictement isolés entre comptes.
+- La création de sujet attend la fin de l'envoi d'image en cours avant de publier.
