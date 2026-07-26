@@ -461,6 +461,17 @@ interface UserPreferencesRepository {
     suspend fun setDisplayDensity(density: DisplayDensity)
 
     /**
+     * Block-GIF display profile (#973, contrat images §8 [AMENDEMENT-v1.5-2]):
+     * [MediaDisplayProfile.M] (default, ×1,5) — the enlargement factor applied to eligible block
+     * GIFs by the post renderer (wired in wave 2). Observed by the renderer hosts and mirrored in
+     * Settings > Affichage. A corrupt / unknown stored value degrades to the M default.
+     */
+    fun observeMediaDisplayProfile(): Flow<MediaDisplayProfile>
+
+    /** Persists [observeMediaDisplayProfile]. Default [MediaDisplayProfile.M] until the first call. */
+    suspend fun setMediaDisplayProfile(profile: MediaDisplayProfile)
+
+    /**
      * Reading font-size preset (#287): [FontScalePreference.M] (default) is the M3 reference size;
      * [FontScalePreference.S] / [FontScalePreference.L] scale the reading typography by the preset
      * [FontScalePreference.factor], applied ON TOP of the OS font zoom (never replacing it).

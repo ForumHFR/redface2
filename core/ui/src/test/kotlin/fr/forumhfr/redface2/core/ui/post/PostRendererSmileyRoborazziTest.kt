@@ -88,11 +88,11 @@ class PostRendererSmileyRoborazziTest {
 
     /** Pre-seed the cache with the same native sizes the fake engine serves → synchronous render. */
     private fun seededCache(): IntrinsicMediaSizeCache = DefaultIntrinsicMediaSizeCache().apply {
-        putSuccess(builtinUrl, IntSize(16, 16))
-        putSuccess(microUrl, IntSize(15, 15))
-        putSuccess(persoUrl, IntSize(70, 50))
-        putSuccess(giantUrl, IntSize(200, 140))
-        putSuccess(bannerUrl, IntSize(500, 120))
+        putSuccess(builtinUrl, IntrinsicMediaMetadata(IntSize(16, 16), mimeType = null))
+        putSuccess(microUrl, IntrinsicMediaMetadata(IntSize(15, 15), mimeType = null))
+        putSuccess(persoUrl, IntrinsicMediaMetadata(IntSize(70, 50), mimeType = null))
+        putSuccess(giantUrl, IntrinsicMediaMetadata(IntSize(200, 140), mimeType = null))
+        putSuccess(bannerUrl, IntrinsicMediaMetadata(IntSize(500, 120), mimeType = null))
     }
 
     @Test

@@ -383,7 +383,7 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
     val measurableUrls = remember(inlines) {
         collectMeasurableSmileyUrls(inlines) + collectMeasurableImageUrls(inlines)
     }
-    val measuredSizes: Map<String, IntSize?> = measurableUrls.associateWith { sizeCache.get(it) }
+    val measuredSizes: Map<String, IntSize?> = measurableUrls.associateWith { sizeCache.get(it)?.size }
 
     // #416 — a smiley URL with a FRESH FAILURE on record is DEAD (HFR's BBCode engine turns any
     // unknown `:code:` into an <img> that 404s) : its token replaces the sprite as body-sized text.
@@ -997,7 +997,9 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
     // standalone PostBlock.Image. Until a measurement lands (cold cache) it is null and the §6 COLD
     // slot (v1.4, #957) is used for that first frame.
     val sizeCache = LocalIntrinsicMediaSizeCache.current
-    val measured: IntSize? = sizeCache.get(url)
+    // #973 — only the SIZE is consumed here in wave 1; the atomic metadata's MIME feeds the
+    // block-GIF display profile in wave 2 (§8 [AMENDEMENT-v1.5-2]).
+    val measured: IntSize? = sizeCache.get(url)?.size
     // #249 follow-up — a standalone PostBlock.Image is NOT covered by the paragraph measure effect, so
     // without this its intrinsic size never lands in the cache: the measured box never resolves, the
     // image stays in the §6 cold slot forever and loses both the exact parity box (#610) and the

@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
+import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
@@ -1190,6 +1191,48 @@ class DataStoreUserPreferencesRepositoryTest {
 
         repository.observeDisplayDensity().test {
             assertEquals(DisplayDensity.COMFORT, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observeMediaDisplayProfile defaults to M on an empty store`() = runTest(dispatcher) {
+        // #973 ([AMENDEMENT-v1.5-2]) — M (×1,5) is the default chosen by XaTriX, never the
+        // enum's first ordinal by chance.
+        repository.observeMediaDisplayProfile().test {
+            assertEquals(MediaDisplayProfile.M, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setMediaDisplayProfile persists and round-trips S then L then M`() = runTest(dispatcher) {
+        repository.setMediaDisplayProfile(MediaDisplayProfile.S)
+        repository.observeMediaDisplayProfile().test {
+            assertEquals(MediaDisplayProfile.S, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setMediaDisplayProfile(MediaDisplayProfile.L)
+        repository.observeMediaDisplayProfile().test {
+            assertEquals(MediaDisplayProfile.L, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setMediaDisplayProfile(MediaDisplayProfile.M)
+        repository.observeMediaDisplayProfile().test {
+            assertEquals(MediaDisplayProfile.M, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `corrupt media_display_profile value falls back to M instead of crashing`() = runTest(dispatcher) {
+        // #973 — an unknown value (older build / manual edit) must degrade to M, not crash valueOf.
+        dataStore.edit { prefs -> prefs[stringPreferencesKey("media_display_profile")] = "XXL" }
+
+        repository.observeMediaDisplayProfile().test {
+            assertEquals(MediaDisplayProfile.M, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
     }

@@ -4,6 +4,7 @@ import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
+import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
@@ -228,6 +229,12 @@ data class SettingsState(
     val isUpdatingFontScale: Boolean = false,
     val fontScaleError: Boolean = false,
     val fontScaleTouchedLocally: Boolean = false,
+    // #973 — block-GIF display profile ([AMENDEMENT-v1.5-2]). Same optimistic-flip machinery as
+    // the reading display presets. Default matches the DataStore default (M ×1,5, choix XaTriX).
+    val mediaDisplayProfile: MediaDisplayProfile = MediaDisplayProfile.M,
+    val isUpdatingMediaDisplayProfile: Boolean = false,
+    val mediaDisplayProfileError: Boolean = false,
+    val mediaDisplayProfileTouchedLocally: Boolean = false,
     // #459 — Hébergeur d'images. The provider is an enum, so it uses the bespoke optimistic-flip
     // shape (like themeMode): `uploadProvider` is the displayed selection, `isUpdating*` gates the
     // control while DataStore writes, `*Error` surfaces a persist failure, `*TouchedLocally` is a
@@ -371,6 +378,10 @@ data class SettingsState(
 
     val canChangeFontScale: Boolean
         get() = !isUpdatingFontScale
+
+    // #973 — the block-GIF profile selector is gated only by its own write.
+    val canChangeMediaDisplayProfile: Boolean
+        get() = !isUpdatingMediaDisplayProfile
 
     // #459 — the provider selector is gated only by its own in-flight write.
     val canChangeUploadProvider: Boolean
@@ -518,6 +529,10 @@ sealed interface SettingsIntent {
     // optimistically with revert-on-failure, like ThemeModeChanged.
     data class DisplayDensityChanged(val density: DisplayDensity) : SettingsIntent
     data class FontScaleChanged(val scale: FontScalePreference) : SettingsIntent
+
+    // #973 — block-GIF display profile. `profile` is the desired selection, applied optimistically
+    // with revert-on-failure, like DisplayDensityChanged.
+    data class MediaDisplayProfileChanged(val profile: MediaDisplayProfile) : SettingsIntent
 
     // #459 — Hébergeur d'images. `provider` is the desired selection (applied optimistically with
     // revert-on-failure, like ThemeModeChanged); `text` is the desired imgur Client-ID (persisted on

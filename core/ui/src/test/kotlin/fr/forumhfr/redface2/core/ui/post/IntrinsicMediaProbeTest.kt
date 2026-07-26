@@ -6,13 +6,16 @@ import androidx.compose.ui.unit.IntSize
 import androidx.exifinterface.media.ExifInterface
 import androidx.test.core.app.ApplicationProvider
 import coil3.BitmapImage
+import coil3.ColorImage
 import coil3.ImageLoader
+import coil3.test.FakeImageLoaderEngine
 import java.io.File
 import kotlinx.coroutines.test.runTest
 import okio.FileSystem
 import okio.Path.Companion.toPath
 import okio.use
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -66,8 +69,8 @@ class IntrinsicMediaProbeTest {
         // 2000×1500 source: the pre-#959 bounded decode reported 1024×768 (measured, §3
         // non-conformity B8). The header-only probe must report the true 2000×1500.
         val file = pngFile(2000, 1500)
-        val size = measureIntrinsicMediaSize(file.absolutePath, context, loader())
-        assertEquals(IntSize(2000, 1500), size)
+        val metadata = measureIntrinsicMediaSize(file.absolutePath, context, loader())
+        assertEquals(IntSize(2000, 1500), metadata?.size)
     }
 
     @Test
@@ -76,8 +79,8 @@ class IntrinsicMediaProbeTest {
         // §3: wNatif/hNatif are the ORIENTED native dimensions (confirmed by measure on the old
         // full-decode path; the header-only decode must keep that contract by hand).
         val file = jpegFile(64, 32, exifOrientation = ExifInterface.ORIENTATION_ROTATE_90)
-        val size = measureIntrinsicMediaSize(file.absolutePath, context, loader())
-        assertEquals(IntSize(32, 64), size)
+        val metadata = measureIntrinsicMediaSize(file.absolutePath, context, loader())
+        assertEquals(IntSize(32, 64), metadata?.size)
     }
 
     @Test
@@ -103,7 +106,7 @@ class IntrinsicMediaProbeTest {
         val file = pngFile(120, 90)
         val imageLoader = loader()
         val probed = measureIntrinsicMediaSize(file.absolutePath, context, imageLoader)
-        assertEquals(IntSize(120, 90), probed)
+        assertEquals(IntSize(120, 90), probed?.size)
 
         val render = imageLoader.execute(
             coil3.request.ImageRequest.Builder(context).data(file.absolutePath).build(),
@@ -112,11 +115,8 @@ class IntrinsicMediaProbeTest {
         assertTrue("render must decode a real bitmap after a probe", image is BitmapImage)
     }
 
-    @Test
-    fun `a REAL gif probes successfully - the exif read must never fail the whole probe`() = runTest {
-        // Gate Sol r1 (blocker #1): ExifInterface does not support GIF — an unguarded call made
-        // the probe fail, so a real GIF never got a measured box (nor an animation). The classic
-        // minimal transparent 1×1 GIF89a exercises the real decoder path end to end.
+    // The classic minimal transparent 1×1 GIF89a — a REAL gif container decoded end to end.
+    private fun gifFile(extension: String): File {
         val gifBytes = byteArrayOf(
             0x47, 0x49, 0x46, 0x38, 0x39, 0x61, // "GIF89a"
             0x01, 0x00, 0x01, 0x00, 0x80.toByte(), 0x00, 0x00, // 1×1, 2-colour palette
@@ -126,21 +126,64 @@ class IntrinsicMediaProbeTest {
             0x02, 0x02, 0x44, 0x01, 0x00, // image data
             0x3B, // trailer
         )
-        val file = File.createTempFile("probe", ".gif").apply {
+        return File.createTempFile("probe", extension).apply {
             writeBytes(gifBytes)
             deleteOnExit()
         }
-        val size = measureIntrinsicMediaSize(file.absolutePath, context, loader())
-        assertEquals(IntSize(1, 1), size)
+    }
+
+    @Test
+    fun `a REAL gif probes successfully - the exif read must never fail the whole probe`() = runTest {
+        // Gate Sol r1 (blocker #1): ExifInterface does not support GIF — an unguarded call made
+        // the probe fail, so a real GIF never got a measured box (nor an animation). #973
+        // ([AMENDEMENT-v1.5-2]): the same probe now carries the decoded MIME atomically with the
+        // dimensions — `image/gif` is what makes a block media profile-eligible in wave 2.
+        val file = gifFile(".gif")
+        val metadata = measureIntrinsicMediaSize(file.absolutePath, context, loader())
+        assertEquals(IntrinsicMediaMetadata(IntSize(1, 1), "image/gif"), metadata)
+    }
+
+    @Test
+    fun `a gif behind a lying jpg extension reports the gif mime - the URL is never authoritative`() = runTest {
+        // #973 ([AMENDEMENT-v1.5-2]): « l'extension d'URL n'est JAMAIS autoritaire ». The MIME
+        // comes from the decoded HEADER (BitmapFactory bounds decode), so a GIF stream served
+        // under a .jpg name still reports image/gif.
+        val file = gifFile(".jpg")
+        val metadata = measureIntrinsicMediaSize(file.absolutePath, context, loader())
+        assertEquals(IntrinsicMediaMetadata(IntSize(1, 1), "image/gif"), metadata)
+    }
+
+    @Test
+    fun `a non-gif reports its own decoded mime`() = runTest {
+        val file = jpegFile(64, 48)
+        val metadata = measureIntrinsicMediaSize(file.absolutePath, context, loader())
+        assertEquals(IntrinsicMediaMetadata(IntSize(64, 48), "image/jpeg"), metadata)
+    }
+
+    @Test
+    fun `a probe success without an identifiable mime carries none`() = runTest {
+        // #973: MIME absent/inconnu → pas de MIME. A result that never went through the
+        // header-only decoder (here: a FakeImageLoaderEngine short-circuits the fetch, the
+        // production analogue being any pipeline that cannot identify the container) yields a
+        // valid size with a null MIME — never a guess from the URL's .gif extension.
+        val url = "https://hfr/unidentified.gif"
+        val engine = FakeImageLoaderEngine.Builder()
+            .intercept(url, ColorImage(width = 70, height = 50))
+            .build()
+        val loader = ImageLoader.Builder(context).components { add(engine) }.build()
+        val metadata = measureIntrinsicMediaSize(url, context, loader)
+        assertEquals(IntrinsicMediaMetadata(IntSize(70, 50), mimeType = null), metadata)
     }
 
     @Test
     fun `an unreadable source reports null - same failure contract as before`() = runTest {
+        // #973: probe échouée → no metadata at all, so no MIME either (never inferred from the
+        // extension of a dead URL).
         val file = File.createTempFile("probe", ".png").apply {
             writeText("not an image")
             deleteOnExit()
         }
-        val size = measureIntrinsicMediaSize(file.absolutePath, context, loader())
-        assertEquals(null, size)
+        val metadata = measureIntrinsicMediaSize(file.absolutePath, context, loader())
+        assertNull(metadata)
     }
 }
