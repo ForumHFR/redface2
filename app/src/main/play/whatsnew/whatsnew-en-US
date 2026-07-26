@@ -1,4 +1,4 @@
-Redface 2 v0.34.5 — dev.
+Redface 2 v0.34.6 — dev.
 
-- New "Full-width posts" setting (Settings → Topic): posts render edge to edge, without the card inset — more room for text and images. Off by default: nothing changes unless you opt in.
-- Accessibility: TalkBack heading navigation per post (author pseudo), in both modes.
+- Quick reply: your message now survives a screen rotation during send, and drafts are strictly isolated between accounts.
+- Topic creation waits for the in-flight image upload before submitting.
