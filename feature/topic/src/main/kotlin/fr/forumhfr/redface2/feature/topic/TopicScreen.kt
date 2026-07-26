@@ -64,6 +64,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -72,6 +73,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -1005,7 +1008,7 @@ internal fun TopicContent(
     // tap time) ; the sheet escalates to the full-screen editor through onReply. Local UI state
     // (like the page picker) : non-null while the sheet is up, carrying the reply coordinates
     // plus the card « Citer » pre-arms (null from the FAB).
-    var quickReplyFor by remember { mutableStateOf<QuickReplyLaunch?>(null) }
+    var quickReplyFor by rememberQuickReplyLaunch()
     // #291 — the per-post toggle checkmarks and the « ❝N » count only need the numreponses.
     val multiQuoteNumreponses = multiQuoteSelections.map { it.numreponse }
     Scaffold(
@@ -3620,6 +3623,86 @@ internal data class QuickReplyLaunch(
      */
     val consumesBasket: Boolean = false,
 )
+
+/**
+ * The quick-reply sheet's mount-point state — non-null while the sheet is up, null once dismissed
+ * (see [QuickReplyLaunch] above for what an opening carries).
+ *
+ * #953 (F3) — SAVEABLE across activity recreation, unlike the deliberately non-saveable local UI
+ * states of this screen (`menuPost` / `imageMenuTarget`, see TopicLoadedContent) : those are
+ * ephemeral overflow menus with nothing in flight, whereas this state is the MOUNT POINT of the
+ * sheet's effect collector while [QuickReplyViewModel] — scoped to the topic's NAV ENTRY, so it
+ * survives the recreation — may hold an in-flight POST. Losing the mount point desynchronised
+ * sheet and ViewModel : the recreation tore the sheet down mid-submit (the #788 dismiss guards
+ * only cover user dismissal), the POST then succeeded into the VM's buffered effects Channel with
+ * no collector, and the stale SubmitSucceeded was REPLAYED at the next manual opening (instant
+ * close + phantom refresh/scroll + basket purge). Restoring the launch re-mounts the sheet over
+ * the SAME nav-entry ViewModel, so the buffered effect is consumed legitimately — the refresh of
+ * a POST that succeeded during the rotation IS the correct outcome. Every field is a plain value
+ * ([QuickReplyLaunchSaver]), so saving it costs nothing.
+ */
+@Composable
+internal fun rememberQuickReplyLaunch(): MutableState<QuickReplyLaunch?> =
+    rememberSaveable(stateSaver = QuickReplyLaunchSaver) { mutableStateOf(null) }
+
+/**
+ * #953 (F3) — explicit [Saver] for the (non-Parcelable) [QuickReplyLaunch] : the flat list is
+ * `[cat, subcat, topicId, page, consumesBasket, then numreponse/author/excerpt per quote]` —
+ * primitives only, all Bundle-safe. A null launch (sheet closed) is handled by [listSaver]
+ * itself : the empty list it produces is stored as null, restored as null, and this saver's
+ * `restore` only ever sees non-empty lists.
+ */
+internal val QuickReplyLaunchSaver: Saver<QuickReplyLaunch?, Any> = listSaver<QuickReplyLaunch?, Any>(
+    save = { launch ->
+        if (launch == null) {
+            emptyList()
+        } else {
+            buildList {
+                add(launch.request.cat)
+                add(launch.request.subcat)
+                add(launch.request.topicId)
+                add(launch.request.page)
+                add(launch.consumesBasket)
+                launch.initialQuotes.forEach { quote ->
+                    add(quote.numreponse)
+                    add(quote.author)
+                    add(quote.excerpt)
+                }
+            }
+        }
+    },
+    restore = { saved ->
+        if (saved.size < QUICK_REPLY_SAVER_HEADER_SIZE) {
+            null
+        } else {
+            QuickReplyLaunch(
+                request = QuickReplyRequest(
+                    cat = saved[0] as Int,
+                    subcat = saved[1] as Int,
+                    topicId = saved[2] as Int,
+                    page = saved[3] as Int,
+                ),
+                initialQuotes = saved
+                    .drop(QUICK_REPLY_SAVER_HEADER_SIZE)
+                    .chunked(QUICK_REPLY_SAVER_QUOTE_FIELDS)
+                    .map { (numreponse, author, excerpt) ->
+                        QuotedPostPreview(
+                            numreponse = numreponse as Int,
+                            author = author as String,
+                            excerpt = excerpt as String,
+                        )
+                    },
+                consumesBasket = saved[4] as Boolean,
+            )
+        }
+    },
+)
+
+/** [QuickReplyLaunchSaver] layout : request Ints + consumesBasket before the quote triplets. */
+private const val QUICK_REPLY_SAVER_HEADER_SIZE = 5
+
+/** [QuickReplyLaunchSaver] layout : numreponse, author, excerpt per armed quote. */
+private const val QUICK_REPLY_SAVER_QUOTE_FIELDS = 3
 
 /** #806 — the two composition surfaces a write tap can open. */
 internal enum class WritingSurface { SHEET, FULL_EDITOR }
