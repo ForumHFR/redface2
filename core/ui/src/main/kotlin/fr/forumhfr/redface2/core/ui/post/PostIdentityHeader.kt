@@ -2,7 +2,6 @@ package fr.forumhfr.redface2.core.ui.post
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -33,7 +32,7 @@ import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
  *  - [pseudo] (optional) — overrides the default pseudo text; the topic passes its gold-sheen
  *    `CreatorPseudoText` (#221). When `null`, a plain ellipsised [Text] of [author] is drawn. Note:
  *    [onAuthorClick] is applied to that fallback text only — a supplied [pseudo] owns its own
- *    interaction, the header does not wrap it.
+ *    interaction AND its `heading()` semantics (#884), the header does not wrap it.
  *  - [dateTrailing] (optional) — a marker on the SAME row as the date, to its right (the topic's
  *    `· édité` #483); `null` on the MP keeps the date as a plain single line.
  *  - [subline] (optional) — extra line under the date; unused by the topic now, available for MP.
@@ -51,8 +50,10 @@ import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
  *
  * A11y (#884) : the pseudo line is a TalkBack heading — heading navigation jumps from post to post
  * on the identity line, on the topic AND the MP. The fallback [Text] carries `heading()` on its own
- * node; a supplied [pseudo] slot is hosted under a heading wrapper instead (the header cannot mark
- * the slot's inner nodes). No synthetic contentDescription — nothing is announced twice.
+ * node; a supplied [pseudo] slot OWNS its heading instead (vague 3): the call-site marks its real
+ * pseudo text node — the best TalkBack target — and the header adds no wrapper around the slot
+ * (a generic wrapper heading would DOUBLE the per-post heading, cf. `TopicPostCardFullWidthTest`).
+ * No synthetic contentDescription — nothing is announced twice.
  */
 @Composable
 @Suppress("LongParameterList") // Shared identity slot: avatar/pseudo/date data + 2 clicks + 3 slots.
@@ -100,12 +101,9 @@ fun PostIdentityHeader(
             verticalArrangement = Arrangement.spacedBy(lineSpacing),
         ) {
             if (pseudo != null) {
-                // #884 a11y — the caller-supplied pseudo (the topic's index+gold-sheen row) composes
-                // its own nodes, so the header hosts the slot under a heading() wrapper. No
-                // contentDescription is synthesised: the slot's own text stays the sole announcement.
-                Box(modifier = Modifier.semantics { heading() }) {
-                    pseudo()
-                }
+                // #884 a11y — a caller-supplied pseudo owns its heading semantics (the topic marks
+                // its real pseudo text node); wrapping the slot here would double the heading.
+                pseudo()
             } else {
                 val pseudoModifier = if (onAuthorClick != null) {
                     Modifier.clickable(
