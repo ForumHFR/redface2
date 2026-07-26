@@ -48,9 +48,15 @@ import androidx.compose.ui.semantics.semantics
  * boundary-less — [RectangleShape], transparent container, and `onSurface` content colour (pinned
  * explicitly: it is what `contentColorFor(surfaceContainer)` resolves to in the default mode, so
  * text cannot drift when the background goes transparent). A hairline `outlineVariant`
- * [HorizontalDivider] drawn STRICTLY after the slots closes the post instead of the card boundary —
- * except when [border] is supplied (multi-quote selection #436): the outline already closes the
- * post on all four sides, and stacking the hairline under it would double-stroke the bottom edge.
+ * [HorizontalDivider] drawn STRICTLY after the slots closes the post instead of the card boundary.
+ * It is suppressed in two cases:
+ *  - [border] is supplied (multi-quote selection #436) — the outline closes the post on all four
+ *    sides, and stacking the hairline under it would double-stroke the bottom edge;
+ *  - [flatBottomEdge] is [PostCardShellFlatBottomEdge.NONE] — the OWNER of the sequence has decided
+ *    this post draws no closing rule, either because the next element brings its own boundary or
+ *    because the sequence ends here (#983). The shell cannot know either fact; it renders the
+ *    decision.
+ *
  * The default (`flat = false`) rendering is byte-identical to the pre-#884 card; existing call-sites
  * pass nothing.
  *
@@ -59,7 +65,7 @@ import androidx.compose.ui.semantics.semantics
  * shell owns the real one.
  */
 @Composable
-@Suppress("LongParameterList") // Slot shell: 2 mandatory slots + modifier/flat/border + 2 optional slots.
+@Suppress("LongParameterList") // Slot shell: 2 mandatory slots + modifier/flat/border/edge + 2 optional slots.
 fun PostCardShell(
     header: @Composable () -> Unit,
     body: @Composable () -> Unit,
@@ -68,6 +74,7 @@ fun PostCardShell(
     border: BorderStroke? = null,
     badges: (@Composable () -> Unit)? = null,
     footer: (@Composable () -> Unit)? = null,
+    flatBottomEdge: PostCardShellFlatBottomEdge = PostCardShellFlatBottomEdge.HAIRLINE,
 ) {
     Card(
         modifier = modifier.semantics { isTraversalGroup = true },
@@ -89,7 +96,7 @@ fun PostCardShell(
             badges?.invoke()
             body()
             footer?.invoke()
-            if (flat && border == null) {
+            if (flat && border == null && flatBottomEdge == PostCardShellFlatBottomEdge.HAIRLINE) {
                 HorizontalDivider(
                     modifier = Modifier.testTag(POST_CARD_SHELL_DIVIDER_TAG),
                     color = MaterialTheme.colorScheme.outlineVariant,
