@@ -2233,7 +2233,9 @@ private fun TopicLoadedContent(
  * band) was too subtle to spot when catching up from a flag.
  */
 @Composable
-private fun LastReadMarker() {
+// `internal` (#884): TopicListFullWidthAnchorTest mounts the real marker inside a post item to
+// guard the full-width toggle. Same visibility relaxation as other tested internals.
+internal fun LastReadMarker() {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -2304,7 +2306,9 @@ private fun EndOfTopicCard(modifier: Modifier = Modifier) {
  * › FAB and the horizontal swipe (#282), so scroll restoration semantics stay uniform.
  */
 @Composable
-private fun PageBoundaryCard(donePage: Int, onNextPage: () -> Unit, modifier: Modifier = Modifier) {
+// `internal` (#884): TopicListFullWidthAnchorTest mounts the real boundary card as the list's
+// closing island to guard the full-width toggle. Same visibility relaxation as other tested internals.
+internal fun PageBoundaryCard(donePage: Int, onNextPage: () -> Unit, modifier: Modifier = Modifier) {
     val nextPageLabel = stringResource(R.string.topic_page_boundary_next, donePage + 1)
     // Card(onClick) over an inner Row.clickable (gate Codex) : the whole surface is declared as
     // ONE interactive Material component, and the action's wording is already the card's visible

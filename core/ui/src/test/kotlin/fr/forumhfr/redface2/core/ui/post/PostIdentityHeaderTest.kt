@@ -31,7 +31,9 @@ import org.robolectric.annotation.Config
  *
  * #884 — a11y contract: the fallback pseudo [Text] carries heading semantics itself (the MP case);
  * a caller-supplied `pseudo` slot OWNS its heading (the topic marks its real pseudo text node) and
- * the header adds none around it — one heading per post, TalkBack never announces it twice.
+ * the header adds none around it — one heading per post, TalkBack never announces it twice. Both
+ * directions of the slot contract are pinned here (review Sol r4): a slot WITH its own heading()
+ * yields exactly one, a slot WITHOUT yields zero — by design, not by accident.
  */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -112,7 +114,7 @@ class PostIdentityHeaderTest {
     }
 
     @Test
-    fun `default pseudo carries heading semantics`() {
+    fun `default pseudo carries heading semantics - and is the only heading`() {
         composeTestRule.setContent {
             RedfaceTheme {
                 PostIdentityHeader(
@@ -125,9 +127,17 @@ class PostIdentityHeaderTest {
 
         // #884 a11y — TalkBack's heading navigation jumps from post to post on the identity line.
         // The fallback pseudo Text carries heading() itself (no synthetic contentDescription — the
-        // author text IS the announcement, so nothing is spoken twice).
+        // author text IS the announcement, so nothing is spoken twice)…
         composeTestRule.onNodeWithText("MonPseudo")
             .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading))
+        // …and it is the ONLY heading the header emits (review Sol r4) — the fallback variant is
+        // the MP production case, one heading per message.
+        composeTestRule
+            .onAllNodes(
+                SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading),
+                useUnmergedTree = true,
+            )
+            .assertCountEquals(1)
     }
 
     @Test
@@ -164,6 +174,33 @@ class PostIdentityHeaderTest {
                 useUnmergedTree = true,
             )
             .assertExists()
+    }
+
+    @Test
+    fun `provided slot without heading yields none - callers own the heading (contract)`() {
+        composeTestRule.setContent {
+            RedfaceTheme {
+                PostIdentityHeader(
+                    author = "RawAuthor",
+                    avatarUrl = null,
+                    dateText = "date",
+                    pseudo = { Text("CustomPseudo") },
+                )
+            }
+        }
+
+        // #884 contract (review Sol r4) — NOT a bug of the component: the header never wraps a
+        // supplied slot in a heading (it would double the announcement for every caller that marks
+        // its own node, cf. the test above), so a slot that sets no heading() yields ZERO heading.
+        // Owning the heading is part of the slot's contract — cf. the [pseudo] KDoc of
+        // PostIdentityHeader; each production variant carries its own exactly-one-heading guard
+        // (TopicPostCardFullWidthTest, MessageCardShellSmokeTest).
+        composeTestRule
+            .onAllNodes(
+                SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading),
+                useUnmergedTree = true,
+            )
+            .assertCountEquals(0)
     }
 
     @Test
