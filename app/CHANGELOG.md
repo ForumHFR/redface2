@@ -16,6 +16,41 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.36.0` — `local` — 2026-07-30
+
+### Ajouté
+
+- **Agrandissement des miniatures-aperçus liées** (#876, `[AMENDEMENT-v1.5-4]` du contrat de rendu) : une
+  image de contenu enveloppée d'un lien vers une ressource DISTINCTE du MÊME hôte, et dont le plus grand
+  axe natif ne dépasse pas 400 px, voit son plafond no-upscale porté à `min(densité, 3)`. Une vignette
+  d'hébergeur de 150 px passe de 7,9 mm à 23,8 mm de large sur un S10e (480 dpi), soit la taille qu'elle
+  occupe déjà sur le rendu web. Signalé par tinc sur le fil DEV.
+  - Deux gardes ferment les faux positifs : le lien doit pointer **ailleurs** que l'image affichée (les
+    auto-liens sont exclus), et au-delà de 400 px natifs une image n'est plus une vignette.
+  - `mEffectif = max(mApercu, mGif)` — les deux multiplicateurs ne se cumulent JAMAIS, le plus grand
+    gagne, et ce `max` porte aussi le plancher `1,0` (sans lui, une densité < 1 rétrécirait l'image).
+  - Décodage inchangé (§7) : la source reste décodée au natif, l'agrandissement se fait au draw.
+  - Résiduels assumés et documentés au contrat : hôte à underscore rejeté (limitation du parseur,
+    fail-closed), point final terminal conservé, et un `[img]` pointant une URL de smiley perso reste
+    indistinguable d'une vignette (la classification se fait sur le token, jamais sur l'URL — I1).
+
+### Modifié
+
+- Banc de test images (topic 148760) : **POST 16** ajouté — 5 cas dont **2 contrôles négatifs** (vignette
+  auto-liée, version 800×800 liée). Le banc passe de 45 à 52 cas ; fixture parser recapturée.
+- Annexe `matrice-invariants-876.md` : I3.1/I3.4 mentionnent désormais l'exception `mEffectif`
+  (péremption qui datait de `[AMENDEMENT-v1.5-2]`, #973).
+
+### Notes de développement
+
+- 37 tests dédiés (22 purs JVM sur l'éligibilité, 15 Robolectric sur le renderer), dont un test qui
+  épingle le validateur d'autorité contre un durcissement en `host != null`, et un cas qui prouve le
+  non-cumul des deux multiplicateurs. Mutant `scaleCeiling = previewCeiling` vérifié tué.
+- Vérifié sur S10e réel : les 5 cas du POST 16 mesurés au pixel (210×450, 450×210, 450×450 pour les
+  vignettes liées ; 150×150 et 800×800 **inchangés** pour les deux contrôles négatifs).
+- Gouvernance : amendement rédigé par Sol (GPT-5.6 Codex xhigh) et gaté par Claude Fable 5 ; code par
+  Claude Fable 5 et gaté par Sol — 3 tours de gate, 2 NO-GO réels levés.
+
 ## `0.35.1` — `local` — 2026-07-26
 
 Correctif du mode « Posts en pleine largeur » (#983, rapporté par styx42) : espacements

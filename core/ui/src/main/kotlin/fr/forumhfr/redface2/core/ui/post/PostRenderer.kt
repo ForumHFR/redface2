@@ -1034,12 +1034,27 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
     // exceed a short window (split-screen) where the clamp follows it.
     val capBlocDp = rememberBlockImageColdCapDp()
     val blockDensity = LocalDensity.current
-    // #973 (§8) — `mEffectif`: an eligible block GIF (probe MIME on the atomic metadata) takes
-    // the display-profile factor as its §3 scale ceiling; everything else keeps the strict 1f.
+    // #973 (§8) — `mGif`: an eligible block GIF (probe MIME on the atomic metadata) takes the
+    // display-profile factor as its §3 scale ceiling; everything else keeps the strict 1f.
     // The COLD path below is untouched by construction: no metadata → no measured box, the §6
     // slot is deterministic (no dimensions, no MIME — no factor).
     val mediaDisplayProfile = LocalMediaDisplayProfile.current
-    val scaleCeiling = if (metadata?.mimeType == GIF_MIME_TYPE) mediaDisplayProfile.factor else 1f
+    val gifCeiling = if (metadata?.mimeType == GIF_MIME_TYPE) mediaDisplayProfile.factor else 1f
+    // #876 (§8 [AMENDEMENT-v1.5-4]) — `mApercu`: an eligible LINKED PREVIEW (a thumbnail wrapped
+    // in a link to a DISTINCT resource of the SAME host, native axis ≤ 400 px — the pure guard
+    // [isEligibleLinkedPreview]) may spread one source pixel over `min(densité, 3)` screen pixels,
+    // so it finally occupies its source dimensions in dp. The dimensions handed to the guard are
+    // the CACHE's (§3 authority, already EXIF-oriented) and the MIME plays no part here.
+    val previewCeiling = if (isEligibleLinkedPreview(url = url, linkUrl = linkUrl, nativePx = measured)) {
+        linkedPreviewUpscaleCeiling(blockDensity.density)
+    } else {
+        1f
+    }
+    // `mEffectif = max(mApercu, mGif)` — the two multipliers relax the SAME no-upscale ceiling and
+    // the largest wins; they must NEVER multiply (an eligible linked GIF is ×3 under M as under S,
+    // never ×4,5). That `max` is ALSO the `1,0` floor: [linkedPreviewUpscaleCeiling] deliberately
+    // returns the raw density, so without it a screen density below 1 would SHRINK the image.
+    val scaleCeiling = maxOf(gifCeiling, previewCeiling)
     // contentAlignment centres the (usually narrower-than-column, #610) exact box on its own line —
     // the same visual centring the pre-#610 full-width Fit letterboxing produced.
     BoxWithConstraints(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
