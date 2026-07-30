@@ -22,9 +22,25 @@ import kotlin.math.roundToInt
 internal fun usefulWindowHeightPx(containerHeightPx: Int, topInsetPx: Int, bottomInsetPx: Int): Int =
     (containerHeightPx - topInsetPx - bottomInsetPx).coerceAtLeast(0)
 
-/** `capBlocPx = min(hauteurUtilePx, max(400dp→px, 0,5 × hauteurUtilePx))`. */
+/**
+ * #993 ([AMENDEMENT-v1.5-5]) — coefficient proportionnel du cap de hauteur, porté de 0,5 à 0,70 :
+ * une image bloc peut occuper 70 % de la fenêtre UTILE, contre 50 % auparavant. Ce n'est pas un
+ * littéral technique mais une constante normative : la décision porte sur la part d'écran qu'une
+ * image a le droit de confisquer, et 0,70 laisse 212,4 dp de contexte sur les 708 dp utiles d'un
+ * S10e en portrait (en-tête de post + deux ou trois lignes de prose) là où 0,85 n'en aurait
+ * laissé que 106,2.
+ */
+private const val BLOCK_IMAGE_COLD_CAP_USEFUL_HEIGHT_FRACTION = 0.70f
+
+/** `capBlocPx = min(hauteurUtilePx, max(400dp→px, 0,70 × hauteurUtilePx))`. */
 internal fun blockImageColdCapPx(usefulHeightPx: Int, floor400DpPx: Int): Int =
-    minOf(usefulHeightPx, maxOf(floor400DpPx, (usefulHeightPx * 0.5f).roundToInt()))
+    minOf(
+        usefulHeightPx,
+        maxOf(
+            floor400DpPx,
+            (usefulHeightPx * BLOCK_IMAGE_COLD_CAP_USEFUL_HEIGHT_FRACTION).roundToInt(),
+        ),
+    )
 
 /** Cold slot §6 : width = 0,9 × available ; height = min(capBloc, max(160 dp, 0,75 × width)). */
 internal fun coldBlockSlotDp(availableWidthDp: Float, capBlocDp: Float): Pair<Float, Float> {

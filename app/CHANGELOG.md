@@ -36,6 +36,15 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ### Modifié
 
+- **Cap de hauteur des images bloc relevé de 50 % à 70 % de la fenêtre utile** (#993, arbitré XaTriX,
+  `[AMENDEMENT-v1.5-5]` du contrat de rendu) : sur S10e en portrait, une grande image passe d'un plafond
+  de 400 dp à ~496 dp — la cible des ~500 dp. Le plancher 400 dp est conservé et devient le garde des
+  fenêtres courtes : sous 571 dp d'utile c'est lui qui gouverne, ce qui préserve à l'identique le
+  comportement « cap = fenêtre entière » acté au gate A3 en split-screen (301 dp) et en paysage (288 dp).
+  Le changement ne peut jamais RÉDUIRE une image : il l'agrandit ou la laisse identique. Conséquence
+  assumée : une capture d'écran occupe au plus environ les deux tiers de l'écran. Aucun cap fixe en dp
+  n'est introduit — le cap reste proportionnel, clampé par la fenêtre. Annexe `matrice-invariants-876.md`
+  (I3.2) réalignée.
 - Banc de test images (topic 148760) : **POST 16** ajouté — 5 cas dont **2 contrôles négatifs** (vignette
   auto-liée, version 800×800 liée). Le banc passe de 45 à 52 cas ; fixture parser recapturée.
 - Annexe `matrice-invariants-876.md` : I3.1/I3.4 mentionnent désormais l'exception `mEffectif`
