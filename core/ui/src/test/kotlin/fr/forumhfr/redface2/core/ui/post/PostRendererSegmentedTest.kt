@@ -214,10 +214,15 @@ class PostRendererSegmentedTest {
 
     @Test
     @Config(sdk = [34], qualifiers = "w360dp-h916dp-xxhdpi")
-    fun `measured PORTRAIT block is capped by the clamped useful-height cap - not the cold slot`() {
-        // #959 (§3) — 1600×2400 px sur h916dp utile (@Config méthode, insets Robolectric = 0) :
-        // capBloc clampé = min(916, max(400, 458)) = 458 dp = 1374 px @d3 → scale = 0,5725 →
-        // 916×1374 px = 305,3×458 dp (height-bound). Le cold §6 donnerait 342×256,5 : séparés.
+    fun `a ratio 1,5 PORTRAIT block is WIDTH-bound since the cap was raised to 0,70`() {
+        // #993 ([AMENDEMENT-v1.5-5]) — MÊME cas qu'avant le relèvement, attendu CHANGÉ et pour une
+        // raison qui compte : capBloc = min(2748, max(1200, round(0,70×2748))) = 1924 px
+        // (641,3 dp), donc le terme hauteur vaut 1924/2400 = 0,802 tandis que la largeur
+        // (fImage × 360 dp = 342 dp = 1026 px) vaut 1026/1600 = 0,641. Le MINIMUM est désormais la
+        // LARGEUR : à 0,70 une image de ratio 1,5 n'est plus bridée en hauteur du tout —
+        // 1026×1539 px = 342×513 dp. C'est exactement l'effet visé par la décision, et c'est pour
+        // cela que le cas height-bound est couvert par le test suivant, sur une image plus
+        // allongée — sans quoi plus aucun test ne vérifierait le cap lui-même.
         val cache = DefaultIntrinsicMediaSizeCache()
         cache.putSuccess(imgA, IntrinsicMediaMetadata(IntSize(1600, 2400), mimeType = null))
         composeTestRule.setContent {
@@ -228,17 +233,45 @@ class PostRendererSegmentedTest {
             }
         }
         val bounds = composeTestRule.onNodeWithContentDescription("portrait").getBoundsInRoot()
-        assertEquals(305.3f, bounds.w, 2f)
-        assertEquals(458f, bounds.h, 2f)
+        assertEquals(342f, bounds.w, 2f)
+        assertEquals(513f, bounds.h, 2f)
+    }
+
+    @Test
+    @Config(sdk = [34], qualifiers = "w360dp-h916dp-xxhdpi")
+    fun `measured PORTRAIT block is capped by the clamped useful-height cap - not the cold slot`() {
+        // #993 — le cas HEIGHT-bound, qui garde l'intention du test d'origine après le passage à
+        // 0,70 : 1600×4000 px sur h916dp → capBloc = 1924 px (641,3 dp), terme hauteur
+        // 1924/4000 = 0,481 contre 0,641 pour la largeur → le cap MORD : 770×1925 px =
+        // 256,7×641,7 dp. 1925 = capBloc + 1 n'est PAS une violation du cap : le §3 impose que la
+        // hauteur soit DÉRIVÉE de la largeur ARRONDIE par le ratio natif, jamais re-clampée —
+        // w = round(1600 × 0,481) = round(769,6) = 770 arrondit VERS LE HAUT, puis
+        // h = round(770 × 4000/1600) = 1925. Les caps contraignent le SCALE, pas le résultat
+        // arrondi (lettre du §3, KDoc d'imageDisplaySizePx ; propriété épinglée côté JVM par
+        // ImageDisplaySizePolicyTest `height cap binds`, 999×1000 → 500×501). Le cold §6
+        // donnerait 342×256,5 dp : les deux chemins restent séparés.
+        val cache = DefaultIntrinsicMediaSizeCache()
+        cache.putSuccess(imgA, IntrinsicMediaMetadata(IntSize(1600, 4000), mimeType = null))
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides cache) {
+                    PostRenderer(content = paragraph(img(imgA, "allonge")))
+                }
+            }
+        }
+        val bounds = composeTestRule.onNodeWithContentDescription("allonge").getBoundsInRoot()
+        assertEquals(256.7f, bounds.w, 2f)
+        assertEquals(641.7f, bounds.h, 2f)
     }
 
     @Test
     @Config(sdk = [34], qualifiers = "w360dp-h350dp-xxhdpi")
     fun `measured block follows the WINDOW in a short window - the legacy screen cap is gone`() {
         // #959 (§3, [Lot0-3]) — LE témoin discriminant clampé vs legacy : fenêtre utile 350 dp →
-        // capBloc = min(350, max(400, 175)) = 350 dp = 1050 px ; le cap legacy
-        // max(400, 0,5×350) = 400 dp aurait DÉPASSÉ la fenêtre. 1600×2400 px → scale =
-        // 1050/2400 = 0,4375 → 700×1050 px = 233,3×350 dp.
+        // capBloc = min(350, max(400, 0,70×350 = 245)) = 350 dp = 1050 px ; le cap legacy
+        // NON clampé max(400, 245) = 400 dp aurait DÉPASSÉ la fenêtre. 1600×2400 px → scale =
+        // 1050/2400 = 0,4375 → 700×1050 px = 233,3×350 dp. Inchangé par #993 : sous 571 dp
+        // d'utile le plancher gouverne, puis le clamp fenêtre — la fraction ne mord pas ici.
         val cache = DefaultIntrinsicMediaSizeCache()
         cache.putSuccess(imgA, IntrinsicMediaMetadata(IntSize(1600, 2400), mimeType = null))
         composeTestRule.setContent {

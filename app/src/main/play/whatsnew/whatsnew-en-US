@@ -2,3 +2,4 @@ Redface 2 v0.36.0 — dev.
 
 - Clickable thumbnails are finally shown at a readable size: a 150 px host thumbnail used to be 8 mm wide on a dense screen, it now takes the room it has on the web. Tapping still opens the full-size version. Thanks to tinc for the report.
 - Only genuine thumbnails are affected: an already-large image, or one whose link points at itself, is left untouched.
+- Large images can now use up to 70% of the screen height (was 50%).
