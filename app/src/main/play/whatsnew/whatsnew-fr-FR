@@ -1,3 +1,4 @@
-Redface 2 v0.35.1 — dev.
+Redface 2 v0.36.0 — dev.
 
-- Correctif « Posts en pleine largeur » : plus de lignes horizontales en double ni d'espacements irréguliers autour du marqueur « Dernier message lu » et des blocs de fin de page. Merci styx42 pour le signalement.
+- Les miniatures cliquables s'affichent enfin à une taille lisible : une vignette d'hébergeur de 150 px faisait 8 mm de large sur un écran dense, elle occupe désormais la place qu'elle a sur le web. Le tap ouvre toujours la version entière. Merci tinc pour le signalement.
+- Seules les vraies vignettes sont concernées : une image déjà grande, ou dont le lien pointe sur elle-même, n'est pas retouchée.
