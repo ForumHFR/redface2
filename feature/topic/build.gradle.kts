@@ -55,5 +55,10 @@ dependencies {
     testImplementation(libs.androidx.compose.ui.test.junit4)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
+    // #958 — PostRendererHostMatrixTest renders REAL post images through TopicPostCard: the fake
+    // Coil engine keeps the JVM tests off the network (coil is `implementation` in :core:ui, so
+    // the test classpath needs its own coil artifacts).
+    testImplementation(libs.coil.core)
+    testImplementation(libs.coil.test)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 }

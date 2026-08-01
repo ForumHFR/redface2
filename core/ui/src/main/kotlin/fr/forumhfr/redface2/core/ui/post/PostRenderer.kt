@@ -34,6 +34,7 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -53,7 +54,6 @@ import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -82,6 +82,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.TextUnit
@@ -490,15 +491,25 @@ private fun ParagraphProse(
         // `maxWidth` is dp but the media placeholders are sized in sp, so convert to the sp-equivalent
         // (Dp.toSp() divides by fontScale): without this, at fontScale > 1 a `0.9 × maxWidth` sp cap
         // renders ~fontScale× wider than the container and overflows a narrow quote (Codex review #246).
-        val maxMediaWidthSp = with(LocalDensity.current) {
+        val density = LocalDensity.current
+        val maxMediaWidthSp = with(density) {
             (maxWidth.toSp().value * SMILEY_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
         }
+        // #959 (§3) — the CONTENT-IMAGE caps, in PHYSICAL px (the sizing equation works px-only,
+        // cadrage Sol r1): fImage × container width, and the 200 sp inline height cap at the
+        // current density × fontScale. Converted once here — the only place density is known.
+        val maxImageWidthPx = with(density) {
+            (maxWidth.toPx() * IMAGE_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
+        }
+        val maxImageHeightPx = with(density) { INLINE_IMAGE_MAX_HEIGHT_SP.sp.toPx() }.roundToInt()
         // §4 v1.4 (#957) — total horizontal placeholder padding of a content image (4 dp/side),
         // converted once to the sp placeholder unit at the current density/fontScale.
-        val inlineImagePaddingSp = with(LocalDensity.current) {
+        val inlineImagePaddingSp = with(density) {
             (INLINE_IMAGE_HORIZONTAL_PADDING * 2).toSp().value.roundToInt()
         }
-        val inlineContent = remember(inlines, measuredSizes, deadSmileyUrls, maxMediaWidthSp) {
+        val inlineContent = remember(
+            inlines, measuredSizes, deadSmileyUrls, maxMediaWidthSp, maxImageWidthPx, maxImageHeightPx, density,
+        ) {
             collectInlineMedia(
                 inlines,
                 smileyBox = { smiley ->
@@ -512,7 +523,10 @@ private fun ParagraphProse(
                     }
                 },
                 imageBox = { image ->
-                    imageDisplayBox(image, measuredSizes, maxMediaWidthSp, inlineImagePaddingSp)
+                    imageDisplayBox(
+                        image, measuredSizes, maxMediaWidthSp,
+                        maxImageWidthPx, maxImageHeightPx, density, inlineImagePaddingSp,
+                    )
                 },
                 deadSmileyUrls = deadSmileyUrls,
             )
@@ -961,8 +975,8 @@ private fun ImageBlock(block: PostBlock.Image) = BlockImage(url = block.url, des
  * AND keeps its tap-through instead of being kept as a small inline thumbnail.
  *
  * #610/#842 — a MEASURED image renders in a box of EXACTLY its parity display size
- * ([PostMediaDisplayPolicy.blockImageDisplaySize]: native size, no upscale, width ≤ 90% of the
- * column, height ≤ the mobile-recalibrated [blockImageMaxHeightDp]), centred. A not-yet-measured
+ * ([imageDisplaySizePx] §3: native PHYSICAL size, no upscale, width ≤ fImage × column, height ≤
+ * the clamped useful-height cap [rememberBlockImageColdCapDp]), centred. A not-yet-measured
  * image (cold cache / failed measurement) sits in the deterministic §6 COLD slot
  * ([coldBlockSlotDp], since #957 — formerly the legacy [160, 480] dp grow-on-load slot).
  * Bounded either way, so a 4000×3000 RAW screenshot can't blow up the post and destroy the
@@ -976,6 +990,9 @@ private fun ImageBlock(block: PostBlock.Image) = BlockImage(url = block.url, des
  * silent empty Box. Animations honour the system reduce-motion preference
  * ([rememberAnimationsEnabled]).
  */
+// CyclomaticComplexMethod: the §3/§6/§7 sizing states × the §5 interaction gates are all
+// contractual branches of ONE render seam — splitting them would scatter the contract.
+@Suppress("CyclomaticComplexMethod")
 @Composable
 private fun BlockImage(url: String, description: String?, linkUrl: String? = null) {
     val uriHandler = LocalUriHandler.current
@@ -989,7 +1006,7 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
     val sizeCache = LocalIntrinsicMediaSizeCache.current
     val measured: IntSize? = sizeCache.get(url)
     // #249 follow-up — a standalone PostBlock.Image is NOT covered by the paragraph measure effect, so
-    // without this its intrinsic size never lands in the cache: blockImageDisplaySize stays null, the
+    // without this its intrinsic size never lands in the cache: the measured box never resolves, the
     // image stays in the §6 cold slot forever and loses both the exact parity box (#610) and the
     // reserved loading space (#249 anti-CLS). Measure it here through the same guarded seam the
     // paragraph effect uses; the SnapshotStateMap write then recomposes this block onto the exact-box
@@ -1011,87 +1028,111 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
     // #842 — the block height cap is recalibrated for mobile (relative to the viewport), read here
     // where the screen height is known; #610's flat 200 dp squeezed square/portrait photos to ~48 %
     // width on phones (the width cap ≈ 90 % never got a chance to bind).
-    val screenHeightDp = LocalConfiguration.current.screenHeightDp
+    // #959 (§3, [Lot0-3]) — the MEASURED path now shares the CLAMPED useful-height cap with the
+    // cold slot (the window-following metric the host reads from containerSize + insets); the
+    // legacy screen-fraction cap (#842, `max(400, 0.5 × screenHeightDp)`) is gone — it could
+    // exceed a short window (split-screen) where the clamp follows it.
+    val capBlocDp = rememberBlockImageColdCapDp()
+    val blockDensity = LocalDensity.current
     // contentAlignment centres the (usually narrower-than-column, #610) exact box on its own line —
     // the same visual centring the pre-#610 full-width Fit letterboxing produced.
     BoxWithConstraints(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        val displaySize = PostMediaDisplayPolicy.blockImageDisplaySize(
-            measured = measured?.let { PixelSize(it.width, it.height) },
-            availableWidthDp = maxWidth.value,
-            maxHeightDp = blockImageMaxHeightDp(screenHeightDp),
-        )
-        // #610/#249/#842 — the EXACT parity box when measured (no upscale, ≤ 90% width, ≤ the
-        // mobile-recalibrated height cap; anti-CLS: it is also the reserved loading slot), else the
-        // deterministic §6 cold slot below.
-        val sizeModifier = if (displaySize != null) {
-            Modifier.size(displaySize.width.dp, displaySize.height.dp)
+        // #959 (§3) — the measured box is the PHYSICAL-pixel equation (imageDisplaySizePx: single
+        // scale, height derived from the rounded width, no physical upscale), caps converted to px
+        // here and the result converted back to dp at this Compose boundary; anti-CLS: it is also
+        // the reserved loading slot. Cold falls back to the deterministic §6 slot below.
+        val displayPx = measured?.let {
+            with(blockDensity) {
+                val maxWidthPx = (maxWidth.toPx() * IMAGE_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
+                val maxHeightPx = capBlocDp.dp.roundToPx()
+                imageDisplaySizePx(it, maxWidthPx, maxHeightPx)
+            }
+        }
+        val sizeModifier = if (displayPx != null) {
+            with(blockDensity) { Modifier.size(displayPx.width.toDp(), displayPx.height.toDp()) }
         } else {
             // §6 COLD slot (v1.4, [AMENDEMENT-Lot0-3]) : deterministic box before any dimension is
-            // known — width 0,9 × available, height min(capBloc, max(160 dp, 0,75 × width)) with
-            // capBloc = clamped USEFUL window height (host-read insets). Replaces the legacy
-            // min/max grow-on-load slot ; the MEASURED path above keeps its legacy cap until Lot 3.
-            val coldCapDp = rememberBlockImageColdCapDp()
-            val (coldWidth, coldHeight) = coldBlockSlotDp(maxWidth.value, coldCapDp)
+            // known — width fImage × available, height min(capBloc, max(160 dp, 0,75 × width)).
+            val (coldWidth, coldHeight) = coldBlockSlotDp(maxWidth.value, capBlocDp)
             Modifier.size(coldWidth.dp, coldHeight.dp)
         }
-        // #831 — contextual image menu on long-press. The tap contract is preserved EXACTLY (Codex
-        // framing, firm reserve): a linked image (#257) keeps its tap-through and gains the
-        // long-press through ONE combinedClickable (a tap already exists there); an unlinked block
-        // image gets a long-press-ONLY handler (no onClick — its tap stays inert as before). When
-        // the surface provides no actions (MP threads, editor preview, signatures: default null),
-        // or the URL is not actionable (data:/blob:/empty), the historical modifiers are
-        // reproduced verbatim.
-        val imageActions = LocalPostImageActions.current?.takeIf { isEligiblePostImageUrl(url) }
+        // #831/#958 (Lot 2, §5) — contextual image menu on long-press + linked-image tap, BOTH gated
+        // by the host capability below. A linked image (#257) gains its tap-through (opens linkUrl)
+        // AND the long-press menu through ONE combinedClickable; an unlinked eligible image gets a
+        // long-press-ONLY handler. When the surface provides no actions (MP threads, editor preview,
+        // signatures: default null) the image is TOTALLY inert (no tap even if linked) — the Lot 2
+        // §5 target. data:/blob:/empty URLs are never menu-eligible.
+        // #958 Lot 2 (§5) — the HOST capability (LocalPostImageActions != null) gates ALL image
+        // interaction. On the three null hosts (MP, editor preview, signature) the block image is
+        // TOTALLY inert — no tap (even linked), no long-press, no interactive role (matrice §5).
+        // Two independent gates (Sol reserve): the TAP-to-open-link depends on `linkUrl != null`
+        // (NOT on the image URL's menu-eligibility) ; the long-press MENU depends on the image URL
+        // being eligible. Role.Image + onClickLabel « Ouvrir l'image » ([AMENDEMENT-Lot2-2] : Role.Link
+        // does not exist in Compose 1.11.x ; the onClickLabel announces the link-open to TalkBack).
+        val host = LocalPostImageActions.current
+        val tapOpensLink = host != null && linkUrl != null
+        val menuEligible = host != null && isEligiblePostImageUrl(url)
+        val optionsLabel = stringResource(R.string.post_image_options_action)
         val interactionModifier = when {
-            imageActions != null && linkUrl != null ->
-                // Role.Image (not Button): the element IS an image that opens its full version on
-                // tap; the localized labels carry both actions for TalkBack. combinedClickable
-                // brings the built-in long-press haptics (#436 precedent, MultiQuoteFab).
+            tapOpensLink && menuEligible ->
                 Modifier.combinedClickable(
                     role = Role.Image,
                     onClickLabel = openLabel,
-                    onLongClickLabel = stringResource(R.string.post_image_options_action),
+                    onLongClickLabel = optionsLabel,
                     onLongClick = {
-                        imageActions.onLongPress(
-                            PostImageTarget(url = url, description = description, linkUrl = linkUrl),
-                        )
+                        host.onLongPress(PostImageTarget(url = url, description = description, linkUrl = linkUrl))
                     },
                 ) {
                     runCatching { uriHandler.openUri(linkUrl) }
                 }
 
-            imageActions != null -> Modifier.postImageLongPress(
-                actions = imageActions,
-                target = PostImageTarget(url = url, description = description, linkUrl = null),
-                haptics = LocalHapticFeedback.current,
-                optionsLabel = stringResource(R.string.post_image_options_action),
-            )
-
-            linkUrl != null ->
-                // Role.Image (not Button): the element IS an image that opens its full version on
-                // tap; the localized onClickLabel carries the action for TalkBack.
+            tapOpensLink ->
+                // Linked image whose own URL is not menu-eligible (e.g. data:) : tap still opens
+                // the link, no long-press menu.
                 Modifier.clickable(role = Role.Image, onClickLabel = openLabel) {
                     runCatching { uriHandler.openUri(linkUrl) }
                 }
+
+            menuEligible -> Modifier.postImageLongPress(
+                actions = host,
+                target = PostImageTarget(url = url, description = description, linkUrl = null),
+                haptics = LocalHapticFeedback.current,
+                optionsLabel = optionsLabel,
+            )
 
             else -> Modifier
         }
         // #610 — the exact parity box centres via the BoxWithConstraints contentAlignment; no
         // fillMaxWidth here (the pre-#610 full-width shape is gone).
+        // #959 (§3 GIF) — block images are always content images (a cc is never promoted, §2
+        // cc-marker boundary rule): gate the animation on (measured box, window bounds, RESUMED).
+        val gifGate = rememberGifAnimationGate(boxReady = measured != null)
         val containerModifier = sizeModifier
             // Structural test seam (#957 gate) : lets bounds-level tests COUNT the block images of
             // a rendered post — descriptions are often null on HFR `[img]`, so the a11y tree alone
             // cannot enumerate them. testTag is invisible to TalkBack.
             .testTag(BLOCK_IMAGE_TEST_TAG)
+            .then(gifGate.modifier)
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             .then(interactionModifier)
-        val request = remember(url, animationsEnabled, platformContext) {
+        // #959 (§7) — measured: decode at the explicit calculator size, KEYED into the remember so
+        // cold→measured recreates request + painter (exactly one new decode). Cold: constraint-
+        // driven as before (the §6 slot is fixed until the measurement lands).
+        val decodeSize = measured?.let { decodeSizePx(displayPx!!.width, it) }
+        val request = remember(url, animationsEnabled, platformContext, decodeSize) {
             ImageRequest.Builder(platformContext)
                 .data(url)
                 // #249 — fondu natif Coil dans la box déjà dimensionnée → zéro saut. Désactivé quand le
                 // système demande de réduire les animations (apparition directe, §4 de l'issue).
                 .crossfade(animationsEnabled)
+                .apply {
+                    if (decodeSize != null) {
+                        size(decodeSize.width, decodeSize.height)
+                        scale(Scale.FIT)
+                        precision(Precision.INEXACT)
+                    }
+                }
                 .build()
         }
         // #813 — key() on the refresh generation recreates the painter node on an explicit user
@@ -1100,7 +1141,11 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
         key(mediaRefreshGeneration) {
         SubcomposeAsyncImage(
             model = request,
-            contentDescription = description,
+            // A11Y-2 (annexe a11y #876) — the HFR alt when present, otherwise the localized
+            // generic fallback; never null, never the raw URL. The error slot swaps in the
+            // contractual error wording (ImageBlockError) on the same containing node.
+            contentDescription = description?.takeIf(String::isNotBlank)
+                ?: stringResource(R.string.post_inline_image_alt),
             contentScale = ContentScale.Fit,
             modifier = containerModifier,
             loading = {
@@ -1110,7 +1155,12 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
                 ImageShimmer(animated = animationsEnabled, modifier = Modifier.fillMaxSize())
             },
             error = { ImageBlockError(description) },
-            success = { SubcomposeAsyncImageContent() },
+            success = { state ->
+                // #959 (§3 GIF) — hand the Animatable behind the result to the gate; SideEffect:
+                // never write snapshot state during composition.
+                SideEffect { gifGate.onState(state) }
+                SubcomposeAsyncImageContent()
+            },
         )
         }
     }
@@ -1364,8 +1414,21 @@ private fun AnnotatedString.Builder.appendInline(
             }
         }
 
-        is PostInline.Link -> withLink(LinkAnnotation.Url(inline.url, linkStyles)) {
-            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors, isDark)
+        // #958 Lot 2 (§5/G3) — a link whose subtree carries a CONTENT image is SPLIT: the image
+        // placeholder leaves the LinkAnnotation (its interaction moves to the image node, see
+        // imageInlineContent), while text, smileys and cc-images (#256) stay under lazily-opened
+        // link ranges (never an empty one). A link without content image keeps today's single
+        // range — text links and the #256 fast-path are structurally untouched.
+        is PostInline.Link -> if (containsContentImage(inline.children)) {
+            val run = LinkRunState(inline.url, linkStyles)
+            appendLinkedInlinesSplit(
+                inline.children, run, emptyList(), linkStyles, media, imageAlt, ignoreColors, isDark,
+            )
+            run.closeIfOpen(this)
+        } else {
+            withLink(LinkAnnotation.Url(inline.url, linkStyles)) {
+                appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors, isDark)
+            }
         }
 
         is PostInline.InlineImage -> appendInlineContent(media.nextImage(), inline.description ?: imageAlt)
@@ -1378,6 +1441,168 @@ private fun AnnotatedString.Builder.appendInline(
             }
         }
     }
+}
+
+/**
+ * #958 Lot 2 (§5) — true when the subtree carries at least one CONTENT image (an
+ * [PostInline.InlineImage] without the #256 cc marker). Decides whether a [PostInline.Link]
+ * needs the LinkAnnotation split.
+ */
+private fun containsContentImage(inlines: List<PostInline>): Boolean = inlines.any { inline ->
+    when (inline) {
+        is PostInline.InlineImage -> !isCcImageUrl(inline.url)
+        is PostInline.Strong -> containsContentImage(inline.children)
+        is PostInline.Emphasis -> containsContentImage(inline.children)
+        is PostInline.Underline -> containsContentImage(inline.children)
+        is PostInline.Strike -> containsContentImage(inline.children)
+        is PostInline.Color -> containsContentImage(inline.children)
+        is PostInline.Link -> containsContentImage(inline.children)
+        else -> false
+    }
+}
+
+/**
+ * Lazily-opened LinkAnnotation range over the split traversal ([appendLinkedInlinesSplit]):
+ * opened at the first link-carried leaf, closed before a content image — adjacent images or
+ * images at the link edges thus never leave an EMPTY link range behind. The open/close always
+ * happens with a balanced style stack ([withStyles] wraps each leaf), so pop(openIndex) never
+ * cuts a style range.
+ */
+private class LinkRunState(private val url: String, private val styles: TextLinkStyles) {
+    private var openIndex = -1
+
+    fun ensureOpen(builder: AnnotatedString.Builder) {
+        if (openIndex < 0) openIndex = builder.pushLink(LinkAnnotation.Url(url, styles))
+    }
+
+    fun closeIfOpen(builder: AnnotatedString.Builder) {
+        if (openIndex >= 0) {
+            builder.pop(openIndex)
+            openIndex = -1
+        }
+    }
+}
+
+// LongParameterList: recursive walker — the same threaded context as appendInline, plus the run.
+@Suppress("LongParameterList")
+private fun AnnotatedString.Builder.appendLinkedInlinesSplit(
+    inlines: List<PostInline>,
+    run: LinkRunState,
+    spanStyles: List<SpanStyle>,
+    linkStyles: TextLinkStyles,
+    media: MediaCounter,
+    imageAlt: String,
+    ignoreColors: Boolean,
+    isDark: Boolean,
+) {
+    inlines.forEach { inline ->
+        when (inline) {
+            // The content image leaves the link range; the generic walker appends its placeholder
+            // (single append path = MediaCounter symmetry). cc-images are link-carried (#256).
+            is PostInline.InlineImage -> if (isCcImageUrl(inline.url)) {
+                carryUnderLink(inline, run, spanStyles, linkStyles, media, imageAlt, ignoreColors, isDark)
+            } else {
+                run.closeIfOpen(this)
+                appendInline(inline, linkStyles, media, imageAlt, ignoreColors, isDark)
+            }
+
+            // A nested [url] (not produced by the parser — defensive): seal the outer run and let
+            // the generic path decide again under the INNER url.
+            is PostInline.Link -> {
+                run.closeIfOpen(this)
+                appendInline(inline, linkStyles, media, imageAlt, ignoreColors, isDark)
+            }
+
+            is PostInline.Strong -> splitOrCarryContainer(
+                inline, inline.children, SpanStyle(fontWeight = FontWeight.Bold),
+                run, spanStyles, linkStyles, media, imageAlt, ignoreColors, isDark,
+            )
+
+            is PostInline.Emphasis -> splitOrCarryContainer(
+                inline, inline.children, SpanStyle(fontStyle = FontStyle.Italic),
+                run, spanStyles, linkStyles, media, imageAlt, ignoreColors, isDark,
+            )
+
+            is PostInline.Underline -> splitOrCarryContainer(
+                inline, inline.children, SpanStyle(textDecoration = TextDecoration.Underline),
+                run, spanStyles, linkStyles, media, imageAlt, ignoreColors, isDark,
+            )
+
+            is PostInline.Strike -> splitOrCarryContainer(
+                inline, inline.children, SpanStyle(textDecoration = TextDecoration.LineThrough),
+                run, spanStyles, linkStyles, media, imageAlt, ignoreColors, isDark,
+            )
+
+            // Mirrors the #553/#(state-hygiene) colour handling of appendInline: dropped when
+            // ignored, otherwise clamped for legibility on the current theme.
+            is PostInline.Color -> splitOrCarryContainer(
+                inline, inline.children,
+                if (ignoreColors) null else SpanStyle(color = ensureReadableColor(parseColor(inline.colorHex), isDark)),
+                run, spanStyles, linkStyles, media, imageAlt, ignoreColors, isDark,
+            )
+
+            // Text, LineBreak, Smiley — link-carried leaves.
+            else -> carryUnderLink(inline, run, spanStyles, linkStyles, media, imageAlt, ignoreColors, isDark)
+        }
+    }
+}
+
+/**
+ * One styled container inside the split traversal: recurse (accumulating [style]) only when its
+ * subtree still carries a content image; an image-free subtree is appended whole through the
+ * untouched generic walker, INSIDE the link range — keeping its nested style ranges intact.
+ */
+@Suppress("LongParameterList") // Same threaded context as the split walker.
+private fun AnnotatedString.Builder.splitOrCarryContainer(
+    container: PostInline,
+    children: List<PostInline>,
+    style: SpanStyle?,
+    run: LinkRunState,
+    spanStyles: List<SpanStyle>,
+    linkStyles: TextLinkStyles,
+    media: MediaCounter,
+    imageAlt: String,
+    ignoreColors: Boolean,
+    isDark: Boolean,
+) {
+    if (containsContentImage(children)) {
+        appendLinkedInlinesSplit(
+            children, run, spanStyles + listOfNotNull(style), linkStyles, media, imageAlt, ignoreColors, isDark,
+        )
+    } else {
+        carryUnderLink(container, run, spanStyles, linkStyles, media, imageAlt, ignoreColors, isDark)
+    }
+}
+
+/**
+ * Appends one image-free inline (leaf or whole subtree) INSIDE the link range, through the
+ * untouched generic walker. [spanStyles] re-applies the styles of the containers the split had to
+ * cut through — per-leaf ranges, visually identical to the nested ranges they replace.
+ */
+@Suppress("LongParameterList") // Same threaded context as the split walker.
+private fun AnnotatedString.Builder.carryUnderLink(
+    inline: PostInline,
+    run: LinkRunState,
+    spanStyles: List<SpanStyle>,
+    linkStyles: TextLinkStyles,
+    media: MediaCounter,
+    imageAlt: String,
+    ignoreColors: Boolean,
+    isDark: Boolean,
+) {
+    run.ensureOpen(this)
+    withStyles(spanStyles) { appendInline(inline, linkStyles, media, imageAlt, ignoreColors, isDark) }
+}
+
+private inline fun AnnotatedString.Builder.withStyles(styles: List<SpanStyle>, block: () -> Unit) {
+    if (styles.isEmpty()) {
+        block()
+        return
+    }
+    val anchor = pushStyle(styles.first())
+    for (i in 1 until styles.size) pushStyle(styles[i])
+    block()
+    pop(anchor)
 }
 
 /**
@@ -1406,11 +1631,21 @@ private fun walkInlinesForMedia(
     smileyBox: (PostInline.Smiley) -> InlineMediaBox,
     imageBox: (PostInline.InlineImage) -> InlineMediaBox,
     deadSmileyUrls: Set<String>,
+    // #958 Lot 2 (§5) — the URL of the enclosing [PostInline.Link], threaded down so the image
+    // node of a linked CONTENT image can own the tap the LinkAnnotation split took away from the
+    // text machinery (see appendInline / imageInlineContent).
+    activeLinkUrl: String? = null,
 ) {
     inlines.forEach { inline ->
         when (inline) {
             is PostInline.InlineImage ->
-                out += media.nextImage() to imageInlineContent(inline, imageBox(inline))
+                out += media.nextImage() to imageInlineContent(
+                    inline,
+                    imageBox(inline),
+                    // A cc-image (#256) stays under the LinkAnnotation and must not gain a tap
+                    // surface of its own through the split.
+                    linkUrl = activeLinkUrl?.takeUnless { isCcImageUrl(inline.url) },
+                )
 
             is PostInline.Smiley -> {
                 val url = inline.imageUrl ?: return@forEach
@@ -1419,17 +1654,17 @@ private fun walkInlinesForMedia(
             }
 
             is PostInline.Strong ->
-                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls)
+                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls, activeLinkUrl)
             is PostInline.Emphasis ->
-                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls)
+                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls, activeLinkUrl)
             is PostInline.Underline ->
-                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls)
+                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls, activeLinkUrl)
             is PostInline.Strike ->
-                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls)
+                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls, activeLinkUrl)
             is PostInline.Color ->
-                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls)
+                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls, activeLinkUrl)
             is PostInline.Link ->
-                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls)
+                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls, inline.url)
             else -> Unit
         }
     }
@@ -1556,31 +1791,39 @@ private fun smileyDisplayBox(
 }
 
 /**
- * #224 (option A) / #610 — resolve an inline `[img]` placeholder box from its measured intrinsic
- * size via the unified web-parity policy [imageParityDisplaySize]: no upscale, height capped to
- * [IMAGE_MAX_HEIGHT_UNITS] (web `max-height: 200px`), width capped to the relative
- * `0.9 × contentWidth` ([maxWidthSp], web `max-width: 90%`) — the former absolute 240 sp width cap
- * is gone since #610 (it survived only as the measured-promotion threshold, removed in #957).
+ * #959 (Lot 3, contrat v1.5 §3) — resolve an inline `[img]` placeholder box. The MEASURED path is
+ * density-aware and works entirely in PHYSICAL pixels through [imageDisplaySizePx] (no-upscale =
+ * 1 source px never spreads past 1 screen px; the pre-#959 "native px as sp" model upscaled every
+ * bitmap by ×density): the caller passes the caps in px ([maxImageWidthPx] = fImage × container,
+ * [maxImageHeightPx] = 200 sp in px) and the result converts back to sp HERE, through [density]
+ * (÷ density × fontScale), so the physical size is stable under any density/fontScale. The
+ * legibility floor is GONE from the measured path (cadrage Sol r1):
+ * [INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP] only shapes the placeholder SLOTS below.
  *
- * #253 — while the measurement is in flight (cold cache / miss) it falls back to a small square of
- * [INLINE_IMAGE_MIN_HEIGHT_SP] (≈ one text line) rather than the old 240×180 bucket. With
- * `ContentScale.Fit` filling the box, a 240×180 cold box upscaled a 16×16 cc-image emoji to a giant
- * 180×180 flash until the measurement landed; a min-height square means the dominant cold case (the
- * 16×16 emoji) is already at its final size — zero flash — and any larger image just grows from a
- * one-line slot once measured instead of shrinking from a giant one. Still relative-capped so even
+ * #253 — while the measurement is in flight (cold cache / miss) the SLOT falls back to a small
+ * square of [INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP] (≈ one text line, sp: it is a text-line
+ * hitbox, not an image size) rather than the old 240×180 bucket — the dominant cold case (a
+ * 16×16 emoji) is already at its final size, zero flash. Still relative-capped ([maxWidthSp]) so
  * the fallback never overflows a narrow quote. Mirrors [smileyDisplayBox].
  *
  * #256 — a URL carrying the `hfr-cc-image=true` marker short-circuits ALL of the above: fixed
  * one-line square, no measurement involved (see [isCcImageUrl] and the fast-path comment below).
  */
+// ReturnCount: three early-exit guards (cc fast-path, cold slot, measured) read better flat.
+@Suppress("LongParameterList", "ReturnCount")
 internal fun imageDisplayBox(
     image: PostInline.InlineImage,
     measured: Map<String, IntSize?>,
+    // Relative cap of the sp-based placeholder SLOTS (cc fast-path + cold square) — unchanged.
     maxWidthSp: Int,
+    // §3 px caps of the MEASURED path: fImage × container width, and the 200 sp inline height,
+    // both converted to physical px by the caller (the only place density is known).
+    maxImageWidthPx: Int,
+    maxImageHeightPx: Int,
+    // px→sp boundary conversion of the measured result (density × fontScale).
+    density: Density,
     // §4 v1.4 (#957) — TOTAL horizontal padding (4 dp each side, sp-converted by the caller)
-    // added to the PLACEHOLDER of a content image ; the bitmap box keeps its HISTORICAL capped
-    // size untouched (sizing is Lot 3), so a width-capped placeholder exceeds the relative cap
-    // by these 8 sp — bounded, cf. the return-site comment. Zero for cc-images.
+    // added to the PLACEHOLDER of a content image; the bitmap box is untouched. Zero for cc.
     horizontalPaddingSp: Int = 0,
 ): InlineMediaBox {
     // #256 — render-time fast-path: a URL carrying the `hfr-cc-image=true` marker declares itself a
@@ -1593,44 +1836,37 @@ internal fun imageDisplayBox(
     // container. Everything else (AST, link semantics, MediaCounter, §2 topology) is untouched.
     if (isCcImageUrl(image.url)) {
         val fixed = capToWidth(
-            PixelSize(INLINE_IMAGE_MIN_HEIGHT_SP, INLINE_IMAGE_MIN_HEIGHT_SP),
+            PixelSize(INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP, INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP),
             maxWidthSp,
         )
         return InlineMediaBox(fixed.width.sp, fixed.height.sp)
     }
     val size = measured[image.url]
-    val base = if (size != null) {
-        // #610 web-parity sizing (no upscale, height ≤ IMAGE_MAX_HEIGHT_UNITS, width ≤ the relative
-        // maxWidthSp cap), then the #253 min-height floor so a SUB-16 low-res source can't render
-        // below ~one text line. A cc-image emoji (16×16) sits exactly at the floor → kept native (per
-        // @XaaT dogfood); only smaller sources get enlarged. NB: the floor only grows the BOX — the
-        // bitmap fills it via ContentScale.Fit.
-        //
-        // Re-apply the parity caps AFTER the floor: a very wide/short source (e.g. 250×10) floored to
-        // height 16 grows to ~400×16 — potentially past the relative width cap. The second pass clamps
-        // that back, so the box never exceeds the caps for any aspect ratio (Codex review #246). The
-        // floor stays the one sanctioned upscale, now bounded by the relative cap instead of the
-        // former absolute 240 sp cap (#610).
-        imageParityDisplaySize(
-            upscaleToMinHeight(
-                imageParityDisplaySize(
-                    PixelSize(size.width, size.height),
-                    maxWidthUnits = maxWidthSp,
-                ),
-                INLINE_IMAGE_MIN_HEIGHT_SP,
-            ),
-            maxWidthUnits = maxWidthSp,
+    if (size == null) {
+        // #253 cold-fallback SLOT: a one-line square, not the 240×180 bucket (no giant Fit flash).
+        val cold = capToWidth(
+            PixelSize(INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP, INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP),
+            maxWidthSp,
         )
-    } else {
-        // #253 cold-fallback: a one-line square, not the 240×180 bucket (no giant Fit upscale flash).
-        PixelSize(INLINE_IMAGE_MIN_HEIGHT_SP, INLINE_IMAGE_MIN_HEIGHT_SP)
+        return InlineMediaBox((cold.width + horizontalPaddingSp).sp, cold.height.sp)
     }
-    val capped = capToWidth(base, maxWidthSp)
-    // §4 — the PLACEHOLDER alone carries the +4 dp/side ; the BITMAP keeps its historical capped
-    // size EXACTLY (gate r1 : sizing is Lot 3 — a capped 800×400 stays 0,9×avail wide, never
-    // shrunk to fit padding inside the cap). The placeholder may thus exceed the 0,9 cap by the
-    // 8 sp padding — bounded and harmless at any realistic quote width.
-    return InlineMediaBox((capped.width + horizontalPaddingSp).sp, capped.height.sp)
+    // §3 — the physical-pixel equation (single scale, height derived from the rounded width),
+    // then the px→sp boundary conversion; §4 padding rides the PLACEHOLDER width only.
+    // Gate Sol r1 (blocker #3): the conversion is the REAL Compose inverse — px → dp (÷density,
+    // linear) then [Density]'s own Dp.toSp(), which on API 34+ goes through the platform's
+    // NON-LINEAR font-scaling table. The text stack applies the same table forward at layout,
+    // so the round-trip lands back on the computed physical pixels exactly. (A hand-rolled
+    // linear px/(density×fontScale) drifted at fontScale > 1 on API 34+ — refused.)
+    val px = imageDisplaySizePx(size, maxImageWidthPx, maxImageHeightPx)
+    return with(density) {
+        InlineMediaBox(
+            placeholderWidth = (px.width.toDp().toSp().value + horizontalPaddingSp).sp,
+            placeholderHeight = px.height.toDp().toSp(),
+            // §7 — the decode size travels WITH the display box: same native pair, same displayed
+            // width, so the request key flips exactly when the decode target changes.
+            decodeSize = decodeSizePx(px.width, size),
+        )
+    }
 }
 
 
@@ -1650,7 +1886,13 @@ private fun hasInlineMedia(inlines: List<PostInline>): Boolean = inlines.any { i
     }
 }
 
-internal fun imageInlineContent(image: PostInline.InlineImage, box: InlineMediaBox): InlineTextContent {
+internal fun imageInlineContent(
+    image: PostInline.InlineImage,
+    box: InlineMediaBox,
+    // #958 Lot 2 (§5) — the URL of the enclosing link, when the LinkAnnotation split moved the
+    // tap from the text machinery onto this image node (content images only — never cc-images).
+    linkUrl: String? = null,
+): InlineTextContent {
     return InlineTextContent(
         placeholder = Placeholder(
             width = box.placeholderWidth,
@@ -1666,45 +1908,78 @@ internal fun imageInlineContent(image: PostInline.InlineImage, box: InlineMediaB
         // tracks the sp-based placeholder under any fontScale; the no-upscale rule lives in the BOX
         // sizing (imageDisplayBox), not the content scale.
         //
-        // #257/#610 — decode at a STABLE size (the flat INLINE_IMAGE_DECODE_CAP_PX bound) instead of
-        // letting Coil resolve the size from the placeholder constraints. The box grows from the
-        // cold-fallback square to the measured size when the measurement lands; with constraint-driven
-        // sizing Coil re-decodes at the new size and, meanwhile, paints the previous tiny bitmap
-        // upscaled → pixelated. A fixed decode size keeps ONE sharp bitmap that Fit scales into
-        // whatever box (Coil never upscales the decode past the source, so a small image still decodes
-        // at native). Before #610 the size derived from the absolute 240×200 sp display cap in px;
-        // that width cap is now relative to the container, so the request uses the flat px bound
-        // directly (still covers 0.9 × container at any realistic phone density/fontScale). The
-        // request is remembered so a measurement landing doesn't rebuild it. Smileys keep their own
-        // (much smaller) path — this cap is photo-sized.
+        // #257/#610/#959 — decode at the EXPLICIT §7 size instead of letting Coil resolve it from
+        // the placeholder constraints (constraint-driven sizing re-decoded on every box change and
+        // painted the previous tiny bitmap upscaled → pixelated). Smileys keep their own (much
+        // smaller) path.
         val context = LocalPlatformContext.current
-        val request = remember(image.url, context) {
+        // #959 (§7) — the decode size is the calculator's output carried by the box (bucketed
+        // width, common-factor caps, height derived from the final width). It KEYS the remember:
+        // cold→measured flips the key and recreates request + painter = exactly one new decode
+        // (Sol r1 blocker #4 — no reliance on the refresh generation alone). The cold/cc slots
+        // (decodeSize == null) decode at one 256 bucket — the slot is a one-line square, and the
+        // measured request takes over as soon as the header-only probe lands.
+        val request = remember(image.url, context, box.decodeSize) {
             ImageRequest.Builder(context)
                 .data(image.url)
-                .size(INLINE_IMAGE_DECODE_CAP_PX, INLINE_IMAGE_DECODE_CAP_PX)
+                .size(
+                    box.decodeSize?.width ?: DECODE_BUCKET_PX,
+                    box.decodeSize?.height ?: DECODE_BUCKET_PX,
+                )
                 .scale(Scale.FIT)
                 .precision(Precision.INEXACT)
                 .build()
         }
-        // #831 — the hosting surface (topic reading) may provide image actions; the lambda of an
-        // InlineTextContent is @Composable, so the CompositionLocal is read HERE, without touching
-        // the invariant AnnotatedString (#175) nor the remember keys of ParagraphBlock. Codex
-        // framing (firm reserve): LONG-PRESS ONLY — no combinedClickable / no-op onClick on inline
-        // images, which would eat the tap and disturb text selection around the image. The
-        // long-press detector does claim the initial down, which is precisely what keeps the
-        // parent SelectionContainer (#281) from starting a word selection under a finger resting
-        // on the image; selection drags STARTED on the surrounding text still travel across the
-        // image unaffected, and taps outside the image keep their behaviour.
-        val imageActions = LocalPostImageActions.current
-        val longPressModifier = if (imageActions != null && isEligiblePostImageUrl(image.url)) {
-            Modifier.postImageLongPress(
-                actions = imageActions,
+        // #831/#958 (Lot 2, §5) — the lambda of an InlineTextContent is @Composable, so the
+        // CompositionLocals are read HERE, without touching the invariant AnnotatedString (#175)
+        // nor the remember keys of ParagraphBlock. The HOST capability (LocalPostImageActions
+        // != null) gates ALL interaction of a content image: on the three null hosts (MP, editor
+        // preview, signature) the image is TOTALLY inert — no tap even when [linkUrl] is set, no
+        // long-press, no interactive role. Two independent gates (Sol reserve): the TAP-to-open-
+        // link depends on `linkUrl != null` (threaded from the LinkAnnotation split), the
+        // long-press MENU on the image URL's eligibility; both live in ONE combinedClickable, so
+        // tap and long-press are mutually exclusive by construction. Role.Image + onClickLabel
+        // « Ouvrir l'image » ([AMENDEMENT-Lot2-2] : Role.Link does not exist in Compose 1.11.x).
+        // The pre-#958 "long-press only, never install an onClick" Codex reserve is superseded by
+        // [AMENDEMENT-Lot2-1]: the device spike proved a tap reaches a clickable child even under
+        // an active selection, so a linked image now opens its link and clears the selection
+        // exactly like a text link. Selection drags STARTED on the surrounding text still travel
+        // across the image unaffected.
+        val host = LocalPostImageActions.current
+        val tapOpensLink = host != null && linkUrl != null
+        val menuEligible = host != null && isEligiblePostImageUrl(image.url)
+        val uriHandler = LocalUriHandler.current
+        val openLabel = stringResource(R.string.post_image_open_link)
+        val optionsLabel = stringResource(R.string.post_image_options_action)
+        val interactionModifier = when {
+            tapOpensLink && menuEligible -> Modifier.combinedClickable(
+                role = Role.Image,
+                onClickLabel = openLabel,
+                onLongClickLabel = optionsLabel,
+                onLongClick = {
+                    host.onLongPress(
+                        PostImageTarget(url = image.url, description = image.description, linkUrl = linkUrl),
+                    )
+                },
+            ) {
+                runCatching { uriHandler.openUri(linkUrl) }
+            }
+
+            tapOpensLink ->
+                // Linked image whose own URL is not menu-eligible (e.g. data:) : the tap still
+                // opens the link, no long-press menu.
+                Modifier.clickable(role = Role.Image, onClickLabel = openLabel) {
+                    runCatching { uriHandler.openUri(linkUrl) }
+                }
+
+            menuEligible -> Modifier.postImageLongPress(
+                actions = host,
                 target = PostImageTarget(url = image.url, description = image.description, linkUrl = null),
                 haptics = LocalHapticFeedback.current,
-                optionsLabel = stringResource(R.string.post_image_options_action),
+                optionsLabel = optionsLabel,
             )
-        } else {
-            Modifier
+
+            else -> Modifier
         }
         // #813 — key() on the refresh generation recreates the AsyncImage node on an explicit user
         // refresh: a painter stuck in error restarts its load (the remembered request may keep its
@@ -1713,20 +1988,42 @@ internal fun imageInlineContent(image: PostInline.InlineImage, box: InlineMediaB
         // A healthy image reloads from Coil's memory cache, so a bump costs no visible flash.
         // §4 v1.4 (#957) — content images get 4 dp of horizontal breathing on EACH side inside
         // the widened placeholder (bitmap box unchanged) ; cc-images keep their exact square.
-        // The long-press hitbox stays on the FULL placeholder (modifier order: gesture wraps
-        // the padding).
+        // #958 (§5, Sol firm reserve) : the HITBOX is the BITMAP — the 4 dp strip must stay inert.
+        // Chaining the gesture AFTER `padding` in the SAME layout node does NOT achieve that: a
+        // pointer-input modifier still receives touches on the whole node's bounds (verified by
+        // spike under the compose test harness — intra-node sub-geometry does not gate hit
+        // testing). Hit testing BETWEEN layout nodes is geometric, so the padding lives on a
+        // parent box and the gesture on the image's own node; the padding-strip test in
+        // PostRendererImageLongPressTest pins the behaviour.
         val paddingModifier = if (isCcImageUrl(image.url)) {
             Modifier
         } else {
             Modifier.padding(horizontal = INLINE_IMAGE_HORIZONTAL_PADDING)
         }
+        // #959 (§3 GIF) — the animation gate wraps CONTENT images only; a cc-image keeps its
+        // historical ungated path (#256). `decodeSize != null` is exactly "the first native pair
+        // landed": a cold GIF must not start before its box is final.
+        val gifGate = if (isCcImageUrl(image.url)) {
+            null
+        } else {
+            rememberGifAnimationGate(boxReady = box.decodeSize != null)
+        }
         key(LocalMediaRefreshGeneration.current) {
-            AsyncImage(
-                model = request,
-                contentDescription = image.description,
-                contentScale = PostMediaDisplayPolicy.inlineImageContentScale,
-                modifier = Modifier.fillMaxSize().then(longPressModifier).then(paddingModifier),
-            )
+            Box(Modifier.fillMaxSize().then(paddingModifier)) {
+                AsyncImage(
+                    model = request,
+                    // A11Y-2 (annexe a11y #876) — the HFR alt when present, otherwise the
+                    // localized generic fallback; never null, never the raw URL.
+                    contentDescription = image.description?.takeIf(String::isNotBlank)
+                        ?: stringResource(R.string.post_inline_image_alt),
+                    contentScale = PostMediaDisplayPolicy.inlineImageContentScale,
+                    onState = gifGate?.onState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(gifGate?.modifier ?: Modifier)
+                        .then(interactionModifier),
+                )
+            }
         }
     }
 }

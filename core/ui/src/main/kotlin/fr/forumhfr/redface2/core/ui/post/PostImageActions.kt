@@ -30,8 +30,9 @@ class PostImageActions(
  * rationale as `LocalFoldLongQuotes` (DisplayMetrics.kt): the value changes only when the hosting
  * surface swaps its handler, so scoped reads without fine-grained tracking are the right trade.
  *
- * Defaults to `null` = the surface offers NO image actions: private messages, the editor BBCode
- * preview and signatures keep their existing inert behaviour without any change on their side.
+ * Defaults to `null` = the surface offers NO image actions. Since #958 (Lot 2, §5) `null` makes
+ * every content image TOTALLY inert — no tap even on a linked image, no long-press, no interactive
+ * role — on private messages, the editor BBCode preview and signatures (text links stay live).
  * Only the topic reading surface provides a non-null value (TopicScreen).
  */
 val LocalPostImageActions = staticCompositionLocalOf<PostImageActions?> { null }
