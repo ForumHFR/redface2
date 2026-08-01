@@ -16,6 +16,48 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.36.1` — `local` — 2026-08-01
+
+Correctif **N1**, trouvé pendant la review de promotion bêta (coupe 9/10, review GPT-5.6 Codex →
+gate Claude Fable 5). Classé bloquant pré-bêta au même titre que F2/F3/F5 de #953 : fonctionnel et
+**silencieux**.
+
+### Corrigé
+
+- **Course d'annulation du painter (#960)** : deux occurrences d'une même URL sur une page se
+  disputent l'unique réservation du painter. Quand la gagnante était disposée **en plein
+  chargement** (un défilement suffit), `rollbackReservation` rendait l'axe à `Untried` sans avancer
+  la génération — conforme au verrou #5, mais aucune clé de la perdante ne bougeait alors : ni
+  l'`attempt` mémoïsé, ni `failedFresh`. La perdante recomposait sans jamais rappeler
+  `reserveIfUntried()` et **restait figée sur son placeholder pour la durée de l'écran**.
+  - Aggravation : le **tirer-pour-rafraîchir ne récupérait pas** ce cas — `retryFailedUrls` ne bump
+    que les axes portant un `Failed` (verrou #1), et un axe rendu à `Untried` n'a pas de TTL. Seules
+    guérisons : recycler la perdante par défilement, une nouvelle occurrence composée plus loin, ou
+    quitter l'écran.
+  - **Fix** : `MediaAttemptLedger.isUntried(url, kind)` — bit snapshot-observable — devient une clé
+    du `LaunchedEffect` de réservation. Le rollback recompose la perdante **et** relance son effet.
+    Ni `rollbackReservation` ni `retryFailedUrls` ne sont touchés : verrous #5 et #1 intacts. Le
+    corps de l'effet reste gaté sur `failedFresh` **seul** — une failure expirée est encore
+    `Failed`, pas `Untried`, et doit continuer d'atteindre `reserveIfUntried()` pour consulter C1.
+  - Écarté : avancer la génération au rollback. Trop large — une rollback survient à **chaque**
+    défilement disposant un effet en vol, et le bump recréerait tous les `PainterAttempt` de l'URL
+    en relançant les effets de mesure, avec annulation possible d'un probe en vol.
+  - Surcoût mesuré du fix : un `tryReserve` refusé supplémentaire par occurrence observatrice, sans
+    écriture, sans bump, sans requête réseau. Aucune boucle de recomposition possible.
+
+### Tests
+
+- `PainterAttemptRearmTest` (neuf) — la course de bout en bout : A gagne, B est refusée, A est
+  disposée en vol, **B reprend et settle**. Vérifié en échec avant le fix (`ComposeTimeoutException`).
+- `MediaAttemptLedgerTest` — un test épingle que le refresh ne récupère **pas** une entrée rendue à
+  `Untried` (la cause traitée au niveau composition, pas au ledger).
+- **Faux vert corrigé** : le test du verrou #5 settlait l'axe en `Succeeded` *avant* la rollback
+  tardive — sa dernière assertion tenait pour la mauvaise raison, un axe succeeded refusant toute
+  réservation que la rollback soit discardée ou non. Réécrit en laissant l'axe **in-flight**, seul
+  état où un mauvais scoping serait observable.
+
+---
+
 ## `0.36.0` — `local` — 2026-07-30
 
 ### Ajouté
