@@ -1,3 +1,6 @@
-Redface 2 v0.36.1 — dev.
+Redface 2 v0.37.0 — bêta.
 
-- Correction d'un blocage silencieux : quand la même image apparaissait deux fois sur une page (une citation et son original, par exemple) et que le chargement du premier exemplaire était interrompu par un défilement, le second restait figé sur son cadre gris — définitivement, même après un tirer-pour-rafraîchir. Il reprend désormais le chargement tout seul.
+- La vue des sujets a été entièrement revue : navigation entre pages sans flash, retour précis aux citations, repères de lecture et mode pleine largeur.
+- Pincez la page pour zoomer jusqu'à 3×.
+- Les images respectent mieux leur taille et l'écran ; miniatures et GIF sont plus lisibles, avec actions, erreurs claires et réessai.
+- Répondre et citer est plus fluide — en plein écran (avec envoi d'images) ou via la réponse rapide expérimentale.

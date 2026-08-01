@@ -16,6 +16,33 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.37.0` — `local` — 2026-08-01
+
+**Promotion bêta** — première version proposée aux testeurs du canal ouvert depuis la 0.18.0.
+Cette entrée synthétise la série dev 0.19.0 → 0.36.1 ; les entrées détaillées ci-dessous restent
+la source des changements et correctifs intermédiaires.
+
+### Ajouté et modifié
+
+- **Vue Topic refondue** : top bar et sélecteur de page intégrés, frontières de page et repère de
+  dernière lecture plus lisibles, actions de post stabilisées, citations longues repliables et
+  option « Posts en pleine largeur » pour gagner de la place de lecture.
+- **Moteur de pagination in-ViewModel** : changement de page sans recréer l'écran ni flasher,
+  revisite instantanée des pages récentes avec leur position, retour fidèle après un saut de
+  citation et transitions de chargement discrètes.
+- **Loupe de lecture** : pincement jusqu'à 3× sur toute la page, déplacement borné et glisse amortie ;
+  les gestes incompatibles sont suspendus pendant le zoom et l'état se réinitialise au changement
+  de page ou de sujet.
+- **Images sous contrat** : séparation fiable entre images inline et blocs, taille mesurée sans
+  upscale, décodage adapté à la densité, grandes images mieux dimensionnées, miniatures liées et GIF
+  plus lisibles, menu d'actions, erreurs visibles et réessai sans recharger les images saines.
+- **Surfaces d'écriture consolidées** : réponse rapide ou éditeur plein écran selon le réglage
+  (plein écran par défaut, feuille encore expérimentale), citations multiples, brouillons robustes,
+  sélecteur de smileys et upload multiple disponibles sur les composeurs concernés ; clavier,
+  curseur et bouton d'envoi restent accessibles sur les écrans courts.
+
+---
+
 ## `0.36.1` — `local` — 2026-08-01
 
 Correctif **N1**, trouvé pendant la review de promotion bêta (coupe 9/10, review GPT-5.6 Codex →
