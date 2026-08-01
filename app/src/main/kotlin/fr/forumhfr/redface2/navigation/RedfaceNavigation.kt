@@ -465,6 +465,24 @@ private fun StartScreenChoice.toTopLevelDestination(): TopLevelDestination = whe
     StartScreenChoice.MESSAGES -> TopLevelDestination.Messages
 }
 
+// #812 — the stable identity of an auth state, used to detect real SESSION TRANSITIONS
+// (login, logout, account switch) : the session-clearing effect must ignore the re-emission
+// that follows an activity recreation, whose identity compares equal. Anonymous is safe as
+// an identity (never a loading placeholder) : observeAuthState() filters the cookie jar's
+// un-loaded null state, so its FIRST emission is already the persisted-session verdict.
+// userId is the canonical key (gate Codex) ; pseudo only backs the rare cookie sets without
+// `md_id`. Pure — pinned by test.
+internal fun authIdentityKey(auth: AuthState?): String? = when (auth) {
+    null -> null
+    AuthState.Anonymous -> "anon"
+    is AuthState.Authenticated -> "auth:${auth.userId ?: "pseudo:${auth.pseudo}"}"
+}
+
+// #812 — a transition needs a KNOWN previous identity that differs : the first delivery of a
+// cold start (previous == null) and a post-recreation re-delivery (equal) are both no-ops.
+internal fun isAuthTransition(previous: String?, identity: String): Boolean =
+    previous != null && previous != identity
+
 // #603 PR6 / #679 — what a bottom-bar tap should do, given the tapped tab, the current tab and the
 // Drapeaux stack depth. Pure (no callbacks → no LongParameterList, fully testable); the host maps the
 // result to an action via [runTopLevelTap].
@@ -1112,37 +1130,34 @@ fun RedfaceApp(intent: Intent?) {
         // only, never serialized into a route.
         var topicPollExpansionCache by remember { mutableStateOf(emptyMap<TopicPollKey, Boolean>()) }
 
+        // #812 — the session-clearing block below must run on real SESSION TRANSITIONS only
+        // (login, logout, account switch), never on the re-emission that follows an activity
+        // recreation : LaunchedEffect restarts on every rotation, and the un-guarded reset was
+        // wiping the Messages back stack (an open conversation silently fell back to the list)
+        // plus every read-state cache. rememberSaveable makes the guard itself survive the
+        // recreation, so the first post-restore delivery compares equal and is a no-op.
+        var lastAuthIdentity by rememberSaveable { mutableStateOf<String?>(null) }
         LaunchedEffect(authState) {
-            when (authState) {
-                null -> Unit
-                AuthState.Anonymous -> {
-                    readPrivateMessageThreadIds = emptyMap()
-                    multiRecipientThreadIds = emptySet()
-                    unreadOnOpenThreadIds = emptySet()
-                    openThreadDates = emptyMap()
-                    // #531 — stay in lockstep with the VM's generation reset (clearPrivateState).
-                    lastReconciledGeneration = 0
-                    privateMessageSentSignal = null
-                    // #291 — a write intention armed under another session must not survive the
-                    // transition (Codex review: stale « Citer N » after logout/login).
-                    multiQuoteBasket = null
-                    pendingEditorQuotes = null
-                    resetStack(messagesBackStack, MessagesRoute, MessagesRoute)
-                }
-                is AuthState.Authenticated -> {
-                    readPrivateMessageThreadIds = emptyMap()
-                    multiRecipientThreadIds = emptySet()
-                    unreadOnOpenThreadIds = emptySet()
-                    openThreadDates = emptyMap()
-                    // #531 — the VM reloads page 1 (generation back to 1) on a fresh authentication;
-                    // resetting here lets that first reconcile run.
-                    lastReconciledGeneration = 0
-                    privateMessageSentSignal = null
-                    multiQuoteBasket = null
-                    pendingEditorQuotes = null
-                    resetStack(messagesBackStack, MessagesRoute, MessagesRoute)
-                }
-            }
+            val identity = authIdentityKey(authState) ?: return@LaunchedEffect
+            val previous = lastAuthIdentity
+            lastAuthIdentity = identity
+            // First delivery of a cold start (fresh stacks, nothing to clear) or the same
+            // session re-delivered after a recreation (restored stacks must survive) — not a
+            // transition, nothing to reset.
+            if (!isAuthTransition(previous, identity)) return@LaunchedEffect
+            readPrivateMessageThreadIds = emptyMap()
+            multiRecipientThreadIds = emptySet()
+            unreadOnOpenThreadIds = emptySet()
+            openThreadDates = emptyMap()
+            // #531 — stay in lockstep with the VM's generation reset (clearPrivateState on
+            // logout ; reload from generation 1 on a fresh authentication).
+            lastReconciledGeneration = 0
+            privateMessageSentSignal = null
+            // #291 — a write intention armed under another session must not survive the
+            // transition (Codex review: stale « Citer N » after logout/login).
+            multiQuoteBasket = null
+            pendingEditorQuotes = null
+            resetStack(messagesBackStack, MessagesRoute, MessagesRoute)
         }
 
         // #624 — the post/topic editor pins an « Envoyer » bar above the keyboard. Inside the bottom-nav
@@ -2504,12 +2519,35 @@ private fun RedfaceNavHost(
                         topicScrollNavState.onAnchorSaved(route.cat, route.post, route.page, anchor)
                     },
                     onOpenProfile = onOpenProfile,
-                    // #604 lots 1-3 — onReply is the quick-reply sheet's ESCALATION : the sheet
-                    // just persisted the shared #405 row, so the editor auto-applies it (#790,
-                    // resumeSharedDraft) instead of surfacing the restore banner. The armed quote
-                    // cards travel as FULL previews through the in-memory handoff (lot 3, mockup
-                    // P3) — the editor renders the same cards and materialises at submit.
+                    // #792 — « Envoyer un MP » from a post's menu : the NEW-conversation composer
+                    // opens with the post's author prefilled (the route arg was designed for this).
+                    onSendPrivateMessage = { author ->
+                        backStack.add(PrivateMessageComposeRoute(prefilledRecipient = author))
+                    },
+                    // #843 — onReply is a COLD full-editor open (FAB under FULL_EDITOR, « Citer »
+                    // routed to the editor, #823 long-press): no sheet is in flight, so
+                    // resumeSharedDraft = false and an existing #405 draft is SURFACED via the
+                    // restore banner (Restaurer / Ignorer) instead of being silently re-applied. The
+                    // armed quote cards still travel as FULL previews through the in-memory handoff
+                    // (lot 3) — cards are independent of the text draft. The genuine sheet escalation
+                    // uses onEscalateToFullEditor below.
                     onReply = { subcat, page, quotes ->
+                        multiQuoteNavState.onEditorQuotesHandoff(quotes.takeIf { it.isNotEmpty() })
+                        backStack.add(
+                            PostEditorRoute(
+                                mode = PostEditorMode.Reply,
+                                cat = route.cat,
+                                topicId = route.post,
+                                page = page,
+                                subcat = subcat,
+                                resumeSharedDraft = false,
+                            ),
+                        )
+                    },
+                    // #843/#790 — the quick-reply sheet's ESCALATION only: the sheet just persisted
+                    // the shared #405 row, so the editor auto-applies it (resumeSharedDraft = true,
+                    // silent append — same composition act) WITHOUT surfacing the restore banner.
+                    onEscalateToFullEditor = { subcat, page, quotes ->
                         multiQuoteNavState.onEditorQuotesHandoff(quotes.takeIf { it.isNotEmpty() })
                         backStack.add(
                             PostEditorRoute(
@@ -2568,8 +2606,10 @@ private fun RedfaceNavHost(
                         // handed to the editor (cards, mockup P3) through the in-memory handoff.
                         // The basket is cleared on launch: the selection's intent is consumed,
                         // and backing out of the editor should not re-arm a stale « Citer N ».
-                        // resumeSharedDraft (Codex fork 4) : quoting is a continuation of this
-                        // topic's composition — any sheet-drafted text is picked up bannerless.
+                        // #843 — « Citer N » (3+) is a COLD full-editor open, not a sheet escalation:
+                        // resumeSharedDraft = false, so an existing text draft is offered via the
+                        // restore banner (cards are independent of it), instead of the silent append
+                        // the escalation flag used to force here (pre-#843 Codex fork 4).
                         val selection = multiQuoteNavState.basket
                             ?.takeIf { it.matches(route.cat, route.post) }
                             ?.selections
@@ -2583,7 +2623,7 @@ private fun RedfaceNavHost(
                                     topicId = route.post,
                                     page = page,
                                     subcat = subcat,
-                                    resumeSharedDraft = true,
+                                    resumeSharedDraft = false,
                                 ),
                             )
                             multiQuoteNavState.onClear()

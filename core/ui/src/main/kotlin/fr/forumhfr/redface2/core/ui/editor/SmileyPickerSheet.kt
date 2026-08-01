@@ -37,10 +37,12 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import fr.forumhfr.redface2.core.model.BUILTIN_HFR_SMILEYS
 import fr.forumhfr.redface2.core.model.EditorSmiley
+import fr.forumhfr.redface2.core.model.EditorSmileySource
 
 /**
  * Phase 2F-B (#11 partial) — bottom-sheet smiley picker. Promoted from `:feature:editor`
@@ -228,12 +230,28 @@ private fun SmileyCell(smiley: EditorSmiley, onClick: () -> Unit) {
             // contentDescription is on the parent Box so the click target carries it ;
             // null here keeps TalkBack from announcing the image twice.
             contentDescription = null,
-            // #236 — render at 30.dp (was 48.dp): HFR builtins are ~16 px sprites, so a smaller
-            // box stops the ×3 upscale that looked huge and blurry. ContentScale.Fit preserves
-            // the aspect ratio of taller perso smileys; FilterQuality.None keeps pixel-art crisp.
-            modifier = Modifier.size(30.dp),
+            // #816 (thibw) — restore the HFR scale contrast inside the uniform grid : builtins
+            // are ~15 px sprites rendered near-native, persos are richer images that deserve
+            // most of the cell. The single 30.dp of #236 made builtins big+blurry and persos
+            // cramped at once. ContentScale.Fit preserves aspect ratios in both cases.
+            modifier = Modifier.size(smileyCellImageSize(smiley.source)),
             contentScale = ContentScale.Fit,
-            filterQuality = FilterQuality.None,
+            // Pixel-art builtins stay crisp unfiltered ; persos (photos, rich art, GIF frames)
+            // look better bilinear-filtered at their mild upscale.
+            filterQuality = when (smiley.source) {
+                EditorSmileySource.BUILTIN -> FilterQuality.None
+                EditorSmileySource.WIKI -> FilterQuality.Low
+            },
         )
     }
+}
+
+/**
+ * #816 — the picker's per-source thumbnail size : builtins near their ~15 px native scale,
+ * persos filling most of the 48.dp cell, mirroring their relative sizes in a rendered post.
+ * Pure — pinned by unit test.
+ */
+internal fun smileyCellImageSize(source: EditorSmileySource): Dp = when (source) {
+    EditorSmileySource.BUILTIN -> 20.dp
+    EditorSmileySource.WIKI -> 44.dp
 }

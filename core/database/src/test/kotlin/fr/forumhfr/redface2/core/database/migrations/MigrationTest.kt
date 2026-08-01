@@ -127,6 +127,7 @@ class MigrationTest {
                 MIGRATION_11_12,
                 MIGRATION_12_13,
                 MIGRATION_13_14,
+                MIGRATION_14_15,
             )
             .build()
 
@@ -271,6 +272,7 @@ class MigrationTest {
                 MIGRATION_11_12,
                 MIGRATION_12_13,
                 MIGRATION_13_14,
+                MIGRATION_14_15,
             )
             .build()
 
@@ -375,6 +377,7 @@ class MigrationTest {
                 MIGRATION_11_12,
                 MIGRATION_12_13,
                 MIGRATION_13_14,
+                MIGRATION_14_15,
             )
             .build()
 
@@ -451,6 +454,7 @@ class MigrationTest {
                 MIGRATION_11_12,
                 MIGRATION_12_13,
                 MIGRATION_13_14,
+                MIGRATION_14_15,
             )
             .build()
 
@@ -523,6 +527,7 @@ class MigrationTest {
                 MIGRATION_11_12,
                 MIGRATION_12_13,
                 MIGRATION_13_14,
+                MIGRATION_14_15,
             )
             .build()
 
@@ -586,6 +591,7 @@ class MigrationTest {
                 MIGRATION_11_12,
                 MIGRATION_12_13,
                 MIGRATION_13_14,
+                MIGRATION_14_15,
             )
             .build()
 
@@ -663,6 +669,7 @@ class MigrationTest {
                 MIGRATION_11_12,
                 MIGRATION_12_13,
                 MIGRATION_13_14,
+                MIGRATION_14_15,
             )
             .build()
 
@@ -727,6 +734,7 @@ class MigrationTest {
                 MIGRATION_11_12,
                 MIGRATION_12_13,
                 MIGRATION_13_14,
+                MIGRATION_14_15,
             )
             .build()
 
@@ -781,6 +789,7 @@ class MigrationTest {
                 MIGRATION_11_12,
                 MIGRATION_12_13,
                 MIGRATION_13_14,
+                MIGRATION_14_15,
             )
             .build()
 
@@ -839,6 +848,7 @@ class MigrationTest {
                 MIGRATION_11_12,
                 MIGRATION_12_13,
                 MIGRATION_13_14,
+                MIGRATION_14_15,
             )
             .build()
 
@@ -902,6 +912,7 @@ class MigrationTest {
                 MIGRATION_11_12,
                 MIGRATION_12_13,
                 MIGRATION_13_14,
+                MIGRATION_14_15,
             )
             .build()
 
@@ -965,6 +976,7 @@ class MigrationTest {
                 MIGRATION_11_12,
                 MIGRATION_12_13,
                 MIGRATION_13_14,
+                MIGRATION_14_15,
             )
             .build()
 
@@ -1038,6 +1050,7 @@ class MigrationTest {
                 MIGRATION_11_12,
                 MIGRATION_12_13,
                 MIGRATION_13_14,
+                MIGRATION_14_15,
             )
             .build()
 
@@ -1047,6 +1060,77 @@ class MigrationTest {
             ).use { cursor ->
                 assertTrue("pre-v14 post row must survive MIGRATION_13_14", cursor.moveToFirst())
                 assertTrue("signature must be NULL for pre-v14 rows", cursor.isNull(0))
+            }
+        } finally {
+            migrated.close()
+        }
+    }
+
+    /**
+     * v14 → v15 (#863) — `posts.citedCount` (compteur serveur « Message cité N fois »).
+     *
+     * Verifies:
+     * 1. The migration runs cleanly against the v14 fixture and matches the exported v15 schema.
+     * 2. Pre-existing post rows survive the migration.
+     * 3. The new column defaults to NULL on old rows (recovered on the next live fetch).
+     */
+    @Test
+    fun migrate_14_to_15_adds_nullable_citedCount_to_posts() {
+        val dbName = "migration_14_15_test"
+
+        // 1. Create a v14 database and insert a posts row that pre-dates `citedCount`.
+        helper.createDatabase(dbName, 14).apply {
+            execSQL(
+                """INSERT INTO topic_pages (cat, post, page, title, totalPages, isFirstPostOwner,
+                   numreponses, fetchedAt, authMode, subcat, canReply)
+                   VALUES (23, 35395, 1, 'v14 cached topic', 10, 0, '[]', 1000, 'AUTHENTICATED', 550, 1)""",
+            )
+            execSQL(
+                """INSERT INTO posts (cat, numreponse, post, author, date, content, avatarUrl,
+                   isEditable, isOwnPost, quotedAuthors, postIndex, fetchedAt, authMode, quoteRef,
+                   profileId, editedAt, signature)
+                   VALUES (23, 100, 35395, 'XaTriX', 1000,
+                   '{"blocks":[]}', NULL, 0, 0, '[]', 1, 1000, 'AUTHENTICATED', NULL, NULL, NULL, NULL)""",
+            )
+            close()
+        }
+
+        // 2. Run MIGRATION_14_15 and validate against the v15 schema.
+        helper.runMigrationsAndValidate(dbName, 15, true, MIGRATION_14_15).close()
+
+        // 3. Re-open through Room. The DB is ALREADY at v15 here — no migration re-runs ; this
+        //    only proves the migrated file opens cleanly against the compiled schema (the DAO
+        //    contract), the full-chain coverage lives in the 1→N tests above.
+        val migrated = Room.databaseBuilder(
+            ApplicationProvider.getApplicationContext(),
+            RedfaceDatabase::class.java,
+            dbName,
+        )
+            .allowMainThreadQueries()
+            .addMigrations(
+                MIGRATION_1_2,
+                MIGRATION_2_3,
+                MIGRATION_3_4,
+                MIGRATION_4_5,
+                MIGRATION_5_6,
+                MIGRATION_6_7,
+                MIGRATION_7_8,
+                MIGRATION_8_9,
+                MIGRATION_9_10,
+                MIGRATION_10_11,
+                MIGRATION_11_12,
+                MIGRATION_12_13,
+                MIGRATION_13_14,
+                MIGRATION_14_15,
+            )
+            .build()
+
+        try {
+            migrated.openHelper.readableDatabase.query(
+                "SELECT citedCount FROM posts WHERE cat = 23 AND numreponse = 100",
+            ).use { cursor ->
+                assertTrue("pre-v15 post row must survive MIGRATION_14_15", cursor.moveToFirst())
+                assertTrue("citedCount must be NULL for pre-v15 rows", cursor.isNull(0))
             }
         } finally {
             migrated.close()

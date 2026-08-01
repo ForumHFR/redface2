@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.topic
 
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
+import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 
@@ -112,6 +113,15 @@ data class TopicUiState(
              * force-refresh / post-delete / search / live-refilter paths.
              */
             val blockedQuoteAuthors: Set<String> = emptySet(),
+            /**
+             * #877 — `true` while this page is the instant cache emission that a network refresh
+             * will supersede on the same load (cf. `TopicPageEmission.provisional`). The posts
+             * render normally (cache-first snappiness) but the top-bar pill keeps « Chargement… »
+             * instead of a possibly stale « page X / Y ». The repository guarantees a terminal
+             * `provisional = false` emission on every path (network page, TTL skip, failed
+             * refresh), so this can never strand the pill.
+             */
+            val provisional: Boolean = false,
         ) : Mode
 
         data class Error(
@@ -127,13 +137,24 @@ data class TopicUiState(
     }
 
     /**
-     * Helper used by the screen : `true` when the loaded topic page exposes a usable intra-topic
-     * search form (authenticated, non-empty `hash_check`). Drives the search icon affordance,
-     * symmetric with the reply gate. The form is transient (never cached), so a cold cache row
-     * keeps search disabled until a live authenticated load.
+     * `true` when the loaded topic page exposes a usable intra-topic search form (authenticated,
+     * non-empty `hash_check`). The form is transient (never cached) — a cache emission carries
+     * none, which is why the ICON affordance is no longer gated on it (cf. [canOpenSearch], #877) :
+     * this gate keeps protecting the actual POST paths (submit / step).
      */
     val canSearchInTopic: Boolean
         get() = (mode as? Mode.Loaded)?.topic?.searchForm?.canSearch == true
+
+    /**
+     * #877 — search ICON affordance : authenticated + a page on screen. Deliberately decoupled
+     * from the transient [canSearchInTopic] : cache emissions (and the TTL-skip path, which never
+     * refetches) carry no `searchForm`, and gating the icon on it made the Loupe vanish between
+     * pages — deterministic on a fresh authenticated cache, perceived as intermittent. Opening
+     * the bar without a form triggers a fresh form fetch (`TopicViewModel.ensureSearchForm`) ;
+     * a submit that still has no form fails explicitly (Toast), never silently.
+     */
+    val canOpenSearch: Boolean
+        get() = isAuthenticated && mode is Mode.Loaded
 
     companion object {
         fun initial(request: TopicRequest): TopicUiState =
@@ -167,10 +188,60 @@ data class TopicSearchUiState(
     val word: String = "",
     val spseudo: String = "",
     val onlyMatches: Boolean = true,
+    /**
+     * #894 — the « Chercher depuis le début » opt-in : a fresh submit sends `firstnum=0` (whole
+     * topic) instead of the session anchor (HFR's default « from the current page onwards »).
+     * EPHEMERAL by design (cadrage F4) : plain bar state, no persisted preference.
+     */
+    val fromStart: Boolean = false,
+    /**
+     * #894 — the search anchor of the topic page the user is READING : the form `firstnum` of the
+     * last REAL topic page rendered (a transsearch response carries none, so it never overwrites
+     * this). A fresh default-mode submit sends it ; a fresh submit from a results page reuses it
+     * (the on-screen response form has no anchor of its own).
+     */
+    val sessionAnchor: Int? = null,
     val status: TopicSearchStatus = TopicSearchStatus.Idle,
     val canGoPreviousResult: Boolean = false,
     val canGoNextResult: Boolean = false,
+    /**
+     * #879 — `true` while the page ON SCREEN is a FILTERED transsearch result list. Set by the
+     * filtered render, cleared whenever a normal-load path takes the page back
+     * (`takeOverFromSearch`). Gates the search-results footer (« résultats suivants ») and
+     * SUPPRESSES the canonical PageBoundary/EndOfTopic cards, whose `onOpenPage` would silently
+     * leave the search.
+     */
+    val showingFilteredResults: Boolean = false,
+    /**
+     * #894 — resume cursor of the displayed FILTERED result list. HFR truncates its scan window
+     * (~200 matches observed) : a truncated response advertises the resume point in its form's
+     * `currentnum` (⇒ « Résultats suivants » available), a COMPLETE response carries none.
+     * `null` = no further batch. The continuation re-submits the FROZEN criteria below with
+     * `currentnum = resumeCursor` (and NO anchor) ; the next batch REPLACES the list (web parity).
+     */
+    val resumeCursor: Int? = null,
+    /**
+     * #879 (gate finding 1) + #894 — the criteria the displayed results were actually SUBMITTED
+     * with. The continuation, the non-filtered steps and the backward replay re-submit THESE,
+     * never the live editable fields : editing the bar after a render can never fetch « the next
+     * batch of a different search ». [resultAnchor] is the `firstnum` actually sent (`0` when
+     * « depuis le début » was checked) — the backward replay re-anchors on it, a response form
+     * carrying no anchor of its own.
+     */
+    val resultWord: String = "",
+    val resultSpseudo: String = "",
+    val resultAnchor: Int? = null,
 ) {
+    /**
+     * #894 — a further batch of filtered results is reachable. Deliberately CURSOR-based only
+     * (gate #879 finding 3, carried over) : during Loading the footer is simply hidden by the
+     * screen, and after a failed continuation the cursor is untouched — the card stays and
+     * doubles as the retry affordance. `EndOfSearchResultsCard` is only truthful on
+     * `Done && !hasMore`.
+     */
+    val hasMoreFilteredResults: Boolean
+        get() = showingFilteredResults && resumeCursor != null
+
     /** HFR needs at least a term or an author ; the submit button is disabled otherwise. */
     val canSubmit: Boolean get() = word.isNotBlank() || spseudo.isNotBlank()
 }
@@ -195,6 +266,9 @@ sealed interface TopicIntent {
      */
     data object Refresh : TopicIntent
 
+    /** #879 — filtered search : fetch the next page of the result list (footer card). */
+    data object SearchNextResultsPage : TopicIntent
+
     /**
      * #292 — confirmed deletion of one of the user's own (normal) posts. The screen shows a
      * confirmation dialog first; this intent is only sent once the user confirms. [numreponse]
@@ -208,6 +282,13 @@ sealed interface TopicIntent {
      * `BlacklistRepository`; the topic re-filters live through the page combine.
      */
     data class SetAuthorBlocked(val author: String, val blocked: Boolean) : TopicIntent
+
+    /**
+     * #809 — a long-press on the top-bar title requests removing THIS topic's drapeau. Carries no
+     * payload : the ViewModel already knows the topic from its [TopicRequest] and resolves the full
+     * [fr.forumhfr.redface2.core.model.Flag] through `FlagRepository.findFlag` before confirming.
+     */
+    data object RequestRemoveTopicFlag : TopicIntent
 
     // ─── intra-topic search (#546) ───────────────────────────────────────────────
 
@@ -225,6 +306,9 @@ sealed interface TopicIntent {
     data class SearchPseudoChanged(val pseudo: String) : TopicIntent
 
     data class SearchOnlyMatchesChanged(val onlyMatches: Boolean) : TopicIntent
+
+    /** #894 — toggle « Chercher depuis le début » (fresh submits send `firstnum=0`). Ephemeral. */
+    data class SearchFromStartChanged(val fromStart: Boolean) : TopicIntent
 
     /** Submit the intra-topic search (`POST transsearch.php`). */
     data object SubmitSearch : TopicIntent
@@ -271,6 +355,13 @@ sealed interface TopicEffect {
      * the current `Topic.posts` list.
      */
     data class ScrollToPost(val numreponse: Int) : TopicEffect
+
+    /**
+     * #879 (gate finding 2) — a NEW page of filtered search results replaced the list content in
+     * place : without an explicit reposition the LazyListState keeps page N's end offset and the
+     * first results of page N+1 open off-screen. Sent on every filtered render (fresh + next).
+     */
+    data object ScrollToTopOfResults : TopicEffect
 
     /**
      * Issue #200 — emitted after a plain reply submit when HFR's success URL anchors
@@ -341,4 +432,41 @@ sealed interface TopicEffect {
      * sober Toast (« Aucun résultat suivant ») and the next arrow disables.
      */
     data object SearchResultsEnd : TopicEffect
+
+    // ─── #809 — one-shot outcomes of the title long-press flag removal. They ride THIS channel
+    // (the screen's single effects collector + Toast surface, like PostDeleted) rather than a
+    // parallel consumable StateFlow — one one-shot mechanism per screen (review finding).
+
+    /** #809 — `delflag.php` confirmed the removal ; the Drapeaux caches are already reconciled. */
+    data object TopicFlagRemoved : TopicEffect
+
+    /** #809 — the removal failed (refused, transport, session) ; nothing was touched. */
+    data object TopicFlagRemovalFailed : TopicEffect
+
+    /**
+     * #809 — the long-press resolved to no removable drapeau : topic not flagged, anonymous
+     * session, or an unresolvable lookup (resolve failure folds here — cf. TopicViewModel).
+     */
+    data object TopicFlagNotFound : TopicEffect
 }
+
+/**
+ * #809 — drives the « Retirer le drapeau » long-press interaction on the topic top bar. MVI-style
+ * explicit state so the confirmation gates the network call. Mirrors FlagsViewModel's
+ * `RemoveFlagState`, plus a [Resolving] step the Drapeaux view never needs : that screen already
+ * holds the [Flag], whereas the topic screen must first resolve it through `FlagRepository.findFlag`
+ * (which may fan out the network on a cold cache).
+ *
+ * - [Idle] — nothing pending.
+ * - [Resolving] — the long-press fired ; the flag lookup is in flight. Blocks a second long-press.
+ * - [Confirming] — a drapeau was found ; the screen shows the confirmation dialog ([flag] feeds its
+ *   title). Absent this state, no dialog.
+ * - [Removing] — the user confirmed ; the `delflag.php` call is in flight (anti double-tap).
+ */
+sealed interface RemoveTopicFlagState {
+    data object Idle : RemoveTopicFlagState
+    data object Resolving : RemoveTopicFlagState
+    data class Confirming(val flag: Flag) : RemoveTopicFlagState
+    data class Removing(val flag: Flag) : RemoveTopicFlagState
+}
+

@@ -44,8 +44,14 @@
     <string name="topic_search_word_hint">Mot</string>
     <string name="topic_search_pseudo_hint">Pseudo</string>
     <string name="topic_search_only_matches">Filtrer (résultats uniquement)</string>
+    <!-- #894 — opt-in « depuis le début » ; le défaut reste ancré à la page courante (parité web). -->
+    <string name="topic_search_from_start">Chercher depuis le début du sujet</string>
     <string name="topic_search_submit">Rechercher</string>
     <string name="topic_search_failed">La recherche dans le sujet a échoué.</string>
+    <!-- #894 — continuation des résultats FILTRÉS (fenêtre de scan HFR tronquée, parité web). -->
+    <string name="topic_search_results_truncated">La liste s’arrête ici, d’autres résultats existent</string>
+    <string name="topic_search_results_next">Afficher les résultats suivants</string>
+    <string name="topic_search_results_list_end">Fin des résultats de la recherche</string>
     <!-- Chantier B (#546) — navigation entre résultats + cas « aucun résultat ». -->
     <string name="topic_search_no_results">Aucun résultat</string>
     <string name="topic_search_prev_result">Résultat précédent</string>
@@ -69,6 +75,8 @@
     <string name="topic_post_menu_open_in_browser">Ouvrir dans le navigateur</string>
     <string name="topic_post_menu_no_browser">Aucun navigateur disponible</string>
     <string name="topic_post_menu_report_soon">Alerter (à venir)</string>
+    <!-- #792 — entrée « Envoyer un MP » du menu contextuel de post (composeur MP pré-rempli). -->
+    <string name="topic_post_menu_send_private_message">Envoyer un MP</string>
     <!-- #509 — entrée du menu post : masquer / réafficher tous les posts de l'auteur (blacklist). -->
     <string name="topic_post_menu_block_author">Masquer cet utilisateur</string>
     <string name="topic_post_menu_unblock_author">Ne plus masquer cet utilisateur</string>
@@ -76,9 +84,10 @@
     <!-- #483 — compact inline marker next to the post date when the post was edited; the full
          « Édité le … » timestamp stays in the post menu (R.string.topic_post_menu_edited). -->
     <string name="topic_post_edited_inline">édité</string>
-    <plurals name="topic_post_menu_cited_on_page">
-        <item quantity="one">Cité %1$d fois sur cette page</item>
-        <item quantity="other">Cité %1$d fois sur cette page</item>
+    <!-- #863 — compteur SERVEUR (« Message cité N fois »), toutes pages confondues. -->
+    <plurals name="topic_post_menu_cited_in_topic">
+        <item quantity="one">Cité %1$d fois dans le sujet</item>
+        <item quantity="other">Cité %1$d fois dans le sujet</item>
     </plurals>
     <!-- #831 — menu contextuel d'appui long sur les images de post (PostImageMenuSheet).
          « Ouvrir dans le navigateur » et son échec réutilisent topic_post_menu_open_in_browser /
@@ -91,7 +100,7 @@
     <string name="topic_image_menu_copy_url">Copier l\'URL de l\'image</string>
     <string name="topic_image_menu_url_copied">URL copiée</string>
     <string name="topic_image_menu_full_size_soon">Afficher en taille réelle (à venir)</string>
-    <!-- #239 — badge on a post showing how many posts of the CURRENT page cite it. -->
+    <!-- #239/#863 — badge : le compteur de citations SERVEUR (toutes pages du sujet). -->
     <plurals name="topic_post_cited_count">
         <item quantity="one">cité %1$d fois</item>
         <item quantity="other">cité %1$d fois</item>
@@ -141,6 +150,15 @@
     <string name="topic_title_collapse">Réduire le titre</string>
     <string name="topic_title_expanded">Titre développé</string>
     <string name="topic_title_collapsed">Titre réduit</string>
+    <!-- #809 : appui long sur le titre de la top bar pour retirer le drapeau du sujet. -->
+    <string name="topic_remove_flag_long_press">Gérer le drapeau</string>
+    <string name="topic_remove_flag_dialog_title">Retirer le drapeau de ce sujet ?</string>
+    <string name="topic_remove_flag_dialog_message">Retirer le drapeau de « %1$s » ? Cette action est définitive depuis l\'app.</string>
+    <string name="topic_remove_flag_dialog_confirm">Retirer</string>
+    <string name="topic_remove_flag_dialog_cancel">Annuler</string>
+    <string name="topic_remove_flag_success">Drapeau retiré</string>
+    <string name="topic_remove_flag_failure">Impossible de retirer le drapeau</string>
+    <string name="topic_remove_flag_not_found">Aucun drapeau trouvé pour ce sujet</string>
     <!-- Vague 4 (#604) lot 1 : feuille de réponse rapide. Wording d'erreurs = copie locale de
          feature/editor (les modules res ne se partagent pas ; promotion :core:ui si un 3e copieur
          apparaît). -->

@@ -95,6 +95,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.domain.author.isRf2Creator
+import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.Poll
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.Topic
@@ -134,15 +135,25 @@ import kotlinx.coroutines.flow.first
 fun TopicScreen(
     request: TopicRequest,
     /**
-     * Open the FULL-SCREEN reply editor for this topic — since #604 lot 1 this is the quick-reply
-     * sheet's ESCALATION only (the reply FAB opens the sheet). The lambda receives the topic's
-     * sub-category id, the current page, and the armed quote cards as FULL previews in citation
-     * order (lot 3 — empty for a plain escalation) ; cat and topicId are derived from [request].
-     * `:app` hands the previews to the editor through the in-memory handoff (never the route) with
-     * `resumeSharedDraft = true` (#790) so the editor auto-applies the sheet's #405 row and
-     * renders the same cards (mockup P3).
+     * Open the FULL-SCREEN reply editor COLD for this topic — the reply FAB under the FULL_EDITOR
+     * preset, « Citer » routed to the full editor (#806), and the #823 long-press. The lambda
+     * receives the topic's sub-category id, the current page, and the armed quote cards as FULL
+     * previews in citation order (empty for a plain reply) ; cat and topicId are derived from
+     * [request]. `:app` hands the previews to the editor through the in-memory handoff (never the
+     * route). #843 — a COLD open sets `resumeSharedDraft = false`, so an existing #405 draft is
+     * SURFACED via the restore banner (Restaurer / Ignorer) instead of being silently re-applied:
+     * these cold paths had lost that choice when #829/#833 reused the escalation flag.
      */
     onReply: (subcat: Int, page: Int, quotes: List<QuotedPostPreview>) -> Unit,
+    /**
+     * #843 — the quick-reply sheet's ESCALATION to the full editor (the only genuine « resume the
+     * same composition » case). Same handoff as [onReply] but `:app` sets `resumeSharedDraft = true`
+     * (#790): the sheet JUST wrote the #405 row, so the editor auto-applies it (appending to any
+     * typed text) WITHOUT a banner — re-proposing a draft the user is visibly continuing would be
+     * noise. Defaults to a no-op for non-topic callers (previews/tests never escalate).
+     */
+    onEscalateToFullEditor: (subcat: Int, page: Int, quotes: List<QuotedPostPreview>) -> Unit =
+        { _, _, _ -> },
     /**
      * Vague 4 (#604) lot 1 — HFR accepted a reply POSTed from the quick-reply sheet. `:app` must
      * refresh this topic route exactly like the full editor's onSubmitSucceeded (replace the route
@@ -212,6 +223,14 @@ fun TopicScreen(
      * (cf. `docs/specs/architecture.md` § Frontière feature:topic ↔ feature:profile).
      */
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
+    /**
+     * #792 — « Envoyer un MP » from a post's contextual menu : `:app` opens the NEW-conversation
+     * MP composer with [author] prefilled as recipient (`PrivateMessageComposeRoute.prefilledRecipient`
+     * was designed for exactly this entry point). Only emitted on an authenticated session, never
+     * for the user's own posts, and only when the post carries a real profile — cf.
+     * [shouldShowSendPrivateMessage].
+     */
+    onSendPrivateMessage: (author: String) -> Unit = {},
     /**
      * #307 — saved read position to restore for THIS `(cat, post, page)` landing, or `null` when
      * nothing should be restored. `:app` resolves the full priority chain
@@ -323,7 +342,11 @@ fun TopicScreen(
     // Chantier C (#546) — intra-topic search failure message (resolved upfront, same rationale).
     val searchFailedMsg = stringResource(R.string.topic_search_failed)
     // Chantier B (#546) — « no further result » Toast (resolved upfront, same rationale).
-    val searchResultsEndMsg = stringResource(R.string.topic_search_results_end)
+    val searchResultsEndMsg = stringResource(R.string.topic_search_results_list_end)
+    // #809 — flag-removal feedback messages (resolved upfront, same rationale).
+    val flagRemovedMsg = stringResource(R.string.topic_remove_flag_success)
+    val flagRemoveFailedMsg = stringResource(R.string.topic_remove_flag_failure)
+    val flagNotFoundMsg = stringResource(R.string.topic_remove_flag_not_found)
     // #292 — delete feedback messages, resolved upfront (same rationale as refreshFailedMsg).
     val deleteSuccessMsg = stringResource(R.string.topic_post_delete_success)
     val deleteFailedLoginMsg = stringResource(R.string.topic_post_delete_failed_login)
@@ -332,6 +355,10 @@ fun TopicScreen(
     // #292 — `numreponse` awaiting delete confirmation (null = no dialog). Local UI state: the
     // confirmation is a pure view concern, only the confirmed deletion reaches the ViewModel.
     var deleteCandidate by rememberSaveable { mutableStateOf<Int?>(null) }
+    // #809 — long-press flag removal. The confirmation dialog is state-driven (the ViewModel owns the
+    // resolve → confirm → remove flow); the outcomes ride the screen's single TopicEffect collector
+    // below, like every other one-shot Toast on this screen.
+    val removeTopicFlagState by viewModel.removeTopicFlagState.collectAsStateWithLifecycle()
 
     // Bug fix (build 89) — report the loaded title up so `:app` caches it per topic. The next page
     // (recreated screen) reads it back through `request.titleHint`, keeping the top bar title stable
@@ -382,6 +409,12 @@ fun TopicScreen(
                         // the layout settles (bails on user scroll, bounded by a frame budget).
                         lazyListState.reanchorWhileMediaSettles(target)
                     }
+                }
+                TopicEffect.ScrollToTopOfResults -> {
+                    // #879 — a filtered result page replaced the list in place : reposition at the
+                    // top (item 0 = header slot) so its first results are on screen.
+                    viewModel.state.first { it.mode is TopicUiState.Mode.Loaded }
+                    lazyListState.scrollToItem(0)
                 }
                 TopicEffect.ScrollToEndOfPage -> {
                     // Issue #200 — post-reply landing : HFR anchored `#bas`, the parser couldn't
@@ -463,6 +496,28 @@ fun TopicScreen(
                         android.widget.Toast.LENGTH_SHORT,
                     ).show()
                 }
+                TopicEffect.TopicFlagRemoved -> {
+                    // #809 — delflag confirmed; the Drapeaux caches are already reconciled.
+                    android.widget.Toast.makeText(
+                        context,
+                        flagRemovedMsg,
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+                TopicEffect.TopicFlagRemovalFailed -> {
+                    android.widget.Toast.makeText(
+                        context,
+                        flagRemoveFailedMsg,
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                }
+                TopicEffect.TopicFlagNotFound -> {
+                    android.widget.Toast.makeText(
+                        context,
+                        flagNotFoundMsg,
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
             }
         }
     }
@@ -473,6 +528,7 @@ fun TopicScreen(
         onIntent = viewModel::send,
         onBack = onBack,
         onReply = onReply,
+        onEscalateToFullEditor = onEscalateToFullEditor,
         onQuickReplySubmitted = onQuickReplySubmitted,
         onEdit = onEdit,
         onEditFirstPost = onEditFirstPost,
@@ -492,6 +548,7 @@ fun TopicScreen(
             )
         },
         onOpenProfile = onOpenProfile,
+        onSendPrivateMessage = onSendPrivateMessage,
         onDeleteRequest = { numreponse -> deleteCandidate = numreponse },
         multiQuoteSelections = multiQuoteSelections,
         onToggleMultiQuote = onToggleMultiQuote,
@@ -512,6 +569,44 @@ fun TopicScreen(
             onDismiss = { deleteCandidate = null },
         )
     }
+
+    // #809 — confirmation gate before the delflag call. Renders only while the ViewModel is in the
+    // Confirming state; confirming moves to Removing (action disabled) and fires the removal.
+    (removeTopicFlagState as? RemoveTopicFlagState.Confirming)?.let { confirming ->
+        RemoveTopicFlagConfirmDialog(
+            flag = confirming.flag,
+            onConfirm = viewModel::confirmRemoveTopicFlag,
+            onDismiss = viewModel::cancelRemoveTopicFlag,
+        )
+    }
+}
+
+/**
+ * #809 — M3 confirmation dialog shown before the `delflag.php` call, mirroring the Drapeaux view's
+ * `RemoveFlagConfirmationDialog` (#99). Spells out the topic title so the user knows exactly what is
+ * being un-flagged — the removal is not undoable in-app (no optimistic re-add).
+ */
+@Composable
+private fun RemoveTopicFlagConfirmDialog(
+    flag: Flag,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.topic_remove_flag_dialog_title)) },
+        text = { Text(stringResource(R.string.topic_remove_flag_dialog_message, flag.title)) },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(stringResource(R.string.topic_remove_flag_dialog_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.topic_remove_flag_dialog_cancel))
+            }
+        },
+    )
 }
 
 /**
@@ -720,12 +815,18 @@ internal fun TopicContent(
     onIntent: (TopicIntent) -> Unit,
     onBack: () -> Unit,
     onReply: (subcat: Int, page: Int, quotes: List<QuotedPostPreview>) -> Unit,
+    // #843 — the quick-reply sheet's escalation (resumeSharedDraft = true, silent append) ; distinct
+    // from [onReply] which is a COLD full-editor open (resumeSharedDraft = false → restore banner).
+    onEscalateToFullEditor: (subcat: Int, page: Int, quotes: List<QuotedPostPreview>) -> Unit =
+        { _, _, _ -> },
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
     // #699 — quote-header tap, threaded down to the post cards (cf. TopicScreen KDoc).
     onGoToPost: (page: Int, numreponse: Int) -> Unit = { _, _ -> },
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
+    // #792 — « Envoyer un MP » entry of the post menu, forwarded up to `:app` (MP composer).
+    onSendPrivateMessage: (author: String) -> Unit = {},
     // #292 — a per-post « Supprimer » tap; the screen owns the confirmation dialog, so this only
     // requests it (carrying the post's numreponse). Never invoked for the first post (excluded).
     onDeleteRequest: (numreponse: Int) -> Unit = {},
@@ -819,8 +920,9 @@ internal fun TopicContent(
                                 page = page,
                             ),
                         )
-                        // Same :app path as the sheet's escalation — in-memory quote handoff
-                        // (empty) + PostEditorRoute(resumeSharedDraft = true).
+                        // #843 — cold full-editor open (no sheet in flight): in-memory quote handoff
+                        // (empty) + PostEditorRoute(resumeSharedDraft = false) → an existing draft is
+                        // offered via the restore banner, not silently re-applied.
                         WritingSurface.FULL_EDITOR -> onReply(subcat, page, emptyList())
                     }
                 },
@@ -921,8 +1023,10 @@ internal fun TopicContent(
                                 hiddenNumreponses = mode.hiddenNumreponses,
                                 // #604 lot 2 / #806 — « Citer » opens the quick-reply sheet with the
                                 // card pre-armed (1-citation session), unless the preset routes any
-                                // citation to the full-screen editor (decision at tap time; same :app
-                                // path as the sheet's escalation, resumeSharedDraft = true).
+                                // citation to the full-screen editor (decision at tap time). #843 —
+                                // that full-editor open is COLD (onReply, resumeSharedDraft = false):
+                                // the cards are handed over, an existing text draft is offered via the
+                                // restore banner, not silently appended.
                                 onQuoteRequested = { preview ->
                                     when (writingSurfaceFor(state.writingSurfacePreset, quoteCount = 1)) {
                                         WritingSurface.SHEET -> quickReplyFor = QuickReplyLaunch(
@@ -940,10 +1044,10 @@ internal fun TopicContent(
                                 },
                                 // #823 — LONG press on « Citer » : one-shot override of the #806
                                 // preset — always the full-screen editor, through the same :app path
-                                // as the FULL_EDITOR branch above (in-memory handoff +
-                                // resumeSharedDraft = true, #790). Deliberately does NOT consult
-                                // writingSurfaceFor: the gesture IS the routing decision (identical
-                                // to the tap under the FULL_EDITOR preset).
+                                // as the FULL_EDITOR branch above (cold open, in-memory handoff +
+                                // resumeSharedDraft = false → restore banner, #843). Deliberately
+                                // does NOT consult writingSurfaceFor: the gesture IS the routing
+                                // decision (identical to the tap under the FULL_EDITOR preset).
                                 onQuoteFullEditorRequested = { preview ->
                                     onReply(mode.topic.subcat, mode.topic.page, listOf(preview))
                                 },
@@ -952,8 +1056,10 @@ internal fun TopicContent(
                                 onOpenPage = onOpenPage,
                                 onGoToPost = onGoToPost,
                                 onOpenProfile = onOpenProfile,
+                                onSendPrivateMessage = onSendPrivateMessage,
                                 onDeleteRequest = onDeleteRequest,
                                 onDoubleTapRefresh = { onIntent(TopicIntent.Refresh) },
+                                onSearchNextResults = { onIntent(TopicIntent.SearchNextResultsPage) },
                                 listState = listState,
                                 multiQuoteSelection = multiQuoteNumreponses,
                                 onToggleMultiQuote = onToggleMultiQuote,
@@ -976,7 +1082,9 @@ internal fun TopicContent(
             onDismiss = { quickReplyFor = null },
             onEscalate = { quotes ->
                 quickReplyFor = null
-                onReply(launch.request.subcat, launch.request.page, quotes)
+                // #843 — genuine escalation: resumeSharedDraft = true (silent append), NOT the cold
+                // onReply path which surfaces the restore banner.
+                onEscalateToFullEditor(launch.request.subcat, launch.request.page, quotes)
             },
             onSubmitted = { targetPage, scrollTo ->
                 quickReplyFor = null
@@ -996,7 +1104,10 @@ internal fun TopicContent(
  */
 @Composable
 private fun topicBarPageIndicator(state: TopicUiState, loaded: TopicUiState.Mode.Loaded?): String = when {
-    loaded != null -> stringResource(
+    // #877 — a provisional page is the instant cache emission (possibly a stale total, or an
+    // anonymous prefetch row) : keep « Chargement… » until the settled emission lands, so the
+    // pill never flashes a wrong « page X / Y ». The repository guarantees termination.
+    loaded != null && !loaded.provisional -> stringResource(
         R.string.topic_page_indicator,
         loaded.topic.page,
         loaded.topic.totalPages,
@@ -1017,8 +1128,8 @@ private val TopBarExpandedTitleExtraHeight = 24.dp
 
 /**
  * #285/#284 + Chantier C (#546) — the topic top app bar (title + page counter + back) plus the
- * intra-topic search affordance : a search icon in `actions` (only when the loaded page exposes a
- * usable, authenticated transsearch form) that opens the [TopicSearchBar] directly beneath the bar.
+ * intra-topic search affordance : a search icon in `actions` (authenticated + page on screen —
+ * #877 : NOT gated on the transient form) that opens the [TopicSearchBar] directly beneath the bar.
  * Extracted from `TopicContent` to keep that builder under detekt's cyclomatic-complexity cap.
  * Internal (not private) so the Robolectric UI test can drive the #772 title expansion directly,
  * same pattern as [TopicPostCard].
@@ -1055,6 +1166,8 @@ internal fun TopicTopBar(
     val titleStateLabel = stringResource(
         if (titleExpanded) R.string.topic_title_expanded else R.string.topic_title_collapsed,
     )
+    // #809 — long-press on the title opens the drapeau-removal flow (the tap toggle is unchanged).
+    val titleLongPressLabel = stringResource(R.string.topic_remove_flag_long_press)
     Column {
         TopAppBar(
             title = {
@@ -1065,16 +1178,26 @@ internal fun TopicTopBar(
                         maxLines = if (titleExpanded) 2 else 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier
-                            .clickable(onClickLabel = titleToggleLabel) {
-                                val expanding = !titleExpanded
-                                titleExpanded = expanding
-                                if (expanding) {
-                                    // enterAlways may hold the bar partially collapsed — re-deploy
-                                    // it so the freshly granted second line shows instead of
-                                    // staying clipped behind the current height offset.
-                                    scrollBehavior?.state?.heightOffset = 0f
-                                }
-                            }
+                            // #809 — combinedClickable adds the long-press (« Gérer le drapeau ») on
+                            // top of the #772 tap toggle. onClick is the SAME toggle as before
+                            // (heightOffset re-deploy included) so TopicTopBarTitleExpandTest stays
+                            // green; onClickLabel + the stateDescription semantics are preserved.
+                            .combinedClickable(
+                                onClickLabel = titleToggleLabel,
+                                onLongClickLabel = titleLongPressLabel,
+                                role = Role.Button,
+                                onLongClick = { onIntent(TopicIntent.RequestRemoveTopicFlag) },
+                                onClick = {
+                                    val expanding = !titleExpanded
+                                    titleExpanded = expanding
+                                    if (expanding) {
+                                        // enterAlways may hold the bar partially collapsed — re-deploy
+                                        // it so the freshly granted second line shows instead of
+                                        // staying clipped behind the current height offset.
+                                        scrollBehavior?.state?.heightOffset = 0f
+                                    }
+                                },
+                            )
                             .semantics { stateDescription = titleStateLabel },
                     )
                     Text(
@@ -1108,7 +1231,9 @@ internal fun TopicTopBar(
                 }
             },
             actions = {
-                if (state.canSearchInTopic && !state.search.isActive) {
+                // #877 — gated on canOpenSearch (auth + page à l'écran), PAS sur le form transient :
+                // les émissions cache n'en portent pas et faisaient disparaître la Loupe.
+                if (state.canOpenSearch && !state.search.isActive) {
                     IconButton(
                         onClick = { onIntent(TopicIntent.OpenSearch) },
                         modifier = Modifier.semantics { contentDescription = searchLabel },
@@ -1243,6 +1368,28 @@ private fun TopicSearchBar(
                     Text(stringResource(R.string.topic_search_submit))
                 }
             }
+            // #894 (cadrage F4) — the « depuis le début » opt-in on its own labelled options row :
+            // the default stays HFR's own semantics (anchored to the current page, forward).
+            // Ephemeral bar state — no persisted preference.
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(
+                    checked = search.fromStart,
+                    onCheckedChange = { onIntent(TopicIntent.SearchFromStartChanged(it)) },
+                    enabled = search.status != TopicSearchStatus.Loading,
+                )
+                Text(
+                    text = stringResource(R.string.topic_search_from_start),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable(enabled = search.status != TopicSearchStatus.Loading) {
+                            onIntent(TopicIntent.SearchFromStartChanged(!search.fromStart))
+                        },
+                )
+            }
             // Chantier B (#546) — per-result navigation (non-filtered) / « no result » feedback.
             TopicSearchResultNav(search = search, onIntent = onIntent)
         }
@@ -1318,9 +1465,13 @@ private fun TopicLoadedContent(
     // #699 — quote-header tap, forwarded into each TopicPostCard's PostRenderer.
     onGoToPost: (page: Int, numreponse: Int) -> Unit = { _, _ -> },
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
+    // #792 — « Envoyer un MP » entry of the post menu (gated at the mount below).
+    onSendPrivateMessage: (author: String) -> Unit = {},
     onDeleteRequest: (numreponse: Int) -> Unit = {},
     /** #382 — double-tap anywhere on the list refreshes the current page (RF1 parity). */
     onDoubleTapRefresh: () -> Unit = {},
+    /** #879 — filtered search : « résultats suivants » footer tap. */
+    onSearchNextResults: () -> Unit = {},
     listState: LazyListState,
     // #291 — selection state + toggle for the post menu's multi-quote entry.
     multiQuoteSelection: List<Int> = emptyList(),
@@ -1336,9 +1487,6 @@ private fun TopicLoadedContent(
     // Marked by tinting ONLY its identity band with tertiaryContainer (XaTriX: the left-rail attempt was
     // ugly; the old card+band double tint stays removed) — one subtle band, no layout shift.
     val highlight = state.request.scrollTo
-    // #239 — how many posts of THIS page cite each post, computed once per loaded post list. Drives
-    // the « cité N fois » badge below. Pure + page-scoped (cf. citationCountsByNumreponse KDoc).
-    val citationCounts = remember(topic.posts) { citationCountsByNumreponse(topic.posts) }
     // #362 — post whose contextual menu is open (null = closed). Plain local UI state at the
     // Loaded level: the menu carries no async data, so no ViewModel/hoisting is needed — the
     // sheet lives in :feature:topic (unlike ProfilePreviewSheet, hoisted in :app only because
@@ -1587,7 +1735,9 @@ private fun TopicLoadedContent(
                     TopicPostCard(
                         post = post,
                         highlighted = highlight == post.numreponse,
-                        citedCount = citationCounts[post.numreponse] ?: 0,
+                        // #863 — the SERVER count (« Message cité N fois », cross-page), parsed
+                        // from div.edited ; null = never cited. The page-scoped client scan is gone.
+                        citedCount = post.citedCount ?: 0,
                         // #699 — makes sourced quote headers tappable (jump to the cited post).
                         onGoToCitedPost = onGoToPost,
                         // #330 — render the author signature beneath the body when the reading preference
@@ -1623,7 +1773,25 @@ private fun TopicLoadedContent(
         // across an insertion — a reader parked on the marker would keep it in view while a
         // freshly fetched post lands above the viewport, unseen. Positional identity is
         // correct for a stateless sentinel.
-        if (topic.page == topic.totalPages) {
+        if (state.search.showingFilteredResults) {
+            // #879 — the page on screen is a FILTERED result list : its pager belongs to the
+            // search. The canonical boundary cards are suppressed (their onOpenPage would leave
+            // the search silently) ; instead the footer offers the next RESULT page, or states
+            // the end of the results.
+            // Gate finding 3 — the footer tells Loading, retry and true end apart : hidden while a
+            // fetch is in flight ; after a FAILED next-page fetch the pager is untouched, so the
+            // « more » card stays and doubles as the retry affordance ; the end marker is only
+            // truthful once Done with no page left.
+            if (state.search.status != TopicSearchStatus.Loading) {
+                item {
+                    if (state.search.hasMoreFilteredResults) {
+                        SearchMoreResultsCard(onNext = onSearchNextResults)
+                    } else if (state.search.status == TopicSearchStatus.Done) {
+                        EndOfSearchResultsCard()
+                    }
+                }
+            }
+        } else if (topic.page == topic.totalPages) {
             item {
                 EndOfTopicCard()
             }
@@ -1644,7 +1812,7 @@ private fun TopicLoadedContent(
     }
     // #362 — per-post contextual menu. The permalink is rebuilt from the LOADED topic's
     // (cat, post, page) — not the request — so it always reflects the page HFR actually
-    // served (HFR clamps out-of-range pages). citedCount reuses the page-scoped #239 index.
+    // served (HFR clamps out-of-range pages). citedCount = the server counter (#863).
     menuPost?.let { post ->
         // #292 → #418 — « Supprimer » lives in the contextual menu now (anti accidental tap,
         // beta feedback by nicko). Same gates as before : « Modifier »'s gate (HFR allows
@@ -1680,7 +1848,7 @@ private fun TopicLoadedContent(
                 page = topic.page,
                 numreponse = post.numreponse,
             ),
-            citedCount = citationCounts[post.numreponse] ?: 0,
+            citedCount = post.citedCount ?: 0,
             onDismiss = { menuPost = null },
             onDelete = menuDeleteAction,
             onEditFirstPost = menuEditFirstPostAction,
@@ -1688,6 +1856,13 @@ private fun TopicLoadedContent(
             // anonymous reads expose no profile link, the hero stays inert.
             onOpenProfile = post.profileId?.let { profileId ->
                 { onOpenProfile(profileId, post.author, post.avatarUrl) }
+            },
+            // #792 — « Envoyer un MP » : auth-gated, never on own posts, real profiles only
+            // (« Publicité » rows are not messageable). Carries the author pseudo to `:app`.
+            onSendPrivateMessage = if (shouldShowSendPrivateMessage(post, state.isAuthenticated)) {
+                { onSendPrivateMessage(post.author) }
+            } else {
+                null
             },
             // #291 — multi-quote toggle, same gate as « Citer » (quoting is a flavour of
             // replying; a locked topic or an anonymous session has nothing to quote).
@@ -1831,6 +2006,62 @@ private fun PageBoundaryCard(donePage: Int, onNextPage: () -> Unit) {
             }
             RedfaceVectorIcon(resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_chevron_right)
         }
+    }
+}
+
+/**
+ * #894 — footer of a FILTERED search-result list when HFR truncated its scan window (the response
+ * advertised a resume cursor). Same actionable card language as [PageBoundaryCard] (filled
+ * primaryContainer = « there is more ») ; the tap re-submits the SEARCH with the resume cursor —
+ * web parity with HFR's own « Résultats suivants » button, never the canonical pager.
+ */
+@Composable
+private fun SearchMoreResultsCard(onNext: () -> Unit) {
+    Card(
+        onClick = onNext,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.topic_search_results_truncated),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    text = stringResource(R.string.topic_search_results_next),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            RedfaceVectorIcon(resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_chevron_right)
+        }
+    }
+}
+
+/**
+ * #879 — quiet outline marker closing a filtered result list (mirrors [EndOfTopicCard]'s calm
+ * language : end of RESULTS, not of the topic).
+ */
+@Composable
+private fun EndOfSearchResultsCard() {
+    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = stringResource(R.string.topic_search_results_list_end),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+        )
     }
 }
 
@@ -2414,8 +2645,8 @@ private fun TopicPostBadges(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (citedCount > 0) {
-            // #239 — sober pill: how many posts of THIS page cite this one. Page-scoped (cf.
-            // citationCountsByNumreponse); jumping to the citing posts is a follow-up.
+            // #239/#863 — sober pill: HFR's server-side citation count (cross-page,
+            // authoritative). Jumping to the citing posts is a follow-up (#783).
             // surfaceContainerHighest : a touch above the surfaceContainer card so the pill reads.
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainerHighest,
@@ -3073,6 +3304,13 @@ internal fun effectiveMultiQuoteCount(topic: Topic, isAuthenticated: Boolean, se
 
 internal fun shouldShowQuoteAction(topic: Topic, isAuthenticated: Boolean): Boolean =
     topic.canReply && isAuthenticated
+
+// #792 — « Envoyer un MP » from the post's contextual menu. Auth-only (the MP composer is a
+// logged-in surface), never on the user's own posts, and only for authors with a real HFR
+// profile (`profileId != null` : « Publicité » rows and anonymous reads are not messageable —
+// same gate as the profile hero). Topic lock is irrelevant : the MP leaves the topic entirely.
+internal fun shouldShowSendPrivateMessage(post: Post, isAuthenticated: Boolean): Boolean =
+    isAuthenticated && !post.isOwnPost && post.profileId != null
 
 internal fun shouldShowEditAction(topic: Topic, post: Post, isAuthenticated: Boolean): Boolean =
     post.isEditable && topic.canReply && isAuthenticated

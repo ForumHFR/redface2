@@ -16,6 +16,69 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.27.2` — `internal` (dev) — 2026-07-12
+
+**Recherche intra-topic v2** (#894, retours XaTriX sur 0.27.1 — contrat `transsearch` re-vérifié live, cadrage + gates Codex, dogfoods sur le serveur réel).
+
+### Vue Topic — recherche
+- **Le mode non-filtré refonctionne** (PR #896) : le form des réponses transsearch (sans `firstnum`) parse à nouveau — le curseur de match n'est plus perdu (« Aucun résultat » systématique corrigé).
+- **Ancrage parité web** (PR #897) : la recherche part de la page courante vers la fin (ancre de session explicite) ; nouvelle option « **Chercher depuis le début du sujet** » (défaut décoché).
+- **« Afficher les résultats suivants »** (PR #897) : quand HFR tronque sa fenêtre de scan (~200 matches), un footer de continuation reprend au curseur annoncé — le batch suivant remplace la liste et s'ouvre en haut. Le pager `p` de 0.27.1 (sans effet serveur) est supprimé.
+- Les étapes ‹ › et le retour au premier résultat re-soumettent les critères figés de la recherche affichée, plus jamais la barre en cours d'édition.
+
+## `0.27.1` — `internal` (dev) — 2026-07-12
+
+**Lot de 4 fixes Vue Topic** (#877, #879, #880, #863 — cadrage groupé, gate Codex par PR, dogfood émulateur de chaque flux dont migration Room v14→v15 en conditions réelles).
+
+### Vue Topic
+- #877 : **top bar stable pendant les chargements** (PR #889) — la pilule affiche « Chargement… » tant que la page est provisoire (fini le numéro de page périmé pendant les transitions), la loupe reste visible en mode chargé authentifié, fetch du formulaire de recherche latest-wins.
+- #879 : **recherche intra-topic conforme au contrat transsearch** (PR #891) — le mode filtré couvre TOUT le sujet (plus d'ancrage à la page courante), pagination des résultats filtrés (« résultats suivants ») avec critères figés à la soumission et retour en tête de liste.
+- #863 : **badge « cité ×N » = compteur serveur** (PR #892) — « Message cité N fois », cross-pages et autoritaire, persisté en cache (migration Room v15) ; l'index local limité à la page courante est supprimé.
+
+### Éditeur & réponse rapide
+- #880 : **le curseur reste visible au-dessus du clavier** à l'escalade réponse rapide → plein écran (PR #890) — le suivi du caret se re-déclenche quand le clavier finit de s'installer.
+
+## `0.27.0` — `internal` (dev) — 2026-07-12
+
+**Lot d'arbitrages et reliquats de la phase** (#792, #809, #881, #805-exp — cadrage + gates Codex par PR, review multi-angles sur #809, dogfood émulateur de chaque flux).
+
+### Vue Topic
+- #809 (#tagsuggestion tinc) : **appui long sur le titre → retirer le drapeau** du sujet courant (PR #887) — confirmation avant retrait, résultat en toast, la liste Drapeaux se met à jour sans refetch. Un drapeau d'un onglet jamais ouvert est retrouvé à la demande. Le tap court (dépliage du titre) est inchangé.
+- #792 (suggestion Dintr-un lemn) : **« Envoyer un MP »** dans le menu contextuel « … » d'un post (PR #886) — ouvre le composeur avec l'auteur pré-rempli. Absent sur ses propres posts et hors session.
+
+### Éditeur & réponse rapide
+- #881 (arbitrage du fil) : **le curseur démarre sous la citation** (PR #885) — un retour à la ligne unique après le bloc [quotemsg] quand il termine le champ, feuille et plein écran.
+- #805 : le réglage **« Citations en cartes » est étiqueté (expérimental)** (PR #885) — défaut inchangé (désactivé) ; le chantier design des cartes est reporté à l'itération Vue · Topic 2.
+
+## `0.26.3` — `internal` (dev) — 2026-07-10
+
+**Suite de la nuit rf2-12** (lot d'issues non démarrées de la phase).
+
+### Éditeur
+- #816 (suggestion thibw) : le **sélecteur de smileys respecte l'échelle du forum** (PR #865) — les standards s'affichent près de leur taille native (petits, pixel-art net), les persos remplissent la cellule. Fini l'uniforme 30 dp qui rendait les standards énormes et flous et les persos à l'étroit.
+
+### Messages privés
+- #812 : **tourner l'écran dans une conversation ne ramène plus à la liste des MP** (PR #866) — le nettoyage de session se rejouait à chaque recréation d'activité et résetait la pile de navigation Messages ; il est désormais limité aux vraies transitions de session (login, logout, changement de compte).
+
+## `0.26.2` — `internal` (dev) — 2026-07-10
+
+**Écriture sur écran court** (retour de la checklist de test, thibw — PR #861, cadrage + gate Codex GO, dogfood émulateur 1080×1700 et 1080×2400).
+
+### Éditeur & réponse rapide
+- Le **champ de saisie n'est plus jamais écrasé par le clavier** (réf #555) : dans l'éditeur plein écran, tout ce qui concurrence le champ (bannière de brouillon, bandeaux d'erreur, cartes de citation) vit dans une zone haute budgétée qui défile au-delà de son budget — le champ garde 96 dp minimum par construction. À l'apparition d'une alerte, la zone se recale en haut.
+- **« Envoyer » toujours visible dans la réponse rapide** (réf #855) : seule la zone des champs défile, la rangée « Envoyer » est épinglée au-dessus du clavier.
+- **Fermer la réponse rapide = un seul retour** (réf #854) : la feuille ne s'arrête plus à mi-hauteur quand un petit écran l'avait forcée en pleine hauteur (fini le « 3× retour pour revenir au sujet »).
+
+## `0.26.1` — `internal` (dev) — 2026-07-07
+
+**Réponses aux deux premiers retours du fil DEV sur la 0.26.0** (même soirée).
+
+### Lecture (vue Topic)
+- #842 : le **plafond de hauteur des images bloc est recalibré pour mobile** — `max(400 dp, 0,5 × hauteur d'écran)` au lieu du flat 200 dp de #610 (PR #844). Une image quasi carrée/portrait remplit maintenant ~90 % de la largeur (mesurée à ~48 % sur le retour du fil) ; paysage inchangé ; toujours borné (pas d'explosion du scroll), aucun upscale. Le 200 n'avait pas de base web réelle (la seule règle HFR est `max-width: 90%`) — l'étiquette « parité web » de #610 est corrigée dans le code. Chemin inline inchangé (200 sp, conservateur dans la prose).
+
+### Éditeur & brouillons
+- #843 : la **bannière « Un brouillon non envoyé a été retrouvé » (Restaurer / Ignorer) est de retour sur les ouvertures à froid** de l'éditeur plein écran (PR #845) — FAB en preset plein écran, « Citer » routé vers l'éditeur, appui long #823, « Citer N » 3+. `resumeSharedDraft` avait dérivé de son contrat #790 : ces chemins ré-appliquaient silencieusement un vieux brouillon, sans choix d'ignorer. L'escalade feuille → éditeur garde l'append silencieux (#790 inchangé).
+
 ## `0.26.0` — `internal` (dev) — 2026-07-07
 
 **Vague 5 Vue Topic (#604)** : interactions image, lot citations, rendu média parité web, gestes d'appui long, recherche smileys, fix Drapeaux.

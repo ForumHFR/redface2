@@ -18,8 +18,13 @@ interface TopicRepository {
      * Network errors after a cache emission are swallowed so the user keeps
      * seeing the last-known-good page; on a cold cache, errors are surfaced as
      * exceptions on the flow.
+     *
+     * #877 — each emission carries its provenance ([TopicPageEmission.provisional]) so the
+     * UI can tell a cache page that a network refresh will supersede from a settled page.
+     * Only this repository knows whether a refresh follows (TTL skip, refresh failure), so
+     * the flag is decided here, never inferred downstream.
      */
-    fun observeTopicPage(cat: Int, post: Int, page: Int, forceRefresh: Boolean = false): Flow<Topic>
+    fun observeTopicPage(cat: Int, post: Int, page: Int, forceRefresh: Boolean = false): Flow<TopicPageEmission>
 
     /**
      * Forces a network fetch, bypasses TTL, and writes the result to the cache.
@@ -55,3 +60,17 @@ interface TopicRepository {
      */
     suspend fun prefetch(cat: Int, post: Int, page: Int)
 }
+
+/**
+ * #877 — one emission of [TopicRepository.observeTopicPage], tagged with its provenance.
+ *
+ * [provisional] is `true` only when this page comes from the cache AND a network refresh is
+ * still expected to follow on the same flow. It is `false` for network pages, for cache pages
+ * the TTL skip settles on (no refresh coming), and for the terminal re-emission after a failed
+ * refresh — so `provisional` always terminates: the UI can safely hold back derived affordances
+ * (the « page X / Y » pill) while it is `true` without ever getting stuck.
+ */
+data class TopicPageEmission(
+    val topic: Topic,
+    val provisional: Boolean,
+)

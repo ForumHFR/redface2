@@ -65,9 +65,11 @@ class PostMediaDisplayPolicyTest {
     }
 
     @Test
-    fun `block display size caps a tall portrait to 200 like the web`() {
-        // The issue-repro shape (360×640): web max-height:200px → ~113×200. Before #610 the block
-        // path rendered it full-width and 480 dp tall (blockImageMaxHeight letterbox).
+    fun `block display size defaults to the legacy 200 height cap when none is passed`() {
+        // #842 — the DEFAULT [maxHeightDp] is the legacy inline value 200 (backward compat for the
+        // pure policy). The issue-repro shape (360×640) with the default → ~113×200. In production the
+        // renderer overrides this with the mobile-recalibrated [blockImageMaxHeightDp] (see the tests
+        // below); the flat 200 was never a real web rule (no max-height on HFR post images).
         val size = PostMediaDisplayPolicy.blockImageDisplaySize(
             measured = PixelSize(width = 360, height = 640),
             availableWidthDp = 400f,
@@ -127,10 +129,13 @@ class PostMediaDisplayPolicyTest {
     }
 
     @Test
-    fun `inline and block paths produce the same parity numbers (#610)`() {
-        // The whole point of #610: for any measured native size, the inline box (sp) and the block
-        // box (dp) carry the SAME numbers — units differ, values match. The inline path adds a
-        // one-line legibility floor (#253) that is a no-op for these ≥16-tall parity results.
+    fun `inline and block paths share the same parity policy at equal caps (#610)`() {
+        // #610's shared math: for any measured native size, at the SAME caps the inline box (sp) and
+        // the block box (dp) carry the SAME numbers — units differ, values match. The inline path adds
+        // a one-line legibility floor (#253) that is a no-op for these ≥16-tall parity results. NB
+        // #842: in production the two paths pass DIFFERENT height caps (inline 200 sp, block the
+        // recalibrated dp), so on-screen sizes diverge by design — this pins the shared policy, not
+        // the runtime caps (each image takes only one path per the width ≥ 240 promotion threshold).
         val columnWidthDp = 400f
         val relativeCapUnits = 360 // 0.9 × column, what the renderer passes on both paths
         listOf(
@@ -141,9 +146,69 @@ class PostMediaDisplayPolicyTest {
             PixelSize(300, 150),
         ).forEach { native ->
             val inline = imageParityDisplaySize(native, maxWidthUnits = relativeCapUnits)
+            // Pass the same default cap on both sides to compare the shared policy, not the caps.
             val block = PostMediaDisplayPolicy.blockImageDisplaySize(native, columnWidthDp)
             assertEquals("parity broken for $native", inline, block)
         }
+    }
+
+    // #842 — mobile recalibration of the BLOCK height cap (relative to the viewport), replacing the
+    // flat 200 that squeezed square/portrait photos to ~48 % width on phones.
+
+    @Test
+    fun `blockImageMaxHeightDp floors at 400 and scales with tall viewports`() {
+        // Floor wins on typical phones (0.5 × 700 = 350 < 400) so a near-square image reaches ~90 %
+        // width; the fraction wins on taller viewports so the cap grows with the device.
+        assertEquals(400, blockImageMaxHeightDp(screenHeightDp = 700))
+        assertEquals(400, blockImageMaxHeightDp(screenHeightDp = 800))
+        assertEquals(458, blockImageMaxHeightDp(screenHeightDp = 916))
+        assertEquals(500, blockImageMaxHeightDp(screenHeightDp = 1000))
+    }
+
+    @Test
+    fun `block display size lets a near-square photo fill ~90 percent width with the recalibrated cap`() {
+        // #842 report shape: an ~800×800 LEGO box on a ~411 dp-wide column (relative cap 370). With the
+        // flat 200 cap it rendered 200×200 (~48 % width); with the recalibrated cap (458 on a 916 dp
+        // viewport) the 90 % WIDTH cap binds first → 370×370, i.e. the intended ~90 % width.
+        val recalibrated = blockImageMaxHeightDp(screenHeightDp = 916)
+        val fixed = PostMediaDisplayPolicy.blockImageDisplaySize(
+            measured = PixelSize(width = 800, height = 800),
+            availableWidthDp = 411f,
+            maxHeightDp = recalibrated,
+        )
+        assertEquals(PixelSize(370, 370), fixed)
+        // Contrast: the shipped 0.26.0 behaviour (flat 200) — the regression this fixes.
+        assertEquals(
+            PixelSize(200, 200),
+            PostMediaDisplayPolicy.blockImageDisplaySize(
+                measured = PixelSize(width = 800, height = 800),
+                availableWidthDp = 411f,
+            ),
+        )
+    }
+
+    @Test
+    fun `block display size keeps a tall portrait bounded but taller than the old 200 cap`() {
+        // 800×1200 on a 411 dp column (relative cap 370), recalibrated cap 458: height binds →
+        // 305×458. Bounded (no scroll-destroying blow-up) yet no longer crushed to 133×200.
+        val fixed = PostMediaDisplayPolicy.blockImageDisplaySize(
+            measured = PixelSize(width = 800, height = 1200),
+            availableWidthDp = 411f,
+            maxHeightDp = blockImageMaxHeightDp(screenHeightDp = 916),
+        )
+        assertEquals(PixelSize(305, 458), fixed)
+    }
+
+    @Test
+    fun `block display size fills width for a landscape photo regardless of the height cap`() {
+        // 1200×675 on a 411 dp column (relative cap 370): width binds (as before), the height cap is
+        // irrelevant → 370×208, full ~90 % width. The recalibration never shrinks a landscape image.
+        val fixed = PostMediaDisplayPolicy.blockImageDisplaySize(
+            measured = PixelSize(width = 1200, height = 675),
+            availableWidthDp = 411f,
+            maxHeightDp = blockImageMaxHeightDp(screenHeightDp = 916),
+        )
+        assertEquals(PixelSize(370, 208), fixed)
     }
 
     @Test

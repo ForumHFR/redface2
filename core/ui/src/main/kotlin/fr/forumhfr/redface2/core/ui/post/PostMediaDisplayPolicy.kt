@@ -130,25 +130,29 @@ internal object PostMediaDisplayPolicy {
      * the bitmap arrives so the container occupies exactly the slot the loaded image will fill, hence
      * zero layout shift (anti-CLS, #249) when it crossfades in.
      *
-     * #610 — the size is the unified HFR-web parity policy ([imageParityDisplaySize]): native size,
-     * no upscale, height ≤ [IMAGE_MAX_HEIGHT_UNITS] (web `max-height: 200px`), width ≤
-     * [SMILEY_RELATIVE_MAX_WIDTH_FRACTION] × [availableWidthDp] (web `max-width: 90%`). Before →
-     * after: a measured block image used to FILL the column width — upscaling any source narrower
-     * than the column — with its height `width × h/w` clamped to the [blockImageMinHeight] /
-     * [blockImageMaxHeight] (160/480 dp) slot; it now renders at its capped NATIVE size, the same
-     * numbers the inline path produces in sp, so a lone posted photo and the same photo inside prose
-     * finally match.
+     * #610/#842 — the size is the unified parity policy ([imageParityDisplaySize]): native size, no
+     * upscale, width ≤ [SMILEY_RELATIVE_MAX_WIDTH_FRACTION] × [availableWidthDp] (web `max-width: 90%`),
+     * height ≤ [maxHeightDp]. #610 passed a flat 200 here (matching the inline sp cap); #842 lets the
+     * caller pass the mobile-recalibrated [blockImageMaxHeightDp] (`max(400, 0.5 × screenHeightDp)`) so
+     * a square/portrait photo reaches ~90 % width instead of being squeezed to ~48 % by a 200 dp cap
+     * with no web basis. Before #610: a measured block image FILLED the column width — upscaling any
+     * source narrower than the column — with its height `width × h/w` clamped to the [blockImageMinHeight]
+     * / [blockImageMaxHeight] (160/480 dp) slot; it now renders at its capped NATIVE size.
      *
      * [measured] is `null` for a not-yet-measured image — a cold cache before the measure effect lands,
      * or a measurement failure (dead host / 404). Both the paragraph effect (#175/#224) and, since the
      * #249 follow-up, the standalone `PostBlock.Image` effect feed the cache; callers fall back to the
      * legacy [blockImageMinHeight]-anchored slot until (or unless) a size lands.
      */
-    fun blockImageDisplaySize(measured: PixelSize?, availableWidthDp: Float): PixelSize? {
+    fun blockImageDisplaySize(
+        measured: PixelSize?,
+        availableWidthDp: Float,
+        maxHeightDp: Int = IMAGE_MAX_HEIGHT_UNITS,
+    ): PixelSize? {
         val size = measured?.takeIf { it.width > 0 && it.height > 0 }
         if (size == null || availableWidthDp <= 0f) return null
         val maxWidthDp = (availableWidthDp * SMILEY_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
-        return imageParityDisplaySize(size, maxWidthUnits = maxWidthDp)
+        return imageParityDisplaySize(size, maxWidthUnits = maxWidthDp, maxHeightUnits = maxHeightDp)
     }
 
     /**
@@ -252,16 +256,37 @@ internal val builtinPreseedSize = PixelSize(16, 16)
 internal val persoColdFallbackSize = PixelSize(70, 50)
 
 /**
- * #610 — HFR-web parity height cap for ANY `[img]`, inline or block: the web rule is
- * `img { max-height: 200px }`, mirrored here with the native px treated as logical units (`.sp` on the
- * inline path so the image tracks the text size, `.dp` on the block path — documented fontScale
- * asymmetry: inline grows with the user font, block does not, exactly like text vs images on the web).
- * Replaces (#610, before → after) the former `INLINE_IMAGE_MAX_HEIGHT_SP` (200 sp → same 200, the
- * inline path was already at web parity) and the MEASURED-path use of
- * [PostMediaDisplayPolicy.blockImageMaxHeight] (480 dp → 200 dp; the block path exceeded the web cap
- * 2.4×, the visible #610 divergence).
+ * Height cap for the INLINE `[img]` path and the pure/legacy default of [imageParityDisplaySize]
+ * (native px treated as logical units, fed as `.sp` inline so the image tracks the text size).
+ *
+ * #610 originally applied this same 200 to BOTH paths as `img { max-height: 200px }` "web parity".
+ * #842 walked that back for the BLOCK path only (see [blockImageMaxHeightDp]): the HFR fixtures carry
+ * NO `max-height` on post images — the only web rule is `img { max-width: 90% }` — and 200 dp on a
+ * ~360-411 dp phone column binds any image narrower than ~1.6:1, squeezing a square photo to ~48 %
+ * width (the #842 report). The INLINE path keeps 200 sp: in-prose images stay conservative so a large
+ * reaction image never grows tall enough to break the text flow, and small inline sources (cc-image
+ * 16×16, reactions) never reach the cap anyway (no upscale).
  */
 internal const val IMAGE_MAX_HEIGHT_UNITS = 200
+
+/**
+ * #842 — mobile-recalibrated height cap (in **dp**) for the BLOCK `[img]` path, replacing the flat
+ * [IMAGE_MAX_HEIGHT_UNITS] that #610 applied there. Real photos land on the block path (promoted at
+ * width ≥ [IMAGE_PROMOTION_WIDTH_UNITS]); the cap is now relative to the viewport height so it scales
+ * with the device while still guarding against a 4000×3000 RAW screenshot blowing up the post:
+ * `max(400 dp, 0.5 × screenHeightDp)`. The 400 dp floor keeps a near-square image at ~90 % width on a
+ * typical ~410 dp-wide phone (there the 90 % width cap ≈ 370 dp binds first, so the height cap no
+ * longer bites), instead of re-creating a visible height cap. Pure so the caller
+ * (`PostRenderer.BlockImage`, which knows `screenHeightDp` via `LocalConfiguration`) stays a one-liner
+ * and the recalibration is JVM-testable.
+ */
+internal const val BLOCK_IMAGE_MAX_HEIGHT_FLOOR_DP = 400
+internal const val BLOCK_IMAGE_MAX_HEIGHT_SCREEN_FRACTION = 0.5f
+
+internal fun blockImageMaxHeightDp(screenHeightDp: Int): Int = maxOf(
+    BLOCK_IMAGE_MAX_HEIGHT_FLOOR_DP,
+    (screenHeightDp * BLOCK_IMAGE_MAX_HEIGHT_SCREEN_FRACTION).roundToInt(),
+)
 
 /**
  * #610 — block-promotion width threshold. Before #610 this was `INLINE_IMAGE_MAX_WIDTH_SP` (240), the

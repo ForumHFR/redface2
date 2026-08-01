@@ -100,6 +100,7 @@ internal object TopicMappers {
         quoteRef = quoteRef,
         profileId = profileId,
         editedAt = editedAt,
+        citedCount = citedCount,
         signature = signature,
     )
 
@@ -116,6 +117,7 @@ internal object TopicMappers {
         quoteRef = quoteRef,
         profileId = profileId,
         editedAt = editedAt,
+        citedCount = citedCount,
         signature = signature,
     )
 

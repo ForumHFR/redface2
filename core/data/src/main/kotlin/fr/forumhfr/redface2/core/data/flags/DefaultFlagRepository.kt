@@ -230,6 +230,57 @@ class DefaultFlagRepository @Inject constructor(
     }
 
     /**
+     * #809 — resolves the full [Flag] for a `(cat, topicId)` pair so callers outside the Drapeaux
+     * view (the topic top-bar long-press) can feed [removeFlag] the complete object it keys the
+     * `delflag.php` mutation on. Never fabricates a partial [Flag].
+     *
+     * Memory-first, **per-bucket** : scans the warm per-type success caches under the
+     * [cachedSuccesses] lock. On a hit, returns immediately (no network). On a miss, only the COLD
+     * buckets are fetched (each writes its success into [cachedSuccesses] via [fetch]'s
+     * generation-guarded write), then a re-scan resolves. A warm bucket is authoritative **for its
+     * own type only** and is never implicitly refreshed (the Drapeaux view owns refresh policy) —
+     * but it says nothing about the other types : the Drapeaux screen warms one tab at a time, so
+     * « CYAN warm + miss » must still check a never-loaded FAVORITE bucket (review finding : the
+     * earlier any-bucket-warm short-circuit made a FAVORITE-only topic unremovable from the topic
+     * screen until its tab had been visited). All three warm + miss → null with zero network. An
+     * anonymous session holds no drapeaux, so it short-circuits to null before any round-trip.
+     *
+     * When a topic carries several drapeaux (e.g. participated AND favori), the [FlagType] iteration
+     * order (CYAN, RED, FAVORITE) breaks the tie deterministically — enough for the MVP « retirer »,
+     * which keys `delflag.php` on that row's own `type`.
+     */
+    override suspend fun findFlag(cat: Int, topicId: Int): Flag? {
+        val (cachedMatch, warmTypes) = synchronized(cachedSuccesses) {
+            scanCachedFlags(cat = cat, topicId = topicId) to cachedSuccesses.keys.toSet()
+        }
+        if (cachedMatch != null) return cachedMatch
+        // Warm buckets are authoritative for their own type ; only the COLD ones need a fetch.
+        val coldTypes = FlagType.entries.filterNot { it in warmTypes }
+        val userId = currentUserId()
+        if (coldTypes.isNotEmpty() && userId != null) {
+            // Same parallel idiom as [fetch]'s per-cat fan-out. [fetchDeduplicated] collapses this
+            // with any concurrent observe/refresh of the same bucket.
+            coroutineScope {
+                coldTypes.map { type ->
+                    async { fetchDeduplicated(type = type, userId = userId) }
+                }.awaitAll()
+            }
+        }
+        return synchronized(cachedSuccesses) { scanCachedFlags(cat = cat, topicId = topicId) }
+    }
+
+    /**
+     * First flag matching `(cat, topicId)` across every warm per-type bucket, or null. Must be called
+     * under the [cachedSuccesses] lock (#809). EnumMap iteration is CYAN → RED → FAVORITE, so a topic
+     * present in several buckets resolves deterministically to the earliest one.
+     */
+    private fun scanCachedFlags(cat: Int, topicId: Int): Flag? =
+        cachedSuccesses.values
+            .asSequence()
+            .flatMap { it.flags.asSequence() }
+            .firstOrNull { it.cat == cat && it.topicId == topicId }
+
+    /**
      * Drops [flag] from the in-memory success cache and Room, then re-emits the trimmed
      * list to active observers of its tab. Called only after a confirmed `delflag.php`
      * success, so it never has to reason about a partial mutation.

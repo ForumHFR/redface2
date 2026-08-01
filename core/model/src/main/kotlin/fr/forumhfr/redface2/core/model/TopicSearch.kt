@@ -33,7 +33,12 @@ package fr.forumhfr.redface2.core.model
  * @property topicId the `post` hidden field — the topic id.
  * @property cat the topic's category id.
  * @property firstnum the `numreponse` of the first message on the page the form was rendered on.
- *   HFR uses it as the search anchor ; forwarded verbatim.
+ *   HFR uses it as the search anchor (« search from the current page onwards ») ; forwarded
+ *   verbatim. **Nullable since #894** : the field is only present in the form of a NORMAL topic
+ *   page — a `transsearch` RESPONSE ships a form with `currentnum` but NO `firstnum` input
+ *   (verified live 2026-07-12, anonymous AND authenticated). A null must never be silently
+ *   promoted to « search the whole topic » on a fresh submit — the caller either reuses the
+ *   anchor it captured from the last real topic page, or fails explicitly.
  * @property owntopic the `owntopic` flag verbatim from the form (`0` on a normal topic, `1` observed
  *   on the cat-IA owned-topic capture). Wire detail, kept as-is.
  * @property currentNum the server-side navigation cursor parsed from the form's `currentnum` hidden
@@ -47,7 +52,7 @@ data class TopicSearchForm(
     val hashCheck: String,
     val topicId: Int,
     val cat: Int,
-    val firstnum: Int,
+    val firstnum: Int?,
     val owntopic: Int = 0,
     val currentNum: Int? = null,
 ) {
@@ -69,14 +74,20 @@ data class TopicSearchForm(
  * @property onlyMatches the real semantics of HFR's `filter` checkbox : when `true`, HFR re-renders
  *   the topic page showing ONLY the messages matching the search ; when `false` it returns the
  *   page with the matches highlighted in place. Named for intent, not for the wire (`filter=1`).
- * @property currentNum the server-side navigation cursor (HFR's JS-managed `currentnum`). `null`/blank
- *   for a FRESH search (the documented "clear on submit" behaviour : HFR re-anchors on the first
- *   match) ; carries the current match's `numreponse` for a next/previous STEP so HFR advances to the
- *   following match. Built by the ViewModel from the previous response's [TopicSearchForm.currentNum].
- * @property isStep `true` for a next/previous navigation step (as opposed to a fresh search). When
- *   stepping, the repository OMITS `firstnum` (and `dep`) from the POST : re-sending `firstnum`
- *   re-anchors HFR on the FIRST match and the cursor never progresses (the live-verified stepping bug
- *   — Chantier B / #546). A fresh search keeps `firstnum` (the page anchor HFR expects).
+ * @property currentNum the server-side cursor (HFR's JS-managed `currentnum`). `null`/blank for a
+ *   FRESH search (the documented "clear on submit" behaviour : HFR re-anchors on the first match).
+ *   Carries a `numreponse` for : a next/previous STEP in non-filtered mode (HFR advances to the
+ *   following match), or a FILTERED CONTINUATION (#894 : « Résultats suivants » — HFR's truncated
+ *   scan resumes from the cursor its response advertised). Built by the ViewModel from the previous
+ *   response's [TopicSearchForm.currentNum].
+ * @property isStep `true` for a next/previous navigation step (as opposed to a fresh search).
+ *   Informational since #894 (diagnostics) — the wire decision (« send `firstnum` or not ») is
+ *   carried explicitly by [anchor].
+ * @property anchor the `firstnum` value to POST, or `null` to omit the field entirely (#894).
+ *   The ViewModel decides it : a fresh search sends the SESSION anchor (first `numreponse` of the
+ *   real topic page the search started from — HFR's own « search from the current page onwards »
+ *   semantics), `0` when the user opted into « chercher depuis le début », and `null` on steps and
+ *   continuations (re-sending an anchor re-anchors HFR on the first match — live-verified, #546).
  */
 data class TopicSearchRequest(
     val form: TopicSearchForm,
@@ -85,6 +96,7 @@ data class TopicSearchRequest(
     val onlyMatches: Boolean,
     val currentNum: String? = null,
     val isStep: Boolean = false,
+    val anchor: Int? = null,
 ) {
     /** HFR needs at least a term or an author ; an all-blank search is meaningless. */
     val isMeaningful: Boolean get() = word.isNotBlank() || spseudo.isNotBlank()

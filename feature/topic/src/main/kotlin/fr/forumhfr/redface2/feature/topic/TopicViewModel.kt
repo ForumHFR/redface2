@@ -11,6 +11,7 @@ import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.blacklist.BlacklistRepository
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
+import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.search.SearchRepository
 import fr.forumhfr.redface2.core.domain.topic.NoTopicSearchResultsException
@@ -51,7 +52,12 @@ import kotlinx.coroutines.withTimeoutOrNull
  * synthetic chain of pages.
  */
 @HiltViewModel(assistedFactory = TopicViewModel.Factory::class)
-@Suppress("LongParameterList") // ViewModel aggregates its injected repositories; one per concern.
+// LongParameterList: the ViewModel aggregates its injected repositories, one per concern.
+// LargeClass (#809): the topic ViewModel is the reading surface's single MVI hub — load / pagination /
+// refresh / delete / intra-topic search / flag removal all live here by design (same aggregator shape
+// as FlagsViewModel). Adding the #809 flow tipped it over the threshold; splitting the hub is a
+// separate refactor, tracked rather than forced by this feature.
+@Suppress("LongParameterList", "LargeClass")
 class TopicViewModel @AssistedInject constructor(
     // #750 — `var`, not `val`: when [TopicRequest.resolveScrollToPage] is set the real target page
     // is only known after the resolution probe; the resolved request then REPLACES this one (and
@@ -65,6 +71,9 @@ class TopicViewModel @AssistedInject constructor(
     private val blacklistRepository: BlacklistRepository,
     private val topicSearchRepository: TopicSearchRepository,
     private val searchRepository: SearchRepository,
+    // #809 — plain Hilt dependency (the assisted Factory is unchanged): resolves + removes THIS
+    // topic's drapeau for the top-bar long-press.
+    private val flagRepository: FlagRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(TopicUiState.initial(request))
@@ -87,6 +96,14 @@ class TopicViewModel @AssistedInject constructor(
 
     /** Chantier C (#546) — at most one intra-topic search POST in flight at a time. */
     private var searchJob: Job? = null
+
+    /**
+     * #877 — at most one background « fetch a fresh search form » in flight (cf. [ensureSearchForm]).
+     * Fired when the search bar opens over a page whose transient `searchForm` is absent — the
+     * TTL-skip cache path never refetches, so without this the form (and thus submit) would stay
+     * unavailable until an unrelated reload.
+     */
+    private var searchFormJob: Job? = null
 
     /**
      * Chantier C (#546) — monotonic token guarding against a stale `transsearch` write.
@@ -198,6 +215,9 @@ class TopicViewModel @AssistedInject constructor(
             .launchIn(viewModelScope)
     }
 
+    @Suppress("CyclomaticComplexMethod") // MVI dispatcher : one branch per intent, no logic here —
+    // splitting the when by domain would only scatter the single entry point (same rationale as the
+    // class-level LargeClass suppress, #809/#879).
     fun send(intent: TopicIntent) {
         when (intent) {
             // Retry goes through the cache-aside path even after a post-submit force
@@ -207,6 +227,7 @@ class TopicViewModel @AssistedInject constructor(
             is TopicIntent.DeletePost -> deletePost(intent.numreponse)
             TopicIntent.Refresh -> refresh()
             is TopicIntent.SetAuthorBlocked -> setAuthorBlocked(intent.author, intent.blocked)
+            TopicIntent.RequestRemoveTopicFlag -> requestRemoveTopicFlag()
             TopicIntent.OpenSearch -> openSearch()
             TopicIntent.CloseSearch -> closeSearch()
             is TopicIntent.SearchWordChanged ->
@@ -215,7 +236,10 @@ class TopicViewModel @AssistedInject constructor(
                 _state.update { it.copy(search = it.search.copy(spseudo = intent.pseudo)) }
             is TopicIntent.SearchOnlyMatchesChanged ->
                 _state.update { it.copy(search = it.search.copy(onlyMatches = intent.onlyMatches)) }
+            is TopicIntent.SearchFromStartChanged ->
+                _state.update { it.copy(search = it.search.copy(fromStart = intent.fromStart)) }
             TopicIntent.SubmitSearch -> submitSearch()
+            TopicIntent.SearchNextResultsPage -> searchNextResultsPage()
             TopicIntent.NextResult -> nextResult()
             TopicIntent.PrevResult -> prevResult()
         }
@@ -262,7 +286,10 @@ class TopicViewModel @AssistedInject constructor(
                     // #785 — rebuild the WHOLE loaded mode through the single seam (loadedMode) so
                     // the post-level mask (hiddenNumreponses) and the quote-level canonical set
                     // (blockedQuoteAuthors) re-filter together on a live blacklist change.
-                    current.copy(mode = loadedMode(loaded.topic))
+                    // #877 — this is a LOCAL transformation of the page already on screen : it must
+                    // carry the provenance over, or a re-filter landing between the provisional
+                    // cache emission and the settled one would fake-settle the pill (gate finding).
+                    current.copy(mode = loadedMode(loaded.topic, provisional = loaded.provisional))
                 }
             }
             // This collector is independent of any load job, so an unhandled error here would tear
@@ -299,6 +326,7 @@ class TopicViewModel @AssistedInject constructor(
                     it.copy(
                         mode = loadedMode(topic),
                         availablePages = (1..topic.totalPages).toList(),
+                        search = it.search.capturingAnchor(topic),
                     )
                 }
                 // Re-arm the page+1 warmup, like `loadCurrentPage` (l. ~219). Unlike the post-submit
@@ -412,11 +440,19 @@ class TopicViewModel @AssistedInject constructor(
                     // still draws a bounded sliver from intent to terminal state.
                     endFirstContentSectionIfNeeded()
                 }
-                .collect { topic ->
+                .collect { emission ->
+                    val topic = emission.topic
                     _state.update {
                         it.copy(
-                            mode = loadedMode(topic),
+                            // #877 — the provenance flag rides into Mode.Loaded so the top-bar
+                            // pill can hold « Chargement… » through the cache emission and only
+                            // show « page X / Y » once the page is settled (network / TTL skip /
+                            // terminal after a failed refresh).
+                            mode = loadedMode(topic, provisional = emission.provisional),
                             availablePages = (1..topic.totalPages).toList(),
+                            // #894 — a REAL topic page refreshes the search session anchor
+                            // (a transsearch response has no form anchor : no-op there).
+                            search = it.search.capturingAnchor(topic),
                         )
                     }
                     // First content visible — close the async section. Subsequent emissions
@@ -438,11 +474,15 @@ class TopicViewModel @AssistedInject constructor(
      * diverge — a path bypassing this seam would make masked citations flicker across
      * refresh/search/delete (Codex framing reservation on #785).
      */
-    private fun loadedMode(topic: Topic): TopicUiState.Mode.Loaded =
+    private fun loadedMode(topic: Topic, provisional: Boolean = false): TopicUiState.Mode.Loaded =
         TopicUiState.Mode.Loaded(
             topic = topic,
             hiddenNumreponses = computeHiddenNumreponses(topic, blockedCanonicals),
             blockedQuoteAuthors = blockedCanonicals,
+            // #877 — default false : every other caller (refresh, force-refresh, post-delete,
+            // search, live re-filter) renders a settled network page ; only the cache-aside
+            // collect above forwards the repository's provenance.
+            provisional = provisional,
         )
 
     /**
@@ -674,16 +714,153 @@ class TopicViewModel @AssistedInject constructor(
         }
     }
 
+    // ─── remove topic flag (#809) ─────────────────────────────────────────────────
+
+    /**
+     * #809 — drives the top-bar long-press « Retirer le drapeau » interaction. Explicit MVI state so
+     * the confirmation gates the delflag call and the anti double-press guard is observable. The
+     * [RemoveTopicFlagState.Resolving] step (which FlagsViewModel lacks — it already holds the Flag)
+     * covers the async lookup that may fan out the network on a cold flag cache.
+     */
+    private val _removeTopicFlagState = MutableStateFlow<RemoveTopicFlagState>(RemoveTopicFlagState.Idle)
+    val removeTopicFlagState: StateFlow<RemoveTopicFlagState> = _removeTopicFlagState.asStateFlow()
+
+    /**
+     * #809 — user long-pressed the title : resolve THIS topic's drapeau, then either raise the
+     * confirmation dialog ([RemoveTopicFlagState.Confirming]) or emit [TopicEffect.TopicFlagNotFound]
+     * (topic not flagged, anonymous, or an unresolvable lookup — see below). The outcome rides the
+     * screen's single [effects] channel like every other one-shot Toast (review finding : no parallel
+     * consumable StateFlow). No-op while a lookup or a removal is already running, so a second
+     * long-press during the (possibly network-bound) resolve cannot launch a duplicate.
+     */
+    @Suppress("TooGenericExceptionCaught") // gate #809 — any resolve failure folds to NotFound below;
+    // cancellation is rethrown after releasing the state.
+    fun requestRemoveTopicFlag() {
+        val current = _removeTopicFlagState.value
+        if (current is RemoveTopicFlagState.Resolving || current is RemoveTopicFlagState.Removing) return
+        _removeTopicFlagState.value = RemoveTopicFlagState.Resolving
+        viewModelScope.launch {
+            // Gate Codex #809 — findFlag can die mid-resolve (an in-flight fetch cancelled by an
+            // account switch, an unexpected runtime failure) : fold it to « unresolvable » instead of
+            // leaving the state wedged in Resolving with no event — the long-press would otherwise be
+            // dead until the VM is recreated. CancellationException is rethrown (the scope is going
+            // away) AFTER releasing the state.
+            val flag = try {
+                flagRepository.findFlag(cat = request.cat, topicId = request.post)
+            } catch (cancelled: CancellationException) {
+                _removeTopicFlagState.value = RemoveTopicFlagState.Idle
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
+            if (flag != null) {
+                _removeTopicFlagState.value = RemoveTopicFlagState.Confirming(flag)
+            } else {
+                _effects.send(TopicEffect.TopicFlagNotFound)
+                _removeTopicFlagState.value = RemoveTopicFlagState.Idle
+            }
+        }
+    }
+
+    /** #809 — user dismissed the confirmation dialog without confirming. */
+    fun cancelRemoveTopicFlag() {
+        if (_removeTopicFlagState.value is RemoveTopicFlagState.Confirming) {
+            _removeTopicFlagState.value = RemoveTopicFlagState.Idle
+        }
+    }
+
+    /**
+     * #809 — user confirmed in the dialog : move to [RemoveTopicFlagState.Removing] (disables the
+     * action), call the repository, then emit the one-shot outcome on [effects]. The repository owns
+     * the cache reconciliation, so nothing optimistic happens here.
+     */
+    fun confirmRemoveTopicFlag() {
+        val confirming = _removeTopicFlagState.value as? RemoveTopicFlagState.Confirming ?: return
+        val flag = confirming.flag
+        _removeTopicFlagState.value = RemoveTopicFlagState.Removing(flag)
+        viewModelScope.launch {
+            try {
+                // Review #809 — removeFlag CAN throw outside its Result (evictFlagFromCaches runs in
+                // `.onSuccess`, past the internal runCatching) : fold a raw throw to Failure so the
+                // user still gets feedback instead of a crash. Cancellation propagates untouched
+                // (the finally below releases the lock either way).
+                val result = runCatching { flagRepository.removeFlag(flag) }
+                    .getOrElse { raised ->
+                        if (raised is CancellationException) throw raised
+                        Result.failure(raised)
+                    }
+                _effects.send(
+                    if (result.isSuccess) TopicEffect.TopicFlagRemoved else TopicEffect.TopicFlagRemovalFailed,
+                )
+            } finally {
+                // #603 audit fix (fork #5) — always release the Removing lock, even if removeFlag
+                // throws outside its Result (or the coroutine is cancelled). Otherwise the state stays
+                // Removing forever and the anti double-tap guard wedges until the VM is recreated.
+                _removeTopicFlagState.value = RemoveTopicFlagState.Idle
+            }
+        }
+    }
+
     // ─── intra-topic search (#546) ───────────────────────────────────────────────
 
     /**
-     * Open the search bar. No-op unless the loaded page exposes a usable search form
-     * ([TopicUiState.canSearchInTopic]) — the screen only shows the affordance in that case, but we
-     * re-check here so a stale tap can never open an inert bar.
+     * Open the search bar. Gated on [TopicUiState.canOpenSearch] (authenticated + page on screen,
+     * #877) — NOT on the transient `searchForm`, whose absence on a cache emission made the Loupe
+     * vanish. When the form is missing (TTL-skip cache, provisional page), [ensureSearchForm]
+     * fetches a fresh one in the background so the submit gate is usually satisfied by the time
+     * the user finished typing ; a submit that still has no form fails explicitly (Toast).
      */
     private fun openSearch() {
-        if (!_state.value.canSearchInTopic) return
+        if (!_state.value.canOpenSearch) return
         _state.update { it.copy(search = it.search.copy(isActive = true)) }
+        ensureSearchForm()
+    }
+
+    /**
+     * #877 — background fetch of a fresh, authenticated page for the sole purpose of harvesting
+     * its transient `searchForm` (hash_check). Never persisted beyond the normal page cache — the
+     * session token itself is NEVER written to Room (cadrage : périssable + sensible). The fresh
+     * page replaces the on-screen one through the single [loadedMode] seam (same page, newer
+     * posts — an acceptable, even desirable, side effect). Failures are silent : the submit path
+     * owns the explicit error surface.
+     */
+    private fun ensureSearchForm() {
+        val loaded = _state.value.mode as? TopicUiState.Mode.Loaded ?: return
+        // No fetch when : the form is already usable ; the page is provisional (the cache-aside
+        // network refresh is in flight and will carry the form — if it fails, the terminal
+        // re-emission drops `provisional` and a re-open of the bar or the submit failure path
+        // retries from here) ; or a fetch is already running.
+        val shouldFetch = loaded.topic.searchForm?.canSearch != true &&
+            !loaded.provisional &&
+            searchFormJob?.isActive != true
+        if (!shouldFetch) return
+        // Snapshot the request AND the generation token : `request` is a var (page changes mutate
+        // it), and `request == fetchedFor` alone cannot tell two successive owners of the SAME
+        // page apart (a refresh or a search taking over between our launch and our landing). Every
+        // owner change bumps `searchGeneration` (takeOverFromSearch / launchSearch), so a stale
+        // form-fetch reply is dropped exactly like a stale transsearch reply (gate finding, #877).
+        val fetchedFor = request
+        val generation = searchGeneration
+        searchFormJob = viewModelScope.launch {
+            runCatching {
+                topicRepository.refreshTopicPage(fetchedFor.cat, fetchedFor.post, fetchedFor.page)
+            }.onSuccess { fresh ->
+                _state.update { state ->
+                    // Latest-wins : same page still on screen AND no newer owner took over.
+                    if (state.mode is TopicUiState.Mode.Loaded &&
+                        request == fetchedFor &&
+                        generation == searchGeneration
+                    ) {
+                        state.copy(
+                            mode = loadedMode(fresh),
+                            availablePages = (1..fresh.totalPages).toList(),
+                        )
+                    } else {
+                        state
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -715,6 +892,9 @@ class TopicViewModel @AssistedInject constructor(
      */
     private fun takeOverFromSearch() {
         searchJob?.cancel()
+        // #877 — a form fetch tied to the outgoing page is moot (its inject guard would drop the
+        // result anyway) : cancel it so it does not waste a network round-trip.
+        searchFormJob?.cancel()
         searchGeneration++
         // A normal-load path owns the page now, so the result cursor history is stale: a later
         // next/prev would step from a position that no longer matches what is on screen. Reset it
@@ -731,10 +911,27 @@ class TopicViewModel @AssistedInject constructor(
                     status = if (s.status == TopicSearchStatus.Loading) TopicSearchStatus.Idle else s.status,
                     canGoPreviousResult = false,
                     canGoNextResult = false,
+                    // #879/#894 — a normal load owns the page again : the filtered-results footer,
+                    // its resume cursor and the frozen criteria are stale, reset them (transverse
+                    // risk : state de résultats mal remis). `sessionAnchor` deliberately SURVIVES —
+                    // it describes the page being read, and the incoming load refreshes it.
+                    showingFilteredResults = false,
+                    resumeCursor = null,
+                    resultWord = "",
+                    resultSpseudo = "",
+                    resultAnchor = null,
                 ),
             )
         }
     }
+
+    /**
+     * #894 — refresh [TopicSearchUiState.sessionAnchor] from a rendered REAL topic page. A
+     * `transsearch` response ships its form without `firstnum`, so it can never overwrite the
+     * anchor of the page the user was actually reading — exactly the intended no-op.
+     */
+    private fun TopicSearchUiState.capturingAnchor(topic: Topic): TopicSearchUiState =
+        topic.searchForm?.firstnum?.let { copy(sessionAnchor = it) } ?: this
 
     /** Chantier B (#546) — drop the client-side result cursor history (no search position active). */
     private fun resetSearchCursors() {
@@ -766,17 +963,62 @@ class TopicViewModel @AssistedInject constructor(
         val current = _state.value
         val form = (current.mode as? TopicUiState.Mode.Loaded)?.topic?.searchForm
         // Re-validate the gate server-side: never POST without a usable (authenticated) form.
-        if (form == null || !form.canSearch || !current.search.canSubmit) return
+        // #877 — with the icon decoupled from the transient form, this path is reachable when the
+        // fresh-form fetch has not landed yet (or failed) : fail EXPLICITLY (same Toast as a
+        // network search failure) and retry the form fetch, never a silent no-op tap. The toast
+        // only fires on a submittable bar — a tap with empty criteria stays inert either way.
+        // #894 — resolve the anchor of a FRESH search : « depuis le début » sends an explicit 0,
+        // the default sends the anchor of the page the search starts from — the on-screen form's
+        // `firstnum` (a real topic page) or, from a results page (whose form carries none), the
+        // frozen session anchor. A default-mode submit with NO anchor available must fail
+        // explicitly (same recovery as a missing form) — silently omitting `firstnum` would run a
+        // whole-topic search the user did not ask for (cadrage F1).
+        val anchor = if (current.search.fromStart) 0 else form?.firstnum ?: current.search.sessionAnchor
+        if (form == null || !form.canSearch || anchor == null) {
+            if (current.search.canSubmit) {
+                viewModelScope.launch { _effects.send(TopicEffect.SearchFailed) }
+                ensureSearchForm()
+            }
+            return
+        }
         val request = TopicSearchRequest(
             form = form,
             word = current.search.word.trim(),
             spseudo = current.search.spseudo.trim(),
             onlyMatches = current.search.onlyMatches,
-            // Fresh search: no cursor, keep firstnum (isStep = false). HFR re-anchors on the first match.
+            // Fresh search : no cursor (HFR re-anchors on the first match at-or-after the anchor).
+            anchor = anchor,
         )
-        if (!request.isMeaningful) return
+        if (!current.search.canSubmit || !request.isMeaningful) return
         resetSearchCursors()
         launchSearch(request, isFresh = true)
+    }
+
+    /**
+     * #894 — fetch the NEXT batch of a FILTERED result list (« Résultats suivants » footer, web
+     * parity) : HFR's scan window truncated and its response advertised a resume cursor. The
+     * continuation re-POSTs the FROZEN criteria with `currentnum = resumeCursor` and NO anchor
+     * (cadrage F3) ; latest-wins via the same generation token as every search. The form is
+     * re-read from the page on screen (a transsearch reply carries its own form).
+     */
+    private fun searchNextResultsPage() {
+        val current = _state.value
+        val form = (current.mode as? TopicUiState.Mode.Loaded)?.topic?.searchForm?.takeIf { it.canSearch }
+        // One combined gate : a batch announced (hasMore ⇒ cursor non-null) + a usable form on the
+        // rendered result page.
+        val cursor = current.search.resumeCursor?.takeIf { current.search.hasMoreFilteredResults }
+        if (cursor == null || form == null) return
+        val request = TopicSearchRequest(
+            form = form,
+            // Gate #879 finding 1 — the cursor belongs to the SUBMITTED search : the next batch is
+            // fetched with the frozen criteria, whatever the (editable) bar currently shows.
+            word = current.search.resultWord,
+            spseudo = current.search.resultSpseudo,
+            onlyMatches = true,
+            currentNum = cursor.toString(),
+        )
+        if (!request.isMeaningful) return
+        launchSearch(request, isFresh = false)
     }
 
     /**
@@ -800,11 +1042,15 @@ class TopicViewModel @AssistedInject constructor(
         val form = navigableSearchForm(current).takeIf { searchCursorIndex > 0 } ?: return
         val targetIndex = searchCursorIndex - 1
         val request = if (targetIndex == 0) {
+            // #894 (cadrage F5) — the replay to the FIRST result re-issues the fresh search with
+            // the FROZEN criteria and the FROZEN anchor of the displayed search session : the
+            // on-screen response form carries no anchor, and the editable bar may have changed.
             TopicSearchRequest(
                 form = form,
-                word = current.search.word.trim(),
-                spseudo = current.search.spseudo.trim(),
+                word = current.search.resultWord,
+                spseudo = current.search.resultSpseudo,
                 onlyMatches = false,
+                anchor = current.search.resultAnchor,
             )
         } else {
             stepRequest(form, current.search, cursor = searchCursors[targetIndex - 1])
@@ -822,15 +1068,19 @@ class TopicViewModel @AssistedInject constructor(
         return (current.mode as? TopicUiState.Mode.Loaded)?.topic?.searchForm?.takeIf { it.canSearch }
     }
 
-    /** Chantier B (#546) — a next/previous STEP request (cursor set, firstnum omitted via isStep). */
+    /**
+     * Chantier B (#546) — a next/previous STEP request : cursor set, NO anchor (re-sending one
+     * re-anchors HFR on the first match). #894 (cadrage F5) — steps re-submit the FROZEN criteria
+     * of the displayed search, never the live editable bar.
+     */
     private fun stepRequest(
         form: TopicSearchForm,
         search: TopicSearchUiState,
         cursor: Int,
     ): TopicSearchRequest = TopicSearchRequest(
         form = form,
-        word = search.word.trim(),
-        spseudo = search.spseudo.trim(),
+        word = search.resultWord,
+        spseudo = search.resultSpseudo,
         onlyMatches = false,
         currentNum = cursor.toString(),
         isStep = true,
@@ -860,13 +1110,27 @@ class TopicViewModel @AssistedInject constructor(
                     topic,
                     isFresh = isFresh,
                     rewindToIndex = rewindToIndex,
-                    onlyMatches = request.onlyMatches,
+                    submitted = request,
                 )
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (noResults: NoTopicSearchResultsException) {
                 android.util.Log.i(LOG_TAG, "Intra-topic search returned no result", noResults)
                 if (generation != searchGeneration) return@launch
+                if (request.onlyMatches && !isFresh) {
+                    // #894 — an empty FILTERED CONTINUATION (matches deleted since the previous
+                    // batch advertised the cursor) is the END of the results, never « Aucun
+                    // résultat » (cadrage F6) : keep the displayed batch, drop the cursor.
+                    _state.update {
+                        it.copy(
+                            search = it.search.copy(
+                                status = TopicSearchStatus.Done,
+                                resumeCursor = null,
+                            ),
+                        )
+                    }
+                    return@launch
+                }
                 // Same dispatch as a parsed reply with no usable landing (fresh→no results,
                 // rewind→replay failure ≠ end, forward→end of results).
                 signalNoLanding(isFresh, rewindToIndex)
@@ -894,14 +1158,33 @@ class TopicViewModel @AssistedInject constructor(
         topic: Topic,
         isFresh: Boolean,
         rewindToIndex: Int?,
-        // Snapshot of the MODE the request was launched with — NOT the live toggle, which the user
-        // may have flipped mid-flight (Codex review : that would apply a non-filtered reply as
-        // filtered or vice-versa).
-        onlyMatches: Boolean,
+        // #894 — the request this reply answers : its criteria are frozen into the state (gate
+        // #879 finding 1 — the footer/steps must never mix new bar content with old results), its
+        // `onlyMatches` snapshot dispatches the branch (never the live toggle, which the user may
+        // have flipped mid-flight — Codex review), and its cursor drives the anti-loop guard.
+        submitted: TopicSearchRequest,
     ) {
-        if (onlyMatches) {
-            // Matches-only page: it is the whole result set, no scroll / cursor navigation.
-            renderSearchPage(topic, TopicSearchStatus.Done, canPrev = false, canNext = false)
+        if (submitted.onlyMatches) {
+            // #894 — the filtered page is ONE batch of the result list. HFR advertises a further
+            // batch through the response form's `currentnum` (truncated scan) ; a COMPLETE list
+            // carries none. Anti-loop guard (cadrage F3) : a continuation cursor that did not
+            // STRICTLY advance past the one we sent would re-serve the same batch forever — treat
+            // it as the end instead.
+            val sentCursor = submitted.currentNum?.toIntOrNull()
+            val resumeCursor = topic.searchForm?.currentNum
+                ?.takeIf { sentCursor == null || it > sentCursor }
+            renderSearchPage(
+                topic,
+                TopicSearchStatus.Done,
+                canPrev = false,
+                canNext = false,
+                filteredResumeCursor = resumeCursor,
+                showingFiltered = true,
+                submitted = submitted,
+            )
+            // Gate #879 finding 2 — the list content was replaced in place : reposition at the top
+            // so the first results of this batch are visible (fresh AND continuation alike).
+            _effects.send(TopicEffect.ScrollToTopOfResults)
             return
         }
         // `landed` = the returned cursor IF it is a real post on the page. A null cursor, or one
@@ -925,6 +1208,9 @@ class TopicViewModel @AssistedInject constructor(
             // Forward-only HFR never reports a count up front; keep « next » enabled until a step
             // actually reports the end (onStepEnd disables it).
             canNext = true,
+            // #894 (cadrage F5) — freeze the criteria + anchor for the steps and the backward
+            // replay, which must never read the live editable bar.
+            submitted = submitted,
         )
         _effects.send(TopicEffect.ScrollToPost(landed))
     }
@@ -971,7 +1257,20 @@ class TopicViewModel @AssistedInject constructor(
      * and the prev/next affordances, keeping the previously-known [TopicUiState.availablePages] (the
      * transsearch pager is not the canonical topic pager) and never scheduling a prefetch off it.
      */
-    private fun renderSearchPage(topic: Topic, status: TopicSearchStatus, canPrev: Boolean, canNext: Boolean) {
+    @Suppress("LongParameterList") // single render seam of the search state : one param per facet.
+    private fun renderSearchPage(
+        topic: Topic,
+        status: TopicSearchStatus,
+        canPrev: Boolean,
+        canNext: Boolean,
+        // #894 — resume cursor advertised by a FILTERED response (null = complete list).
+        filteredResumeCursor: Int? = null,
+        // #894 — `true` ONLY for a filtered render (the batch replaces the list on screen).
+        showingFiltered: Boolean = false,
+        // #879 finding 1 + #894 F5 — the request this render answers : criteria + anchor frozen
+        // with the results they produced, for the continuation / steps / backward replay.
+        submitted: TopicSearchRequest? = null,
+    ) {
         _state.update {
             it.copy(
                 mode = loadedMode(topic),
@@ -979,6 +1278,13 @@ class TopicViewModel @AssistedInject constructor(
                     status = status,
                     canGoPreviousResult = canPrev,
                     canGoNextResult = canNext,
+                    showingFilteredResults = showingFiltered,
+                    resumeCursor = filteredResumeCursor,
+                    resultWord = submitted?.word ?: "",
+                    resultSpseudo = submitted?.spseudo ?: "",
+                    // A step/continuation carries no anchor : keep the one frozen by the fresh
+                    // submit — the backward replay re-anchors on it.
+                    resultAnchor = submitted?.anchor ?: it.search.resultAnchor,
                 ),
             )
         }

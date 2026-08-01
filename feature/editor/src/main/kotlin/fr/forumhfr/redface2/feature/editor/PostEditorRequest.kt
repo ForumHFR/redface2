@@ -31,10 +31,15 @@ data class PostEditorRequest(
      */
     val initialQuotes: List<QuotedPostPreview> = emptyList(),
     /**
-     * #790 (#604 lot 2) — `true` when this editor is the ESCALATION of a quick-reply sheet. The
+     * #790 (#604 lot 2) — `true` ONLY when this editor is the ESCALATION of a quick-reply sheet. The
      * ViewModel then auto-applies the shared #405 draft row instead of surfacing the restore
      * banner (appending to anything already typed — the escalation continues the same
      * composition act).
+     *
+     * #843 — this flag is escalation-ONLY again. The #829/#833 COLD full-editor opens (FAB under the
+     * FULL_EDITOR preset, « Citer », long-press, « Citer N » 3+) had wrongly set it too, silently
+     * re-applying an old draft with no « Ignorer »; they now pass `false` so the restore banner is
+     * surfaced. Only `RedfaceNavigation.onEscalateToFullEditor` sets it `true`.
      */
     val resumeSharedDraft: Boolean = false,
 )

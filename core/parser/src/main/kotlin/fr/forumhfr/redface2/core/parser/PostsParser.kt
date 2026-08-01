@@ -82,6 +82,7 @@ class PostsParser(
             quoteRef = parseQuoteRef(postTable),
             profileId = parseProfileId(postTable),
             editedAt = parseEditedAt(postTable),
+            citedCount = parseCitedCount(postTable),
             // #330 — parsed from the same content element as `content` (the signature span is a
             // descendant of `div[id^=para]`, stripped from the body but surfaced here).
             signature = content.signature,
@@ -101,6 +102,18 @@ class PostsParser(
         postTable.selectFirst(HfrSelectors.POST_EDITED)
             ?.text()
             ?.let(dateParser::parseEditedAtOrNull)
+
+    /**
+     * #863 — HFR's server-side citation counter, read from the SAME `div.edited` trailer as
+     * [parseEditedAt] : « Message cité N fois » (a `quote_only=1` link on the web). It counts the
+     * citations across the WHOLE topic — the authoritative value the page-scoped client scan could
+     * never produce. `null` when the trailer is absent or only carries the edit line. Tolerates
+     * NBSP between the words (HFR mixes `&nbsp;` and plain spaces in trailers).
+     */
+    private fun parseCitedCount(postTable: Element): Int? =
+        postTable.selectFirst(HfrSelectors.POST_EDITED)
+            ?.text()
+            ?.let { trailer -> CITED_COUNT_REGEX.find(trailer)?.groupValues?.get(1)?.toIntOrNull() }
 
     /**
      * Phase 2D (#147) / #227 — returns `true` when the post's left toolbar exposes an
@@ -177,6 +190,9 @@ class PostsParser(
     }
 
     private companion object {
+        // #863 — « Message cité N fois » in the div.edited trailer. `[\s ]+` : Jsoup's
+        // text() keeps HFR's non-breaking spaces, which are NOT matched by a plain space.
+        val CITED_COUNT_REGEX: Regex = Regex("""Message[\s ]+cité[\s ]+(\d+)[\s ]+fois""")
         val QUOTE_REF_REGEX: Regex = Regex("""[?&]ref=(\d+)""")
         val EDIT_NUMREPONSE_REGEX: Regex = Regex("""[?&]numreponse=(\d+)""")
         // #227 — authenticated pages serve the toolbar edit link as a pretty URL
