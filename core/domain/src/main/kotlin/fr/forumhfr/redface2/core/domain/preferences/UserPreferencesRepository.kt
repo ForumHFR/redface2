@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.domain.preferences
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import kotlinx.coroutines.flow.Flow
 
 interface UserPreferencesRepository {
@@ -236,6 +237,34 @@ interface UserPreferencesRepository {
     suspend fun setConfirmBeforePosting(enabled: Boolean)
 
     /**
+     * Quote cards in the composer (#805 arbitrage, 2026-07-05): when `true`, citations picked via
+     * « Citer » / « Citer N » are rendered as compact cards above the field (quick-reply sheet AND
+     * full-screen editor) and materialised into `[quotemsg]` BBCode only at submit. Default `false`
+     * — citations are inserted as editable `[quotemsg]` BBCode directly in the text field
+     * (interleaving-friendly, web parity). Read ONCE at surface-opening time (`first()`, not
+     * collected) by `QuickReplyViewModel` and `PostEditorViewModel` — a toggle flip never
+     * rewires a composition session in flight. Toggled in Settings (« Édition et publication »).
+     */
+    fun observeQuoteCardsEnabled(): Flow<Boolean>
+
+    /** Persists [observeQuoteCardsEnabled]. Default `false` until the first call. */
+    suspend fun setQuoteCardsEnabled(enabled: Boolean)
+
+    /**
+     * #806 — which composition surface a write action in a topic opens (reply FAB, « Citer »,
+     * « Citer N »). Default [WritingSurfacePreset.FULL_EDITOR] since the quick-reply sheet moved
+     * to experimental status (#951) — the sheet presets stay available as opt-in. The preset
+     * decides the surface only — quote RENDERING stays [observeQuoteCardsEnabled] (#805). A
+     * corrupt / unknown stored value degrades to the default. Observed by `:feature:topic`
+     * (decision at tap time, an open sheet is never migrated), chosen in Settings
+     * (« Édition et publication »).
+     */
+    fun observeWritingSurfacePreset(): Flow<WritingSurfacePreset>
+
+    /** Persists [observeWritingSurfacePreset]. Default [WritingSurfacePreset.FULL_EDITOR] until the first call. */
+    suspend fun setWritingSurfacePreset(preset: WritingSurfacePreset)
+
+    /**
      * Opt-in « DT » section on the Drapeaux screen: when `true`, a « DT » tab appears next
      * to the flag-type tabs. Placeholder for now — the content (the followed-discussions
      * list whose flags sync through the MPStorage document, #6) lands later. Default
@@ -321,6 +350,17 @@ interface UserPreferencesRepository {
 
     /** Persists [observeFoldLongQuotes]. Default `true` until the first call. */
     suspend fun setFoldLongQuotes(enabled: Boolean)
+
+    /**
+     * #884 — whether topic posts render FULL-WIDTH (edge-to-edge, without the card inset).
+     * Default `false`: the inset card is the historical layout and stays the baseline; full
+     * width is the opt-in for readers who want the messages bord à bord. Pure render-time
+     * switch (no refetch). Observed by `:feature:topic`, toggled in Settings.
+     */
+    fun observeTopicFullWidthPosts(): Flow<Boolean>
+
+    /** Persists [observeTopicFullWidthPosts]. Default `false` until the first call. */
+    suspend fun setTopicFullWidthPosts(enabled: Boolean)
 
     /**
      * #105 — whether the intra-page reading scrollbar ([LazyListScrollbar], the thin auto-hiding
@@ -419,6 +459,17 @@ interface UserPreferencesRepository {
 
     /** Persists [observeDisplayDensity]. Default [DisplayDensity.COMFORT] until the first call. */
     suspend fun setDisplayDensity(density: DisplayDensity)
+
+    /**
+     * Block-GIF display profile (#973, contrat images §8 [AMENDEMENT-v1.5-2]):
+     * [MediaDisplayProfile.M] (default, ×1,5) — the enlargement factor applied to eligible block
+     * GIFs by the post renderer (wired in wave 2). Observed by the renderer hosts and mirrored in
+     * Settings > Affichage. A corrupt / unknown stored value degrades to the M default.
+     */
+    fun observeMediaDisplayProfile(): Flow<MediaDisplayProfile>
+
+    /** Persists [observeMediaDisplayProfile]. Default [MediaDisplayProfile.M] until the first call. */
+    suspend fun setMediaDisplayProfile(profile: MediaDisplayProfile)
 
     /**
      * Reading font-size preset (#287): [FontScalePreference.M] (default) is the M3 reference size;

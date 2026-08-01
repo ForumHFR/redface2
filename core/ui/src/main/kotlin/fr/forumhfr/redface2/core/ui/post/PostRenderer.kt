@@ -2,6 +2,8 @@ package fr.forumhfr.redface2.core.ui.post
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,36 +17,55 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Card
+import androidx.compose.material3.Icon
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.hapticfeedback.HapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.Placeholder
@@ -64,6 +85,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.TextUnit
@@ -78,9 +100,13 @@ import coil3.request.ImageRequest
 import coil3.request.crossfade
 import coil3.size.Precision
 import coil3.size.Scale
+import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
+import fr.forumhfr.redface2.core.ui.motion.rememberAnimationsEnabled
 import fr.forumhfr.redface2.core.ui.R
+import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
 import fr.forumhfr.redface2.core.ui.theme.LocalFoldLongQuotes
 import fr.forumhfr.redface2.core.ui.theme.LocalIgnoreInlineColors
+import fr.forumhfr.redface2.core.ui.theme.LocalMediaDisplayProfile
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
@@ -159,13 +185,49 @@ private fun inlineVisibleTextLength(inline: PostInline): Int = when (inline) {
 }
 
 /**
- * Issue #332 — true when a quote must fold to a one-line header by default because it is "long".
+ * Issue #332 — true when a quote must fold by default because it is "long" (since #784 the fold
+ * shows a bounded PREVIEW instead of a bare header line, cf. [FoldableQuoteBlock]).
  * Restricted to [quoteDepth] == 0: a nested quote is already governed by the depth rule
  * ([isCollapsedQuoteDepth]) and the parent fold, so folding it again by length would stack two
  * different toggles on the same sub-tree. Pure decision, pinned in [PostRendererQuoteDepthTest].
  */
 internal fun isLongQuote(block: PostBlock.Quote, quoteDepth: Int): Boolean =
     quoteDepth == 0 && quoteVisibleTextLength(block.content) > LONG_QUOTE_CHAR_THRESHOLD
+
+/**
+ * #784 — how many `bodyMedium` lines of a folded long quote stay visible as a PREVIEW. 5 lines ≈
+ * the reading depth of a short citation: enough context to decide whether the wall of text is
+ * worth unfolding, small enough that a folded quote never dominates the post. Pure constant so
+ * the budget is pinned in [PostRendererQuoteDepthTest] and any change is a deliberate review step.
+ */
+internal const val LONG_QUOTE_PREVIEW_LINES = 5
+
+/** #784 — fallback line height (sp) when the theme leaves `bodyMedium.lineHeight` unspecified. */
+internal const val LONG_QUOTE_FALLBACK_LINE_HEIGHT_SP = 20f
+
+/**
+ * #784 — max height (sp) of the folded preview container: [LONG_QUOTE_PREVIEW_LINES] ×
+ * the body line height. Sp on purpose so the preview grows with the user's font scale (a fixed
+ * dp cap would show fewer lines at accessibility font sizes). Pure so the sizing rule is
+ * testable without composing anything ([PostRendererQuoteDepthTest]).
+ */
+internal fun longQuotePreviewMaxHeightSp(bodyLineHeightSp: Float): Float {
+    val line = if (bodyLineHeightSp > 0f) bodyLineHeightSp else LONG_QUOTE_FALLBACK_LINE_HEIGHT_SP
+    return line * LONG_QUOTE_PREVIEW_LINES
+}
+
+/** #784 — tolerance for the clip decision below (sub-pixel rounding of the constrained height). */
+internal const val LONG_QUOTE_CLIP_TOLERANCE_PX = 1f
+
+/**
+ * #784 — whether the folded preview actually CLIPPED its content: the constrained box reports a
+ * height at (or within a rounding tolerance of) the cap only when the content wanted more room.
+ * Gates the bottom fade so a quote that is « long » by character count but renders short (wide
+ * screen, media-light text) is not painted with a misleading « more below » scrim. Pure decision,
+ * pinned in [PostRendererQuoteDepthTest].
+ */
+internal fun isLongQuotePreviewClipped(contentHeightPx: Float, maxHeightPx: Float): Boolean =
+    contentHeightPx >= maxHeightPx - LONG_QUOTE_CLIP_TOLERANCE_PX
 
 /**
  * Which themed accent the [QuoteFrame] left bar uses. Issue #252 — a **bare** `[quote]` (typed by
@@ -199,6 +261,20 @@ internal fun quoteAccentRole(quoteDepth: Int, isBareQuote: Boolean): QuoteAccent
 internal fun isBareQuote(quote: PostBlock.Quote): Boolean =
     quote.author == null && quote.numreponse == null && quote.page == null
 
+/**
+ * #785 — true when a quote cites a black-listed author: the quote's parsed author matches (by the
+ * canonical key, cf. [canonicalizePseudo]) one of the blocked canonicals the reading surface
+ * provided through [LocalBlockedQuoteAuthors]. Author-only on purpose: a citation HFR served in
+ * the dynamic `forum2.php` form keeps `page`/`numreponse` null but still carries the author, so
+ * the mask must never depend on the jump coordinates. A `[quotemsg]` forged with an arbitrary
+ * pseudo masks too — acceptable, the author line is the only identity a citation carries. Pure
+ * decision so it is pinned in [PostRendererQuoteDepthTest] without entering Compose.
+ */
+internal fun isBlockedQuoteAuthor(author: String?, blockedCanonicals: Set<String>): Boolean {
+    if (author == null || blockedCanonicals.isEmpty()) return false
+    return canonicalizePseudo(author) in blockedCanonicals
+}
+
 @Composable
 fun PostRenderer(
     content: PostContent,
@@ -207,6 +283,14 @@ fun PostRenderer(
     // surfaces outside scope (the editor BBCode preview and private-message thread keep their prior
     // non-selectable behaviour). Topic posts pass `selectable = true`.
     selectable: Boolean = false,
+    // #699 — invoked with the cited post's `(page, numreponse)` when the reader taps a sourced
+    // quote's header. Null (default) keeps the header inert — only the topic reading surface wires
+    // it (the editor preview, MP threads and signatures have nowhere meaningful to navigate).
+    onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
+    // #813/#960 — media failure/retry state is NOT a parameter anymore: the per-URL
+    // MediaAttemptLedger (ambient, process-wide) carries it, and the hosting screen retries
+    // through the scoped public seam `retryFailedPostMedia(urls)` instead of the pre-#960
+    // screen-owned refresh-generation bump.
 ) {
     if (selectable) {
         // #281 — allow selecting / copying a post's text. The SelectionContainer is wrapped at this
@@ -215,10 +299,15 @@ fun PostRenderer(
         // inside a SelectionContainer; inline media carry a U+FFFC placeholder that can pollute a
         // copied selection spanning them (known, acceptable limitation).
         SelectionContainer(modifier = modifier) {
-            PostBlocksRenderer(blocks = content.blocks, quoteDepth = 0)
+            PostBlocksRenderer(blocks = content.blocks, quoteDepth = 0, onGoToCitedPost = onGoToCitedPost)
         }
     } else {
-        PostBlocksRenderer(blocks = content.blocks, modifier = modifier, quoteDepth = 0)
+        PostBlocksRenderer(
+            blocks = content.blocks,
+            modifier = modifier,
+            quoteDepth = 0,
+            onGoToCitedPost = onGoToCitedPost,
+        )
     }
 }
 
@@ -227,6 +316,7 @@ private fun PostBlocksRenderer(
     blocks: List<PostBlock>,
     modifier: Modifier = Modifier,
     quoteDepth: Int,
+    onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
 ) {
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -235,8 +325,8 @@ private fun PostBlocksRenderer(
         blocks.forEach { block ->
             when (block) {
                 is PostBlock.Paragraph -> ParagraphBlock(block.inlines)
-                is PostBlock.Quote -> QuoteBlock(block, quoteDepth)
-                is PostBlock.Spoiler -> SpoilerBlock(block, quoteDepth)
+                is PostBlock.Quote -> QuoteBlock(block, quoteDepth, onGoToCitedPost)
+                is PostBlock.Spoiler -> SpoilerBlock(block, quoteDepth, onGoToCitedPost)
                 is PostBlock.Image -> ImageBlock(block)
                 is PostBlock.Fixed -> FixedBlock(block)
                 is PostBlock.CodeBlock -> CodeBlockBlock(block)
@@ -259,10 +349,15 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
     val imageAlt = stringResource(R.string.post_inline_image_alt)
     // #553 — signatures provide LocalIgnoreInlineColors = true so author `[color]` is dropped.
     val ignoreColors = LocalIgnoreInlineColors.current
+    // State-hygiene audit 2026-07-05 — author `[color]` legibility: dark is detected from the
+    // surface luminance so it follows AMOLED and a forced ThemeMode, not just the system flag
+    // (same rule as CreatorHighlight). isDark keys the remember so a live theme switch rebuilds
+    // the spans; it never changes during media measurements, so the #175 invariance holds.
+    val isDark = MaterialTheme.colorScheme.surface.luminance() < DARK_SURFACE_LUMINANCE
     // The AnnotatedString is INVARIANT — it carries only the U+FFFC markers + IDs (via MediaCounter),
     // never a size — so it is never rebuilt when a measurement lands (#175 stability pivot).
-    val annotated = remember(inlines, linkStyles, imageAlt, ignoreColors) {
-        buildInlineText(inlines, linkStyles, imageAlt, ignoreColors)
+    val annotated = remember(inlines, linkStyles, imageAlt, ignoreColors, isDark) {
+        buildInlineText(inlines, linkStyles, imageAlt, ignoreColors, isDark)
     }
     val hasMedia = remember(inlines) { hasInlineMedia(inlines) }
 
@@ -289,52 +384,95 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
     val measurableUrls = remember(inlines) {
         collectMeasurableSmileyUrls(inlines) + collectMeasurableImageUrls(inlines)
     }
-    val measuredSizes: Map<String, IntSize?> = measurableUrls.associateWith { sizeCache.get(it) }
+    val measuredSizes: Map<String, IntSize?> = measurableUrls.associateWith { sizeCache.get(it)?.size }
 
     // #416 — a smiley URL with a FRESH FAILURE on record is DEAD (HFR's BBCode engine turns any
     // unknown `:code:` into an <img> that 404s) : its token replaces the sprite as body-sized text.
-    // Failures land from two writers — the #175 measurement effect below (perso smileys) and the
-    // render-time error slot of smileyInlineContent (builtins, which are deliberately not measured).
-    // isFailureFresh reads the same SnapshotStateMap as the sizes, so a failure landing recomposes
-    // this block ; the AnnotatedString stays invariant (#175 pivot), only the inline-content map
-    // and the placeholder box change.
+    // Failures land from two writers — the #175 measurement effect below (perso smileys, PROBE
+    // axis) and the render-time error slot of smileyInlineContent (builtins, which are
+    // deliberately not measured — PAINTER axis) — so BOTH axes of the #960 ledger are consulted.
+    // The reads track the ledger's SnapshotStateMap, so a failure landing recomposes this block ;
+    // the AnnotatedString stays invariant (#175 pivot), only the inline-content map and the
+    // placeholder box change.
+    val ledger = LocalMediaAttemptLedger.current
     val allSmileyUrls = remember(inlines) { collectSmileyUrls(inlines) }
-    val deadSmileyUrls: Set<String> =
-        allSmileyUrls.filterTo(HashSet()) { sizeCache.isFailureFresh(it, System.currentTimeMillis()) }
+    val deadSmileyUrls: Set<String> = allSmileyUrls.filterTo(HashSet()) {
+        val now = System.currentTimeMillis()
+        ledger.isFailedFresh(it, MediaAttemptKind.PROBE, now) ||
+            ledger.isFailedFresh(it, MediaAttemptKind.PAINTER, now)
+    }
 
     // Measure the not-yet-known URLs. Coil's execute() is a main-safe suspend call (it dispatches its
     // own I/O), and reuses the shared SingletonImageLoader caches the rendering AsyncImage hits — so no
-    // double network fetch. A dead URL is recorded as a failure (TTL) so it is not re-fetched.
+    // double network fetch. A dead URL settles a PROBE failure on the ledger (TTL) so it is not
+    // re-fetched. #813/#960 — the urls' ledger GENERATIONS key the effect (tracked reads): a
+    // re-parsed page yields a structurally EQUAL `inlines` (remember keeps the same set instance),
+    // so without them the effect never relaunched after a scoped retry bumped a failed url.
     val platformContext = LocalPlatformContext.current
-    LaunchedEffect(measurableUrls) {
+    val mediaGenerations = measurableUrls.map { ledger.generationOf(it) }
+    LaunchedEffect(measurableUrls, mediaGenerations) {
         val loader = SingletonImageLoader.get(platformContext)
         measurableUrls.forEach { url ->
-            measureAndCacheIntrinsicMediaSize(url, sizeCache, platformContext, loader)
+            measureAndCacheIntrinsicMediaSize(url, sizeCache, ledger, platformContext, loader)
         }
     }
 
-    // #224 (option B) — a paragraph whose only content is image(s) (a gallery, or a lone posted image
-    // the parser kept inline because of a stray sibling) is promoted to full-width centred blocks once
-    // a measurement shows at least one is larger than the inline caps (a left-aligned 240sp thumbnail).
-    // cc-image emoji / small reactions never trip the threshold, so they keep their inline size. The
-    // measure LaunchedEffect above feeds the same cache the threshold reads.
-    val galleryImages = remember(inlines) { imageOnlyParagraphImages(inlines) }
-    if (galleryImages != null && shouldPromoteImagesToBlocks(galleryImages, measuredSizes)) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            galleryImages.forEach { promoted ->
-                BlockImage(
-                    url = promoted.image.url,
-                    description = promoted.image.description,
-                    linkUrl = promoted.linkUrl,
-                )
-            }
-        }
+    // #876/#957 (Lot 1B) — STRUCTURAL topology (frozen contract v1.4 §2) : the paragraph is
+    // partitioned by the pure Lot-1A policy ; measured sizes never decide inline/bloc anymore
+    // (`shouldPromoteImagesToBlocks` and its threshold are gone, §9). No MediaRun → fast-path :
+    // the ORIGINAL inlines render through the historical prose path, byte-for-byte unchanged.
+    val segments = remember(inlines) { partitionParagraph(inlines) }
+    if (segments.none { it is ParagraphSegment.MediaRun }) {
+        ParagraphProse(inlines, annotated, measuredSizes, deadSmileyUrls)
         return
     }
+    // §4 — ONE spacing mechanism : 8 dp between a run and its neighbour segment (outer Column),
+    // 8 dp between the images of a run (inner Column). Each prose segment rebuilds its own
+    // INVARIANT AnnotatedString with the same remember keys as the paragraph-level one (#175).
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        segments.forEach { segment ->
+            when (segment) {
+                is ParagraphSegment.InlineSegment -> {
+                    val segmentAnnotated = remember(segment.inlines, linkStyles, imageAlt, ignoreColors, isDark) {
+                        buildInlineText(segment.inlines, linkStyles, imageAlt, ignoreColors, isDark)
+                    }
+                    if (segmentAnnotated.text.isNotBlank() || hasInlineMedia(segment.inlines)) {
+                        ParagraphProse(segment.inlines, segmentAnnotated, measuredSizes, deadSmileyUrls)
+                    }
+                }
 
+                is ParagraphSegment.MediaRun -> Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    segment.images.forEach { runImage ->
+                        BlockImage(
+                            url = runImage.image.url,
+                            description = runImage.image.description,
+                            linkUrl = runImage.linkUrl,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * #957 — the historical prose path of [ParagraphBlock], extracted VERBATIM (no nested
+ * SelectionContainer : selection wrapping stays at the PostRenderer level). Renders one
+ * [ParagraphSegment.InlineSegment] (or the whole paragraph on the no-run fast-path).
+ */
+@Composable
+private fun ParagraphProse(
+    inlines: List<PostInline>,
+    annotated: AnnotatedString,
+    measuredSizes: Map<String, IntSize?>,
+    deadSmileyUrls: Set<String>,
+) {
     // Two guards against a tall/large inline smiley overlapping the text:
     //  - width: cap each smiley to RF1's `img { max-width: 90% }` of the content width (read from
     //    BoxWithConstraints, which shrinks with quote depth) so it never overflows a narrow quote;
@@ -347,10 +485,25 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
         // `maxWidth` is dp but the media placeholders are sized in sp, so convert to the sp-equivalent
         // (Dp.toSp() divides by fontScale): without this, at fontScale > 1 a `0.9 × maxWidth` sp cap
         // renders ~fontScale× wider than the container and overflows a narrow quote (Codex review #246).
-        val maxMediaWidthSp = with(LocalDensity.current) {
+        val density = LocalDensity.current
+        val maxMediaWidthSp = with(density) {
             (maxWidth.toSp().value * SMILEY_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
         }
-        val inlineContent = remember(inlines, measuredSizes, deadSmileyUrls, maxMediaWidthSp) {
+        // #959 (§3) — the CONTENT-IMAGE caps, in PHYSICAL px (the sizing equation works px-only,
+        // cadrage Sol r1): fImage × container width, and the 200 sp inline height cap at the
+        // current density × fontScale. Converted once here — the only place density is known.
+        val maxImageWidthPx = with(density) {
+            (maxWidth.toPx() * IMAGE_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
+        }
+        val maxImageHeightPx = with(density) { INLINE_IMAGE_MAX_HEIGHT_SP.sp.toPx() }.roundToInt()
+        // §4 v1.4 (#957) — total horizontal placeholder padding of a content image (4 dp/side),
+        // converted once to the sp placeholder unit at the current density/fontScale.
+        val inlineImagePaddingSp = with(density) {
+            (INLINE_IMAGE_HORIZONTAL_PADDING * 2).toSp().value.roundToInt()
+        }
+        val inlineContent = remember(
+            inlines, measuredSizes, deadSmileyUrls, maxMediaWidthSp, maxImageWidthPx, maxImageHeightPx, density,
+        ) {
             collectInlineMedia(
                 inlines,
                 smileyBox = { smiley ->
@@ -363,7 +516,12 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
                         smileyDisplayBox(smiley, measuredSizes, maxMediaWidthSp)
                     }
                 },
-                imageBox = { image -> imageDisplayBox(image, measuredSizes, maxMediaWidthSp) },
+                imageBox = { image ->
+                    imageDisplayBox(
+                        image, measuredSizes, maxMediaWidthSp,
+                        maxImageWidthPx, maxImageHeightPx, density, inlineImagePaddingSp,
+                    )
+                },
                 deadSmileyUrls = deadSmileyUrls,
             )
         }
@@ -376,24 +534,40 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
     }
 }
 
+// ReturnCount: the guard chain (blocked author first, then the folds) IS the dispatch.
+@Suppress("ReturnCount")
 @Composable
-private fun QuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
+private fun QuoteBlock(
+    block: PostBlock.Quote,
+    quoteDepth: Int,
+    onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
+) {
+    // #785 — the blacklist applies INSIDE quotes too: a citation whose author is black-listed is
+    // masked like that author's own posts are. This branch runs BEFORE the depth/length folds so a
+    // blocked quote can never leak through an expanded render; the QuoteBlock recursion covers
+    // nested citations natively, and the local's empty default keeps every non-topic surface
+    // (editor preview, MP threads, signatures) unchanged.
+    if (isBlockedQuoteAuthor(block.author, LocalBlockedQuoteAuthors.current)) {
+        BlockedQuoteBlock(block, quoteDepth, onGoToCitedPost)
+        return
+    }
     if (isCollapsedQuoteDepth(quoteDepth)) {
-        CollapsedQuoteBlock(block, quoteDepth)
+        CollapsedQuoteBlock(block, quoteDepth, onGoToCitedPost)
         return
     }
     // #332 — the long-quote fold is gated on the user preference (default ON = historical fold).
     // When OFF we skip FoldableQuoteBlock entirely and fall through to the normal expanded render,
     // exactly as if the quote were not "long". The depth fold above is unaffected.
     if (LocalFoldLongQuotes.current && isLongQuote(block, quoteDepth)) {
-        FoldableQuoteBlock(block, quoteDepth)
+        FoldableQuoteBlock(block, quoteDepth, onGoToCitedPost)
         return
     }
     QuoteFrame(quoteDepth = quoteDepth, isBareQuote = isBareQuote(block)) {
-        QuoteHeader(block)
+        QuoteHeader(block, onGoToCitedPost)
         PostBlocksRenderer(
             blocks = block.content.blocks,
             quoteDepth = quoteDepth + 1,
+            onGoToCitedPost = onGoToCitedPost,
         )
     }
 }
@@ -403,44 +577,83 @@ private fun QuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
  * reads as a quotation, not a stray indented paragraph. A bare quote (no author) falls back to the
  * generic "Citation" label. Extracted so the expanded, depth-collapsed and long-fold variants share
  * one source of truth for the header text.
+ *
+ * #699 — when the quote carries its source coordinates (`page` + `numreponse`, parsed from the
+ * citation href) AND the surface wired [onGoToCitedPost], the header becomes the « go to the cited
+ * post » affordance: primary tint + tap. Quotes whose href HFR served in the dynamic `forum2.php`
+ * form (coordinates unparsed, cf. PostContentParser) keep the inert neutral header — no invented
+ * fallback target.
  */
 @Composable
-private fun QuoteHeader(block: PostBlock.Quote) {
-    Text(
-        text = block.author
-            ?.let { stringResource(R.string.post_quote_author, it) }
-            ?: stringResource(R.string.post_quote_bare),
-        style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
+private fun QuoteHeader(
+    block: PostBlock.Quote,
+    onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
+) {
+    val page = block.page
+    val numreponse = block.numreponse
+    val text = block.author
+        ?.let { stringResource(R.string.post_quote_author, it) }
+        ?: stringResource(R.string.post_quote_bare)
+    if (onGoToCitedPost != null && page != null && numreponse != null) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.clickable(
+                onClickLabel = stringResource(R.string.post_quote_go_to),
+            ) { onGoToCitedPost(page, numreponse) },
+        )
+    } else {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
 
 /**
- * Issue #332 — a "long" top-level citation (`isLongQuote`) folds to a single header line by default,
- * dépliable au clic puis repliable. Mirrors the [SpoilerBlock] interaction (a `rememberSaveable`
- * boolean + a clickable header carrying an "Afficher"/"Masquer" affordance) and reuses [QuoteFrame]
- * so the accent bar, surface and bare-quote palette stay identical to a normal quote. Unlike
+ * Issue #332 — a "long" top-level citation (`isLongQuote`) folds by default, dépliable au clic puis
+ * repliable. Since #784 the folded state is a bounded PREVIEW ([LongQuotePreview]: the first
+ * ~[LONG_QUOTE_PREVIEW_LINES] lines, clipped, with a bottom fade) instead of a bare header line, so
+ * the reader gets enough context to decide whether to unfold. Reuses [QuoteFrame] so the accent
+ * bar, surface and bare-quote palette stay identical to a normal quote. Unlike
  * [CollapsedQuoteBlock] (issue #3 depth fold, which resets depth to 0 on reveal) this fold keeps the
  * real [quoteDepth] when expanded so a long quote that also nests deeply still hits the depth rule.
+ *
+ * Gesture contract (#784, Codex framing): the FRAME — preview body, fade, « Déplier »/« Replier »
+ * label — toggles the fold, with its own a11y `onClickLabel`; the HEADER keeps its distinct #699
+ * « go to the cited post » tap (its clickable consumes the event before the frame's). Inline links
+ * inside the preview keep consuming their own taps, like everywhere else in the renderer.
  */
 @Composable
-private fun FoldableQuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
+private fun FoldableQuoteBlock(
+    block: PostBlock.Quote,
+    quoteDepth: Int,
+    onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
+) {
     var expanded by rememberSaveable(block) { mutableStateOf(false) }
     QuoteFrame(
         quoteDepth = quoteDepth,
         isBareQuote = isBareQuote(block),
-        modifier = Modifier.clickable { expanded = !expanded },
+        modifier = Modifier.clickable(
+            onClickLabel = stringResource(
+                if (expanded) R.string.post_quote_collapse_label else R.string.post_quote_expand_label,
+            ),
+        ) { expanded = !expanded },
     ) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            QuoteHeader(block)
+            // #699 — the header keeps its own go-to-cited-post tap INSIDE the frame's fold toggle:
+            // its clickable consumes the tap, the rest of the frame still folds/unfolds.
+            QuoteHeader(block, onGoToCitedPost)
             Text(
                 text = if (expanded) {
-                    stringResource(R.string.post_quote_hide)
+                    stringResource(R.string.post_quote_collapse)
                 } else {
-                    stringResource(R.string.post_quote_show)
+                    stringResource(R.string.post_quote_expand)
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary,
@@ -450,8 +663,72 @@ private fun FoldableQuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
             PostBlocksRenderer(
                 blocks = block.content.blocks,
                 quoteDepth = quoteDepth + 1,
+                onGoToCitedPost = onGoToCitedPost,
             )
+        } else {
+            LongQuotePreview(block, quoteDepth, onGoToCitedPost)
         }
+    }
+}
+
+/** #784 — height of the bottom fade hinting at the clipped remainder of a folded preview. */
+private val LONG_QUOTE_FADE_HEIGHT: Dp = 28.dp
+
+/**
+ * #784 — bounded, clipped preview of a folded long quote: the normal [PostBlocksRenderer] inside a
+ * `heightIn(max = ~5 bodyMedium lines)` + `clipToBounds` container, with a bottom fade towards the
+ * frame's own container colour hinting at the hidden remainder.
+ *
+ * STRICTLY a container: no AnnotatedString is ever rebuilt to measure or truncate the text (the
+ * #175 invariance pivot — the paragraphs inside are byte-identical to the expanded render), and no
+ * intrinsic measurement is asked of the subtree (`SubcomposeAsyncImage` crashes under
+ * `IntrinsicSize`, cf. the [QuoteFrame] history note). The fade is skipped when the content
+ * actually fits under the cap ([isLongQuotePreviewClipped]) so a char-count-long but visually
+ * short quote is not painted with a misleading « more below » scrim.
+ */
+@Composable
+private fun LongQuotePreview(
+    block: PostBlock.Quote,
+    quoteDepth: Int,
+    onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)?,
+) {
+    val bodyLineHeight = MaterialTheme.typography.bodyMedium.lineHeight
+    val density = LocalDensity.current
+    // Sp-based cap so the preview keeps showing ~the same LINE COUNT at any font scale.
+    val maxHeight = with(density) {
+        longQuotePreviewMaxHeightSp(
+            bodyLineHeightSp = if (bodyLineHeight.isSp) bodyLineHeight.value else 0f,
+        ).sp.toDp()
+    }
+    val maxHeightPx = with(density) { maxHeight.toPx() }
+    // The fade dissolves the clipped last line into the quote card's own surface colour.
+    val fadeColor = MaterialTheme.colorScheme.surfaceContainerHighest
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(max = maxHeight)
+            .clipToBounds()
+            .drawWithContent {
+                drawContent()
+                if (isLongQuotePreviewClipped(contentHeightPx = size.height, maxHeightPx = maxHeightPx)) {
+                    val fadeHeightPx = LONG_QUOTE_FADE_HEIGHT.toPx()
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(Color.Transparent, fadeColor),
+                            startY = size.height - fadeHeightPx,
+                            endY = size.height,
+                        ),
+                        topLeft = Offset(0f, size.height - fadeHeightPx),
+                        size = Size(size.width, fadeHeightPx),
+                    )
+                }
+            },
+    ) {
+        PostBlocksRenderer(
+            blocks = block.content.blocks,
+            quoteDepth = quoteDepth + 1,
+            onGoToCitedPost = onGoToCitedPost,
+        )
     }
 }
 
@@ -526,7 +803,11 @@ private fun QuoteFrame(
 private val QUOTE_ACCENT_WIDTH: Dp = 4.dp
 
 @Composable
-private fun CollapsedQuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
+private fun CollapsedQuoteBlock(
+    block: PostBlock.Quote,
+    quoteDepth: Int,
+    onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
+) {
     // Issue #3 mandates the masked tail beyond N=3 nested quotes stays *collapsible* — the user
     // must be able to ask for the deeper sub-tree on demand. We reset quoteDepth to 0 once
     // revealed so the user gets another N levels before the next collapse, instead of an
@@ -562,17 +843,75 @@ private fun CollapsedQuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
         }
         if (revealed) {
             // #252 — same "Citation"/"Citation de X" header rule as the expanded QuoteBlock.
-            QuoteHeader(block)
+            QuoteHeader(block, onGoToCitedPost)
             PostBlocksRenderer(
                 blocks = block.content.blocks,
                 quoteDepth = 0,
+                onGoToCitedPost = onGoToCitedPost,
+            )
+        }
+    }
+}
+
+/**
+ * #785 — placeholder for a quote whose author is black-listed, mirroring the [CollapsedQuoteBlock]
+ * interaction (one-line label + « Afficher »/« Masquer », the whole frame toggles) and the topic
+ * screen's `HiddenPostCard` copy (the pseudo stays visible, consistent with the post-level mask).
+ * The reveal is per-quote and transient (`rememberSaveable`, same lifetime as the other folds).
+ * Unlike [CollapsedQuoteBlock] the reveal keeps the REAL depth (`quoteDepth + 1`, like the expanded
+ * render): revealing a blocked quote must not grant extra nesting levels, and a blocked citation
+ * nested inside the revealed body stays masked through the recursion.
+ */
+@Composable
+private fun BlockedQuoteBlock(
+    block: PostBlock.Quote,
+    quoteDepth: Int,
+    onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
+) {
+    var revealed by rememberSaveable(block) { mutableStateOf(false) }
+    QuoteFrame(
+        quoteDepth = quoteDepth,
+        isBareQuote = isBareQuote(block),
+        modifier = Modifier.clickable { revealed = !revealed },
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                // isBlockedQuoteAuthor never matches a null author, so the fallback is defensive.
+                text = stringResource(R.string.post_quote_blocked_author, block.author.orEmpty()),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = if (revealed) {
+                    stringResource(R.string.post_quote_hide)
+                } else {
+                    stringResource(R.string.post_quote_show)
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        if (revealed) {
+            // #252/#699 — same header rule as the expanded QuoteBlock (and same jump affordance).
+            QuoteHeader(block, onGoToCitedPost)
+            PostBlocksRenderer(
+                blocks = block.content.blocks,
+                quoteDepth = quoteDepth + 1,
+                onGoToCitedPost = onGoToCitedPost,
             )
         }
     }
 }
 
 @Composable
-private fun SpoilerBlock(block: PostBlock.Spoiler, quoteDepth: Int) {
+private fun SpoilerBlock(
+    block: PostBlock.Spoiler,
+    quoteDepth: Int,
+    onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
+) {
     var revealed by rememberSaveable(block) { mutableStateOf(false) }
     Card(
         colors = CardDefaults.cardColors(
@@ -610,6 +949,7 @@ private fun SpoilerBlock(block: PostBlock.Spoiler, quoteDepth: Int) {
                 PostBlocksRenderer(
                     blocks = block.content.blocks,
                     quoteDepth = quoteDepth,
+                    onGoToCitedPost = onGoToCitedPost,
                 )
             }
         }
@@ -620,24 +960,33 @@ private fun SpoilerBlock(block: PostBlock.Spoiler, quoteDepth: Int) {
 private fun ImageBlock(block: PostBlock.Image) = BlockImage(url = block.url, description = block.description)
 
 /**
- * Full-width, centred, bounded image. The home of a standalone `PostBlock.Image`, and (since #224
- * option B) of a large image promoted out of an image-only paragraph.
+ * Centred, bounded block image on its own line. The home of a standalone `PostBlock.Image`, and
+ * (#876/#957, contract v1.4 §2) of every [ParagraphSegment.MediaRun] image — the STRUCTURAL
+ * topology replaced the former measured promotion (#224 option B, removed in this lot).
  *
  * When [linkUrl] is non-null the image was posted as `[url=…][img]` (the "click to enlarge" pattern):
- * the whole block is tappable and opens that URL (#257), so a linked image gets the full-width
- * treatment AND keeps its tap-through instead of being kept as a small inline thumbnail.
+ * the whole block is tappable and opens that URL (#257), so a linked image gets the block treatment
+ * AND keeps its tap-through instead of being kept as a small inline thumbnail.
  *
- * Bounded so a 4000×3000 RAW screenshot can't blow up the post and destroy the scroll position.
- * SubcomposeAsyncImage exposes loading/error slots so the user gets visual feedback when an HFR image
- * host (rehost.diberie.com, super-h.fr, …) is offline rather than a silent empty Box.
+ * #610/#842 — a MEASURED image renders in a box of EXACTLY its parity display size
+ * ([imageDisplaySizePx] §3: native PHYSICAL size, no upscale, width ≤ fImage × column, height ≤
+ * the clamped useful-height cap [rememberBlockImageColdCapDp]), centred. A not-yet-measured
+ * image (cold cache / failed measurement) sits in the deterministic §6 COLD slot
+ * ([coldBlockSlotDp], since #957 — formerly the legacy [160, 480] dp grow-on-load slot).
+ * Bounded either way, so a 4000×3000 RAW screenshot can't blow up the post and destroy the
+ * scroll position.
  *
- * #249 — anti-CLS: instead of reserving the legacy `minHeight` slot (which then SNAPS to the bitmap's
- * real height on arrival = a bump), reserve the EXACT final height from the measured intrinsic size
- * (`width × h/w`, same #175/#224 cache) so the shimmer placeholder occupies the loaded image's slot and
- * nothing below moves. The image then `crossfade`s in (Coil native) into the already-sized box. A
- * not-yet-measured image (standalone `PostBlock.Image`, no paragraph measure effect) keeps the legacy
- * min/max slot. Animations honour the system reduce-motion preference ([rememberAnimationsEnabled]).
+ * #249 — anti-CLS survives the #610 unification: the exact box is computed BEFORE the bitmap arrives
+ * (same measured-intrinsic cache as #175/#224), so the shimmer placeholder occupies the loaded
+ * image's slot and nothing below moves; the image then `crossfade`s in (Coil native) into the
+ * already-sized box. SubcomposeAsyncImage exposes loading/error slots so the user gets visual
+ * feedback when an HFR image host (rehost.diberie.com, super-h.fr, …) is offline rather than a
+ * silent empty Box. Animations honour the system reduce-motion preference
+ * ([rememberAnimationsEnabled]).
  */
+// CyclomaticComplexMethod: the §3/§6/§7 sizing states × the §5 interaction gates are all
+// contractual branches of ONE render seam — splitting them would scatter the contract.
+@Suppress("CyclomaticComplexMethod")
 @Composable
 private fun BlockImage(url: String, description: String?, linkUrl: String? = null) {
     val uriHandler = LocalUriHandler.current
@@ -645,83 +994,235 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
     val animationsEnabled = rememberAnimationsEnabled()
 
     // #249 — reserve the exact final box from the measured intrinsic size when known. The cache is fed by
-    // the #175/#224 paragraph measure effect (promoted images) AND, since #249 follow-up, by the effect
-    // just below for standalone PostBlock.Image. Until a measurement lands (cold cache) it is null and the
-    // legacy min/max slot is used for that first frame.
+    // the #175/#224 paragraph measure effect AND, since #249 follow-up, by the effect just below for
+    // standalone PostBlock.Image. Until a measurement lands (cold cache) it is null and the §6 COLD
+    // slot (v1.4, #957) is used for that first frame.
     val sizeCache = LocalIntrinsicMediaSizeCache.current
-    val measured: IntSize? = sizeCache.get(url)
+    // #973 (§8 [AMENDEMENT-v1.5-2]) — the ATOMIC metadata: the size drives the §3 box, the probe
+    // MIME decides `eligibleGifBloc` below (never the URL extension; null MIME = non-eligible).
+    val metadata: IntrinsicMediaMetadata? = sizeCache.get(url)
+    val measured: IntSize? = metadata?.size
     // #249 follow-up — a standalone PostBlock.Image is NOT covered by the paragraph measure effect, so
-    // without this its intrinsic size never lands in the cache: reservedBlockImageHeight stays null, the
-    // image falls into the legacy min/max slot and loses both the full-width fit and the reserved loading
-    // space (#249 anti-CLS). Measure it here through the same guarded seam the paragraph effect uses; the
-    // SnapshotStateMap write then recomposes this block onto the reserved-box path.
+    // without this its intrinsic size never lands in the cache: the measured box never resolves, the
+    // image stays in the §6 cold slot forever and loses both the exact parity box (#610) and the
+    // reserved loading space (#249 anti-CLS). Measure it here through the same guarded seam the
+    // paragraph effect uses; the SnapshotStateMap write then recomposes this block onto the exact-box
+    // path.
     val platformContext = LocalPlatformContext.current
-    LaunchedEffect(url, sizeCache, platformContext) {
+    // #813/#960 parity (gate #957 r1, bloquant) : a structurally-promoted image renders here, so
+    // the block path must honour the ledger exactly like the inline path — the measure effect
+    // re-keys on the url's GENERATION (tracked read) and the painter attempt below is recreated
+    // on a scoped retry.
+    val ledger = LocalMediaAttemptLedger.current
+    val mediaGeneration = ledger.generationOf(url)
+    LaunchedEffect(url, sizeCache, platformContext, mediaGeneration) {
         measureAndCacheIntrinsicMediaSize(
             url = url,
             cache = sizeCache,
+            ledger = ledger,
             context = platformContext,
             imageLoader = SingletonImageLoader.get(platformContext),
         )
     }
 
-    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-        val reservedHeight = PostMediaDisplayPolicy.reservedBlockImageHeight(
-            measured = measured?.let { PixelSize(it.width, it.height) },
-            availableWidthDp = maxWidth.value,
-        )
-        // Reserved box: an exact height when measured (anti-CLS), else the legacy min/max slot.
-        val sizeModifier = if (reservedHeight != null) {
-            Modifier.height(reservedHeight)
-        } else {
-            Modifier
-                .defaultMinSize(minHeight = PostMediaDisplayPolicy.blockImageMinHeight)
-                .heightIn(max = PostMediaDisplayPolicy.blockImageMaxHeight)
+    // #842 — the block height cap is recalibrated for mobile (relative to the viewport), read here
+    // where the screen height is known; #610's flat 200 dp squeezed square/portrait photos to ~48 %
+    // width on phones (the width cap ≈ 90 % never got a chance to bind).
+    // #959 (§3, [Lot0-3]) — the MEASURED path now shares the CLAMPED useful-height cap with the
+    // cold slot (the window-following metric the host reads from containerSize + insets); the
+    // legacy screen-fraction cap (#842, `max(400, 0.5 × screenHeightDp)`) is gone — it could
+    // exceed a short window (split-screen) where the clamp follows it.
+    val capBlocDp = rememberBlockImageColdCapDp()
+    val blockDensity = LocalDensity.current
+    // #973 (§8) — `mGif`: an eligible block GIF (probe MIME on the atomic metadata) takes the
+    // display-profile factor as its §3 scale ceiling; everything else keeps the strict 1f.
+    // The COLD path below is untouched by construction: no metadata → no measured box, the §6
+    // slot is deterministic (no dimensions, no MIME — no factor).
+    val mediaDisplayProfile = LocalMediaDisplayProfile.current
+    val gifCeiling = if (metadata?.mimeType == GIF_MIME_TYPE) mediaDisplayProfile.factor else 1f
+    // #876 (§8 [AMENDEMENT-v1.5-4]) — `mApercu`: an eligible LINKED PREVIEW (a thumbnail wrapped
+    // in a link to a DISTINCT resource of the SAME host, native axis ≤ 400 px — the pure guard
+    // [isEligibleLinkedPreview]) may spread one source pixel over `min(densité, 3)` screen pixels,
+    // so it finally occupies its source dimensions in dp. The dimensions handed to the guard are
+    // the CACHE's (§3 authority, already EXIF-oriented) and the MIME plays no part here.
+    val previewCeiling = if (isEligibleLinkedPreview(url = url, linkUrl = linkUrl, nativePx = measured)) {
+        linkedPreviewUpscaleCeiling(blockDensity.density)
+    } else {
+        1f
+    }
+    // `mEffectif = max(mApercu, mGif)` — the two multipliers relax the SAME no-upscale ceiling and
+    // the largest wins; they must NEVER multiply (an eligible linked GIF is ×3 under M as under S,
+    // never ×4,5). That `max` is ALSO the `1,0` floor: [linkedPreviewUpscaleCeiling] deliberately
+    // returns the raw density, so without it a screen density below 1 would SHRINK the image.
+    val scaleCeiling = maxOf(gifCeiling, previewCeiling)
+    // contentAlignment centres the (usually narrower-than-column, #610) exact box on its own line —
+    // the same visual centring the pre-#610 full-width Fit letterboxing produced.
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        // #959 (§3) — the measured box is the PHYSICAL-pixel equation (imageDisplaySizePx: single
+        // scale, height derived from the rounded width, no physical upscale), caps converted to px
+        // here and the result converted back to dp at this Compose boundary; anti-CLS: it is also
+        // the reserved loading slot. Cold falls back to the deterministic §6 slot below.
+        val displayPx = measured?.let {
+            with(blockDensity) {
+                val maxWidthPx = (maxWidth.toPx() * IMAGE_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
+                val maxHeightPx = capBlocDp.dp.roundToPx()
+                imageDisplaySizePx(it, maxWidthPx, maxHeightPx, scaleCeiling)
+            }
         }
-        val containerModifier = Modifier
-            .fillMaxWidth()
-            .then(sizeModifier)
+        val sizeModifier = if (displayPx != null) {
+            with(blockDensity) { Modifier.size(displayPx.width.toDp(), displayPx.height.toDp()) }
+        } else {
+            // §6 COLD slot (v1.4, [AMENDEMENT-Lot0-3]) : deterministic box before any dimension is
+            // known — width fImage × available, height min(capBloc, max(160 dp, 0,75 × width)).
+            val (coldWidth, coldHeight) = coldBlockSlotDp(maxWidth.value, capBlocDp)
+            Modifier.size(coldWidth.dp, coldHeight.dp)
+        }
+        // #831/#958 (Lot 2, §5) — contextual image menu on long-press + linked-image tap, BOTH gated
+        // by the host capability below. A linked image (#257) gains its tap-through (opens linkUrl)
+        // AND the long-press menu through ONE combinedClickable; an unlinked eligible image gets a
+        // long-press-ONLY handler. When the surface provides no actions (MP threads, editor preview,
+        // signatures: default null) the image is TOTALLY inert (no tap even if linked) — the Lot 2
+        // §5 target. data:/blob:/empty URLs are never menu-eligible.
+        // #958 Lot 2 (§5) — the HOST capability (LocalPostImageActions != null) gates ALL image
+        // interaction. On the three null hosts (MP, editor preview, signature) the block image is
+        // TOTALLY inert — no tap (even linked), no long-press, no interactive role (matrice §5).
+        // Two independent gates (Sol reserve): the TAP-to-open-link depends on `linkUrl != null`
+        // (NOT on the image URL's menu-eligibility) ; the long-press MENU depends on the image URL
+        // being eligible. Role.Image + onClickLabel « Ouvrir l'image » ([AMENDEMENT-Lot2-2] : Role.Link
+        // does not exist in Compose 1.11.x ; the onClickLabel announces the link-open to TalkBack).
+        val host = LocalPostImageActions.current
+        val tapOpensLink = host != null && linkUrl != null
+        val menuEligible = host != null && isEligiblePostImageUrl(url)
+        val optionsLabel = stringResource(R.string.post_image_options_action)
+        val interactionModifier = when {
+            tapOpensLink && menuEligible ->
+                Modifier.combinedClickable(
+                    role = Role.Image,
+                    onClickLabel = openLabel,
+                    onLongClickLabel = optionsLabel,
+                    onLongClick = {
+                        host.onLongPress(PostImageTarget(url = url, description = description, linkUrl = linkUrl))
+                    },
+                ) {
+                    runCatching { uriHandler.openUri(linkUrl) }
+                }
+
+            tapOpensLink ->
+                // Linked image whose own URL is not menu-eligible (e.g. data:) : tap still opens
+                // the link, no long-press menu.
+                Modifier.clickable(role = Role.Image, onClickLabel = openLabel) {
+                    runCatching { uriHandler.openUri(linkUrl) }
+                }
+
+            menuEligible -> Modifier.postImageLongPress(
+                actions = host,
+                target = PostImageTarget(url = url, description = description, linkUrl = null),
+                haptics = LocalHapticFeedback.current,
+                optionsLabel = optionsLabel,
+            )
+
+            else -> Modifier
+        }
+        // #610 — the exact parity box centres via the BoxWithConstraints contentAlignment; no
+        // fillMaxWidth here (the pre-#610 full-width shape is gone).
+        // #959 (§3 GIF) — block images are always content images (a cc is never promoted, §2
+        // cc-marker boundary rule): gate the animation on (measured box, window bounds, RESUMED).
+        val gifGate = rememberGifAnimationGate(boxReady = measured != null)
+        val containerModifier = sizeModifier
+            // Structural test seam (#957 gate) : lets bounds-level tests COUNT the block images of
+            // a rendered post — descriptions are often null on HFR `[img]`, so the a11y tree alone
+            // cannot enumerate them. testTag is invisible to TalkBack.
+            .testTag(BLOCK_IMAGE_TEST_TAG)
+            .then(gifGate.modifier)
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-            .then(
-                if (linkUrl != null) {
-                    // Role.Image (not Button): the element IS an image that opens its full version on
-                    // tap; the localized onClickLabel carries the action for TalkBack.
-                    Modifier.clickable(role = Role.Image, onClickLabel = openLabel) {
-                        runCatching { uriHandler.openUri(linkUrl) }
-                    }
-                } else {
-                    Modifier
-                },
-            )
-        val request = remember(url, animationsEnabled, platformContext) {
+            .then(interactionModifier)
+        // #959 (§7) — measured: decode at the explicit calculator size, KEYED into the remember so
+        // cold→measured recreates request + painter (exactly one new decode). Cold: constraint-
+        // driven as before (the §6 slot is fixed until the measurement lands).
+        val decodeSize = measured?.let { decodeSizePx(displayPx!!.width, it) }
+        val request = remember(url, animationsEnabled, platformContext, decodeSize) {
             ImageRequest.Builder(platformContext)
                 .data(url)
                 // #249 — fondu natif Coil dans la box déjà dimensionnée → zéro saut. Désactivé quand le
                 // système demande de réduire les animations (apparition directe, §4 de l'issue).
                 .crossfade(animationsEnabled)
+                .apply {
+                    if (decodeSize != null) {
+                        size(decodeSize.width, decodeSize.height)
+                        scale(Scale.FIT)
+                        precision(Precision.INEXACT)
+                    }
+                }
                 .build()
         }
-        SubcomposeAsyncImage(
-            model = request,
-            contentDescription = description,
-            contentScale = ContentScale.Fit,
-            modifier = containerModifier,
-            loading = {
-                // Measured: fill the exact reserved box. Unmeasured (max-only constraint): a STABLE
-                // min-height placeholder — NOT fillMaxSize, which would balloon to the max slot and then
-                // collapse to the loaded intrinsic height (a visible shift, Codex review). The legacy
-                // min→intrinsic grow on load remains for these rare standalone images.
-                val shimmerModifier = if (reservedHeight != null) {
-                    Modifier.fillMaxSize()
-                } else {
-                    Modifier.fillMaxWidth().height(PostMediaDisplayPolicy.blockImageMinHeight)
+        // #960 (§6) — the painter ATTEMPT gates the node (replaces the pre-#960 screen-wide
+        // key(refreshGeneration) bump): a fresh failure composes the §6 error state WITHOUT any
+        // painter — no network re-attempt per occurrence or recomposition — and a scoped retry
+        // recreates the attempt (its remember keys the url's generation), hence the painter.
+        val attempt = rememberPainterAttempt(url)
+        when {
+            attempt.failedFresh -> {
+                // §6 P3 — error state INSIDE the reserved box (anti-CLS, A11Y-5: contractual
+                // wording on the same containing node) + the UNIVERSAL per-URL manual retry
+                // (Role.Button « Réessayer » → new generation). Deliberately independent of the
+                // §5 host capability: the §5 matrix gates the interactions of a RENDERED image
+                // (link tap, long-press menu — none installed here); the slot's single action is
+                // the retry, mechanically effective in every host through the ambient ledger.
+                val retryLabel = stringResource(R.string.post_image_retry_action)
+                Box(
+                    modifier = sizeModifier
+                        .testTag(BLOCK_IMAGE_TEST_TAG)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                        .clickable(role = Role.Button, onClickLabel = retryLabel) {
+                            ledger.retryUrl(url)
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    ImageBlockError(description)
                 }
-                ImageShimmer(animated = animationsEnabled, modifier = shimmerModifier)
-            },
-            error = { ImageBlockError(description) },
-            success = { SubcomposeAsyncImageContent() },
-        )
+            }
+
+            attempt.renderPainter -> SubcomposeAsyncImage(
+                model = request,
+                // A11Y-2 (annexe a11y #876) — the HFR alt when present, otherwise the localized
+                // generic fallback; never null, never the raw URL. The error slot swaps in the
+                // contractual error wording (ImageBlockError) on the same containing node.
+                contentDescription = description?.takeIf(String::isNotBlank)
+                    ?: stringResource(R.string.post_inline_image_alt),
+                contentScale = ContentScale.Fit,
+                modifier = containerModifier,
+                loading = {
+                    // Both branches have an exactly-sized box (measured parity #610 OR the §6 cold
+                    // slot #957), so the shimmer always fills it — the legacy min→intrinsic
+                    // grow-on-load is gone with the min/max slot.
+                    ImageShimmer(animated = animationsEnabled, modifier = Modifier.fillMaxSize())
+                },
+                error = { state ->
+                    // The settlement recomposes this node onto the failedFresh branch above; this
+                    // slot only covers the transient frame in between (same wording). SideEffect:
+                    // never write snapshot state during composition.
+                    SideEffect { attempt.onState(state) }
+                    ImageBlockError(description)
+                },
+                success = { state ->
+                    // #959 (§3 GIF) — hand the Animatable behind the result to the gate.
+                    SideEffect {
+                        gifGate.onState(state)
+                        attempt.onState(state)
+                    }
+                    SubcomposeAsyncImageContent()
+                },
+            )
+
+            else ->
+                // Grant pending (first frame) or another occurrence's attempt in flight: hold the
+                // reserved box with the loading treatment until the ledger settles.
+                Box(modifier = containerModifier) {
+                    ImageShimmer(animated = animationsEnabled, modifier = Modifier.fillMaxSize())
+                }
+        }
     }
 }
 
@@ -911,60 +1412,83 @@ internal fun buildInlineText(
     // web-tuned colours read as garish/illegible on the app theme). Text falls back to the caller's
     // colour. Default false: post bodies keep author colours.
     ignoreColors: Boolean = false,
+    // State-hygiene audit 2026-07-05 — when true, author `[color]` values are clamped for
+    // legibility on a dark surface via [ensureReadableColor] (and symmetrically on light).
+    // Default false: existing callers/tests keep the light-theme behaviour.
+    isDark: Boolean = false,
 ): AnnotatedString = buildAnnotatedString {
     val media = MediaCounter()
-    appendInlines(inlines, linkStyles, media, imageAlt, ignoreColors)
+    appendInlines(inlines, linkStyles, media, imageAlt, ignoreColors, isDark)
 }
 
+@Suppress("LongParameterList") // Recursive walker — every param is the same threaded context.
 private fun AnnotatedString.Builder.appendInlines(
     inlines: List<PostInline>,
     linkStyles: TextLinkStyles,
     media: MediaCounter,
     imageAlt: String,
     ignoreColors: Boolean,
+    isDark: Boolean,
 ) {
-    inlines.forEach { inline -> appendInline(inline, linkStyles, media, imageAlt, ignoreColors) }
+    inlines.forEach { inline -> appendInline(inline, linkStyles, media, imageAlt, ignoreColors, isDark) }
 }
 
-@Suppress("CyclomaticComplexMethod")
+// LongParameterList: recursive walker — every param is the same threaded context.
+@Suppress("CyclomaticComplexMethod", "LongParameterList")
 private fun AnnotatedString.Builder.appendInline(
     inline: PostInline,
     linkStyles: TextLinkStyles,
     media: MediaCounter,
     imageAlt: String,
     ignoreColors: Boolean,
+    isDark: Boolean,
 ) {
     when (inline) {
         is PostInline.Text -> append(inline.value)
         PostInline.LineBreak -> append('\n')
         is PostInline.Strong -> withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors)
+            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors, isDark)
         }
 
         is PostInline.Emphasis -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
-            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors)
+            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors, isDark)
         }
 
         is PostInline.Underline -> withStyle(SpanStyle(textDecoration = TextDecoration.Underline)) {
-            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors)
+            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors, isDark)
         }
 
         is PostInline.Strike -> withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) {
-            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors)
+            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors, isDark)
         }
 
         // #553 — drop the author colour when asked (signatures): render the children plain so they
         // inherit the caller's neutral colour instead of the web-tuned, often-illegible author hue.
+        // Otherwise the colour is kept but clamped for legibility on the current theme
+        // (state-hygiene audit 2026-07-05): a web-tuned navy is unreadable on a dark surface.
         is PostInline.Color -> if (ignoreColors) {
-            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors)
+            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors, isDark)
         } else {
-            withStyle(SpanStyle(color = parseColor(inline.colorHex))) {
-                appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors)
+            withStyle(SpanStyle(color = ensureReadableColor(parseColor(inline.colorHex), isDark))) {
+                appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors, isDark)
             }
         }
 
-        is PostInline.Link -> withLink(LinkAnnotation.Url(inline.url, linkStyles)) {
-            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors)
+        // #958 Lot 2 (§5/G3) — a link whose subtree carries a CONTENT image is SPLIT: the image
+        // placeholder leaves the LinkAnnotation (its interaction moves to the image node, see
+        // imageInlineContent), while text, smileys and cc-images (#256) stay under lazily-opened
+        // link ranges (never an empty one). A link without content image keeps today's single
+        // range — text links and the #256 fast-path are structurally untouched.
+        is PostInline.Link -> if (containsContentImage(inline.children)) {
+            val run = LinkRunState(inline.url, linkStyles)
+            appendLinkedInlinesSplit(
+                inline.children, run, emptyList(), linkStyles, media, imageAlt, ignoreColors, isDark,
+            )
+            run.closeIfOpen(this)
+        } else {
+            withLink(LinkAnnotation.Url(inline.url, linkStyles)) {
+                appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors, isDark)
+            }
         }
 
         is PostInline.InlineImage -> appendInlineContent(media.nextImage(), inline.description ?: imageAlt)
@@ -977,6 +1501,168 @@ private fun AnnotatedString.Builder.appendInline(
             }
         }
     }
+}
+
+/**
+ * #958 Lot 2 (§5) — true when the subtree carries at least one CONTENT image (an
+ * [PostInline.InlineImage] without the #256 cc marker). Decides whether a [PostInline.Link]
+ * needs the LinkAnnotation split.
+ */
+private fun containsContentImage(inlines: List<PostInline>): Boolean = inlines.any { inline ->
+    when (inline) {
+        is PostInline.InlineImage -> !isCcImageUrl(inline.url)
+        is PostInline.Strong -> containsContentImage(inline.children)
+        is PostInline.Emphasis -> containsContentImage(inline.children)
+        is PostInline.Underline -> containsContentImage(inline.children)
+        is PostInline.Strike -> containsContentImage(inline.children)
+        is PostInline.Color -> containsContentImage(inline.children)
+        is PostInline.Link -> containsContentImage(inline.children)
+        else -> false
+    }
+}
+
+/**
+ * Lazily-opened LinkAnnotation range over the split traversal ([appendLinkedInlinesSplit]):
+ * opened at the first link-carried leaf, closed before a content image — adjacent images or
+ * images at the link edges thus never leave an EMPTY link range behind. The open/close always
+ * happens with a balanced style stack ([withStyles] wraps each leaf), so pop(openIndex) never
+ * cuts a style range.
+ */
+private class LinkRunState(private val url: String, private val styles: TextLinkStyles) {
+    private var openIndex = -1
+
+    fun ensureOpen(builder: AnnotatedString.Builder) {
+        if (openIndex < 0) openIndex = builder.pushLink(LinkAnnotation.Url(url, styles))
+    }
+
+    fun closeIfOpen(builder: AnnotatedString.Builder) {
+        if (openIndex >= 0) {
+            builder.pop(openIndex)
+            openIndex = -1
+        }
+    }
+}
+
+// LongParameterList: recursive walker — the same threaded context as appendInline, plus the run.
+@Suppress("LongParameterList")
+private fun AnnotatedString.Builder.appendLinkedInlinesSplit(
+    inlines: List<PostInline>,
+    run: LinkRunState,
+    spanStyles: List<SpanStyle>,
+    linkStyles: TextLinkStyles,
+    media: MediaCounter,
+    imageAlt: String,
+    ignoreColors: Boolean,
+    isDark: Boolean,
+) {
+    inlines.forEach { inline ->
+        when (inline) {
+            // The content image leaves the link range; the generic walker appends its placeholder
+            // (single append path = MediaCounter symmetry). cc-images are link-carried (#256).
+            is PostInline.InlineImage -> if (isCcImageUrl(inline.url)) {
+                carryUnderLink(inline, run, spanStyles, linkStyles, media, imageAlt, ignoreColors, isDark)
+            } else {
+                run.closeIfOpen(this)
+                appendInline(inline, linkStyles, media, imageAlt, ignoreColors, isDark)
+            }
+
+            // A nested [url] (not produced by the parser — defensive): seal the outer run and let
+            // the generic path decide again under the INNER url.
+            is PostInline.Link -> {
+                run.closeIfOpen(this)
+                appendInline(inline, linkStyles, media, imageAlt, ignoreColors, isDark)
+            }
+
+            is PostInline.Strong -> splitOrCarryContainer(
+                inline, inline.children, SpanStyle(fontWeight = FontWeight.Bold),
+                run, spanStyles, linkStyles, media, imageAlt, ignoreColors, isDark,
+            )
+
+            is PostInline.Emphasis -> splitOrCarryContainer(
+                inline, inline.children, SpanStyle(fontStyle = FontStyle.Italic),
+                run, spanStyles, linkStyles, media, imageAlt, ignoreColors, isDark,
+            )
+
+            is PostInline.Underline -> splitOrCarryContainer(
+                inline, inline.children, SpanStyle(textDecoration = TextDecoration.Underline),
+                run, spanStyles, linkStyles, media, imageAlt, ignoreColors, isDark,
+            )
+
+            is PostInline.Strike -> splitOrCarryContainer(
+                inline, inline.children, SpanStyle(textDecoration = TextDecoration.LineThrough),
+                run, spanStyles, linkStyles, media, imageAlt, ignoreColors, isDark,
+            )
+
+            // Mirrors the #553/#(state-hygiene) colour handling of appendInline: dropped when
+            // ignored, otherwise clamped for legibility on the current theme.
+            is PostInline.Color -> splitOrCarryContainer(
+                inline, inline.children,
+                if (ignoreColors) null else SpanStyle(color = ensureReadableColor(parseColor(inline.colorHex), isDark)),
+                run, spanStyles, linkStyles, media, imageAlt, ignoreColors, isDark,
+            )
+
+            // Text, LineBreak, Smiley — link-carried leaves.
+            else -> carryUnderLink(inline, run, spanStyles, linkStyles, media, imageAlt, ignoreColors, isDark)
+        }
+    }
+}
+
+/**
+ * One styled container inside the split traversal: recurse (accumulating [style]) only when its
+ * subtree still carries a content image; an image-free subtree is appended whole through the
+ * untouched generic walker, INSIDE the link range — keeping its nested style ranges intact.
+ */
+@Suppress("LongParameterList") // Same threaded context as the split walker.
+private fun AnnotatedString.Builder.splitOrCarryContainer(
+    container: PostInline,
+    children: List<PostInline>,
+    style: SpanStyle?,
+    run: LinkRunState,
+    spanStyles: List<SpanStyle>,
+    linkStyles: TextLinkStyles,
+    media: MediaCounter,
+    imageAlt: String,
+    ignoreColors: Boolean,
+    isDark: Boolean,
+) {
+    if (containsContentImage(children)) {
+        appendLinkedInlinesSplit(
+            children, run, spanStyles + listOfNotNull(style), linkStyles, media, imageAlt, ignoreColors, isDark,
+        )
+    } else {
+        carryUnderLink(container, run, spanStyles, linkStyles, media, imageAlt, ignoreColors, isDark)
+    }
+}
+
+/**
+ * Appends one image-free inline (leaf or whole subtree) INSIDE the link range, through the
+ * untouched generic walker. [spanStyles] re-applies the styles of the containers the split had to
+ * cut through — per-leaf ranges, visually identical to the nested ranges they replace.
+ */
+@Suppress("LongParameterList") // Same threaded context as the split walker.
+private fun AnnotatedString.Builder.carryUnderLink(
+    inline: PostInline,
+    run: LinkRunState,
+    spanStyles: List<SpanStyle>,
+    linkStyles: TextLinkStyles,
+    media: MediaCounter,
+    imageAlt: String,
+    ignoreColors: Boolean,
+    isDark: Boolean,
+) {
+    run.ensureOpen(this)
+    withStyles(spanStyles) { appendInline(inline, linkStyles, media, imageAlt, ignoreColors, isDark) }
+}
+
+private inline fun AnnotatedString.Builder.withStyles(styles: List<SpanStyle>, block: () -> Unit) {
+    if (styles.isEmpty()) {
+        block()
+        return
+    }
+    val anchor = pushStyle(styles.first())
+    for (i in 1 until styles.size) pushStyle(styles[i])
+    block()
+    pop(anchor)
 }
 
 /**
@@ -1005,11 +1691,21 @@ private fun walkInlinesForMedia(
     smileyBox: (PostInline.Smiley) -> InlineMediaBox,
     imageBox: (PostInline.InlineImage) -> InlineMediaBox,
     deadSmileyUrls: Set<String>,
+    // #958 Lot 2 (§5) — the URL of the enclosing [PostInline.Link], threaded down so the image
+    // node of a linked CONTENT image can own the tap the LinkAnnotation split took away from the
+    // text machinery (see appendInline / imageInlineContent).
+    activeLinkUrl: String? = null,
 ) {
     inlines.forEach { inline ->
         when (inline) {
             is PostInline.InlineImage ->
-                out += media.nextImage() to imageInlineContent(inline, imageBox(inline))
+                out += media.nextImage() to imageInlineContent(
+                    inline,
+                    imageBox(inline),
+                    // A cc-image (#256) stays under the LinkAnnotation and must not gain a tap
+                    // surface of its own through the split.
+                    linkUrl = activeLinkUrl?.takeUnless { isCcImageUrl(inline.url) },
+                )
 
             is PostInline.Smiley -> {
                 val url = inline.imageUrl ?: return@forEach
@@ -1018,17 +1714,17 @@ private fun walkInlinesForMedia(
             }
 
             is PostInline.Strong ->
-                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls)
+                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls, activeLinkUrl)
             is PostInline.Emphasis ->
-                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls)
+                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls, activeLinkUrl)
             is PostInline.Underline ->
-                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls)
+                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls, activeLinkUrl)
             is PostInline.Strike ->
-                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls)
+                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls, activeLinkUrl)
             is PostInline.Color ->
-                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls)
+                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls, activeLinkUrl)
             is PostInline.Link ->
-                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls)
+                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls, inline.url)
             else -> Unit
         }
     }
@@ -1099,6 +1795,12 @@ private fun collectMeasurableSmileyUrl(inline: PostInline, urls: MutableSet<Stri
  * (no-upscale native sizing, like #175 smileys). The `:core:ui` parser has already stripped
  * non-http(s) schemes, so every collected URL is safe to hand to Coil. Recurses into inline
  * containers (e.g. an `[img]` wrapped in a `[url=…]` link), mirroring [walkInlinesForMedia].
+ *
+ * #256 — URLs carrying the `hfr-cc-image=true` marker are EXCLUDED: their box is pinned by the
+ * [imageDisplayBox] fast-path (never read from the measurement cache), so probing them would only
+ * spend a useless network round-trip. Topology is unaffected: since #957 inline/bloc is decided by
+ * the STRUCTURE ([partitionParagraph], contract v1.4 §2), never by measurement — a cc emoji in
+ * prose stays inline by construction.
  */
 internal fun collectMeasurableImageUrls(inlines: List<PostInline>): Set<String> {
     val urls = LinkedHashSet<String>()
@@ -1112,7 +1814,8 @@ private fun collectMeasurableImageUrlsInto(inlines: List<PostInline>, urls: Muta
 
 private fun collectMeasurableImageUrl(inline: PostInline, urls: MutableSet<String>) {
     when (inline) {
-        is PostInline.InlineImage -> urls += inline.url
+        // #256 — cc-image-marked URLs are not measurable (fixed one-line box, see the KDoc above).
+        is PostInline.InlineImage -> if (!isCcImageUrl(inline.url)) urls += inline.url
         is PostInline.Strong -> collectMeasurableImageUrlsInto(inline.children, urls)
         is PostInline.Emphasis -> collectMeasurableImageUrlsInto(inline.children, urls)
         is PostInline.Underline -> collectMeasurableImageUrlsInto(inline.children, urls)
@@ -1148,107 +1851,85 @@ private fun smileyDisplayBox(
 }
 
 /**
- * #224 (option A) — resolve an inline `[img]` placeholder box from its measured intrinsic size:
- * no-upscale + absolute cap ([INLINE_IMAGE_MAX_WIDTH_SP]×[INLINE_IMAGE_MAX_HEIGHT_SP]) via the shared
- * [intrinsicSmileyDisplaySize] policy, then the relative `0.9 × contentWidth` cap ([maxWidthSp]).
+ * #959 (Lot 3, contrat v1.5 §3) — resolve an inline `[img]` placeholder box. The MEASURED path is
+ * density-aware and works entirely in PHYSICAL pixels through [imageDisplaySizePx] (no-upscale =
+ * 1 source px never spreads past 1 screen px; the pre-#959 "native px as sp" model upscaled every
+ * bitmap by ×density): the caller passes the caps in px ([maxImageWidthPx] = fImage × container,
+ * [maxImageHeightPx] = 200 sp in px) and the result converts back to sp HERE, through [density]
+ * (÷ density × fontScale), so the physical size is stable under any density/fontScale. The
+ * legibility floor is GONE from the measured path (cadrage Sol r1):
+ * [INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP] only shapes the placeholder SLOTS below.
  *
- * #253 — while the measurement is in flight (cold cache / miss) it falls back to a small square of
- * [INLINE_IMAGE_MIN_HEIGHT_SP] (≈ one text line) rather than the old 240×180 bucket. With
- * `ContentScale.Fit` filling the box, a 240×180 cold box upscaled a 16×16 cc-image emoji to a giant
- * 180×180 flash until the measurement landed; a min-height square means the dominant cold case (the
- * 16×16 emoji) is already at its final size — zero flash — and any larger image just grows from a
- * one-line slot once measured instead of shrinking from a giant one. Still relative-capped so even
+ * #253 — while the measurement is in flight (cold cache / miss) the SLOT falls back to a small
+ * square of [INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP] (≈ one text line, sp: it is a text-line
+ * hitbox, not an image size) rather than the old 240×180 bucket — the dominant cold case (a
+ * 16×16 emoji) is already at its final size, zero flash. Still relative-capped ([maxWidthSp]) so
  * the fallback never overflows a narrow quote. Mirrors [smileyDisplayBox].
+ *
+ * #256 — a URL carrying the `hfr-cc-image=true` marker short-circuits ALL of the above: fixed
+ * one-line square, no measurement involved (see [isCcImageUrl] and the fast-path comment below).
  */
+// ReturnCount: three early-exit guards (cc fast-path, cold slot, measured) read better flat.
+@Suppress("LongParameterList", "ReturnCount")
 internal fun imageDisplayBox(
     image: PostInline.InlineImage,
     measured: Map<String, IntSize?>,
+    // Relative cap of the sp-based placeholder SLOTS (cc fast-path + cold square) — unchanged.
     maxWidthSp: Int,
+    // §3 px caps of the MEASURED path: fImage × container width, and the 200 sp inline height,
+    // both converted to physical px by the caller (the only place density is known).
+    maxImageWidthPx: Int,
+    maxImageHeightPx: Int,
+    // px→sp boundary conversion of the measured result (density × fontScale).
+    density: Density,
+    // §4 v1.4 (#957) — TOTAL horizontal padding (4 dp each side, sp-converted by the caller)
+    // added to the PLACEHOLDER of a content image; the bitmap box is untouched. Zero for cc.
+    horizontalPaddingSp: Int = 0,
 ): InlineMediaBox {
-    val size = measured[image.url]
-    val base = if (size != null) {
-        // #175 no-upscale + cap with the inline-image caps, then a min-height floor so a SUB-16 low-res
-        // source can't render below ~one text line. A cc-image emoji (16×16) sits exactly at the floor
-        // → kept native (per @XaaT dogfood); only smaller sources get enlarged. NB: the floor only
-        // grows the BOX — the bitmap fills it via ContentScale.Fit.
-        //
-        // Re-apply the absolute caps AFTER the floor: a very wide/short source (e.g. 250×10) capped to
-        // 240×10 then floored to height 16 would grow to ~384×16 — past both the 240sp width cap and its
-        // native width. The second cap clamps that back (the floor simply doesn't apply when it can't fit
-        // the width cap), so the no-upscale/cap contract holds for every aspect ratio (Codex review #246).
-        intrinsicSmileyDisplaySize(
-            upscaleToMinHeight(
-                intrinsicSmileyDisplaySize(
-                    PixelSize(size.width, size.height),
-                    maxWidthSp = INLINE_IMAGE_MAX_WIDTH_SP,
-                    maxHeightSp = INLINE_IMAGE_MAX_HEIGHT_SP,
-                ),
-                INLINE_IMAGE_MIN_HEIGHT_SP,
-            ),
-            maxWidthSp = INLINE_IMAGE_MAX_WIDTH_SP,
-            maxHeightSp = INLINE_IMAGE_MAX_HEIGHT_SP,
+    // #256 — render-time fast-path: a URL carrying the `hfr-cc-image=true` marker declares itself a
+    // community cc-image emoji (a one-line glyph). Pin its box to the one-line square immediately —
+    // the same square as the #253 cold fallback below, so a marked emoji is at its final size from
+    // the very first frame (zero flash, zero reflow) — and IGNORE any measured size on record: the
+    // marker, not the measurement, is the contract (matching + duplicate rules in [isCcImageUrl]).
+    // The companion exclusion in [collectMeasurableImageUrl] skips the async probe for these URLs
+    // entirely. Still relative-capped so even this square cannot overflow a pathologically narrow
+    // container. Everything else (AST, link semantics, MediaCounter, §2 topology) is untouched.
+    if (isCcImageUrl(image.url)) {
+        val fixed = capToWidth(
+            PixelSize(INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP, INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP),
+            maxWidthSp,
         )
-    } else {
-        // #253 cold-fallback: a one-line square, not the 240×180 bucket (no giant Fit upscale flash).
-        PixelSize(INLINE_IMAGE_MIN_HEIGHT_SP, INLINE_IMAGE_MIN_HEIGHT_SP)
+        return InlineMediaBox(fixed.width.sp, fixed.height.sp)
     }
-    val capped = capToWidth(base, maxWidthSp)
-    return InlineMediaBox(capped.width.sp, capped.height.sp)
-}
-
-/** #224/#257 — an image eligible for block promotion, paired with its enclosing `[url=…]` link (if any). */
-internal data class PromotedImage(val image: PostInline.InlineImage, val linkUrl: String?)
-
-/**
- * #224 (option B) / #257 — if a paragraph's only meaningful content is image(s) (a single posted image
- * the parser kept inline because of a stray sibling, or a gallery of several), return them in order,
- * each paired with the URL of its enclosing `[url=…]` link if there is one, so they can be promoted to
- * full-width centred blocks. Blank text and line breaks are ignored.
- *
- * Returns null when the paragraph has any other meaningful inline (non-blank text, a smiley): genuine
- * prose keeps its inline image treatment. A link wrapping ONLY an image is fine — #257 promotes it to a
- * block that opens the link on tap, so the "click to enlarge" tap-through is preserved AND the image
- * fills the width (before #257 a linked image was kept inline → small + the inline pixelation path).
- * A link wrapping image **+** text still counts as other content → null (stays inline prose).
- */
-@Suppress("CyclomaticComplexMethod") // exhaustive when over the PostInline sealed type, like appendInline
-internal fun imageOnlyParagraphImages(inlines: List<PostInline>): List<PromotedImage>? {
-    val images = mutableListOf<PromotedImage>()
-    var hasOtherContent = false
-    fun walk(list: List<PostInline>, linkUrl: String?) {
-        list.forEach { inline ->
-            when (inline) {
-                is PostInline.InlineImage -> images += PromotedImage(inline, linkUrl)
-                is PostInline.Text -> if (inline.value.isNotBlank()) hasOtherContent = true
-                PostInline.LineBreak -> Unit
-                is PostInline.Smiley -> hasOtherContent = true
-                is PostInline.Strong -> walk(inline.children, linkUrl)
-                is PostInline.Emphasis -> walk(inline.children, linkUrl)
-                is PostInline.Underline -> walk(inline.children, linkUrl)
-                is PostInline.Strike -> walk(inline.children, linkUrl)
-                is PostInline.Color -> walk(inline.children, linkUrl)
-                is PostInline.Link -> walk(inline.children, inline.url)
-            }
-        }
+    val size = measured[image.url]
+    if (size == null) {
+        // #253 cold-fallback SLOT: a one-line square, not the 240×180 bucket (no giant Fit flash).
+        val cold = capToWidth(
+            PixelSize(INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP, INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP),
+            maxWidthSp,
+        )
+        return InlineMediaBox((cold.width + horizontalPaddingSp).sp, cold.height.sp)
     }
-    walk(inlines, linkUrl = null)
-    return images.takeIf { it.isNotEmpty() && !hasOtherContent }
+    // §3 — the physical-pixel equation (single scale, height derived from the rounded width),
+    // then the px→sp boundary conversion; §4 padding rides the PLACEHOLDER width only.
+    // Gate Sol r1 (blocker #3): the conversion is the REAL Compose inverse — px → dp (÷density,
+    // linear) then [Density]'s own Dp.toSp(), which on API 34+ goes through the platform's
+    // NON-LINEAR font-scaling table. The text stack applies the same table forward at layout,
+    // so the round-trip lands back on the computed physical pixels exactly. (A hand-rolled
+    // linear px/(density×fontScale) drifted at fontScale > 1 on API 34+ — refused.)
+    val px = imageDisplaySizePx(size, maxImageWidthPx, maxImageHeightPx)
+    return with(density) {
+        InlineMediaBox(
+            placeholderWidth = (px.width.toDp().toSp().value + horizontalPaddingSp).sp,
+            placeholderHeight = px.height.toDp().toSp(),
+            // §7 — the decode size travels WITH the display box: same native pair, same displayed
+            // width, so the request key flips exactly when the decode target changes.
+            decodeSize = decodeSizePx(px.width, size),
+        )
+    }
 }
 
-/**
- * #224 (option B) — promote an image-only paragraph to full-width blocks only once at least one image
- * has measured larger than the inline display caps (so inline rendering would shrink it to a small
- * left-aligned thumbnail). A cc-image emoji (16×16) or a small reaction never trips this, so they keep
- * their inline size; a real posted photo / gallery does, and gets the centred full-width treatment.
- * Returns false while every size is unknown (cold) so promotion only kicks in after measurement.
- */
-internal fun shouldPromoteImagesToBlocks(
-    images: List<PromotedImage>,
-    measured: Map<String, IntSize?>,
-): Boolean = images.any { promoted ->
-    val size = measured[promoted.image.url] ?: return@any false
-    size.width > INLINE_IMAGE_MAX_WIDTH_SP || size.height > INLINE_IMAGE_MAX_HEIGHT_SP
-}
+
 
 /** True when [inlines] contains at least one renderable inline media (a smiley with a URL, or an image). */
 private fun hasInlineMedia(inlines: List<PostInline>): Boolean = inlines.any { inline ->
@@ -1265,7 +1946,17 @@ private fun hasInlineMedia(inlines: List<PostInline>): Boolean = inlines.any { i
     }
 }
 
-internal fun imageInlineContent(image: PostInline.InlineImage, box: InlineMediaBox): InlineTextContent {
+// CyclomaticComplexMethod: like BlockImage above, the §3/§6/§7 sizing states × the §5 interaction
+// gates × the #960 painter-attempt gate are all contractual branches of ONE render seam —
+// splitting them would scatter the contract.
+@Suppress("CyclomaticComplexMethod")
+internal fun imageInlineContent(
+    image: PostInline.InlineImage,
+    box: InlineMediaBox,
+    // #958 Lot 2 (§5) — the URL of the enclosing link, when the LinkAnnotation split moved the
+    // tap from the text machinery onto this image node (content images only — never cc-images).
+    linkUrl: String? = null,
+): InlineTextContent {
     return InlineTextContent(
         placeholder = Placeholder(
             width = box.placeholderWidth,
@@ -1281,36 +1972,212 @@ internal fun imageInlineContent(image: PostInline.InlineImage, box: InlineMediaB
         // tracks the sp-based placeholder under any fontScale; the no-upscale rule lives in the BOX
         // sizing (imageDisplayBox), not the content scale.
         //
-        // #257 — decode at a STABLE size (the inline display cap in px, bounded) instead of letting
-        // Coil resolve the size from the placeholder constraints. The box grows from the cold-fallback
-        // square to the measured size when the measurement lands; with constraint-driven sizing Coil
-        // re-decodes at the new size and, meanwhile, paints the previous tiny bitmap upscaled →
-        // pixelated. A fixed decode size keeps ONE sharp bitmap that Fit scales into whatever box (Coil
-        // never upscales the decode past the source, so a small image still decodes at native). The
-        // request is remembered so a measurement landing doesn't rebuild it. Smileys keep their own
-        // (much smaller) path — this cap is photo-sized.
-        val density = LocalDensity.current
+        // #257/#610/#959 — decode at the EXPLICIT §7 size instead of letting Coil resolve it from
+        // the placeholder constraints (constraint-driven sizing re-decoded on every box change and
+        // painted the previous tiny bitmap upscaled → pixelated). Smileys keep their own (much
+        // smaller) path.
         val context = LocalPlatformContext.current
-        val widthPx = with(density) { INLINE_IMAGE_MAX_WIDTH_SP.sp.roundToPx() }
-            .coerceAtMost(INLINE_IMAGE_DECODE_CAP_PX)
-        val heightPx = with(density) { INLINE_IMAGE_MAX_HEIGHT_SP.sp.roundToPx() }
-            .coerceAtMost(INLINE_IMAGE_DECODE_CAP_PX)
-        val request = remember(image.url, widthPx, heightPx, context) {
+        // #959 (§7) — the decode size is the calculator's output carried by the box (bucketed
+        // width, common-factor caps, height derived from the final width). It KEYS the remember:
+        // cold→measured flips the key and recreates request + painter = exactly one new decode
+        // (Sol r1 blocker #4 — no reliance on the refresh generation alone). The cold/cc slots
+        // (decodeSize == null) decode at one 256 bucket — the slot is a one-line square, and the
+        // measured request takes over as soon as the header-only probe lands.
+        val request = remember(image.url, context, box.decodeSize) {
             ImageRequest.Builder(context)
                 .data(image.url)
-                .size(widthPx, heightPx)
+                .size(
+                    box.decodeSize?.width ?: DECODE_BUCKET_PX,
+                    box.decodeSize?.height ?: DECODE_BUCKET_PX,
+                )
                 .scale(Scale.FIT)
                 .precision(Precision.INEXACT)
                 .build()
         }
-        AsyncImage(
-            model = request,
-            contentDescription = image.description,
-            contentScale = PostMediaDisplayPolicy.inlineImageContentScale,
-            modifier = Modifier.fillMaxSize(),
+        // #831/#958 (Lot 2, §5) — the lambda of an InlineTextContent is @Composable, so the
+        // CompositionLocals are read HERE, without touching the invariant AnnotatedString (#175)
+        // nor the remember keys of ParagraphBlock. The HOST capability (LocalPostImageActions
+        // != null) gates ALL interaction of a content image: on the three null hosts (MP, editor
+        // preview, signature) the image is TOTALLY inert — no tap even when [linkUrl] is set, no
+        // long-press, no interactive role. Two independent gates (Sol reserve): the TAP-to-open-
+        // link depends on `linkUrl != null` (threaded from the LinkAnnotation split), the
+        // long-press MENU on the image URL's eligibility; both live in ONE combinedClickable, so
+        // tap and long-press are mutually exclusive by construction. Role.Image + onClickLabel
+        // « Ouvrir l'image » ([AMENDEMENT-Lot2-2] : Role.Link does not exist in Compose 1.11.x).
+        // The pre-#958 "long-press only, never install an onClick" Codex reserve is superseded by
+        // [AMENDEMENT-Lot2-1]: the device spike proved a tap reaches a clickable child even under
+        // an active selection, so a linked image now opens its link and clears the selection
+        // exactly like a text link. Selection drags STARTED on the surrounding text still travel
+        // across the image unaffected.
+        val host = LocalPostImageActions.current
+        val tapOpensLink = host != null && linkUrl != null
+        val menuEligible = host != null && isEligiblePostImageUrl(image.url)
+        val uriHandler = LocalUriHandler.current
+        val openLabel = stringResource(R.string.post_image_open_link)
+        val optionsLabel = stringResource(R.string.post_image_options_action)
+        val interactionModifier = when {
+            tapOpensLink && menuEligible -> Modifier.combinedClickable(
+                role = Role.Image,
+                onClickLabel = openLabel,
+                onLongClickLabel = optionsLabel,
+                onLongClick = {
+                    host.onLongPress(
+                        PostImageTarget(url = image.url, description = image.description, linkUrl = linkUrl),
+                    )
+                },
+            ) {
+                runCatching { uriHandler.openUri(linkUrl) }
+            }
+
+            tapOpensLink ->
+                // Linked image whose own URL is not menu-eligible (e.g. data:) : the tap still
+                // opens the link, no long-press menu.
+                Modifier.clickable(role = Role.Image, onClickLabel = openLabel) {
+                    runCatching { uriHandler.openUri(linkUrl) }
+                }
+
+            menuEligible -> Modifier.postImageLongPress(
+                actions = host,
+                target = PostImageTarget(url = image.url, description = image.description, linkUrl = null),
+                haptics = LocalHapticFeedback.current,
+                optionsLabel = optionsLabel,
+            )
+
+            else -> Modifier
+        }
+        // §4 v1.4 (#957) — content images get 4 dp of horizontal breathing on EACH side inside
+        // the widened placeholder (bitmap box unchanged) ; cc-images keep their exact square.
+        // #958 (§5, Sol firm reserve) : the HITBOX is the BITMAP — the 4 dp strip must stay inert.
+        // Chaining the gesture AFTER `padding` in the SAME layout node does NOT achieve that: a
+        // pointer-input modifier still receives touches on the whole node's bounds (verified by
+        // spike under the compose test harness — intra-node sub-geometry does not gate hit
+        // testing). Hit testing BETWEEN layout nodes is geometric, so the padding lives on a
+        // parent box and the gesture on the image's own node; the padding-strip test in
+        // PostRendererImageLongPressTest pins the behaviour.
+        val paddingModifier = if (isCcImageUrl(image.url)) {
+            Modifier
+        } else {
+            Modifier.padding(horizontal = INLINE_IMAGE_HORIZONTAL_PADDING)
+        }
+        // #959 (§3 GIF) — the animation gate wraps CONTENT images only; a cc-image keeps its
+        // historical ungated path (#256). `decodeSize != null` is exactly "the first native pair
+        // landed": a cold GIF must not start before its box is final.
+        val gifGate = if (isCcImageUrl(image.url)) {
+            null
+        } else {
+            rememberGifAnimationGate(boxReady = box.decodeSize != null)
+        }
+        // #960 (§6) — the painter ATTEMPT gates the node (replaces the pre-#960 screen-wide
+        // key(refreshGeneration) bump): a fresh failure keeps the placeholder box WITHOUT any
+        // painter — no network re-attempt per occurrence or recomposition (P3 will put the §6
+        // error slot + manual retry here) — and a scoped retry recreates the attempt (its
+        // remember keys the url's generation), hence a fresh AsyncImage node.
+        val attempt = rememberPainterAttempt(image.url)
+        val showPainter = !attempt.failedFresh && attempt.renderPainter
+        // A11Y-2 (annexe a11y #876) — the HFR alt when present, otherwise the localized generic
+        // fallback; never null, never the raw URL. When the gate withholds the painter the BOX
+        // carries a description so the media never disappears from the semantics tree.
+        val alt = image.description?.takeIf(String::isNotBlank)
+            ?: stringResource(R.string.post_inline_image_alt)
+        Box(Modifier.fillMaxSize().then(paddingModifier)) {
+            when {
+                showPainter -> AsyncImage(
+                    model = request,
+                    contentDescription = alt,
+                    contentScale = PostMediaDisplayPolicy.inlineImageContentScale,
+                    onState = { state ->
+                        attempt.onState(state)
+                        gifGate?.onState?.invoke(state)
+                    },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(gifGate?.modifier ?: Modifier)
+                        .then(interactionModifier),
+                )
+
+                // §6 P3 — inline error slot INSIDE the reserved placeholder (anti-CLS) + the
+                // universal per-URL manual retry, same stance as the block slot above.
+                attempt.failedFresh -> InlineImageErrorSlot(url = image.url, description = image.description)
+
+                // Attempt pending / another occurrence in flight: hold the placeholder.
+                else -> Box(Modifier.fillMaxSize().semantics { contentDescription = alt })
+            }
+        }
+    }
+}
+
+/**
+ * #960 P3 (§6) — the INLINE error slot: broken-image glyph in the reserved placeholder, the
+ * localized error description (A11Y-5) and the universal Role.Button retry (« Réessayer » → new
+ * generation for THIS url only). Independent of the §5 host capability — see the block slot.
+ */
+@Composable
+private fun InlineImageErrorSlot(url: String, description: String?) {
+    val ledger = LocalMediaAttemptLedger.current
+    val errorText = description?.takeIf(String::isNotBlank)
+        ?.let { stringResource(R.string.post_image_error_with_alt, it) }
+        ?: stringResource(R.string.post_image_error)
+    val retryLabel = stringResource(R.string.post_image_retry_action)
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clickable(role = Role.Button, onClickLabel = retryLabel) { ledger.retryUrl(url) }
+            .semantics { contentDescription = errorText },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            painter = painterResource(R.drawable.ic_ms_broken_image),
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.fillMaxSize(INLINE_ERROR_GLYPH_FRACTION),
         )
     }
 }
+
+/** §6 P3 — the broken-image glyph fills most of the slot while keeping a breathing margin. */
+private const val INLINE_ERROR_GLYPH_FRACTION = 0.8f
+
+/**
+ * #831 — long-press-ONLY gesture + a11y surface for a post image. Deliberately NOT a
+ * `combinedClickable`: that would install an onClick and consume every tap (Codex framing, firm
+ * reserve — cf. the call-site comments for the tap contracts it would break).
+ *
+ * `detectTapGestures(onLongPress)` DOES claim the gesture's down, and that claim is load-bearing:
+ * a fully non-consuming variant (`awaitEachGesture` + `awaitLongPressOrCancellation`) was tried
+ * after the Codex gate flagged the consumption, and its own tests proved it worse — with the down
+ * unclaimed, the parent SelectionContainer (#281) ALSO reacts to the long press, starting a word
+ * selection with its magnifier underneath the menu sheet (the Robolectric suite crashes in
+ * `Magnifier.dismiss`, pinning exactly that). The claim costs what a tap on an inline image was
+ * already documented to cost (a no-op — the known clear-selection loss), and does NOT break
+ * scrolling: Compose `scrollable` starts from unconsumed MOVE deltas past the touch slop and is
+ * insensitive to a consumed down. Selection drags STARTED on surrounding text never reach this
+ * node (they are captured by the text at their own down) and keep travelling across the image.
+ * The `semantics` block exposes the same action to TalkBack as a custom long-click action
+ * labelled [optionsLabel] (`combinedClickable`'s `onLongClickLabel` equivalent).
+ *
+ * Non-composable on purpose (the resolved [haptics]/[optionsLabel] come in as parameters):
+ * composable `Modifier` factories are flagged by the Compose lint (`ComposableModifierFactory`).
+ */
+private fun Modifier.postImageLongPress(
+    actions: PostImageActions,
+    target: PostImageTarget,
+    haptics: HapticFeedback,
+    optionsLabel: String,
+): Modifier = this
+    .pointerInput(actions, target) {
+        detectTapGestures(
+            onLongPress = {
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                actions.onLongPress(target)
+            },
+        )
+    }
+    .semantics {
+        onLongClick(label = optionsLabel) {
+            actions.onLongPress(target)
+            true
+        }
+    }
 
 internal fun smileyInlineContent(
     smiley: PostInline.Smiley,
@@ -1343,36 +2210,54 @@ internal fun smileyInlineContent(
             )
             return@InlineTextContent
         }
-        SubcomposeAsyncImage(
-            model = smiley.imageUrl,
-            contentDescription = description,
-            contentScale = PostMediaDisplayPolicy.smileyContentScale,
-            modifier = Modifier.fillMaxSize(),
-            success = { SubcomposeAsyncImageContent() },
-            error = {
-                // #416 — first failure of a sprite that was NOT known dead when this content was
-                // built (builtins are never measured ; a perso can die between measure and render).
-                // Record the failure so the paragraph recomposes onto the dead-token path above
-                // (readable, body-sized) ; the tiny ellipsised token below is only the transient
-                // frame between this error and that recomposition.
-                val cache = LocalIntrinsicMediaSizeCache.current
-                val url = smiley.imageUrl
-                if (url != null) {
-                    LaunchedEffect(url) {
-                        if (!cache.isFailureFresh(url, System.currentTimeMillis())) {
-                            cache.putFailure(url, System.currentTimeMillis())
-                        }
-                    }
-                }
-                Text(
-                    text = description,
-                    fontSize = 10.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            },
-        )
+        val url = smiley.imageUrl
+        if (url == null) {
+            // No sprite URL: same visual as the historical model-null error slot, without the
+            // pointless painter machinery.
+            TransientSmileyToken(description)
+            return@InlineTextContent
+        }
+        // #960 (§6, Sol P1 blocker 2) — the smiley painter obeys V2 like every media: ONE painter
+        // attempt per (url, generation), the concurrent occurrences of a sprite hold an empty
+        // box for the frame(s) until the winner settles. A granted failure settles through
+        // onState and the paragraph recomposes onto the dead-token path above (#416 — readable,
+        // body-sized); the tiny ellipsised token below only covers the transient frames.
+        val attempt = rememberPainterAttempt(url)
+        when {
+            attempt.failedFresh -> TransientSmileyToken(description)
+
+            attempt.renderPainter -> SubcomposeAsyncImage(
+                model = url,
+                contentDescription = description,
+                contentScale = PostMediaDisplayPolicy.smileyContentScale,
+                modifier = Modifier.fillMaxSize(),
+                success = { state ->
+                    SideEffect { attempt.onState(state) }
+                    SubcomposeAsyncImageContent()
+                },
+                error = { state ->
+                    SideEffect { attempt.onState(state) }
+                    TransientSmileyToken(description)
+                },
+            )
+
+            else -> Unit // grant pending / another occurrence's attempt in flight
+        }
     }
+}
+
+/**
+ * #416 — tiny ellipsised stand-in for a sprite whose failure is not yet reflected by the
+ * paragraph's dead-token path (the readable body-sized swap happens on the next recomposition).
+ */
+@Composable
+private fun TransientSmileyToken(description: String) {
+    Text(
+        text = description,
+        fontSize = 10.sp,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 /** #416 — body-sized token for a dead sprite (bodyMedium is 14 sp ; keep in sync with the box). */
@@ -1382,6 +2267,68 @@ private fun SmileyKind.token(): String = when (this) {
     is SmileyKind.Builtin -> code
     is SmileyKind.Perso -> "[:$name]"
 }
+
+/**
+ * State-hygiene audit 2026-07-05 — clamps an author `[color]`'s relative luminance into the
+ * current theme's readable range, hue preserved. A web-tuned navy (`#000080`) is invisible on a
+ * dark/AMOLED surface; symmetrically a pale yellow washes out on light. Pure function (no
+ * Composable dependency) so it stays JVM-testable like [parseColor]:
+ *
+ * - dark theme + luminance below [MIN_DARK_LUMINANCE] → lerp towards White just enough to reach
+ *   the floor;
+ * - light theme + luminance above [MAX_LIGHT_LUMINANCE] → lerp towards Black down to the ceiling;
+ * - already-readable colours (e.g. `#CC0000`) pass through UNTOUCHED in both themes — this is a
+ *   clamp, not a remap.
+ *
+ * The minimal lerp fraction is found by binary search: Compose's [lerp] interpolates in Oklab, so
+ * luminance is not linear in the fraction (a closed form would be wrong). The invariant
+ * `reached(high)` guarantees the returned colour satisfies the threshold. The original alpha is
+ * preserved (the defensive #RRGGBBAA parse path).
+ */
+internal fun ensureReadableColor(color: Color, isDark: Boolean): Color {
+    if (color == Color.Unspecified) return color
+    val luminance = color.luminance()
+    return when {
+        isDark && luminance < MIN_DARK_LUMINANCE ->
+            clampLuminance(color, towards = Color.White) { it >= MIN_DARK_LUMINANCE }
+        !isDark && luminance > MAX_LIGHT_LUMINANCE ->
+            clampLuminance(color, towards = Color.Black) { it <= MAX_LIGHT_LUMINANCE }
+        else -> color
+    }
+}
+
+/** Smallest-fraction lerp of [color] towards [towards] whose luminance satisfies [reached]. */
+private fun clampLuminance(color: Color, towards: Color, reached: (Float) -> Boolean): Color {
+    var low = 0f
+    // `reached(1f)` always holds: a full lerp IS the target (White = 1.0, Black = 0.0).
+    var high = 1f
+    repeat(LUMINANCE_CLAMP_ITERATIONS) {
+        val mid = (low + high) / 2f
+        if (reached(lerp(color, towards, mid).luminance())) high = mid else low = mid
+    }
+    return lerp(color, towards, high).copy(alpha = color.alpha)
+}
+
+/**
+ * Dark detection threshold on the surface's relative luminance — duplicated from
+ * `CreatorHighlight.DARK_SURFACE_LUMINANCE` (private there): follows AMOLED and a forced
+ * ThemeMode, not just the system flag.
+ */
+private const val DARK_SURFACE_LUMINANCE = 0.5f
+
+/**
+ * Author-colour luminance floor on dark surfaces. Deliberately conservative (a CLAMP for the
+ * unreadable tail, not a beautifier): classic dark-but-readable hues like `#CC0000` (≈ 0.13) or
+ * pure red `#FF0000` (≈ 0.21) pass untouched, while navy `#000080` (≈ 0.016) or pure blue
+ * `#0000FF` (≈ 0.07) — invisible on near-black — get lifted to the floor.
+ */
+internal const val MIN_DARK_LUMINANCE = 0.1f
+
+/** Author-colour luminance ceiling on light surfaces (pure yellow `#FFFF00` ≈ 0.93 gets darkened). */
+internal const val MAX_LIGHT_LUMINANCE = 0.78f
+
+/** Binary-search depth for [clampLuminance] — 2^-12 fraction precision, plenty for 8-bit channels. */
+private const val LUMINANCE_CLAMP_ITERATIONS = 12
 
 internal fun parseColor(hex: String): Color {
     // Pure-Kotlin parsing keeps :core:ui testable on plain JVM (no Android runtime). The parser
@@ -1416,3 +2363,9 @@ private class MediaCounter {
     fun nextImage(): String = "post-image-${image++}"
     fun nextSmiley(): String = "post-smiley-${smiley++}"
 }
+
+/** §4 v1.4 (#957) — horizontal padding of an inline CONTENT image, each side. */
+internal val INLINE_IMAGE_HORIZONTAL_PADDING = 4.dp
+
+/** Structural test seam on every [BlockImage] node (#957) — see the modifier-site comment. */
+internal const val BLOCK_IMAGE_TEST_TAG = "PostBlockImage"

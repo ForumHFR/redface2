@@ -87,11 +87,13 @@ graph TB
 
 L'écran le plus important de l'app. Affiche les topics suivis par l'utilisateur.
 
+> **Refonte #603 livrée (bêta 0.18.0)** — top bar dédiée (indicateur d'onglet, recherche, avatar), marqueurs de ligne repensés, sheet d'actions à l'appui long, super-favoris locaux, « config rapide » au tap sur la barre basse : voir [ADR-017]({{ site.baseurl }}/adr/017-refonte-vue-drapeaux). Les invariants fonctionnels ci-dessous restent valides ; pour la surface visuelle, le code fait foi (`FlagsTopBar.kt`, `FlagActionsSheet.kt`, `FlagsRoute.kt`).
+
 **Onglets** (`FlagTab`, un `FlagType` chacun sauf `Super` et `Dt`) :
 - **Mes sujets** (cyan) : topics où l'utilisateur a participé. Re-tap de l'onglet déjà sélectionné → toggle « +lus » (afficher/masquer les cyans déjà lus, #154).
 - **Lu** (rouge) : topics lus uniquement (drapeau de lecture sans participation).
 - **Favoris** : topics marqués d'une étoile jaune.
-- **Super** : placeholder « super favoris » (pas de backend, pas de fetch).
+- **Super** : super-favoris **locaux** — sélection épinglée par l'utilisateur via le sheet d'appui long, persistée côté app (`SuperFavoriteRepository`, cf. [ADR-017]({{ site.baseurl }}/adr/017-refonte-vue-drapeaux)) ; aucun backend HFR.
 - **DT** (conditionnel) : 5e onglet listant les conversations MultiMP / DT. **Visible uniquement** quand le réglage « section DT » est actif (`state.showDtTab`, persisté via `UserPreferencesRepository`, **défaut OFF**). Source code : `FlagsViewModel` (sealed `FlagTab` incl. `Dt`), `FlagsRoute.kt` (rendu conditionnel). Comportement :
   - **Liste** = union des MultiMP connus de **MPStorage** (`mpFlags.list[]`) et de la **1re page de l'inbox** MP. **Limite connue** : seule la première page de l'inbox est scannée — une conversation MultiMP poussée au-delà de la 1re page (et absente de MPStorage) n'apparaît pas dans l'onglet DT.
   - **Non-lus par défaut** : l'onglet affiche d'abord les conversations non lues ; un **clic sur l'onglet** déjà sélectionné révèle aussi les conversations lues.
@@ -112,12 +114,13 @@ L'écran le plus important de l'app. Affiche les topics suivis par l'utilisateur
 - **activé** : chaque type de drapeau (cyan / rouge / favoris) garde ses propres valeurs, avec **repli sur la valeur globale toggle par toggle** (`UserPreferencesRepository.observeFlagsViewSettings(type)` résout global vs per-type). Les clés per-type sont **sticky** : désactiver le master ne les efface pas, le réactiver restaure le réglage par onglet précédent.
 
 **Deux surfaces de réglage** (miroir) :
-- un **bottom sheet M3** (`ModalBottomSheet`, « Affichage ») ouvert depuis l'en-tête de l'écran Drapeaux — masqué sur l'onglet Super (placeholder) et en anonyme ; il édite la portée courante (globale, ou l'onglet sélectionné quand le master est activé) et affiche un libellé de portée explicite ;
+- un **bottom sheet M3** (`ModalBottomSheet`, « Affichage des drapeaux ») ouvert depuis la top bar Drapeaux ou via la « config rapide » (tap sur la barre de navigation basse, #603) — masqué en anonyme (gate `canConfigureView`) ; il édite la portée courante (globale, ou l'onglet sélectionné quand le master est activé) et affiche un libellé de portée explicite ;
 - le miroir dans **Réglages > Drapeaux** (master « Réglages différents par onglet » + les deux toggles globaux qui servent de valeurs par défaut/repli).
 
 **Actions sur un topic :**
 - Tap → ouvrir le topic à la dernière position non lue
-- Swipe (end-to-start) → ouvre le dialog de confirmation de retrait du drapeau (#99). Le retrait n'est **pas** annulable dans l'app (pas d'undo) ; la ligne revient en place tant que l'utilisateur n'a pas confirmé.
+- **Appui long** → sheet d'actions du drapeau (`FlagActionsSheet`, #603/ADR-017) : retrait avec confirmation (#99), super-favori, métadonnées du sujet. Le retrait n'est **pas** annulable dans l'app (pas d'undo).
+- **Swipe horizontal** → change d'onglet (#660) ; il ne retire jamais un drapeau (l'ancien swipe-to-remove a été remplacé par l'appui long lors de la refonte #603).
 
 ### Profil utilisateur (Phase 2 finish #208)
 
@@ -148,6 +151,8 @@ Accessible depuis la lecture topic via un tap sur l'avatar ou le pseudo d'un pos
 
 L'écran central de l'app. Affiche les posts d'un topic avec pagination.
 
+> **Refonte #604 en cours** (vagues 1-4 livrées en dev 0.19.x→0.24.x) — skeleton de chargement (`TopicLoadingSkeleton`), header dissous (pilule « page X / Y » cliquable → feuille de navigation), cartes de frontière de page (`PageBoundaryCard`/`EndOfTopicCard`), repère « dernier message lu » traversant (#600). Côté écriture, la surface par défaut est l'**éditeur plein écran** (#951) ; la réponse rapide en bottom sheet (`QuickReplySheet`) est un préréglage expérimental opt-in (réglage « Surface d'écriture », #806), avec escalade vers l'éditeur plein écran (le brouillon suit, #405) et bascule multi-quote en plein écran au-delà d'un seuil propre à ce préréglage. Le rendu des citations dans le composer est en arbitrage (#805 : BBCode inline par défaut, cartes en option). La navigation par pages ci-dessous (#282/#307) reste exacte.
+
 **Navigation dans le topic :**
 - Scroll vertical pour lire les posts
 - Boutons page précédente / suivante
@@ -158,7 +163,7 @@ L'écran central de l'app. Affiche les posts d'un topic avec pagination.
 - **Restauration de la position de lecture par page (#307)** — revenir sur une page déjà visitée (swipe, pager, FAB, back) ré-atterrit à la position de scroll quittée, pas en haut. Le changement de page étant route-driven (#282), l'entrée nav — et son `LazyListState` — est détruite à chaque page : `:app` garde un cache session `(cat, post, page) → ancre` hoisté dans `RedfaceApp` (jumeau du cache de titres, borné à 128 avec éviction des ancres les moins récemment sauvegardées), sauvegardé au `onDispose` de l'écran (uniquement après un premier `Loaded`, pour ne pas écraser une vraie position par le `(0, 0)` d'une page abandonnée en chargement) et rejoué une seule fois au premier `Loaded` du retour. Priorité stricte résolue par `resolveTopicScrollRestoration` (`app/.../navigation/TopicScrollRestore.kt`, résolveur pur testé) : `scrollTo` route > atterrissage post-submit (`submitSignal`, #200/#226) > ancre sauvée > haut de page — les effets `ScrollToPost`/`ScrollToEndOfPage` restent seuls propriétaires de leurs atterrissages. Cf. `TopicScrollAnchor` (`feature/topic/.../TopicScrollAnchor.kt`).
 
 **Actions sur un post :**
-- **Quoter** → ouvre l'éditeur avec la citation pré-remplie
+- **Citer** → éditeur plein écran pré-armé avec la citation (surface par défaut depuis #951). Le réglage expérimental « Surface d'écriture » (#806) permet d'ouvrir à la place la feuille de réponse rapide : sous « Toujours la feuille », « Citer » ouvre la feuille (escalade possible vers le plein écran) et « Citer N » (multi-quote) bascule en plein écran à partir de 3 citations (seuil épinglé par test, propre à ce préréglage) ; sous « Feuille sauf citations », toute citation ouvre directement le plein écran. Rendu des citations : cf. arbitrage #805
 - **Editer** (si c'est notre post) → ouvre l'éditeur avec le contenu actuel
 - **Editer le FP** (si `isFirstPostOwner`) → éditeur spécial avec sujet + sondage
 - **Copier le texte**

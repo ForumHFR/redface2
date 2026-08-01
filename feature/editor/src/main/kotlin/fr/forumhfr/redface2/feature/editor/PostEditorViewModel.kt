@@ -1,7 +1,8 @@
 package fr.forumhfr.redface2.feature.editor
+import fr.forumhfr.redface2.core.ui.editor.UploadError
+import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 
-import fr.forumhfr.redface2.core.ui.editor.WikiSearchState
-import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.ViewModel
@@ -22,11 +23,13 @@ import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
 import fr.forumhfr.redface2.core.domain.upload.UploadException
 import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import fr.forumhfr.redface2.core.domain.write.EditPostRepository
+import fr.forumhfr.redface2.core.domain.write.ReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.write.EditPostContext
+import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
 import fr.forumhfr.redface2.core.model.write.ReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
@@ -45,6 +48,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -83,6 +87,7 @@ class PostEditorViewModel @AssistedInject constructor(
     private val uploadRepository: UploadRepository,
     private val imageUploadReader: ImageUploadReader,
     private val authRepository: AuthRepository,
+    private val quoteMaterializer: ReplyQuoteMaterializer,
 ) : ViewModel() {
 
     private val _state: MutableStateFlow<PostEditorState> = MutableStateFlow(
@@ -93,8 +98,10 @@ class PostEditorViewModel @AssistedInject constructor(
             numreponse = request.numreponse,
             page = request.page,
             subcat = request.subcat,
-            quotedNumreponse = request.quotedNumreponse,
-            quoteRef = request.quoteRef,
+            // #805 arbitrage — the handoff quotes are NOT seeded here anymore : their rendering
+            // (cards vs inline [quotemsg]) is decided per opening from the persisted preference,
+            // which is a suspend read — see [resolveQuoteRenderingThenLoad] in init.
+            quotes = emptyList(),
         ),
     )
     val state: StateFlow<PostEditorState> = _state.asStateFlow()
@@ -109,8 +116,6 @@ class PostEditorViewModel @AssistedInject constructor(
      */
     private var loadedForm: ReplyForm? = null
     private var submitJob: Job? = null
-    /** In-flight wiki smiley search ; cancelled on next query change / picker close. */
-    private var smileySearchJob: Job? = null
 
     /**
      * #405 — stable, content-free draft key for this editor session, or null when the routing args
@@ -191,21 +196,116 @@ class PostEditorViewModel @AssistedInject constructor(
         }
         restoreDraftIfAny()
         when (request.mode) {
-            PostEditorMode.Reply -> loadReplyFormIfPossible()
+            PostEditorMode.Reply -> resolveQuoteRenderingThenLoad()
             PostEditorMode.Edit -> loadEditFormIfPossible()
+        }
+    }
+
+    /**
+     * #805 arbitrage — one preference read (`first()`, decided per opening) picks the citation
+     * rendering for this session :
+     *
+     * - **cards ON** — the #604 lot 3 behaviour, unchanged : handoff previews become
+     *   [PostEditorState.quotes] (deduplicated per numreponse, Reply-only), the open-time fetch
+     *   stays PLAIN, `[quotemsg]` is materialised fresh at submit.
+     * - **cards OFF (default)** — the pre-lot-3 flow : the open-time fetch IS the materialisation
+     *   ([ReplyQuoteMaterializer.fetchFormWithQuotes]), so [launchFormFetch] hydrates the field
+     *   with the merged `[quotemsg]` prefills through the existing anti-clobber guards, and
+     *   [restoreDraftIfAny]'s `resumeSharedDraft` append stays commutative with it (#790).
+     *   `state.quotes` stays empty → submit takes the plain path (the content is the field).
+     */
+    private fun resolveQuoteRenderingThenLoad() {
+        val initialQuotes = request.initialQuotes.distinctBy { it.numreponse }
+        if (initialQuotes.isEmpty()) {
+            loadReplyFormIfPossible()
+            return
+        }
+        viewModelScope.launch {
+            if (userPreferencesRepository.observeQuoteCardsEnabled().first()) {
+                _state.update { it.copy(quotes = initialQuotes) }
+                loadReplyFormIfPossible()
+            } else {
+                loadReplyFormWithInlineQuotes(initialQuotes)
+            }
+        }
+    }
+
+    /**
+     * #805 cards OFF — open-time fetch through the materializer (quote form + merged prefills).
+     *
+     * The prefill does NOT ride [launchFormFetch]'s hydration : that path only fills a BLANK
+     * field (anti-clobber), so a `resumeSharedDraft` restore landing first would silently drop
+     * the citation. Instead the merged `[quotemsg]` blocks are PREPENDED onto the live field
+     * content at completion — commutative with the restore's append whichever lands first
+     * (réserve Codex n°5), and typing started during the fetch survives. Options still hydrate
+     * through [withFormHydration] (with a content-blanked form, so the text path stays inert).
+     */
+    private fun loadReplyFormWithInlineQuotes(quotes: List<QuotedPostPreview>) {
+        val context = buildReplyContext() ?: run {
+            _state.update { it.copy(submitError = SubmitError.MissingSubcat) }
+            return
+        }
+        val quoteContext = context.copy(quotedNumreponse = quotes.first().numreponse, quoteRef = null)
+        _state.update { it.copy(isLoadingForm = true, submitError = null) }
+        viewModelScope.launch {
+            val outcome = runCatching {
+                quoteMaterializer.fetchFormWithQuotes(
+                    context = quoteContext,
+                    extraQuoteNumreponses = quotes.drop(1).map { it.numreponse },
+                )
+            }
+            outcome.fold(
+                onSuccess = { form ->
+                    loadedForm = form
+                    val prefills = form.initialContent.trimEnd()
+                    _state.update { current ->
+                        val existing = current.draft.text
+                        // #881 — a quote block that ends the field carries exactly ONE trailing
+                        // newline so typing starts under the citation. In the prepend branch the
+                        // existing "\n\n" separator already provides it; a later resumeSharedDraft
+                        // append trimEnd()s the field first, so both orders stay commutative (#790).
+                        val combined = if (existing.isBlank()) prefills + "\n" else prefills + "\n\n" + existing
+                        current
+                            .withFormHydration(form.copy(initialContent = ""), current.preview)
+                            .copy(draft = TextFieldValue(text = combined, selection = TextRange(combined.length)))
+                    }
+                    scheduleAutosave()
+                },
+                onFailure = { error -> handleFetchFailure(error) },
+            )
         }
     }
 
     /**
      * #405 — surface a cached draft for [draftKey] on the banner (never auto-apply : a quote prefill
      * or an edit body would otherwise be silently clobbered). Empty drafts are ignored.
+     *
+     * #790 exception — when the route carries `resumeSharedDraft` (escalation of a quick-reply
+     * sheet, which JUST wrote the row), the body is APPENDED to the field instead of banner'd :
+     * the escalation continues the same composition act. With cards OFF (#805 default) the
+     * open-time quote form DOES carry a `[quotemsg]` prefill again : this append and the form
+     * hydration prepend are commutative, guarded against double-hydration — the original #790
+     * contract, restored.
      */
     private fun restoreDraftIfAny() {
         val key = draftKey ?: return
         viewModelScope.launch {
             draftOwner = draftStore.currentOwner()
             val body = draftStore.load(draftOwner, key)?.body
-            if (!body.isNullOrBlank()) {
+            if (body.isNullOrBlank()) return@launch
+            if (request.resumeSharedDraft) {
+                _state.update { current ->
+                    // Conditional separator (gate #798): a late restore during typing must not
+                    // glue the resumed body to the user's last word.
+                    val combined = if (current.draft.text.isBlank()) {
+                        body
+                    } else {
+                        current.draft.text.trimEnd() + "\n\n" + body
+                    }
+                    current.withDraft(TextFieldValue(text = combined, selection = TextRange(combined.length)))
+                }
+                scheduleAutosave()
+            } else {
                 _state.update { it.copy(restorableDraft = body) }
             }
         }
@@ -217,16 +317,60 @@ class PostEditorViewModel @AssistedInject constructor(
      * an active session, so nothing is persisted for an anonymous client.
      */
     private fun scheduleAutosave() {
-        val key = draftKey ?: return
-        val body = _state.value.draft.text
+        if (draftKey == null) return
         autosaveJob?.cancel()
         autosaveJob = viewModelScope.launch {
             delay(AUTOSAVE_DEBOUNCE_MS)
-            if (body.isBlank()) {
-                draftStore.delete(draftOwner, key)
-            } else {
-                draftStore.save(draftOwner, key, EditorDraftStore.Draft(body = body))
+            persistDraftNow()
+        }
+    }
+
+    /** Immediate write of the current body (blank = delete the row, cf. [scheduleAutosave]). */
+    private suspend fun persistDraftNow() {
+        val key = draftKey ?: return
+        val body = _state.value.draft.text
+        if (body.isBlank()) {
+            draftStore.delete(draftOwner, key)
+        } else {
+            draftStore.save(draftOwner, key, EditorDraftStore.Draft(body = body))
+        }
+    }
+
+    /** #604 lot 4a — one-shot latch : a committed close is never re-emitted (gate #803). */
+    private var closeRequested = false
+
+    /**
+     * #604 lot 4a — dirty close : flush the pending debounce so the last keystrokes reach the
+     * #405 row, THEN let the UI pop (CloseCommitted). Without this, a system back < 750 ms
+     * after typing cancelled the debounce with the ViewModel and silently dropped the tail of
+     * the draft. Mirrors the quick-reply escalation (save awaited before the effect).
+     *
+     * Two guards (gate #803, NO-GO findings) :
+     * - INERT while a POST is in flight — popping would cancel the submit with the
+     *   viewModelScope and leave the server state unknown with a repostable draft (the sheet
+     *   blocks its dismiss the same way, gate #788) ; on failure `isSubmitting` drops and the
+     *   back works again, on success SubmitSucceeded pops anyway ;
+     * - ONE-SHOT — a second back racing the first CloseCommitted must not emit a second
+     *   effect (each `onClose` pops blindly : the second pop would remove the screen BELOW).
+     */
+    private fun onCloseRequested() {
+        if (_state.value.isSubmitting || closeRequested) return
+        closeRequested = true
+        autosaveJob?.cancel()
+        viewModelScope.launch {
+            // The close must NEVER stay blocked on a failing flush (Room is not contractually
+            // non-throwing — disk full, corrupted store) : the one-shot latch is already set, so
+            // a swallowed failure here only costs the last <750 ms of typing (the debounced
+            // autosave already persisted the rest) while a rethrow would leave the screen
+            // unclosable. CancellationException still propagates (scope teardown is not an error).
+            try {
+                persistDraftNow()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // Best effort — the previous debounced write is what remains.
             }
+            _effects.send(PostEditorEffect.CloseCommitted)
         }
     }
 
@@ -247,9 +391,6 @@ class PostEditorViewModel @AssistedInject constructor(
                 _state.update { it.copy(smileyDisabled = intent.disabled) }
             is PostEditorIntent.ToggleEmailNotification ->
                 _state.update { it.copy(emailNotificationEnabled = intent.enabled) }
-            PostEditorIntent.SmileyPickerOpened -> onSmileyPickerOpened()
-            PostEditorIntent.SmileyPickerDismissed -> onSmileyPickerDismissed()
-            is PostEditorIntent.SmileySearchQueryChanged -> onSmileySearchQueryChanged(intent.query)
             is PostEditorIntent.SmileySelected -> onSmileySelected(intent.token)
             is PostEditorIntent.ImageUrlInserted -> onImageUrlInserted(intent.url)
             is PostEditorIntent.ImagePicked -> onImagePicked(intent.uri)
@@ -257,6 +398,30 @@ class PostEditorViewModel @AssistedInject constructor(
             PostEditorIntent.UploadErrorDismissed -> _state.update { it.copy(uploadError = null) }
             PostEditorIntent.DraftRestoreRequested -> onDraftRestoreRequested()
             PostEditorIntent.DraftDiscardRequested -> onDraftDiscardRequested()
+            is PostEditorIntent.QuoteRemoved -> onQuoteRemoved(intent.numreponse)
+            is PostEditorIntent.QuoteMoved -> onQuoteMoved(intent.numreponse, intent.delta)
+            PostEditorIntent.QuotesCleared -> _state.update { it.copy(quotes = emptyList()) }
+            PostEditorIntent.CloseRequested -> onCloseRequested()
+        }
+    }
+
+    /** #604 lot 3 — same card semantics as the quick-reply sheet (remove by numreponse). */
+    private fun onQuoteRemoved(numreponse: Int) {
+        _state.update { current ->
+            current.copy(quotes = current.quotes.filterNot { it.numreponse == numreponse })
+        }
+    }
+
+    /** #604 lot 3 — move the card one slot up ([delta] = -1) or down (+1) ; out-of-range = no-op. */
+    private fun onQuoteMoved(numreponse: Int, delta: Int) {
+        _state.update { current ->
+            val index = current.quotes.indexOfFirst { it.numreponse == numreponse }
+            val target = index + delta
+            if (index < 0 || target < 0 || target > current.quotes.lastIndex) return@update current
+            val reordered = current.quotes.toMutableList().apply {
+                add(target, removeAt(index))
+            }
+            current.copy(quotes = reordered)
         }
     }
 
@@ -281,91 +446,38 @@ class PostEditorViewModel @AssistedInject constructor(
         viewModelScope.launch { draftStore.delete(draftOwner, key) }
     }
 
-    private fun onSmileyPickerOpened() {
-        _state.update { current ->
-            if (current.smileyPicker is SmileyPickerState.Open) current
-            else current.copy(smileyPicker = SmileyPickerState.Open())
-        }
-    }
-
-    private fun onSmileyPickerDismissed() {
-        smileySearchJob?.cancel()
-        smileySearchJob = null
-        _state.update { it.copy(smileyPicker = SmileyPickerState.Hidden) }
-    }
-
-    private fun onSmileySearchQueryChanged(query: String) {
-        _state.update { current ->
-            val open = current.smileyPicker as? SmileyPickerState.Open ?: return@update current
-            current.copy(smileyPicker = open.copy(query = query))
-        }
-        // Cancel in-flight searches so an older response can't overwrite a newer query.
-        smileySearchJob?.cancel()
-        if (query.length <= 2) {
-            // Mirrors the HFR web composer's `query.length > 2` gate. Below threshold we
-            // reset the wiki branch to Idle so the picker can render the Standard tab.
-            _state.update { current ->
-                val open = current.smileyPicker as? SmileyPickerState.Open ?: return@update current
-                current.copy(smileyPicker = open.copy(wiki = WikiSearchState.Idle))
-            }
-            return
-        }
-        smileySearchJob = viewModelScope.launch {
-            // 300 ms matches the JS `find_smilies_timer` debounce embedded in HFR's
-            // /compressed/message.js — keeping it identical avoids surprising spikes if
-            // the user types fast. We deliberately flip to `Loading` AFTER the debounce
-            // so a user typing « jap » in one burst never sees a Loading flash before
-            // the actual network call (the previous job is cancelled before its delay
-            // resolves, so the state stays on the previous wiki snapshot until the
-            // last keystroke survives the 300 ms idle window).
-            delay(SMILEY_SEARCH_DEBOUNCE_MS)
-            // Identity guard against the « same query typed twice in a 300 ms window »
-            // race : if the user types « jap » → backspaces → re-types « jap » before
-            // the first delay resolves, both jobs would pass the `open.query == query`
-            // check (the query string is identical) and launch two parallel requests.
-            // We compare the current job identity to the ViewModel's `smileySearchJob`
-            // — the second `launchSmileySearch` call replaced the reference, so the
-            // first job's `coroutineContext.job` is not the active one anymore. Abort.
-            if (coroutineContext[Job] !== smileySearchJob) return@launch
-            _state.update { current ->
-                val open = current.smileyPicker as? SmileyPickerState.Open ?: return@update current
-                if (open.query != query) return@update current
-                current.copy(smileyPicker = open.copy(wiki = WikiSearchState.Loading))
-            }
-            val effectiveUserId = _state.value.userId ?: 0
-            val outcome = runCatching { smileyRepository.searchWiki(effectiveUserId, query) }
-            outcome.fold(
-                onSuccess = { items ->
-                    _state.update { current ->
-                        val open = current.smileyPicker as? SmileyPickerState.Open
-                            ?: return@update current
-                        // Drop the result if the user closed the picker or typed a different
-                        // query while we were waiting on the network.
-                        if (open.query != query) return@update current
-                        current.copy(smileyPicker = open.copy(wiki = WikiSearchState.Results(items)))
-                    }
-                },
-                onFailure = { error ->
-                    if (error is CancellationException) throw error
-                    diagnostics.record(
-                        DiagnosticsLog.Level.WARN,
-                        LOG_TAG_VM,
-                        "wiki smiley search failed: ${error::class.simpleName}",
-                    )
-                    _state.update { current ->
-                        val open = current.smileyPicker as? SmileyPickerState.Open
-                            ?: return@update current
-                        if (open.query != query) return@update current
-                        current.copy(smileyPicker = open.copy(wiki = WikiSearchState.Error))
-                    }
-                },
+    /**
+     * #441 — smiley picker (Standard + Wiki search), delegated to the shared
+     * [SmileyPickerController] exactly like the MP composers (#387/#440) : the controller owns
+     * open/dismiss/query, the 300 ms debounce and its race guards, and the #824
+     * restore-search-on-reopen contract. This ViewModel keeps only the insertion
+     * ([onSmileySelected] — a draft mutation, so it stays an MVI intent). Mixed wiring is
+     * deliberate : the sheet talks to the controller directly for open/dismiss/query and goes
+     * through [PostEditorIntent.SmileySelected] for insertion — do not re-route one into the
+     * other for « consistency ».
+     *
+     * Lifecycle (réserve Codex #441) : this ViewModel's editorial context is frozen at
+     * construction (`@Assisted request` ; one `PostEditorRoute` nav entry = one ViewModel,
+     * cf. `RedfaceNavigation`), so the controller can never be re-armed for another post —
+     * no targeted reset is needed beyond the ViewModel's own death.
+     *
+     * Failure logging stays a policy of THIS feature (the MP composers keep the controller's
+     * no-op default) : class name only — never the query nor the userId (anti-leak test).
+     */
+    val smileyPicker = SmileyPickerController(
+        scope = viewModelScope,
+        searchWiki = smileyRepository::searchWiki,
+        userId = { _state.value.userId },
+        onSearchFailed = { error ->
+            diagnostics.record(
+                DiagnosticsLog.Level.WARN,
+                LOG_TAG_VM,
+                "wiki smiley search failed: ${error::class.simpleName}",
             )
-        }
-    }
+        },
+    )
 
     private fun onSmileySelected(token: String) {
-        smileySearchJob?.cancel()
-        smileySearchJob = null
         // Reuse the formatter helper so the surrounding-spaces convention from HFR's web
         // composer is honoured uniformly (cf. `BbcodeFormatter.insertBbcodeToken`).
         _state.update { current ->
@@ -382,16 +494,17 @@ class PostEditorViewModel @AssistedInject constructor(
                 selection = TextRange(outcome.selectionStart, outcome.selectionEnd),
             )
             val withDraft = current.withDraft(updatedDraft)
-            val withPreview = if (withDraft.isPreviewVisible) {
+            if (withDraft.isPreviewVisible) {
                 withDraft.copy(preview = previewParser.parsePreview(withDraft.draft.text))
             } else {
                 withDraft
             }
-            // Close the picker on successful insertion ; the user can re-open it for another
-            // smiley if they want to chain. This matches HFR web behaviour and keeps the
-            // sheet from squatting the screen between two distant insertions.
-            withPreview.copy(smileyPicker = SmileyPickerState.Hidden)
         }
+        // Close the picker on successful insertion ; the user can re-open it for another
+        // smiley if they want to chain — #824 restores the search they just used. This
+        // matches HFR web behaviour and keeps the sheet from squatting the screen between
+        // two distant insertions.
+        smileyPicker.dismiss()
         scheduleAutosave()
     }
 
@@ -589,48 +702,12 @@ class PostEditorViewModel @AssistedInject constructor(
             _state.update { it.copy(submitError = SubmitError.MissingSubcat) }
             return
         }
-        launchFormFetch { fetchReplyFormWithExtraQuotes(context) }
-    }
-
-    /**
-     * #291 multi-quote — the quote form fetch (#146) returns ONE `[quotemsg]` prefill per
-     * `numrep`, so additional quoted posts are fetched by replaying the same contract with
-     * `quotedNumreponse` swapped, then concatenated into the first form's [ReplyForm.initialContent]
-     * in selection order. Client-side only: HFR never sees a multi-numrep request, and the
-     * submit still rides the FIRST form's `hash_check`/hidden fields (per-session, not
-     * per-post — the single-quote and plain-reply paths already share them).
-     *
-     * Sequential on purpose: N is tiny (a handful of posts), order must be deterministic, and
-     * a failed extra fails the whole fetch — silently dropping a quote the user explicitly
-     * selected would be worse than the retryable form-fetch error.
-     */
-    private suspend fun fetchReplyFormWithExtraQuotes(context: ReplyContext): ReplyForm {
-        val form = replyRepository.fetchReplyForm(context)
-        val extras = request.extraQuoteNumreponses
-        if (extras.isEmpty() || !context.isQuote) return form
-        val prefills = buildList {
-            add(form.initialContent)
-            extras.forEach { numreponse ->
-                // quoteRef is positional/cosmetic and belongs to the FIRST post only.
-                add(
-                    replyRepository
-                        .fetchReplyForm(context.copy(quotedNumreponse = numreponse, quoteRef = null))
-                        .initialContent,
-                )
-            }
-        }
-        val merged = prefills
-            .map { prefill ->
-                prefill.trimEnd().also { trimmed ->
-                    // Codex review — a 200-OK form whose prefill came back BLANK would silently
-                    // drop a quote the user explicitly selected (the exact failure mode the
-                    // sequential design refuses). Fail the whole fetch instead; the mapped
-                    // SubmitError keeps the editor on its retryable error path.
-                    check(trimmed.isNotBlank()) { "multi-quote prefill came back blank" }
-                }
-            }
-            .joinToString(separator = "\n\n", postfix = "\n\n")
-        return form.copy(initialContent = merged)
+        // #604 lot 3 (mockup P3) — with cards ON (or no citations at all) the open-time fetch is
+        // the PLAIN reply form : citations live as cards in [PostEditorState.quotes] and their
+        // [quotemsg] blocks are materialised fresh at submit (see [onSubmitClicked]), exactly
+        // like the quick-reply sheet. This fetch only warms the hash and hydrates the per-post
+        // options. Cards OFF goes through [loadReplyFormWithInlineQuotes] instead (#805).
+        launchFormFetch { replyRepository.fetchReplyForm(context) }
     }
 
     private fun loadEditFormIfPossible() {
@@ -686,6 +763,20 @@ class PostEditorViewModel @AssistedInject constructor(
             draft.text.isBlank() &&
             form.initialContent.isNotBlank()
 
+    private fun PostEditorState.resolveHydratedDraft(
+        form: ReplyForm,
+        shouldHydrate: Boolean,
+    ): TextFieldValue = if (shouldHydrate) {
+        TextFieldValue(
+            text = form.initialContent,
+            // Place caret at the end so the user can type their content
+            // right after the prefill — matches HFR's web behavior.
+            selection = TextRange(form.initialContent.length),
+        )
+    } else {
+        draft
+    }
+
     /**
      * Pure state transformer : produces the next [PostEditorState] after a form
      * fetch lands. The preview AST is supplied by the caller (pre-computed off
@@ -712,16 +803,7 @@ class PostEditorViewModel @AssistedInject constructor(
         nextPreview: PostContent,
     ): PostEditorState {
         val shouldHydrate = shouldHydrateFrom(form)
-        val nextDraft = if (shouldHydrate) {
-            TextFieldValue(
-                text = form.initialContent,
-                // Place caret at the end so the user can type their content
-                // right after the prefill — matches HFR's web behavior.
-                selection = TextRange(form.initialContent.length),
-            )
-        } else {
-            draft
-        }
+        val nextDraft = resolveHydratedDraft(form, shouldHydrate)
         val hydrateOptions = !optionsHydratedFromForm
         return copy(
             isLoadingForm = false,
@@ -825,12 +907,7 @@ class PostEditorViewModel @AssistedInject constructor(
                 when (snapshot.mode) {
                     PostEditorMode.Reply -> {
                         val context = buildReplyContext() ?: error("canSubmit lied about reply context")
-                        replyRepository.submitReply(
-                            context = context,
-                            form = form,
-                            bbcodeContent = snapshot.draft.text,
-                            options = options,
-                        )
+                        submitReply(context, form, snapshot, options)
                     }
                     PostEditorMode.Edit -> {
                         val context = buildEditPostContext() ?: error("canSubmit lied about edit context")
@@ -848,6 +925,51 @@ class PostEditorViewModel @AssistedInject constructor(
                 onFailure = ::handleSubmitFailure,
             )
         }
+    }
+
+    /**
+     * #604 lot 3 (mockup P3) — the Reply POST, quotes-aware. Without cards the cached plain form
+     * is submitted as before. With cards the [quotemsg] blocks are materialised FRESH here (never
+     * the cached plain form : the quote form carries the prefills AND the hash the submit rides),
+     * card order = citation order, the typed body follows the quotes ; a quotes-only reply keeps
+     * no trailing blank lines (same pinned BBCode as the quick-reply sheet). A failure anywhere
+     * leaves body AND cards untouched — the state only mutates on success. One divergence from
+     * the sheet : [options] comes from the editor's user-editable toggles, not the form defaults.
+     */
+    private suspend fun submitReply(
+        context: ReplyContext,
+        form: ReplyForm,
+        snapshot: PostEditorState,
+        options: ReplyFormOptions,
+    ): ReplySubmitResult {
+        val quotes = snapshot.quotes
+        if (quotes.isEmpty()) {
+            return replyRepository.submitReply(
+                context = context,
+                form = form,
+                bbcodeContent = snapshot.draft.text,
+                options = options,
+            )
+        }
+        val quoteContext = context.copy(
+            quotedNumreponse = quotes.first().numreponse,
+            quoteRef = null,
+        )
+        val quoteForm = quoteMaterializer.fetchFormWithQuotes(
+            context = quoteContext,
+            extraQuoteNumreponses = quotes.drop(1).map { it.numreponse },
+        )
+        val body = snapshot.draft.text
+        return replyRepository.submitReply(
+            context = quoteContext,
+            form = quoteForm,
+            bbcodeContent = if (body.isBlank()) {
+                quoteForm.initialContent.trimEnd()
+            } else {
+                quoteForm.initialContent.trimEnd() + "\n\n" + body
+            },
+            options = options,
+        )
     }
 
     private suspend fun handleSubmitOutcome(
@@ -941,17 +1063,13 @@ class PostEditorViewModel @AssistedInject constructor(
         // #213 — mirror the `ReplyContext.init` rule : reject only the SUBCAT_UNKNOWN
         // sentinel (-1). `subcat = 0` is postable (cat without sub-category, e.g. IA).
         if (subcat < 0) return null
+        // #604 lot 3 — always the PLAIN context : citations are cards, and [submitReply]
+        // derives the quote context (first card's numreponse) when materialising.
         return ReplyContext(
             cat = snapshot.cat,
             subcat = subcat,
             topicId = topicId,
             page = page,
-            // Phase 2C (#146) : both fields are null for a simple reply ; both
-            // non-null for a quote launched from `TopicScreen.onQuote`. The model
-            // tolerates a quote with a null `quoteRef` for forward compat (HFR
-            // could drop `ref` someday), but we keep them aligned in practice.
-            quotedNumreponse = snapshot.quotedNumreponse,
-            quoteRef = snapshot.quoteRef,
         )
     }
 
@@ -975,11 +1093,6 @@ class PostEditorViewModel @AssistedInject constructor(
         // Distinct from the repository's "ReplyRepository" tag so the diagnostics
         // panel makes it obvious which layer recorded an entry.
         private const val LOG_TAG_VM = "PostEditorVM"
-
-        // HFR's web composer waits 300 ms after the last keystroke before calling
-        // `find_smilies`, cf. `/compressed/message.js`. Mirror it so the wiki endpoint
-        // sees roughly the same query rate as the web client.
-        private const val SMILEY_SEARCH_DEBOUNCE_MS = 300L
 
         // #405 — idle window after the last edit before the draft is persisted. Long enough to
         // coalesce a burst of keystrokes into a single Room write, short enough that an accidental

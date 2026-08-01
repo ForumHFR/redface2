@@ -305,11 +305,23 @@ class SearchViewModel @AssistedInject constructor(
             outcome.fold(
                 onSuccess = { page ->
                     _state.update {
+                        // #918 — HFR omits the pivot from explicit-category responses. Keep the
+                        // categories discovered by the originating all-category search so
+                        // the user can continue switching tabs. A fresh all-category search
+                        // still replaces the pivot, including with an empty result.
+                        val pivotCategories = page.pivotCategories.ifEmpty {
+                            if (scope is SearchCategoryScope.Category) it.pivotCategories else emptyList()
+                        }
+                        val selectedCategory = when (scope) {
+                            is SearchCategoryScope.Category ->
+                                pivotCategories.firstOrNull { category -> category.id == scope.id }
+                            SearchCategoryScope.All -> page.selectedCategory
+                        }
                         it.copy(
                             isLoading = false,
                             results = page.topics,
-                            pivotCategories = page.pivotCategories,
-                            selectedCategory = page.selectedCategory,
+                            pivotCategories = pivotCategories,
+                            selectedCategory = selectedCategory,
                             errorMessage = null,
                         )
                     }

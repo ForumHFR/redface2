@@ -213,4 +213,80 @@ class PostRendererQuoteDepthTest {
         )
         assertEquals(2, quoteVisibleTextLength(content))
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // #784 — folded long quotes show a bounded preview. The container/fade rendering lives in the
+    // @Composable LongQuotePreview (PostRendererLongQuoteFoldTest, Robolectric); here we pin the
+    // pure sizing and clip decisions.
+    // ---------------------------------------------------------------------------------------------
+
+    @Test
+    fun `the preview keeps the documented number of body lines`() {
+        assertEquals(
+            "Changing LONG_QUOTE_PREVIEW_LINES changes how much of every folded quote is visible " +
+                "— keep it a deliberate review step.",
+            5,
+            LONG_QUOTE_PREVIEW_LINES,
+        )
+    }
+
+    @Test
+    fun `preview max height is the line height times the line budget, with a fallback`() {
+        // bodyMedium's M3 line height (20sp) → 100sp of preview.
+        assertEquals(20f * LONG_QUOTE_PREVIEW_LINES, longQuotePreviewMaxHeightSp(20f), 0f)
+        // A theme leaving lineHeight unspecified (0 / negative) falls back to the documented value
+        // instead of collapsing the preview to zero height.
+        assertEquals(
+            LONG_QUOTE_FALLBACK_LINE_HEIGHT_SP * LONG_QUOTE_PREVIEW_LINES,
+            longQuotePreviewMaxHeightSp(0f),
+            0f,
+        )
+        assertEquals(
+            LONG_QUOTE_FALLBACK_LINE_HEIGHT_SP * LONG_QUOTE_PREVIEW_LINES,
+            longQuotePreviewMaxHeightSp(-1f),
+            0f,
+        )
+    }
+
+    @Test
+    fun `the bottom fade draws only when the preview actually clipped`() {
+        // At (or within rounding tolerance of) the cap = the box was constrained → content hidden.
+        assertTrue(isLongQuotePreviewClipped(contentHeightPx = 500f, maxHeightPx = 500f))
+        assertTrue(isLongQuotePreviewClipped(contentHeightPx = 499.5f, maxHeightPx = 500f))
+        // Clearly under the cap = the whole quote is visible; a « more below » fade would lie.
+        assertFalse(isLongQuotePreviewClipped(contentHeightPx = 300f, maxHeightPx = 500f))
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // #785 — the blacklist applies inside quotes. The rendering branch lives in the @Composable
+    // QuoteBlock/BlockedQuoteBlock (PostRendererBlockedQuoteTest, Robolectric); here we pin the pure
+    // decision so the canonical-match contract can't drift silently.
+    // ---------------------------------------------------------------------------------------------
+
+    @Test
+    fun `isBlockedQuoteAuthor matches the blocked set through the canonical key`() {
+        // The provided set carries CANONICAL keys (cf. canonicalizePseudo); the quote author is raw
+        // parser output ("X a écrit"), so case and stray whitespace must not defeat the match.
+        val blocked = setOf("alice")
+        assertTrue(isBlockedQuoteAuthor("alice", blocked))
+        assertTrue(isBlockedQuoteAuthor("Alice", blocked))
+        assertTrue(isBlockedQuoteAuthor("  aLiCe  ", blocked))
+    }
+
+    @Test
+    fun `isBlockedQuoteAuthor never matches a null author or a non-blocked one`() {
+        // A bare [quote] has no author: nothing to match, never masked. A sourced citation from a
+        // non-blocked user must render untouched.
+        val blocked = setOf("alice")
+        assertFalse(isBlockedQuoteAuthor(null, blocked))
+        assertFalse(isBlockedQuoteAuthor("Bob", blocked))
+    }
+
+    @Test
+    fun `isBlockedQuoteAuthor is inert on the empty default set`() {
+        // LocalBlockedQuoteAuthors defaults to emptySet(): every non-topic surface (editor preview,
+        // MP threads, signatures) must keep rendering quotes unchanged.
+        assertFalse(isBlockedQuoteAuthor("Alice", emptySet()))
+        assertFalse(isBlockedQuoteAuthor(null, emptySet()))
+    }
 }

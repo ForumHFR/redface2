@@ -50,8 +50,8 @@ import kotlinx.coroutines.launch
  * - a hero row: avatar + author, with « Post n°{numreponse} » (the post number moved
  *   here from the header bar) and the post date underneath;
  * - optional info lines: « Édité le … » when [Post.editedAt] is non-null, and
- *   « Cité N fois sur cette page » when [citedCount] > 0 (hidden at 0 — same
- *   page-scoped #239 count as the badge, which stays on the card);
+ *   « Cité N fois dans le sujet » when [citedCount] > 0 (hidden at 0) — #863 : the SERVER
+ *   counter, cross-page, same value as the card's badge;
  * - stacked full-width actions, profile-sheet style: a filled « Copier le lien de ce
  *   post » (primary), an outlined « Ouvrir dans le navigateur » (debug-friendly: the
  *   canonical permalink opens in the default browser), and a DISABLED « Alerter »
@@ -84,12 +84,27 @@ internal fun PostMenuSheet(
      */
     onDelete: (() -> Unit)? = null,
     /**
+     * Vague 3 (#604) — « Modifier le premier message », migrated here from the dissolved header
+     * card (Phase 2D #148). Non-null ONLY on the topic's first post when the FP edit gates hold
+     * (`shouldShowEditFirstPost`: page 1, owner toolbar link, postable topic with a real
+     * sub-category — #213). Null hides the entry.
+     */
+    onEditFirstPost: (() -> Unit)? = null,
+    /**
      * #395 — opens the author's profile from the hero row (avatar + pseudo), parity with
      * the #208 tap on the post card. Null keeps the hero inert — same gate as the card
      * (`Post.profileId == null` : Publicité rows, anonymous reads). The sheet plays its
      * hide animation first so the profile sheet never stacks over this one.
      */
     onOpenProfile: (() -> Unit)? = null,
+    /**
+     * #792 — « Envoyer un MP » : opens the NEW-conversation MP composer with this post's
+     * author prefilled as recipient. Null hides the entry (anonymous session, own post, or
+     * no real profile — cf. `shouldShowSendPrivateMessage`). The sheet hides first, then
+     * dismisses AND navigates (same order as « Modifier le premier message ») so the
+     * composer never opens under a still-visible menu sheet.
+     */
+    onSendPrivateMessage: (() -> Unit)? = null,
     /**
      * #291 — whether this post already sits in the multi-quote basket; flips the entry's
      * label between « Ajouter à » and « Retirer de » la citation multiple.
@@ -160,7 +175,7 @@ internal fun PostMenuSheet(
                 if (citedCount > 0) {
                     Text(
                         text = pluralStringResource(
-                            R.plurals.topic_post_menu_cited_on_page,
+                            R.plurals.topic_post_menu_cited_in_topic,
                             citedCount,
                             citedCount,
                         ),
@@ -195,6 +210,24 @@ internal fun PostMenuSheet(
                 Text(stringResource(R.string.topic_post_menu_open_in_browser))
             }
 
+            if (onEditFirstPost != null) {
+                Spacer(Modifier.height(8.dp))
+                // Vague 3 (#604) — topic-level edit, first post only (Phase 2D #148). Hide first,
+                // then dismiss AND navigate (same order as the profile hero above) — the editor
+                // must not open under a still-visible menu sheet.
+                OutlinedButton(
+                    onClick = {
+                        hideThenDismiss(coroutineScope, sheetState) {
+                            onDismiss()
+                            onEditFirstPost()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.topic_edit_first_post))
+                }
+            }
+
             if (onToggleMultiQuote != null) {
                 Spacer(Modifier.height(8.dp))
                 // #291 — adds/removes this post in the multi-quote basket. The sheet closes on
@@ -215,6 +248,23 @@ internal fun PostMenuSheet(
                             },
                         ),
                     )
+                }
+            }
+
+            if (onSendPrivateMessage != null) {
+                Spacer(Modifier.height(8.dp))
+                // #792 — person-directed action, grouped with the author-scoped entry below. Hide
+                // first, then dismiss AND navigate (same order as « Modifier le premier message »).
+                OutlinedButton(
+                    onClick = {
+                        hideThenDismiss(coroutineScope, sheetState) {
+                            onDismiss()
+                            onSendPrivateMessage()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.topic_post_menu_send_private_message))
                 }
             }
 
@@ -359,10 +409,10 @@ private fun openPermalinkInBrowser(context: Context, permalink: String, failureF
 /**
  * Plays the sheet's hide animation, then invokes [onDismiss] once the sheet is actually
  * off-screen — same Material 3 « animated dismiss » idiom as ProfilePreviewSheet's
- * `hideThenNavigate`.
+ * `hideThenNavigate`. `internal` (#831): shared with [PostImageMenuSheet].
  */
 @OptIn(ExperimentalMaterial3Api::class)
-private fun hideThenDismiss(
+internal fun hideThenDismiss(
     coroutineScope: CoroutineScope,
     sheetState: SheetState,
     onDismiss: () -> Unit,

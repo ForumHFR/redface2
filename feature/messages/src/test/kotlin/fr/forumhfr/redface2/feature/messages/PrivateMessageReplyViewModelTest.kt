@@ -2,6 +2,8 @@ package fr.forumhfr.redface2.feature.messages
 
 import androidx.compose.ui.text.input.TextFieldValue
 import app.cash.turbine.test
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
@@ -23,6 +25,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -70,6 +73,8 @@ class PrivateMessageReplyViewModelTest {
     private fun userPreferences(confirmBeforePosting: Boolean = false): UserPreferencesRepository =
         mockk {
             every { observeConfirmBeforePosting() } returns MutableStateFlow(confirmBeforePosting)
+            // #459 — the composer now mirrors the image-insert preference on init.
+            every { observeEditorImageInsert() } returns MutableStateFlow(EditorImageInsert.REDUCED)
         }
 
     private fun form(
@@ -103,12 +108,37 @@ class PrivateMessageReplyViewModelTest {
     )
 
     @Test
+    fun `picked images upload and insert one img per success (#459)`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        val uploads = FakeUploadRepository()
+        val reader = FakeImageUploadReader()
+
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), uploads, reader, DiagnosticsLog(),
+            smileyRepository(),
+        )
+        advanceUntilIdle()
+
+        viewModel.onImagesPicked(listOf("content://pick/1", "content://pick/2"))
+        advanceUntilIdle()
+
+        assertEquals(listOf("content://pick/1", "content://pick/2"), reader.readUris)
+        assertEquals(2, uploads.uploadCalls)
+        assertEquals(2, Regex("\\[img]").findAll(viewModel.state.value.draft.text).count())
+        assertFalse(viewModel.state.value.isUploading)
+    }
+
+    @Test
     fun `loads the form on init and hydrates signature from the hidden field`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any(), any()) } returns form()
 
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
         )
 
         val state = viewModel.state.value
@@ -126,7 +156,9 @@ class PrivateMessageReplyViewModelTest {
         val smileys = smileyRepository()
 
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), draftStore, smileys,
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileys,
         )
 
         viewModel.smileyPicker.open()
@@ -144,7 +176,9 @@ class PrivateMessageReplyViewModelTest {
             ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
 
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
         )
         viewModel.onContentChanged(TextFieldValue("Coucou en privé."))
 
@@ -168,7 +202,9 @@ class PrivateMessageReplyViewModelTest {
             ReplySubmitResult.Failure(ReplyFailureReason.EmptyMessage)
 
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
         )
         viewModel.onContentChanged(TextFieldValue("non-blank"))
         viewModel.onSubmit()
@@ -187,7 +223,9 @@ class PrivateMessageReplyViewModelTest {
             ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
 
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
         )
         viewModel.onContentChanged(TextFieldValue("hello"))
         viewModel.onSubmit()
@@ -205,7 +243,9 @@ class PrivateMessageReplyViewModelTest {
             ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
 
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
         )
         // First load hydrates signature ON (hidden `signature=1`); the user turns it OFF.
         viewModel.onToggleSignature(false)
@@ -229,7 +269,9 @@ class PrivateMessageReplyViewModelTest {
             ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
 
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
         )
         viewModel.onContentChanged(TextFieldValue("hello"))
         viewModel.onSubmit()
@@ -246,7 +288,9 @@ class PrivateMessageReplyViewModelTest {
         coEvery { repository.fetchReplyForm(any(), any()) } throws IOException("network down")
 
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
         )
 
         val state = viewModel.state.value
@@ -261,7 +305,9 @@ class PrivateMessageReplyViewModelTest {
         coEvery { repository.fetchReplyForm(any(), any()) } returns form(isAnonymous = true)
 
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
         )
 
         assertTrue(viewModel.state.value.formError)
@@ -286,7 +332,9 @@ class PrivateMessageReplyViewModelTest {
             ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
 
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
         )
         viewModel.onContentChanged(TextFieldValue("Coucou en privé."))
         viewModel.onSubmit()
@@ -306,6 +354,7 @@ class PrivateMessageReplyViewModelTest {
             previewParser,
             userPreferences(confirmBeforePosting = true),
             draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
             smileyRepository(),
         )
         viewModel.onContentChanged(TextFieldValue("Coucou en privé."))
@@ -329,6 +378,7 @@ class PrivateMessageReplyViewModelTest {
             previewParser,
             userPreferences(confirmBeforePosting = true),
             draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
             smileyRepository(),
         )
         viewModel.onContentChanged(TextFieldValue("Coucou en privé."))
@@ -359,6 +409,7 @@ class PrivateMessageReplyViewModelTest {
             previewParser,
             userPreferences(confirmBeforePosting = true),
             draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
             smileyRepository(),
         )
         viewModel.onContentChanged(TextFieldValue("Coucou en privé."))
@@ -385,6 +436,7 @@ class PrivateMessageReplyViewModelTest {
             previewParser,
             userPreferences(confirmBeforePosting = true),
             draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
             smileyRepository(),
         )
         viewModel.onSubmit()
@@ -404,6 +456,7 @@ class PrivateMessageReplyViewModelTest {
             previewParser,
             userPreferences(confirmBeforePosting = true),
             draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
             smileyRepository(),
         )
         viewModel.onContentChanged(TextFieldValue("Coucou en privé."))
@@ -438,6 +491,7 @@ class PrivateMessageReplyViewModelTest {
             previewParser,
             userPreferences(confirmBeforePosting = true),
             draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
             smileyRepository(),
         )
         viewModel.onContentChanged(TextFieldValue("Coucou en privé."))
@@ -461,7 +515,9 @@ class PrivateMessageReplyViewModelTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any(), any()) } returns form()
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
         )
 
         viewModel.onContentChanged(TextFieldValue("private draft"))
@@ -481,7 +537,9 @@ class PrivateMessageReplyViewModelTest {
             EditorDraftStore.Draft(body = "rescued MP", isPrivate = true),
         )
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
         )
 
         assertEquals("rescued MP", viewModel.state.value.restorableDraft)
@@ -499,7 +557,9 @@ class PrivateMessageReplyViewModelTest {
         val key = EditorDraftKey.mpReply(request.threadId)
         draftStore.preload(key, EditorDraftStore.Draft(body = "rescued MP", isPrivate = true))
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
         )
 
         viewModel.onDraftDiscardRequested()
@@ -516,7 +576,9 @@ class PrivateMessageReplyViewModelTest {
         coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
         )
         viewModel.onContentChanged(TextFieldValue("Coucou en privé."))
 
@@ -524,6 +586,104 @@ class PrivateMessageReplyViewModelTest {
         advanceUntilIdle()
 
         assertTrue(draftStore.deletedKeys.contains(EditorDraftKey.mpReply(request.threadId)))
+    }
+
+    // ----- #803 pattern : dirty close (flush before pop), state-hygiene audit 2026-07-05 -----
+
+    @Test
+    fun `onCloseRequested flushes the pending debounce before CloseCommitted`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
+        )
+
+        // Type, then close IMMEDIATELY — well inside the 750 ms debounce window. The flush must
+        // persist the state at close time, not the snapshot the debounce captured at scheduling.
+        viewModel.onContentChanged(TextFieldValue("dernier mot"))
+        viewModel.onCloseRequested()
+
+        val effect = viewModel.effects.first()
+        assertEquals(PrivateMessageReplyEffect.CloseCommitted, effect)
+        val saved = draftStore.saved[EditorDraftKey.mpReply(request.threadId)]
+        assertEquals("the tail of the draft must reach the row before the pop", "dernier mot", saved?.body)
+        assertTrue("MP drafts must stay flagged private", saved?.isPrivate == true)
+    }
+
+    @Test
+    fun `onCloseRequested with a blank body deletes the row and still closes`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        val key = EditorDraftKey.mpReply(request.threadId)
+        draftStore.preload(key, EditorDraftStore.Draft(body = "stale", isPrivate = true))
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
+        )
+
+        viewModel.onCloseRequested()
+
+        val effect = viewModel.effects.first()
+        assertEquals(PrivateMessageReplyEffect.CloseCommitted, effect)
+        assertTrue("an emptied editor must not leave a stale row", draftStore.deletedKeys.contains(key))
+    }
+
+    @Test
+    fun `onCloseRequested during an in-flight submit is ignored (gate #803)`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        // Hold the POST in flight so the close lands while isSubmitting is true.
+        val gate = CompletableDeferred<Unit>()
+        coEvery { repository.submitReply(any(), any(), any(), any(), any()) } coAnswers {
+            gate.await()
+            ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+        }
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
+        )
+        viewModel.onContentChanged(TextFieldValue("en vol"))
+
+        viewModel.onSubmit()
+        // Close requested while the POST is in flight — must be inert (gate #803).
+        viewModel.onCloseRequested()
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        viewModel.effects.test {
+            assertTrue(
+                "the submit outcome must be the ONLY effect — no CloseCommitted",
+                awaitItem() is PrivateMessageReplyEffect.SubmitSucceeded,
+            )
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a second onCloseRequested is a no-op (gate #803)`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
+        )
+
+        viewModel.onCloseRequested()
+        viewModel.onCloseRequested()
+        advanceUntilIdle()
+
+        viewModel.effects.test {
+            assertEquals(PrivateMessageReplyEffect.CloseCommitted, awaitItem())
+            // A double close must never yield a second pop (it would remove the screen BELOW).
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     // ----- #606 : owner manages DT/MultiMP members --------------------------------
@@ -536,7 +696,9 @@ class PrivateMessageReplyViewModelTest {
             ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
 
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
         )
 
         assertFalse(viewModel.state.value.canManageRecipients)
@@ -567,7 +729,9 @@ class PrivateMessageReplyViewModelTest {
         coEvery { repository.fetchReplyForm(any(), any()) } returns ownerForm()
 
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
         )
 
         assertTrue(viewModel.state.value.canManageRecipients)
@@ -585,7 +749,9 @@ class PrivateMessageReplyViewModelTest {
             ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
 
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
         )
         viewModel.onContentChanged(TextFieldValue("hello"))
 
@@ -611,7 +777,9 @@ class PrivateMessageReplyViewModelTest {
         coEvery { repository.fetchReplyForm(any(), any()) } returns ownerForm(newdest = "alice, bob")
 
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
         )
 
         viewModel.onAddRecipient("  charlie  ") // trimmed before insertion
@@ -624,7 +792,9 @@ class PrivateMessageReplyViewModelTest {
         coEvery { repository.fetchReplyForm(any(), any()) } returns ownerForm(newdest = "alice, bob")
 
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
         )
 
         viewModel.onAddRecipient(" alice ")
@@ -637,7 +807,9 @@ class PrivateMessageReplyViewModelTest {
         coEvery { repository.fetchReplyForm(any(), any()) } returns ownerForm(newdest = "alice, bob, bob2")
 
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
         )
 
         viewModel.onRemoveRecipient("bob")
@@ -650,7 +822,9 @@ class PrivateMessageReplyViewModelTest {
         coEvery { repository.fetchReplyForm(any(), any()) } returns ownerForm(newdest = "alice, bob")
 
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
         )
 
         viewModel.onRemoveRecipient("alice")
@@ -668,7 +842,9 @@ class PrivateMessageReplyViewModelTest {
             ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
 
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
         )
         viewModel.onRemoveRecipient("alice")
         viewModel.onAddRecipient("Bébé Yoda")
@@ -694,7 +870,9 @@ class PrivateMessageReplyViewModelTest {
             ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
 
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
         )
         viewModel.onRemoveRecipient("alice") // user edit before the failed submit
         viewModel.onContentChanged(TextFieldValue("hello"))
@@ -720,7 +898,9 @@ class PrivateMessageReplyViewModelTest {
             ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
 
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
         )
         viewModel.onContentChanged(TextFieldValue("hello")) // no member edit
         viewModel.onSubmit()

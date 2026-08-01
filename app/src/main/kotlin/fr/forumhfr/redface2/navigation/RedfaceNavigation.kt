@@ -97,6 +97,7 @@ import fr.forumhfr.redface2.BuildConfig
 import fr.forumhfr.redface2.R
 import fr.forumhfr.redface2.core.ui.R as CoreUiR
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageSummary
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.shouldRevealNavBar
@@ -139,6 +140,7 @@ import fr.forumhfr.redface2.feature.settings.SettingsScreen
 import fr.forumhfr.redface2.feature.topic.TopicRequest
 import fr.forumhfr.redface2.feature.topic.TopicScreen
 import fr.forumhfr.redface2.feature.topic.TopicScrollAnchor
+import fr.forumhfr.redface2.feature.topic.TopicSubmitResult
 import java.time.Instant
 import kotlinx.serialization.Serializable
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -282,13 +284,11 @@ data class TopicRoute(
     val page: Int = 1,
     val scrollTo: Int? = null,
     /**
-     * Issue #200 — bumped to `System.currentTimeMillis()` by the navigation host when the
-     * editor pops back after a successful submit (reply / quote / edit / edit-FP /
-     * create-topic). The new value invalidates the route key so the topic screen rebuilds
-     * its ViewModel and `loadCurrentPage()` skips the cache to force-fetch the latest page
-     * — otherwise the cache-aside path would serve a stale page that doesn't include the
-     * post the user just published. `null` on the normal nav path (forum / flags / deep
-     * link) so the cache-first behaviour is preserved everywhere else.
+     * DEAD since #895 étape 4 (PR 2) — the historical #200 post-submit rebuild signal. The
+     * editor outcome now reaches the RETAINED topic ViewModel through [TopicSubmitNavState]
+     * (transient, never serialized) and the route is frozen at entry. The field is kept, unread,
+     * for serialization compat : a back stack persisted by an older build must keep
+     * deserialising (same stance as the removed quote args on [PostEditorRoute]).
      */
     val submitSignal: Long? = null,
     /**
@@ -299,15 +299,20 @@ data class TopicRoute(
      */
     val forceRefresh: Boolean = false,
     /**
-     * #226 — `true` only on the route re-pushed by [onNavigateToLastPage] after a plain reply
-     * overflowed onto a freshly created last page. Forwarded to `TopicRequest.postSubmitOverflowLanding`.
-     * Always paired with a fresh [submitSignal] (force-fetch, no stale cache) and tells the ViewModel
-     * this is the overflow *landing*: scroll to the end of the fresh page, do NOT redirect again to
-     * yet another last page (anti-chase under concurrent posting). Default `false` keeps every other
-     * route — including the initial post-submit refresh — unaffected; defaulted so older serialised
-     * back stacks deserialise without the field.
+     * DEAD since #895 étape 4 (PR 2) — the historical #226 overflow-landing marker of the
+     * route-replace era. The anti-chase guarantee now lives in
+     * `TopicViewModel.applySubmitResult` (single internal redirect budget). Kept, unread, for
+     * serialization compat like [submitSignal].
      */
     val postSubmitOverflowLanding: Boolean = false,
+    /**
+     * #750 — `true` when [page] is untrusted: HFR email-notification links always say `page=1`
+     * while the real target travels as `numreponse`. Forwarded to `TopicRequest.resolveScrollToPage`
+     * so the ViewModel resolves the actual page (server-side redirect probe, #277 mechanism) before
+     * the first load. Only the email deep-link path sets it; defaulted so older serialised back
+     * stacks deserialise without the field.
+     */
+    val resolveScrollToPage: Boolean = false,
 ) : RedfaceNavKey
 
 @Serializable
@@ -329,26 +334,19 @@ data class PostEditorRoute(
      */
     val subcat: Int? = null,
     /**
-     * `numreponse` of the post being quoted (Phase 2C, #146). `null` for a
-     * simple reply ; non-null when the user tapped « Citer » on a specific post.
-     * Routed verbatim into `PostEditorRequest.quotedNumreponse`.
+     * #790 (#604 lot 2) — `true` when this editor is the ESCALATION of a quick-reply sheet: the
+     * shared #405 draft row was just written by the sheet, so the editor auto-applies it instead
+     * of surfacing the restore banner (the escalation continues the same composition act). The
+     * text itself never rides the route — only this flag does. Defaulted so older serialised
+     * back stacks deserialise.
+     *
+     * #604 lot 3 — the quote args (`quotedNumreponse`/`quoteRef`/`extraQuoteNumreponses`) left
+     * this route : citations are CARDS handed over in memory (cf. `MultiQuoteNavState.
+     * pendingEditorQuotes`), transient by decision. Removing serialised fields is
+     * restore-safe — the decoder reads the class descriptor's elements and simply never
+     * touches extra keys an older back stack may have stored.
      */
-    val quotedNumreponse: Int? = null,
-    /**
-     * `ref` parameter extracted from HFR's quote link on the source post when HFR
-     * exposed it in clear HTML. Opaque positional id ; forwarded as-is to
-     * `HfrClient.getReplyForm`. `null` for a simple reply or for an obfuscated /
-     * absent quote link ; quote still works from `quotedNumreponse` alone.
-     */
-    val quoteRef: Int? = null,
-    /**
-     * #291 multi-quote — `numreponse`s of the ADDITIONAL posts to quote after
-     * [quotedNumreponse], in selection order. The editor replays the #146 quote
-     * form fetch once per entry and concatenates the `[quotemsg]` prefills —
-     * client-side only, no new HFR contract. Empty for single quote / plain
-     * reply ; defaulted so older serialised back stacks deserialise.
-     */
-    val extraQuoteNumreponses: List<Int> = emptyList(),
+    val resumeSharedDraft: Boolean = false,
 ) : RedfaceNavKey
 
 @Serializable
@@ -462,6 +460,24 @@ private fun StartScreenChoice.toTopLevelDestination(): TopLevelDestination = whe
     StartScreenChoice.FORUM -> TopLevelDestination.Forum
     StartScreenChoice.MESSAGES -> TopLevelDestination.Messages
 }
+
+// #812 — the stable identity of an auth state, used to detect real SESSION TRANSITIONS
+// (login, logout, account switch) : the session-clearing effect must ignore the re-emission
+// that follows an activity recreation, whose identity compares equal. Anonymous is safe as
+// an identity (never a loading placeholder) : observeAuthState() filters the cookie jar's
+// un-loaded null state, so its FIRST emission is already the persisted-session verdict.
+// userId is the canonical key (gate Codex) ; pseudo only backs the rare cookie sets without
+// `md_id`. Pure — pinned by test.
+internal fun authIdentityKey(auth: AuthState?): String? = when (auth) {
+    null -> null
+    AuthState.Anonymous -> "anon"
+    is AuthState.Authenticated -> "auth:${auth.userId ?: "pseudo:${auth.pseudo}"}"
+}
+
+// #812 — a transition needs a KNOWN previous identity that differs : the first delivery of a
+// cold start (previous == null) and a post-recreation re-delivery (equal) are both no-ops.
+internal fun isAuthTransition(previous: String?, identity: String): Boolean =
+    previous != null && previous != identity
 
 // #603 PR6 / #679 — what a bottom-bar tap should do, given the tapped tab, the current tab and the
 // Drapeaux stack depth. Pure (no callbacks → no LongParameterList, fully testable); the host maps the
@@ -833,6 +849,8 @@ fun RedfaceApp(intent: Intent?) {
     val foldLongQuotes by themeViewModel.foldLongQuotes.collectAsStateWithLifecycle()
     // #105 — « afficher l'ascenseur » reading preference, provided to the reading scrollbar via RedfaceTheme.
     val showScrollbar by themeViewModel.showScrollbar.collectAsStateWithLifecycle()
+    // #973 — block-GIF display profile (S/M/L), provided to the post renderer via RedfaceTheme.
+    val mediaDisplayProfile by themeViewModel.mediaDisplayProfile.collectAsStateWithLifecycle()
     // #666 — show/hide the labels under the bottom-nav icons (resolved at the shell for the suite below).
     val navBarLabels by themeViewModel.navBarLabels.collectAsStateWithLifecycle()
     // #445 — debug bounds overlay preference (the dev-channel gate + render live in
@@ -898,6 +916,7 @@ fun RedfaceApp(intent: Intent?) {
             fontScale = fontScale,
             foldLongQuotes = foldLongQuotes,
             showScrollbar = showScrollbar,
+            mediaDisplayProfile = mediaDisplayProfile,
         ),
     ) {
         // #458 — cold-start screen, read synchronously from the bootstrap mirror and frozen for
@@ -1069,22 +1088,33 @@ fun RedfaceApp(intent: Intent?) {
         // the entry recreation; keyed by (cat, post) so titles never bleed across categories.
         var topicTitleCache by remember { mutableStateOf(emptyMap<TopicTitleKey, String>()) }
 
-        // #307 — per-page scroll anchors keyed by (cat, post, page), twin of topicTitleCache: a page
-        // change destroys the nav entry (and its rememberSaveable LazyListState), so returning to an
-        // already-visited page used to land at the top. The topic screen saves its read position here
-        // on departure; the next landing on the same page restores it (unless the route carries a
-        // scrollTo / submitSignal, cf. resolveTopicScrollRestoration). RAM/session only, like titles.
+        // #307 — per-page scroll anchors keyed by (cat, post, page), twin of topicTitleCache. The
+        // topic screen saves its read position here on departure (under its CANONICAL page, #895) ;
+        // the next ENTRY on the same page restores it (unless the route carries a scrollTo, cf.
+        // resolveTopicScrollRestoration). Serves cross-entry restores only since #895 étape 4 —
+        // in-topic page changes stay inside the retained ViewModel. RAM/session only, like titles.
         var topicScrollAnchorCache by remember { mutableStateOf(emptyMap<TopicScrollKey, TopicScrollAnchor>()) }
-        // #412 — transient « land at the bottom » marker, lifecycle-matched to the anchor cache
-        // above (plain remember: lost on activity/process recreation, which falls back to the
-        // pre-#412 top landing instead of replaying a stale bottom scroll).
-        var topicPendingBottomLanding by remember { mutableStateOf<TopicScrollKey?>(null) }
+        // #895 étape 4 (PR 2) — pending full-editor submit outcome, published BEFORE the editor
+        // pop and consumed exactly once by the topic entry below (→ TopicViewModel.applySubmitResult).
+        // Keyed (cat, post) so another topic's entry can never consume it ; eventId is a strictly
+        // monotonic counter so two rapid submits with identical payloads both apply. Plain remember
+        // on purpose: process death drops it — the POST already reached HFR, the restored topic
+        // shows the cached page until a manual refresh (same stance as the other transient slots).
+        var topicPendingSubmit by remember { mutableStateOf<TopicPendingSubmit?>(null) }
+        var topicSubmitEventId by remember { mutableStateOf(0L) }
         // #291 — multi-quote basket: numreponses selected for quoting, in tap order, keyed by
         // (cat, post) so a page change (which destroys the topic nav entry, cf. titles above)
         // keeps the cross-page selection while a different topic never sees it. One basket at a
         // time (selecting in another topic resets it — quoting is a single-topic act). Plain
         // remember: losing it on process death just means re-selecting, like the markers above.
         var multiQuoteBasket by remember { mutableStateOf<MultiQuoteBasket?>(null) }
+        // #604 lot 3 — quote cards handed to the NEXT full-screen editor (mockup P3) : set right
+        // before pushing a PostEditorRoute (« Citer N » or a sheet escalation), consumed ONCE by
+        // the editor entry (read into the request, then cleared) so a later editor can never
+        // resurrect a stale citation set. In-memory on purpose — the cards are transient by
+        // decision (lot 2) : a process death keeps the #405 draft text but drops the cards.
+        // #868-#870 — carries `consumesBasket` too (cf. EditorQuotesHandoff).
+        var pendingEditorQuotes by remember { mutableStateOf<EditorQuotesHandoff?>(null) }
         // #465 — per-topic MANUAL poll-expansion choice, keyed by (cat, post) (one poll per topic),
         // twin of topicTitleCache / topicScrollAnchorCache: a page change replaces the TopicRoute
         // (new nav entry → new ViewModel), so a `rememberSaveable` toggle inside the poll card was
@@ -1094,35 +1124,36 @@ fun RedfaceApp(intent: Intent?) {
         // only, never serialized into a route.
         var topicPollExpansionCache by remember { mutableStateOf(emptyMap<TopicPollKey, Boolean>()) }
 
+        // #812 — the session-clearing block below must run on real SESSION TRANSITIONS only
+        // (login, logout, account switch), never on the re-emission that follows an activity
+        // recreation : LaunchedEffect restarts on every rotation, and the un-guarded reset was
+        // wiping the Messages back stack (an open conversation silently fell back to the list)
+        // plus every read-state cache. rememberSaveable makes the guard itself survive the
+        // recreation, so the first post-restore delivery compares equal and is a no-op.
+        var lastAuthIdentity by rememberSaveable { mutableStateOf<String?>(null) }
         LaunchedEffect(authState) {
-            when (authState) {
-                null -> Unit
-                AuthState.Anonymous -> {
-                    readPrivateMessageThreadIds = emptyMap()
-                    multiRecipientThreadIds = emptySet()
-                    unreadOnOpenThreadIds = emptySet()
-                    openThreadDates = emptyMap()
-                    // #531 — stay in lockstep with the VM's generation reset (clearPrivateState).
-                    lastReconciledGeneration = 0
-                    privateMessageSentSignal = null
-                    // #291 — a write intention armed under another session must not survive the
-                    // transition (Codex review: stale « Citer N » after logout/login).
-                    multiQuoteBasket = null
-                    resetStack(messagesBackStack, MessagesRoute, MessagesRoute)
-                }
-                is AuthState.Authenticated -> {
-                    readPrivateMessageThreadIds = emptyMap()
-                    multiRecipientThreadIds = emptySet()
-                    unreadOnOpenThreadIds = emptySet()
-                    openThreadDates = emptyMap()
-                    // #531 — the VM reloads page 1 (generation back to 1) on a fresh authentication;
-                    // resetting here lets that first reconcile run.
-                    lastReconciledGeneration = 0
-                    privateMessageSentSignal = null
-                    multiQuoteBasket = null
-                    resetStack(messagesBackStack, MessagesRoute, MessagesRoute)
-                }
-            }
+            val identity = authIdentityKey(authState) ?: return@LaunchedEffect
+            val previous = lastAuthIdentity
+            lastAuthIdentity = identity
+            // First delivery of a cold start (fresh stacks, nothing to clear) or the same
+            // session re-delivered after a recreation (restored stacks must survive) — not a
+            // transition, nothing to reset.
+            if (!isAuthTransition(previous, identity)) return@LaunchedEffect
+            readPrivateMessageThreadIds = emptyMap()
+            multiRecipientThreadIds = emptySet()
+            unreadOnOpenThreadIds = emptySet()
+            openThreadDates = emptyMap()
+            // #531 — stay in lockstep with the VM's generation reset (clearPrivateState on
+            // logout ; reload from generation 1 on a fresh authentication).
+            lastReconciledGeneration = 0
+            privateMessageSentSignal = null
+            // #291 — a write intention armed under another session must not survive the
+            // transition (Codex review: stale « Citer N » after logout/login).
+            multiQuoteBasket = null
+            pendingEditorQuotes = null
+            // #895 étape 4 — same rule for a submit outcome armed under another session.
+            topicPendingSubmit = null
+            resetStack(messagesBackStack, MessagesRoute, MessagesRoute)
         }
 
         // #624 — the post/topic editor pins an « Envoyer » bar above the keyboard. Inside the bottom-nav
@@ -1299,15 +1330,31 @@ fun RedfaceApp(intent: Intent?) {
                                     anchor,
                                 )
                             },
-                            pendingBottomLanding = topicPendingBottomLanding,
-                            onPendingBottomLanding = { topicPendingBottomLanding = it },
+                        ),
+                        topicSubmitNavState = TopicSubmitNavState(
+                            pending = topicPendingSubmit,
+                            onPublish = { cat, post, targetPage, scrollTo ->
+                                topicSubmitEventId += 1
+                                topicPendingSubmit = TopicPendingSubmit(
+                                    cat = cat,
+                                    post = post,
+                                    result = TopicSubmitResult(
+                                        eventId = topicSubmitEventId,
+                                        targetPage = targetPage,
+                                        scrollTo = scrollTo,
+                                    ),
+                                )
+                            },
+                            onConsumed = { topicPendingSubmit = null },
                         ),
                         multiQuoteNavState = MultiQuoteNavState(
                             basket = multiQuoteBasket,
-                            onToggle = { cat, post, numreponse ->
-                                multiQuoteBasket = multiQuoteBasket.toggled(cat, post, numreponse)
+                            onToggle = { cat, post, preview ->
+                                multiQuoteBasket = multiQuoteBasket.toggled(cat, post, preview)
                             },
                             onClear = { multiQuoteBasket = null },
+                            pendingEditorQuotes = pendingEditorQuotes,
+                            onEditorQuotesHandoff = { pendingEditorQuotes = it },
                         ),
                         topicPollNavState = TopicPollNavState(
                             expansions = topicPollExpansionCache,
@@ -1665,40 +1712,98 @@ private data class TopicTitleNavState(
 
 /**
  * #307 — per-page scroll-anchor cache plumbed into [RedfaceNavHost], twin of [TopicTitleNavState].
- * A topic page change replaces the TopicRoute in place (#282), destroying the nav entry and the
- * `rememberSaveable` `LazyListState` with it, so returning to an already-visited page landed at the
- * top. The `var` backing [anchors] lives in [RedfaceApp] so it survives the entry recreation;
- * [onAnchorSaved] records the read position when a topic screen leaves the composition and the next
- * landing on the same `(cat, post, page)` ([TopicScrollKey]) restores it — unless the route carries
- * a higher-priority scroll (`scrollTo` / `submitSignal`, cf. [resolveTopicScrollRestoration]). Same
- * read-map + on-event-callback shape as [TopicTitleNavState] / [PrivateMessageNavState]; in-memory
- * only (session-scoped), never serialized into a route.
+ * The `var` backing [anchors] lives in [RedfaceApp] so it survives the nav-entry recreation;
+ * [onAnchorSaved] records the read position (under its CANONICAL page — the in-VM engine may have
+ * switched pages since entry, #895 étape 4) when a topic screen leaves the composition, and the
+ * next ENTRY landing on the same `(cat, post, page)` ([TopicScrollKey]) restores it — unless the
+ * route carries a higher-priority `scrollTo` (cf. [resolveTopicScrollRestoration]). In-topic page
+ * changes never consult this cache (the engine keeps its own per-page RAM anchors) : it serves
+ * CROSS-ENTRY restores only (reopen the same topic page later in the session). Same read-map +
+ * on-event-callback shape as [TopicTitleNavState] / [PrivateMessageNavState]; in-memory only
+ * (session-scoped), never serialized into a route.
  *
  * @property anchors last saved read position per visited topic page.
  * @property onAnchorSaved records a page's read position when its screen is disposed.
- * @property pendingBottomLanding #412 — the one page currently owed a bottom landing (armed by
- *   `onOpenPage` on a strict « page - 1 » step, cleared on any other page change and consumed by
- *   the screen after its first `Loaded`). Deliberately transient nav state, NOT a `TopicRoute`
- *   field: a serialized route would replay the bottom landing on process/configuration restore and
- *   could override the user's restored position (Codex review on PR #420). Losing it with the
- *   composition just falls back to the pre-#412 top landing.
- * @property onPendingBottomLanding rewrites the pending key (null clears it).
  */
 private data class TopicScrollNavState(
     val anchors: Map<TopicScrollKey, TopicScrollAnchor>,
     val onAnchorSaved: (cat: Int, post: Int, page: Int, anchor: TopicScrollAnchor) -> Unit,
-    val pendingBottomLanding: TopicScrollKey? = null,
-    val onPendingBottomLanding: (TopicScrollKey?) -> Unit = {},
+)
+
+/**
+ * #895 étape 4 (PR 2) — the one pending full-editor submit outcome, keyed to its topic. Published
+ * by the editor entries BEFORE their pop (cf. [TopicSubmitNavState.onPublish]) and consumed exactly
+ * once by the topic entry below, which forwards [TopicPendingSubmit.result] to
+ * `TopicViewModel.applySubmitResult`.
+ */
+private data class TopicPendingSubmit(
+    val cat: Int,
+    val post: Int,
+    val result: TopicSubmitResult,
+) {
+    fun matches(cat: Int, post: Int): Boolean = this.cat == cat && this.post == post
+}
+
+/**
+ * #895 étape 4 (PR 2) — whether [below] (the nav entry under the editor being popped) is the
+ * topic a successful submit targeted. Publishing without this guard would arm an outcome that a
+ * LATER unrelated open of the same topic would consume — e.g. an editor opened straight from the
+ * Flags list (`onReplyFlag`) pops back to the LIST, not to a topic entry.
+ */
+private fun isTopicEntryFor(below: Any?, cat: Int, topicId: Int): Boolean {
+    val topic = below as? TopicRoute ?: return false
+    return topic.cat == cat && topic.post == topicId
+}
+
+/**
+ * #895 étape 4 (PR 2) — post-submit handoff bundle threaded into [RedfaceNavHost], same
+ * hoisted-state shape as [TopicScrollNavState]. Replaces the historical route-replace +
+ * `submitSignal` rebuild (PR #420 stance : one-shot intentions are transient nav state, never
+ * route fields).
+ *
+ * @property pending the one submit outcome currently owed to a topic entry, or `null`.
+ * @property onPublish arms the outcome for `(cat, post)` — called BEFORE the editor pop so the
+ *   revealed topic entry finds it on first recomposition ; stamps a fresh monotonic eventId.
+ * @property onConsumed clears the slot once the topic screen applied the result.
+ */
+private data class TopicSubmitNavState(
+    val pending: TopicPendingSubmit?,
+    val onPublish: (cat: Int, post: Int, targetPage: Int?, scrollTo: Int?) -> Unit,
+    val onConsumed: () -> Unit,
 )
 
 /**
  * #291 — multi-quote nav bundle threaded into [RedfaceNavHost], same shape as the other
  * hoisted-state bundles ([TopicScrollNavState], `TopicTitleNavState`).
+ *
+ * #604 lot 3 — also carries the editor quote HANDOFF : [pendingEditorQuotes] is set (via
+ * [onEditorQuotesHandoff]) right before a PostEditorRoute is pushed with citations (« Citer N »
+ * or a sheet escalation), read once by the editor entry into `PostEditorRequest.initialQuotes`,
+ * then cleared (null). Never serialised into the route — the cards are transient by decision.
+ *
+ * #868/#869/#870 — the handoff also says whether the editor session CONSUMED the hoisted basket
+ * ([EditorQuotesHandoff.consumesBasket]): only a « Citer N » launch (or a sheet escalation of one)
+ * does. The basket is no longer cleared at editor OPEN — it survives a back/cancel so the
+ * selection re-arms the « Citer N » FAB — and is cleared on SUBMIT SUCCESS of a basket-consuming
+ * session only (a « Citer » simple / plain reply never empties a selection it never shipped).
  */
 private data class MultiQuoteNavState(
     val basket: MultiQuoteBasket?,
-    val onToggle: (cat: Int, post: Int, numreponse: Int) -> Unit,
+    val onToggle: (cat: Int, post: Int, preview: QuotedPostPreview) -> Unit,
     val onClear: () -> Unit,
+    val pendingEditorQuotes: EditorQuotesHandoff? = null,
+    val onEditorQuotesHandoff: (EditorQuotesHandoff?) -> Unit = {},
+)
+
+/**
+ * #868-#870 — what a full-screen editor opening receives : the quote previews (cards), and whether
+ * a successful submit of THAT session must empty the hoisted multi-quote basket. `consumesBasket`
+ * is decided by the OPEN PATH (« Citer N » / escalation of a basket-armed sheet = true ; « Citer »
+ * simple, #823 long-press and plain replies = false) — never inferred from the quote count.
+ */
+internal data class EditorQuotesHandoff(
+    val quotes: List<QuotedPostPreview>,
+    val consumesBasket: Boolean,
 )
 
 /**
@@ -1774,31 +1879,37 @@ private fun ResetNavBarScrollOffTopic(topRoute: NavKey?, onReset: () -> Unit) {
 /**
  * #291 — multi-quote selection, hoisted to RedfaceApp (same survival rationale as
  * [TopicScrollNavState]: a page change replaces the TopicRoute entry, so any state owned by the
- * topic screen dies with it). [numreponses] keeps SELECTION ORDER — the quotes are concatenated
- * in the order the user tapped them, not post order.
+ * topic screen dies with it). [selections] keeps SELECTION ORDER — the quotes are concatenated
+ * in the order the user tapped them, not post order. #604 lot 2 enriched the entries from bare
+ * numreponses to [QuotedPostPreview]s (author + excerpt captured at selection time) so the quote
+ * cards never re-parse a post ; uniqueness stays keyed on the numreponse alone.
  */
 internal data class MultiQuoteBasket(
     val cat: Int,
     val post: Int,
-    val numreponses: List<Int>,
+    val selections: List<QuotedPostPreview>,
 ) {
+    val numreponses: List<Int> get() = selections.map { it.numreponse }
+
     fun matches(cat: Int, post: Int): Boolean = this.cat == cat && this.post == post
 }
 
 /**
- * Toggles [numreponse] in the basket for topic ([cat], [post]). Selecting in a DIFFERENT topic
- * replaces the basket (one quoting act at a time); removing the last entry clears it to null so
- * the « Citer N » affordance disappears instead of advertising an empty selection.
+ * Toggles [preview] in the basket for topic ([cat], [post]) — presence is keyed on the
+ * numreponse, so re-tapping a selected post removes it whatever snapshot the caller rebuilt.
+ * Selecting in a DIFFERENT topic replaces the basket (one quoting act at a time); removing the
+ * last entry clears it to null so the « Citer N » affordance disappears instead of advertising
+ * an empty selection.
  */
-internal fun MultiQuoteBasket?.toggled(cat: Int, post: Int, numreponse: Int): MultiQuoteBasket? {
+internal fun MultiQuoteBasket?.toggled(cat: Int, post: Int, preview: QuotedPostPreview): MultiQuoteBasket? {
     val current = this?.takeIf { it.matches(cat, post) }
-        ?: return MultiQuoteBasket(cat, post, listOf(numreponse))
-    val next = if (numreponse in current.numreponses) {
-        current.numreponses - numreponse
+        ?: return MultiQuoteBasket(cat, post, listOf(preview))
+    val next = if (current.selections.any { it.numreponse == preview.numreponse }) {
+        current.selections.filterNot { it.numreponse == preview.numreponse }
     } else {
-        current.numreponses + numreponse
+        current.selections + preview
     }
-    return if (next.isEmpty()) null else current.copy(numreponses = next)
+    return if (next.isEmpty()) null else current.copy(selections = next)
 }
 
 /**
@@ -1859,6 +1970,8 @@ private fun RedfaceNavHost(
     topicTitleNavState: TopicTitleNavState,
     // #307 — per-page scroll-anchor cache, same hoisting rationale as topicTitleNavState.
     topicScrollNavState: TopicScrollNavState,
+    // #895 étape 4 (PR 2) — post-submit handoff (editor → retained topic ViewModel), same rationale.
+    topicSubmitNavState: TopicSubmitNavState,
     // #291 — multi-quote basket, same hoisting rationale (survives the per-page entry swap).
     multiQuoteNavState: MultiQuoteNavState,
     // #465 — per-topic poll-expansion cache, same hoisting rationale (survives the per-page swap).
@@ -1884,8 +1997,8 @@ private fun RedfaceNavHost(
         // le backStack → ça passe par transitionSpec : on le détecte par le changement de racine de pile
         // (chaque onglet a une racine distincte) pour ne pas hériter du slide de drill-down.
         transitionSpec = { navForwardTransform(initialState, targetState) },
-        popTransitionSpec = { navPopTransform(initialState, targetState) },
-        predictivePopTransitionSpec = { navPopTransform(initialState, targetState) },
+        popTransitionSpec = { navSharedAxisXBack() },
+        predictivePopTransitionSpec = { navSharedAxisXBack() },
         entryDecorators = listOf(
             rememberSaveableStateHolderNavEntryDecorator(),
             rememberViewModelStoreNavEntryDecorator(),
@@ -1896,6 +2009,10 @@ private fun RedfaceNavHost(
                     // #676 v2 — [page] is chosen by the caller: row tap + sheet « Ouvrir » resume at
                     // lastReadPage, « 1er non-lu » jumps to lastReadPage+1, « dernière page » to totalPages.
                     onOpenFlag = { flag, page ->
+                        // #762 — seed the title cache from the row so the topic's top bar shows
+                        // the real title during the very first load (the cache was otherwise only
+                        // fed by onTitleLoaded AFTER a page parse, i.e. from the second page on).
+                        topicTitleNavState.onTitleLoaded(flag.cat, flag.topicId, flag.title)
                         backStack.add(
                             TopicRoute(
                                 cat = flag.cat,
@@ -2077,6 +2194,9 @@ private fun RedfaceNavHost(
                         }
                         privateMessageNavState.onConversationSent()
                     },
+                    // #803 pattern (state-hygiene audit 2026-07-05) — invoked only on
+                    // CloseCommitted, after the ViewModel flushed the private draft. The screen
+                    // routes the system back AND the header arrow through the ViewModel first.
                     onBack = {
                         if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)
@@ -2141,6 +2261,9 @@ private fun RedfaceNavHost(
                             )
                         }
                     },
+                    // #803 pattern (state-hygiene audit 2026-07-05) — invoked only on
+                    // CloseCommitted, after the ViewModel flushed the private draft. The screen
+                    // routes the system back AND the header arrow through the ViewModel first.
                     onBack = {
                         if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)
@@ -2277,6 +2400,9 @@ private fun RedfaceNavHost(
                         highlightTitle = route.highlightTitle,
                     ),
                     onOpenTopic = { topic ->
+                        // #762 — same seeding as onOpenFlag: the listing row already knows the
+                        // title, show it in the top bar from the first frame of the load.
+                        topicTitleNavState.onTitleLoaded(topic.cat, topic.topicId, topic.title)
                         backStack.add(
                             TopicRoute(
                                 cat = topic.cat,
@@ -2331,22 +2457,19 @@ private fun RedfaceNavHost(
                     },
                 )
             }
-            entry<TopicRoute>(metadata = mapOf(TOPIC_SCENE_METADATA_KEY to true)) { route ->
-                // #307 — resolve what the initial scroll of this landing should do. Strict priority
-                // (route scrollTo > post-submit landing > saved anchor > top) lives in the pure
-                // resolver; only a RestoreSaved outcome hands the screen an anchor to apply — the
-                // Follow* levels resolve to null so the existing ScrollToPost / ScrollToEndOfPage
-                // effects (#200/#226/#344) keep sole ownership of their landings.
+            entry<TopicRoute> { route ->
+                // #895 étape 4 (PR 2) — the route is FROZEN at entry : every in-topic page change,
+                // quote jump, jump return and post-submit landing now lives inside the retained
+                // TopicViewModel (single nav entry, single LazyListState — no more per-page entry
+                // swap). The route's page/scrollTo describe the ENTRY intention only.
+                // #307 — resolve what the initial ENTRY scroll should do. Strict priority (route
+                // scrollTo > saved anchor > top) lives in the pure resolver; only a RestoreSaved
+                // outcome hands the screen an anchor to apply — FollowScrollTo resolves to null so
+                // the ScrollToPost effect keeps sole ownership of its landing.
                 val scrollRestoration = resolveTopicScrollRestoration(
                     scrollTo = route.scrollTo,
-                    submitSignal = route.submitSignal,
                     savedAnchor = topicScrollNavState
                         .anchors[TopicScrollKey(route.cat, route.post, route.page)],
-                    // #412 — armed by onOpenPage on a strict « page - 1 » step; transient nav
-                    // state rather than a route field (Codex review on PR #420: a serialized
-                    // flag would replay the bottom landing on process/config restore).
-                    previousPageLanding = topicScrollNavState.pendingBottomLanding ==
-                        TopicScrollKey(route.cat, route.post, route.page),
                 )
                 TopicScreen(
                     request = TopicRequest(
@@ -2354,63 +2477,93 @@ private fun RedfaceNavHost(
                         post = route.post,
                         page = route.page,
                         scrollTo = route.scrollTo,
-                        submitSignal = route.submitSignal,
                         forceRefresh = route.forceRefresh,
-                        postSubmitOverflowLanding = route.postSubmitOverflowLanding,
                         titleHint = topicTitleNavState.titles[TopicTitleKey(route.cat, route.post)],
+                        resolveScrollToPage = route.resolveScrollToPage,
                     ),
                     onTitleLoaded = { title ->
                         topicTitleNavState.onTitleLoaded(route.cat, route.post, title)
                     },
                     restoreScrollAnchor =
                         (scrollRestoration as? TopicScrollRestoration.RestoreSaved)?.anchor,
-                    startAtBottom = scrollRestoration is TopicScrollRestoration.StartAtBottom,
-                    onStartAtBottomConsumed = {
-                        // One-shot: once the screen has executed (or skipped) the bottom landing
-                        // for this page, drop the marker so it can never replay.
-                        topicScrollNavState.onPendingBottomLanding(null)
+                    onScrollAnchorSaved = { page, anchor ->
+                        topicScrollNavState.onAnchorSaved(route.cat, route.post, page, anchor)
                     },
-                    onScrollAnchorSaved = { anchor ->
-                        topicScrollNavState.onAnchorSaved(route.cat, route.post, route.page, anchor)
-                    },
-                    onOpenProfile = onOpenProfile,
-                    onReply = { subcat, page ->
-                        backStack.add(
-                            PostEditorRoute(
-                                mode = PostEditorMode.Reply,
-                                cat = route.cat,
-                                topicId = route.post,
-                                page = page,
-                                subcat = subcat,
-                            ),
-                        )
-                    },
-                    onQuote = { subcat, page, quotedNumreponse, quoteRef ->
-                        // Phase 2C (#146) — same destination as reply ; only the
-                        // editor's request differs (quotedNumreponse pulls the HFR
-                        // quote prefill). Route is `PostEditorMode.Reply` because
-                        // quote is a flavour of reply, not a new editor mode.
-                        backStack.add(
-                            PostEditorRoute(
-                                mode = PostEditorMode.Reply,
-                                cat = route.cat,
-                                topicId = route.post,
-                                page = page,
-                                subcat = subcat,
-                                quotedNumreponse = quotedNumreponse,
-                                quoteRef = quoteRef,
-                            ),
-                        )
-                    },
-                    // #291 — selection of THIS topic's basket (another topic's selection must
-                    // never leak into the menu checkmarks or the « Citer N » FAB).
-                    multiQuoteSelection = multiQuoteNavState.basket
+                    // #895 étape 4 (PR 2) — the pending submit outcome for THIS topic, if any ;
+                    // the screen forwards it to the retained ViewModel and acknowledges.
+                    pendingSubmitResult = topicSubmitNavState.pending
                         ?.takeIf { it.matches(route.cat, route.post) }
-                        ?.numreponses
-                        .orEmpty(),
-                    onToggleMultiQuote = { numreponse ->
-                        multiQuoteNavState.onToggle(route.cat, route.post, numreponse)
+                        ?.result,
+                    onSubmitResultConsumed = topicSubmitNavState.onConsumed,
+                    onOpenProfile = onOpenProfile,
+                    // #792 — « Envoyer un MP » from a post's menu : the NEW-conversation composer
+                    // opens with the post's author prefilled (the route arg was designed for this).
+                    onSendPrivateMessage = { author ->
+                        backStack.add(PrivateMessageComposeRoute(prefilledRecipient = author))
                     },
+                    // #843 — onReply is a COLD full-editor open (FAB under FULL_EDITOR, « Citer »
+                    // routed to the editor, #823 long-press): no sheet is in flight, so
+                    // resumeSharedDraft = false and an existing #405 draft is SURFACED via the
+                    // restore banner (Restaurer / Ignorer) instead of being silently re-applied. The
+                    // armed quote cards still travel as FULL previews through the in-memory handoff
+                    // (lot 3) — cards are independent of the text draft. The genuine sheet escalation
+                    // uses onEscalateToFullEditor below.
+                    onReply = { subcat, page, quotes ->
+                        // #868-#870 — « Citer » simple / #823 long-press / plain reply : these
+                        // quotes never came from the basket, a submit must not empty it.
+                        multiQuoteNavState.onEditorQuotesHandoff(
+                            quotes.takeIf { it.isNotEmpty() }
+                                ?.let { EditorQuotesHandoff(it, consumesBasket = false) },
+                        )
+                        backStack.add(
+                            PostEditorRoute(
+                                mode = PostEditorMode.Reply,
+                                cat = route.cat,
+                                topicId = route.post,
+                                page = page,
+                                subcat = subcat,
+                                resumeSharedDraft = false,
+                            ),
+                        )
+                    },
+                    // #843/#790 — the quick-reply sheet's ESCALATION only: the sheet just persisted
+                    // the shared #405 row, so the editor auto-applies it (resumeSharedDraft = true,
+                    // silent append — same composition act) WITHOUT surfacing the restore banner.
+                    onEscalateToFullEditor = { subcat, page, quotes, consumesBasket ->
+                        // #868-#870 — the escalated editor inherits the sheet session's basket
+                        // consumption : a « Citer N » sheet escalated to full screen still empties
+                        // the basket on ITS successful submit, and only then. The handoff is built
+                        // UNCONDITIONALLY (gate Sol r1) : a « Citer N » sheet whose cards were all
+                        // removed before escalating still consumes the basket — the flag follows
+                        // the OPEN PATH, never the quote count.
+                        multiQuoteNavState.onEditorQuotesHandoff(
+                            EditorQuotesHandoff(quotes, consumesBasket = consumesBasket),
+                        )
+                        backStack.add(
+                            PostEditorRoute(
+                                mode = PostEditorMode.Reply,
+                                cat = route.cat,
+                                topicId = route.post,
+                                page = page,
+                                subcat = subcat,
+                                resumeSharedDraft = true,
+                            ),
+                        )
+                    },
+                    // #291 / #604 lot 3 — selection of THIS topic's basket as full previews
+                    // (another topic's selection must never leak into the menu checkmarks or
+                    // the « Citer N » FAB) ; under the full-screen threshold the screen pre-arms
+                    // the sheet's cards from them and consumes the basket via onClearMultiQuote.
+                    multiQuoteSelections = multiQuoteNavState.basket
+                        ?.takeIf { it.matches(route.cat, route.post) }
+                        ?.selections
+                        .orEmpty(),
+                    onToggleMultiQuote = { preview ->
+                        multiQuoteNavState.onToggle(route.cat, route.post, preview)
+                    },
+                    // #436 — « Tout vider » : a long press on the « Citer N » FAB empties the
+                    // whole hoisted basket (same reset path as the post-editor launch / logout).
+                    onClearMultiQuote = multiQuoteNavState.onClear,
                     // #465 — the topic's saved manual poll choice (null = follow the global
                     // default), and the callback recording a tap on the poll card. Hoisted to
                     // :app so it survives the per-page TopicRoute swap, keyed by (cat, post).
@@ -2421,15 +2574,25 @@ private fun RedfaceNavHost(
                         topicPollNavState.onExpansionChanged(route.cat, route.post, expanded)
                     },
                     onMultiQuote = { subcat, page ->
-                        // #291 — quote flavour of reply with the EXTRA numreponses riding the
-                        // route; the editor replays the #146 fetch per entry. The basket is
-                        // cleared on launch: the selection's intent is consumed, and backing
-                        // out of the editor should not re-arm a stale « Citer N ».
+                        // #291 / #604 lot 3 — quote flavour of reply : the basket's previews are
+                        // handed to the editor (cards, mockup P3) through the in-memory handoff.
+                        // #868/#869 — the basket is NO LONGER cleared on launch : backing out of
+                        // the editor keeps the selection armed (« Citer N » survives a cancel) ;
+                        // the clear moved to the SUBMIT SUCCESS of this basket-consuming session
+                        // (consumesBasket = true below). « Tout vider » (#436) stays the manual
+                        // reset.
+                        // #843 — « Citer N » (3+) is a COLD full-editor open, not a sheet escalation:
+                        // resumeSharedDraft = false, so an existing text draft is offered via the
+                        // restore banner (cards are independent of it), instead of the silent append
+                        // the escalation flag used to force here (pre-#843 Codex fork 4).
                         val selection = multiQuoteNavState.basket
                             ?.takeIf { it.matches(route.cat, route.post) }
-                            ?.numreponses
+                            ?.selections
                             .orEmpty()
                         if (selection.isNotEmpty()) {
+                            multiQuoteNavState.onEditorQuotesHandoff(
+                                EditorQuotesHandoff(selection, consumesBasket = true),
+                            )
                             backStack.add(
                                 PostEditorRoute(
                                     mode = PostEditorMode.Reply,
@@ -2437,12 +2600,9 @@ private fun RedfaceNavHost(
                                     topicId = route.post,
                                     page = page,
                                     subcat = subcat,
-                                    quotedNumreponse = selection.first(),
-                                    quoteRef = null,
-                                    extraQuoteNumreponses = selection.drop(1),
+                                    resumeSharedDraft = false,
                                 ),
                             )
-                            multiQuoteNavState.onClear()
                         }
                     },
                     onEdit = { subcat, page, numreponse ->
@@ -2479,53 +2639,14 @@ private fun RedfaceNavHost(
                             ),
                         )
                     },
-                    onOpenPage = { targetPage ->
-                        // #412 — a one-page step backwards lands at the bottom of the target page
-                        // (reading direction) unless that page has a saved anchor. Strict
-                        // « page - 1 » so pager jumps further back keep the top landing; any other
-                        // page change clears a stale marker.
-                        topicScrollNavState.onPendingBottomLanding(
-                            TopicScrollKey(route.cat, route.post, targetPage)
-                                .takeIf { targetPage == route.page - 1 },
-                        )
-                        // #282 — replace the top entry IN PLACE rather than removeAt + add. The two-step
-                        // version briefly leaves the parent on top (size-1), an observable intermediate
-                        // state NavDisplay can start transitioning toward; an indexed set is a single
-                        // mutation straight from TopicRoute(page=N) to TopicRoute(page=target).
-                        backStack[backStack.lastIndex] = TopicRoute(
-                            cat = route.cat,
-                            post = route.post,
-                            page = targetPage,
-                            scrollTo = null,
-                        )
-                    },
                     onBack = {
                         // #285 — explicit back affordance in the topic top bar. Pop to the screen that
                         // opened the topic (list / flags). Guard size > 1 so we never pop a tab root
-                        // (mirrors the global back handling used across the other entries).
+                        // (mirrors the global back handling used across the other entries). The #782
+                        // quote-jump chain lives (and dies) with the ViewModel — nothing to clear here.
                         if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)
                         }
-                    },
-                    onNavigateToLastPage = { lastPage ->
-                        // #226 — the plain reply overflowed onto a freshly created page; land the user
-                        // there (their reply lives on the last page, not the stale form page). Carry a
-                        // fresh submitSignal so the destination ViewModel force-fetches the page — a
-                        // plain cache-aside load could serve a TTL-fresh row that pre-dates the reply
-                        // (the original #226 failure). The `postSubmitOverflowLanding` flag is what
-                        // keeps the old anti-chase guarantee WITHOUT dropping the refresh: the landing
-                        // ViewModel scrolls to the end but never re-emits NavigateToLastPage, so a
-                        // concurrent post that pushes totalPages further during the refresh window does
-                        // not start a moving-tail chase. Indexed set (not removeAt + add) for the same
-                        // single-mutation reason as onOpenPage (#282).
-                        backStack[backStack.lastIndex] = TopicRoute(
-                            cat = route.cat,
-                            post = route.post,
-                            page = lastPage,
-                            scrollTo = null,
-                            submitSignal = System.currentTimeMillis(),
-                            postSubmitOverflowLanding = true,
-                        )
                     },
                     // #518 follow-up — report scroll facts so RedfaceApp can reveal the hidden system
                     // nav bar per the chosen mode. `active` is false (no-op) unless immersive + a
@@ -2535,6 +2656,20 @@ private fun RedfaceNavHost(
                 )
             }
             entry<PostEditorRoute> { route ->
+                // #604 lot 3 — consume the quote handoff ONCE : the previews reach the ViewModel
+                // through the assisted request (used only at first creation — a recomposition or
+                // configuration change reuses the existing VM, so the cleared handoff is moot),
+                // and the LaunchedEffect clears the slot so a LATER editor can never resurrect a
+                // stale citation set. Process death drops the handoff with the process : the
+                // restored editor keeps the #405 text, not the cards (transient by decision).
+                // #868-#870 — the handoff is CAPTURED here (remember runs before the clearing
+                // effect) : `consumesBasket` must still be known at submit time, long after the
+                // slot was nulled. Keyed on the route (gate Sol r1) so two editor routes
+                // succeeding each other at the same Compose position can never share a capture.
+                // An activity recreation loses the capture together with the hoisted basket
+                // itself (both plain remember) — consistent, nothing to clear.
+                val editorQuotesHandoff = remember(route) { multiQuoteNavState.pendingEditorQuotes }
+                LaunchedEffect(Unit) { multiQuoteNavState.onEditorQuotesHandoff(null) }
                 PostEditorScreen(
                     request = PostEditorRequest(
                         mode = route.mode,
@@ -2543,46 +2678,48 @@ private fun RedfaceNavHost(
                         numreponse = route.numreponse,
                         page = route.page,
                         subcat = route.subcat,
-                        quotedNumreponse = route.quotedNumreponse,
-                        quoteRef = route.quoteRef,
-                        extraQuoteNumreponses = route.extraQuoteNumreponses,
+                        initialQuotes = editorQuotesHandoff?.quotes.orEmpty(),
+                        resumeSharedDraft = route.resumeSharedDraft,
                     ),
-                    onSubmitSucceeded = { targetPage, scrollTo ->
-                        // Pop the editor and refresh the topic page. `targetPage` is parsed
-                        // from HFR's success URL and tells us which page to land on;
-                        // `scrollTo` is the numreponse the parser extracted from the
-                        // `#t{N}` URL fragment (quote / edit post), or null when HFR
-                        // anchored `#bas` (plain reply). The bumped `submitSignal` invalidates
-                        // the route key so the topic screen rebuilds its ViewModel and
-                        // force-fetches the page — without it, the cache-aside path would
-                        // serve a page that pre-dates the freshly-published post (#200).
-                        // Guard the pop the same way the global `onBack` lambda does:
-                        // never collapse the back stack below the tab root.
+                    // #604 lot 4a — the system back reaches here only AFTER the ViewModel
+                    // flushed the draft row (CloseCommitted). Same guarded pop as onBack.
+                    onClose = {
                         if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)
                         }
-                        val topicEntry = backStack.lastOrNull() as? TopicRoute
-                        if (topicEntry != null) {
+                    },
+                    onSubmitSucceeded = { targetPage, scrollTo ->
+                        // #895 étape 4 (PR 2) — publish the outcome BEFORE the pop, so the revealed
+                        // topic entry finds it on first recomposition and hands it to its RETAINED
+                        // ViewModel (in-place force refresh + landing, #200/#226 — the historical
+                        // route-replace + submitSignal rebuild is gone). `targetPage` is parsed
+                        // from HFR's success URL; `scrollTo` is the numreponse from the `#t{N}`
+                        // fragment (quote / edit), or null when HFR anchored `#bas` (plain reply →
+                        // bottom landing). Guarded on the entry below actually being THIS topic —
+                        // an editor opened from the Flags list (onReplyFlag) pops back to the list,
+                        // and a pending outcome armed there would fire on a LATER unrelated open
+                        // of the topic.
+                        val topicId = route.topicId
+                        val below = backStack.getOrNull(backStack.lastIndex - 1)
+                        if (topicId != null && isTopicEntryFor(below, route.cat, topicId)) {
+                            topicSubmitNavState.onPublish(route.cat, topicId, targetPage, scrollTo)
+                        }
+                        // #868/#869 — the selection's intent is consumed by the SUCCESSFUL submit
+                        // of a basket-consuming session (« Citer N » / its escalation), and only
+                        // then : a failure, a back or a « Citer » simple never empty the basket.
+                        // Guarded on the basket still being THIS topic's (gate Sol r1) : the one
+                        // basket is keyed (cat, post), so if it was re-armed on another topic
+                        // while this editor lived, the submit must not wipe that newer selection.
+                        if (editorQuotesHandoff?.consumesBasket == true &&
+                            topicId != null &&
+                            multiQuoteNavState.basket?.matches(route.cat, topicId) == true
+                        ) {
+                            multiQuoteNavState.onClear()
+                        }
+                        // Same guarded pop as the global `onBack` lambda: never collapse below the
+                        // tab root.
+                        if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)
-                            backStack.add(
-                                topicEntry.copy(
-                                    page = targetPage ?: topicEntry.page,
-                                    // Issue #200 — do NOT fall back to topicEntry.scrollTo here.
-                                    // A topic opened from Flags / deep link / search may already carry
-                                    // a `scrollTo` (the post the user was originally jumping to). After
-                                    // a plain reply, the parser returns scrollTo=null because HFR anchors
-                                    // `#bas` — if we re-use the previous scrollTo, the topic screen scrolls
-                                    // back to that old post and never to the freshly-published reply, and
-                                    // the `ScrollToEndOfPage` fallback in `TopicViewModel.maybeEmitScroll`
-                                    // is silently suppressed (it gates on `target == null`).
-                                    scrollTo = scrollTo,
-                                    submitSignal = System.currentTimeMillis(),
-                                    // #226 — a fresh submit may itself overflow, so it must be allowed
-                                    // to redirect once. Reset the landing flag the previous route may
-                                    // have carried (topicEntry could already be an overflow landing).
-                                    postSubmitOverflowLanding = false,
-                                ),
-                            )
                         }
                     },
                 )
@@ -2597,38 +2734,29 @@ private fun RedfaceNavHost(
                         page = route.page,
                         numreponse = route.numreponse,
                     ),
-                    onSubmitSucceeded = { targetPage, scrollTo ->
-                        // Phase 2D (#148) — pop the FP form, replace the topic route below
-                        // with one that refreshes the target page and scrolls to the edited
-                        // first post. Same pattern as `PostEditorRoute.onSubmitSucceeded`;
-                        // `submitSignal` bumps the route key so the topic screen rebuilds
-                        // and force-fetches the page (issue #200) — otherwise the cache-
-                        // aside path could serve a stale page that pre-dates the FP edit.
+                    // #803 pattern (state-hygiene audit 2026-07-05) — the system back reaches here
+                    // only AFTER the ViewModel flushed the draft row (CloseCommitted). Same guarded
+                    // pop as PostEditorRoute.onClose.
+                    onClose = {
                         if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)
                         }
-                        val topicEntry = backStack.lastOrNull() as? TopicRoute
-                        if (topicEntry != null) {
+                    },
+                    onSubmitSucceeded = { targetPage, scrollTo ->
+                        // Phase 2D (#148) / #895 étape 4 (PR 2) — publish the FP-edit outcome
+                        // BEFORE the pop (same handoff as `PostEditorRoute.onSubmitSucceeded`) :
+                        // the revealed topic entry hands it to its retained ViewModel, which
+                        // force-fetches the target page (#200) and lands on the edited first
+                        // post. Guarded on the entry below being THIS topic (route.topicId is
+                        // null in New mode, whose success path is onNewTopicCreated below).
+                        val topicId = route.topicId
+                        val cat = route.cat
+                        val below = backStack.getOrNull(backStack.lastIndex - 1)
+                        if (cat != null && topicId != null && isTopicEntryFor(below, cat, topicId)) {
+                            topicSubmitNavState.onPublish(cat, topicId, targetPage, scrollTo)
+                        }
+                        if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)
-                            backStack.add(
-                                topicEntry.copy(
-                                    page = targetPage ?: topicEntry.page,
-                                    // Issue #200 — do NOT fall back to topicEntry.scrollTo here.
-                                    // A topic opened from Flags / deep link / search may already carry
-                                    // a `scrollTo` (the post the user was originally jumping to). After
-                                    // a plain reply, the parser returns scrollTo=null because HFR anchors
-                                    // `#bas` — if we re-use the previous scrollTo, the topic screen scrolls
-                                    // back to that old post and never to the freshly-published reply, and
-                                    // the `ScrollToEndOfPage` fallback in `TopicViewModel.maybeEmitScroll`
-                                    // is silently suppressed (it gates on `target == null`).
-                                    scrollTo = scrollTo,
-                                    submitSignal = System.currentTimeMillis(),
-                                    // #226 — a fresh submit may itself overflow, so it must be allowed
-                                    // to redirect once. Reset the landing flag the previous route may
-                                    // have carried (topicEntry could already be an overflow landing).
-                                    postSubmitOverflowLanding = false,
-                                ),
-                            )
                         }
                     },
                     onNewTopicCreated = { cat, subcat, newTopicId, newNumreponse, subject ->
@@ -2652,11 +2780,10 @@ private fun RedfaceNavHost(
                                     cat = cat,
                                     post = newTopicId,
                                     page = 1,
+                                    // A freshly-created topic has no cache row, so the plain
+                                    // cache-aside load fetches live and scrolls to the first
+                                    // post (#206) — no force-fetch signal needed (#895 PR 2).
                                     scrollTo = newNumreponse,
-                                    // Bump the route key like the reply/quote/edit paths so the
-                                    // topic screen builds fresh (not from a stale cache entry)
-                                    // and scrolls to the freshly-created first post (#206).
-                                    submitSignal = System.currentTimeMillis(),
                                 ),
                             )
                         } else {
@@ -2710,10 +2837,22 @@ internal fun parseHfrDeepLink(uri: Uri): ParsedDeepLink? = when (uri.path) {
         val cat = uri.getQueryParameter("cat")?.toIntOrNull() ?: return null
         val post = uri.getQueryParameter("post")?.toIntOrNull() ?: return null
         val page = uri.getQueryParameter("page")?.toIntOrNull() ?: 1
+        // #750 — the `numreponse` QUERY param is the fallback target: HFR email-notification
+        // links carry it alongside the fragment, and some mail clients strip the fragment.
         val scrollTo = uri.fragment?.removePrefix("t")?.toIntOrNull()
+            ?: uri.getQueryParameter("numreponse")?.toIntOrNull()
         ParsedDeepLink(
             destination = TopLevelDestination.Flags,
-            route = TopicRoute(cat = cat, post = post, page = page, scrollTo = scrollTo),
+            route = TopicRoute(
+                cat = cat,
+                post = post,
+                page = page,
+                scrollTo = scrollTo,
+                // #750 — email links always serialise `page=1` whatever page the target post
+                // lives on; a page-1 link WITH an anchor is therefore untrusted and the real
+                // page is resolved before the first load. An explicit page > 1 is trusted as-is.
+                resolveScrollToPage = scrollTo != null && page == 1,
+            ),
         )
     }
 
@@ -2784,8 +2923,6 @@ private const val TAB_FADE_IN_MS = 140
 private const val TAB_FADE_OUT_MS = 80
 private const val SLIDE_DIVISOR = 4
 
-private fun navInstant(): ContentTransform = EnterTransition.None togetherWith ExitTransition.None
-
 /** Shared-axis X, sens AVANT : l'entrant glisse depuis la droite, le sortant part vers la gauche. */
 private fun navSharedAxisXForward(): ContentTransform =
     (slideInHorizontally(tween(DRILL_MS, easing = EmphasizedDecelerate)) { it / SLIDE_DIVISOR } +
@@ -2803,26 +2940,6 @@ private fun navSharedAxisXBack(): ContentTransform =
 /** Fade-through court entre onglets (contenus sans relation spatiale → pas de slide). */
 private fun navTabFadeThrough(): ContentTransform =
     fadeIn(tween(TAB_FADE_IN_MS, delayMillis = 30)) togetherWith fadeOut(tween(TAB_FADE_OUT_MS))
-
-/**
- * Marks a [TopicRoute] NavEntry so [isTopicScene] can recognise a topic scene without relying on the
- * route type: nav3 1.1.1 exposes `Scene.key` as `route.toString()` (a String), not the route object,
- * so an `is TopicRoute` test on the scene key would never match. The entry's public metadata is the
- * stable signal instead.
- */
-internal const val TOPIC_SCENE_METADATA_KEY = "fr.forumhfr.redface2.topicScene"
-
-/**
- * True iff [metadata] carries the topic-scene marker. Null/empty/other-keys/false → false. Extracted
- * as a pure function so the marker contract (incl. the empty-`entries` → null case) is unit-testable
- * without a Compose/nav3 runtime.
- */
-internal fun isTopicSceneMetadata(metadata: Map<String, Any>?): Boolean =
-    metadata?.get(TOPIC_SCENE_METADATA_KEY) == true
-
-/** True when this scene's top entry is a [TopicRoute] (tagged via [TOPIC_SCENE_METADATA_KEY]). */
-private fun Scene<NavKey>.isTopicScene(): Boolean =
-    isTopicSceneMetadata(entries.lastOrNull()?.metadata)
 
 /**
  * Pure : une navigation AVANT est un drill-down (push) — par opposition à un changement d'onglet ou un
@@ -2847,16 +2964,15 @@ private fun Scene<NavKey>.isForwardDrillDownTo(to: Scene<NavKey>): Boolean =
     )
 
 /**
- * Transition AVANT (push/replace non-pop) : instantané pour le swipe topic→topic (#282), shared-axis X
- * avant pour un drill-down (push intra-onglet, toute profondeur), fade-through sinon (changement
- * d'onglet ou remplacement de pile — contenus sans relation spatiale parent/enfant).
+ * Transition AVANT (push/replace non-pop) : shared-axis X avant pour un drill-down (push
+ * intra-onglet, toute profondeur), fade-through sinon (changement d'onglet ou remplacement de
+ * pile — contenus sans relation spatiale parent/enfant). #895 étape 5 : le cas spécial
+ * « instantané topic→topic » (swipe de page #282) est mort avec la route figée — un changement
+ * de page ne traverse plus la navigation, et un vrai topic→topic (deep link pendant la lecture)
+ * mérite la même transition que tout autre remplacement.
  */
 private fun navForwardTransform(from: Scene<NavKey>, to: Scene<NavKey>): ContentTransform = when {
-    from.isTopicScene() && to.isTopicScene() -> navInstant()
     from.isForwardDrillDownTo(to) -> navSharedAxisXForward()
     else -> navTabFadeThrough()
 }
 
-/** Transition ARRIÈRE (pop / retour prédictif) : instantané topic→topic, sinon shared-axis X arrière. */
-private fun navPopTransform(from: Scene<NavKey>, to: Scene<NavKey>): ContentTransform =
-    if (from.isTopicScene() && to.isTopicScene()) navInstant() else navSharedAxisXBack()

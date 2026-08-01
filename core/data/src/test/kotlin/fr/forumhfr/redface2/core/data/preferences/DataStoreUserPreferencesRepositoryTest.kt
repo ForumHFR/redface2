@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
+import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
@@ -23,6 +24,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.FlagType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -831,6 +833,27 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `observeTopicFullWidthPosts defaults to false then persists true and false`() = runTest(dispatcher) {
+        // #884 — the card inset is the historical layout; full-width posts are the opt-in.
+        repository.observeTopicFullWidthPosts().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setTopicFullWidthPosts(true)
+        repository.observeTopicFullWidthPosts().test {
+            assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setTopicFullWidthPosts(false)
+        repository.observeTopicFullWidthPosts().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `observeShowScrollbar defaults to true then persists false and true`() = runTest(dispatcher) {
         // #105 — the reading scrollbar is the historical behaviour; disabling it is the opt-out.
         repository.observeShowScrollbar().test {
@@ -1075,6 +1098,42 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `observeWritingSurfacePreset defaults to FULL_EDITOR on an empty store`() = runTest(dispatcher) {
+        // #951 — FULL_EDITOR is the default (the quick-reply sheet is experimental opt-in),
+        // never the enum's first ordinal by chance.
+        repository.observeWritingSurfacePreset().test {
+            assertEquals(WritingSurfacePreset.FULL_EDITOR, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setWritingSurfacePreset persists and round-trips FULL_EDITOR then SHEET`() = runTest(dispatcher) {
+        repository.setWritingSurfacePreset(WritingSurfacePreset.FULL_EDITOR)
+        repository.observeWritingSurfacePreset().test {
+            assertEquals(WritingSurfacePreset.FULL_EDITOR, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setWritingSurfacePreset(WritingSurfacePreset.SHEET)
+        repository.observeWritingSurfacePreset().test {
+            assertEquals(WritingSurfacePreset.SHEET, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `corrupt writing_surface_preset value falls back to FULL_EDITOR instead of crashing`() = runTest(dispatcher) {
+        // An unknown value (older build / manual edit) must degrade to FULL_EDITOR, not crash valueOf.
+        dataStore.edit { prefs -> prefs[stringPreferencesKey("writing_surface_preset")] = "HOLODECK" }
+
+        repository.observeWritingSurfacePreset().test {
+            assertEquals(WritingSurfacePreset.FULL_EDITOR, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `observeDisplayDensity defaults to COMFORT on an empty store`() = runTest(dispatcher) {
         // #287 — COMFORT is the default (historical rhythm), never the enum's first ordinal by chance.
         repository.observeDisplayDensity().test {
@@ -1132,6 +1191,48 @@ class DataStoreUserPreferencesRepositoryTest {
 
         repository.observeDisplayDensity().test {
             assertEquals(DisplayDensity.COMFORT, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observeMediaDisplayProfile defaults to M on an empty store`() = runTest(dispatcher) {
+        // #973 ([AMENDEMENT-v1.5-2]) — M (×1,5) is the default chosen by XaTriX, never the
+        // enum's first ordinal by chance.
+        repository.observeMediaDisplayProfile().test {
+            assertEquals(MediaDisplayProfile.M, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setMediaDisplayProfile persists and round-trips S then L then M`() = runTest(dispatcher) {
+        repository.setMediaDisplayProfile(MediaDisplayProfile.S)
+        repository.observeMediaDisplayProfile().test {
+            assertEquals(MediaDisplayProfile.S, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setMediaDisplayProfile(MediaDisplayProfile.L)
+        repository.observeMediaDisplayProfile().test {
+            assertEquals(MediaDisplayProfile.L, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setMediaDisplayProfile(MediaDisplayProfile.M)
+        repository.observeMediaDisplayProfile().test {
+            assertEquals(MediaDisplayProfile.M, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `corrupt media_display_profile value falls back to M instead of crashing`() = runTest(dispatcher) {
+        // #973 — an unknown value (older build / manual edit) must degrade to M, not crash valueOf.
+        dataStore.edit { prefs -> prefs[stringPreferencesKey("media_display_profile")] = "XXL" }
+
+        repository.observeMediaDisplayProfile().test {
+            assertEquals(MediaDisplayProfile.M, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
     }

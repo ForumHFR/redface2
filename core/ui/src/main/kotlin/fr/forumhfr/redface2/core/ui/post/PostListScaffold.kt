@@ -42,6 +42,9 @@ fun PostListScaffold(
     modifier: Modifier = Modifier,
     listModifier: Modifier = Modifier,
     showScrollbar: Boolean = true,
+    // #182 — the topic magnifier suspends native list scrolling while zoomed (the vertical axis is
+    // then driven programmatically via dispatchRawDelta). Default keeps both consumers unchanged.
+    userScrollEnabled: Boolean = true,
     content: LazyListScope.() -> Unit,
 ) {
     Box(modifier = modifier.fillMaxSize()) {
@@ -52,6 +55,7 @@ fun PostListScaffold(
                 .then(listModifier),
             contentPadding = contentPadding,
             verticalArrangement = verticalArrangement,
+            userScrollEnabled = userScrollEnabled,
             content = content,
         )
         if (showScrollbar) {

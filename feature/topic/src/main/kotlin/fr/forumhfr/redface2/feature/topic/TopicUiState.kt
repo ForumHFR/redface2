@@ -1,7 +1,9 @@
 package fr.forumhfr.redface2.feature.topic
 
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
+import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.Topic
+import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 
 data class TopicUiState(
     val request: TopicRequest,
@@ -18,6 +20,13 @@ data class TopicUiState(
      * in practice the cookie jar is primed at nav-host start so the window rarely shows.
      */
     val isAuthenticated: Boolean = false,
+    /**
+     * #545 — pseudo of the authenticated session, `null` while anonymous. Feeds the ownership
+     * fallback [isOwnPostBySession] : profiles with `affichoutils=0` get no post toolbar from
+     * HFR, so `Post.isEditable`/`Post.isOwnPost` are blind there and the gates need the session
+     * pseudo to recognise the user's own posts by author instead.
+     */
+    val connectedPseudo: String? = null,
     /**
      * #292 — `numreponse` of the post whose deletion is currently in flight, or `null` when no
      * delete is running. Drives the per-post « Supprimer » affordance (disabled / busy) and guards
@@ -53,6 +62,21 @@ data class TopicUiState(
      */
     val showSignatures: Boolean = false,
     /**
+     * #884 — mirrors `UserPreferencesRepository.observeTopicFullWidthPosts()`. When `true`, the
+     * post cards render edge-to-edge (full width, without the card inset). Default `false` keeps
+     * the historical inset card. Flips on the first preference emission; pure render-time switch
+     * (consumed by the screen in a later wave), toggling never refetches.
+     */
+    val fullWidthPosts: Boolean = false,
+    /**
+     * #806 — mirrors `UserPreferencesRepository.observeWritingSurfacePreset()`. Feeds
+     * [writingSurfaceFor] AT TAP TIME on the three write entry points (reply FAB, « Citer »,
+     * « Citer N ») to pick the quick-reply sheet or the full-screen editor. Default
+     * [WritingSurfacePreset.FULL_EDITOR] since the sheet is experimental opt-in (#951). A preset
+     * change never migrates an already-open sheet (the decision is only ever taken on the next tap).
+     */
+    val writingSurfacePreset: WritingSurfacePreset = WritingSurfacePreset.FULL_EDITOR,
+    /**
      * #335 — `true` while a manual pull-to-refresh of the current page is in flight. Drives the
      * Material3 `PullToRefreshBox` spinner. Set on the `Refresh` intent, cleared in the refresh
      * coroutine's `finally` (so a cancellation — e.g. a delete starting mid-refresh — never leaves
@@ -66,6 +90,14 @@ data class TopicUiState(
      * answers a topic page), so there is no separate "results list" model here.
      */
     val search: TopicSearchUiState = TopicSearchUiState(),
+    /**
+     * #782 / #895 étape 4 — `true` while the in-VM quote-jump chain is non-empty, i.e. the next
+     * back gesture should unwind one jump ([TopicViewModel.returnFromJump]) instead of leaving
+     * the topic. Drives the screen's `BackHandler(enabled = …)` — the interception moved from
+     * `:app` (route-replace era) into the screen, next to the ViewModel that owns the chain.
+     * Kept in lock-step with every jump-stack mutation (push / pop / clear).
+     */
+    val canReturnFromJump: Boolean = false,
 ) {
     /**
      * Helper used by the screen / ViewModel : `true` when the user has navigated to a
@@ -93,6 +125,25 @@ data class TopicUiState(
              * first emission (combine with the blacklist) so a blocked post never flashes before hiding.
              */
             val hiddenNumreponses: Set<Int> = emptySet(),
+            /**
+             * #785 — canonical pseudos (cf. `canonicalizePseudo`) of the black-listed authors — the
+             * same blacklist snapshot [hiddenNumreponses] was computed from. The screen provides it
+             * to the post renderers (`LocalBlockedQuoteAuthors`) so a citation OF a blocked author
+             * inside another user's post is masked too. Kept in lock-step with [hiddenNumreponses]
+             * by `TopicViewModel.loadedMode` — the single construction seam for this mode — so the
+             * post-level and quote-level masks can never diverge across the load / refresh /
+             * force-refresh / post-delete / search / live-refilter paths.
+             */
+            val blockedQuoteAuthors: Set<String> = emptySet(),
+            /**
+             * #877 — `true` while this page is the instant cache emission that a network refresh
+             * will supersede on the same load (cf. `TopicPageEmission.provisional`). The posts
+             * render normally (cache-first snappiness) but the top-bar pill keeps « Chargement… »
+             * instead of a possibly stale « page X / Y ». The repository guarantees a terminal
+             * `provisional = false` emission on every path (network page, TTL skip, failed
+             * refresh), so this can never strand the pill.
+             */
+            val provisional: Boolean = false,
         ) : Mode
 
         data class Error(
@@ -108,13 +159,24 @@ data class TopicUiState(
     }
 
     /**
-     * Helper used by the screen : `true` when the loaded topic page exposes a usable intra-topic
-     * search form (authenticated, non-empty `hash_check`). Drives the search icon affordance,
-     * symmetric with the reply gate. The form is transient (never cached), so a cold cache row
-     * keeps search disabled until a live authenticated load.
+     * `true` when the loaded topic page exposes a usable intra-topic search form (authenticated,
+     * non-empty `hash_check`). The form is transient (never cached) — a cache emission carries
+     * none, which is why the ICON affordance is no longer gated on it (cf. [canOpenSearch], #877) :
+     * this gate keeps protecting the actual POST paths (submit / step).
      */
     val canSearchInTopic: Boolean
         get() = (mode as? Mode.Loaded)?.topic?.searchForm?.canSearch == true
+
+    /**
+     * #877 — search ICON affordance : authenticated + a page on screen. Deliberately decoupled
+     * from the transient [canSearchInTopic] : cache emissions (and the TTL-skip path, which never
+     * refetches) carry no `searchForm`, and gating the icon on it made the Loupe vanish between
+     * pages — deterministic on a fresh authenticated cache, perceived as intermittent. Opening
+     * the bar without a form triggers a fresh form fetch (`TopicViewModel.ensureSearchForm`) ;
+     * a submit that still has no form fails explicitly (Toast), never silently.
+     */
+    val canOpenSearch: Boolean
+        get() = isAuthenticated && mode is Mode.Loaded
 
     companion object {
         fun initial(request: TopicRequest): TopicUiState =
@@ -148,10 +210,60 @@ data class TopicSearchUiState(
     val word: String = "",
     val spseudo: String = "",
     val onlyMatches: Boolean = true,
+    /**
+     * #894 — the « Chercher depuis le début » opt-in : a fresh submit sends `firstnum=0` (whole
+     * topic) instead of the session anchor (HFR's default « from the current page onwards »).
+     * EPHEMERAL by design (cadrage F4) : plain bar state, no persisted preference.
+     */
+    val fromStart: Boolean = false,
+    /**
+     * #894 — the search anchor of the topic page the user is READING : the form `firstnum` of the
+     * last REAL topic page rendered (a transsearch response carries none, so it never overwrites
+     * this). A fresh default-mode submit sends it ; a fresh submit from a results page reuses it
+     * (the on-screen response form has no anchor of its own).
+     */
+    val sessionAnchor: Int? = null,
     val status: TopicSearchStatus = TopicSearchStatus.Idle,
     val canGoPreviousResult: Boolean = false,
     val canGoNextResult: Boolean = false,
+    /**
+     * #879 — `true` while the page ON SCREEN is a FILTERED transsearch result list. Set by the
+     * filtered render, cleared whenever a normal-load path takes the page back
+     * (`takeOverFromSearch`). Gates the search-results footer (« résultats suivants ») and
+     * SUPPRESSES the canonical PageBoundary/EndOfTopic cards, whose `onOpenPage` would silently
+     * leave the search.
+     */
+    val showingFilteredResults: Boolean = false,
+    /**
+     * #894 — resume cursor of the displayed FILTERED result list. HFR truncates its scan window
+     * (~200 matches observed) : a truncated response advertises the resume point in its form's
+     * `currentnum` (⇒ « Résultats suivants » available), a COMPLETE response carries none.
+     * `null` = no further batch. The continuation re-submits the FROZEN criteria below with
+     * `currentnum = resumeCursor` (and NO anchor) ; the next batch REPLACES the list (web parity).
+     */
+    val resumeCursor: Int? = null,
+    /**
+     * #879 (gate finding 1) + #894 — the criteria the displayed results were actually SUBMITTED
+     * with. The continuation, the non-filtered steps and the backward replay re-submit THESE,
+     * never the live editable fields : editing the bar after a render can never fetch « the next
+     * batch of a different search ». [resultAnchor] is the `firstnum` actually sent (`0` when
+     * « depuis le début » was checked) — the backward replay re-anchors on it, a response form
+     * carrying no anchor of its own.
+     */
+    val resultWord: String = "",
+    val resultSpseudo: String = "",
+    val resultAnchor: Int? = null,
 ) {
+    /**
+     * #894 — a further batch of filtered results is reachable. Deliberately CURSOR-based only
+     * (gate #879 finding 3, carried over) : during Loading the footer is simply hidden by the
+     * screen, and after a failed continuation the cursor is untouched — the card stays and
+     * doubles as the retry affordance. `EndOfSearchResultsCard` is only truthful on
+     * `Done && !hasMore`.
+     */
+    val hasMoreFilteredResults: Boolean
+        get() = showingFilteredResults && resumeCursor != null
+
     /** HFR needs at least a term or an author ; the submit button is disabled otherwise. */
     val canSubmit: Boolean get() = word.isNotBlank() || spseudo.isNotBlank()
 }
@@ -176,6 +288,9 @@ sealed interface TopicIntent {
      */
     data object Refresh : TopicIntent
 
+    /** #879 — filtered search : fetch the next page of the result list (footer card). */
+    data object SearchNextResultsPage : TopicIntent
+
     /**
      * #292 — confirmed deletion of one of the user's own (normal) posts. The screen shows a
      * confirmation dialog first; this intent is only sent once the user confirms. [numreponse]
@@ -189,6 +304,13 @@ sealed interface TopicIntent {
      * `BlacklistRepository`; the topic re-filters live through the page combine.
      */
     data class SetAuthorBlocked(val author: String, val blocked: Boolean) : TopicIntent
+
+    /**
+     * #809 — a long-press on the top-bar title requests removing THIS topic's drapeau. Carries no
+     * payload : the ViewModel already knows the topic from its [TopicRequest] and resolves the full
+     * [fr.forumhfr.redface2.core.model.Flag] through `FlagRepository.findFlag` before confirming.
+     */
+    data object RequestRemoveTopicFlag : TopicIntent
 
     // ─── intra-topic search (#546) ───────────────────────────────────────────────
 
@@ -206,6 +328,9 @@ sealed interface TopicIntent {
     data class SearchPseudoChanged(val pseudo: String) : TopicIntent
 
     data class SearchOnlyMatchesChanged(val onlyMatches: Boolean) : TopicIntent
+
+    /** #894 — toggle « Chercher depuis le début » (fresh submits send `firstnum=0`). Ephemeral. */
+    data class SearchFromStartChanged(val fromStart: Boolean) : TopicIntent
 
     /** Submit the intra-topic search (`POST transsearch.php`). */
     data object SubmitSearch : TopicIntent
@@ -254,13 +379,44 @@ sealed interface TopicEffect {
     data class ScrollToPost(val numreponse: Int) : TopicEffect
 
     /**
+     * #879 (gate finding 2) — a NEW page of filtered search results replaced the list content in
+     * place : without an explicit reposition the LazyListState keeps page N's end offset and the
+     * first results of page N+1 open off-screen. Sent on every filtered render (fresh + next).
+     */
+    data object ScrollToTopOfResults : TopicEffect
+
+    /**
      * Issue #200 — emitted after a plain reply submit when HFR's success URL anchors
      * `#bas` instead of `#t{numreponse}`. The screen scrolls to the last post on the
      * (force-refreshed) page so the user can see their freshly-published reply at the
      * bottom. Distinct from [ScrollToPost] because we don't know the new numreponse
      * — the parser couldn't extract it from the `#bas` fragment.
+     *
+     * Gate #895 r3 — [page] scopes the landing : the screen re-validates it against the CURRENT
+     * `state.request.page` and DROPS a stale effect (a buffered landing consumed after a page
+     * switch must never scroll the new page — the ViewModel's atomicity cannot cover the channel
+     * and the UI consumer). [ScrollToPost] needs no scope : its numreponse lives on exactly one
+     * page, so a stale one simply resolves to « absent » on the new page.
      */
-    data object ScrollToEndOfPage : TopicEffect
+    data class ScrollToEndOfPage(val page: Int) : TopicEffect
+
+    /**
+     * #895 (étape 4) — land back on a previously visited page at the exact reading position the
+     * user left it (raw `LazyListState` primitives, cf. [TopicScrollAnchor]). Emitted by the
+     * in-ViewModel page engine when a page switch resolves its landing to a saved anchor
+     * (revisit / #782 jump return). Unwired until the navigation switch-over (PR 2) : the
+     * route-replace paths never emit it. [page] : same stale-drop contract as [ScrollToEndOfPage].
+     */
+    data class ScrollToAnchor(val anchor: TopicScrollAnchor, val page: Int) : TopicEffect
+
+    /**
+     * #895 (étape 4) — land at the top of a freshly-switched page (no scrollTo, no saved anchor,
+     * not a `page - 1` reading step). The explicit default landing of the in-ViewModel page
+     * engine — without it a page switch inside one entry would keep the previous page's scroll
+     * offset (the entry, and its `LazyListState`, now survive the switch). [page] : same
+     * stale-drop contract as [ScrollToEndOfPage].
+     */
+    data class ScrollToTop(val page: Int) : TopicEffect
 
     /**
      * Issue #200 — emitted when the post-submit force refresh (`refreshTopicPage`) fails.
@@ -279,22 +435,6 @@ sealed interface TopicEffect {
      * current page stays on screen (cache-first); the screen surfaces a Toast inviting a retry.
      */
     data object RefreshFailed : TopicEffect
-
-    /**
-     * Issue #226 — emitted after a plain-reply submit when the reply overflowed the topic onto a
-     * newly-created page but HFR's success URL anchored the OLD page (the one the form was on). The
-     * ViewModel detects this in `forceRefreshCurrentPage`: the force-refreshed page reports a
-     * `totalPages` greater than `request.page` while `scrollTo` is null (plain reply — quote/edit
-     * carry a `#t{N}` scrollTo and are excluded). The navigation host re-routes to [page] (= the new
-     * `totalPages`) with `scrollTo = null`, a **fresh `submitSignal`** AND
-     * `postSubmitOverflowLanding = true` (cf. `TopicRequest`). The fresh `submitSignal` makes the new
-     * ViewModel force-fetch that last page — never a stale cache-aside row — and the landing flag
-     * makes it emit [ScrollToEndOfPage] (surfacing the freshly-published post) **without** re-emitting
-     * `NavigateToLastPage`: if a concurrent post bumped `totalPages` further during the refresh, the
-     * flag breaks the moving-tail chase. Defensive: works whether HFR anchored the old page (the bug)
-     * or the new one.
-     */
-    data class NavigateToLastPage(val page: Int) : TopicEffect
 
     /**
      * #292 — emitted after a post was successfully deleted. The screen surfaces a confirmation
@@ -322,4 +462,41 @@ sealed interface TopicEffect {
      * sober Toast (« Aucun résultat suivant ») and the next arrow disables.
      */
     data object SearchResultsEnd : TopicEffect
+
+    // ─── #809 — one-shot outcomes of the title long-press flag removal. They ride THIS channel
+    // (the screen's single effects collector + Toast surface, like PostDeleted) rather than a
+    // parallel consumable StateFlow — one one-shot mechanism per screen (review finding).
+
+    /** #809 — `delflag.php` confirmed the removal ; the Drapeaux caches are already reconciled. */
+    data object TopicFlagRemoved : TopicEffect
+
+    /** #809 — the removal failed (refused, transport, session) ; nothing was touched. */
+    data object TopicFlagRemovalFailed : TopicEffect
+
+    /**
+     * #809 — the long-press resolved to no removable drapeau : topic not flagged, anonymous
+     * session, or an unresolvable lookup (resolve failure folds here — cf. TopicViewModel).
+     */
+    data object TopicFlagNotFound : TopicEffect
 }
+
+/**
+ * #809 — drives the « Retirer le drapeau » long-press interaction on the topic top bar. MVI-style
+ * explicit state so the confirmation gates the network call. Mirrors FlagsViewModel's
+ * `RemoveFlagState`, plus a [Resolving] step the Drapeaux view never needs : that screen already
+ * holds the [Flag], whereas the topic screen must first resolve it through `FlagRepository.findFlag`
+ * (which may fan out the network on a cold cache).
+ *
+ * - [Idle] — nothing pending.
+ * - [Resolving] — the long-press fired ; the flag lookup is in flight. Blocks a second long-press.
+ * - [Confirming] — a drapeau was found ; the screen shows the confirmation dialog ([flag] feeds its
+ *   title). Absent this state, no dialog.
+ * - [Removing] — the user confirmed ; the `delflag.php` call is in flight (anti double-tap).
+ */
+sealed interface RemoveTopicFlagState {
+    data object Idle : RemoveTopicFlagState
+    data object Resolving : RemoveTopicFlagState
+    data class Confirming(val flag: Flag) : RemoveTopicFlagState
+    data class Removing(val flag: Flag) : RemoveTopicFlagState
+}
+

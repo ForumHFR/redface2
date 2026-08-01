@@ -100,6 +100,7 @@ internal object TopicMappers {
         quoteRef = quoteRef,
         profileId = profileId,
         editedAt = editedAt,
+        citedCount = citedCount,
         signature = signature,
     )
 
@@ -116,6 +117,7 @@ internal object TopicMappers {
         quoteRef = quoteRef,
         profileId = profileId,
         editedAt = editedAt,
+        citedCount = citedCount,
         signature = signature,
     )
 
@@ -136,6 +138,10 @@ internal object TopicMappers {
         @SerialName("multipleChoice") val multipleChoice: Boolean = false,
         @SerialName("totalVotes") val totalVotes: Int = 0,
         @SerialName("hasVoted") val hasVoted: Boolean = false,
+        // #697 — default TRUE : legacy cache rows (written before the flag existed) all carried the
+        // results shape, so they decode into « résultats disponibles » — graceful, same pattern as
+        // the other defaults above.
+        @SerialName("resultsAvailable") val resultsAvailable: Boolean = true,
     )
 
     @Serializable
@@ -151,6 +157,7 @@ internal object TopicMappers {
         multipleChoice = multipleChoice,
         totalVotes = totalVotes,
         hasVoted = hasVoted,
+        resultsAvailable = resultsAvailable,
     )
 
     private fun PollDto.toDomain(): Poll = Poll(
@@ -159,5 +166,6 @@ internal object TopicMappers {
         multipleChoice = multipleChoice,
         totalVotes = totalVotes,
         hasVoted = hasVoted,
+        resultsAvailable = resultsAvailable,
     )
 }

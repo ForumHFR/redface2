@@ -1,12 +1,16 @@
 package fr.forumhfr.redface2.feature.topic
 
+import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.blacklist.BlacklistRepository
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
+import fr.forumhfr.redface2.core.domain.flags.FlagRepository
+import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
+import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
@@ -20,17 +24,23 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.search.SearchRepository
 import fr.forumhfr.redface2.core.domain.topic.NoTopicSearchResultsException
+import fr.forumhfr.redface2.core.domain.topic.TopicPageEmission
 import fr.forumhfr.redface2.core.domain.topic.TopicRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicSearchRepository
 import fr.forumhfr.redface2.core.model.TopicSearchForm
 import fr.forumhfr.redface2.core.model.TopicSearchRequest
+import fr.forumhfr.redface2.core.model.search.SearchRequest
+import fr.forumhfr.redface2.core.model.search.SearchResultPage
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostResult
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.blacklist.BlacklistEntry
+import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.write.EditPostContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
@@ -44,11 +54,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -198,6 +212,108 @@ class TopicViewModelTest {
 
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `#877 provisional cache emission is exposed then settles on the network emission`() = runTest {
+        val cached = fakeTopic(page = 1, totalPages = 3, title = "cached")
+        val fresh = fakeTopic(page = 1, totalPages = 5, title = "fresh")
+        val controlled = MutableSharedFlow<TopicPageEmission>(replay = 0)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeStreamingEmissionTopicRepository(controlled),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.state.test {
+            assertMode<TopicUiState.Mode.Loading>(awaitItem())
+
+            controlled.emit(TopicPageEmission(cached, provisional = true))
+            val provisional = assertMode<TopicUiState.Mode.Loaded>(awaitItem())
+            assertEquals("cached", provisional.topic.title)
+            assertTrue("the cache emission must surface as provisional", provisional.provisional)
+
+            controlled.emit(TopicPageEmission(fresh, provisional = false))
+            val settled = assertMode<TopicUiState.Mode.Loaded>(awaitItem())
+            assertEquals("fresh", settled.topic.title)
+            assertFalse("the network emission must settle the page", settled.provisional)
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `#877 live blacklist re-filter preserves the provisional flag`() = runTest {
+        // Gate finding : loadedMode() defaults provisional=false, and the independent blacklist
+        // collector rebuilds Mode.Loaded from the page ON SCREEN. Landing between the provisional
+        // cache emission and the settled one, it must carry the provenance over — not fake-settle.
+        val cached = fakeTopic(
+            page = 1,
+            totalPages = 3,
+            title = "cached",
+            posts = listOf(fakePost(100, author = "Alice"), fakePost(101, author = "Bob")),
+        )
+        val controlled = MutableSharedFlow<TopicPageEmission>(replay = 0)
+        val blacklist = FakeBlacklistRepository()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeStreamingEmissionTopicRepository(controlled),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            blacklistRepository = blacklist,
+        )
+
+        viewModel.state.test {
+            assertMode<TopicUiState.Mode.Loading>(awaitItem())
+            controlled.emit(TopicPageEmission(cached, provisional = true))
+            assertTrue(assertMode<TopicUiState.Mode.Loaded>(awaitItem()).provisional)
+
+            blacklist.block("alice")
+            val refiltered = assertMode<TopicUiState.Mode.Loaded>(awaitItem())
+            assertEquals(setOf(100), refiltered.hiddenNumreponses)
+            assertTrue("the local re-filter must NOT fake-settle the page", refiltered.provisional)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `#877 a stale form fetch is dropped after a newer owner took the same page`() = runTest {
+        // Gate finding : `request == fetchedFor` cannot tell two successive owners of the SAME page
+        // apart — the generation token must drop the late form-fetch reply, like a stale transsearch.
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 1)
+        val gate = CompletableDeferred<Unit>()
+        var gated = true
+        val repo = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(fakeTopic(1, 3, title = "no-form")) }),
+            // Consumed in COMPLETION order : the (ungated) pull-to-refresh takes the first item,
+            // the released form fetch takes the second.
+            refreshTopicsToReturn = listOf(
+                fakeTopic(1, 3, title = "refreshed"),
+                fakeTopic(1, 3, title = "late-form", searchForm = form),
+            ),
+        )
+        repo.refreshHook = { _, _, _ ->
+            if (gated) {
+                gated = false
+                gate.await()
+            }
+        }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repo,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.send(TopicIntent.OpenSearch) // ensureSearchForm suspends on the gate
+        viewModel.send(TopicIntent.Refresh) // same page, NEW owner → bumps the generation
+        assertEquals("refreshed", assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic.title)
+
+        gate.complete(Unit) // the late form fetch lands — and must be dropped
+
+        assertEquals(
+            "the stale form fetch must not clobber the newer owner",
+            "refreshed",
+            assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic.title,
+        )
     }
 
     @Test
@@ -430,6 +546,50 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `state carries the connected pseudo for the ownership fallback (#545)`() = runTest {
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"))
+        val vm = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = auth,
+        )
+        assertEquals("xaat", vm.state.value.connectedPseudo)
+
+        auth.emit(AuthState.Anonymous) // logout → the fallback must stop matching anything
+        assertEquals(null, vm.state.value.connectedPseudo)
+    }
+
+    @Test
+    fun `DeletePost proceeds for an own-by-pseudo post without an edit link (#545)`() = runTest {
+        // affichoutils=0 : the toolbar (and its edit link) is absent, so isEditable=false even on
+        // the user's own post. Ownership-by-pseudo must let the deletion through.
+        val loaded = fakeTopic(
+            page = 2,
+            totalPages = 3,
+            posts = listOf(fakePost(numreponse = 777, isEditable = false, author = "xaat")),
+        )
+        val refreshed = fakeTopic(page = 2, totalPages = 3, title = "refreshed")
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(loaded) }),
+            refreshTopicsToReturn = listOf(refreshed),
+        )
+        val deleteRepo = FakeDeletePostRepository(DeletePostResult.Success(deletedWholeTopic = false))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            deletePostRepository = deleteRepo,
+        )
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.DeletePost(777))
+            assertEquals(TopicEffect.PostDeleted, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(777, deleteRepo.calls.single().numreponse)
+    }
+
+    @Test
     fun `state topBarAutoHide reflects the user preference (build 89)`() = runTest {
         val on = topicViewModel(
             request = topicRequest(page = 1),
@@ -503,6 +663,46 @@ class TopicViewModelTest {
             userPreferencesRepository = FakeUserPreferencesRepository(topicSignatures = true),
         )
         assertEquals(true, shown.state.value.showSignatures)
+    }
+
+    @Test
+    fun `state fullWidthPosts reflects the user preference (#884)`() = runTest {
+        val inset = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            userPreferencesRepository = FakeUserPreferencesRepository(topicFullWidthPosts = false),
+        )
+        assertEquals(false, inset.state.value.fullWidthPosts)
+
+        val fullWidth = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            userPreferencesRepository = FakeUserPreferencesRepository(topicFullWidthPosts = true),
+        )
+        assertEquals(true, fullWidth.state.value.fullWidthPosts)
+    }
+
+    @Test
+    fun `state writingSurfacePreset reflects the user preference (#806)`() = runTest {
+        val fullEditor = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            userPreferencesRepository = FakeUserPreferencesRepository(
+                writingSurfacePreset = WritingSurfacePreset.FULL_EDITOR,
+            ),
+        )
+        assertEquals(WritingSurfacePreset.FULL_EDITOR, fullEditor.state.value.writingSurfacePreset)
+
+        val default = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            userPreferencesRepository = FakeUserPreferencesRepository(),
+        )
+        assertEquals(WritingSurfacePreset.FULL_EDITOR, default.state.value.writingSurfacePreset)
     }
 
     @Test
@@ -788,6 +988,40 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `the canonical blocked set is exposed for quote masking and re-filters live (#785)`() = runTest {
+        // #785 — the screen provides Loaded.blockedQuoteAuthors to the quote renderer
+        // (LocalBlockedQuoteAuthors), so the set must (a) land with the initial load — even when the
+        // blocked author has NO post on the page, only citations of them — and (b) follow live
+        // blacklist changes through the same seam as hiddenNumreponses (loadedMode).
+        val topic = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            posts = listOf(fakePost(100, author = "Alice"), fakePost(101, author = "Bob")),
+        )
+        val blacklist = FakeBlacklistRepository(blockedCanonicals = setOf("charlie"))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            blacklistRepository = blacklist,
+        )
+
+        viewModel.state.test {
+            val initial = assertMode<TopicUiState.Mode.Loaded>(awaitItem())
+            // charlie posts nothing on this page (hiddenNumreponses empty), yet the canonical set is
+            // exposed so a CITATION of charlie in Alice/Bob's posts can be masked by the renderer.
+            assertEquals(setOf("charlie"), initial.blockedQuoteAuthors)
+            assertEquals(emptySet<Int>(), initial.hiddenNumreponses)
+
+            blacklist.block("Alice")
+            val refiltered = assertMode<TopicUiState.Mode.Loaded>(awaitItem())
+            assertEquals(setOf("charlie", "alice"), refiltered.blockedQuoteAuthors)
+            assertEquals(setOf(100), refiltered.hiddenNumreponses)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `blocking an author after a pull-to-refresh hides their posts live (#509 beta)`() = runTest {
         // Beta regression: the blacklist used to be collected only inside loadCurrentPage's combine, so
         // a refresh (which cancels loadJob and runs a one-shot refetch) FROZE the live re-filter — a
@@ -835,26 +1069,33 @@ class TopicViewModelTest {
     @Test
     fun `a post-submit landing hides authors already blacklisted before the force refresh (#509 beta)`() =
         runTest {
-            // Beta regression: a VM created with submitSignal != null lands via forceRefreshCurrentPage
-            // and NEVER calls loadCurrentPage, so the blacklist combine never ran → blockedCanonicals
-            // stayed emptySet() and an already-blocked author was NOT hidden on the landing page. The
-            // init collector now seeds blockedCanonicals before the force refresh computes its hidden set.
+            // Beta regression (#509), re-anchored on the engine (#895 PR 2) : the post-submit
+            // landing is built by performSubmitRefresh through loadedMode(), which must see the
+            // blacklist seeded by the init collector — an already-blocked author is hidden on the
+            // freshly force-fetched page too, not only on cache-aside loads.
+            val stale = fakeTopic(
+                page = 2,
+                totalPages = 2,
+                posts = listOf(fakePost(1, author = "Bob")),
+            )
             val fresh = fakeTopic(
                 page = 2,
-                totalPages = 5,
+                totalPages = 2,
                 posts = listOf(fakePost(900, author = "Alice"), fakePost(901, author = "Bob")),
             )
             val repository = FakeTopicRepository(
-                flowsToReturn = emptyList(),
+                flowsToReturn = listOf(flow { emit(stale) }),
                 refreshTopicsToReturn = listOf(fresh),
             )
             val viewModel = topicViewModel(
-                request = topicRequest(page = 2, submitSignal = 1_700_000_000_000L),
+                request = topicRequest(page = 2),
                 topicRepository = repository,
                 authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
                 // Alice is ALREADY blacklisted when the VM is constructed.
                 blacklistRepository = FakeBlacklistRepository(blockedCanonicals = setOf("alice")),
             )
+
+            viewModel.applySubmitResult(targetPage = 2, scrollTo = null)
 
             val mode = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
             assertEquals(fresh, mode.topic)
@@ -863,7 +1104,11 @@ class TopicViewModelTest {
                 setOf(900),
                 mode.hiddenNumreponses,
             )
-            assertTrue("the landing went through the force-refresh path", repository.calls.isEmpty())
+            assertEquals(
+                "the landing went through the force-refresh path",
+                listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)),
+                repository.refreshCalls,
+            )
         }
 
     @Test
@@ -908,17 +1153,103 @@ class TopicViewModelTest {
     // ─── intra-topic search (#546) ───────────────────────────────────────────────
 
     @Test
-    fun `OpenSearch is a no-op when the loaded page exposes no usable search form`() = runTest {
-        // No searchForm ⇒ canSearchInTopic=false ⇒ the bar must not open.
+    fun `#877 OpenSearch without a form opens the bar and fetches a fresh form`() = runTest {
+        // The TTL-skip cache path serves a settled page WITHOUT a searchForm (transient, never
+        // cached). Pre-#877 the Loupe simply vanished ; now the bar opens (auth + page on screen)
+        // and ensureSearchForm harvests a fresh form in the background.
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 1)
+        val repo = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(fakeTopic(1, 3, title = "no-form")) }),
+            refreshTopicsToReturn = listOf(fakeTopic(1, 3, title = "fresh-form", searchForm = form)),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repo,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        assertEquals(true, viewModel.state.value.canOpenSearch)
+        viewModel.send(TopicIntent.OpenSearch)
+
+        assertEquals(true, viewModel.state.value.search.isActive)
+        assertEquals("the fresh-form fetch must fire", 1, repo.refreshCalls.size)
+        val loaded = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+        assertEquals("fresh-form", loaded.topic.title)
+        assertEquals("the harvested form makes submit usable", true, viewModel.state.value.canSearchInTopic)
+    }
+
+    @Test
+    fun `#877 OpenSearch stays a no-op when logged out`() = runTest {
         val viewModel = topicViewModel(
             request = topicRequest(page = 1),
             topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
-            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
         )
 
         viewModel.send(TopicIntent.OpenSearch)
 
+        assertEquals(false, viewModel.state.value.canOpenSearch)
         assertEquals(false, viewModel.state.value.search.isActive)
+    }
+
+    @Test
+    fun `#877 SubmitSearch without a form fails explicitly and retries the form fetch`() = runTest {
+        // Both refresh fetches come back formless (e.g. session lost server-side) : the submit
+        // must surface an explicit SearchFailed Toast — never a silent no-op tap — and retry.
+        val repo = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(fakeTopic(1, 3, title = "no-form")) }),
+            refreshTopicsToReturn = listOf(
+                fakeTopic(1, 3, title = "still-no-form"),
+                fakeTopic(1, 3, title = "still-no-form-2"),
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repo,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+        viewModel.send(TopicIntent.OpenSearch) // consumes refresh #1, lands formless
+        viewModel.send(TopicIntent.SearchWordChanged("betatest"))
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.SubmitSearch)
+            assertEquals(TopicEffect.SearchFailed, awaitItem())
+        }
+        assertEquals("submit must retry the form fetch", 2, repo.refreshCalls.size)
+    }
+
+    @Test
+    fun `#894 non-filtered SubmitSearch without a firstnum anchor fails explicitly, never whole-topic`() = runTest {
+        // The page on screen is a transsearch RESPONSE : its form has NO firstnum anchor (live
+        // contract). A fresh NON-FILTERED submit from there must fail explicitly and refetch the
+        // form — silently omitting firstnum would run a whole-topic search the user did not ask for.
+        val responseForm = TopicSearchForm(
+            hashCheck = "tok",
+            topicId = SAMPLE_POST,
+            cat = SAMPLE_CAT,
+            firstnum = null,
+            currentNum = 4242,
+        )
+        val repo = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(fakeTopic(1, 3, searchForm = responseForm)) }),
+            refreshTopicsToReturn = listOf(fakeTopic(1, 3, searchForm = responseForm)),
+        )
+        val searchRepo = FakeTopicSearchRepository(result = fakeTopic(1, 1))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repo,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("betatest"))
+        viewModel.send(TopicIntent.SearchOnlyMatchesChanged(false))
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.SubmitSearch)
+            assertEquals(TopicEffect.SearchFailed, awaitItem())
+        }
+        assertEquals("the anchorless submit must never reach the network", 0, searchRepo.requests.size)
     }
 
     @Test
@@ -951,6 +1282,332 @@ class TopicViewModelTest {
         val loaded = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
         assertEquals("filtered", loaded.topic.title)
         assertEquals(TopicSearchStatus.Done, viewModel.state.value.search.status)
+    }
+
+    @Test
+    fun `#894 a truncated filtered reply exposes the resume cursor and fetches the next batch`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
+        // Batch 1 : HFR truncated its scan → the response form advertises the resume cursor.
+        // Batch 2 : complete list → no cursor.
+        val batch1 = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            title = "results-b1",
+            searchForm = form.copy(firstnum = null, currentNum = 500),
+        )
+        val batch2 = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            title = "results-b2",
+            searchForm = form.copy(firstnum = null, currentNum = null),
+        )
+        val searchRepo = FakeTopicSearchRepository()
+        searchRepo.responder = { req -> if (req.currentNum == "500") batch2 else batch1 }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(flow { emit(fakeTopic(1, 5, searchForm = form)) }),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("iwds"))
+        viewModel.send(TopicIntent.SubmitSearch)
+
+        // The truncated reply advertises a further batch — canonical pager intact.
+        assertEquals("results-b1", assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic.title)
+        assertEquals(true, viewModel.state.value.search.showingFilteredResults)
+        assertEquals(500, viewModel.state.value.search.resumeCursor)
+        assertEquals(true, viewModel.state.value.search.hasMoreFilteredResults)
+        assertEquals(listOf(1, 2, 3, 4, 5), viewModel.state.value.availablePages)
+        // The fresh submit anchored on the current page (web parity, #894).
+        assertEquals(999, searchRepo.requests.single().anchor)
+
+        viewModel.send(TopicIntent.SearchNextResultsPage)
+
+        assertEquals(2, searchRepo.requests.size)
+        val continuation = searchRepo.requests.last()
+        assertEquals("the footer must re-submit the resume cursor", "500", continuation.currentNum)
+        assertEquals("a continuation never re-sends an anchor", null, continuation.anchor)
+        assertEquals(true, continuation.onlyMatches)
+        assertEquals("results-b2", assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic.title)
+        assertEquals("a complete batch ends the continuation", null, viewModel.state.value.search.resumeCursor)
+        assertEquals(false, viewModel.state.value.search.hasMoreFilteredResults)
+    }
+
+    @Test
+    fun `#879 the footer re-submits the FROZEN criteria, not the edited bar (gate finding 1)`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
+        val results = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            title = "results",
+            searchForm = form.copy(firstnum = null, currentNum = 500),
+        )
+        val searchRepo = FakeTopicSearchRepository(result = results)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(flow { emit(fakeTopic(1, 5, searchForm = form)) }),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("iwds"))
+        viewModel.send(TopicIntent.SubmitSearch)
+
+        // The user edits the bar WITHOUT re-submitting, then taps the footer.
+        viewModel.send(TopicIntent.SearchWordChanged("autre chose"))
+        viewModel.send(TopicIntent.SearchNextResultsPage)
+
+        assertEquals(2, searchRepo.requests.size)
+        assertEquals(
+            "the next batch must belong to the SUBMITTED search, never the edited bar",
+            "iwds",
+            searchRepo.requests.last().word,
+        )
+        assertEquals("500", searchRepo.requests.last().currentNum)
+    }
+
+    @Test
+    fun `#879 every filtered render repositions at the top of the results (gate finding 2)`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
+        val results = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            title = "results",
+            searchForm = form.copy(firstnum = null, currentNum = 500),
+        )
+        val searchRepo = FakeTopicSearchRepository(result = results)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(flow { emit(fakeTopic(1, 5, searchForm = form)) }),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("iwds"))
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.SubmitSearch)
+            assertEquals(TopicEffect.ScrollToTopOfResults, awaitItem())
+            viewModel.send(TopicIntent.SearchNextResultsPage)
+            assertEquals(TopicEffect.ScrollToTopOfResults, awaitItem())
+        }
+    }
+
+    @Test
+    fun `#879 a failed continuation keeps the cursor so the footer stays as retry (gate finding 3)`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
+        val batch1 = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            title = "results-b1",
+            searchForm = form.copy(firstnum = null, currentNum = 500),
+        )
+        val searchRepo = FakeTopicSearchRepository()
+        searchRepo.responder = { req ->
+            if (req.currentNum != null) throw IOException("boom") else batch1
+        }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(flow { emit(fakeTopic(1, 5, searchForm = form)) }),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("iwds"))
+        viewModel.send(TopicIntent.SubmitSearch)
+        assertEquals(true, viewModel.state.value.search.hasMoreFilteredResults)
+
+        viewModel.send(TopicIntent.SearchNextResultsPage)
+
+        // The fetch failed : the cursor is untouched — the « more » card doubles as retry.
+        assertEquals(500, viewModel.state.value.search.resumeCursor)
+        assertEquals(true, viewModel.state.value.search.hasMoreFilteredResults)
+        assertEquals(true, viewModel.state.value.search.showingFilteredResults)
+    }
+
+    @Test
+    fun `#894 anti-loop — a continuation cursor that did not advance ends the results`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
+        // HFR mis-reports : the continuation re-advertises the SAME cursor it was sent — following
+        // it would re-serve the same batch forever.
+        val batch = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            title = "results-b1",
+            searchForm = form.copy(firstnum = null, currentNum = 500),
+        )
+        val searchRepo = FakeTopicSearchRepository(result = batch)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(flow { emit(fakeTopic(1, 5, searchForm = form)) }),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("iwds"))
+        viewModel.send(TopicIntent.SubmitSearch)
+        assertEquals(true, viewModel.state.value.search.hasMoreFilteredResults)
+
+        viewModel.send(TopicIntent.SearchNextResultsPage)
+
+        // A non-advancing cursor is treated as the end : footer gone, no infinite loop.
+        assertEquals(null, viewModel.state.value.search.resumeCursor)
+        assertEquals(false, viewModel.state.value.search.hasMoreFilteredResults)
+        assertEquals(true, viewModel.state.value.search.showingFilteredResults)
+    }
+
+    @Test
+    fun `#894 an EMPTY filtered continuation is the end of results, never « Aucun résultat »`() = runTest {
+        // Cadrage F6 — the matches behind the advertised cursor were deleted meanwhile : HFR
+        // answers its « aucune réponse n'a été trouvée » page. The displayed batch must STAY on
+        // screen, the status settle on Done (not NoResults) and the cursor drop so the footer
+        // becomes the end card.
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
+        val batch1 = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            title = "results-b1",
+            searchForm = form.copy(firstnum = null, currentNum = 500),
+        )
+        val searchRepo = FakeTopicSearchRepository()
+        searchRepo.responder = { req ->
+            if (req.currentNum != null) throw NoTopicSearchResultsException() else batch1
+        }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(flow { emit(fakeTopic(1, 5, searchForm = form)) }),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("iwds"))
+        viewModel.send(TopicIntent.SubmitSearch)
+        assertEquals(true, viewModel.state.value.search.hasMoreFilteredResults)
+
+        viewModel.send(TopicIntent.SearchNextResultsPage)
+
+        assertEquals(TopicSearchStatus.Done, viewModel.state.value.search.status)
+        assertEquals(null, viewModel.state.value.search.resumeCursor)
+        assertEquals(false, viewModel.state.value.search.hasMoreFilteredResults)
+        assertEquals(true, viewModel.state.value.search.showingFilteredResults)
+        assertEquals(
+            "the displayed batch must stay on screen",
+            "results-b1",
+            assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic.title,
+        )
+    }
+
+    @Test
+    fun `#879 a normal load resets the filtered results state`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
+        val results = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            title = "results",
+            searchForm = form.copy(firstnum = null, currentNum = 500),
+        )
+        val searchRepo = FakeTopicSearchRepository(result = results)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(
+                    flow { emit(fakeTopic(1, 5, searchForm = form)) },
+                    flow { emit(fakeTopic(1, 5, title = "normal-again", searchForm = form)) },
+                ),
+                refreshTopicsToReturn = listOf(fakeTopic(1, 5, title = "refreshed", searchForm = form)),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("iwds"))
+        viewModel.send(TopicIntent.SubmitSearch)
+        assertEquals(true, viewModel.state.value.search.showingFilteredResults)
+
+        viewModel.send(TopicIntent.Refresh)
+
+        // A normal-load owner reset the results state : footer gone, no stale « résultats suivants ».
+        assertEquals(false, viewModel.state.value.search.showingFilteredResults)
+        assertEquals(null, viewModel.state.value.search.resumeCursor)
+        assertEquals(false, viewModel.state.value.search.hasMoreFilteredResults)
+    }
+
+    @Test
+    fun `#894 from-start submits an explicit 0 anchor, default anchors the current page`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
+        val results = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            title = "results",
+            searchForm = form.copy(firstnum = null, currentNum = null),
+        )
+        val searchRepo = FakeTopicSearchRepository(result = results)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(flow { emit(fakeTopic(1, 5, searchForm = form)) }),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("iwds"))
+        viewModel.send(TopicIntent.SearchFromStartChanged(true))
+        viewModel.send(TopicIntent.SubmitSearch)
+
+        assertEquals("« depuis le début » = explicit 0", 0, searchRepo.requests.last().anchor)
+
+        viewModel.send(TopicIntent.SearchFromStartChanged(false))
+        viewModel.send(TopicIntent.SubmitSearch)
+
+        assertEquals("default anchors the current page", 999, searchRepo.requests.last().anchor)
+    }
+
+    @Test
+    fun `#894 a fresh submit from a results page reuses the frozen session anchor`() = runTest {
+        // The on-screen page is a transsearch RESPONSE (form without anchor) : a new fresh submit
+        // must reuse the session anchor captured from the last REAL topic page, never fail and
+        // never silently search the whole topic.
+        val pageForm = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 777)
+        val results = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            title = "results",
+            searchForm = pageForm.copy(firstnum = null, currentNum = null),
+        )
+        val searchRepo = FakeTopicSearchRepository(result = results)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(flow { emit(fakeTopic(1, 5, searchForm = pageForm)) }),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("iwds"))
+        viewModel.send(TopicIntent.SubmitSearch)
+        assertEquals(777, searchRepo.requests.last().anchor)
+
+        // Second fresh submit FROM the rendered results page (its form has no firstnum).
+        viewModel.send(TopicIntent.SearchWordChanged("autre"))
+        viewModel.send(TopicIntent.SubmitSearch)
+
+        assertEquals(2, searchRepo.requests.size)
+        assertEquals("the session anchor survives the results render", 777, searchRepo.requests.last().anchor)
     }
 
     @Test
@@ -1287,6 +1944,1039 @@ class TopicViewModelTest {
     }
 
     /** Chantier B (#546) — a topic repo that loads a 5-page topic carrying [form] (keeps lines short). */
+    // ──────────────────────────────────────────────────────────────────────
+    // #809 — long-press flag removal from the topic top bar
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `requestRemoveTopicFlag resolves then moves to Confirming when a flag is found (#809)`() = runTest {
+        val flag = fakeFlag()
+        // Gate the lookup so the Resolving frame is observable (an instant findFlag would be conflated
+        // by the StateFlow before the collector reads it).
+        val gate = CompletableDeferred<Unit>()
+        val flagRepo = FakeFlagRepository(flagToFind = flag).apply { findFlagGate = gate }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(2, 3)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            flagRepository = flagRepo,
+        )
+
+        viewModel.removeTopicFlagState.test {
+            assertEquals(RemoveTopicFlagState.Idle, awaitItem())
+            viewModel.send(TopicIntent.RequestRemoveTopicFlag)
+            assertEquals(RemoveTopicFlagState.Resolving, awaitItem())
+            gate.complete(Unit)
+            val confirming = awaitItem() as RemoveTopicFlagState.Confirming
+            assertEquals(flag, confirming.flag)
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(1, flagRepo.findFlagCalls)
+    }
+
+    @Test
+    fun `requestRemoveTopicFlag emits NotFound and returns to Idle when no flag is found (#809)`() = runTest {
+        val flagRepo = FakeFlagRepository(flagToFind = null)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(2, 3)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            flagRepository = flagRepo,
+        )
+
+        viewModel.send(TopicIntent.RequestRemoveTopicFlag)
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.TopicFlagNotFound, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(RemoveTopicFlagState.Idle, viewModel.removeTopicFlagState.value)
+        assertTrue(
+            "a NotFound resolution must never reach the confirmation dialog",
+            viewModel.removeTopicFlagState.value !is RemoveTopicFlagState.Confirming,
+        )
+    }
+
+    @Test
+    fun `requestRemoveTopicFlag folds a resolve failure into NotFound and returns to Idle (#809)`() = runTest {
+        // Gate Codex #809 — a findFlag that dies mid-resolve (cancelled in-flight fetch after an
+        // account switch, runtime failure) must not wedge the state in Resolving with no event :
+        // it folds to NotFound and the long-press stays usable.
+        val flagRepo = FakeFlagRepository(flagToFind = fakeFlag()).apply {
+            findFlagError = RuntimeException("resolve died")
+        }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(2, 3)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            flagRepository = flagRepo,
+        )
+
+        viewModel.send(TopicIntent.RequestRemoveTopicFlag)
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.TopicFlagNotFound, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(RemoveTopicFlagState.Idle, viewModel.removeTopicFlagState.value)
+
+        // The guard is released : a next long-press resolves again instead of being wedged.
+        flagRepo.findFlagError = null
+        viewModel.send(TopicIntent.RequestRemoveTopicFlag)
+        assertTrue(
+            "after a failed resolve, a retry must reach Confirming",
+            viewModel.removeTopicFlagState.value is RemoveTopicFlagState.Confirming,
+        )
+    }
+
+    @Test
+    fun `requestRemoveTopicFlag ignores a second press while Resolving (#809)`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val flagRepo = FakeFlagRepository(flagToFind = fakeFlag()).apply { findFlagGate = gate }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(2, 3)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            flagRepository = flagRepo,
+        )
+
+        viewModel.send(TopicIntent.RequestRemoveTopicFlag) // → Resolving, awaiting the gate
+        viewModel.send(TopicIntent.RequestRemoveTopicFlag) // ignored while Resolving
+
+        assertEquals(RemoveTopicFlagState.Resolving, viewModel.removeTopicFlagState.value)
+        assertEquals("the second long-press must not launch a duplicate lookup", 1, flagRepo.findFlagCalls)
+        gate.complete(Unit)
+    }
+
+    @Test
+    fun `requestRemoveTopicFlag ignores a press while a removal is in flight (#809)`() = runTest {
+        val removeGate = CompletableDeferred<Unit>()
+        val flagRepo = FakeFlagRepository(flagToFind = fakeFlag()).apply { removeFlagGate = removeGate }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(2, 3)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            flagRepository = flagRepo,
+        )
+
+        viewModel.send(TopicIntent.RequestRemoveTopicFlag) // resolves instantly → Confirming
+        viewModel.confirmRemoveTopicFlag() // → Removing, awaiting the removal gate
+        assertTrue(viewModel.removeTopicFlagState.value is RemoveTopicFlagState.Removing)
+
+        viewModel.send(TopicIntent.RequestRemoveTopicFlag) // ignored while Removing
+
+        assertEquals("no re-resolution while a removal is in flight", 1, flagRepo.findFlagCalls)
+        assertTrue(viewModel.removeTopicFlagState.value is RemoveTopicFlagState.Removing)
+        removeGate.complete(Unit)
+    }
+
+    @Test
+    fun `confirmRemoveTopicFlag success emits Success and resets to Idle (#809)`() = runTest {
+        val flag = fakeFlag(title = "Redface 2")
+        val flagRepo = FakeFlagRepository(flagToFind = flag, removeResult = Result.success(Unit))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(2, 3)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            flagRepository = flagRepo,
+        )
+
+        viewModel.send(TopicIntent.RequestRemoveTopicFlag)
+        assertTrue(viewModel.removeTopicFlagState.value is RemoveTopicFlagState.Confirming)
+        viewModel.confirmRemoveTopicFlag()
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.TopicFlagRemoved, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(RemoveTopicFlagState.Idle, viewModel.removeTopicFlagState.value)
+        assertEquals(1, flagRepo.removeFlagCalls)
+        assertEquals(flag, flagRepo.lastRemovedFlag)
+    }
+
+    @Test
+    fun `confirmRemoveTopicFlag failure emits Failure and resets to Idle (#809)`() = runTest {
+        val flag = fakeFlag(title = "Redface 2")
+        val flagRepo = FakeFlagRepository(
+            flagToFind = flag,
+            removeResult = Result.failure(IllegalStateException("delflag refused")),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(2, 3)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            flagRepository = flagRepo,
+        )
+
+        viewModel.send(TopicIntent.RequestRemoveTopicFlag)
+        viewModel.confirmRemoveTopicFlag()
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.TopicFlagRemovalFailed, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        // The Removing lock is always released in the finally block (#603 fork 5 lesson).
+        assertEquals(RemoveTopicFlagState.Idle, viewModel.removeTopicFlagState.value)
+    }
+
+    @Test
+    fun `confirmRemoveTopicFlag folds a raw removeFlag throw into RemovalFailed (#809)`() = runTest {
+        // Review #809 — removeFlag CAN throw outside its Result (evictFlagFromCaches runs in
+        // `.onSuccess`, past the internal runCatching) : the user still gets the failure toast
+        // and the Removing lock is released, instead of an app crash with no feedback.
+        val flagRepo = FakeFlagRepository(flagToFind = fakeFlag()).apply {
+            removeFlagError = IllegalStateException("evict blew up")
+        }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(2, 3)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            flagRepository = flagRepo,
+        )
+
+        viewModel.send(TopicIntent.RequestRemoveTopicFlag)
+        viewModel.confirmRemoveTopicFlag()
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.TopicFlagRemovalFailed, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(RemoveTopicFlagState.Idle, viewModel.removeTopicFlagState.value)
+    }
+
+    @Test
+    fun `cancelRemoveTopicFlag dismisses the confirmation without removing (#809)`() = runTest {
+        val flagRepo = FakeFlagRepository(flagToFind = fakeFlag())
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(2, 3)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            flagRepository = flagRepo,
+        )
+
+        viewModel.send(TopicIntent.RequestRemoveTopicFlag)
+        assertTrue(viewModel.removeTopicFlagState.value is RemoveTopicFlagState.Confirming)
+        viewModel.cancelRemoveTopicFlag()
+
+        assertEquals(RemoveTopicFlagState.Idle, viewModel.removeTopicFlagState.value)
+        assertEquals("cancelling must never call delflag", 0, flagRepo.removeFlagCalls)
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // #895 étape 4 — in-ViewModel page engine (switch / LRU / anchors / landing
+    // priorities / submit result / consumable entry intentions). Unbranched in
+    // production until the navigation switch-over PR : these tests ARE its harness.
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `switchToPage without a snapshot holds the departed page then loads the target (#895 slash #910)`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flow { emit(fakeTopic(2, 5)) },
+                flow { emit(fakeTopic(3, 5)) },
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+        )
+
+        viewModel.state.test {
+            assertMode<TopicUiState.Mode.Loaded>(awaitItem())
+            viewModel.effects.test {
+                viewModel.switchToPage(3)
+                assertEquals(TopicEffect.ScrollToTop(3), awaitItem())
+                cancelAndIgnoreRemainingEvents()
+            }
+            val emitted = cancelAndConsumeRemainingEvents()
+                .mapNotNull { (it as? app.cash.turbine.Event.Item)?.value }
+            assertTrue(
+                "an unvisited page bridges with the departed page held provisional (#910) — " +
+                    "a snapshot hit would swap Loaded(non-provisional) directly",
+                emitted.any { (it.mode as? TopicUiState.Mode.Loaded)?.provisional == true },
+            )
+        }
+        assertEquals(3, viewModel.state.value.request.page)
+        assertEquals(3, (viewModel.state.value.mode as TopicUiState.Mode.Loaded).topic.page)
+        assertEquals(
+            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2), Triple(SAMPLE_CAT, SAMPLE_POST, 3)),
+            repository.calls,
+        )
+    }
+
+    @Test
+    fun `a revisit activates the LRU snapshot with no Loading and lands on the saved anchor (#895)`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flow { emit(fakeTopic(2, 5, title = "first-visit")) },
+                flow { emit(fakeTopic(3, 5)) },
+                // The revisit's in-place refresh settles with fresher content.
+                flow { emit(fakeTopic(2, 5, title = "refreshed")) },
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+        )
+        val departure = TopicScrollAnchor(index = 12, offset = 34)
+
+        viewModel.effects.test {
+            viewModel.switchToPage(3, departureAnchor = departure)
+            assertEquals(TopicEffect.ScrollToTop(3), awaitItem())
+            viewModel.state.test {
+                assertMode<TopicUiState.Mode.Loaded>(awaitItem())
+                viewModel.switchToPage(2)
+                val emitted = cancelAndConsumeRemainingEvents()
+                    .mapNotNull { (it as? app.cash.turbine.Event.Item)?.value }
+                assertTrue(
+                    "the revisit must never pass through Loading",
+                    emitted.none { it.mode is TopicUiState.Mode.Loading },
+                )
+            }
+            assertEquals(TopicEffect.ScrollToAnchor(departure, 2), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        // The snapshot bridged the switch, then the cache-aside refresh settled in place.
+        assertEquals("refreshed", (viewModel.state.value.mode as TopicUiState.Mode.Loaded).topic.title)
+        assertEquals(2, viewModel.state.value.request.page)
+    }
+
+    @Test
+    fun `the snapshot map is an LRU bounded to 5 terminal pages (#895)`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = buildList {
+                add(flow { emit(fakeTopic(1, 9)) })
+                (2..6).forEach { page -> add(flow { emit(fakeTopic(page, 9)) }) }
+                // Page 1 was evicted (6 terminal pages > 5) : the return re-loads it.
+                add(flow { emit(fakeTopic(1, 9)) })
+            },
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+        )
+        (2..6).forEach { viewModel.switchToPage(it) }
+
+        viewModel.state.test {
+            assertMode<TopicUiState.Mode.Loaded>(awaitItem())
+            viewModel.switchToPage(1)
+            val emitted = cancelAndConsumeRemainingEvents()
+                .mapNotNull { (it as? app.cash.turbine.Event.Item)?.value }
+            assertTrue(
+                "page 1 was evicted from the LRU : the return is a COLD switch (provisional hold, " +
+                    "#910) — a surviving snapshot would swap Loaded(non-provisional) atomically",
+                emitted.any { (it.mode as? TopicUiState.Mode.Loaded)?.provisional == true },
+            )
+        }
+        assertEquals(7, repository.calls.size)
+    }
+
+    @Test
+    fun `a rapid A to B to C switch applies nothing from the abandoned target (#895)`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flow { emit(fakeTopic(2, 5)) },
+                // Page 3's load hangs — the user switches again before it lands.
+                flow { kotlinx.coroutines.awaitCancellation() },
+                flow { emit(fakeTopic(4, 5)) },
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+        )
+
+        viewModel.switchToPage(3)
+        viewModel.switchToPage(4)
+
+        val loaded = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+        assertEquals("the abandoned page 3 must never land", 4, loaded.topic.page)
+        assertEquals(4, viewModel.state.value.request.page)
+    }
+
+    @Test
+    fun `a blacklist change while a page is memorized re-filters at reactivation (#895)`() = runTest {
+        val blockedPost = fakePost(numreponse = 501, author = "troll")
+        val blacklist = FakeBlacklistRepository()
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flow { emit(fakeTopic(2, 5, posts = listOf(blockedPost, fakePost(502)))) },
+                flow { emit(fakeTopic(3, 5)) },
+                flow { kotlinx.coroutines.awaitCancellation() },
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+            blacklistRepository = blacklist,
+        )
+        viewModel.switchToPage(3)
+        // Blocked while page 2 lives only as a memory snapshot.
+        blacklist.block("troll")
+
+        viewModel.switchToPage(2)
+
+        // The snapshot activation (the refresh is held in flight) already hides the blocked post :
+        // the raw Topic was stored, the filter is recomputed through loadedMode (cadrage F2).
+        val loaded = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+        assertEquals(2, loaded.topic.page)
+        assertEquals(setOf(501), loaded.hiddenNumreponses)
+    }
+
+    @Test
+    fun `applySubmitResult falls back on the canonical page and lands at the bottom (#895)`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flow { emit(fakeTopic(2, 3)) },
+                flow { emit(fakeTopic(3, 3)) },
+            ),
+            // The canonical page IS the tail (a plain reply lands there) : no #226 redirect.
+            refreshTopicsToReturn = listOf(fakeTopic(3, 3, title = "fresh")),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+        viewModel.effects.test {
+            // The user switched pages after the route was created : the canonical page is 3, not 2.
+            viewModel.switchToPage(3)
+            assertEquals(TopicEffect.ScrollToTop(3), awaitItem())
+            viewModel.applySubmitResult(targetPage = null, scrollTo = null)
+            assertEquals(TopicEffect.ScrollToEndOfPage(3), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(
+            "the submit refresh must force-fetch the CANONICAL page (Sol point 1)",
+            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 3)),
+            repository.refreshCalls,
+        )
+        assertEquals("fresh", (viewModel.state.value.mode as TopicUiState.Mode.Loaded).topic.title)
+    }
+
+    @Test
+    fun `applySubmitResult with a scrollTo lands on the freshly-published post (#895)`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(fakeTopic(2, 5)) }),
+            refreshTopicsToReturn = listOf(fakeTopic(2, 5, posts = listOf(fakePost(777)))),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            viewModel.applySubmitResult(targetPage = 2, scrollTo = 777)
+            assertEquals(TopicEffect.ScrollToPost(777), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `the internal overflow redirect fires once and never chases a moving tail (#895)`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(fakeTopic(2, 2)) }),
+            refreshTopicsToReturn = listOf(
+                // The plain reply overflowed : page 2 now reports 3 pages.
+                fakeTopic(2, 3),
+                // A concurrent poster pushed totalPages further DURING our redirect refresh :
+                // the landing is terminal, no second redirect (anti-chase, Sol point 3).
+                fakeTopic(3, 4),
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            viewModel.applySubmitResult(targetPage = 2, scrollTo = null)
+            assertEquals(TopicEffect.ScrollToEndOfPage(3), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(
+            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2), Triple(SAMPLE_CAT, SAMPLE_POST, 3)),
+            repository.refreshCalls,
+        )
+        assertEquals(3, viewModel.state.value.request.page)
+    }
+
+    @Test
+    fun `goToPost pushes the jump chain and returnFromJump lands back on the departure anchor (#895)`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flow { emit(fakeTopic(2, 5)) },
+                flow { emit(fakeTopic(4, 5, posts = listOf(fakePost(900)))) },
+                flow { emit(fakeTopic(2, 5)) },
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+        )
+        val departure = TopicScrollAnchor(index = 3, offset = 10)
+
+        viewModel.effects.test {
+            viewModel.goToPost(targetPage = 4, numreponse = 900, departureAnchor = departure)
+            assertEquals(TopicEffect.ScrollToPost(900), awaitItem())
+            assertTrue(viewModel.returnFromJump())
+            assertEquals(TopicEffect.ScrollToAnchor(departure, 2), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(2, viewModel.state.value.request.page)
+        assertFalse("the chain is unwound : back must leave the topic", viewModel.returnFromJump())
+    }
+
+    @Test
+    fun `a manual page switch clears the jump chain (#895)`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flow { emit(fakeTopic(2, 5)) },
+                flow { emit(fakeTopic(4, 5, posts = listOf(fakePost(900)))) },
+                flow { emit(fakeTopic(5, 5)) },
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+        )
+
+        viewModel.goToPost(targetPage = 4, numreponse = 900)
+        viewModel.switchToPage(5)
+
+        assertFalse(
+            "a manual navigation invalidates the quote-jump returns (browser-like, #782)",
+            viewModel.returnFromJump(),
+        )
+    }
+
+    @Test
+    fun `a strict page-minus-one switch lands at the bottom (#412 via engine)`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flow { emit(fakeTopic(3, 5)) },
+                flow { emit(fakeTopic(2, 5)) },
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 3),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+        )
+
+        viewModel.effects.test {
+            viewModel.switchToPage(2)
+            assertEquals(TopicEffect.ScrollToEndOfPage(2), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `prefetch re-arms on the switched page (#895)`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flow { emit(fakeTopic(2, 6)) },
+                flow { emit(fakeTopic(4, 6)) },
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+        )
+        viewModel.switchToPage(4)
+
+        assertEquals(
+            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 3), Triple(SAMPLE_CAT, SAMPLE_POST, 5)),
+            repository.prefetches,
+        )
+    }
+
+    @Test
+    fun `process restore adopts the switched page and its anchor over the route (#895)`() = runTest {
+        val handle = SavedStateHandle()
+        val first = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(
+                    flow { emit(fakeTopic(2, 5)) },
+                    flow { emit(fakeTopic(3, 5)) },
+                ),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+            savedStateHandle = handle,
+        )
+        first.switchToPage(3)
+        first.reportPageAnchor(TopicScrollAnchor(index = 7, offset = 42))
+
+        // Process death : a NEW ViewModel from the SAME route + the SAME handle.
+        val restoredRepo = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(3, 5)) }))
+        val restored = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = restoredRepo,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+            savedStateHandle = handle,
+        )
+
+        assertEquals(
+            "SavedState wins over the route's initial page (Sol F1)",
+            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 3)),
+            restoredRepo.calls,
+        )
+        assertEquals(3, restored.state.value.request.page)
+        restored.effects.test {
+            assertEquals(TopicEffect.ScrollToAnchor(TopicScrollAnchor(7, 42), 3), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `an initial scrollTo is consumed once and never replays after process death (#895)`() = runTest {
+        val handle = SavedStateHandle()
+        val page = fakeTopic(2, 5, posts = listOf(fakePost(55)))
+        val first = topicViewModel(
+            request = topicRequest(page = 2, scrollTo = 55),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(page) })),
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+            savedStateHandle = handle,
+        )
+        first.effects.test {
+            assertEquals(TopicEffect.ScrollToPost(55), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        val restored = topicViewModel(
+            request = topicRequest(page = 2, scrollTo = 55),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(page) })),
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+            savedStateHandle = handle,
+        )
+        restored.effects.test {
+            expectNoEvents()
+            cancel()
+        }
+    }
+
+    @Test
+    fun `a consumed forceRefresh does not replay after process death (#231 via engine)`() = runTest {
+        val handle = SavedStateHandle()
+        val firstRepo = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(2, 5)) }))
+        topicViewModel(
+            request = TopicRequest(
+                cat = SAMPLE_CAT,
+                post = SAMPLE_POST,
+                page = 2,
+                scrollTo = null,
+                forceRefresh = true,
+            ),
+            topicRepository = firstRepo,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+            savedStateHandle = handle,
+        )
+        assertEquals(true, firstRepo.lastForceRefresh)
+
+        val restoredRepo = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(2, 5)) }))
+        topicViewModel(
+            request = TopicRequest(
+                cat = SAMPLE_CAT,
+                post = SAMPLE_POST,
+                page = 2,
+                scrollTo = null,
+                forceRefresh = true,
+            ),
+            topicRepository = restoredRepo,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+            savedStateHandle = handle,
+        )
+        assertEquals(
+            "the terminal fresh emission consumed the #231 catch-up : no TTL bypass on restore",
+            false,
+            restoredRepo.lastForceRefresh,
+        )
+    }
+
+    @Test
+    fun `a deletion invalidates every memory snapshot (#895)`() = runTest {
+        val deletable = fakePost(numreponse = 610, isEditable = true)
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flow { emit(fakeTopic(2, 5, posts = listOf(fakePost(600)))) },
+                flow { emit(fakeTopic(3, 5, posts = listOf(deletable))) },
+                flow { emit(fakeTopic(2, 5, posts = listOf(fakePost(600)))) },
+            ),
+            refreshTopicsToReturn = listOf(fakeTopic(3, 5)),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+        viewModel.switchToPage(3)
+        // Page 2 lives as a snapshot ; the deletion (on page 3) may shift the whole pagination.
+        viewModel.send(TopicIntent.DeletePost(610))
+
+        viewModel.state.test {
+            assertMode<TopicUiState.Mode.Loaded>(awaitItem())
+            viewModel.switchToPage(2)
+            val emitted = cancelAndConsumeRemainingEvents()
+                .mapNotNull { (it as? app.cash.turbine.Event.Item)?.value }
+            assertTrue(
+                "post-delete, the stale page-2 snapshot must not serve : the return is a COLD " +
+                    "switch (provisional hold, #910), never an atomic snapshot swap",
+                emitted.any { (it.mode as? TopicUiState.Mode.Loaded)?.provisional == true },
+            )
+        }
+    }
+
+    @Test
+    fun `an interrupted page resolution replays after process death (#750 via engine)`() = runTest {
+        val handle = SavedStateHandle()
+        val hangingSearch = object : SearchRepository {
+            override suspend fun search(request: SearchRequest): SearchResultPage =
+                error("unused by TopicViewModel")
+
+            override suspend fun resolveSearchResultPage(cat: Int, post: Int, numreponse: Int): Int? =
+                kotlinx.coroutines.awaitCancellation()
+        }
+        topicViewModel(
+            request = topicRequest(page = 1, scrollTo = 4242, resolveScrollToPage = true),
+            // The probe never resolves (virtual time expires the #750 timeout → degraded
+            // fallback on the untrusted page 1) : that fallback load must succeed…
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 40)) })),
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+            searchRepository = hangingSearch,
+            savedStateHandle = handle,
+        )
+
+        // …but the UNRESOLVED page is deliberately never persisted as canonical (gate Sol PR1
+        // bloquant 1) : after process death the restored ViewModel re-runs the resolution.
+        val restoredSearch = FakeSearchRepository(pageToResolve = 37)
+        val restoredRepo = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(37, 40)) }))
+        val restored = topicViewModel(
+            request = topicRequest(page = 1, scrollTo = 4242, resolveScrollToPage = true),
+            topicRepository = restoredRepo,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+            searchRepository = restoredSearch,
+            savedStateHandle = handle,
+        )
+
+        assertEquals("the restore must re-probe", 1, restoredSearch.resolveCalls.size)
+        assertEquals(37, restored.state.value.request.page)
+        assertEquals(listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 37)), restoredRepo.calls)
+    }
+
+    @Test
+    fun `a superseded landing never fires on the new page (#895 gate)`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flow { emit(fakeTopic(2, 5)) },
+                flow { emit(fakeTopic(3, 5, posts = listOf(fakePost(999)))) },
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+        )
+
+        viewModel.effects.test {
+            // Same-page jump to a post NOT on the page : the Post landing stays pending.
+            viewModel.goToPost(targetPage = 2, numreponse = 999)
+            expectNoEvents()
+            // Manual switch to page 3 — which happens to CONTAIN numreponse 999. The stale
+            // Post landing is superseded by the switch's own landing and must never fire.
+            viewModel.switchToPage(3)
+            assertEquals(TopicEffect.ScrollToTop(3), awaitItem())
+            expectNoEvents()
+            cancel()
+        }
+    }
+
+    @Test
+    fun `a late manual-refresh reply never overwrites a newer page (#895 gate r2)`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flow { emit(fakeTopic(2, 5, title = "page-2")) },
+                flow { emit(fakeTopic(3, 5, title = "page-3")) },
+            ),
+            refreshTopicsToReturn = listOf(fakeTopic(2, 5, title = "late-refresh")),
+        )
+        // NonCancellable : the switch cancels the refresh job, but the reply still LANDS —
+        // the only setup that actually exercises the generation belt (cf. the transsearch twin).
+        repository.refreshHook = { _, _, _ -> withContext(NonCancellable) { gate.await() } }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+        )
+
+        viewModel.send(TopicIntent.Refresh)
+        viewModel.switchToPage(3)
+        gate.complete(Unit)
+
+        val loaded = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+        assertEquals("the stale refresh reply must be dropped", "page-3", loaded.topic.title)
+    }
+
+    @Test
+    fun `a search takeover reclaims an in-flight refresh spinner (#895 gate r4)`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 1)
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(fakeTopic(1, 5, searchForm = form)) }),
+            refreshTopicsToReturn = listOf(fakeTopic(1, 5, searchForm = form)),
+        )
+        repository.refreshHook = { _, _, _ -> withContext(NonCancellable) { gate.await() } }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = FakeTopicSearchRepository(result = fakeTopic(1, 5, searchForm = form)),
+        )
+
+        viewModel.send(TopicIntent.Refresh)
+        assertTrue(viewModel.state.value.isRefreshing)
+        // launchSearch takes the page over WITHOUT going through becomePageOwner : it must
+        // reclaim the spinner itself, or the superseded refresh's generation-guarded finally
+        // leaves it stuck forever (and `refresh()` gates on it, blocking every future pull).
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("plop"))
+        viewModel.send(TopicIntent.SubmitSearch)
+        assertFalse("the search takeover must reclaim the spinner", viewModel.state.value.isRefreshing)
+
+        gate.complete(Unit)
+        assertFalse(
+            "the superseded refresh must not resurrect or re-clear a newer owner's spinner",
+            viewModel.state.value.isRefreshing,
+        )
+    }
+
+    @Test
+    fun `a switch persists the target's known anchor for process restore (#895 gate r2)`() = runTest {
+        val handle = SavedStateHandle()
+        val anchor = TopicScrollAnchor(index = 5, offset = 17)
+        val first = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(
+                    flow { emit(fakeTopic(2, 5)) },
+                    flow { emit(fakeTopic(3, 5)) },
+                    flow { emit(fakeTopic(2, 5)) },
+                ),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+            savedStateHandle = handle,
+        )
+        first.switchToPage(3, departureAnchor = anchor)
+        // The return targets a page whose anchor lives in RAM : it must be persisted AT the
+        // switch — a process death before any reportPageAnchor would otherwise lose it.
+        first.switchToPage(2)
+
+        val restored = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(2, 5)) })),
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+            savedStateHandle = handle,
+        )
+        restored.effects.test {
+            assertEquals(TopicEffect.ScrollToAnchor(anchor, 2), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // #910 — stale-while-switching (cold-switch grace)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `a fast cold switch keeps the departed page then swaps without any skeleton (#910)`() = runTest {
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(
+                    flow { emit(fakeTopic(2, 5, title = "departed")) },
+                    // The target lands fast but not synchronously (50 ms — well within the grace).
+                    flow {
+                        kotlinx.coroutines.delay(50)
+                        emit(fakeTopic(3, 5, title = "target"))
+                    },
+                ),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+        )
+
+        viewModel.switchToPage(3)
+        // Mid-grace : the departed page is held on screen, flagged provisional, canonical = 3.
+        val held = viewModel.state.value
+        val heldMode = assertMode<TopicUiState.Mode.Loaded>(held)
+        assertEquals("the departed page stays on screen during the grace", "departed", heldMode.topic.title)
+        assertTrue("the hold is flagged provisional (hairline, honest pill)", heldMode.provisional)
+        assertEquals(3, held.request.page)
+
+        // Record every state from here : the swap must be Loaded→Loaded, never Loading.
+        val states = mutableListOf<TopicUiState>()
+        val recorder = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.state.collect { states.add(it) }
+        }
+        advanceTimeBy(60)
+        runCurrent()
+        recorder.cancel()
+
+        assertTrue(
+            "the skeleton must never show on a fast cold switch",
+            states.none { it.mode is TopicUiState.Mode.Loading },
+        )
+        assertEquals("target", assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic.title)
+    }
+
+    @Test
+    fun `a slow cold switch posts the skeleton only after the grace (#910)`() = runTest {
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(
+                    flow { emit(fakeTopic(2, 5, title = "departed")) },
+                    flow { kotlinx.coroutines.awaitCancellation() },
+                ),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+        )
+        viewModel.switchToPage(3)
+
+        val held = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+        assertEquals("departed", held.topic.title)
+        assertTrue(held.provisional)
+
+        // Just under the grace : still holding.
+        advanceTimeBy(200)
+        runCurrent()
+        assertTrue(viewModel.state.value.mode is TopicUiState.Mode.Loaded)
+
+        // Past the grace with no emission : the skeleton is now legitimate.
+        advanceTimeBy(100)
+        runCurrent()
+        assertTrue(
+            "a genuinely slow load still gets its skeleton after the grace",
+            viewModel.state.value.mode is TopicUiState.Mode.Loading,
+        )
+    }
+
+    @Test
+    fun `a failed cold switch surfaces the error instead of a stale hold (#910)`() = runTest {
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(
+                    flow { emit(fakeTopic(2, 5, title = "departed")) },
+                    flow { throw IOException("switch load failed") },
+                ),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+        )
+        viewModel.switchToPage(3)
+
+        // A durable « displayed ≠ canonical » hold is forbidden (#907 gates) : the failed target
+        // surfaces Error (Retry reloads it) instead of silently keeping the departed page.
+        assertTrue(viewModel.state.value.mode is TopicUiState.Mode.Error)
+        // And the cancelled grace never stomps the error with a late skeleton.
+        advanceTimeBy(300)
+        runCurrent()
+        assertTrue(viewModel.state.value.mode is TopicUiState.Mode.Error)
+    }
+
+    @Test
+    fun `a cold switch whose flow completes empty terminalizes in Error, never a stuck hold (#910)`() = runTest {
+        // Gate r1 : a NORMAL completion with no emission used to leave the grace orphaned —
+        // skeleton (or provisional hold) forever. The empty completion must terminalize.
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(
+                    flow { emit(fakeTopic(2, 5, title = "departed")) },
+                    flow { /* completes without emitting */ },
+                ),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+        )
+        viewModel.switchToPage(3)
+
+        assertTrue(
+            "an empty completion surfaces Error for the target (Retry reloads it)",
+            viewModel.state.value.mode is TopicUiState.Mode.Error,
+        )
+        // The cancelled grace never repaints a skeleton over the error.
+        advanceTimeBy(300)
+        runCurrent()
+        assertTrue(viewModel.state.value.mode is TopicUiState.Mode.Error)
+    }
+
+    @Test
+    fun `closing a failed search after a transition takeover reloads the canonical page (#913)`() = runTest {
+        // Verdict Sol (loupe/#910) : loupe tapped during the grace, search submitted during the
+        // transition (takeover kills the switch load), search FAILS, bar closed → the target must
+        // be reloaded ; the old « no results → no reload » path left the departed page displayed
+        // with the canonical page elsewhere and NO load in flight (the #907-forbidden state).
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 1)
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flow { emit(fakeTopic(2, 5, title = "departed", searchForm = form)) },
+                flow { kotlinx.coroutines.awaitCancellation() },
+                flow { emit(fakeTopic(3, 5, title = "target")) },
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = FakeTopicSearchRepository(error = IllegalStateException("boom")),
+        )
+
+        viewModel.switchToPage(3)
+        // Mid-grace : departed page displayed (Loaded provisional), canonical = 3, loupe active.
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("x"))
+        viewModel.send(TopicIntent.SubmitSearch)
+        assertEquals(TopicSearchStatus.Error, viewModel.state.value.search.status)
+
+        viewModel.send(TopicIntent.CloseSearch)
+
+        val landed = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+        assertEquals("closing the failed search reloaded the CANONICAL page", "target", landed.topic.title)
+        assertEquals(3, viewModel.state.value.request.page)
+    }
+
+    @Test
+    fun `pull-to-refresh is a no-op while the displayed page is not the canonical one (#910)`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flow { emit(fakeTopic(2, 5, title = "departed")) },
+                flow { kotlinx.coroutines.awaitCancellation() },
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+        viewModel.switchToPage(3)
+
+        // Mid-grace : the displayed Loaded is page 2, the canonical page is 3. A pull here must
+        // not refresh the page the user is leaving (nor fight the in-flight switch load).
+        viewModel.send(TopicIntent.Refresh)
+        assertEquals(emptyList<Triple<Int, Int, Int>>(), repository.refreshCalls)
+        assertEquals(false, viewModel.state.value.isRefreshing)
+    }
+
     private fun searchableRepo(form: TopicSearchForm): FakeTopicRepository =
         FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 5, searchForm = form)) }))
 
@@ -1299,220 +2989,110 @@ class TopicViewModelTest {
         deletePostRepository: DeletePostRepository = FakeDeletePostRepository(),
         blacklistRepository: BlacklistRepository = FakeBlacklistRepository(),
         topicSearchRepository: TopicSearchRepository = FakeTopicSearchRepository(),
+        searchRepository: SearchRepository = FakeSearchRepository(),
+        flagRepository: FlagRepository = FakeFlagRepository(),
+        // #895 étape 4 — a fresh handle per test ; the process-restore tests pass the SAME handle
+        // to a second ViewModel to simulate death + recreation.
+        savedStateHandle: SavedStateHandle = SavedStateHandle(),
     ): TopicViewModel = TopicViewModel(
         request = request,
+        savedStateHandle = savedStateHandle,
         topicRepository = topicRepository,
         authRepository = authRepository,
         userPreferencesRepository = userPreferencesRepository,
         deletePostRepository = deletePostRepository,
         blacklistRepository = blacklistRepository,
         topicSearchRepository = topicSearchRepository,
+        searchRepository = searchRepository,
+        flagRepository = flagRepository,
     )
 
     private fun topicRequest(
         page: Int,
         scrollTo: Int? = null,
-        submitSignal: Long? = null,
-        postSubmitOverflowLanding: Boolean = false,
+        resolveScrollToPage: Boolean = false,
     ): TopicRequest = TopicRequest(
         cat = SAMPLE_CAT,
         post = SAMPLE_POST,
         page = page,
         scrollTo = scrollTo,
-        submitSignal = submitSignal,
-        postSubmitOverflowLanding = postSubmitOverflowLanding,
+        resolveScrollToPage = resolveScrollToPage,
     )
 
     // ──────────────────────────────────────────────────────────────────────
-    // Issue #200 — post-submit force refresh path
+    // #750 — untrusted-page resolution before the first load (email deep links)
     // ──────────────────────────────────────────────────────────────────────
 
     @Test
-    fun `submitSignal triggers a force refresh instead of the cache-aside path`() = runTest {
-        // Reply / quote / edit / edit-FP landing: the navigation host bumped submitSignal
-        // so the ViewModel must skip observeTopicPage (cache-aside) and call refreshTopicPage
-        // directly, otherwise the user would see a stale page that doesn't include the post
-        // they just published.
-        val freshTopic = fakeTopic(page = 2, totalPages = 5, posts = listOf(fakePost(987)))
-        val repository = FakeTopicRepository(
-            flowsToReturn = emptyList(),
-            refreshTopicsToReturn = listOf(freshTopic),
-        )
-
+    fun `resolveScrollToPage resolves the real page before the first load (#750)`() = runTest {
+        val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(37, 39)) }))
+        val search = FakeSearchRepository(pageToResolve = 37)
         val viewModel = topicViewModel(
-            request = topicRequest(page = 2, submitSignal = 1_700_000_000_000L),
+            request = topicRequest(page = 1, scrollTo = 4242, resolveScrollToPage = true),
             topicRepository = repository,
-            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+            searchRepository = search,
         )
-
-        viewModel.state.test {
-            val loaded = awaitItem()
-            val mode = assertMode<TopicUiState.Mode.Loaded>(loaded)
-            assertEquals(freshTopic, mode.topic)
-            cancelAndIgnoreRemainingEvents()
-        }
-        assertEquals(
-            "Force refresh path must hit refreshTopicPage, not observeTopicPage",
-            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)),
-            repository.refreshCalls,
-        )
-        assertTrue(
-            "observeTopicPage must NOT be called when submitSignal is non-null",
-            repository.calls.isEmpty(),
-        )
+        // The probe must carry the full (cat, post, numreponse) tuple (numreponse is per-category).
+        assertEquals(listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 4242)), search.resolveCalls)
+        // The load targets the RESOLVED page, never the untrusted page=1 from the email link…
+        assertEquals(37, repository.calls.single().third)
+        // …and the resolved page becomes the real request everywhere (indicator, retry, highlight).
+        assertEquals(37, viewModel.state.value.request.page)
+        assertEquals(4242, viewModel.state.value.request.scrollTo)
     }
 
     @Test
-    fun `submitSignal with scrollTo emits ScrollToPost after the force refresh`() = runTest {
-        // Quote / edit / edit-FP path: the parser extracted #t{numreponse} so the navigation
-        // host passed scrollTo through. The ViewModel must emit ScrollToPost(target) once
-        // the force-refreshed page is loaded and contains the target post.
-        val targetNumreponse = 2_523_833
-        val freshTopic = fakeTopic(
-            page = 1,
-            totalPages = 3,
-            posts = listOf(fakePost(2_523_829), fakePost(targetNumreponse)),
-        )
-        val repository = FakeTopicRepository(
-            flowsToReturn = emptyList(),
-            refreshTopicsToReturn = listOf(freshTopic),
-        )
-
+    fun `resolveScrollToPage falls back to the link page when the probe fails (#750)`() = runTest {
+        val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 39)) }))
         val viewModel = topicViewModel(
-            request = topicRequest(page = 1, scrollTo = targetNumreponse, submitSignal = 42L),
+            request = topicRequest(page = 1, scrollTo = 4242, resolveScrollToPage = true),
             topicRepository = repository,
-            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+            searchRepository = FakeSearchRepository(pageToResolve = null),
         )
-
-        viewModel.effects.test {
-            assertEquals(TopicEffect.ScrollToPost(targetNumreponse), awaitItem())
-            cancelAndIgnoreRemainingEvents()
-        }
+        // Failed probe (null) → pre-#750 behaviour: the link's own page loads, nothing worse.
+        assertEquals(1, repository.calls.single().third)
+        assertEquals(1, viewModel.state.value.request.page)
     }
 
     @Test
-    fun `submitSignal without scrollTo emits ScrollToEndOfPage so plain reply lands on the new post`() = runTest {
-        // Plain reply path: HFR anchored #bas so the parser left scrollTo null. The ViewModel
-        // emits ScrollToEndOfPage so the screen scrolls to the last post (the one just
-        // published) rather than letting the user wonder where their reply went.
-        val freshTopic = fakeTopic(
-            page = 20,
-            totalPages = 20,
-            posts = listOf(fakePost(1), fakePost(2), fakePost(3)),
-        )
-        val repository = FakeTopicRepository(
-            flowsToReturn = emptyList(),
-            refreshTopicsToReturn = listOf(freshTopic),
-        )
-
-        val viewModel = topicViewModel(
-            request = topicRequest(page = 20, scrollTo = null, submitSignal = 99L),
+    fun `resolveScrollToPage without scrollTo is a plain load, no probe (#750)`() = runTest {
+        val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) }))
+        val search = FakeSearchRepository(pageToResolve = 5)
+        topicViewModel(
+            request = topicRequest(page = 1, resolveScrollToPage = true),
             topicRepository = repository,
-            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+            searchRepository = search,
         )
-
-        viewModel.effects.test {
-            assertEquals(TopicEffect.ScrollToEndOfPage, awaitItem())
-            cancelAndIgnoreRemainingEvents()
-        }
+        assertEquals(emptyList<Triple<Int, Int, Int>>(), search.resolveCalls)
+        assertEquals(1, repository.calls.single().third)
     }
 
     @Test
-    fun `submitSignal without scrollTo on an overflowed reply emits NavigateToLastPage (#226)`() = runTest {
-        // #226 — the plain reply was submitted from page 20's form, but it overflowed onto a freshly
-        // created page 21. HFR anchored the form's page (20) so the force refresh of page 20 reports
-        // an up-to-date totalPages = 21 > request.page = 20. The new post lives on page 21, not here,
-        // so the ViewModel must re-route there (NavigateToLastPage) rather than ScrollToEndOfPage on
-        // the stale page 20 (which would scroll to the pre-overflow last post and confuse the user).
-        val overflowedTopic = fakeTopic(
-            page = 20,
-            totalPages = 21,
-            posts = listOf(fakePost(1), fakePost(2), fakePost(3)),
-        )
-        val repository = FakeTopicRepository(
-            flowsToReturn = emptyList(),
-            refreshTopicsToReturn = listOf(overflowedTopic),
-        )
+    fun `resolveScrollToPage times out on a hung probe and falls back to the link page (#750)`() = runTest {
+        val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 39)) }))
+        val hungSearch = object : SearchRepository {
+            override suspend fun search(request: SearchRequest): SearchResultPage =
+                throw UnsupportedOperationException("TopicViewModel never searches")
 
-        val viewModel = topicViewModel(
-            request = topicRequest(page = 20, scrollTo = null, submitSignal = 123L),
-            topicRepository = repository,
-            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
-        )
-
-        viewModel.effects.test {
-            assertEquals(TopicEffect.NavigateToLastPage(21), awaitItem())
-            cancelAndIgnoreRemainingEvents()
-        }
-    }
-
-    @Test
-    fun `overflow landing force-refreshes and scrolls to end without re-redirecting (#226)`() = runTest {
-        // #226 — the host re-routed us onto the freshly created last page (21) with a fresh
-        // submitSignal AND postSubmitOverflowLanding = true. The force refresh still runs (submitSignal
-        // != null) so the page is never a stale cache-aside row — the original #226 failure — but the
-        // landing flag means we stop here: emit ScrollToEndOfPage to surface the new reply, NOT another
-        // NavigateToLastPage. (totalPages == request.page, the normal post-overflow shape.)
-        val landedTopic = fakeTopic(
-            page = 21,
-            totalPages = 21,
-            posts = listOf(fakePost(40), fakePost(41)),
-        )
-        val repository = FakeTopicRepository(
-            flowsToReturn = emptyList(),
-            refreshTopicsToReturn = listOf(landedTopic),
-        )
-
-        val viewModel = topicViewModel(
-            request = topicRequest(
-                page = 21,
-                scrollTo = null,
-                submitSignal = 456L,
-                postSubmitOverflowLanding = true,
-            ),
-            topicRepository = repository,
-            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
-        )
-
-        viewModel.effects.test {
-            assertEquals(TopicEffect.ScrollToEndOfPage, awaitItem())
-            cancelAndIgnoreRemainingEvents()
-        }
-    }
-
-    @Test
-    fun `overflow landing does not chase a moving tail when a concurrent post grows totalPages (#226)`() =
-        runTest {
-            // #226 anti-chase — on the overflow landing (page 21, flag set), a concurrent poster
-            // created page 22 during our refresh, so the fresh page reports totalPages = 22 >
-            // request.page = 21. Without the flag the ViewModel would NavigateToLastPage(22) and keep
-            // chasing the moving tail. The flag pins us here: ScrollToEndOfPage, never NavigateToLastPage.
-            val landedTopic = fakeTopic(
-                page = 21,
-                totalPages = 22,
-                posts = listOf(fakePost(40), fakePost(41)),
-            )
-            val repository = FakeTopicRepository(
-                flowsToReturn = emptyList(),
-                refreshTopicsToReturn = listOf(landedTopic),
-            )
-
-            val viewModel = topicViewModel(
-                request = topicRequest(
-                    page = 21,
-                    scrollTo = null,
-                    submitSignal = 789L,
-                    postSubmitOverflowLanding = true,
-                ),
-                topicRepository = repository,
-                authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
-            )
-
-            viewModel.effects.test {
-                assertEquals(TopicEffect.ScrollToEndOfPage, awaitItem())
-                cancelAndIgnoreRemainingEvents()
+            override suspend fun resolveSearchResultPage(cat: Int, post: Int, numreponse: Int): Int? {
+                // Degraded network: the probe never answers. withTimeoutOrNull(3 s) must cut it
+                // (instantaneous under runTest's virtual clock) and degrade to the link page.
+                kotlinx.coroutines.awaitCancellation()
             }
         }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1, scrollTo = 4242, resolveScrollToPage = true),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+            searchRepository = hungSearch,
+        )
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, repository.calls.single().third)
+        assertEquals(1, viewModel.state.value.request.page)
+    }
 
     // ──────────────────────────────────────────────────────────────────────
     // #335 — manual pull-to-refresh
@@ -1722,15 +3302,15 @@ class TopicViewModelTest {
     }
 
     @Test
-    fun `normal load without submitSignal does not emit ScrollToEndOfPage`() = runTest {
-        // Regression guard: ScrollToEndOfPage is gated on submitSignal != null. A normal
-        // deep-link navigation (cache-aside) must never emit it, even when scrollTo is null,
-        // otherwise we would snap to the bottom on every back navigation.
+    fun `normal entry load does not emit ScrollToEndOfPage`() = runTest {
+        // Regression guard: the bottom landing belongs to the post-submit path
+        // (applySubmitResult). A normal navigation (cache-aside) must never emit it, even
+        // when scrollTo is null, otherwise we would snap to the bottom on every back navigation.
         val topic = fakeTopic(page = 1, totalPages = 1, posts = listOf(fakePost(1)))
         val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) }))
 
         val viewModel = topicViewModel(
-            request = topicRequest(page = 1, scrollTo = null, submitSignal = null),
+            request = topicRequest(page = 1, scrollTo = null),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
         )
@@ -1749,37 +3329,33 @@ class TopicViewModelTest {
     }
 
     @Test
-    fun `submitSignal refresh failure falls back to the cache-aside path`() = runTest {
-        // Resilience: a transient network blip on the force refresh must not strand the user
-        // on an error screen. The ViewModel falls back to observeTopicPage so the cached
-        // page is shown (without the new post — but with a Retry affordance).
+    fun `applySubmitResult refresh failure falls back to the cache-aside path`() = runTest {
+        // Resilience: a transient network blip on the post-submit force refresh must not strand
+        // the user on an error screen. The ViewModel emits PostSubmitRefreshFailed (Toast : HFR
+        // DID accept the post) then falls back to observeTopicPage so the cached page is shown
+        // (without the new post — but with a Retry affordance) and must NOT re-emit a bottom
+        // landing on that stale cache (post 100 is the pre-submit last post).
         val cachedTopic = fakeTopic(
             page = 2,
             totalPages = 5,
-            // Stale cache: the pre-submit "last post" is post 100. If the VM erroneously
-            // emitted ScrollToEndOfPage after the fallback, the user would be scrolled to
-            // post 100 thinking it's their fresh reply — that's the bug we guard against.
             posts = listOf(fakePost(100)),
         )
         val repository = FakeTopicRepository(
-            flowsToReturn = listOf(flow { emit(cachedTopic) }),
+            flowsToReturn = listOf(flow { emit(cachedTopic) }, flow { emit(cachedTopic) }),
             refreshErrorToThrow = IOException("force refresh transient failure"),
         )
 
         val viewModel = topicViewModel(
-            request = topicRequest(page = 2, submitSignal = 7L),
+            request = topicRequest(page = 2),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
         )
 
-        // The first effect emitted on the failure path must be PostSubmitRefreshFailed so the
-        // screen surfaces a Toast (cf. TopicScreen.kt) telling the user HFR did accept their post
-        // even though the local refresh blipped. The fallback to observeTopicPage must NOT then
-        // re-emit ScrollToEndOfPage on the stale cache.
         viewModel.effects.test {
+            viewModel.applySubmitResult(targetPage = 2, scrollTo = null)
             assertEquals(TopicEffect.PostSubmitRefreshFailed, awaitItem())
-            // expectNoEvents() would race with cache emission; we settle by ensuring no
-            // further effect lands within the test scheduler's idle.
+            // A bottom landing on the stale cache would surface here — nothing must.
+            expectNoEvents()
             cancelAndIgnoreRemainingEvents()
         }
 
@@ -1795,10 +3371,46 @@ class TopicViewModelTest {
             repository.refreshCalls,
         )
         assertEquals(
-            "Fallback path must hit observeTopicPage after the failure",
-            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)),
+            "Entry load then the post-failure fallback both ride observeTopicPage",
+            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2), Triple(SAMPLE_CAT, SAMPLE_POST, 2)),
             repository.calls,
         )
+    }
+
+    @Test
+    fun `canReturnFromJump mirrors the jump chain across push, unwind and manual switch (#782)`() = runTest {
+        // #895 étape 4 (PR 2) — the screen's BackHandler is driven by this flag: enabled while
+        // the in-VM jump chain has frames to unwind, disabled once it is empty or a MANUAL page
+        // change invalidated it (browser-like).
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flow { emit(fakeTopic(2, 5)) },
+                flow { emit(fakeTopic(3, 5)) },
+                flow { emit(fakeTopic(2, 5)) },
+                flow { emit(fakeTopic(3, 5)) },
+                flow { emit(fakeTopic(4, 5)) },
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+        assertEquals(false, viewModel.state.value.canReturnFromJump)
+
+        viewModel.goToPost(targetPage = 3, numreponse = 42)
+        assertEquals(true, viewModel.state.value.canReturnFromJump)
+
+        assertEquals(true, viewModel.returnFromJump())
+        assertEquals(false, viewModel.state.value.canReturnFromJump)
+        assertEquals("the unwind landed back on the departure page", 2, viewModel.state.value.request.page)
+
+        // Re-arm a jump, then a MANUAL switch drops the whole chain (#782 browser-like rule).
+        viewModel.goToPost(targetPage = 3, numreponse = 42)
+        assertEquals(true, viewModel.state.value.canReturnFromJump)
+        viewModel.switchToPage(4)
+        assertEquals(false, viewModel.state.value.canReturnFromJump)
+        assertEquals(false, viewModel.returnFromJump())
     }
 
     @Suppress("LongParameterList") // test builder mirroring the Topic model's fields, all defaulted.
@@ -1837,6 +3449,23 @@ class TopicViewModelTest {
         postIndex = null,
     )
 
+    // #809 — a full drapeau for the SAMPLE topic, as FlagRepository.findFlag would resolve it.
+    private fun fakeFlag(title: String = "fake flag"): Flag = Flag(
+        cat = SAMPLE_CAT,
+        subcat = SAMPLE_SUBCAT,
+        topicId = SAMPLE_POST,
+        title = title,
+        totalPages = 10,
+        replyCount = 42,
+        type = FlagType.CYAN,
+        hasUnread = true,
+        lastReadPage = 7,
+        lastPostReadId = 1234L,
+        firstPostAuthor = "XaT",
+        lastReplyAuthor = "XaTelitte",
+        lastReplyAt = "2026-05-03 12:00",
+    )
+
     private inline fun <reified T : TopicUiState.Mode> assertMode(state: TopicUiState): T {
         val mode = state.mode
         assertTrue("expected mode ${T::class.simpleName} but was ${mode::class.simpleName}", mode is T)
@@ -1848,6 +3477,25 @@ class TopicViewModelTest {
         private const val SAMPLE_POST = 84_540
         private const val SAMPLE_SUBCAT = 432
         private const val CANCEL_TIMEOUT_MS = 2_000L
+    }
+}
+
+/**
+ * #750 — canned page-resolution probe. [pageToResolve] null simulates a failed probe (network
+ * error / timeout / unparsable redirect); [resolveCalls] records the exact tuples asked for.
+ * `search` is unused by TopicViewModel and fails loudly if something starts calling it.
+ */
+private class FakeSearchRepository(
+    private val pageToResolve: Int? = null,
+) : SearchRepository {
+    val resolveCalls: MutableList<Triple<Int, Int, Int>> = mutableListOf()
+
+    override suspend fun search(request: SearchRequest): SearchResultPage =
+        throw UnsupportedOperationException("TopicViewModel never searches")
+
+    override suspend fun resolveSearchResultPage(cat: Int, post: Int, numreponse: Int): Int? {
+        resolveCalls += Triple(cat, post, numreponse)
+        return pageToResolve
     }
 }
 
@@ -1896,10 +3544,14 @@ private class FakeTopicRepository(
      */
     var refreshHook: (suspend (cat: Int, post: Int, page: Int) -> Unit)? = null
 
-    override fun observeTopicPage(cat: Int, post: Int, page: Int, forceRefresh: Boolean): Flow<Topic> {
+    override fun observeTopicPage(cat: Int, post: Int, page: Int, forceRefresh: Boolean): Flow<TopicPageEmission> {
         calls += Triple(cat, post, page)
         lastForceRefresh = forceRefresh
-        return queue.removeFirstOrNull() ?: error("No more flows queued")
+        val flow = queue.removeFirstOrNull() ?: error("No more flows queued")
+        // #877 — tests enqueue plain Flow<Topic> ; the fake settles every page (provisional =
+        // false) so the pre-#877 assertions keep their meaning. Provisional-specific tests use
+        // [FakeStreamingEmissionTopicRepository].
+        return flow.map { TopicPageEmission(it, provisional = false) }
     }
 
     override suspend fun refreshTopicPage(cat: Int, post: Int, page: Int): Topic {
@@ -1924,6 +3576,52 @@ private class FakeDeletePostRepository(
     override suspend fun deletePost(context: EditPostContext): DeletePostResult {
         calls += context
         return result
+    }
+}
+
+/**
+ * #809 — canned FlagRepository for the topic ViewModel. [flagToFind] is what `findFlag` resolves
+ * (null = not flagged / anonymous), [removeResult] the removal outcome. Optional [findFlagGate] /
+ * [removeFlagGate] hold the respective call in flight so a test can observe the Resolving / Removing
+ * states and their anti double-press guard. The read APIs (`observe` / `refresh` / `clearSessionCache`)
+ * fail loudly — the topic ViewModel must never touch them.
+ */
+private class FakeFlagRepository(
+    private val flagToFind: Flag? = null,
+    private val removeResult: Result<Unit> = Result.success(Unit),
+) : FlagRepository {
+    var findFlagCalls = 0
+    var removeFlagCalls = 0
+    var lastRemovedFlag: Flag? = null
+    var findFlagGate: CompletableDeferred<Unit>? = null
+    var removeFlagGate: CompletableDeferred<Unit>? = null
+
+    /** Gate #809 — when set, [findFlag] throws instead of returning (resolve failure path). */
+    var findFlagError: Throwable? = null
+
+    /** Review #809 — when set, [removeFlag] throws RAW (outside its Result contract). */
+    var removeFlagError: Throwable? = null
+
+    override fun observe(type: FlagType): Flow<FlagsResult> =
+        error("TopicViewModel must not observe flags")
+
+    override suspend fun refresh(type: FlagType) = error("TopicViewModel must not refresh flags")
+
+    override fun clearSessionCache() = error("TopicViewModel must not clear the flags cache")
+
+    override suspend fun findFlag(cat: Int, topicId: Int): Flag? {
+        findFlagCalls++
+        findFlagGate?.await()
+        findFlagError?.let { throw it }
+        return flagToFind
+    }
+
+    override suspend fun removeFlag(flag: Flag): Result<Unit> {
+        removeFlagCalls++
+        lastRemovedFlag = flag
+        removeFlagGate?.await()
+        removeFlagError?.let { throw it }
+        return removeResult
     }
 }
 
@@ -1995,7 +3693,8 @@ private class FakeTopicSearchRepository(
 private class FakeStreamingTopicRepository(
     private val source: Flow<Topic>,
 ) : TopicRepository {
-    override fun observeTopicPage(cat: Int, post: Int, page: Int, forceRefresh: Boolean): Flow<Topic> = source
+    override fun observeTopicPage(cat: Int, post: Int, page: Int, forceRefresh: Boolean): Flow<TopicPageEmission> =
+        source.map { TopicPageEmission(it, provisional = false) }
 
     override suspend fun refreshTopicPage(cat: Int, post: Int, page: Int): Topic {
         error("refreshTopicPage not used by ViewModel under test")
@@ -2007,17 +3706,52 @@ private class FakeStreamingTopicRepository(
 }
 
 /**
+ * #877 — streaming fake whose emissions carry an explicit [TopicPageEmission.provisional] flag,
+ * for the provenance tests (cache emission held provisional, settled page confirmed).
+ */
+private class FakeStreamingEmissionTopicRepository(
+    private val source: Flow<TopicPageEmission>,
+    private val refreshTopicsToReturn: List<Topic> = emptyList(),
+) : TopicRepository {
+    private val refreshQueue = ArrayDeque(refreshTopicsToReturn)
+    val refreshCalls: MutableList<Triple<Int, Int, Int>> = mutableListOf()
+
+    override fun observeTopicPage(cat: Int, post: Int, page: Int, forceRefresh: Boolean): Flow<TopicPageEmission> =
+        source
+
+    override suspend fun refreshTopicPage(cat: Int, post: Int, page: Int): Topic {
+        refreshCalls += Triple(cat, post, page)
+        return refreshQueue.removeFirstOrNull() ?: error("No refresh topic queued (#877 ensureSearchForm)")
+    }
+
+    override suspend fun prefetch(cat: Int, post: Int, page: Int) {
+        // no-op
+    }
+}
+
+/**
  * No-op preferences fake for the topic ViewModel tests. Only [observeTopicTopBarAutoHide]
- * (build 89 follow-up), [observeTopicPageFabs] (#383), [observeTopicPollsExpanded] (#456) and
- * [observeTopicSignatures] (#330) are read by [TopicViewModel] — everything else returns the
- * DataStore default so the fake stays a thin stand-in. The relevant values are
+ * (build 89 follow-up), [observeTopicPageFabs] (#383), [observeTopicPollsExpanded] (#456),
+ * [observeTopicSignatures] (#330), [observeTopicFullWidthPosts] (#884) and
+ * [observeWritingSurfacePreset] (#806) are read by [TopicViewModel] — everything else returns
+ * the DataStore default so the fake stays a thin stand-in. The relevant values are
  * constructor-injectable so tests can assert they reach state.
  */
-private class FakeUserPreferencesRepository(
+// Internal (not private) so QuickReplyViewModelTest reuses the single fake of this wide interface.
+@Suppress("LongParameterList") // one constructor knob per observed pref — grows with TopicViewModel's reads.
+internal class FakeUserPreferencesRepository(
     private val topicTopBarAutoHide: Boolean = false,
     private val topicPageFabs: Boolean = true,
     private val topicPollsExpanded: Boolean = false,
     private val topicSignatures: Boolean = false,
+    // #884 — full-width posts; false mirrors the production default (historical card inset).
+    private val topicFullWidthPosts: Boolean = false,
+    private val confirmBeforePosting: Boolean = false,
+    // #805 — quote rendering in the composer; false mirrors the production default (inline BBCode).
+    private val quoteCardsEnabled: Boolean = false,
+    // #951 — writing-surface preset; FULL_EDITOR mirrors the production default (the
+    // quick-reply sheet is experimental opt-in).
+    private val writingSurfacePreset: WritingSurfacePreset = WritingSurfacePreset.FULL_EDITOR,
 ) : UserPreferencesRepository {
     override fun observeProxyConfig(): Flow<ProxyConfig> = MutableStateFlow(ProxyConfig())
 
@@ -2072,9 +3806,18 @@ private class FakeUserPreferencesRepository(
     override suspend fun setTopicTopBarAutoHide(enabled: Boolean) = Unit
 
     // #312 — confirm-before-posting is irrelevant to TopicViewModel; stubbed at its default.
-    override fun observeConfirmBeforePosting(): Flow<Boolean> = MutableStateFlow(false)
+    override fun observeConfirmBeforePosting(): Flow<Boolean> = MutableStateFlow(confirmBeforePosting)
 
     override suspend fun setConfirmBeforePosting(enabled: Boolean) = Unit
+
+    override fun observeQuoteCardsEnabled(): Flow<Boolean> = MutableStateFlow(quoteCardsEnabled)
+
+    override suspend fun setQuoteCardsEnabled(enabled: Boolean) = Unit
+
+    override fun observeWritingSurfacePreset(): Flow<WritingSurfacePreset> =
+        MutableStateFlow(writingSurfacePreset)
+
+    override suspend fun setWritingSurfacePreset(preset: WritingSurfacePreset) = Unit
 
     override fun observeShowDtSection(): Flow<Boolean> = MutableStateFlow(false)
 
@@ -2107,6 +3850,10 @@ private class FakeUserPreferencesRepository(
     override fun observeFoldLongQuotes(): Flow<Boolean> = MutableStateFlow(true)
 
     override suspend fun setFoldLongQuotes(enabled: Boolean) = Unit
+
+    override fun observeTopicFullWidthPosts(): Flow<Boolean> = MutableStateFlow(topicFullWidthPosts)
+
+    override suspend fun setTopicFullWidthPosts(enabled: Boolean) = Unit
 
     override fun observeShowScrollbar(): Flow<Boolean> = MutableStateFlow(true)
 
@@ -2148,6 +3895,12 @@ private class FakeUserPreferencesRepository(
     override fun observeFontScale(): Flow<FontScalePreference> = MutableStateFlow(FontScalePreference.M)
 
     override suspend fun setFontScale(scale: FontScalePreference) = Unit
+
+    // #973 — the block-GIF display profile is irrelevant to TopicViewModel; stubbed at the M default.
+    override fun observeMediaDisplayProfile(): Flow<MediaDisplayProfile> =
+        MutableStateFlow(MediaDisplayProfile.M)
+
+    override suspend fun setMediaDisplayProfile(profile: MediaDisplayProfile) = Unit
 
     override fun observeDebugBoundsOverlay(): Flow<Boolean> = MutableStateFlow(false)
 

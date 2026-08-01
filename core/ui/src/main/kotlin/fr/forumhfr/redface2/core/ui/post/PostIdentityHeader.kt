@@ -12,6 +12,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -30,7 +32,13 @@ import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
  *  - [pseudo] (optional) — overrides the default pseudo text; the topic passes its gold-sheen
  *    `CreatorPseudoText` (#221). When `null`, a plain ellipsised [Text] of [author] is drawn. Note:
  *    [onAuthorClick] is applied to that fallback text only — a supplied [pseudo] owns its own
- *    interaction, the header does not wrap it.
+ *    interaction. CONTRACT (#884): the provided slot also OWNS the post heading semantics — exactly
+ *    one node inside it must set `semantics { heading() }`, on the real pseudo text node (the best
+ *    TalkBack target). The header deliberately adds NO heading around a supplied slot: wrapping it
+ *    would DOUBLE the per-post heading for every caller that marks its own node. The flip side is
+ *    that a slot which forgets the marker silently loses heading navigation — guards:
+ *    `PostIdentityHeaderTest` (contract, both directions) plus one exactly-one-heading assert per
+ *    production variant (`TopicPostCardFullWidthTest`, `MessageCardShellSmokeTest`).
  *  - [dateTrailing] (optional) — a marker on the SAME row as the date, to its right (the topic's
  *    `· édité` #483); `null` on the MP keeps the date as a plain single line.
  *  - [subline] (optional) — extra line under the date; unused by the topic now, available for MP.
@@ -45,6 +53,13 @@ import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
  * since the labels are feature strings. [avatarContentDescription] overrides the avatar's TalkBack
  * announcement for a non-personal avatar (e.g. a multi-recipient MP labelled « Interlocuteurs
  * multiples »).
+ *
+ * A11y (#884) : the pseudo line is a TalkBack heading — heading navigation jumps from post to post
+ * on the identity line, on the topic AND the MP. The fallback [Text] carries `heading()` on its own
+ * node; a supplied [pseudo] slot OWNS its heading instead (vague 3, cf. the [pseudo] contract
+ * above): exactly one node inside the slot sets `semantics { heading() }` and the header adds no
+ * wrapper around it (a generic wrapper heading would DOUBLE the per-post heading, cf.
+ * `TopicPostCardFullWidthTest`). No synthetic contentDescription — nothing is announced twice.
  */
 @Composable
 @Suppress("LongParameterList") // Shared identity slot: avatar/pseudo/date data + 2 clicks + 3 slots.
@@ -92,6 +107,8 @@ fun PostIdentityHeader(
             verticalArrangement = Arrangement.spacedBy(lineSpacing),
         ) {
             if (pseudo != null) {
+                // #884 a11y — a caller-supplied pseudo owns its heading semantics (the topic marks
+                // its real pseudo text node); wrapping the slot here would double the heading.
                 pseudo()
             } else {
                 val pseudoModifier = if (onAuthorClick != null) {
@@ -109,7 +126,8 @@ fun PostIdentityHeader(
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = pseudoModifier,
+                    // #884 a11y — heading() rides on the pseudo node itself (best TalkBack target).
+                    modifier = pseudoModifier.semantics { heading() },
                 )
             }
             if (dateTrailing != null) {

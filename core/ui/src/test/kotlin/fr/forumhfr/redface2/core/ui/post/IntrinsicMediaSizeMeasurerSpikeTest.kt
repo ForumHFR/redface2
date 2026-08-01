@@ -17,7 +17,7 @@ import org.robolectric.RobolectricTestRunner
  *
  * Confirms (the design study flagged these as NOT provable by docs, only by the compiler):
  *  - `coil3.Image.width/height` is the dimension API after `execute(...)` (#257: the request is now a
- *    bounded `size(1024)` FIT probe, not `Size.ORIGINAL`; the `ColorImage` fixtures are ≤ 70px so the
+ *    probe request (#959: header-only decoder now); the `ColorImage` fixtures are ≤ 70px so the
  *    bound is a no-op and these assertions are unchanged) ;
  *  - `coil3.test.ColorImage(width, height)` exists and propagates its dimensions to `image.width/height`
  *    (so Robolectric tests can pin sizes deterministically, no network/decode) ;
@@ -39,8 +39,8 @@ class IntrinsicMediaSizeMeasurerSpikeTest {
             .build()
         val loader = ImageLoader.Builder(context).components { add(engine) }.build()
 
-        assertEquals(IntSize(70, 50), measureIntrinsicMediaSize("https://hfr/perso70x50.gif", context, loader))
-        assertEquals(IntSize(15, 15), measureIntrinsicMediaSize("https://hfr/micro15x15.gif", context, loader))
-        assertEquals(IntSize(16, 16), measureIntrinsicMediaSize("https://hfr/builtin16.gif", context, loader))
+        assertEquals(IntSize(70, 50), measureIntrinsicMediaSize("https://hfr/perso70x50.gif", context, loader)?.size)
+        assertEquals(IntSize(15, 15), measureIntrinsicMediaSize("https://hfr/micro15x15.gif", context, loader)?.size)
+        assertEquals(IntSize(16, 16), measureIntrinsicMediaSize("https://hfr/builtin16.gif", context, loader)?.size)
     }
 }

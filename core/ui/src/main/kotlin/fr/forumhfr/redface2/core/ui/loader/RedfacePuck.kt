@@ -20,7 +20,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.R
-import fr.forumhfr.redface2.core.ui.post.rememberAnimationsEnabled
+import fr.forumhfr.redface2.core.ui.motion.rememberAnimationsEnabled
 
 /**
  * #7/#728 — the « redface » pull-to-refresh puck: an elevated round M3-style CONTAINED loading

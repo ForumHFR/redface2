@@ -246,6 +246,40 @@ class PageSwipeTest {
         assertEquals(1, swipeTargetPage(currentPage = 2, totalPages = 5, forward = false))
     }
 
+    // --- #752 start (edge-gesture) dead-zone contract ---
+    // A custom horizontal swipe never STARTS inside the system's left/right gesture bands: the real
+    // edge belongs to the system back gesture, and a near-miss just inside used to fire a surprise
+    // tab/page change (Stylken). The predicate is the shared gate of both gesture sites.
+
+    @Test
+    fun `a down inside either gesture band is in the dead zone`() {
+        assertTrue(inStartGestureDeadZone(x = 10f, widthPx = 1080, leftInsetPx = 30, rightInsetPx = 30))
+        assertTrue(inStartGestureDeadZone(x = 1070f, widthPx = 1080, leftInsetPx = 30, rightInsetPx = 30))
+    }
+
+    @Test
+    fun `a down between the bands starts the gesture`() {
+        assertFalse(inStartGestureDeadZone(x = 540f, widthPx = 1080, leftInsetPx = 30, rightInsetPx = 30))
+        // Boundary: exactly ON the inset edge is outside the band (strict comparisons).
+        assertFalse(inStartGestureDeadZone(x = 30f, widthPx = 1080, leftInsetPx = 30, rightInsetPx = 30))
+        assertFalse(inStartGestureDeadZone(x = 1050f, widthPx = 1080, leftInsetPx = 30, rightInsetPx = 30))
+    }
+
+    @Test
+    fun `zero insets - three-button nav - never dead-zones`() {
+        assertFalse(inStartGestureDeadZone(x = 0f, widthPx = 1080, leftInsetPx = 0, rightInsetPx = 0))
+        assertFalse(inStartGestureDeadZone(x = 1080f, widthPx = 1080, leftInsetPx = 0, rightInsetPx = 0))
+    }
+
+    @Test
+    fun `aberrant insets clamp to the window instead of inverting the predicate`() {
+        // Negative insets (bogus provider) behave like zero insets.
+        assertFalse(inStartGestureDeadZone(x = 0f, widthPx = 1080, leftInsetPx = -50, rightInsetPx = -50))
+        // A band wider than the window degrades to a full dead zone, never a partial inversion.
+        assertTrue(inStartGestureDeadZone(x = 540f, widthPx = 1080, leftInsetPx = 0, rightInsetPx = 2000))
+        assertTrue(inStartGestureDeadZone(x = 540f, widthPx = 1080, leftInsetPx = 2000, rightInsetPx = 0))
+    }
+
     private companion object {
         const val TOLERANCE = 0.001f
     }

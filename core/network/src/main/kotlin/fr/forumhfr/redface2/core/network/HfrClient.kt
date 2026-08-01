@@ -558,6 +558,9 @@ class HfrClient @Inject constructor(
             .add("post", topicId.toString())
             .add("cat", cat.toString())
             .add("config", "hfr.inc")
+            // #894 — constant hidden field of the web form. NOT a results pager : `p` paginates
+            // nothing on transsearch (verified live, `p=2` returns the same page) — result batches
+            // beyond HFR's scan window are reached through the `currentnum` resume cursor instead.
             .add("p", "1")
             .add("sondage", "0")
             .add("owntopic", owntopic.toString())

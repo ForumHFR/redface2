@@ -7,10 +7,13 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Chantier C (#546) — extraction of the intra-topic search form (`transsearch.php`) hidden fields
- * from existing topic-page fixtures. The `transsearch` RESPONSE is never asserted here : it was
- * NEVER captured live, so there is no response fixture to round-trip (see the class KDoc of
- * `TopicSearchFormParser`). These tests cover only the request-side extraction the parser owns.
+ * Chantier C (#546) + #894 — extraction of the intra-topic search form (`transsearch.php`) hidden
+ * fields, from topic-page fixtures (request side) AND from live-captured `transsearch` RESPONSE
+ * fixtures (`transsearch_response_nonfilter_{anon,auth}.html`, 2026-07-12). The response captures
+ * replaced a synthetic fixture that wrongly assumed responses carry a `firstnum` input — they do
+ * NOT (the anchor only exists on normal topic pages), and requiring it made every response form
+ * parse to null, dropping the `currentnum` cursor (#894 : non-filtered search always « Aucun
+ * résultat » against live HFR).
  */
 class TopicSearchFormParserTest {
     private val parser = TopicSearchFormParser()
@@ -51,7 +54,7 @@ class TopicSearchFormParserTest {
 
         assertEquals(84540, form.topicId)
         assertEquals(13, form.cat)
-        assertTrue(form.firstnum > 0)
+        assertTrue(requireNotNull(form.firstnum) > 0)
         assertEquals("", form.hashCheck)
         assertFalse("empty hash_check ⇒ search not available", form.canSearch)
     }
@@ -67,27 +70,31 @@ class TopicSearchFormParserTest {
     }
 
     @Test
-    fun `parses the currentnum cursor from a transsearch response form`() {
-        // Chantier B (#546) — a `transsearch` RESPONSE re-renders the form WITH a `currentnum` hidden
-        // input pointing at the anchored match. The parser must read it back so the ViewModel can step
-        // to the next/previous result. Synthetic fixture (no live capture exists; hash_check is fake).
-        val html = """
-            <html><body>
-              <form action="/transsearch.php" method="post">
-                <input type="hidden" name="hash_check" value="0000000000000000" />
-                <input type="hidden" name="post" value="35395" />
-                <input type="hidden" name="cat" value="23" />
-                <input type="hidden" name="owntopic" value="0" />
-                <input type="hidden" name="firstnum" value="2783602" />
-                <input type="hidden" name="currentnum" value="2786594" />
-              </form>
-            </body></html>
-        """.trimIndent()
+    fun `parses a transsearch response form — currentnum cursor present, firstnum ABSENT (anon)`() {
+        // #894 — live-captured non-filtered response (author-only search anchored at page 61 of the
+        // RF2 topic). The response form carries the `currentnum` cursor (the anchored match) and NO
+        // `firstnum` input : the parse must SUCCEED with firstnum=null, never degrade to null — a
+        // null form silently drops the cursor and reports « Aucun résultat » on every live search.
+        val form = requireNotNull(parser.parse(fixture("transsearch_response_nonfilter_anon.html")))
 
-        val form = requireNotNull(parser.parse(html))
+        assertEquals(35395, form.topicId)
+        assertEquals(23, form.cat)
+        assertNull("a transsearch response carries no firstnum anchor", form.firstnum)
+        assertEquals(2789841, form.currentNum)
+        assertFalse("anonymous capture ⇒ empty hash_check", form.canSearch)
+    }
 
-        assertEquals(2786594, form.currentNum)
-        assertEquals(2783602, form.firstnum)
+    @Test
+    fun `parses a transsearch response form — authenticated twin keeps canSearch true`() {
+        // #894 — same query captured authenticated (hash_check scrubbed to a non-empty placeholder) :
+        // firstnum is absent from the response form in BOTH render modes (HFR serves different HTML
+        // authenticated vs anonymous), while canSearch must still read true here.
+        val form = requireNotNull(parser.parse(fixture("transsearch_response_nonfilter_auth.html")))
+
+        assertEquals(35395, form.topicId)
+        assertEquals(23, form.cat)
+        assertNull("a transsearch response carries no firstnum anchor", form.firstnum)
+        assertEquals(2789841, form.currentNum)
         assertTrue(form.canSearch)
     }
 
@@ -110,13 +117,14 @@ class TopicSearchFormParserTest {
 
     @Test
     fun `returns null when the transsearch form is missing a required id`() {
-        // A transsearch form without `firstnum` is unusable for the search anchor : degrade to null.
+        // `post` / `cat` stay REQUIRED (they key the POST) : a form missing one is unusable and must
+        // degrade to null. `firstnum` deliberately absent from this list since #894.
         val html = """
             <html><body>
               <form action="/transsearch.php" method="post">
                 <input type="hidden" name="hash_check" value="abc" />
-                <input type="hidden" name="post" value="35395" />
                 <input type="hidden" name="cat" value="23" />
+                <input type="hidden" name="firstnum" value="2783602" />
               </form>
             </body></html>
         """.trimIndent()

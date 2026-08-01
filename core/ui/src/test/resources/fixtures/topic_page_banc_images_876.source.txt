@@ -1,0 +1,34 @@
+Fixture : topic_page_banc_images_876.html
+Sujet   : [Redface 2] Banc de test images (#876) — cat=10 (Programmation), post=148760, page=1
+Posts   : 29 posts. RECAPTURE 2026-07-30 : le banc est passé de 45 à 52 cas — POST 15
+          (images plus hautes que le cap, cas 15.1/15.2, ajouté le 27/07 pour départager les
+          valeurs de limite de hauteur, #993) et POST 16 (miniatures-aperçus liées, cas
+          16.1-16.5 dont DEUX contrôles négatifs, ajouté le 30/07 pour
+          [AMENDEMENT-v1.5-4], #876). Capture initiale : 14 posts XaTelitte
+          Le corps du POST 10 (numreponse 2539094) diffère aussi de la capture initiale :
+          édition HFR du 22/07 (Lot 4 #960) — attendus 10.1/10.2/10.3 révisés en prose
+          (retry par tap, décodeur SVG depuis 0.34.4) + ligne d'attribution. Topologie
+          d'images STRICTEMENT inchangée (mêmes 7 img, mêmes positions), le test post 10
+          passe sans modification. Les 13 autres corps communs sont octet-identiques.
+          (numreponse 2539082-2539099) + 4 AAF XaTriX + 2 réponses nicko.
+Capture : recapturée le 2026-07-30, ANONYME (sans cookies), même canal curl et même
+          User-Agent que la capture initiale ; hash_check nativement VIDES revérifiés,
+          aucun cookie / email / identifiant personnel (grep avant commit).
+          Capture initiale : 2026-07-19, ANONYME, après synchronisation du banc avec le contrat
+          images v1.4 (45 cas, errata + cas 14.1 EXIF + attendus 10.1/10.2 précisés).
+          CANAL : curl direct — DIVERGENCE DOCUMENTÉE avec contributing.md : la règle
+          « hfr_read … output=path écrit le HTML brut » ne correspond pas au comportement
+          réel de hfr-mcp v1.2.0, dont output= écrit la REPRÉSENTATION PARSÉE (~15 Ko,
+          vérifié le 20/07 sur ce même topic), inutilisable comme fixture parser. curl est
+          le seul canal produisant le HTML brut (précédent : les fixtures existantes du
+          repo, ex. topic_page_single.html). Divergence fichée pour correction de la règle
+          ou évolution de hfr-mcp. Commande :
+          curl -sL --compressed -A "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0" \
+            "https://forum.hardware.fr/forum2.php?config=hfr.inc&cat=10&post=148760&page=1"
+Caveats : capture anonyme → les champs hash_check sont VIDES nativement (aucune redaction
+          nécessaire), pas de form de réponse bddpost (topic servi read-only), pseudos des
+          comptes de test publics XaTelitte/XaTriX conservés (exception contrôlée
+          contributing.md). Aucun cookie, email ni identifiant personnel (vérifié par grep
+          avant commit). Ne pas reformater (DOM fidèle à la réponse HFR).
+Usage   : PostMediaSegmentationFixtureTest (#956, Lot 1A de la passe images #876) — la
+          partition §2 du contrat v1.4 est assertée sur les 14 posts réels du banc.

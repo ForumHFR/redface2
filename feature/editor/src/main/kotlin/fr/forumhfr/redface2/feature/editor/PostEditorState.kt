@@ -1,12 +1,12 @@
 package fr.forumhfr.redface2.feature.editor
+import fr.forumhfr.redface2.core.ui.editor.UploadError
+import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 
-import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import androidx.compose.ui.text.input.TextFieldValue
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
 import fr.forumhfr.redface2.core.domain.editor.validateBbcodeDraft
-import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
-import fr.forumhfr.redface2.core.model.EditorSmiley
 import fr.forumhfr.redface2.core.model.PostContent
+import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 
 /**
@@ -26,17 +26,13 @@ data class PostEditorState(
     /** Sub-category id required by HFR's write contract. Null when unknown — reply disabled. */
     val subcat: Int?,
     /**
-     * `numreponse` of the post being quoted (Phase 2C, #146). When non-null the
-     * editor opened in quote mode : HFR prefills `[quotemsg=…]` and we hydrate
-     * the draft with it on form load. Same surface as a simple reply otherwise.
+     * #604 lot 3 (mockup P3) — the armed quote CARDS, in citation order. Seeded from
+     * [PostEditorRequest.initialQuotes], reorderable / removable / clearable from the UI
+     * (#436 « Tout vider »). The field never contains their BBCode : the `[quotemsg]`
+     * blocks are materialised fresh at submit, exactly like the quick-reply sheet
+     * (one implementation, `ReplyQuoteMaterializer`). Always empty in [PostEditorMode.Edit].
      */
-    val quotedNumreponse: Int? = null,
-    /**
-     * `ref` parameter HFR included in the quote link when parseable — opaque,
-     * forwarded as-is. May be null on a quote: HFR still quotes from
-     * [quotedNumreponse] alone when the toolbar link was obfuscated.
-     */
-    val quoteRef: Int? = null,
+    val quotes: List<QuotedPostPreview> = emptyList(),
     val draft: TextFieldValue = TextFieldValue(),
     val preview: PostContent = PostContent(blocks = emptyList()),
     val isPreviewVisible: Boolean = false,
@@ -76,16 +72,12 @@ data class PostEditorState(
      * submit attempt.
      */
     val optionsHydratedFromForm: Boolean = false,
-    /**
-     * Phase 2F-B (#11 partial) — smiley picker visibility + wiki search state. Hidden by
-     * default. Opening the picker is an Intent ; closing it is also an Intent, so the
-     * bottom-sheet dismiss path stays MVI-correct.
-     */
-    val smileyPicker: SmileyPickerState = SmileyPickerState.Hidden,
+    // #441 — the smiley picker state no longer lives here : visibility + wiki search moved
+    // to the shared `SmileyPickerController` exposed as `PostEditorViewModel.smileyPicker`.
     /**
      * HFR user id parsed from the form HTML (cf. `ReplyForm.userId`). Used by the wiki
-     * smiley search call. `null` when the form is anonymous or unparseable — the
-     * repository falls back to `user_id=0`.
+     * smiley search call (read by the `SmileyPickerController` lambda). `null` when the
+     * form is anonymous or unparseable — the controller falls back to `user_id=0`.
      */
     val userId: Int? = null,
     /**
@@ -137,7 +129,10 @@ data class PostEditorState(
             // `Topic.subcat` / `Topic.canReply`.
             (subcat != null && subcat >= 0) &&
             topicId != null &&
-            draft.text.isNotBlank() &&
+            // #604 lot 3 — a quotes-only reply is sendable (same rule as the quick-reply
+            // sheet : the materialised [quotemsg] blocks ARE the content). Edit keeps
+            // requiring a non-blank body — its cards list is always empty.
+            (draft.text.isNotBlank() || (mode == PostEditorMode.Reply && quotes.isNotEmpty())) &&
             !isSubmitting &&
             !isLoadingForm &&
             !isUploading
@@ -167,43 +162,9 @@ sealed interface SubmitError {
     data object MissingSubcat : SubmitError
 }
 
-/**
- * #459 PR2 / #474 — UI-facing image-upload failure. Maps the `:core:domain`
- * [fr.forumhfr.redface2.core.domain.upload.UploadException] variants onto an actionable message
- * (too large / unsupported type / host HTTP error / unreadable host response / network) instead of
- * a generic « erreur de l'hébergeur ». The HTTP [Server] case carries the status [code] and the
- * [providerId] so the banner can name the host and the exact code (#474); [Malformed] stays distinct
- * so an unreadable-but-2xx body reads differently from a flat HTTP refusal. Anonymous clients never
- * get here — the ViewModel ignores a pick without a userId.
- */
-sealed interface UploadError {
-    /** The picked image exceeds the host's accepted size. */
-    data object TooLarge : UploadError
-
-    /** The host rejected the MIME type. */
-    data object UnsupportedType : UploadError
-
-    /** The host answered a non-2xx HTTP status. [code] is the status, [providerId] the host (#474). */
-    data class Server(val code: Int, val providerId: UploadProviderId) : UploadError
-
-    /** The host answered 2xx but the body could not be parsed into the expected shape (#474). */
-    data class Malformed(val providerId: UploadProviderId) : UploadError
-
-    /** The upload provider is not configured (e.g. a blank Imgur Client-ID): the user must set it
-     * up in Settings, not retry — so the banner points at configuration, not connectivity (#474). */
-    data object Configuration : UploadError
-
-    /** No network / DNS / timeout — also covers an unreadable picked Uri (mapped to Network). */
-    data object Network : UploadError
-}
-
-/**
- * Progress of a multi-image upload batch: [completed] images uploaded and inserted out of [total]
- * picked. Surfaced as an « n/N » counter while [PostEditorState.isUploading] is true.
- */
-data class UploadProgress(val completed: Int, val total: Int)
-
-
+// #459 — UploadError / UploadProgress were born here and are now promoted to
+// `:core:ui` (core.ui.editor.EditorUpload) so the MP composers share the same
+// upload vocabulary as the topic-side editors.
 
 internal fun PostEditorState.withDraft(updated: TextFieldValue): PostEditorState =
     copy(

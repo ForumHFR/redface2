@@ -23,9 +23,12 @@ class TopicSearchFormParser {
 
     /**
      * @return the parsed [TopicSearchForm], or `null` when the page carries no `transsearch` form or
-     *   is missing one of its required ids (`post` / `cat` / `firstnum`). A `null` lets the caller
-     *   keep the intra-topic-search affordance hidden rather than crash a topic that lacks the form
-     *   (e.g. a synthetic / truncated cache row).
+     *   is missing one of its required ids (`post` / `cat`). A `null` lets the caller keep the
+     *   intra-topic-search affordance hidden rather than crash a topic that lacks the form (e.g. a
+     *   synthetic / truncated cache row). `firstnum` is NOT required (#894) : a `transsearch`
+     *   RESPONSE ships the form without it (only topic pages carry the anchor — verified live,
+     *   anonymous and authenticated) — requiring it made every search-response form parse to null,
+     *   which dropped HFR's `currentnum` cursor and broke the whole non-filtered mode.
      */
     fun parse(html: String): TopicSearchForm? = parse(Jsoup.parse(html))
 
@@ -37,14 +40,13 @@ class TopicSearchFormParser {
         document.selectFirst(HfrSelectors.TOPIC_SEARCH_FORM)?.let(::toForm)
 
     /**
-     * Builds the model from the located form element, or `null` when any required id (`post` / `cat`
-     * / `firstnum`) is missing/unparsable. Single exit point keeps detekt's ReturnCount happy.
+     * Builds the model from the located form element, or `null` when a required id (`post` / `cat`)
+     * is missing/unparsable. Single exit point keeps detekt's ReturnCount happy.
      */
     private fun toForm(form: Element): TopicSearchForm? {
         val topicId = form.intValue(HfrSelectors.TOPIC_SEARCH_POST)
         val cat = form.intValue(HfrSelectors.TOPIC_SEARCH_CAT)
-        val firstnum = form.intValue(HfrSelectors.TOPIC_SEARCH_FIRSTNUM)
-        return if (topicId == null || cat == null || firstnum == null) {
+        return if (topicId == null || cat == null) {
             null
         } else {
             TopicSearchForm(
@@ -53,7 +55,9 @@ class TopicSearchFormParser {
                 hashCheck = form.selectFirst(HfrSelectors.TOPIC_SEARCH_HASH_CHECK)?.attr("value").orEmpty(),
                 topicId = topicId,
                 cat = cat,
-                firstnum = firstnum,
+                // #894 — present on a NORMAL topic page (the search anchor : first numreponse of
+                // the rendered page), ABSENT from a `transsearch` response form.
+                firstnum = form.intValue(HfrSelectors.TOPIC_SEARCH_FIRSTNUM),
                 owntopic = form.intValue(HfrSelectors.TOPIC_SEARCH_OWNTOPIC) ?: 0,
                 // Chantier B (#546) — null on a normal page (no `currentnum` input ; HFR's JS injects
                 // one client-side), non-null on a `transsearch` response carrying the anchored match.

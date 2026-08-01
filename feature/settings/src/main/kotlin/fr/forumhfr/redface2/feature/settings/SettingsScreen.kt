@@ -8,9 +8,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -25,9 +27,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsListItem
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsSearchTopBar
 import fr.forumhfr.redface2.core.ui.settings.shell.SettingsHomeScreen
@@ -546,6 +550,17 @@ internal fun buildSettingsCatalogue(
                     .takeIf { state.foldLongQuotesError },
                 onCheckedChange = { onIntent(SettingsIntent.FoldLongQuotesChanged(it)) },
             ),
+            // #884 — posts en pleine largeur (bord à bord, sans encart), arbitrage passe images.
+            toggleRow(
+                id = "full_width_posts",
+                title = stringResource(R.string.settings_full_width_posts_title),
+                description = stringResource(R.string.settings_full_width_posts_description),
+                checked = state.fullWidthPosts,
+                enabled = state.canToggleFullWidthPosts,
+                errorRes = R.string.settings_full_width_posts_persist_failed
+                    .takeIf { state.fullWidthPostsError },
+                onCheckedChange = { onIntent(SettingsIntent.FullWidthPostsChanged(it)) },
+            ),
             // #105 — afficher l'ascenseur de lecture (sujets et MP), retour bêta styx42.
             toggleRow(
                 id = "show_scrollbar",
@@ -597,6 +612,68 @@ internal fun buildSettingsCatalogue(
                 errorRes = R.string.settings_confirm_before_posting_persist_failed
                     .takeIf { state.confirmBeforePostingError },
                 onCheckedChange = { onIntent(SettingsIntent.ConfirmBeforePostingChanged(it)) },
+            ),
+            // #806 — writing-surface radio group (3 single-choice rows, one per preset). The
+            // group picks WHICH surface a write action opens ; the quote-cards toggle below picks
+            // how citations RENDER inside it — deliberately separate copy so the two don't blur.
+            radioRow(
+                id = "writing_surface_sheet",
+                title = stringResource(R.string.settings_writing_surface_sheet),
+                description = stringResource(R.string.settings_writing_surface_sheet_description),
+                keywords = listOf(
+                    stringResource(R.string.settings_writing_surface_title),
+                    "feuille",
+                    "réponse rapide",
+                    "plein écran",
+                    "éditeur",
+                ),
+                selected = state.writingSurfacePreset == WritingSurfacePreset.SHEET,
+                enabled = state.canChangeWritingSurfacePreset,
+                onSelect = { onIntent(SettingsIntent.SetWritingSurfacePreset(WritingSurfacePreset.SHEET)) },
+                groupTitle = stringResource(R.string.settings_writing_surface_title),
+            ),
+            radioRow(
+                id = "writing_surface_sheet_except_quotes",
+                title = stringResource(R.string.settings_writing_surface_sheet_except_quotes),
+                description = stringResource(R.string.settings_writing_surface_sheet_except_quotes_description),
+                keywords = listOf(
+                    stringResource(R.string.settings_writing_surface_title),
+                    "feuille",
+                    "citation",
+                    "plein écran",
+                    "éditeur",
+                ),
+                selected = state.writingSurfacePreset == WritingSurfacePreset.SHEET_EXCEPT_QUOTES,
+                enabled = state.canChangeWritingSurfacePreset,
+                onSelect = {
+                    onIntent(SettingsIntent.SetWritingSurfacePreset(WritingSurfacePreset.SHEET_EXCEPT_QUOTES))
+                },
+            ),
+            radioRow(
+                id = "writing_surface_full_editor",
+                title = stringResource(R.string.settings_writing_surface_full_editor),
+                description = stringResource(R.string.settings_writing_surface_full_editor_description),
+                keywords = listOf(
+                    stringResource(R.string.settings_writing_surface_title),
+                    "feuille",
+                    "plein écran",
+                    "éditeur",
+                ),
+                selected = state.writingSurfacePreset == WritingSurfacePreset.FULL_EDITOR,
+                enabled = state.canChangeWritingSurfacePreset,
+                onSelect = { onIntent(SettingsIntent.SetWritingSurfacePreset(WritingSurfacePreset.FULL_EDITOR)) },
+                errorRes = R.string.settings_writing_surface_persist_failed
+                    .takeIf { state.writingSurfacePresetError },
+            ),
+            toggleRow(
+                id = "quote_cards_enabled",
+                title = stringResource(R.string.settings_quote_cards_title),
+                description = stringResource(R.string.settings_quote_cards_description),
+                checked = state.quoteCardsEnabled,
+                enabled = state.canToggleQuoteCardsEnabled,
+                errorRes = R.string.settings_quote_cards_persist_failed
+                    .takeIf { state.quoteCardsEnabledError },
+                onCheckedChange = { onIntent(SettingsIntent.QuoteCardsEnabledChanged(it)) },
             ),
             futureRow(
                 id = "future_auto_signature",
@@ -878,6 +955,60 @@ private fun toggleRow(
                 description = description,
                 trailingContent = {
                     Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
+                },
+            )
+            if (errorRes != null) {
+                Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                    PreferencePersistError(errorRes)
+                }
+            }
+        }
+    },
+)
+
+/**
+ * One option of a single-choice radio group (#806 writing surface) : a leading M3 [RadioButton] with
+ * the whole row selectable (`Role.RadioButton` semantics — the radio is not a separate touch target,
+ * so its own `onClick` is `null`). Each option is its own catalogue row so it stays individually
+ * searchable ; the group is the set of rows firing the same intent family. [groupTitle] renders a
+ * small header above the FIRST row of the group ; [errorRes] renders the group's shared persist
+ * error under the LAST row.
+ */
+@Suppress("LongParameterList") // row descriptor: id + texts + keywords + selection + slots + callback.
+private fun radioRow(
+    id: String,
+    title: String,
+    description: String,
+    keywords: List<String>,
+    selected: Boolean,
+    enabled: Boolean,
+    onSelect: () -> Unit,
+    groupTitle: String? = null,
+    errorRes: Int? = null,
+): SettingsCatalogueRow = SettingsCatalogueRow(
+    searchable = SettingsSearchableItem(id = id, title = title, description = description, keywords = keywords),
+    render = {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            if (groupTitle != null) {
+                Text(
+                    text = groupTitle,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
+                )
+            }
+            RedfaceSettingsListItem(
+                title = title,
+                description = description,
+                enabled = enabled,
+                modifier = Modifier.selectable(
+                    selected = selected,
+                    enabled = enabled,
+                    role = Role.RadioButton,
+                    onClick = onSelect,
+                ),
+                leadingContent = {
+                    RadioButton(selected = selected, onClick = null, enabled = enabled)
                 },
             )
             if (errorRes != null) {

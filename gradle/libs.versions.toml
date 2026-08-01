@@ -9,6 +9,8 @@ android-targetSdk = "36"
 android-compileSdk = "36"
 androidx-core = "1.18.0"
 androidx-test-core = "1.7.0"
+androidx-test-runner = "1.7.0"
+androidx-test-ext-junit = "1.3.0"
 androidx-activity = "1.13.0"
 androidx-lifecycle = "2.10.0"
 compose-bom = "2026.05.01"
@@ -62,6 +64,10 @@ androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidx
 # (TraceSink + TraceDriver APIs).
 androidx-tracing = { module = "androidx.tracing:tracing", version.ref = "androidx-tracing" }
 androidx-test-core = { module = "androidx.test:core", version.ref = "androidx-test-core" }
+# #959 — EXIF orientation of the header-only intrinsic probe (explicit: it was only a coil transitive).
+androidx-exifinterface = { module = "androidx.exifinterface:exifinterface", version = "1.4.2" }
+androidx-test-runner = { module = "androidx.test:runner", version.ref = "androidx-test-runner" }
+androidx-test-ext-junit = { module = "androidx.test.ext:junit", version.ref = "androidx-test-ext-junit" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity" }
 androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = "compose-bom" }
 androidx-compose-material3 = { module = "androidx.compose.material3:material3" }
@@ -114,5 +120,7 @@ jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
 coil-core = { module = "io.coil-kt.coil3:coil", version.ref = "coil" }
 coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" }
 coil-gif = { module = "io.coil-kt.coil3:coil-gif", version.ref = "coil" }
+# #960 P4 — SVG decoding for [img] payloads (probe header-only KO by design → G2 painter geometry).
+coil-svg = { module = "io.coil-kt.coil3:coil-svg", version.ref = "coil" }
 coil-network-okhttp = { module = "io.coil-kt.coil3:coil-network-okhttp", version.ref = "coil" }
 coil-test = { module = "io.coil-kt.coil3:coil-test", version.ref = "coil" }

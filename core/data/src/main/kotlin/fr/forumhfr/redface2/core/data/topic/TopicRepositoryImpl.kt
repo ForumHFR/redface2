@@ -10,6 +10,7 @@ import fr.forumhfr.redface2.core.database.entities.PostEntity
 import fr.forumhfr.redface2.core.database.entities.TopicEntity
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.topic.TopicPageEmission
 import fr.forumhfr.redface2.core.domain.topic.TopicRepository
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.network.HfrClient
@@ -55,7 +56,12 @@ class TopicRepositoryImpl @Inject constructor(
      * - Cache miss → fetch directly. A failure here propagates so the UI can
      *   show its error state.
      */
-    override fun observeTopicPage(cat: Int, post: Int, page: Int, forceRefresh: Boolean): Flow<Topic> = flow {
+    override fun observeTopicPage(
+        cat: Int,
+        post: Int,
+        page: Int,
+        forceRefresh: Boolean,
+    ): Flow<TopicPageEmission> = flow {
         // Alpha "Ignorer le cache topic" toggle (Phase 2 finish): when enabled, skip the
         // Room read entirely and emit a fresh network fetch. The result is still persisted
         // so toggling back OFF later finds a cache coherent with the current parser. We
@@ -64,21 +70,24 @@ class TopicRepositoryImpl @Inject constructor(
             userPreferencesRepository.observeIgnoreTopicCache().first()
         }
         if (ignoreTopicCache) {
-            emit(fetchAndPersist(cat, post, page, FetchMode.AUTHENTICATED))
+            emit(TopicPageEmission(fetchAndPersist(cat, post, page, FetchMode.AUTHENTICATED), provisional = false))
             return@flow
         }
 
         val cached = withContext(ioDispatcher) { loadFromCache(cat, post, page) }
         if (cached != null) {
-            emit(cached.topic)
             // #231 — `forceRefresh` (set when opening a topic from a flag, where the user
-            // wants the latest posts) bypasses the snappy-cache TTL: the cached page was
-            // emitted instantly above, but we still always re-fetch below so a followed
+            // wants the latest posts) bypasses the snappy-cache TTL: the cached page is
+            // emitted instantly, but we still always re-fetch below so a followed
             // topic that grew is never shown stale within the 60s window. The TTL skip
             // remains for ordinary back-nav (forceRefresh = false).
             val canSkipRefresh = !forceRefresh &&
                 cached.authMode == FetchMode.AUTHENTICATED &&
                 CachePolicy.isFresh(cached.fetchedAt, CachePolicy.topicPage, clock)
+            // #877 — the cache page is provisional ONLY when a refresh follows on this very
+            // flow. On the TTL-skip path it IS the settled page: flagging it provisional
+            // would strand the pill on « Chargement… » with nothing left to confirm it.
+            emit(TopicPageEmission(cached.topic, provisional = !canSkipRefresh))
             if (canSkipRefresh) {
                 return@flow
             }
@@ -88,14 +97,18 @@ class TopicRepositoryImpl @Inject constructor(
             // needs a structural change here). CancellationException is rethrown to
             // keep structured concurrency semantics intact.
             try {
-                emit(fetchAndPersist(cat, post, page, FetchMode.AUTHENTICATED))
+                emit(TopicPageEmission(fetchAndPersist(cat, post, page, FetchMode.AUTHENTICATED), provisional = false))
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (@Suppress("TooGenericExceptionCaught") refreshError: Exception) {
                 Log.w(LOG_TAG, "Stale refresh failed for cat=$cat post=$post page=$page", refreshError)
+                // #877 — terminal re-emission: the refresh is not coming, so the cache page is
+                // now the settled one. Without this, a provisional-gated pill would show
+                // « Chargement… » forever on an offline back-nav to a stale page.
+                emit(TopicPageEmission(cached.topic, provisional = false))
             }
         } else {
-            emit(fetchAndPersist(cat, post, page, FetchMode.AUTHENTICATED))
+            emit(TopicPageEmission(fetchAndPersist(cat, post, page, FetchMode.AUTHENTICATED), provisional = false))
         }
     }
 
@@ -111,6 +124,14 @@ class TopicRepositoryImpl @Inject constructor(
      * **No-op when the alpha `ignoreTopicCache` toggle is ON**: prefetching into Room
      * while the user explicitly asked to bypass it would re-fill the very cache they
      * want to skip, so the call returns early without hitting the network.
+     *
+     * **No-op when ANY cache row already exists** (#895 quick win 2) : the prefetch's declared
+     * purpose is warming pages never visited. Re-fetching over an existing AUTHENTICATED row is
+     * pure waste (the DAO guard below would refuse the write anyway), and over a stale ANONYMOUS
+     * row it buys nothing either — reading an anon row always triggers the authenticated refetch.
+     * The `upsertTopicPageWithPostsUnlessAuthenticated` transaction stays as the LAST line of
+     * defense against the check-then-fetch race (a concurrent authenticated fetch landing between
+     * this read and the persist).
      */
     override suspend fun prefetch(cat: Int, post: Int, page: Int) {
         val ignoreTopicCache = withContext(ioDispatcher) {
@@ -122,6 +143,10 @@ class TopicRepositoryImpl @Inject constructor(
             // very cache they asked us to skip. Cancellation semantics are preserved because we
             // do nothing.
             Log.d(LOG_TAG, "Skipped topic prefetch because ignore topic cache is enabled")
+            return
+        }
+        if (withContext(ioDispatcher) { loadFromCache(cat, post, page) } != null) {
+            Log.d(LOG_TAG, "Skipped topic prefetch: page already cached (cat=$cat post=$post page=$page)")
             return
         }
         try {

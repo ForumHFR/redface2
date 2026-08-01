@@ -39,7 +39,7 @@ class DefaultSmileyRepository @Inject constructor(
         // the same network error. `CancellationException` still propagates untouched via
         // `withContext`'s structured concurrency.
         return withContext(ioDispatcher) {
-            val fragment = hfrClient.getSmileySearch(userId = userId, query = query)
+            val fragment = hfrClient.getSmileySearch(userId = userId, query = toImplicitAndQuery(query))
             val results = parser.parse(fragment)
             diagnostics.record(
                 DiagnosticsLog.Level.DEBUG,
@@ -54,3 +54,22 @@ class DefaultSmileyRepository @Inject constructor(
         private const val LOG_TAG = "SmileyRepository"
     }
 }
+
+/**
+ * #794 — implicit AND between search terms. The wiki engine treats a bare space as OR (union,
+ * server-capped at 1000 rows), `+term` as a requirement and `-term` as an exclusion — all three
+ * live-verified on `message-smi-mp-aj.php` (2026-07-05 : `chat noir`=1000, `+chat +noir`=25,
+ * `+chat -noir`=657−25). Nobody searching « chat noir » wants the union, so every UNOPERATED term
+ * gets a `+` prefix ; terms the user already prefixed with `+` or `-` keep their operator (the
+ * NOT is functional and must not be clobbered). Pure and unit-tested ; blank input is returned
+ * untouched.
+ */
+internal fun toImplicitAndQuery(raw: String): String {
+    val terms = raw.trim().split(WHITESPACE).filter { it.isNotBlank() }
+    if (terms.isEmpty()) return raw
+    return terms.joinToString(" ") { term ->
+        if (term.startsWith('+') || term.startsWith('-')) term else "+$term"
+    }
+}
+
+private val WHITESPACE = Regex("""\s+""")

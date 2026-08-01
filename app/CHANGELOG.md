@@ -16,6 +16,581 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.37.0` — `local` — 2026-08-01
+
+**Promotion bêta** — première version proposée aux testeurs du canal ouvert depuis la 0.18.0.
+Cette entrée synthétise la série dev 0.19.0 → 0.36.1 ; les entrées détaillées ci-dessous restent
+la source des changements et correctifs intermédiaires.
+
+### Ajouté et modifié
+
+- **Vue Topic refondue** : top bar et sélecteur de page intégrés, frontières de page et repère de
+  dernière lecture plus lisibles, actions de post stabilisées, citations longues repliables et
+  option « Posts en pleine largeur » pour gagner de la place de lecture.
+- **Moteur de pagination in-ViewModel** : changement de page sans recréer l'écran ni flasher,
+  revisite instantanée des pages récentes avec leur position, retour fidèle après un saut de
+  citation et transitions de chargement discrètes.
+- **Loupe de lecture** : pincement jusqu'à 3× sur toute la page, déplacement borné et glisse amortie ;
+  les gestes incompatibles sont suspendus pendant le zoom et l'état se réinitialise au changement
+  de page ou de sujet.
+- **Images sous contrat** : séparation fiable entre images inline et blocs, taille mesurée sans
+  upscale, décodage adapté à la densité, grandes images mieux dimensionnées, miniatures liées et GIF
+  plus lisibles, menu d'actions, erreurs visibles et réessai sans recharger les images saines.
+- **Surfaces d'écriture consolidées** : réponse rapide ou éditeur plein écran selon le réglage
+  (plein écran par défaut, feuille encore expérimentale), citations multiples, brouillons robustes,
+  sélecteur de smileys et upload multiple disponibles sur les composeurs concernés ; clavier,
+  curseur et bouton d'envoi restent accessibles sur les écrans courts.
+
+---
+
+## `0.36.1` — `local` — 2026-08-01
+
+Correctif **N1**, trouvé pendant la review de promotion bêta (coupe 9/10, review GPT-5.6 Codex →
+gate Claude Fable 5). Classé bloquant pré-bêta au même titre que F2/F3/F5 de #953 : fonctionnel et
+**silencieux**.
+
+### Corrigé
+
+- **Course d'annulation du painter (#960)** : deux occurrences d'une même URL sur une page se
+  disputent l'unique réservation du painter. Quand la gagnante était disposée **en plein
+  chargement** (un défilement suffit), `rollbackReservation` rendait l'axe à `Untried` sans avancer
+  la génération — conforme au verrou #5, mais aucune clé de la perdante ne bougeait alors : ni
+  l'`attempt` mémoïsé, ni `failedFresh`. La perdante recomposait sans jamais rappeler
+  `reserveIfUntried()` et **restait figée sur son placeholder pour la durée de l'écran**.
+  - Aggravation : le **tirer-pour-rafraîchir ne récupérait pas** ce cas — `retryFailedUrls` ne bump
+    que les axes portant un `Failed` (verrou #1), et un axe rendu à `Untried` n'a pas de TTL. Seules
+    guérisons : recycler la perdante par défilement, une nouvelle occurrence composée plus loin, ou
+    quitter l'écran.
+  - **Fix** : `MediaAttemptLedger.isUntried(url, kind)` — bit snapshot-observable — devient une clé
+    du `LaunchedEffect` de réservation. Le rollback recompose la perdante **et** relance son effet.
+    Ni `rollbackReservation` ni `retryFailedUrls` ne sont touchés : verrous #5 et #1 intacts. Le
+    corps de l'effet reste gaté sur `failedFresh` **seul** — une failure expirée est encore
+    `Failed`, pas `Untried`, et doit continuer d'atteindre `reserveIfUntried()` pour consulter C1.
+  - Écarté : avancer la génération au rollback. Trop large — une rollback survient à **chaque**
+    défilement disposant un effet en vol, et le bump recréerait tous les `PainterAttempt` de l'URL
+    en relançant les effets de mesure, avec annulation possible d'un probe en vol.
+  - Surcoût du fix : un `tryReserve` refusé supplémentaire par occurrence observatrice, sans
+    écriture, sans bump, sans requête réseau. Aucune boucle de recomposition possible.
+  - Résidu consigné, **auto-guérissant** : la course de même forme existe sur l'axe **probe**
+    (`IntrinsicMediaSizeMeasurer`), mais `settlePainterGeometry` settle l'axe probe à **chaque**
+    succès painter — l'axe painter étant désormais re-armé, tout painter qui aboutit guérit la probe
+    coincée. Résidu réel : « painter réussi avec dimensions inexploitables », dont le symptôme est
+    une boîte cold, pas une image absente. Durcissement symétrique possible après la bêta.
+
+### Tests
+
+- `PainterAttemptRearmTest` (neuf) — la course de bout en bout : A gagne, B est refusée, A est
+  disposée en vol, **B reprend et settle**. **Vérifié en échec avant le fix** — `AssertionError`
+  déterministe en phase 3 (« B must re-arm »), reproduite par un validateur distinct.
+- `MediaAttemptLedgerTest` — un test épingle que le refresh ne récupère **pas** une entrée rendue à
+  `Untried` (la cause traitée au niveau composition, pas au ledger).
+- **Faux vert corrigé** : le test du verrou #5 settlait l'axe en `Succeeded` *avant* la rollback
+  tardive — sa dernière assertion tenait pour la mauvaise raison, un axe succeeded refusant toute
+  réservation que la rollback soit discardée ou non. Réécrit en laissant l'axe **in-flight**, seul
+  état où un mauvais scoping serait observable.
+
+---
+
+## `0.36.0` — `local` — 2026-07-30
+
+### Ajouté
+
+- **Agrandissement des miniatures-aperçus liées** (#876, `[AMENDEMENT-v1.5-4]` du contrat de rendu) : une
+  image de contenu enveloppée d'un lien vers une ressource DISTINCTE du MÊME hôte, et dont le plus grand
+  axe natif ne dépasse pas 400 px, voit son plafond no-upscale porté à `min(densité, 3)`. Une vignette
+  d'hébergeur de 150 px passe de 7,9 mm à 23,8 mm de large sur un S10e (480 dpi), soit la taille qu'elle
+  occupe déjà sur le rendu web. Signalé par tinc sur le fil DEV.
+  - Deux gardes ferment les faux positifs : le lien doit pointer **ailleurs** que l'image affichée (les
+    auto-liens sont exclus), et au-delà de 400 px natifs une image n'est plus une vignette.
+  - `mEffectif = max(mApercu, mGif)` — les deux multiplicateurs ne se cumulent JAMAIS, le plus grand
+    gagne, et ce `max` porte aussi le plancher `1,0` (sans lui, une densité < 1 rétrécirait l'image).
+  - Décodage inchangé (§7) : la source reste décodée au natif, l'agrandissement se fait au draw.
+  - Résiduels assumés et documentés au contrat : hôte à underscore rejeté (limitation du parseur,
+    fail-closed), point final terminal conservé, et un `[img]` pointant une URL de smiley perso reste
+    indistinguable d'une vignette (la classification se fait sur le token, jamais sur l'URL — I1).
+
+### Modifié
+
+- **Cap de hauteur des images bloc relevé de 50 % à 70 % de la fenêtre utile** (#993, arbitré XaTriX,
+  `[AMENDEMENT-v1.5-5]` du contrat de rendu) : sur S10e en portrait, une grande image passe d'un plafond
+  de 400 dp à ~496 dp — la cible des ~500 dp. Le plancher 400 dp est conservé et devient le garde des
+  fenêtres courtes : sous 571 dp d'utile c'est lui qui gouverne, ce qui préserve à l'identique le
+  comportement « cap = fenêtre entière » acté au gate A3 en split-screen (301 dp) et en paysage (288 dp).
+  Le changement ne peut jamais RÉDUIRE une image : il l'agrandit ou la laisse identique. Conséquence
+  assumée : une capture d'écran occupe au plus environ les deux tiers de l'écran. Aucun cap fixe en dp
+  n'est introduit — le cap reste proportionnel, clampé par la fenêtre. Annexe `matrice-invariants-876.md`
+  (I3.2) réalignée.
+- Banc de test images (topic 148760) : **POST 16** ajouté — 5 cas dont **2 contrôles négatifs** (vignette
+  auto-liée, version 800×800 liée). Le banc passe de 45 à 52 cas ; fixture parser recapturée.
+- Annexe `matrice-invariants-876.md` : I3.1/I3.4 mentionnent désormais l'exception `mEffectif`
+  (péremption qui datait de `[AMENDEMENT-v1.5-2]`, #973).
+
+### Notes de développement
+
+- 37 tests dédiés (22 purs JVM sur l'éligibilité, 15 Robolectric sur le renderer), dont un test qui
+  épingle le validateur d'autorité contre un durcissement en `host != null`, et un cas qui prouve le
+  non-cumul des deux multiplicateurs. Mutant `scaleCeiling = previewCeiling` vérifié tué.
+- Vérifié sur S10e réel : les 5 cas du POST 16 mesurés au pixel (210×450, 450×210, 450×450 pour les
+  vignettes liées ; 150×150 et 800×800 **inchangés** pour les deux contrôles négatifs).
+- Gouvernance : amendement rédigé par Sol (GPT-5.6 Codex xhigh) et gaté par Claude Fable 5 ; code par
+  Claude Fable 5 et gaté par Sol — 3 tours de gate, 2 NO-GO réels levés.
+
+## `0.35.1` — `local` — 2026-07-26
+
+Correctif du mode « Posts en pleine largeur » (#983, rapporté par styx42) : espacements
+irréguliers et lignes horizontales parasites autour des marqueurs. Le trait de pied d'un post
+n'est plus dessiné que d'un post à un autre — là où le marqueur « Dernier message lu », un
+placeholder de post masqué ou un îlot de fin (fin de sujet, frontière de page, footers de
+recherche) apporte déjà sa propre bordure, il était empilé quelques dp au-dessus d'elle. Et le
+marqueur porte désormais son propre rythme vertical, symétrique (il héritait de 8 dp au-dessus
+et de rien en dessous) ; il reste traversant, à la largeur des posts qu'il sépare. Le mode encart
+est inchangé à l'identique.
+
+## `0.35.0` — `local` — 2026-07-26
+
+Agrandissement des GIF (#973, [AMENDEMENT-v1.5-2] au contrat images, arbitrage XaTriX) :
+nouveau réglage « Agrandissement des GIF » (Réglages → Affichage) — S (×1, net) / M (×1,5) /
+L (×2,5), **défaut M**. S'applique aux GIF de contenu en bloc uniquement (identifiés par le
+MIME réel de la probe, jamais l'extension d'URL) ; les images normales, smileys, cc-images et
+GIF inline ne changent pas ; les caps de largeur/hauteur continuent de borner le résultat ;
+le décodage reste au natif (agrandissement au dessin, net à ×1). Répond aux retours de
+l'appel à tests tailles (GIF trop petits depuis le no-upscale strict).
+
+## `0.34.6` — `local` — 2026-07-26
+
+Fixes pré-promotion (#953, bloquants F2/F3/F5/F6 de la review beta) : la réponse rapide
+survit à une rotation pendant l'envoi (l'état est restauré, plus de rejet fantôme du
+résultat) ; les brouillons de réponse rapide sont strictement isolés entre comptes
+(re-capture de l'owner à chaque ouverture, sessions scellées, gardes de lecture/suppression
+en base — un compte ne peut plus lire ni effacer le brouillon d'un autre) ; la création de
+topic n'est plus soumise pendant un upload d'image en vol ; la spec navigation reflète le
+défaut plein écran de l'éditeur.
+
+## `0.34.5` — `local` — 2026-07-26
+
+Réglage « Posts en pleine largeur » — Lot 5 (#884) de la passe images (#876), arbitrage
+XaTriX : optionnel, 2 états, défaut inchangé. Nouveau réglage dans Réglages → Topic :
+en pleine largeur, les posts s'affichent bord à bord (fond plat, bande d'identité sur
+toute la largeur, fine ligne de séparation) au lieu des encarts — plus de place pour le
+texte ET les images (le dimensionnement de la passe images s'applique à la largeur
+gagnée). Les gouttières ne disparaissent qu'entre les posts : sondages, frontières de
+page et fin de sujet gardent leur respiration. Accessibilité : chaque post est un groupe
+TalkBack avec le pseudo en titre (navigation par titres), dans les deux modes. Le mode
+encart par défaut est strictement inchangé (rendu byte-identique).
+
+---
+
+## `0.34.4` — `local` — 2026-07-22
+
+Les états d'erreur & retry — Lot 4 (#960) de la passe images (#876, contrat v1.5 §6,
+la mort de #813/B5) : registre d'essais par URL (UNE tentative probe + UNE tentative
+painter par génération — une URL morte n'est plus re-requêtée à chaque recomposition
+ni par chaque occurrence), TTL négatif 60 s qui ouvre une NOUVELLE génération (jamais
+la courante), slot d'erreur VISIBLE dans la boîte réservée (bloc ET inline — fini le
+vide silencieux), retry manuel par TAP sur le slot (« Réessayer », universel : corps
+de post, MP, aperçu, signatures), pull-to-refresh scopé aux SEULES images en échec de
+la page (les images saines ne sont jamais re-décodées), protocole G2 (une image dont
+la mesure échoue prend sa boîte de son propre décodage — SVG s'affiche ainsi), coil-svg
+embarqué, AVIF selon décodeur device avec état d'erreur propre + retry sinon. Gates
+Sol P1..P4 + gate final (2 NO-GO fermés en TDD : générations qui gelaient un axe en
+vol, éviction du cache de géométrie). 513 tests :core:ui.
+
+## `0.34.3` — `local` — 2026-07-21
+
+Le sizing & décodage density-aware — Lot 3 (#959) de la passe images (#876, contrat
+v1.5 §3/§7/§9) : équation unique en PIXELS PHYSIQUES (no-upscale réel : 1 px source ≤
+1 px écran, hauteur dérivée de la largeur arrondie), fraction de largeur dédiée
+`fImage = 0,95` sur les 3 chemins ([AMENDEMENT-v1.5-1], levier A #884), cap hauteur
+bloc CLAMPÉ à la fenêtre utile (le legacy écran disparaît), probe intrinsèque
+header-only (fini l'écrêtage 1024 des grandes photos — B8 ; EXIF gardé, GIF réels
+OK), décodage §7 par buckets 256/facteur commun ≤ 2048 avec la taille DANS les clés
+de requêtes (netteté — bug nicko #842), GIF gatés (boîte finale ∧ viewport réel ∧
+RESUMED — prefetch et arrière-plan figés), floor 16 sp retiré du chemin mesuré
+(slots cold/cc seulement). [AMENDEMENT-Lot3-1] : hitbox au-delà du minimum touch
+target plateforme (a11y, approbation a posteriori). Gates Sol : cadrage r2 GO,
+mini-gate P2 GO, gate final r2 GO.
+
+## `0.34.2` — `internal` (dev) — 2026-07-21
+
+Les interactions images — Lot 2 (#958) de la passe images (#876, contrat v1.5 §5) :
+tap sur une image liée = ouvre le lien, appui long = menu image, désormais AUSSI pour
+les miniatures liées en pleine phrase (split de la `LinkAnnotation` — le lien
+n'intercepte plus le geste, bug CharLee/B6) ; hitbox du geste = le bitmap (hors
+padding §4) ; MP, aperçu éditeur et signatures : images totalement inertes
+(capability hôte) ; a11y A11Y-1..5 (alt HFR + fallback « [image] », nœud stable en
+erreur, aucune action fantôme). [AMENDEMENT-Lot2-1] (garde sélection retirée — le
+tap ouvre le lien et ferme la sélection) et [AMENDEMENT-Lot2-2] (`Role.Image` +
+`onClickLabel`, `Role.Link` inexistant en Compose stable) approuvés + gatés Sol.
+
+## `0.34.1` — `internal` (dev) — 2026-07-20
+
+Le renderer segmenté branché — Lot 1B (#957, PR #966), le lot visible de la passe
+images (#876, contrat v1.4).
+
+- Modifié : la topologie inline/bloc des images est désormais STRUCTURELLE (§2) — les
+  galeries deviennent des colonnes de blocs espacés de 8 dp (fini le collage B3), les
+  petites images isolées deviennent des blocs à taille native, les images en pleine
+  phrase restent dans le flux du texte (fini la rupture de paragraphe), les fragments
+  de texte entre galeries survivent à leur place (le tout-ou-rien tinc est mort).
+- Ajouté : respiration de 4 dp de chaque côté des images de contenu dans la prose (§4) ;
+  boîte d'attente déterministe des blocs non mesurés (cold §6, plafond fenêtre v1.4) ;
+  le rafraîchissement explicite (#813) recrée aussi les painters des blocs.
+- Retiré : la promotion mesurée (#224 option B) et ses seuils — la mesure ne fait plus
+  que dimensionner.
+- Verdicts banc S10e (topic 148760) : structure 2.7/3.1/3.x/4.x/5.x/8.x/13.1 verte,
+  témoins #175/#256 inchangés ; B1/B4 partiels attendus (Lot 3), B5 au Lot 4.
+- Gate GPT-5.6 Sol : GO au r3 (2 NO-GO instructifs, dont un vrai bug §4 corrigé avant
+  merge). 427 tests :core:ui.
+
+## `0.34.0` — `internal` (dev) — 2026-07-20
+
+Premier lot applicatif de la passe images (#876, contrat v1.4 gelé) — Lot 1A (#956, PR #964).
+
+- Ajouté : policy pure de segmentation `InlineSegment`/`MediaRun` (topologie inline/bloc
+  décidée par la structure de l'AST, contrat §2) + 48 tests dont 14 sur la fixture réelle
+  du banc images (topic 148760, 45 cas). AUCUN changement visuel : la policy n'est pas
+  encore branchée au renderer (Lot 1B).
+- Fixture `topic_page_banc_images_876.html` + provenance ; divergence de canal de capture
+  fichée #963.
+
+## `0.33.0` — `internal` (dev) — 2026-07-19
+
+Premier lot du chantier « barres » #882 (P1) — deux reviews indépendantes (Codex GO + code-review
+multi-agents, aucune issue retenue).
+
+- Vue Topic : la **rangée d'actions du post** (Répondre, Citer, etc.) passe à une hauteur de
+  **48 dp réels** (cible tactile conforme) et la **pill dynamique « Ajouté à la citation »** est
+  supprimée. Résultat : **zéro décalage de mise en page** au tap « + Citer » (plus de saut du post)
+  et un gain d'environ **16 dp par post** en préset Confort.
+
+## `0.32.0` — `internal` (dev) — 2026-07-15
+
+Décision produit #951 : la feuille de réponse rapide n'est pas correctement terminée.
+
+- Éditeur : la **feuille de réponse rapide passe en expérimental** (opt-in). Le défaut de
+  « Surface d'écriture » devient **« Toujours plein écran »** ; les deux presets feuille sont
+  étiquetés « (expérimental) » dans les réglages (pattern #805). Les utilisateurs qui avaient
+  déjà choisi un preset gardent leur choix.
+
+## `0.31.0` — `internal` (dev) — 2026-07-15
+
+Premier lot du chantier couleurs #883 (arbitrage XaTriX sur la galerie V2 : la refonte
+complète des palettes part en phase suivante, seul le tertiaire change maintenant).
+
+- Thème : l'accent tertiaire **ambre** (« jaune ») est remplacé par une **ardoise** dans les
+  5 palettes (Rose clair/sombre, AMOLED, Rouge REDFACE1 clair/sombre). Visible sur la bande du
+  post ciblé (ancre de scroll), le bouton d'envoi armé, les barres des citations imbriquées
+  alternées et le badge sticky/lock des listes forum. Le jaune des drapeaux favoris
+  (FlagPalette) est découplé et ne change pas.
+
+## `0.30.1` — `internal` (dev) — 2026-07-15
+
+Lot v1.1 de la loupe — retours communautaires 0.30.0 (fil DEV), même journée.
+
+- Loupe : plafond de zoom relevé à **3×** (demande unanime) ; au-delà, place au futur viewer d'images.
+- Loupe : **glisse verticale amortie** après un déplacement zoomé (décélération rapide, bornée, jamais après un pincement — le « lancer en sucette » de RF1 est structurellement impossible) (#182).
+- Fix #946 : pincer sur une citation dépliée ne la replie plus (le changement structurel du mode replié jetait l'état des citations).
+
+## `0.30.0` — `internal` (dev) — 2026-07-15
+
+Chantier pinch-to-zoom #182 (option A) — POC #935 GO (3 relevés, matrices émulateur + S10e), durcissement #936, production #937.
+
+- **Loupe globale de lecture** : pinch-to-zoom graphique éphémère de la page topic (esprit RF1) — plafond 2,5×, rubber-band saturant, pan 1 doigt (Y = vrai scroll + complément borné au bord bas), chip « 1× », reset au changement de page/sujet (#182, #935, #937).
+- Pendant le zoom : swipe de page, pull-to-refresh, double-tap refresh et sélection suspendus ; **taps/appuis longs inertes (mode replié annoncé sur le fil DEV)** — dézoomer pour interagir.
+- `topicPageSwipe` : annulation multi-touch native (2e doigt pendant un drag non commité = spring-back, jamais de navigation) (#936).
+- 32 tests ajoutés (maths de mapping, matrice de gestes, multi-touch swipe) ; gates croisés Sol/gpt-5.5/review Claude indépendante.
+
+## `0.29.2` — `internal` (dev) — 2026-07-13
+
+**Batch autonome de l'après-midi** (5 chantiers, gates croisés Claude Fable 5 ↔ GPT 5.6 Sol : deux fixes codés par Sol et gatés par Claude, trois l'inverse).
+
+### Fixes
+- **#918 — recherche globale** : la rangée d'onglets catégories ne disparaît plus après une bascule de catégorie (HFR n'embarque pas le pivot dans les réponses mono-catégorie ; il est désormais conservé). [codé par Sol]
+- **#545 — édition de ses propres posts** : les profils HFR avec « Affichage des outils » désactivée (affichoutils=0) retrouvent Modifier/Supprimer — l'ownership est reconnu par le pseudo de session quand HFR ne sert pas la toolbar (cause reproduite live ; les gardes MP-à-soi/auto-masquage suivent).
+- **#532 — lignes vides alignées sur le web** : contrat serveur capturé live (HFR compresse : n lignes vides → floor(n/2)+1 visibles, sans plafond) ; l'app sous-rendait ces runs depuis #466. Rendu visible sur les posts multi-paragraphes. [codé par Sol]
+- **#872 (a) — libellé « Contenu BBCode »** : épinglé au-dessus du viewport scrollable des éditeurs plein écran — il ne peut plus être rogné par le scroll d'ouverture, à aucun fontScale (nom accessible conservé via la sémantique du champ).
+
+### Améliorations
+- **#900 (volet 2) — panneau smileys** : la grille se cale sur 62 % de la hauteur d'écran (plancher 320 dp) — la feuille atteint ~3/4 de l'écran (mesuré 73,8 % au dogfood), réponse au retour de CharLee.
+
+## `0.29.1` — `internal` (dev) — 2026-07-13
+
+**Trio multiquote** (#868/#869/#870, PR #920 — le lot retenu de la nuit, mergé après dogfood émulateur complet des 8 contrats du cadrage, au matin post-reboot).
+
+### Vue topic / composer
+- **#868 — le FAB « Citer N » survit** à l'ouverture de l'éditeur + retour sans envoi : le panier n'est plus vidé à l'OUVERTURE mais à l'**envoi réussi** d'une session qui l'a consommé (flag explicite porté par le chemin d'ouverture — « Citer » simple, réponse, édition et échecs d'envoi ne le vident jamais ; « Tout vider » reste le reset manuel).
+- **#869 — le compteur repart de N**, plus jamais de reset à 1 après un aller-retour.
+- **#870 — plus de citations fantômes** : la feuille de réponse remet ses citations exactement au set livré à chaque ouverture (plus de fusion avec une session précédente).
+
+## `0.29.0` — `internal` (dev) — 2026-07-13
+
+**Lot de nuit 12→13/07** (#813 images fantômes, #862 épinglés drapeaux, trio éditeur #873/#900/#872, garde citation #583, fix loupe #913 de la veille). Chantiers cadrés + gatés hors-bande (GPT-5.6 Sol) ; vérification visuelle émulateur non réalisée cette nuit (hôte KVM HS — reboot machine requis), couverture par tests JVM/Robolectric + fixtures serveur réelles.
+
+### Vue topic
+- **#813 — les images fantômes se récupèrent** : une image inline dont le premier chargement a échoué (hébergeur en panne, coupure) restait un carré quasi invisible jusqu'à « citer puis revenir ». Le tirer-pour-rafraîchir (et le double-tap) relance désormais mesure ET chargement. (PR #919)
+- **#913 — la loupe de recherche reste cohérente** après la fermeture d'une recherche pendant une transition de page (reliquat de la veille). (PR #914)
+
+### Drapeaux
+- **#862 — les sujets épinglés flaggés apparaissent dans les listes** (favoris/cyan/rouges) : le serveur les omet de ses buckets dans TOUTES les catégories (prouvé par captures) ; le supplément `topics/last` couvre maintenant les 19 catégories, en UN balayage partagé par les trois types (barrière de génération au refresh — cadrage Sol 5 rounds). (PR #922)
+
+### Éditeur
+- **#873 — l'aperçu affiche les smileys standards** (`:jap:`, `:lol:`, `:pt1cable:`… — 51 tokens), validés contre la table canonique (pas de faux positifs type `10:30:45`). Les persos `[:name]` restent en texte (résolution d'URL = suivi) ; les émoticônes ponctuation (`:)`, `:D`) volontairement non converties en aperçu. (PR #921)
+- **#900 — panneau smileys wiki compacté** : ligne de titre retirée (les onglets nomment la surface, TalkBack garde une annonce paneTitle) — une rangée de plus visible. (PR #921)
+- **#872 — le libellé « Contenu BBCode » ne se rogne plus** aux grandes tailles de police (réservation du label indexée sur l'échelle de police). (PR #921)
+- **#583 — une citation qui ne se matérialise pas bloque l'envoi** (erreur retryable) au lieu de poster silencieusement SANS le bloc cité. (PR #922)
+
+## `0.28.1` — `internal` (dev) — 2026-07-13
+
+**Stale-while-switching** (#910, PR #911 — retour immédiat de XaTriX sur la 0.28.0 : « ça saute/flash toujours sur une page non connue »).
+
+### Vue topic
+- **Plus de squelette flashé sur un changement de page rapide** : la page quittée reste affichée (hairline discrète) pendant que la nouvelle charge ; le squelette n'apparaît que si le chargement dépasse ~250 ms. Une page en cache Room (session antérieure) bascule sans aucun flash.
+- La pilule ne dit plus jamais « Chargement… » par-dessus un contenu affiché ; la barre (loupe, repli auto-hide, titre) ne change plus d'état pendant le chargement d'un switch.
+- Gardes : un switch échoué affiche l'erreur (jamais un état figé) ; pull-to-refresh inactif pendant la transition.
+
+## `0.28.0` — `internal` (dev) — 2026-07-12
+
+**Zéro flash au changement de page** (#895 étapes 4-5, PRs #905/#907/#908 — le fond du chantier, après les quick wins de 0.27.3).
+
+### Vue topic — moteur de pagination in-ViewModel
+- **Plus aucun flash au changement de page** : la pagination vit dans un seul écran retenu (une seule entrée de navigation pour tout le topic) — plus de squelette plein écran ni de barre recréée entre deux pages ; le squelette ne reste que pour une page jamais visitée.
+- **Revisite instantanée** : les 5 dernières pages lues sont gardées en mémoire — y revenir est immédiat, à la position exacte où on les avait laissées.
+- **Retour de citation fidèle** (#782 renforcé) : après « aller au message cité », le retour ramène à la position exacte du tap, même en chaîne ; un changement de page manuel réinitialise la chaîne (comportement navigateur), un 2e retour sort du topic.
+- **Landing « page précédente » conservé** (#412) : reculer d'une page atterrit en bas (sens de lecture), sauf position déjà connue pour cette page.
+- Post-submit : la publication rafraîchit la bonne page dans le MÊME écran (débordement #226 géré en interne, plus de re-navigation) ; la position de lecture survit à la mort de process (page + ancre).
+- Nettoyage : transition instantanée topic→topic supprimée (code mort de l'ère « une route par page »).
+
+## `0.27.4` — `internal` (dev) — 2026-07-12
+
+**Duo picker smileys** (retours tinc/nicko du jour sur le fil DEV — fixes livrés en parallèle par sub-agents, gates Codex GO).
+
+### Éditeur — sélecteur de smileys
+- **Fini les petits smileys flous** (#871, PR #903) : les persos plus petits que la cellule s'affichent à leur taille intrinsèque (même pipeline de mesure que le rendu des posts, #175), jamais étirés ; cap 44 dp conservé, builtins inchangés.
+- **Curseur en fin de mot** (#901, PR #904) : la recherche restaurée à la réouverture du panneau (#824) garde le terme et place le curseur à la FIN — effacer ou compléter est immédiat.
+
+## `0.27.3` — `internal` (dev) — 2026-07-12
+
+**Quick wins zéro-flash** (#895, PR #899 — premier lot du chantier « zéro flash au changement de page » ; le fond, pagination intra-topic dans un même ViewModel, suit dans un lot dédié).
+
+### Vue Topic — changement de page
+- **La pilule de la barre dit la vérité** : une page servie du cache pendant son actualisation affiche « page X / Y » (le contenu réellement à l'écran) au lieu de « Chargement… » ; « Chargement… » est réservé au vrai chargement sans contenu.
+- **Signal d'actualisation discret** : fine barre de progression (2 dp) sous la top bar pendant l'actualisation d'une page en cache — bande toujours réservée, aucun décalage de mise en page ; annonce d'accessibilité « actualisation en cours » sur la pilule.
+- **Prefetch sans réseau inutile** : le préchargement des pages voisines ne refait plus de requête quand la page est déjà en cache (et n'écrase jamais une version authentifiée — garde couverte par tests).
+
+## `0.27.2` — `internal` (dev) — 2026-07-12
+
+**Recherche intra-topic v2** (#894, retours XaTriX sur 0.27.1 — contrat `transsearch` re-vérifié live, cadrage + gates Codex, dogfoods sur le serveur réel).
+
+### Vue Topic — recherche
+- **Le mode non-filtré refonctionne** (PR #896) : le form des réponses transsearch (sans `firstnum`) parse à nouveau — le curseur de match n'est plus perdu (« Aucun résultat » systématique corrigé).
+- **Ancrage parité web** (PR #897) : la recherche part de la page courante vers la fin (ancre de session explicite) ; nouvelle option « **Chercher depuis le début du sujet** » (défaut décoché).
+- **« Afficher les résultats suivants »** (PR #897) : quand HFR tronque sa fenêtre de scan (~200 matches), un footer de continuation reprend au curseur annoncé — le batch suivant remplace la liste et s'ouvre en haut. Le pager `p` de 0.27.1 (sans effet serveur) est supprimé.
+- Les étapes ‹ › et le retour au premier résultat re-soumettent les critères figés de la recherche affichée, plus jamais la barre en cours d'édition.
+
+## `0.27.1` — `internal` (dev) — 2026-07-12
+
+**Lot de 4 fixes Vue Topic** (#877, #879, #880, #863 — cadrage groupé, gate Codex par PR, dogfood émulateur de chaque flux dont migration Room v14→v15 en conditions réelles).
+
+### Vue Topic
+- #877 : **top bar stable pendant les chargements** (PR #889) — la pilule affiche « Chargement… » tant que la page est provisoire (fini le numéro de page périmé pendant les transitions), la loupe reste visible en mode chargé authentifié, fetch du formulaire de recherche latest-wins.
+- #879 : **recherche intra-topic conforme au contrat transsearch** (PR #891) — le mode filtré couvre TOUT le sujet (plus d'ancrage à la page courante), pagination des résultats filtrés (« résultats suivants ») avec critères figés à la soumission et retour en tête de liste.
+- #863 : **badge « cité ×N » = compteur serveur** (PR #892) — « Message cité N fois », cross-pages et autoritaire, persisté en cache (migration Room v15) ; l'index local limité à la page courante est supprimé.
+
+### Éditeur & réponse rapide
+- #880 : **le curseur reste visible au-dessus du clavier** à l'escalade réponse rapide → plein écran (PR #890) — le suivi du caret se re-déclenche quand le clavier finit de s'installer.
+
+## `0.27.0` — `internal` (dev) — 2026-07-12
+
+**Lot d'arbitrages et reliquats de la phase** (#792, #809, #881, #805-exp — cadrage + gates Codex par PR, review multi-angles sur #809, dogfood émulateur de chaque flux).
+
+### Vue Topic
+- #809 (#tagsuggestion tinc) : **appui long sur le titre → retirer le drapeau** du sujet courant (PR #887) — confirmation avant retrait, résultat en toast, la liste Drapeaux se met à jour sans refetch. Un drapeau d'un onglet jamais ouvert est retrouvé à la demande. Le tap court (dépliage du titre) est inchangé.
+- #792 (suggestion Dintr-un lemn) : **« Envoyer un MP »** dans le menu contextuel « … » d'un post (PR #886) — ouvre le composeur avec l'auteur pré-rempli. Absent sur ses propres posts et hors session.
+
+### Éditeur & réponse rapide
+- #881 (arbitrage du fil) : **le curseur démarre sous la citation** (PR #885) — un retour à la ligne unique après le bloc [quotemsg] quand il termine le champ, feuille et plein écran.
+- #805 : le réglage **« Citations en cartes » est étiqueté (expérimental)** (PR #885) — défaut inchangé (désactivé) ; le chantier design des cartes est reporté à l'itération Vue · Topic 2.
+
+## `0.26.3` — `internal` (dev) — 2026-07-10
+
+**Suite de la nuit rf2-12** (lot d'issues non démarrées de la phase).
+
+### Éditeur
+- #816 (suggestion thibw) : le **sélecteur de smileys respecte l'échelle du forum** (PR #865) — les standards s'affichent près de leur taille native (petits, pixel-art net), les persos remplissent la cellule. Fini l'uniforme 30 dp qui rendait les standards énormes et flous et les persos à l'étroit.
+
+### Messages privés
+- #812 : **tourner l'écran dans une conversation ne ramène plus à la liste des MP** (PR #866) — le nettoyage de session se rejouait à chaque recréation d'activité et résetait la pile de navigation Messages ; il est désormais limité aux vraies transitions de session (login, logout, changement de compte).
+
+## `0.26.2` — `internal` (dev) — 2026-07-10
+
+**Écriture sur écran court** (retour de la checklist de test, thibw — PR #861, cadrage + gate Codex GO, dogfood émulateur 1080×1700 et 1080×2400).
+
+### Éditeur & réponse rapide
+- Le **champ de saisie n'est plus jamais écrasé par le clavier** (réf #555) : dans l'éditeur plein écran, tout ce qui concurrence le champ (bannière de brouillon, bandeaux d'erreur, cartes de citation) vit dans une zone haute budgétée qui défile au-delà de son budget — le champ garde 96 dp minimum par construction. À l'apparition d'une alerte, la zone se recale en haut.
+- **« Envoyer » toujours visible dans la réponse rapide** (réf #855) : seule la zone des champs défile, la rangée « Envoyer » est épinglée au-dessus du clavier.
+- **Fermer la réponse rapide = un seul retour** (réf #854) : la feuille ne s'arrête plus à mi-hauteur quand un petit écran l'avait forcée en pleine hauteur (fini le « 3× retour pour revenir au sujet »).
+
+## `0.26.1` — `internal` (dev) — 2026-07-07
+
+**Réponses aux deux premiers retours du fil DEV sur la 0.26.0** (même soirée).
+
+### Lecture (vue Topic)
+- #842 : le **plafond de hauteur des images bloc est recalibré pour mobile** — `max(400 dp, 0,5 × hauteur d'écran)` au lieu du flat 200 dp de #610 (PR #844). Une image quasi carrée/portrait remplit maintenant ~90 % de la largeur (mesurée à ~48 % sur le retour du fil) ; paysage inchangé ; toujours borné (pas d'explosion du scroll), aucun upscale. Le 200 n'avait pas de base web réelle (la seule règle HFR est `max-width: 90%`) — l'étiquette « parité web » de #610 est corrigée dans le code. Chemin inline inchangé (200 sp, conservateur dans la prose).
+
+### Éditeur & brouillons
+- #843 : la **bannière « Un brouillon non envoyé a été retrouvé » (Restaurer / Ignorer) est de retour sur les ouvertures à froid** de l'éditeur plein écran (PR #845) — FAB en preset plein écran, « Citer » routé vers l'éditeur, appui long #823, « Citer N » 3+. `resumeSharedDraft` avait dérivé de son contrat #790 : ces chemins ré-appliquaient silencieusement un vieux brouillon, sans choix d'ignorer. L'escalade feuille → éditeur garde l'append silencieux (#790 inchangé).
+
+## `0.26.0` — `internal` (dev) — 2026-07-07
+
+**Vague 5 Vue Topic (#604)** : interactions image, lot citations, rendu média parité web, gestes d'appui long, recherche smileys, fix Drapeaux.
+
+### Lecture (vue Topic)
+- #831 (partiel) : **appui long sur une image de post → menu contextuel** (PR #837) — Copier l'URL, Ouvrir dans le navigateur, Enregistrer (octets originaux via le cache disque Coil, GIF préservés ; « Taille réelle » arrive avec le viewer #182). Le tap court sur une image liée ouvre toujours le navigateur (#257). Limite connue : le menu n'est pas accessible sur les images `[url=][img]` restées inline dans un paragraphe mixte — l'issue #831 reste ouverte pour ce cas.
+- #610 : le dimensionnement des `[img]` s'aligne sur HFR web (max-width 90 %, max-height ~200 dp, PR #836) — parité visuelle avec le site, ni upscale ni débordement.
+- #256 : fast-path de rendu pour le marqueur `hfr-cc-image` (PR #835) — matching strict sur la query (garde anti-fragment), règle « un intrus = pas de marqueur ».
+
+### Citations
+- #785 : la black-list masque aussi le **contenu des citations** d'un auteur bloqué (PR #838) — bandeau « Citation de X masquée », tap pour révéler.
+- #782 : après un saut vers un post cité, **le retour ramène à la position de lecture précédente** (PR #839) — pile de retour par onglet, vidée à la sortie du topic.
+- #784 : les **citations longues sont repliées** avec un aperçu (PR #840) — tap sur le corps pour déplier, l'en-tête continue de sauter au post cité.
+
+### Gestes
+- #822/#823 : appui long sur les **FAB de pagination → première/dernière page**, appui long sur **Citer → éditeur plein écran** (PR #833) — haptique + libellés TalkBack.
+
+### Éditeur
+- #441/#824 : recherche de smileys unifiée derrière `SmileyPickerController` (un seul chemin feuille/plein écran) et **recherche restaurée à la réouverture** du picker, onglet inclus (PR #834).
+
+### Drapeaux
+- #825 : le filtre « masquer les catégories vides » ne s'applique plus à l'**onglet lus** (PR #832).
+
+## `0.25.2` — `internal` (dev) — 2026-07-05
+
+**Presets de surface d'écriture (#806)** + lot d'hygiène d'état (audit rf2-10) + deux fixes de veille.
+
+### Éditeur & réponse rapide
+- #806 : réglage « **Surface d'écriture** » (Réglages > Édition et publication, PR #829) — « Toujours la feuille » (défaut, comportement actuel), « Feuille sauf citations » (toute citation ouvre l'éditeur plein écran — la demande du fil DEV), « Toujours plein écran ». L'escalade feuille → plein écran reste disponible partout ; réglage orthogonal à « Citations en cartes ».
+- #808 : dans la feuille de réponse rapide, le bloc de cartes de citation est plafonné (~2 cartes, scroll interne, PR #827) — le champ et « Envoyer » restent toujours visibles clavier levé.
+- #794 : la recherche du wiki smileys applique un **ET implicite** entre les termes (PR #828) — « chat noir » cherche l'intersection, plus l'union ; les opérateurs saisis (`+`/`-`) sont préservés.
+
+### Corrections d'état (audit 05/07, PR #826)
+- Réglages : les valeurs ne sont plus jamais périmées au retour sur l'écran (re-synchronisation continue, gate #788).
+- Éditeurs (sujet, MP compose/réponse) : la dernière frappe n'est plus perdue à la fermeture (flush du brouillon avant fermeture, pattern #803) ; une fermeture ne peut plus rester bloquée par un stockage défaillant.
+- Lecture : les couleurs `[color]` illisibles sont éclaircies/assombries a minima selon le thème (teinte préservée) — un `[#000080]` redevient lisible en sombre/AMOLED.
+
+## `0.25.1` — `internal` (dev) — 2026-07-05
+
+**Citation multiple : action « Tout vider »** (dernier volet de #436, PR #820).
+
+### Éditeur & réponse rapide
+- #436 : un **appui long sur le FAB « ❝N »** vide toute la sélection de citation multiple d'un coup (haptique + libellé TalkBack « Vider la sélection de citations »). Le tap court reste inchangé (ouvre l'éditeur / la feuille). Rendu en FAB « maison » (`Surface` + `combinedClickable`) pour que le geste long soit reconnu là où le compteur est visible. Clôt #436 (les volets marquage des posts et panier survivant au back étaient déjà livrés).
+
+## `0.25.0` — `internal` (dev) — 2026-07-05
+
+**Citations : retour du BBCode inline par défaut** (arbitrage XaTriX sur #805, PR #818) + remise en phase des docs (PR #817).
+
+### Éditeur & réponse rapide
+- #805 : les **cartes de citation deviennent une option, désactivée par défaut**. Par défaut, « Citer » et « Citer N » insèrent le BBCode `[quotemsg]` directement dans le champ — modifiable, réponses intercalées possibles, parité avec le site. Les cartes compactes (#604 lots 2-3) restent disponibles via Réglages > Édition et publication > « Citations en cartes ».
+- La citation s'insère **à la fin du texte en cours, sans jamais perdre la frappe** (matérialisation à l'ouverture, annulée si la feuille est fermée) ; « Citer N » ≥ 3 ouvre toujours l'éditeur plein écran, désormais pré-rempli des blocs `[quotemsg]` fusionnés ; l'escalade feuille → plein écran et les brouillons (#405) suivent sans changement.
+
+### Docs
+- PR #817 : vitrine et specs réalignées sur le code (bêta 0.18.0, gestes Drapeaux post-#603, couverture Roborazzi réelle, ADR-001 amendé, specs v0.11.0).
+
+## `0.24.1` — `internal` (dev) — 2026-07-03
+
+**Fix express dogfood v220** (PR #810).
+
+### Vue Topic
+- #807 (nicko, Dintr-un lemn) : **capitalisation automatique en début de phrase dans la réponse rapide** — régression de surface du fix #237 (le champ de la feuille ne passait pas la consigne autoCap à l'IME).
+
+## `0.24.0` — `internal` (dev) — 2026-07-03
+
+**Phase « Vue Topic » (#604) — vague 4 « Postage », lot 4a polish** (PR #803 — cadrage + gate Codex NO-GO→fixes→GO, dogfood émulateur).
+
+### Vue Topic
+- **Réponse rapide** : le contenu de la feuille défile — plus de bouton « Envoyer » hors d'atteinte clavier ouvert sur petit écran ou en paysage.
+- **Éditeur plein écran** : quitter l'éditeur (retour système) enregistre d'abord le brouillon — les dernières frappes ne sont plus perdues si on sort dans la foulée ; le retour est inerte pendant un envoi en cours (impossible d'interrompre un POST en quittant).
+- **Accessibilité des cartes de citation** : TalkBack annonce le résultat des actions (« Citation de X retirée », « déplacée en position N ») et le focus est rendu à la carte voisine après un retrait.
+
+## `0.23.0` — `internal` (dev) — 2026-07-03
+
+**Phase « Vue Topic » (#604) — vague 4 « Postage », lot 3** (PRs #800 #801 — cadrage Codex 8 forks, gates GO-avec-réserves/GO, dogfood émulateur).
+
+### Vue Topic
+- **Citations en cartes dans l'éditeur plein écran** (mockup P3) : fini le pavé de BBCode `[quotemsg]` dans le champ — les citations s'affichent en cartes compactes au-dessus (réordonnables ↑/↓, supprimables ✕, « Tout vider » #436), le champ ne contient que votre texte, le BBCode est assemblé à l'envoi (un échec ne perd rien). La bascule réponse rapide → plein écran transporte les cartes.
+- **Le panier multi-citations (« Citer N ») choisit sa surface** : 1 ou 2 citations ouvrent la réponse rapide avec les cartes pré-armées ; 3 et plus filent directement en plein écran.
+
+## `0.22.0` — `internal` (dev) — 2026-07-03
+
+**Phase « Vue Topic » (#604) — vague 4 « Postage », lot 2** (PRs #797 #798 — cadrage 9 forks + gates Codex gpt-5.5, dogfood émulateur).
+
+### Vue Topic
+- **Citations-cartes dans la réponse rapide** : « Citer » ouvre désormais la feuille de réponse rapide avec une carte compacte « ❝ auteur — extrait » (citer un autre message ajoute une carte) ; suppression et réordonnancement ↑/↓ par carte ; l'envoi matérialise les `[quotemsg]` dans l'ordre des cartes, le texte à la suite ; la bascule plein écran emporte les citations. Un échec d'envoi ne perd ni le texte ni les cartes.
+- #790 (styx42, Dintr-un lemn) : **la bascule réponse rapide → plein écran reprend le texte automatiquement** — plus d'étape « Restaurer » sur ce chemin (la bannière reste pour les brouillons de sessions antérieures).
+
+## `0.21.0` — `internal` (dev) — 2026-07-03
+
+**Phase « Vue Topic » (#604) — vague 4 « Postage », lot 1** (PR #788 — cadrage + gate Codex gpt-5.5 NO-GO→fixes→GO, dogfood IME émulateur).
+
+### Vue Topic
+- **Réponse rapide en feuille** : le bouton ✎ ouvre une bottom sheet (champ texte, Envoyer, bouton plein écran) au lieu de l'éditeur complet. Le brouillon est partagé avec l'éditeur plein écran (#405) : l'escalade transfère le texte, la fermeture ne perd jamais la saisie (autosave), la réouverture reprend où on en était. Erreurs typées (anti-flood, sujet fermé, session) et « Confirmation avant publication » (#312) respectées. Citations, upload et smileys restent en plein écran (lots 2-4 à venir).
+
+## `0.20.2` — `internal` (dev) — 2026-07-03
+
+**Retours bêta gestes + top bar Topic** (PRs #781, #786 — gates Codex gpt-5.5, dogfoods émulateur).
+
+### Gestes (Drapeaux & Vue Topic)
+- #752 : **zone morte au départ des swipes sur les bandes de gestes système** — un swipe horizontal qui démarre dans la bande latérale (navigation gestuelle) est laissé au geste back système au lieu d'entrer en compétition avec le changement d'onglet (Drapeaux) ou de page (Topic, #282) ; fini la frontière imprévisible au ras du bord. Navigation 3 boutons : comportement strictement inchangé (insets nuls). Bornes clampées contre les insets aberrants (split-screen/foldable).
+
+### Vue Topic
+- #772 (tinc) : **titre dépliable au tap** — le titre tronqué de la top bar se déplie sur 2 lignes au tap (la barre grandit d'une ligne), re-tap ou changement de page le replie ; la pilule « page X / Y » garde sa propre cible (sélecteur de page). Annonces TalkBack dédiées (afficher/réduire + état).
+
+## `0.20.1` — `internal` (dev) — 2026-07-03
+
+**Quick wins vue Drapeaux — retours bêta 0.18.0** (PRs #776, #777 — cadrage + gate Codex gpt-5.5).
+
+### Drapeaux
+- #751 (thibw) : le raccourci **« +lus »** (tap sur la zone type de la pilule) fonctionne désormais sur **tous les onglets** — Lu et Favoris rejoignent Cyan et DT (même chemin persisté, même anti-double-tap ; l'indicateur œil/anneau et le suffixe du picker suivent l'état sur chaque onglet).
+- #753 (Dintr-un lemn) : le texte de l'état vide « aucune catégorie avec un message non lu » pointe la bonne action — la bascule « +lus » pour revoir les sujets lus (l'ancien texte prescrivait « Masquer les catégories sans non-lu », qui ne réaffiche que les catégories vides).
+
+## `0.20.0` — `internal` (dev) — 2026-07-03
+
+**Phase « Vue Topic » (#604) — vague 3 : redesign de la lecture** (PRs #770, #771, #773, #774 — cadrage + gates Codex gpt-5.5, dogfoods émulateur par lot).
+
+### Vue Topic
+- #599 : **slots FAB figés** — ‹ › ✎ ❝N occupent des emplacements réservés (40 dp) dès le squelette ; plus aucun décalage quand une action apparaît/disparaît (retour antiseptiqueIncolore). Le slot multi-citation vit à l'extrême gauche du cluster.
+- **Header dissous** (mockup « Lecture A ») : la carte d'en-tête du sujet disparaît — le titre et « page X / Y » vivent dans la top bar ; la **pilule « page X / Y » devient cliquable** et ouvre un sélecteur de page en feuille (préc./suiv., saisie, grille) ; « Modifier le premier message » migre dans le menu « … » du premier post (gates #148/#213 inchangées) ; le sondage devient une carte autonome en tête de liste (invariants d'index préservés). L'indicateur scrollTo disparaît (la surbrillance d'arrivée suffit).
+- **Frontières de page lisibles** (retours thibw & styx42) : en fin de page intermédiaire, carte primaire « Page N terminée » + « Continuer vers la page N+1 » (tap = même navigation que le FAB ›, arrivée en haut) ; en fin de sujet, carte outline calme « Fin du sujet » — les deux états ne se confondent plus.
+- #600 : **repère « Dernier message lu » traversant** (retour Colonel MythO) — règle primaire + pilule centrée sous le dernier message lu, à l'ouverture depuis un drapeau uniquement (gate sémantique testée) ; couche distincte de la surbrillance d'arrivée (#200) et de la teinte d'ancre (#104).
+
+## `0.19.2` — `internal` (dev) — 2026-07-03
+
+**Phase « Vue Topic » (#604) — fin de la vague 2 : #459 complet** (PR #768, gate Codex gpt-5.5).
+
+### Éditeurs
+- #459 (2/2) : **upload d'images dans les deux composeurs MP** (réponse et nouvelle conversation) — bouton Uploader, sélection multiple (max 10), un `[img]` par image dans l'ordre, compteur n/N, erreurs typées ; le vocabulaire d'upload (erreurs, progression) est promu dans `:core:ui`, partagé par toutes les surfaces d'édition.
+
+## `0.19.1` — `internal` (dev) — 2026-07-02
+
+**Phase « Vue Topic » (#604) — vague 2 : quick wins navigation & éditeurs** (PRs #763, #764, #765, #766 — cadrage + gates Codex gpt-5.5).
+
+### Vue Topic
+- #699 : l'en-tête d'une citation sourcée (« Citation de X ») devient cliquable (teinté couleur primaire) — tap = saut vers le message cité, avec scroll et surbrillance à l'arrivée, même s'il est sur une autre page. Chaînable de citation en citation.
+- #750 : un lien de notification **email** ouvre enfin le sujet au bon message — HFR met toujours `page=1` dans ces liens ; la vraie page est résolue via le redirect serveur (mécanisme #277 de la recherche) pendant que le squelette s'affiche. Échec réseau = comportement d'avant, jamais pire.
+- #762 : le titre du sujet s'affiche désormais réellement dès la première frame quand on ouvre depuis la liste Drapeaux ou un listing de forum (le cache de titres n'était alimenté qu'après un premier chargement — l'annonce 0.19.0 est maintenant vraie).
+
+### Éditeurs
+- #555 : ouvrir un éditeur (répondre, citer, **éditer un long message**) lève le clavier immédiatement, champ déjà focus — plus besoin de taper dans le champ pour commencer.
+- #250 : l'onglet Wiki du sélecteur de smileys donne le focus à la recherche dès l'ouverture — on tape directement.
+- #459 (1/2) : **upload d'images dans le composeur « nouveau sujet »** — bouton Uploader, sélection multiple (max 10), un `[img]` par image dans l'ordre, compteur n/N, erreurs typées ; même moteur que l'éditeur de réponse. (Reste : le composeur MP.)
+
+## `0.19.0` — `internal` (dev) — 2026-07-02
+
+**Phase « Vue Topic » (#604) — vague 1 : écran de chargement** (mockup « Chargement A » arbitré sur le fil DEV, cadrage + gate Codex gpt-5.5).
+
+### Vue Topic
+- Chargement d'une page : loader centré + « Chargement de la page demandée » + cartes squelettes animées (fini le spinner nu en haut à gauche). Nouvelle primitive partagée `SkeletonBox` dans `:core:ui` (le shimmer d'images #249 y délègue) ; l'animation respecte le réglage système « réduire les animations ».
+- #622 : le compteur de la barre du haut affiche « Chargement… » tant que la page n'est pas parsée — plus jamais un total périmé d'une navigation précédente (« 3 / 10 » corrigé en « 3 / 20 » à l'arrivée). Le contexte du chemin d'erreur (grille des pages connues) est conservé.
+
 ## `0.18.0` — `open` (beta) — 2026-06-29
 
 **Promotion bêta — clôture de la phase « refonte de la vue Drapeaux » (#603)** (cumul des dev 0.17.0 → 0.17.30 + audit de clôture multi-agent Claude Opus + Codex gpt-5.5).

@@ -1,9 +1,6 @@
-Redface 2 v0.18.0 — bêta.
+Redface 2 v0.37.0 — bêta.
 
-Refonte de la vue Drapeaux :
-- Nouvelle barre du haut (drapeau + nom court + « +lus », loupe rétractable, avatar rond).
-- Barre translucide : la liste défile dessous.
-- Loader « redface » au tirer-pour-rafraîchir.
-- « +lus », avatar et glyphe configurables ; recherche sur l'onglet DT.
-- Appui-long : actions rapides, aller à une page, poster.
-- Accessibilité et préservation du défilement par onglet améliorées.
+- La vue des sujets a été entièrement revue : navigation entre pages sans flash, retour précis aux citations, repères de lecture et mode pleine largeur.
+- Pincez la page pour zoomer jusqu'à 3×.
+- Les images respectent mieux leur taille et l'écran ; miniatures et GIF sont plus lisibles, avec actions, erreurs claires et réessai.
+- Répondre et citer est plus fluide — en plein écran (avec envoi d'images) ou via la réponse rapide expérimentale.

@@ -1,0 +1,7 @@
+Capture: forum.hardware.fr live, 2026-07-13
+Provenance: corps de post fourni par le mainteneur pour l'issue #532 ; URL, catégorie et numreponse non fournis.
+Contenu: runs source de 5 lignes vides entre M7/M8 et de 10 lignes vides entre M8/M9.
+Nettoyage: aucun changement de structure ; les balises <p>/<br /> et les &nbsp; sont conservés tels que capturés,
+y compris le spacer <div style="clear: both;"> réel de fin de post et la fermeture </p> (la coupe initiale de la
+capture les avait tronqués — corrigé le 13/07 pour coller au HTML servi).
+Encodage: capture annoncée latin-1 ; contenu utile ASCII.

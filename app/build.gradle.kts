@@ -53,7 +53,7 @@ android {
         // versionName is also surfaced in the app footer via BuildConfig.VERSION_NAME so
         // dogfood builds advertise their lineage to the user.
         versionCode = cliVersionCode ?: 72
-        versionName = "0.18.0"
+        versionName = "0.37.0"
 
         // Manifest placeholder so a side-by-side install (dogfood/preview overlay)
         // can override the launcher label without touching tracked manifest/strings.
@@ -234,9 +234,13 @@ dependencies {
     // coil-network-okhttp for the `AsyncImage` call sites.
     implementation(libs.coil.core)
     implementation(libs.coil.gif)
+    // #960 P4 — SVG [img] payloads: decoder registered in the same singleton config.
+    implementation(libs.coil.svg)
     implementation(libs.coil.network.okhttp)
 
     testImplementation(libs.junit4)
+    testImplementation(libs.coil.core)
+    testImplementation(libs.coil.svg)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.mockk)
     testImplementation(libs.konsist)

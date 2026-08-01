@@ -30,6 +30,9 @@ dependencies {
     // androidx.core.net.toUri for the post-menu « Ouvrir dans le navigateur » action (#362
     // follow-up) — same ktx idiom as the mailto: intent in :app.
     implementation(libs.androidx.core.ktx)
+    // BackHandler for the in-screen #782 quote-jump unwind (#895 étape 4 — the page engine no
+    // longer swaps nav entries, so the interception moved from :app to the screen).
+    implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.hilt.navigation.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
@@ -52,5 +55,10 @@ dependencies {
     testImplementation(libs.androidx.compose.ui.test.junit4)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
+    // #958 — PostRendererHostMatrixTest renders REAL post images through TopicPostCard: the fake
+    // Coil engine keeps the JVM tests off the network (coil is `implementation` in :core:ui, so
+    // the test classpath needs its own coil artifacts).
+    testImplementation(libs.coil.core)
+    testImplementation(libs.coil.test)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 }

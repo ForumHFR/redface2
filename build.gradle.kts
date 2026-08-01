@@ -25,7 +25,7 @@ val detektCliTask = tasks.register<JavaExec>("detektCliCheck") {
         "--report", "html:${reportsDir.get().file("detekt.html").asFile.absolutePath}",
         "--report", "sarif:${reportsDir.get().file("detekt.sarif").asFile.absolutePath}",
         "--report", "md:${reportsDir.get().file("detekt.md").asFile.absolutePath}",
-        "--excludes", "**/build/**,**/.gradle/**,**/.gradle-user/**,**/generated/**",
+        "--excludes", "**/build/**,**/.gradle/**,**/.gradle-user/**,**/generated/**,**/.claude/**",
     )
 }
 

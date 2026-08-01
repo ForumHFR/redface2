@@ -1,7 +1,8 @@
 package fr.forumhfr.redface2.feature.editor
+import fr.forumhfr.redface2.core.ui.editor.UploadError
+import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 
-import fr.forumhfr.redface2.core.ui.editor.WikiSearchState
-import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.ViewModel
@@ -10,6 +11,7 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
+import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
@@ -17,7 +19,11 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
+import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
+import fr.forumhfr.redface2.core.domain.upload.UploadException
+import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
+import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.write.EditFirstPostContext
@@ -72,6 +78,12 @@ class TopicFormViewModel @AssistedInject constructor(
     private val userPreferencesRepository: UserPreferencesRepository,
     private val draftStore: EditorDraftStore,
     private val diagnostics: DiagnosticsLog,
+    // #459 — image upload wiring, same trio as PostEditorViewModel: auth scopes the upload to the
+    // active HFR session, the reader turns a picked Uri into bytes, the repository posts to the
+    // host of the current preference.
+    private val authRepository: AuthRepository,
+    private val uploadRepository: UploadRepository,
+    private val imageUploadReader: ImageUploadReader,
 ) : ViewModel() {
 
     private val _state: MutableStateFlow<TopicFormState> = MutableStateFlow(
@@ -99,8 +111,6 @@ class TopicFormViewModel @AssistedInject constructor(
 
     private var loadedForm: TopicForm? = null
     private var submitJob: Job? = null
-    /** In-flight wiki smiley search ; cancelled on next query change / picker close / selection. */
-    private var smileySearchJob: Job? = null
 
     /**
      * #405 — stable, content-free draft key. New uses the category key ; EditFirstPost needs the
@@ -118,6 +128,17 @@ class TopicFormViewModel @AssistedInject constructor(
 
     /** #405 — debounced autosave coroutine ; relaunched (cancelling the previous) on each edit. */
     private var autosaveJob: Job? = null
+
+    /**
+     * #459 — lowercased pseudo of the authenticated session, or null when anonymous. The upload
+     * providers require an HFR session for the trace ; an anonymous pick is silently ignored
+     * (the submit-time anonymous guard already surfaces the login requirement). Mirrors
+     * `PostEditorViewModel.activeUserId`.
+     */
+    private var activeUserId: String? = null
+
+    /** #459 — in-flight image upload job ; one at a time, cancelled on [onCleared]. */
+    private var uploadJob: Job? = null
 
     /**
      * #405 — account that owned this editor when it opened, snapshotted from [draftStore] so a
@@ -152,6 +173,23 @@ class TopicFormViewModel @AssistedInject constructor(
                 imageInsertMode = mode
             }
         }
+        viewModelScope.launch {
+            authRepository.observeAuthState().collect { authState ->
+                val newUserId = when (authState) {
+                    AuthState.Anonymous -> null
+                    is AuthState.Authenticated -> authState.pseudo.lowercase()
+                }
+                // #459 — account switched / logged out mid-session: cancel any in-flight upload
+                // and pending autosave so this session's image URL / draft is never attributed to
+                // the new account (same Codex-reviewed rule as PostEditorViewModel).
+                if (activeUserId != null && newUserId != activeUserId) {
+                    uploadJob?.cancel()
+                    autosaveJob?.cancel()
+                    _state.update { it.copy(isUploading = false, uploadProgress = null) }
+                }
+                activeUserId = newUserId
+            }
+        }
         restoreDraftIfAny()
         when (request.mode) {
             TopicFormMode.EditFirstPost -> loadEditFirstPostFormIfPossible()
@@ -182,26 +220,74 @@ class TopicFormViewModel @AssistedInject constructor(
      * The store stamps `updatedAt` and is a no-op without an active session.
      */
     private fun scheduleAutosave() {
+        if (draftKey == null) return
+        autosaveJob?.cancel()
+        autosaveJob = viewModelScope.launch {
+            delay(AUTOSAVE_DEBOUNCE_MS)
+            persistDraftNow()
+        }
+    }
+
+    /**
+     * Immediate write of the current subject + body (both blank = delete the row, cf.
+     * [scheduleAutosave]). Reads [_state] AFTER the debounce delay — the previous shape captured
+     * a snapshot at scheduling time, which the #803 dirty-close flush would have re-persisted
+     * stale (state-hygiene audit 2026-07-05). Mirrors `PostEditorViewModel.persistDraftNow`.
+     */
+    private suspend fun persistDraftNow() {
         val key = draftKey ?: return
         val snapshot = _state.value
         val body = snapshot.draft.text
         val subject = snapshot.subject.text
-        autosaveJob?.cancel()
-        autosaveJob = viewModelScope.launch {
-            delay(AUTOSAVE_DEBOUNCE_MS)
-            if (body.isBlank() && subject.isBlank()) {
-                draftStore.delete(draftOwner, key)
-            } else {
-                draftStore.save(
-                    draftOwner,
-                    key,
-                    EditorDraftStore.Draft(body = body, subject = subject.ifBlank { null }),
-                )
-            }
+        if (body.isBlank() && subject.isBlank()) {
+            draftStore.delete(draftOwner, key)
+        } else {
+            draftStore.save(
+                draftOwner,
+                key,
+                EditorDraftStore.Draft(body = body, subject = subject.ifBlank { null }),
+            )
         }
     }
 
-    @Suppress("CyclomaticComplexMethod") // MVI when-dispatch over 16 intent variants ; flat by design.
+    /** #803 pattern — one-shot latch : a committed close is never re-emitted. */
+    private var closeRequested = false
+
+    /**
+     * #803 pattern (ported from `PostEditorViewModel.onCloseRequested`, state-hygiene audit
+     * 2026-07-05) — dirty close : flush the pending debounce so the last keystrokes reach the
+     * #405 row, THEN let the UI pop (CloseCommitted). Without this, a system back < 750 ms after
+     * typing cancelled the debounce with the ViewModel and silently dropped the tail of the draft.
+     *
+     * Two guards (gate #803) :
+     * - INERT while a POST is in flight — popping would cancel the submit with the viewModelScope
+     *   and leave the server state unknown with a repostable draft ; on failure `isSubmitting`
+     *   drops and the back works again, on success SubmitSucceeded / NewTopicCreated pops anyway ;
+     * - ONE-SHOT — a second back racing the first CloseCommitted must not emit a second effect
+     *   (each `onClose` pops blindly : the second pop would remove the screen BELOW).
+     */
+    private fun onCloseRequested() {
+        if (_state.value.isSubmitting || closeRequested) return
+        closeRequested = true
+        autosaveJob?.cancel()
+        viewModelScope.launch {
+            // The close must NEVER stay blocked on a failing flush (Room is not contractually
+            // non-throwing — disk full, corrupted store) : the one-shot latch is already set, so
+            // a swallowed failure here only costs the last <750 ms of typing (the debounced
+            // autosave already persisted the rest) while a rethrow would leave the screen
+            // unclosable. CancellationException still propagates (scope teardown is not an error).
+            try {
+                persistDraftNow()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // Best effort — the previous debounced write is what remains.
+            }
+            _effects.send(TopicFormEffect.CloseCommitted)
+        }
+    }
+
+    @Suppress("CyclomaticComplexMethod") // MVI when-dispatch over the TopicFormIntent variants ; flat by design.
     fun submit(intent: TopicFormIntent) {
         when (intent) {
             is TopicFormIntent.SubjectChanged -> onSubjectChanged(intent.value)
@@ -221,13 +307,13 @@ class TopicFormViewModel @AssistedInject constructor(
                 _state.update { it.copy(smileyDisabled = intent.disabled) }
             is TopicFormIntent.ToggleEmailNotification ->
                 _state.update { it.copy(emailNotificationEnabled = intent.enabled) }
-            TopicFormIntent.SmileyPickerOpened -> onSmileyPickerOpened()
-            TopicFormIntent.SmileyPickerDismissed -> onSmileyPickerDismissed()
-            is TopicFormIntent.SmileySearchQueryChanged -> onSmileySearchQueryChanged(intent.query)
             is TopicFormIntent.SmileySelected -> onSmileySelected(intent.token)
             is TopicFormIntent.ImageUrlInserted -> onImageUrlInserted(intent.url)
+            is TopicFormIntent.ImagesPicked -> onImagesPicked(intent.uris)
+            TopicFormIntent.UploadErrorDismissed -> _state.update { it.copy(uploadError = null) }
             TopicFormIntent.DraftRestoreRequested -> onDraftRestoreRequested()
             TopicFormIntent.DraftDiscardRequested -> onDraftDiscardRequested()
+            TopicFormIntent.CloseRequested -> onCloseRequested()
         }
     }
 
@@ -271,85 +357,36 @@ class TopicFormViewModel @AssistedInject constructor(
         draftKey?.let { key -> draftStore.delete(draftOwner, key) }
     }
 
-    private fun onSmileyPickerOpened() {
-        _state.update { current ->
-            if (current.smileyPicker is SmileyPickerState.Open) current
-            else current.copy(smileyPicker = SmileyPickerState.Open())
-        }
-    }
-
-    private fun onSmileyPickerDismissed() {
-        smileySearchJob?.cancel()
-        smileySearchJob = null
-        _state.update { it.copy(smileyPicker = SmileyPickerState.Hidden) }
-    }
-
-    private fun onSmileySearchQueryChanged(query: String) {
-        _state.update { current ->
-            val open = current.smileyPicker as? SmileyPickerState.Open ?: return@update current
-            current.copy(smileyPicker = open.copy(query = query))
-        }
-        // Cancel in-flight searches so an older response can't overwrite a newer query.
-        smileySearchJob?.cancel()
-        if (query.length <= 2) {
-            // Mirrors the HFR web composer's `query.length > 2` gate. Below threshold we
-            // reset the wiki branch to Idle so the picker can render the Standard tab.
-            _state.update { current ->
-                val open = current.smileyPicker as? SmileyPickerState.Open ?: return@update current
-                current.copy(smileyPicker = open.copy(wiki = WikiSearchState.Idle))
-            }
-            return
-        }
-        smileySearchJob = viewModelScope.launch {
-            // 300 ms matches the JS `find_smilies_timer` debounce embedded in HFR's
-            // /compressed/message.js, identical to `PostEditorViewModel`. Flip to
-            // `Loading` AFTER the debounce so a fast burst of keystrokes does not
-            // flash the spinner before the actual network call.
-            delay(SMILEY_SEARCH_DEBOUNCE_MS)
-            // Identity guard against the « same query typed twice in a 300 ms window »
-            // race : if a second `onSmileySearchQueryChanged` arrived with the same
-            // query while the first was still in its debounce, the older job's
-            // `coroutineContext[Job]` is no longer the active `smileySearchJob`.
-            if (coroutineContext[Job] !== smileySearchJob) return@launch
-            _state.update { current ->
-                val open = current.smileyPicker as? SmileyPickerState.Open ?: return@update current
-                if (open.query != query) return@update current
-                current.copy(smileyPicker = open.copy(wiki = WikiSearchState.Loading))
-            }
-            val effectiveUserId = _state.value.userId ?: 0
-            val outcome = runCatching { smileyRepository.searchWiki(effectiveUserId, query) }
-            outcome.fold(
-                onSuccess = { items ->
-                    _state.update { current ->
-                        val open = current.smileyPicker as? SmileyPickerState.Open
-                            ?: return@update current
-                        // Drop the result if the user closed the picker or typed a different
-                        // query while we were waiting on the network.
-                        if (open.query != query) return@update current
-                        current.copy(smileyPicker = open.copy(wiki = WikiSearchState.Results(items)))
-                    }
-                },
-                onFailure = { error ->
-                    if (error is CancellationException) throw error
-                    diagnostics.record(
-                        DiagnosticsLog.Level.WARN,
-                        LOG_TAG_VM,
-                        "wiki smiley search failed: ${error::class.simpleName}",
-                    )
-                    _state.update { current ->
-                        val open = current.smileyPicker as? SmileyPickerState.Open
-                            ?: return@update current
-                        if (open.query != query) return@update current
-                        current.copy(smileyPicker = open.copy(wiki = WikiSearchState.Error))
-                    }
-                },
+    /**
+     * #441 — smiley picker (Standard + Wiki search), delegated to the shared
+     * [SmileyPickerController] exactly like the MP composers (#387/#440) and
+     * `PostEditorViewModel` : the controller owns open/dismiss/query, the 300 ms debounce
+     * and its race guards, and the #824 restore-search-on-reopen contract. This ViewModel
+     * keeps only the insertion ([onSmileySelected] — a draft mutation, so it stays an MVI
+     * intent) ; the mixed wiring is deliberate, do not re-route it for « consistency ».
+     *
+     * Lifecycle (réserve Codex #441) : the editorial context is frozen at construction
+     * (`@Assisted request` ; one `TopicFormRoute` nav entry = one ViewModel), so the
+     * controller can never be re-armed for another topic/form — no targeted reset needed
+     * beyond the ViewModel's own death.
+     *
+     * Failure logging stays a policy of THIS feature (the MP composers keep the controller's
+     * no-op default) : class name only — never the query nor the userId (anti-leak test).
+     */
+    val smileyPicker = SmileyPickerController(
+        scope = viewModelScope,
+        searchWiki = smileyRepository::searchWiki,
+        userId = { _state.value.userId },
+        onSearchFailed = { error ->
+            diagnostics.record(
+                DiagnosticsLog.Level.WARN,
+                LOG_TAG_VM,
+                "wiki smiley search failed: ${error::class.simpleName}",
             )
-        }
-    }
+        },
+    )
 
     private fun onSmileySelected(token: String) {
-        smileySearchJob?.cancel()
-        smileySearchJob = null
         _state.update { current ->
             val draft = current.draft
             val selection = draft.selection
@@ -364,13 +401,15 @@ class TopicFormViewModel @AssistedInject constructor(
                 selection = TextRange(outcome.selectionStart, outcome.selectionEnd),
             )
             val withDraft = current.withDraft(updatedDraft)
-            val withPreview = if (withDraft.isPreviewVisible) {
+            if (withDraft.isPreviewVisible) {
                 withDraft.copy(preview = previewParser.parsePreview(withDraft.draft.text))
             } else {
                 withDraft
             }
-            withPreview.copy(smileyPicker = SmileyPickerState.Hidden)
         }
+        // Close the picker on successful insertion (#824 restores the search on the next
+        // open) — same contract as PostEditorViewModel.onSmileySelected.
+        smileyPicker.dismiss()
         scheduleAutosave()
     }
 
@@ -382,9 +421,24 @@ class TopicFormViewModel @AssistedInject constructor(
      */
     private fun onImageUrlInserted(url: String) {
         val token = imageInsertBbcodeOrNull(fullUrl = url, mode = imageInsertMode) ?: return
+        insertImageBbcodeAtCaret(token, leadingNewline = false)
+        scheduleAutosave()
+    }
+
+    /**
+     * #459 — inserts an already-built image BBCode fragment at the caret. Same cursor contract as
+     * the smiley path ([insertBbcodeToken] preserves the selection, the preview is refreshed),
+     * WITHOUT surrounding spaces (an image is self-contained). [leadingNewline] prefixes a newline
+     * when the caret is not already at a line start, so consecutive uploads land on their own lines.
+     * Mirrors `PostEditorViewModel.insertImageBbcodeAtCaret`.
+     */
+    private fun insertImageBbcodeAtCaret(bbcode: String, leadingNewline: Boolean) {
         _state.update { current ->
             val draft = current.draft
             val selection = draft.selection
+            val caret = selection.start.coerceIn(0, draft.text.length)
+            val needsNewline = leadingNewline && caret > 0 && draft.text[caret - 1] != '\n'
+            val token = if (needsNewline) "\n$bbcode" else bbcode
             val outcome = insertBbcodeToken(
                 token = token,
                 text = draft.text,
@@ -403,7 +457,85 @@ class TopicFormViewModel @AssistedInject constructor(
                 withDraft
             }
         }
-        scheduleAutosave()
+    }
+
+    /**
+     * #459 — pick→read→upload→insert for the topic composer, copied from the proven
+     * `PostEditorViewModel.onImagesPicked` contract (multi-image #490): the picked [uris] are read
+     * and uploaded sequentially (one in-flight at a time), each success inserts its `[img]` at the
+     * caret in pick order (with a leading newline from the second image on) and autosaves, and the
+     * batch stops at the first failure — the already-inserted images stay, the typed [UploadError]
+     * is surfaced. A blank list, an anonymous session (no [activeUserId]) or an upload already in
+     * flight are ignored. [TopicFormState.uploadProgress] carries « n/N » when the batch has more
+     * than one image.
+     */
+    private fun onImagesPicked(uris: List<String>) {
+        val userId = activeUserId
+        val targets = uris.filter { it.isNotBlank() }
+        // One guard (ReturnCount): nothing in flight already, an authenticated owner, a non-empty pick.
+        if (uploadJob?.isActive == true || userId == null || targets.isEmpty()) return
+        val multiple = targets.size > 1
+        _state.update {
+            it.copy(
+                isUploading = true,
+                uploadError = null,
+                uploadProgress = if (multiple) UploadProgress(completed = 0, total = targets.size) else null,
+            )
+        }
+        uploadJob = viewModelScope.launch {
+            // Snapshot the cached preference once at batch start so all N inserts use a consistent
+            // mode even if the user flips the setting mid-upload.
+            val mode = imageInsertMode
+            var completed = 0
+            for (uri in targets) {
+                val outcome = runCatching {
+                    val image = imageUploadReader.read(uri)
+                    uploadRepository.uploadWithCurrentProvider(image, userId)
+                }
+                val uploaded = outcome.getOrElse { error ->
+                    handleUploadFailure(error)
+                    return@launch
+                }
+                val bbcode = imageInsertBbcodeOrNull(
+                    fullUrl = uploaded.imageUrl,
+                    displayUrl = uploaded.resizedUrl ?: uploaded.imageUrl,
+                    mode = mode,
+                )
+                if (bbcode != null) {
+                    insertImageBbcodeAtCaret(bbcode, leadingNewline = completed > 0)
+                    // Persist after EACH insert: a later image failing must not lose the images
+                    // already inserted into the draft (Codex review #490).
+                    scheduleAutosave()
+                }
+                completed += 1
+                if (multiple) {
+                    _state.update { it.copy(uploadProgress = UploadProgress(completed, targets.size)) }
+                }
+            }
+            _state.update { it.copy(isUploading = false, uploadError = null, uploadProgress = null) }
+        }
+    }
+
+    private fun handleUploadFailure(error: Throwable) {
+        if (error is CancellationException) {
+            _state.update { it.copy(isUploading = false, uploadProgress = null) }
+            throw error
+        }
+        val mapped = when (error) {
+            is UploadException.TooLarge -> UploadError.TooLarge
+            is UploadException.UnsupportedType -> UploadError.UnsupportedType
+            is UploadException.Server -> UploadError.Server(code = error.code, providerId = error.providerId)
+            is UploadException.Malformed -> UploadError.Malformed(providerId = error.providerId)
+            is UploadException.Configuration -> UploadError.Configuration
+            is UploadException.Network -> UploadError.Network
+            else -> UploadError.Network
+        }
+        diagnostics.record(
+            DiagnosticsLog.Level.WARN,
+            LOG_TAG_VM,
+            "image upload failed: ${error::class.simpleName} → ${mapped::class.simpleName}",
+        )
+        _state.update { it.copy(isUploading = false, uploadError = mapped, uploadProgress = null) }
     }
 
     private fun onSubjectChanged(value: TextFieldValue) {
@@ -857,6 +989,16 @@ class TopicFormViewModel @AssistedInject constructor(
         )
     }
 
+    /**
+     * #459 — belt-and-braces upload cancellation on ViewModel death (viewModelScope is already
+     * cancelled by the lifecycle; this makes the « one upload, no leak » contract explicit).
+     * Mirrors `PostEditorViewModel.onCleared`.
+     */
+    override fun onCleared() {
+        uploadJob?.cancel()
+        super.onCleared()
+    }
+
     @AssistedFactory
     interface Factory {
         fun create(request: TopicFormRequest): TopicFormViewModel
@@ -864,11 +1006,6 @@ class TopicFormViewModel @AssistedInject constructor(
 
     private companion object {
         private const val LOG_TAG_VM = "TopicFormVM"
-
-        // HFR's web composer waits 300 ms after the last keystroke before calling
-        // `find_smilies`, cf. `/compressed/message.js`. Mirror it so the wiki endpoint
-        // sees roughly the same query rate as the web client.
-        private const val SMILEY_SEARCH_DEBOUNCE_MS = 300L
 
         // #405 — idle window after the last edit before the draft is persisted (cf. PostEditorViewModel).
         private const val AUTOSAVE_DEBOUNCE_MS = 750L

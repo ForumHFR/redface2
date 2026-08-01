@@ -25,6 +25,7 @@ import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
+import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsChoice
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsChoiceGroup
@@ -171,6 +172,14 @@ fun SettingsDisplayScreen(
                 PreferencePersistError(R.string.settings_display_font_scale_persist_failed)
             }
 
+            // #973 — block-GIF display profile ([AMENDEMENT-v1.5-2]), next to the density presets.
+            MediaDisplayProfileSetting(
+                selected = state.mediaDisplayProfile,
+                enabled = state.canChangeMediaDisplayProfile,
+                error = state.mediaDisplayProfileError,
+                onSelected = { viewModel.submit(SettingsIntent.MediaDisplayProfileChanged(it)) },
+            )
+
             // Immersive full-screen (#518).
             Text(
                 text = stringResource(R.string.settings_display_fullscreen_title),
@@ -287,6 +296,46 @@ private fun DisplayToggleRow(
             )
         }
         Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
+    }
+}
+
+/**
+ * #973 ([AMENDEMENT-v1.5-2], exigence XaTriX) — block-GIF display profile setting. The S/M/L
+ * labels carry the NUMERIC factors visibly (« S (×1, net) », « M (×1,5) », « L (×2,5) »).
+ * Extracted from [SettingsDisplayScreen] so the host stays under detekt's cyclomatic-complexity
+ * budget (same rationale as [AccentColorSetting]); emits a section title, the intro text, the
+ * three-choice group and the persist-error line into the caller's Column.
+ */
+@Composable
+private fun MediaDisplayProfileSetting(
+    selected: MediaDisplayProfile,
+    enabled: Boolean,
+    error: Boolean,
+    onSelected: (MediaDisplayProfile) -> Unit,
+) {
+    val options = listOf(
+        RedfaceSettingsChoice(MediaDisplayProfile.S, stringResource(R.string.settings_display_media_profile_small)),
+        RedfaceSettingsChoice(MediaDisplayProfile.M, stringResource(R.string.settings_display_media_profile_medium)),
+        RedfaceSettingsChoice(MediaDisplayProfile.L, stringResource(R.string.settings_display_media_profile_large)),
+    )
+    Text(
+        text = stringResource(R.string.settings_display_media_profile_title),
+        style = MaterialTheme.typography.titleMedium,
+        color = MaterialTheme.colorScheme.onSurface,
+    )
+    Text(
+        text = stringResource(R.string.settings_display_media_profile_intro),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    RedfaceSettingsChoiceGroup(
+        options = options,
+        selected = selected,
+        onSelected = onSelected,
+        enabled = enabled,
+    )
+    if (error) {
+        PreferencePersistError(R.string.settings_display_media_profile_persist_failed)
     }
 }
 

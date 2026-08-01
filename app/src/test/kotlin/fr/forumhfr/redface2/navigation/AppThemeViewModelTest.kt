@@ -4,6 +4,7 @@ import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
+import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrap
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
@@ -68,6 +69,8 @@ class AppThemeViewModelTest {
             every { observeImmersiveBackButton() } returns MutableStateFlow(true)
             every { observeImmersiveNavBarReveal() } returns MutableStateFlow(ImmersiveNavBarReveal.MANUAL)
             every { observeAccentColor() } returns MutableStateFlow(AccentColor.ROSE)
+            // #973 — eagerly collected by the VM constructor; default M is enough here.
+            every { observeMediaDisplayProfile() } returns MutableStateFlow(MediaDisplayProfile.M)
         }
 
         val vm = AppThemeViewModel(
@@ -101,6 +104,8 @@ class AppThemeViewModelTest {
             every { observeImmersiveBackButton() } returns MutableStateFlow(true)
             every { observeImmersiveNavBarReveal() } returns MutableStateFlow(ImmersiveNavBarReveal.MANUAL)
             every { observeAccentColor() } returns MutableStateFlow(AccentColor.ROSE)
+            // #973 — eagerly collected by the VM constructor; default M is enough here.
+            every { observeMediaDisplayProfile() } returns MutableStateFlow(MediaDisplayProfile.M)
         }
 
         val vm = AppThemeViewModel(
@@ -110,5 +115,34 @@ class AppThemeViewModelTest {
 
         assertEquals(ThemeMode.LIGHT, vm.themeMode.value)
         assertEquals(false, vm.amoledEnabled.value)
+    }
+
+    @Test
+    fun `the media display profile hydrates from the repository`() = runTest {
+        // #973 — the profile is a reading preference like foldLongQuotes (#332): eagerly
+        // collected, seed M (no bootstrap mirror — it does not paint the pre-first-frame
+        // window), the DataStore value wins once hydrated.
+        val repository = mockk<UserPreferencesRepository> {
+            every { observeThemeMode() } returns MutableStateFlow(ThemeMode.LIGHT)
+            every { observeAmoledEnabled() } returns MutableStateFlow(false)
+            every { observeDisplayDensity() } returns MutableStateFlow(DisplayDensity.COMFORT)
+            every { observeFontScale() } returns MutableStateFlow(FontScalePreference.M)
+            every { observeDebugBoundsOverlay() } returns MutableStateFlow(false)
+            every { observeFoldLongQuotes() } returns MutableStateFlow(true)
+            every { observeShowScrollbar() } returns MutableStateFlow(true)
+            every { observeNavBarLabels() } returns MutableStateFlow(true)
+            every { observeHideSystemNavBar() } returns MutableStateFlow(false)
+            every { observeImmersiveBackButton() } returns MutableStateFlow(true)
+            every { observeImmersiveNavBarReveal() } returns MutableStateFlow(ImmersiveNavBarReveal.MANUAL)
+            every { observeAccentColor() } returns MutableStateFlow(AccentColor.ROSE)
+            every { observeMediaDisplayProfile() } returns MutableStateFlow(MediaDisplayProfile.L)
+        }
+
+        val vm = AppThemeViewModel(
+            userPreferencesRepository = repository,
+            themeBootstrapStore = bootstrapStore(ThemeBootstrap(ThemeMode.DARK, amoledEnabled = true)),
+        )
+
+        assertEquals(MediaDisplayProfile.L, vm.mediaDisplayProfile.value)
     }
 }

@@ -1,86 +1,170 @@
 package fr.forumhfr.redface2.core.ui.post
 
+import android.util.Log
 import androidx.compose.ui.unit.IntSize
 import coil3.ImageLoader
 import coil3.PlatformContext
+import coil3.request.CachePolicy
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
-import coil3.size.Precision
-import coil3.size.Scale
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 /**
- * #175/#257 — probe a media's dimensions via a **bounded** Coil decode (aspect ratio + size class).
+ * #175/#257/#959 — probe a media's NATIVE ORIENTED dimensions via a **header-only** decode
+ * ([ProbeMetadataDecoder], attached per request — cadrage Sol Lot 3, Q1 option b).
  *
- * Requests a [INTRINSIC_PROBE_SIZE_PX]-bounded `FIT` decode (NOT `Size.ORIGINAL`), then reads
- * `coil3.Image.width/height`. `Size.ORIGINAL` fully decoded a large photo at source resolution **just
- * to read its dimensions** — slow and memory-heavy on every measurable image, on top of the render
- * decode (#257). A 1024-bounded decode is far cheaper and still answers everything the callers need:
- *  - **aspect ratio** — preserved by Coil's uniform downsample, used by `imageDisplayBox`;
- *  - **size class** ("larger than the inline caps?") — all inline caps (≤ 240×200 sp) are well below
- *    1024, so a source exceeding them still reports a width/height past the cap after probing.
- * A source ≤ 1024 px (every smiley, most inline images) decodes at native size, unchanged from before.
- * `execute()` is main-safe (Coil dispatches its own I/O); the caller invokes it from a `LaunchedEffect`
- * and caches the result by URL. Returns `null` on error / non-positive dimensions.
+ * The pre-#959 probe requested a 1024-bounded FIT decode and read `image.width/height` from the
+ * decoded bitmap — which CLIPPED the reported dimensions of any source past the bound (measured:
+ * 4000×3000 → 1024×768, EXIF 900×1200 → 768×1024), violating §3 "the probe must never clip the
+ * reported native dimensions". The header-only decoder reads the bounds (and EXIF orientation)
+ * without ever allocating the bitmap — cheaper than the old bounded decode AND exact at any size.
  *
- * NB (#175 conversion): the returned px are CSS/logical-pixel equivalents — fed to the placeholder as
- * `.sp` directly (`70px → 70.sp`), NOT divided by screen density.
+ * The memory cache is disabled BOTH ways on this request: the metadata pseudo-image must never be
+ * served to a render request (and a cached render bitmap must not short-circuit the probe with
+ * its possibly-resized dimensions — the §3 "first valid pair" authority stays with the probe).
+ * The disk cache stays active: the downloaded bytes serve the subsequent render decode.
+ * `execute()` is main-safe (Coil dispatches its own I/O); the caller invokes it from a
+ * `LaunchedEffect` and caches the result by URL. Returns `null` on error / non-positive
+ * dimensions. The returned size is in SOURCE PIXELS — the §3 equation consumes it as physical px.
+ *
+ * #973 ([AMENDEMENT-v1.5-2]) — the result is the ATOMIC [IntrinsicMediaMetadata]: the size plus
+ * the MIME the header decode identified (through the [ProbeMetadataImage] carrier). A success
+ * that did not flow through the probe decoder (or an unidentified container) carries a `null`
+ * MIME — never one inferred from the URL. A failed probe returns `null`: no size, no MIME.
  */
-internal const val INTRINSIC_PROBE_SIZE_PX = 1024
-
 internal suspend fun measureIntrinsicMediaSize(
     url: String,
     context: PlatformContext,
     imageLoader: ImageLoader,
-): IntSize? {
+): IntrinsicMediaMetadata? {
     val result = imageLoader.execute(
         ImageRequest.Builder(context)
             .data(url)
-            .size(INTRINSIC_PROBE_SIZE_PX)
-            .scale(Scale.FIT)
-            // INEXACT is REQUIRED here (Codex review): Coil's default EXACT precision would UPSCALE a
-            // source smaller than the probe (a 16×16 emoji, a 70×50 smiley) up to 1024 before reporting
-            // image.width/height — measuring small media as huge and breaking imageDisplayBox sizing +
-            // the promotion threshold. INEXACT lets Coil report the native size for sources ≤ probe.
-            .precision(Precision.INEXACT)
+            .decoderFactory(ProbeMetadataDecoder.Factory)
+            .memoryCachePolicy(CachePolicy.DISABLED)
             .build(),
     )
     val image = (result as? SuccessResult)?.image ?: return null
-    return if (image.width > 0 && image.height > 0) IntSize(image.width, image.height) else null
+    return if (image.width > 0 && image.height > 0) {
+        IntrinsicMediaMetadata(
+            size = IntSize(image.width, image.height),
+            mimeType = (image as? ProbeMetadataImage)?.mimeType,
+        )
+    } else {
+        null
+    }
 }
 
 /**
- * #249 follow-up — measure [url] and store the outcome in [cache], but ONLY when it is neither already
- * known nor a fresh failure. Single shared seam for every caller that feeds the intrinsic-size cache:
- * the paragraph measure effect (#175/#224 — smileys + inline images) AND the standalone `PostBlock.Image`
- * effect. Keeping one implementation prevents the two paths from drifting (e.g. one forgetting the
- * [IntrinsicMediaSizeCache.isFailureFresh] guard and re-probing a dead host every recomposition).
+ * #249 follow-up / #960 (§6) — measure [url], store a success in [cache] and settle the outcome on
+ * the PROBE axis of [ledger]. Single shared seam for every caller that feeds the intrinsic-size
+ * cache: the paragraph measure effect (#175/#224 — smileys + inline images) AND the standalone
+ * `PostBlock.Image` effect. Keeping one implementation prevents the two paths from drifting.
  *
- * Idempotent: a cached success / fresh failure short-circuits without a probe, so once the first result
- * lands the `SnapshotStateMap` write recomposes readers and subsequent calls no-op.
+ * The ledger is the single source of truth for failures and generations (#960, Sol r3):
+ *  - a cached success or a FRESH probe failure short-circuits without a probe;
+ *  - consulting the generation applies C1 (an EXPIRED failure atomically opens a new generation);
+ *  - the probe runs only under a granted reservation — ONE attempt per (URL, generation), the
+ *    settlement carries the reserved generation so a stale result (the user retried mid-probe)
+ *    is discarded by the ledger instead of the legacy failure-epoch guard;
+ *  - a CANCELLED probe rolls its reservation back (a cancelled try is not a try) — nothing keeps
+ *    the axis in-flight forever.
  *
  * The cache guard is a non-atomic check-then-act, so two callers racing on the SAME cold URL (the
- * BlockImage effect vs the paragraph effect, or two on-screen copies) could each start a probe before
- * the first result lands. [inFlightMeasurements] de-dupes that window: the first caller wins the URL and
- * the others no-op until it clears the entry (in a `finally`, so a cancelled probe also releases it).
- * Process-wide like [ProcessIntrinsicMediaSizeCache]; keyed by URL (native sizes are URL-immutable).
+ * BlockImage effect vs the paragraph effect, or two on-screen copies) could each consult before
+ * the first result lands; the reservation makes the race harmless, and [inFlightMeasurements]
+ * keeps the LOSER AWAITING the winner's ticket instead of returning: when a generation bump
+ * cancels the winning effect mid-probe, a plain "loser returns" would leave the URL cold with
+ * nobody left to probe it (#813) — the loser waking up on the ticket re-runs the guards and
+ * becomes the new winner (the rollback reopened the axis). Process-wide; keyed by URL.
  */
-private val inFlightMeasurements: MutableSet<String> = ConcurrentHashMap.newKeySet()
+private val inFlightMeasurements = ConcurrentHashMap<String, CompletableDeferred<Unit>>()
 
+// LongParameterList: the trailing `probe` is a test-only seam (cancellation-race pins); the five
+// real parameters are the url + its pipeline collaborators — grouping them would be a one-call
+// holder class with no other purpose.
+@Suppress("LongParameterList")
 internal suspend fun measureAndCacheIntrinsicMediaSize(
     url: String,
     cache: IntrinsicMediaSizeCache,
+    ledger: MediaAttemptLedger,
     context: PlatformContext,
     imageLoader: ImageLoader,
+    // Injectable for the cancellation-race tests only — production callers keep the default.
+    probe: suspend (String, PlatformContext, ImageLoader) -> IntrinsicMediaMetadata? =
+        ::measureIntrinsicMediaSize,
 ) {
-    val now = System.currentTimeMillis()
-    if (cache.get(url) != null || cache.isFailureFresh(url, now)) return
-    // Lost the race to another in-flight probe for this URL — its putSuccess/putFailure will recompose us.
-    if (!inFlightMeasurements.add(url)) return
+    while (true) {
+        val now = System.currentTimeMillis()
+        if (cache.get(url) != null || ledger.isFailedFresh(url, MediaAttemptKind.PROBE, now)) return
+        val ticket = CompletableDeferred<Unit>()
+        val winner = inFlightMeasurements.putIfAbsent(url, ticket)
+        if (winner != null) {
+            // Lost the race — wait for the in-flight probe to settle (result OR cancellation),
+            // then loop: a landed result short-circuits on the guards, a cancelled probe rolled
+            // its reservation back and this caller takes over.
+            winner.await()
+            continue
+        }
+        try {
+            probeUnderReservation(url, cache, ledger, context, imageLoader, probe, now)
+        } finally {
+            inFlightMeasurements.remove(url, ticket)
+            ticket.complete(Unit)
+        }
+        return
+    }
+}
+
+// LongParameterList: private tail of the seam above — same collaborators, same rationale.
+@Suppress("LongParameterList")
+private suspend fun probeUnderReservation(
+    url: String,
+    cache: IntrinsicMediaSizeCache,
+    ledger: MediaAttemptLedger,
+    context: PlatformContext,
+    imageLoader: ImageLoader,
+    probe: suspend (String, PlatformContext, ImageLoader) -> IntrinsicMediaMetadata?,
+    nowMillis: Long,
+) {
+    // Eviction repair (Sol P2, O1): the caller only reaches this point when the cache has no
+    // geometry for [url]; a terminally-succeeded probe axis then has no backing truth anymore
+    // (FIFO eviction) and must reopen, or the §6 locked slot would stay cold forever.
+    if (ledger.hasSucceeded(url, MediaAttemptKind.PROBE)) ledger.reopenForLostGeometry(url)
+    // C1 — consulting may open a new generation when the recorded failure has expired; the
+    // reservation is then taken against the CURRENT generation. A denied reservation means the
+    // axis settled while this caller raced through the guards — nothing to do.
+    val generation = ledger.consultGeneration(url, nowMillis)
+    if (!ledger.tryReserve(url, generation, MediaAttemptKind.PROBE)) return
+    var settled = false
     try {
-        val size = measureIntrinsicMediaSize(url, context, imageLoader)
-        if (size != null) cache.putSuccess(url, size) else cache.putFailure(url, now)
+        val metadata = probe(url, context, imageLoader)
+        // Belt for a probe that swallowed cancellation: never publish a result on behalf of a
+        // dead effect.
+        currentCoroutineContext().ensureActive()
+        if (metadata != null) {
+            // §3/§6 — first-pair authority: a concurrent G2 painter deposit may have fixed the
+            // box already; the probe's disagreeing metadata is then logged, never applied —
+            // #973: the MIME included (no late reclassification of a fixed entry).
+            val deposited = cache.putSuccessIfAbsent(url, metadata)
+            if (!deposited && cache.get(url)?.size != metadata.size) {
+                Log.d(
+                    MEDIA_GEOMETRY_LOG_TAG,
+                    "geometry disagreement for $url: kept=${cache.get(url)?.size} probe=${metadata.size} " +
+                        "(first valid pair wins, §3)",
+                )
+            }
+            ledger.settleSuccess(url, generation, MediaAttemptKind.PROBE)
+        } else {
+            ledger.settleFailure(url, generation, MediaAttemptKind.PROBE, System.currentTimeMillis())
+        }
+        settled = true
     } finally {
-        inFlightMeasurements.remove(url)
+        // A cancelled try is not a try: reopen the axis so the awaiting loser (or the next
+        // occurrence) may attempt again.
+        if (!settled) ledger.rollbackReservation(url, generation, MediaAttemptKind.PROBE)
     }
 }

@@ -14,6 +14,7 @@ import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.ui.theme.DisplayMetrics
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 import fr.forumhfr.redface2.core.ui.theme.LocalFoldLongQuotes
+import fr.forumhfr.redface2.core.ui.theme.LocalMediaDisplayProfile
 import fr.forumhfr.redface2.core.ui.theme.LocalShowScrollbar
 import fr.forumhfr.redface2.core.ui.theme.ReadingDisplaySettings
 import fr.forumhfr.redface2.core.ui.theme.RedfaceAmoledColorScheme
@@ -53,6 +54,9 @@ fun RedfaceTheme(
         // #105 — expose the « afficher l'ascenseur » preference to the reading scrollbar (read via
         // LocalShowScrollbar.current in LazyListScrollbar) so flipping the toggle hides/shows it.
         LocalShowScrollbar provides reading.showScrollbar,
+        // #973 — expose the block-GIF display profile to the post renderer (read via
+        // LocalMediaDisplayProfile.current in BlockImage) so switching S/M/L re-sizes eligible GIFs.
+        LocalMediaDisplayProfile provides reading.mediaDisplayProfile,
     ) {
         MaterialTheme(
             colorScheme = colorScheme,

@@ -58,6 +58,25 @@ interface FlagRepository {
      * otherwise — including transport / session-expiry errors.
      */
     suspend fun removeFlag(flag: Flag): Result<Unit>
+
+    /**
+     * Resolve the full [Flag] for a `(cat, topicId)` pair (#809), for surfaces OUTSIDE the Drapeaux
+     * view that hold a topic identity but not the loaded [Flag] — e.g. the topic screen's long-press
+     * « Retirer le drapeau ». [removeFlag] needs the complete object (its `subcat` / `type` /
+     * `lastReadPage` form the `delflag.php` key), so a partial [Flag] must never be fabricated : this
+     * lookup returns the real cached/fetched row or nothing.
+     *
+     * Resolution order (per-bucket) :
+     * - Scans the in-memory per-type success caches first ; a hit returns without any network.
+     * - A warm bucket is authoritative **for its own type only** and is never implicitly refreshed
+     *   (the Drapeaux view owns refresh policy). On a miss, the **cold** buckets — and only those —
+     *   are fetched so the lookup can still resolve a type whose tab was never opened ; then a
+     *   re-scan decides. All three warm + miss → null with zero network.
+     * - An anonymous session (no HFR user) can hold no drapeaux : null with no round-trip.
+     *
+     * Returns the matching [Flag], or null when the topic is not flagged / unresolvable / anonymous.
+     */
+    suspend fun findFlag(cat: Int, topicId: Int): Flag?
 }
 
 /**

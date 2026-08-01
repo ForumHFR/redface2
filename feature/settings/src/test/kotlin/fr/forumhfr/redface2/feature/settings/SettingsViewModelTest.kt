@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.feature.settings
 import fr.forumhfr.redface2.core.domain.cache.ImageCacheMaintenance
 import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
+import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
@@ -18,6 +19,7 @@ import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.FlagType
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -453,40 +455,51 @@ class SettingsViewModelTest {
         assertEquals(1, repository.ignoreTopicCacheSetCalls)
     }
 
-    @Test
-    fun `hydration race - a stale initial DataStore emission must not overwrite a local toggle change`() = runTest {
-        // Reproduce the startup race: the init coroutine subscribes to
-        // observeIgnoreTopicCache() and suspends on .first() because the override emits
-        // nothing yet. The user then flips the toggle locally (optimistic true + write
-        // succeeds). Finally, the still-suspended init resumes and tries to apply a
-        // stale `false` — the guard must skip the apply.
-        val initialHydrationFlow = MutableSharedFlow<Boolean>(replay = 0)
-        repository.ignoreTopicCacheObserveOverride = initialHydrationFlow
-        val viewModel = newViewModel()
+    // ──────────────────────────────────────────────────────────────────────
+    // #788 — continuous DataStore re-sync (state-hygiene). Every Settings destination owns its
+    // own SettingsViewModel instance, so a value written by another instance (sub-page, second
+    // pane) must land here too. The only guarded window is an optimistic write in flight.
+    // ──────────────────────────────────────────────────────────────────────
 
-        // Step 1: init is now suspended on `initialHydrationFlow.first()`.
-        // Step 2: user flips the toggle. The optimistic flip + DataStore write run
-        // synchronously under UnconfinedTestDispatcher and complete before we return here.
-        viewModel.submit(SettingsIntent.IgnoreTopicCacheChanged(true))
+    @Test
+    fun `an external DataStore write is reflected in an already-hydrated state (#788)`() = runTest {
+        val viewModel = newViewModel()
+        assertFalse(viewModel.state.value.ignoreTopicCache)
+
+        repository.emitIgnoreTopicCache(true)
+
         assertTrue(
-            "optimistic flip must reach the state synchronously",
+            "an external write must reach a live VM instance, not just the init hydration",
             viewModel.state.value.ignoreTopicCache,
         )
-        assertTrue(viewModel.state.value.ignoreTopicCacheTouchedLocally)
-        assertFalse(
-            "write must have completed under the UnconfinedTestDispatcher",
-            viewModel.state.value.isUpdatingIgnoreTopicCache,
+    }
+
+    @Test
+    fun `an emission during an in-flight write is ignored, then the state converges on success (#788)`() = runTest {
+        val externalFlow = MutableSharedFlow<Boolean>(replay = 0)
+        repository.ignoreTopicCacheObserveOverride = externalFlow
+        val gate = CompletableDeferred<Unit>()
+        repository.blockIgnoreTopicCacheSetUntil = gate
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.IgnoreTopicCacheChanged(true))
+        assertTrue(viewModel.state.value.ignoreTopicCache)
+        assertTrue("write must be held in flight by the gate", viewModel.state.value.isUpdatingIgnoreTopicCache)
+
+        // An emission of the OLD value landing while the optimistic write is in flight must not
+        // undo the flip — `isUpdating*` is the re-sync guard.
+        externalFlow.emit(false)
+        assertTrue(
+            "an emission during the in-flight write must not clobber the optimistic flip",
+            viewModel.state.value.ignoreTopicCache,
         )
 
-        // Step 3: the late hydration finally produces a stale `false`. On the buggy code
-        // this overwrites the local true; on the fixed code the guard skips the apply.
-        initialHydrationFlow.emit(false)
+        gate.complete(Unit)
+        // DataStore re-emits the committed value after the write — a no-op convergence.
+        externalFlow.emit(true)
 
         val finalState = viewModel.state.value
-        assertTrue(
-            "stale initial DataStore hydration must NOT overwrite the local toggle change",
-            finalState.ignoreTopicCache,
-        )
+        assertTrue(finalState.ignoreTopicCache)
         assertFalse(finalState.isUpdatingIgnoreTopicCache)
         assertFalse(finalState.ignoreTopicCacheError)
         assertEquals(1, repository.ignoreTopicCacheSetCalls)
@@ -494,33 +507,44 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun `hydration race - failure path keeps the toggle latched to the reverted previous value`() = runTest {
-        // Symmetric guard for the failure branch: the local flip happens first, then DataStore
-        // write fails (revert to previous=false + error flag), then a stale hydration arrives.
-        // The reverted state must survive — the hydration must NOT silently mutate it back to
-        // anything else, even if the stale value happens to match the reverted one.
-        repository.failOnIgnoreTopicCacheSet = true
-        val initialHydrationFlow = MutableSharedFlow<Boolean>(replay = 0)
-        repository.ignoreTopicCacheObserveOverride = initialHydrationFlow
+    fun `a successful toggle followed by an external write reflects the external value (#788)`() = runTest {
+        // The exact staleness scenario behind #788: this VM instance toggles ON, another
+        // Settings destination (its own VM) later writes OFF — this instance must follow the
+        // store, otherwise its next optimistic flip starts from a wrong `previous`.
         val viewModel = newViewModel()
-
         viewModel.submit(SettingsIntent.IgnoreTopicCacheChanged(true))
-        // After failure: reverted to false + error flag raised; touchedLocally remains true.
-        val midState = viewModel.state.value
-        assertFalse(midState.ignoreTopicCache)
-        assertTrue(midState.ignoreTopicCacheError)
-        assertTrue(midState.ignoreTopicCacheTouchedLocally)
+        assertTrue(viewModel.state.value.ignoreTopicCache)
 
-        // Stale hydration arrives — must be ignored because touchedLocally == true.
-        initialHydrationFlow.emit(true)
+        repository.emitIgnoreTopicCache(false)
 
-        val finalState = viewModel.state.value
         assertFalse(
-            "stale hydration must not flip the toggle back on after a failed write",
-            finalState.ignoreTopicCache,
+            "the state must follow the external write, not the last local toggle",
+            viewModel.state.value.ignoreTopicCache,
         )
-        assertTrue(finalState.ignoreTopicCacheError)
     }
+
+    @Test
+    fun `a failed write reverts and the persisted re-emission keeps the revert and the error flag (#788)`() =
+        runTest {
+            // Failure branch: the local flip fails (revert to previous=false + error flag). The
+            // store still holds `false`, so the only thing the re-sync may deliver afterwards is
+            // that same persisted value — applying it must keep the revert AND the error flag.
+            repository.failOnIgnoreTopicCacheSet = true
+            val externalFlow = MutableSharedFlow<Boolean>(replay = 0)
+            repository.ignoreTopicCacheObserveOverride = externalFlow
+            val viewModel = newViewModel()
+
+            viewModel.submit(SettingsIntent.IgnoreTopicCacheChanged(true))
+            val midState = viewModel.state.value
+            assertFalse(midState.ignoreTopicCache)
+            assertTrue(midState.ignoreTopicCacheError)
+
+            externalFlow.emit(false)
+
+            val finalState = viewModel.state.value
+            assertFalse("the reverted value must survive the persisted re-emission", finalState.ignoreTopicCache)
+            assertTrue("the error flag is not owned by the re-sync path", finalState.ignoreTopicCacheError)
+        }
 
     @Test
     fun `IgnoreTopicCacheChanged does not touch proxy or clear-cache state`() = runTest {
@@ -829,6 +853,71 @@ class SettingsViewModelTest {
         }
 
     @Test
+    fun `init hydrates the media display profile from storage`() = runTest {
+        // #973 — same continuous-hydration seam as the reading display presets.
+        repository.emitMediaDisplayProfile(MediaDisplayProfile.L)
+
+        val viewModel = newViewModel()
+
+        assertEquals(MediaDisplayProfile.L, viewModel.state.value.mediaDisplayProfile)
+    }
+
+    @Test
+    fun `MediaDisplayProfileChanged persists the new profile and clears the updating flag`() = runTest {
+        val viewModel = newViewModel()
+        assertEquals(
+            "M (×1,5) is the default (#973, choix XaTriX)",
+            MediaDisplayProfile.M,
+            viewModel.state.value.mediaDisplayProfile,
+        )
+
+        viewModel.submit(SettingsIntent.MediaDisplayProfileChanged(MediaDisplayProfile.L))
+
+        val state = viewModel.state.value
+        assertEquals(MediaDisplayProfile.L, state.mediaDisplayProfile)
+        assertFalse(state.isUpdatingMediaDisplayProfile)
+        assertFalse(state.mediaDisplayProfileError)
+        assertEquals(1, repository.mediaDisplayProfileSetCalls)
+        assertEquals(MediaDisplayProfile.L, repository.lastMediaDisplayProfileSet)
+    }
+
+    @Test
+    fun `MediaDisplayProfileChanged reverts to the previous profile and raises the error flag on persist failure`() =
+        runTest {
+            repository.failOnMediaDisplayProfileSet = true
+            val viewModel = newViewModel()
+
+            viewModel.submit(SettingsIntent.MediaDisplayProfileChanged(MediaDisplayProfile.S))
+
+            val state = viewModel.state.value
+            assertEquals(
+                "must revert to the previous profile on failure",
+                MediaDisplayProfile.M,
+                state.mediaDisplayProfile,
+            )
+            assertFalse(state.isUpdatingMediaDisplayProfile)
+            assertTrue(state.mediaDisplayProfileError)
+        }
+
+    @Test
+    fun `media display profile - an external write after a settled local change is reflected (#788)`() =
+        runTest {
+            val viewModel = newViewModel()
+
+            viewModel.submit(SettingsIntent.MediaDisplayProfileChanged(MediaDisplayProfile.S))
+            assertEquals(MediaDisplayProfile.S, viewModel.state.value.mediaDisplayProfile)
+            assertEquals(1, repository.mediaDisplayProfileSetCalls)
+
+            repository.emitMediaDisplayProfile(MediaDisplayProfile.L)
+
+            assertEquals(
+                "an external write must be reflected after the local change settled",
+                MediaDisplayProfile.L,
+                viewModel.state.value.mediaDisplayProfile,
+            )
+        }
+
+    @Test
     fun `FontScaleChanged persists the new preset and clears the updating flag`() = runTest {
         val viewModel = newViewModel()
         assertEquals("M is the default", FontScalePreference.M, viewModel.state.value.fontScale)
@@ -896,12 +985,9 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun `topicPageFabs hydration race - a stale emission must not overwrite a local flip`() = runTest {
-        // Same startup race as ignoreTopicCache: init suspends on .first() (the override
-        // emits nothing yet), the user opts out locally, then the stale `true` arrives —
-        // the TouchedLocally guard must skip the apply.
-        val initialHydrationFlow = MutableSharedFlow<Boolean>(replay = 0)
-        repository.topicPageFabsObserveOverride = initialHydrationFlow
+    fun `topicPageFabs - an external write after a settled local flip is reflected (#788)`() = runTest {
+        // #788 re-sync contract: once the local opt-out settled, a later external write (another
+        // Settings destination's VM) must be reflected, not shadowed by a touched-locally latch.
         val viewModel = newViewModel()
 
         viewModel.submit(SettingsIntent.TopicPageFabsChanged(false))
@@ -909,15 +995,14 @@ class SettingsViewModelTest {
             "optimistic flip must reach the state synchronously",
             viewModel.state.value.topicPageFabs,
         )
-        assertTrue(viewModel.state.value.topicPageFabsTouchedLocally)
+        assertEquals(1, repository.topicPageFabsSetCalls)
 
-        initialHydrationFlow.emit(true)
+        repository.emitTopicPageFabs(true)
 
-        assertFalse(
-            "stale initial DataStore hydration must NOT overwrite the local opt-out",
+        assertTrue(
+            "an external write must be reflected after the local flip settled",
             viewModel.state.value.topicPageFabs,
         )
-        assertEquals(1, repository.topicPageFabsSetCalls)
     }
 
     @Test
@@ -1098,6 +1183,45 @@ class SettingsViewModelTest {
         assertTrue("failed persist must revert to the previous value", viewModel.state.value.foldLongQuotes)
         assertFalse(viewModel.state.value.isUpdatingFoldLongQuotes)
         assertTrue(viewModel.state.value.foldLongQuotesError)
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Full-width posts (#884)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `init hydrates fullWidthPosts from a persisted true`() = runTest {
+        // Default is false — only a persisted opt-IN exercises the hydration path.
+        repository.emitFullWidthPosts(true)
+
+        val viewModel = newViewModel()
+
+        assertTrue(viewModel.state.value.fullWidthPosts)
+        assertFalse(viewModel.state.value.fullWidthPostsError)
+    }
+
+    @Test
+    fun `FullWidthPostsChanged persists the flip`() = runTest {
+        val viewModel = newViewModel()
+        assertFalse("posts keep the card inset by default", viewModel.state.value.fullWidthPosts)
+
+        viewModel.submit(SettingsIntent.FullWidthPostsChanged(true))
+
+        assertTrue(viewModel.state.value.fullWidthPosts)
+        assertFalse(viewModel.state.value.isUpdatingFullWidthPosts)
+        assertEquals(1, repository.fullWidthPostsSetCalls)
+    }
+
+    @Test
+    fun `FullWidthPostsChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnFullWidthPostsSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.FullWidthPostsChanged(true))
+
+        assertFalse("failed persist must revert to the previous value", viewModel.state.value.fullWidthPosts)
+        assertFalse(viewModel.state.value.isUpdatingFullWidthPosts)
+        assertTrue(viewModel.state.value.fullWidthPostsError)
     }
 
     @Test
@@ -1363,6 +1487,77 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `QuoteCardsEnabledChanged persists the flip`() = runTest {
+        val viewModel = newViewModel()
+        assertFalse("#805 — quote cards are OFF by default (inline BBCode)", viewModel.state.value.quoteCardsEnabled)
+
+        viewModel.submit(SettingsIntent.QuoteCardsEnabledChanged(true))
+
+        assertTrue(viewModel.state.value.quoteCardsEnabled)
+        assertFalse(viewModel.state.value.isUpdatingQuoteCardsEnabled)
+        assertEquals(1, repository.quoteCardsEnabledSetCalls)
+    }
+
+    @Test
+    fun `QuoteCardsEnabledChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnQuoteCardsEnabledSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.QuoteCardsEnabledChanged(true))
+
+        assertFalse("must revert to the previous value on failure", viewModel.state.value.quoteCardsEnabled)
+        assertFalse(viewModel.state.value.isUpdatingQuoteCardsEnabled)
+        assertTrue(viewModel.state.value.quoteCardsEnabledError)
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Writing surface preset (#806)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `writingSurfacePreset re-syncs continuously from the persisted preference (#788)`() = runTest {
+        val viewModel = newViewModel()
+        assertEquals(
+            "#951 — FULL_EDITOR is the default (the sheet is experimental opt-in)",
+            WritingSurfacePreset.FULL_EDITOR,
+            viewModel.state.value.writingSurfacePreset,
+        )
+
+        // An external write (another SettingsViewModel instance, or any other writer) must land
+        // in THIS instance too — the #788 continuous re-sync, not a one-shot hydration.
+        repository.emitWritingSurfacePreset(WritingSurfacePreset.SHEET_EXCEPT_QUOTES)
+
+        assertEquals(WritingSurfacePreset.SHEET_EXCEPT_QUOTES, viewModel.state.value.writingSurfacePreset)
+    }
+
+    @Test
+    fun `SetWritingSurfacePreset persists the pick`() = runTest {
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.SetWritingSurfacePreset(WritingSurfacePreset.FULL_EDITOR))
+
+        assertEquals(WritingSurfacePreset.FULL_EDITOR, viewModel.state.value.writingSurfacePreset)
+        assertFalse(viewModel.state.value.isUpdatingWritingSurfacePreset)
+        assertEquals(1, repository.writingSurfacePresetSetCalls)
+    }
+
+    @Test
+    fun `SetWritingSurfacePreset reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnWritingSurfacePresetSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.SetWritingSurfacePreset(WritingSurfacePreset.SHEET))
+
+        assertEquals(
+            "must revert to the previous value on failure",
+            WritingSurfacePreset.FULL_EDITOR,
+            viewModel.state.value.writingSurfacePreset,
+        )
+        assertFalse(viewModel.state.value.isUpdatingWritingSurfacePreset)
+        assertTrue(viewModel.state.value.writingSurfacePresetError)
+    }
+
+    @Test
     fun `init hydrates the experimental MPStorage write opt-in from the persisted preference`() = runTest {
         repository.emitSyncPrivateMessagesWriteEnabled(true)
 
@@ -1403,14 +1598,10 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun `theme hydration race - a stale initial DataStore emission must not overwrite a local mode change`() =
+    fun `themeMode - an external write after a settled local change is reflected (#788)`() =
         runTest {
-            // Mirror of the ignoreTopicCache startup-race test for ThemeMode (#286, Codex nit): init
-            // subscribes to observeThemeMode() and suspends on .first() (override emits nothing yet),
-            // the user picks DARK locally (optimistic + write succeeds, touchedLocally = true), then the
-            // still-suspended init resumes with a stale SYSTEM — the guard must skip the apply.
-            val initialHydrationFlow = MutableSharedFlow<ThemeMode>(replay = 0)
-            repository.themeModeObserveOverride = initialHydrationFlow
+            // #788 re-sync contract for the enum shape: after the local DARK settled, an external
+            // LIGHT (e.g. written from the Display sub-page's own VM) must land here too.
             val viewModel = newViewModel()
 
             viewModel.submit(SettingsIntent.ThemeModeChanged(ThemeMode.DARK))
@@ -1419,76 +1610,64 @@ class SettingsViewModelTest {
                 ThemeMode.DARK,
                 viewModel.state.value.themeMode,
             )
-            assertTrue(viewModel.state.value.themeModeTouchedLocally)
             assertFalse(viewModel.state.value.isUpdatingThemeMode)
+            assertEquals(1, repository.themeModeSetCalls)
+            assertEquals(ThemeMode.DARK, repository.lastThemeModeSet)
 
-            // Late, stale hydration produces SYSTEM. On the buggy code this overwrites the local DARK;
-            // on the fixed code the touchedLocally guard skips the apply.
-            initialHydrationFlow.emit(ThemeMode.SYSTEM)
+            repository.emitThemeMode(ThemeMode.LIGHT)
 
             val finalState = viewModel.state.value
             assertEquals(
-                "stale initial DataStore hydration must NOT overwrite the local mode change",
-                ThemeMode.DARK,
+                "an external write must be reflected after the local change settled",
+                ThemeMode.LIGHT,
                 finalState.themeMode,
             )
             assertFalse(finalState.isUpdatingThemeMode)
             assertFalse(finalState.themeModeError)
-            assertEquals(1, repository.themeModeSetCalls)
-            assertEquals(ThemeMode.DARK, repository.lastThemeModeSet)
         }
 
     @Test
-    fun `displayDensity hydration race - a stale initial emission must not overwrite a local change`() =
+    fun `displayDensity - an external write after a settled local change is reflected (#788)`() =
         runTest {
-            // Same startup-race contract as ThemeMode (#287): the user picks COMPACT while init is
-            // still suspended on observeDisplayDensity().first(); the late stale COMFORT must be
-            // skipped by the touchedLocally guard.
-            val initialHydrationFlow = MutableSharedFlow<DisplayDensity>(replay = 0)
-            repository.displayDensityObserveOverride = initialHydrationFlow
             val viewModel = newViewModel()
 
             viewModel.submit(SettingsIntent.DisplayDensityChanged(DisplayDensity.COMPACT))
             assertEquals(DisplayDensity.COMPACT, viewModel.state.value.displayDensity)
-            assertTrue(viewModel.state.value.displayDensityTouchedLocally)
+            assertEquals(1, repository.displayDensitySetCalls)
+            assertEquals(DisplayDensity.COMPACT, repository.lastDisplayDensitySet)
 
-            initialHydrationFlow.emit(DisplayDensity.COMFORT)
+            repository.emitDisplayDensity(DisplayDensity.COMFORT)
 
             val finalState = viewModel.state.value
             assertEquals(
-                "stale hydration must NOT overwrite the local density change",
-                DisplayDensity.COMPACT,
+                "an external write must be reflected after the local change settled",
+                DisplayDensity.COMFORT,
                 finalState.displayDensity,
             )
             assertFalse(finalState.isUpdatingDisplayDensity)
             assertFalse(finalState.displayDensityError)
-            assertEquals(1, repository.displayDensitySetCalls)
-            assertEquals(DisplayDensity.COMPACT, repository.lastDisplayDensitySet)
         }
 
     @Test
-    fun `fontScale hydration race - a stale initial emission must not overwrite a local change`() =
+    fun `fontScale - an external write after a settled local change is reflected (#788)`() =
         runTest {
-            val initialHydrationFlow = MutableSharedFlow<FontScalePreference>(replay = 0)
-            repository.fontScaleObserveOverride = initialHydrationFlow
             val viewModel = newViewModel()
 
             viewModel.submit(SettingsIntent.FontScaleChanged(FontScalePreference.L))
             assertEquals(FontScalePreference.L, viewModel.state.value.fontScale)
-            assertTrue(viewModel.state.value.fontScaleTouchedLocally)
+            assertEquals(1, repository.fontScaleSetCalls)
+            assertEquals(FontScalePreference.L, repository.lastFontScaleSet)
 
-            initialHydrationFlow.emit(FontScalePreference.M)
+            repository.emitFontScale(FontScalePreference.M)
 
             val finalState = viewModel.state.value
             assertEquals(
-                "stale hydration must NOT overwrite the local font-scale change",
-                FontScalePreference.L,
+                "an external write must be reflected after the local change settled",
+                FontScalePreference.M,
                 finalState.fontScale,
             )
             assertFalse(finalState.isUpdatingFontScale)
             assertFalse(finalState.fontScaleError)
-            assertEquals(1, repository.fontScaleSetCalls)
-            assertEquals(FontScalePreference.L, repository.lastFontScaleSet)
         }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -1596,29 +1775,55 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun `upload provider hydration race - a stale initial emission must not overwrite a local change`() =
+    fun `upload provider - an external write after a settled local change is reflected (#788)`() =
         runTest {
-            // Same startup-race contract as ThemeMode (#459): the user picks IMGUR while init is still
-            // suspended on observeUploadProvider().first(); the late stale DIBERIE must be skipped by
-            // the touchedLocally guard.
-            val initialHydrationFlow = MutableSharedFlow<UploadProviderId>(replay = 0)
-            repository.uploadProviderObserveOverride = initialHydrationFlow
             val viewModel = newViewModel()
 
             viewModel.submit(SettingsIntent.SetUploadProvider(UploadProviderId.IMGUR))
             assertEquals(UploadProviderId.IMGUR, viewModel.state.value.uploadProvider)
-            assertTrue(viewModel.state.value.uploadProviderTouchedLocally)
-
-            initialHydrationFlow.emit(UploadProviderId.DIBERIE)
-
-            val finalState = viewModel.state.value
-            assertEquals(
-                "stale hydration must NOT overwrite the local provider change",
-                UploadProviderId.IMGUR,
-                finalState.uploadProvider,
-            )
             assertEquals(1, repository.uploadProviderSetCalls)
             assertEquals(UploadProviderId.IMGUR, repository.lastUploadProviderSet)
+
+            repository.emitUploadProvider(UploadProviderId.DIBERIE)
+
+            assertEquals(
+                "an external write must be reflected after the local change settled",
+                UploadProviderId.DIBERIE,
+                viewModel.state.value.uploadProvider,
+            )
+        }
+
+    @Test
+    fun `imgur client id - an external write is reflected while the field is untouched (#788)`() = runTest {
+        val viewModel = newViewModel()
+        assertEquals("", viewModel.state.value.imgurClientId)
+
+        repository.emitImgurClientId("external-cid")
+
+        assertEquals(
+            "an untouched instance must follow external Client-ID writes",
+            "external-cid",
+            viewModel.state.value.imgurClientId,
+        )
+    }
+
+    @Test
+    fun `imgur client id - once touched locally, an external emission never rewrites the field (#788)`() =
+        runTest {
+            // The persist-on-keystroke field is the one pref that KEEPS its touch latch: an echoed
+            // (or concurrent) emission landing mid-typing must never rewrite what the user typed.
+            val viewModel = newViewModel()
+
+            viewModel.submit(SettingsIntent.SetImgurClientId("CID-42"))
+            assertEquals("CID-42", viewModel.state.value.imgurClientId)
+
+            repository.emitImgurClientId("external-cid")
+
+            assertEquals(
+                "the typing guard must shield the field from re-sync for this VM's lifetime",
+                "CID-42",
+                viewModel.state.value.imgurClientId,
+            )
         }
 
     private fun newViewModel(): SettingsViewModel =
@@ -1652,10 +1857,11 @@ class SettingsViewModelTest {
         override fun readProxyConfigForNetworkBootstrap(): ProxyConfig = config.value
 
         /**
-         * Test seam for the startup-race test: when non-null, `observeIgnoreTopicCache()` returns
-         * this overridden flow instead of the internal `MutableStateFlow`. That lets the test hold
-         * the initial `.first()` suspension, perform a local toggle while the hydration is still
-         * pending, and only then release a stale emission to verify the guard ignores it.
+         * Test seam for the #788 re-sync tests: when non-null, `observeIgnoreTopicCache()` returns
+         * this overridden flow instead of the internal `MutableStateFlow`. A `MutableSharedFlow`
+         * (no replay, no dedup) lets a test emit an arbitrary sequence — e.g. the OLD value while
+         * a gated write is in flight, or the persisted value after a failed write — which the
+         * conflating internal StateFlow could not replay.
          */
         var ignoreTopicCacheObserveOverride: Flow<Boolean>? = null
 
@@ -1728,14 +1934,7 @@ class SettingsViewModelTest {
             private set
         var failOnAmoledSet: Boolean = false
 
-        /**
-         * Test seam for the theme startup-race test (#286), mirroring [ignoreTopicCacheObserveOverride]:
-         * when non-null, `observeThemeMode()` returns this flow so the test can hold the init `.first()`
-         * suspension, perform a local mode change, then release a stale emission to prove the guard skips it.
-         */
-        var themeModeObserveOverride: Flow<ThemeMode>? = null
-
-        override fun observeThemeMode(): Flow<ThemeMode> = themeModeObserveOverride ?: themeMode
+        override fun observeThemeMode(): Flow<ThemeMode> = themeMode
 
         override suspend fun setThemeMode(mode: ThemeMode) {
             themeModeSetCalls += 1
@@ -1760,11 +1959,7 @@ class SettingsViewModelTest {
             private set
         var failOnDisplayDensitySet: Boolean = false
 
-        /** Startup-race seam, mirroring [themeModeObserveOverride] (#287). */
-        var displayDensityObserveOverride: Flow<DisplayDensity>? = null
-
-        override fun observeDisplayDensity(): Flow<DisplayDensity> =
-            displayDensityObserveOverride ?: displayDensity
+        override fun observeDisplayDensity(): Flow<DisplayDensity> = displayDensity
 
         override suspend fun setDisplayDensity(density: DisplayDensity) {
             displayDensitySetCalls += 1
@@ -1784,11 +1979,7 @@ class SettingsViewModelTest {
             private set
         var failOnFontScaleSet: Boolean = false
 
-        /** Startup-race seam, mirroring [themeModeObserveOverride] (#287). */
-        var fontScaleObserveOverride: Flow<FontScalePreference>? = null
-
-        override fun observeFontScale(): Flow<FontScalePreference> =
-            fontScaleObserveOverride ?: fontScale
+        override fun observeFontScale(): Flow<FontScalePreference> = fontScale
 
         override suspend fun setFontScale(scale: FontScalePreference) {
             fontScaleSetCalls += 1
@@ -1799,6 +1990,27 @@ class SettingsViewModelTest {
 
         fun emitFontScale(value: FontScalePreference) {
             fontScale.value = value
+        }
+
+        // #973 — block-GIF display profile. Same optimistic-flip seam as the display density.
+        private val mediaDisplayProfile = MutableStateFlow(MediaDisplayProfile.M)
+        var mediaDisplayProfileSetCalls: Int = 0
+            private set
+        var lastMediaDisplayProfileSet: MediaDisplayProfile? = null
+            private set
+        var failOnMediaDisplayProfileSet: Boolean = false
+
+        override fun observeMediaDisplayProfile(): Flow<MediaDisplayProfile> = mediaDisplayProfile
+
+        override suspend fun setMediaDisplayProfile(profile: MediaDisplayProfile) {
+            mediaDisplayProfileSetCalls += 1
+            check(!failOnMediaDisplayProfileSet) { "boom" }
+            lastMediaDisplayProfileSet = profile
+            mediaDisplayProfile.value = profile
+        }
+
+        fun emitMediaDisplayProfile(value: MediaDisplayProfile) {
+            mediaDisplayProfile.value = value
         }
 
         // Build 89 follow-up — topic top-bar auto-hide. Same optimistic-flip seam as amoled.
@@ -1815,16 +2027,13 @@ class SettingsViewModelTest {
             topicTopBarAutoHide.value = enabled
         }
 
-        // #383 — topic page FABs. Same optimistic-flip seam as the topic top-bar toggle,
-        // plus the observe-override seam of ignoreTopicCache for the hydration-race test.
+        // #383 — topic page FABs. Same optimistic-flip seam as the topic top-bar toggle.
         private val topicPageFabs = MutableStateFlow(true)
         var topicPageFabsSetCalls: Int = 0
             private set
         var failOnTopicPageFabsSet: Boolean = false
-        var topicPageFabsObserveOverride: Flow<Boolean>? = null
 
-        override fun observeTopicPageFabs(): Flow<Boolean> =
-            topicPageFabsObserveOverride ?: topicPageFabs
+        override fun observeTopicPageFabs(): Flow<Boolean> = topicPageFabs
 
         override suspend fun setTopicPageFabs(enabled: Boolean) {
             topicPageFabsSetCalls += 1
@@ -1908,6 +2117,24 @@ class SettingsViewModelTest {
             foldLongQuotes.value = value
         }
 
+        // #884 — posts en pleine largeur. Même seam optimistic-flip ; default FALSE (encart).
+        private val fullWidthPosts = MutableStateFlow(false)
+        var fullWidthPostsSetCalls: Int = 0
+            private set
+        var failOnFullWidthPostsSet: Boolean = false
+
+        override fun observeTopicFullWidthPosts(): Flow<Boolean> = fullWidthPosts
+
+        override suspend fun setTopicFullWidthPosts(enabled: Boolean) {
+            fullWidthPostsSetCalls += 1
+            check(!failOnFullWidthPostsSet) { "boom" }
+            fullWidthPosts.value = enabled
+        }
+
+        fun emitFullWidthPosts(value: Boolean) {
+            fullWidthPosts.value = value
+        }
+
         // #105 — afficher l'ascenseur. Même seam optimistic-flip ; default TRUE (ascenseur affiché).
         private val showScrollbar = MutableStateFlow(true)
         var showScrollbarSetCalls: Int = 0
@@ -1975,11 +2202,7 @@ class SettingsViewModelTest {
             private set
         var failOnUploadProviderSet: Boolean = false
 
-        /** Startup-race seam, mirroring [themeModeObserveOverride] (#459). */
-        var uploadProviderObserveOverride: Flow<UploadProviderId>? = null
-
-        override fun observeUploadProvider(): Flow<UploadProviderId> =
-            uploadProviderObserveOverride ?: uploadProvider
+        override fun observeUploadProvider(): Flow<UploadProviderId> = uploadProvider
 
         override suspend fun setUploadProvider(provider: UploadProviderId) {
             uploadProviderSetCalls += 1
@@ -2038,6 +2261,39 @@ class SettingsViewModelTest {
             confirmBeforePostingSetCalls += 1
             check(!failOnConfirmBeforePostingSet) { "boom" }
             confirmBeforePosting.value = enabled
+        }
+
+        // #805 — quote cards in the composer. Same optimistic-flip seam as confirm-before-posting.
+        private val quoteCardsEnabled = MutableStateFlow(false)
+        var quoteCardsEnabledSetCalls: Int = 0
+            private set
+        var failOnQuoteCardsEnabledSet: Boolean = false
+
+        override fun observeQuoteCardsEnabled(): Flow<Boolean> = quoteCardsEnabled
+
+        override suspend fun setQuoteCardsEnabled(enabled: Boolean) {
+            quoteCardsEnabledSetCalls += 1
+            check(!failOnQuoteCardsEnabledSet) { "boom" }
+            quoteCardsEnabled.value = enabled
+        }
+
+        // #806 — writing-surface preset. Same optimistic-flip seam, enum-typed.
+        // FULL_EDITOR mirrors the production default (#951).
+        private val writingSurfacePreset = MutableStateFlow(WritingSurfacePreset.FULL_EDITOR)
+        var writingSurfacePresetSetCalls: Int = 0
+            private set
+        var failOnWritingSurfacePresetSet: Boolean = false
+
+        override fun observeWritingSurfacePreset(): Flow<WritingSurfacePreset> = writingSurfacePreset
+
+        override suspend fun setWritingSurfacePreset(preset: WritingSurfacePreset) {
+            writingSurfacePresetSetCalls += 1
+            check(!failOnWritingSurfacePresetSet) { "boom" }
+            writingSurfacePreset.value = preset
+        }
+
+        fun emitWritingSurfacePreset(value: WritingSurfacePreset) {
+            writingSurfacePreset.value = value
         }
 
         private val showDtSection = MutableStateFlow(false)

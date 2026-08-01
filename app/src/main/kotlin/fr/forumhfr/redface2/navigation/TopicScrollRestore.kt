@@ -41,64 +41,44 @@ internal fun Map<TopicScrollKey, TopicScrollAnchor>.withScrollAnchor(
 }
 
 /**
- * #307 — what the topic screen's initial scroll should do for one route landing. Resolved ONCE per
- * landing by [resolveTopicScrollRestoration]; only [RestoreSaved] makes the screen move the list —
- * the two `Follow*` levels mean « a higher-priority mechanism owns the scroll, stay out of its way ».
+ * #307 — what the topic screen's initial ENTRY scroll should do. Resolved ONCE per topic entry by
+ * [resolveTopicScrollRestoration]; only [RestoreSaved] makes the screen move the list — the
+ * `FollowScrollTo` level means « a higher-priority mechanism owns the landing, stay out of its way ».
+ *
+ * #895 étape 4 (PR 2) — this resolver now covers the ENTRY landing only. The historical mid-topic
+ * levels died with the route-replace navigation: post-submit landings ride
+ * `TopicViewModel.applySubmitResult`, quote-jump returns ride the in-VM jump chain, and the #412
+ * « page précédente » bottom landing is armed by `TopicViewModel.switchToPage` — all delivered as
+ * page-scoped scroll effects by the in-VM page engine.
  */
 internal sealed interface TopicScrollRestoration {
     /**
-     * The route carries a `scrollTo` (deep link, search, drapeau, quote/edit submit): the existing
-     * `ScrollToPost` effect owns the landing. Always wins.
+     * The route carries a `scrollTo` (deep link, search, drapeau): the `ScrollToPost` effect owns
+     * the landing. Always wins.
      */
     data object FollowScrollTo : TopicScrollRestoration
 
-    /**
-     * Post-submit route (`submitSignal != null`) without a `scrollTo`: `TopicViewModel.maybeEmitScroll`
-     * emits `ScrollToEndOfPage` (#200) — including on the #226/#344 overflow landing
-     * (`postSubmitOverflowLanding`, paired with a fresh `submitSignal` by the nav host). Restoring a
-     * stale anchor here would fight the « show my fresh post » scroll, so the saved position is
-     * deliberately ignored.
-     */
-    data object FollowSubmitLanding : TopicScrollRestoration
-
     /** A position was saved for this exact `(cat, post, page)` — restore it once loaded. */
     data class RestoreSaved(val anchor: TopicScrollAnchor) : TopicScrollRestoration
-
-    /**
-     * #412 — « page précédente » navigation onto a page with no saved anchor: land at the BOTTOM.
-     * Reading a thread backwards, the posts that chronologically follow what the user just read
-     * are the LAST ones of the previous page (same landing HFR's own `#bas` anchor gives on the
-     * web). A saved anchor still wins — this only replaces the [StartAtTop] fallback.
-     */
-    data object StartAtBottom : TopicScrollRestoration
 
     /** Never-visited page (or evicted anchor): keep the default top-of-page landing. */
     data object StartAtTop : TopicScrollRestoration
 }
 
 /**
- * #307 — pure priority resolver for the initial scroll of a topic page landing. STRICT order:
+ * #307 — pure priority resolver for the initial scroll of a topic ENTRY landing. STRICT order:
  *
- *  1. route `scrollTo` (deep link / search / drapeau / quote-edit submit) →
- *     [TopicScrollRestoration.FollowScrollTo] ;
- *  2. post-submit route (`submitSignal != null`, covers the #344 `ScrollToEndOfPage` path and the
- *     #226 overflow landing) → [TopicScrollRestoration.FollowSubmitLanding] ;
- *  3. saved anchor for the page → [TopicScrollRestoration.RestoreSaved] ;
- *  4. « page précédente » navigation (#412, `previousPageLanding`) →
- *     [TopicScrollRestoration.StartAtBottom] ;
- *  5. nothing → [TopicScrollRestoration.StartAtTop].
+ *  1. route `scrollTo` (deep link / search / drapeau) → [TopicScrollRestoration.FollowScrollTo] ;
+ *  2. saved anchor for the entry page → [TopicScrollRestoration.RestoreSaved] ;
+ *  3. nothing → [TopicScrollRestoration.StartAtTop].
  *
- * Pure so the five levels are unit-testable without Compose/nav3 (cf. `TopicScrollRestorationTest`).
+ * Pure so the levels are unit-testable without Compose/nav3 (cf. `TopicScrollRestorationTest`).
  */
 internal fun resolveTopicScrollRestoration(
     scrollTo: Int?,
-    submitSignal: Long?,
     savedAnchor: TopicScrollAnchor?,
-    previousPageLanding: Boolean = false,
 ): TopicScrollRestoration = when {
     scrollTo != null -> TopicScrollRestoration.FollowScrollTo
-    submitSignal != null -> TopicScrollRestoration.FollowSubmitLanding
     savedAnchor != null -> TopicScrollRestoration.RestoreSaved(savedAnchor)
-    previousPageLanding -> TopicScrollRestoration.StartAtBottom
     else -> TopicScrollRestoration.StartAtTop
 }

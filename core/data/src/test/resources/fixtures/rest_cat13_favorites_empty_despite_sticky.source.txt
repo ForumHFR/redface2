@@ -1,0 +1,6 @@
+GET https://forum.hardware.fr/webservices/rest_api.php?uri=forums/hardwarefr/categories/13/topics/favorites/&page=1&results_per_page=50
+Capturé le 2026-07-13 (~01h30), session authentifiée XaTelitte (compte agent), via curl,
+DANS LA MÊME SESSION que rest_cat13_topics_last_sticky_favorite.json et APRÈS la pose du
+favori sur le sticky 100217. resources est VIDE : le bucket favorites/ OMET les stickies
+flaggés (preuve serveur du drop #862, pendant favoris du drop cyan prouvé sur cat 32 #251).
+Non modifié.

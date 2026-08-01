@@ -15,6 +15,7 @@ import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
+import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
@@ -31,6 +32,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.Flag
@@ -188,7 +190,10 @@ class FlagsViewModelTest {
         vm.consumeRecallListToTop()
         assertFalse(vm.recallListToTop.value)
 
-        vm.selectTab(FlagTab.Red) // re-tap the same tab: no-op, no recall (keeps scroll position)
+        // #751 — the re-tap flips Red's filter now, but it is a FILTER action, not a tab
+        // transition: it must still never raise the recall (FilterFlipScrollResetEffect owns
+        // the scroll on a flip).
+        vm.selectTab(FlagTab.Red)
         assertFalse("re-tapping the already-selected tab must not recall", vm.recallListToTop.value)
     }
 
@@ -305,6 +310,75 @@ class FlagsViewModelTest {
         vm.selectTab(FlagTab.Cyan)
         assertEquals(FlagTab.Cyan, vm.selectedTab.value)
         assertEquals(true, vm.flagsViewSettings.value.unreadOnly)
+    }
+
+    @Test
+    fun `re-tapping the already selected Favorite tab toggles its unread-only filter`() = runTest {
+        // #751 (thibw) — the « +lus » shortcut used to no-op outside Cyan/DT.
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = viewModel(auth, flags, forum)
+
+        vm.selectTab(FlagTab.Favorite)
+        // FAVORITE defaults to unreadOnly = false (show all); the first re-tap flips it on.
+        assertEquals(false, vm.flagsViewSettings.value.unreadOnly)
+        vm.selectTab(FlagTab.Favorite)
+        assertEquals(true, vm.flagsViewSettings.value.unreadOnly)
+        vm.selectTab(FlagTab.Favorite)
+        assertEquals(false, vm.flagsViewSettings.value.unreadOnly)
+        assertEquals(FlagTab.Favorite, vm.selectedTab.value)
+        assertTrue("re-tap must not refetch", flags.refreshCalls.isEmpty())
+    }
+
+    @Test
+    fun `flipping Favorite does not clobber Cyan's pending flip`() = runTest {
+        // #751 — the optimistic shim is a per-type map: a Favorite write gated in flight must not
+        // erase a concurrent Cyan pending value (the old CYAN-only shim guaranteed this by never
+        // touching other types; the map must keep that isolation).
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository()
+        prefs.blockUnreadOnlySetUntil = kotlinx.coroutines.CompletableDeferred()
+        val vm = viewModel(auth, flags, forum, prefs)
+
+        vm.selectTab(FlagTab.Cyan) // re-tap: CYAN true → pending false, write gated
+        assertEquals(false, vm.cyanUnreadOnly.value)
+
+        vm.selectTab(FlagTab.Favorite) // real transition
+        vm.selectTab(FlagTab.Favorite) // re-tap: FAVORITE false → pending true, write gated
+        assertEquals(true, vm.favoriteUnreadOnly.value)
+        assertEquals("Cyan's optimistic flip must survive the Favorite write", false, vm.cyanUnreadOnly.value)
+
+        prefs.blockUnreadOnlySetUntil!!.complete(Unit)
+        assertEquals(false, vm.cyanUnreadOnly.value)
+        assertEquals(true, vm.favoriteUnreadOnly.value)
+    }
+
+    @Test
+    fun `rapid double re-tap on Favorite flips twice via the optimistic value`() = runTest {
+        // #751 gate (Codex) — same-type equivalent of the Cyan shim test below: two rapid re-taps
+        // on Favorite before either write persists must net back to the start (false → true →
+        // false), proving the second tap read the optimistic map value, not the lagging store.
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository()
+        val vm = viewModel(auth, flags, forum, prefs)
+
+        vm.selectTab(FlagTab.Favorite) // real transition
+        prefs.blockUnreadOnlySetUntil = kotlinx.coroutines.CompletableDeferred()
+
+        vm.selectTab(FlagTab.Favorite) // re-tap: false → write(true) gated, pending = true
+        vm.selectTab(FlagTab.Favorite) // re-tap: reads optimistic true → write(false) gated
+        prefs.blockUnreadOnlySetUntil!!.complete(Unit) // release both gated writes (FIFO)
+
+        assertEquals(
+            "two rapid re-taps must net back to the start, not lose the second flip",
+            false,
+            vm.flagsViewSettings.value.unreadOnly,
+        )
     }
 
     @Test
@@ -882,9 +956,11 @@ class FlagsViewModelTest {
     }
 
     @Test
-    fun `hide-read pref drops categories without an unread flag on RED`() = runTest {
-        // RED is not read-filtered, so both read and unread reach the grouping: hide-read must
-        // drop the all-read category (10) and the empty ones, keeping only the one with an unread.
+    fun `hide-read with unread-only on RED drops categories without an unread flag`() = runTest {
+        // Unread-only view on RED (explicit opt-in, off by default): the #317 filter removes the
+        // read flag first, so its category (10) groups empty and hide-read drops it — keeping only
+        // the one with an actionable unread. The read-showing RED default is pinned by the #825
+        // regression test below.
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository(catIds = listOf(1, 10))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
@@ -894,6 +970,7 @@ class FlagsViewModelTest {
         vm.flagsState.test {
             awaitItem() // initial null
             vm.selectTab(FlagTab.Red)
+            vm.setFlagsUnreadOnly(true)
             flags.emit(
                 FlagType.RED,
                 FlagsResult.Success(
@@ -969,11 +1046,11 @@ class FlagsViewModelTest {
     }
 
     @Test
-    fun `hide-read with no unread flag collapses the grouped sections to empty`() = runTest {
-        // Codex review: when hide-read is on and NO category has an unread flag (all read, or CYAN
-        // all-read with +lus off), the grouped content must be Grouped(emptyList()). The screen
-        // renders a placeholder for this state so the body never blanks (anti #229 regression);
-        // this test pins the state contract the screen relies on.
+    fun `red default read-showing view keeps fully-read categories under hide-read (#825)`() = runTest {
+        // #825 regression: RED shows read topics by default (« Lu (+lus) », unreadOnly off). The
+        // CYAN-only override used to leak the literal hide-read filter onto this view — once every
+        // red flag was read, every section was dropped and the body collapsed to empty. The « +lus »
+        // override applies to every read-showing view: only truly empty categories are dropped.
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository(catIds = listOf(1, 10))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
@@ -982,7 +1059,7 @@ class FlagsViewModelTest {
 
         vm.flagsState.test {
             awaitItem() // initial null
-            vm.selectTab(FlagTab.Red) // RED isn't read-filtered: the all-read flags reach grouping.
+            vm.selectTab(FlagTab.Red)
             flags.emit(
                 FlagType.RED,
                 FlagsResult.Success(
@@ -992,9 +1069,75 @@ class FlagsViewModelTest {
                     ),
                 ),
             )
+            val success = awaitItem() as FlagsListUiState.Success
+            assertEquals(
+                "all-read categories must stay visible when RED shows read topics",
+                listOf(1, 10),
+                sections(success).map { it.catId },
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `favorite default read-showing view keeps fully-read categories under hide-read (#825)`() = runTest {
+        // #825 twin on FAVORITE: same read-showing default as RED, same override.
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(catIds = listOf(1, 10))
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository(hideReadCategories = true)
+        val vm = viewModel(auth, flags, forum, prefs)
+
+        vm.flagsState.test {
+            awaitItem() // initial null
+            vm.selectTab(FlagTab.Favorite)
+            flags.emit(
+                FlagType.FAVORITE,
+                FlagsResult.Success(
+                    listOf(
+                        stubFlag(1, FlagType.FAVORITE, hasUnread = false, cat = 1),
+                        stubFlag(2, FlagType.FAVORITE, hasUnread = false, cat = 10),
+                    ),
+                ),
+            )
+            val success = awaitItem() as FlagsListUiState.Success
+            assertEquals(
+                "all-read categories must stay visible when FAVORITE shows read topics",
+                listOf(1, 10),
+                sections(success).map { it.catId },
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `hide-read with no unread flag collapses the grouped sections to empty`() = runTest {
+        // Codex review: when hide-read is on and NO category has a VISIBLE flag (here CYAN
+        // all-read with its default unread-only filter on, so the #317 filter empties the list),
+        // the grouped content must be Grouped(emptyList()). The screen renders a placeholder for
+        // this state so the body never blanks (anti #229 regression); this test pins the state
+        // contract the screen relies on. (Moved off RED by #825: its read-showing default no
+        // longer collapses — the collapse now only happens in unread-only views.)
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(catIds = listOf(1, 10))
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository(hideReadCategories = true)
+        val vm = viewModel(auth, flags, forum, prefs)
+
+        vm.flagsState.test {
+            awaitItem() // initial null
+            flags.emit(
+                FlagType.CYAN,
+                FlagsResult.Success(
+                    listOf(
+                        stubFlag(1, FlagType.CYAN, hasUnread = false, cat = 1),
+                        stubFlag(2, FlagType.CYAN, hasUnread = false, cat = 10),
+                    ),
+                ),
+            )
             val grouped = (awaitItem() as FlagsListUiState.Success).content as FlagsContent.Grouped
             assertTrue(
-                "every category is fully read → hide-read collapses to zero sections",
+                "no unread flag survives CYAN's unread-only filter → zero sections",
                 grouped.sections.isEmpty(),
             )
             cancelAndIgnoreRemainingEvents()
@@ -2247,6 +2390,11 @@ class FlagsViewModelTest {
             return removeFlagResult.await()
         }
 
+        override suspend fun findFlag(cat: Int, topicId: Int): Flag? {
+            // #809 — not exercised by the Drapeaux-view tests (findFlag serves the topic screen).
+            return null
+        }
+
         suspend fun emit(type: FlagType, result: FlagsResult) {
             perType.getValue(type).emit(result)
         }
@@ -2502,6 +2650,10 @@ class FlagsViewModelTest {
 
         override suspend fun setFoldLongQuotes(enabled: Boolean) = Unit
 
+        override fun observeTopicFullWidthPosts(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setTopicFullWidthPosts(enabled: Boolean) = Unit
+
         override fun observeShowScrollbar(): Flow<Boolean> = MutableStateFlow(true)
 
         override suspend fun setShowScrollbar(enabled: Boolean) = Unit
@@ -2540,6 +2692,17 @@ class FlagsViewModelTest {
 
         override suspend fun setConfirmBeforePosting(enabled: Boolean) = Unit
 
+        // #805 — quote rendering is irrelevant to FlagsViewModel; stubbed at its default.
+        override fun observeQuoteCardsEnabled(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setQuoteCardsEnabled(enabled: Boolean) = Unit
+
+        // #806 — writing surface is irrelevant to FlagsViewModel; stubbed at its default.
+        override fun observeWritingSurfacePreset(): Flow<WritingSurfacePreset> =
+            MutableStateFlow(WritingSurfacePreset.SHEET)
+
+        override suspend fun setWritingSurfacePreset(preset: WritingSurfacePreset) = Unit
+
         override fun observeShowDtSection(): Flow<Boolean> = MutableStateFlow(false)
 
         override suspend fun setShowDtSection(enabled: Boolean) = Unit
@@ -2577,6 +2740,12 @@ class FlagsViewModelTest {
         override fun observeFontScale(): Flow<FontScalePreference> = MutableStateFlow(FontScalePreference.M)
 
         override suspend fun setFontScale(scale: FontScalePreference) = Unit
+
+        // #973 — the block-GIF display profile is irrelevant to FlagsViewModel; stubbed at the M default.
+        override fun observeMediaDisplayProfile(): Flow<MediaDisplayProfile> =
+            MutableStateFlow(MediaDisplayProfile.M)
+
+        override suspend fun setMediaDisplayProfile(profile: MediaDisplayProfile) = Unit
 
         override fun observeDebugBoundsOverlay(): Flow<Boolean> = MutableStateFlow(false)
 

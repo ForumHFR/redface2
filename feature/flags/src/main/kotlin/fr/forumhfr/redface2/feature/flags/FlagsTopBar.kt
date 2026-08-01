@@ -91,18 +91,30 @@ data class FlagsAppBarState(
 )
 
 /**
- * #661 — read-filter state for the picker's contextual « +lus » entry: `null` when the active tab has
- * no such toggle (Red / Favori / Super), otherwise whether read items are currently shown (Cyan / DT).
- * Pure → unit-tested.
+ * #751 — per-tab « read items are currently shown » states, threaded as one bundle from the
+ * ViewModel's four eager shortcut StateFlows to the top bar (indicator, picker entry, label suffix).
+ */
+internal data class FlagsReadShortcuts(
+    val cyan: Boolean,
+    val dt: Boolean,
+    val red: Boolean,
+    val favorite: Boolean,
+)
+
+/**
+ * #661 → #751 — read-filter state for the picker's contextual « +lus » entry: `null` when the active
+ * tab has no such toggle (only the Super placeholder since #751 — thibw : the shortcut used to skip
+ * Red / Favori), otherwise whether read items are currently shown. Pure → unit-tested.
  */
 internal fun flagsReadFilterShowsRead(
     tab: FlagTab,
-    cyanShowsRead: Boolean,
-    dtShowsRead: Boolean,
+    shortcuts: FlagsReadShortcuts,
 ): Boolean? = when (tab) {
-    FlagTab.Cyan -> cyanShowsRead
-    FlagTab.Dt -> dtShowsRead
-    else -> null
+    FlagTab.Cyan -> shortcuts.cyan
+    FlagTab.Dt -> shortcuts.dt
+    FlagTab.Red -> shortcuts.red
+    FlagTab.Favorite -> shortcuts.favorite
+    FlagTab.Super -> null
 }
 
 private val ContainerShape = RoundedCornerShape(22.dp)

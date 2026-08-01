@@ -11,6 +11,7 @@ import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
+import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
@@ -27,6 +28,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.FlagType
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -348,6 +350,38 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeQuoteCardsEnabled(): Flow<Boolean> =
+        dataStore.data
+            // Default `false` (#805 arbitrage): citations land as editable [quotemsg] BBCode in
+            // the field; the compact cards of #604 lots 2-3 are the opt-in rendering.
+            .map { prefs -> prefs[KEY_QUOTE_CARDS_ENABLED] ?: false }
+            .distinctUntilChanged()
+            .catch { emit(false) }
+
+    override suspend fun setQuoteCardsEnabled(enabled: Boolean) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_QUOTE_CARDS_ENABLED] = enabled
+            }
+        }
+    }
+
+    override fun observeWritingSurfacePreset(): Flow<WritingSurfacePreset> =
+        dataStore.data
+            // Default FULL_EDITOR (#951): the quick-reply sheet is experimental opt-in — users
+            // who explicitly picked a sheet preset keep it (stored value wins over the default).
+            .map(::readWritingSurfacePreset)
+            .distinctUntilChanged()
+            .catch { emit(WritingSurfacePreset.FULL_EDITOR) }
+
+    override suspend fun setWritingSurfacePreset(preset: WritingSurfacePreset) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_WRITING_SURFACE_PRESET] = preset.name
+            }
+        }
+    }
+
     override fun observeShowDtSection(): Flow<Boolean> =
         dataStore.data
             // Default `false`: the DT tab is a placeholder until the MPStorage sync (#6) — opt-in only.
@@ -473,6 +507,22 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         persist {
             dataStore.edit { prefs ->
                 prefs[KEY_FOLD_LONG_QUOTES] = enabled
+            }
+        }
+    }
+
+    override fun observeTopicFullWidthPosts(): Flow<Boolean> =
+        dataStore.data
+            // Default `false` (#884): the inset card is the historical layout; full-width posts
+            // are the opt-in for edge-to-edge reading.
+            .map { prefs -> prefs[KEY_TOPIC_FULL_WIDTH_POSTS] ?: false }
+            .distinctUntilChanged()
+            .catch { emit(false) }
+
+    override suspend fun setTopicFullWidthPosts(enabled: Boolean) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_TOPIC_FULL_WIDTH_POSTS] = enabled
             }
         }
     }
@@ -617,6 +667,22 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeMediaDisplayProfile(): Flow<MediaDisplayProfile> =
+        dataStore.data
+            // Default M ×1,5 (#973, [AMENDEMENT-v1.5-2] — chosen by XaTriX). Like the display
+            // density, no bootstrap mirror: the profile never paints the pre-first-frame window.
+            .map(::readMediaDisplayProfile)
+            .distinctUntilChanged()
+            .catch { emit(MediaDisplayProfile.M) }
+
+    override suspend fun setMediaDisplayProfile(profile: MediaDisplayProfile) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_MEDIA_DISPLAY_PROFILE] = profile.name
+            }
+        }
+    }
+
     override fun observeImgurClientId(): Flow<String> =
         dataStore.data
             // Default empty (#459): imgur is unconfigured until the user pastes their Client-ID.
@@ -744,6 +810,12 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             ?.let { stored -> runCatching { EditorImageInsert.valueOf(stored) }.getOrNull() }
             ?: EditorImageInsert.REDUCED
 
+    /** Reads [KEY_WRITING_SURFACE_PRESET] defensively; unknown / corrupt value → [WritingSurfacePreset.FULL_EDITOR]. */
+    private fun readWritingSurfacePreset(prefs: Preferences): WritingSurfacePreset =
+        prefs[KEY_WRITING_SURFACE_PRESET]
+            ?.let { stored -> runCatching { WritingSurfacePreset.valueOf(stored) }.getOrNull() }
+            ?: WritingSurfacePreset.FULL_EDITOR
+
     /**
      * Reads [KEY_DISPLAY_DENSITY] defensively (#287): an unknown / corrupt stored value (older
      * build, manual edit) falls back to [DisplayDensity.COMFORT] instead of crashing on
@@ -753,6 +825,16 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         prefs[KEY_DISPLAY_DENSITY]
             ?.let { stored -> runCatching { DisplayDensity.valueOf(stored) }.getOrNull() }
             ?: DisplayDensity.COMFORT
+
+    /**
+     * Reads [KEY_MEDIA_DISPLAY_PROFILE] defensively (#973): an unknown / corrupt stored value
+     * (older build, manual edit) falls back to [MediaDisplayProfile.M] instead of crashing on
+     * `MediaDisplayProfile.valueOf`, same stance as [readDisplayDensity].
+     */
+    private fun readMediaDisplayProfile(prefs: Preferences): MediaDisplayProfile =
+        prefs[KEY_MEDIA_DISPLAY_PROFILE]
+            ?.let { stored -> runCatching { MediaDisplayProfile.valueOf(stored) }.getOrNull() }
+            ?: MediaDisplayProfile.M
 
     /**
      * Reads [KEY_IMMERSIVE_NAV_BAR_REVEAL] defensively (#518 follow-up): an unknown / corrupt stored
@@ -963,6 +1045,12 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         // #312 — confirmation dialog before any publish action (reply / edit / new topic / MP).
         val KEY_CONFIRM_BEFORE_POSTING = booleanPreferencesKey("confirm_before_posting")
 
+        // #805 arbitrage — quote cards in the composer (default OFF = inline [quotemsg] BBCode).
+        val KEY_QUOTE_CARDS_ENABLED = booleanPreferencesKey("quote_cards_enabled")
+
+        // #806 — writing-surface preset (WritingSurfacePreset.name, defensively parsed).
+        val KEY_WRITING_SURFACE_PRESET = stringPreferencesKey("writing_surface_preset")
+
         // Opt-in « DT » placeholder tab on the Drapeaux screen (MPStorage sync lands later, #6).
         val KEY_FLAGS_SHOW_DT_SECTION = booleanPreferencesKey("flags_show_dt_section")
 
@@ -983,6 +1071,9 @@ class DataStoreUserPreferencesRepository @Inject constructor(
 
         // #332 — fold long top-level citations by default (default true = historical fold; opt-out).
         val KEY_FOLD_LONG_QUOTES = booleanPreferencesKey("fold_long_quotes")
+
+        // #884 — render topic posts full-width / edge-to-edge (default false = historical card inset).
+        val KEY_TOPIC_FULL_WIDTH_POSTS = booleanPreferencesKey("topic_full_width_posts")
 
         // #105 — show the intra-page reading scrollbar (default true = historical; opt-out).
         val KEY_SHOW_SCROLLBAR = booleanPreferencesKey("show_scrollbar")
@@ -1006,6 +1097,8 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         // (FontScalePreference.name), both defensively parsed. No bootstrap mirror (cf. observers).
         val KEY_DISPLAY_DENSITY = stringPreferencesKey("display_density")
         val KEY_FONT_SCALE = stringPreferencesKey("font_scale")
+        // #973 — block-GIF display profile (MediaDisplayProfile.name, defensively parsed).
+        val KEY_MEDIA_DISPLAY_PROFILE = stringPreferencesKey("media_display_profile")
 
         // #445 — debug bounds overlay toggle (default false; exposed on the dev channel only).
         val KEY_DEBUG_BOUNDS_OVERLAY = booleanPreferencesKey("debug_bounds_overlay")

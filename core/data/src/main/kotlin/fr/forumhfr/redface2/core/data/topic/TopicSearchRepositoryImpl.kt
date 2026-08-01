@@ -56,12 +56,11 @@ class TopicSearchRepositoryImpl @Inject constructor(
             spseudo = request.spseudo,
             onlyMatches = request.onlyMatches,
             hashCheck = request.form.hashCheck,
-            // #546 — on ne renvoie JAMAIS firstnum (le client omet firstnum+dep quand firstnum=null) :
-            // avec firstnum HFR ancre la recherche en avant de la page courante et rate les matches
-            // antérieurs ; sans firstnum elle couvre tout le topic — vérifié live #546/bug tinc 2788609.
-            // Fresh comme step l'omettent : la recherche fraîche trouve le 1er match du topic entier,
-            // puis next/prev avance via currentnum.
-            firstnum = null,
+            // #894 — the anchor decision (« which firstnum, if any ») belongs to the ViewModel :
+            // session anchor (current page — HFR's own default), 0 (« depuis le début » opt-in),
+            // or null (steps and continuations MUST omit it — re-sending an anchor re-anchors HFR
+            // on the first match, live-verified #546). Forwarded verbatim.
+            firstnum = request.anchor,
             owntopic = request.form.owntopic,
             currentnum = request.currentNum,
         )

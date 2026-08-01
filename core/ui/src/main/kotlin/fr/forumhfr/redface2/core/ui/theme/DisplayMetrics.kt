@@ -5,6 +5,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
+import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 
 /**
  * Structural spacing metrics driven by the [DisplayDensity] preset (#287 lot B).
@@ -80,6 +81,29 @@ val LocalFoldLongQuotes = staticCompositionLocalOf { true }
  * [fr.forumhfr.redface2.core.ui.list.LazyListScrollbar], which renders nothing when `false`.
  */
 val LocalShowScrollbar = staticCompositionLocalOf { true }
+
+/**
+ * Project CompositionLocal carrying the #973 block-GIF display profile (contrat images §8
+ * [AMENDEMENT-v1.5-2]). Same `staticCompositionLocalOf` rationale as [LocalFoldLongQuotes]: the
+ * value changes only when the user switches profile in Réglages → Affichage, so the subtree
+ * recomposes once on change. Defaults to [MediaDisplayProfile.M] (×1,5 — the shipped default,
+ * XaTriX 26/07) for previews / hosts that do not provide it; `RedfaceTheme` provides the resolved
+ * value from [ReadingDisplaySettings.mediaDisplayProfile]. Read by the BLOCK image path of
+ * `PostRenderer` only — the factor applies solely to an eligible block GIF (probe MIME), inline
+ * media and non-GIF blocks keep the strict v1.5 no-upscale.
+ */
+val LocalMediaDisplayProfile = staticCompositionLocalOf { MediaDisplayProfile.M }
+
+/**
+ * #785 — canonical pseudos (cf. `canonicalizePseudo`) of the black-listed authors, provided by the
+ * topic reading surface around its post list so `QuoteBlock` can mask a citation OF a blocked
+ * author embedded in another user's post (the post-level mask alone let a blocked author's words
+ * resurface through quotes). Defaults to the empty set: every other PostRenderer host (editor
+ * preview, MP threads, signatures) keeps rendering quotes untouched. `staticCompositionLocalOf`:
+ * the value changes only when the blacklist changes, so a one-shot subtree recomposition on change
+ * is acceptable (same stance as [LocalFoldLongQuotes]).
+ */
+val LocalBlockedQuoteAuthors = staticCompositionLocalOf { emptySet<String>() }
 
 /**
  * Project CompositionLocal asking the post renderer to IGNORE the author's inline `[color]` styling

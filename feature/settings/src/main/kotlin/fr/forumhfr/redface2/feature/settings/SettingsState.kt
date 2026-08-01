@@ -4,9 +4,11 @@ import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
+import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 
 data class SettingsState(
     val proxyEnabled: Boolean = false,
@@ -38,9 +40,13 @@ data class SettingsState(
     val isUpdatingIgnoreTopicCache: Boolean = false,
     val ignoreTopicCacheError: Boolean = false,
     /**
-     * Internal startup-race guard. Set to `true` the moment the user flips the toggle locally,
-     * so the (still-suspended) initial DataStore hydration coroutine in `init` cannot resume
-     * later and overwrite the optimistic flip with a stale snapshot. Never surfaced in the UI.
+     * Legacy write marker, set to `true` the moment the user flips the toggle locally. It used
+     * to gate the one-shot `init` hydration against a stale late snapshot; since the #788
+     * continuous re-sync it is NO LONGER CONSULTED (the in-flight `isUpdating*` flag is the only
+     * hydration guard) — every `*TouchedLocally` field below shares this status. The imgur
+     * Client-ID is the one exception: its latch still opts the instance out of the re-sync while
+     * the user types (persist-on-keystroke field). Never surfaced in the UI; removal deferred to
+     * keep this diff mechanical.
      */
     val ignoreTopicCacheTouchedLocally: Boolean = false,
     // #445 — debug bounds overlay toggle (dev-channel only; the channel gate is in the screen, which
@@ -50,11 +56,11 @@ data class SettingsState(
     val isUpdatingDebugBoundsOverlay: Boolean = false,
     val debugBoundsOverlayError: Boolean = false,
     val debugBoundsOverlayTouchedLocally: Boolean = false,
-    // Drapeaux view preferences (#179 follow-up). Same optimistic-flip + startup-race-guard
-    // machinery as ignoreTopicCache: the field is the displayed value, `isUpdating*` gates the
-    // switch while DataStore writes, `*Error` surfaces a persist failure, and `*TouchedLocally`
-    // forbids a late hydration from clobbering a fast user flip. Defaults match the DataStore
-    // defaults (grouped on, hide-read off).
+    // Drapeaux view preferences (#179 follow-up). Same optimistic-flip machinery as
+    // ignoreTopicCache: the field is the displayed value, `isUpdating*` gates the switch while
+    // DataStore writes, `*Error` surfaces a persist failure, and `*TouchedLocally` is a legacy
+    // write marker (no longer consulted — #788, cf. ignoreTopicCacheTouchedLocally). Defaults
+    // match the DataStore defaults (grouped on, hide-read off).
     val flagsGroupByCategory: Boolean = true,
     val isUpdatingFlagsGroupByCategory: Boolean = false,
     val flagsGroupByCategoryError: Boolean = false,
@@ -70,10 +76,10 @@ data class SettingsState(
     val isUpdatingFlagsPerTabOverride: Boolean = false,
     val flagsPerTabOverrideError: Boolean = false,
     val flagsPerTabOverrideTouchedLocally: Boolean = false,
-    // Theme preferences (#286). Same optimistic-flip + startup-race-guard machinery as the flags
-    // toggles: `themeMode`/`amoledEnabled` are the displayed values, `isUpdating*` gates the control
-    // while DataStore writes, `*Error` surfaces a persist failure, and `*TouchedLocally` forbids a
-    // late `init` hydration from clobbering a fast user change. Defaults match the DataStore defaults
+    // Theme preferences (#286). Same optimistic-flip machinery as the flags toggles:
+    // `themeMode`/`amoledEnabled` are the displayed values, `isUpdating*` gates the control
+    // while DataStore writes, `*Error` surfaces a persist failure, and `*TouchedLocally` is a
+    // legacy write marker (no longer consulted — #788). Defaults match the DataStore defaults
     // (SYSTEM, amoled off).
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val isUpdatingThemeMode: Boolean = false,
@@ -89,10 +95,10 @@ data class SettingsState(
     val isUpdatingAccentColor: Boolean = false,
     val accentColorError: Boolean = false,
     val accentColorTouchedLocally: Boolean = false,
-    // Topic reading preferences (build 89 follow-up). Same optimistic-flip + startup-race-guard
-    // machinery: `topicTopBarAutoHide` is the displayed value, `isUpdating*` gates the switch while
-    // DataStore writes, `*Error` surfaces a persist failure, `*TouchedLocally` forbids a late `init`
-    // hydration from clobbering a fast user flip. Default false (top bar pinned).
+    // Topic reading preferences (build 89 follow-up). Same optimistic-flip machinery:
+    // `topicTopBarAutoHide` is the displayed value, `isUpdating*` gates the switch while
+    // DataStore writes, `*Error` surfaces a persist failure, `*TouchedLocally` is a legacy write
+    // marker (no longer consulted — #788). Default false (top bar pinned).
     val topicTopBarAutoHide: Boolean = false,
     val isUpdatingTopicTopBarAutoHide: Boolean = false,
     val topicTopBarAutoHideError: Boolean = false,
@@ -127,6 +133,12 @@ data class SettingsState(
     val isUpdatingFoldLongQuotes: Boolean = false,
     val foldLongQuotesError: Boolean = false,
     val foldLongQuotesTouchedLocally: Boolean = false,
+    // #884 — posts en pleine largeur dans la lecture de sujet. Même machinerie optimistic-flip +
+    // garde de course au démarrage. Default FALSE (encart historique) : la pleine largeur est l'opt-in.
+    val fullWidthPosts: Boolean = false,
+    val isUpdatingFullWidthPosts: Boolean = false,
+    val fullWidthPostsError: Boolean = false,
+    val fullWidthPostsTouchedLocally: Boolean = false,
     // #105 — afficher l'ascenseur de lecture. Même machinerie optimistic-flip + garde de course au
     // démarrage. Default TRUE (ascenseur historique) : le toggle est l'opt-out (retour bêta styx42).
     val showScrollbar: Boolean = true,
@@ -164,14 +176,28 @@ data class SettingsState(
     val isUpdatingImmersiveNavBarReveal: Boolean = false,
     val immersiveNavBarRevealError: Boolean = false,
     val immersiveNavBarRevealTouchedLocally: Boolean = false,
-    // Publishing preferences (#312). Same optimistic-flip + startup-race-guard machinery:
-    // `confirmBeforePosting` is the displayed value, `isUpdating*` gates the switch while DataStore
-    // writes, `*Error` surfaces a persist failure, `*TouchedLocally` forbids a late `init` hydration
-    // from clobbering a fast user flip. Default false (publishing stays one-tap).
+    // Publishing preferences (#312). Same optimistic-flip machinery: `confirmBeforePosting` is
+    // the displayed value, `isUpdating*` gates the switch while DataStore writes, `*Error`
+    // surfaces a persist failure, `*TouchedLocally` is a legacy write marker (no longer
+    // consulted — #788). Default false (publishing stays one-tap).
     val confirmBeforePosting: Boolean = false,
     val isUpdatingConfirmBeforePosting: Boolean = false,
     val confirmBeforePostingError: Boolean = false,
     val confirmBeforePostingTouchedLocally: Boolean = false,
+    // #805 arbitrage — quote cards in the composer, opt-in. Same optimistic-flip + startup-race
+    // machinery. Default false (citations = inline [quotemsg] BBCode in the field).
+    val quoteCardsEnabled: Boolean = false,
+    val isUpdatingQuoteCardsEnabled: Boolean = false,
+    val quoteCardsEnabledError: Boolean = false,
+    val quoteCardsEnabledTouchedLocally: Boolean = false,
+    // #806 — which surface a write action in a topic opens (sheet / sheet-except-quotes / full
+    // editor). Enum, so the same bespoke optimistic-flip shape as [editorImageInsert]. Default
+    // FULL_EDITOR since the quick-reply sheet is experimental opt-in (#951). Distinct from
+    // [quoteCardsEnabled], which governs the quote RENDERING inside whichever surface opens.
+    val writingSurfacePreset: WritingSurfacePreset = WritingSurfacePreset.FULL_EDITOR,
+    val isUpdatingWritingSurfacePreset: Boolean = false,
+    val writingSurfacePresetError: Boolean = false,
+    val writingSurfacePresetTouchedLocally: Boolean = false,
     // Drapeaux — opt-in « DT » placeholder tab (MPStorage sync #6 lands later). Same
     // optimistic-flip + startup-race-guard machinery. Default false (tab hidden).
     val showDtSection: Boolean = false,
@@ -190,11 +216,11 @@ data class SettingsState(
     val isUpdatingFlagsAutoRefresh: Boolean = false,
     val flagsAutoRefreshError: Boolean = false,
     val flagsAutoRefreshTouchedLocally: Boolean = false,
-    // Reading display presets (#287). Same optimistic-flip + startup-race-guard machinery as the
-    // theme controls (both are enums, so the bespoke shape): the value is the displayed selection,
-    // `isUpdating*` gates the control while DataStore writes, `*Error` surfaces a persist failure,
-    // `*TouchedLocally` forbids a late `init` hydration from clobbering a fast user change. Defaults
-    // match the DataStore defaults (COMFORT density, M font scale).
+    // Reading display presets (#287). Same optimistic-flip machinery as the theme controls (both
+    // are enums, so the bespoke shape): the value is the displayed selection, `isUpdating*` gates
+    // the control while DataStore writes, `*Error` surfaces a persist failure, `*TouchedLocally`
+    // is a legacy write marker (no longer consulted — #788). Defaults match the DataStore
+    // defaults (COMFORT density, M font scale).
     val displayDensity: DisplayDensity = DisplayDensity.COMFORT,
     val isUpdatingDisplayDensity: Boolean = false,
     val displayDensityError: Boolean = false,
@@ -203,18 +229,25 @@ data class SettingsState(
     val isUpdatingFontScale: Boolean = false,
     val fontScaleError: Boolean = false,
     val fontScaleTouchedLocally: Boolean = false,
+    // #973 — block-GIF display profile ([AMENDEMENT-v1.5-2]). Same optimistic-flip machinery as
+    // the reading display presets. Default matches the DataStore default (M ×1,5, choix XaTriX).
+    val mediaDisplayProfile: MediaDisplayProfile = MediaDisplayProfile.M,
+    val isUpdatingMediaDisplayProfile: Boolean = false,
+    val mediaDisplayProfileError: Boolean = false,
+    val mediaDisplayProfileTouchedLocally: Boolean = false,
     // #459 — Hébergeur d'images. The provider is an enum, so it uses the bespoke optimistic-flip
     // shape (like themeMode): `uploadProvider` is the displayed selection, `isUpdating*` gates the
-    // control while DataStore writes, `*Error` surfaces a persist failure, `*TouchedLocally` forbids
-    // a late `init` hydration from clobbering a fast user change. Default DIBERIE (no Client-ID).
+    // control while DataStore writes, `*Error` surfaces a persist failure, `*TouchedLocally` is a
+    // legacy write marker (no longer consulted — #788). Default DIBERIE (no Client-ID).
     val uploadProvider: UploadProviderId = UploadProviderId.DIBERIE,
     val isUpdatingUploadProvider: Boolean = false,
     val uploadProviderError: Boolean = false,
     val uploadProviderTouchedLocally: Boolean = false,
     // #459 — imgur Client-ID text field. `imgurClientId` is the displayed/edited value, persisted on
     // each change (no save button — same as the optimistic prefs). `*Error` surfaces a persist
-    // failure; `*TouchedLocally` forbids the late hydration from overwriting in-progress typing.
-    // Default empty = imgur not configured.
+    // failure; `*TouchedLocally` is STILL consulted for this pref only (#788 exception): it opts
+    // the instance out of the continuous re-sync so an echoed emission never overwrites
+    // in-progress typing. Default empty = imgur not configured.
     val imgurClientId: String = "",
     val imgurClientIdError: Boolean = false,
     val imgurClientIdTouchedLocally: Boolean = false,
@@ -287,6 +320,10 @@ data class SettingsState(
     val canToggleFoldLongQuotes: Boolean
         get() = !isUpdatingFoldLongQuotes
 
+    // #884 — the full-width-posts toggle is gated only by its own write.
+    val canToggleFullWidthPosts: Boolean
+        get() = !isUpdatingFullWidthPosts
+
     // #105 — the show-scrollbar toggle is gated only by its own write.
     val canToggleShowScrollbar: Boolean
         get() = !isUpdatingShowScrollbar
@@ -315,6 +352,14 @@ data class SettingsState(
     val canToggleConfirmBeforePosting: Boolean
         get() = !isUpdatingConfirmBeforePosting
 
+    // #805 — the quote-cards toggle is gated only by its own write.
+    val canToggleQuoteCardsEnabled: Boolean
+        get() = !isUpdatingQuoteCardsEnabled
+
+    // #806 — the writing-surface radio group is gated only by its own in-flight write.
+    val canChangeWritingSurfacePreset: Boolean
+        get() = !isUpdatingWritingSurfacePreset
+
     // DT tab — gated only by its own write.
     val canToggleShowDtSection: Boolean
         get() = !isUpdatingShowDtSection
@@ -333,6 +378,10 @@ data class SettingsState(
 
     val canChangeFontScale: Boolean
         get() = !isUpdatingFontScale
+
+    // #973 — the block-GIF profile selector is gated only by its own write.
+    val canChangeMediaDisplayProfile: Boolean
+        get() = !isUpdatingMediaDisplayProfile
 
     // #459 — the provider selector is gated only by its own in-flight write.
     val canChangeUploadProvider: Boolean
@@ -430,6 +479,9 @@ sealed interface SettingsIntent {
     /** #332 — replier les longues citations sur une ligne. */
     data class FoldLongQuotesChanged(val enabled: Boolean) : SettingsIntent
 
+    /** #884 — afficher les posts en pleine largeur (bord à bord, sans encart). */
+    data class FullWidthPostsChanged(val enabled: Boolean) : SettingsIntent
+
     /** #105 — afficher l'ascenseur de lecture (sujets et MP). */
     data class ShowScrollbarChanged(val enabled: Boolean) : SettingsIntent
 
@@ -452,6 +504,16 @@ sealed interface SettingsIntent {
     // the boolean is the desired post-flip state.
     data class ConfirmBeforePostingChanged(val enabled: Boolean) : SettingsIntent
 
+    // #805 — quote-cards-in-composer toggle. Optimistic-flip contract, like the flags toggles.
+    data class QuoteCardsEnabledChanged(val enabled: Boolean) : SettingsIntent
+
+    /**
+     * #806 — choose which surface a write action in a topic opens. `preset` is the desired
+     * selection (one intent per radio pick), applied optimistically with revert-on-failure,
+     * like [SetEditorImageInsert].
+     */
+    data class SetWritingSurfacePreset(val preset: WritingSurfacePreset) : SettingsIntent
+
     // Drapeaux — opt-in « DT » placeholder tab (MPStorage sync #6 lands later). Optimistic-flip
     // contract, like the flags toggles: the boolean is the desired post-flip state.
     data class ShowDtSectionChanged(val enabled: Boolean) : SettingsIntent
@@ -467,6 +529,10 @@ sealed interface SettingsIntent {
     // optimistically with revert-on-failure, like ThemeModeChanged.
     data class DisplayDensityChanged(val density: DisplayDensity) : SettingsIntent
     data class FontScaleChanged(val scale: FontScalePreference) : SettingsIntent
+
+    // #973 — block-GIF display profile. `profile` is the desired selection, applied optimistically
+    // with revert-on-failure, like DisplayDensityChanged.
+    data class MediaDisplayProfileChanged(val profile: MediaDisplayProfile) : SettingsIntent
 
     // #459 — Hébergeur d'images. `provider` is the desired selection (applied optimistically with
     // revert-on-failure, like ThemeModeChanged); `text` is the desired imgur Client-ID (persisted on

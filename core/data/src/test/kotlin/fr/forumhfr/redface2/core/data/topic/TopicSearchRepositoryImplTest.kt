@@ -19,19 +19,19 @@ import org.junit.Assert.assertThrows
 import org.junit.Test
 
 /**
- * Chantier C (#546) — tests for [TopicSearchRepositoryImpl].
+ * Chantier C (#546) + #894 — tests for [TopicSearchRepositoryImpl].
  *
  * The HfrClient is mocked ; the parser stays real so the response → [fr.forumhfr.redface2.core.model.Topic]
- * mapping is exercised. We assert the REQUEST construction (each form field forwarded verbatim from
- * the parsed [TopicSearchForm]) and that the response page is re-parsed as a topic. The `transsearch`
- * RESPONSE is never asserted against a real capture — none exists (see the model KDoc) — so we feed
- * the parser a known topic-page fixture as a stand-in to prove the round-trip wiring.
+ * mapping is exercised. We assert the REQUEST construction — since #894 the anchor decision
+ * (`firstnum`) belongs entirely to the CALLER ([TopicSearchRequest.anchor] forwarded verbatim,
+ * `null` = omitted) and result batches are reached through the `currentnum` resume cursor, never a
+ * `p` pager (verified live : `p` paginates nothing).
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class TopicSearchRepositoryImplTest {
 
     @Test
-    fun `forwards every form field and the filter flag, but never firstnum (whole-topic search)`() = runTest {
+    fun `forwards the caller-decided anchor verbatim (#894 fresh default = current page)`() = runTest {
         val hfrClient = mockk<HfrClient>()
         coEvery {
             hfrClient.searchInTopic(
@@ -53,6 +53,7 @@ class TopicSearchRepositoryImplTest {
                 word = "betatest",
                 spseudo = "XaTriX",
                 onlyMatches = true,
+                anchor = 2783602,
             ),
         )
 
@@ -66,10 +67,9 @@ class TopicSearchRepositoryImplTest {
                 spseudo = "XaTriX",
                 onlyMatches = true,
                 hashCheck = "tok",
-                // #546 (bug tinc 2788609) — a FRESH search must NOT send firstnum: with firstnum HFR
-                // anchors the search ahead of the current page and misses earlier matches. firstnum=null
-                // makes it cover the whole topic from the start, even though form.firstnum is non-null.
-                firstnum = null,
+                // #894 — HFR's own semantics : the fresh default anchors on the current page
+                // (« search from here onwards »), the VALUE decided by the ViewModel.
+                firstnum = 2783602,
                 owntopic = 0,
                 currentnum = null,
             )
@@ -77,7 +77,7 @@ class TopicSearchRepositoryImplTest {
     }
 
     @Test
-    fun `carries the navigation cursor and owntopic verbatim, still omitting firstnum`() = runTest {
+    fun `sends an explicit 0 anchor for a from-start search (#894 opt-in)`() = runTest {
         val hfrClient = mockk<HfrClient>()
         coEvery {
             hfrClient.searchInTopic(
@@ -91,25 +91,25 @@ class TopicSearchRepositoryImplTest {
                 form = TopicSearchForm(hashCheck = "tok", topicId = 7, cat = 32, firstnum = 16244, owntopic = 1),
                 word = "",
                 spseudo = "someone",
-                onlyMatches = false,
-                currentNum = "16300",
+                onlyMatches = true,
+                // « Chercher depuis le début » — an explicit whole-topic anchor, never a silent
+                // omission (cadrage F1).
+                anchor = 0,
             ),
         )
 
         coVerify(exactly = 1) {
-            // owntopic + currentnum forwarded verbatim ; firstnum dropped (#546 whole-topic search).
             hfrClient.searchInTopic(
-                cat = 32, topicId = 7, word = "", spseudo = "someone", onlyMatches = false,
-                hashCheck = "tok", firstnum = null, owntopic = 1, currentnum = "16300",
+                cat = 32, topicId = 7, word = "", spseudo = "someone", onlyMatches = true,
+                hashCheck = "tok", firstnum = 0, owntopic = 1, currentnum = null,
             )
         }
     }
 
     @Test
     fun `omits firstnum on a navigation step and forwards currentnum so HFR advances the cursor`() = runTest {
-        // #546 — a STEP request (isStep=true) drops firstnum so HFR does not re-anchor on the first match,
-        // and advances via currentnum. Since the bug-tinc fix, a FRESH search ALSO drops firstnum (whole
-        // topic) — both modes pass firstnum=null ; only currentnum tells fresh (null) from step here.
+        // #546/#894 — a STEP request carries NO anchor : re-sending one re-anchors HFR on the
+        // first match and the cursor never advances (live-verified stepping bug).
         val hfrClient = mockk<HfrClient>()
         coEvery {
             hfrClient.searchInTopic(
@@ -126,6 +126,7 @@ class TopicSearchRepositoryImplTest {
                 onlyMatches = false,
                 currentNum = "2786594",
                 isStep = true,
+                anchor = null,
             ),
         )
 
@@ -133,6 +134,37 @@ class TopicSearchRepositoryImplTest {
             hfrClient.searchInTopic(
                 cat = 23, topicId = 35395, word = "betatest", spseudo = "", onlyMatches = false,
                 hashCheck = "tok", firstnum = null, owntopic = 0, currentnum = "2786594",
+            )
+        }
+    }
+
+    @Test
+    fun `a filtered continuation posts the resume cursor with no anchor (#894 web parity)`() = runTest {
+        // #894 — « Résultats suivants » : HFR's truncated scan resumes from the cursor its
+        // previous response advertised. Same criteria, `currentnum` = cursor, NO `firstnum`.
+        val hfrClient = mockk<HfrClient>()
+        coEvery {
+            hfrClient.searchInTopic(
+                cat = any(), topicId = any(), word = any(), spseudo = any(), onlyMatches = any(),
+                hashCheck = any(), firstnum = any(), owntopic = any(), currentnum = any(),
+            )
+        } returns fixture("topic_page_single.html")
+
+        buildRepository(hfrClient).searchInTopic(
+            TopicSearchRequest(
+                form = TopicSearchForm(hashCheck = "tok", topicId = 35395, cat = 23, firstnum = null),
+                word = "",
+                spseudo = "XaTriX",
+                onlyMatches = true,
+                currentNum = "2783327",
+                anchor = null,
+            ),
+        )
+
+        coVerify(exactly = 1) {
+            hfrClient.searchInTopic(
+                cat = 23, topicId = 35395, word = "", spseudo = "XaTriX", onlyMatches = true,
+                hashCheck = "tok", firstnum = null, owntopic = 0, currentnum = "2783327",
             )
         }
     }
@@ -163,6 +195,7 @@ class TopicSearchRepositoryImplTest {
                         word = "topic",
                         spseudo = "",
                         onlyMatches = false,
+                        anchor = 1,
                     ),
                 )
             }
@@ -189,6 +222,7 @@ class TopicSearchRepositoryImplTest {
                 word = "word-secret",
                 spseudo = "pseudo-secret",
                 onlyMatches = true,
+                anchor = 1,
             ),
         )
 
@@ -219,6 +253,7 @@ class TopicSearchRepositoryImplTest {
                         word = "x",
                         spseudo = "",
                         onlyMatches = true,
+                        anchor = 1,
                     ),
                 )
             }
