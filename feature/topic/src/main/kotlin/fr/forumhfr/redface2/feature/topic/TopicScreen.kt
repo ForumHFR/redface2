@@ -1133,8 +1133,8 @@ internal fun TopicContent(
 
                 is TopicUiState.Mode.Loaded -> {
                     // #182 (#937) — magnifier state hoisted above the pull-to-refresh wrapper:
-                    // the PTR suspension, the selection gate (LocalTopicZoomed) and the reset chip
-                    // read it here; the gesture and the draw layer consume it in TopicLoadedContent.
+                    // the PTR suspension and the reset chip read it here; the gesture and the draw
+                    // layer consume it in TopicLoadedContent.
                     val zoomAnimationScope = rememberCoroutineScope()
                     val zoomState = rememberTopicZoomState(
                         // Full route identity (§2.1) — two topics on the same page number must
@@ -3830,10 +3830,10 @@ internal fun shouldShowEditAction(
 // remove the whole topic) is applied at the call site by position, not here.
 // #600 (vague 3) — « Dernier message lu » separator gate. `forceRefresh` is #231's flag-tap
 // marker: the ONE navigation whose scrollTo is semantically « last read » (the flag handler only
-// sets scrollTo when resuming at the last-read page). Every route-replace (pagination #282,
-// citation jump #699, overflow landing #226) rebuilds the route WITHOUT forceRefresh, so the
-// marker never survives a navigation away from the landing. If forceRefresh ever grows another
-// producer, this gate needs its own dedicated route field — cf. TopicActionGatesTest.
+// sets scrollTo when resuming at the last-read page). Since #895, pagination and citation jumps
+// happen in-VM and can preserve these request fields instead of rebuilding the route. This gate is
+// intentionally unchanged for the beta; #953/F4 tracks the marker that can therefore outlive its
+// landing. If forceRefresh ever grows another producer, give this semantic its own field first.
 internal fun shouldShowLastReadMarker(request: TopicRequest, numreponse: Int): Boolean =
     request.forceRefresh && request.scrollTo == numreponse
 
