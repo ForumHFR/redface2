@@ -16,7 +16,7 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
-## `0.37.0` — `local` — 2026-08-01
+## `0.37.0` — `open` (beta) — 2026-08-01
 
 **Promotion bêta** — première version proposée aux testeurs du canal ouvert depuis la 0.18.0.
 Cette entrée synthétise la série dev 0.19.0 → 0.36.1 ; les entrées détaillées ci-dessous restent
@@ -43,7 +43,7 @@ la source des changements et correctifs intermédiaires.
 
 ---
 
-## `0.36.1` — `local` — 2026-08-01
+## `0.36.1` — `internal` (dev) — 2026-08-01
 
 Correctif **N1**, trouvé pendant la review de promotion bêta (coupe 9/10, review GPT-5.6 Codex →
 gate Claude Fable 5). Classé bloquant pré-bêta au même titre que F2/F3/F5 de #953 : fonctionnel et
@@ -91,7 +91,7 @@ gate Claude Fable 5). Classé bloquant pré-bêta au même titre que F2/F3/F5 de
 
 ---
 
-## `0.36.0` — `local` — 2026-07-30
+## `0.36.0` — `internal` (dev) — 2026-07-30
 
 ### Ajouté
 
@@ -135,7 +135,7 @@ gate Claude Fable 5). Classé bloquant pré-bêta au même titre que F2/F3/F5 de
 - Gouvernance : amendement rédigé par Sol (GPT-5.6 Codex xhigh) et gaté par Claude Fable 5 ; code par
   Claude Fable 5 et gaté par Sol — 3 tours de gate, 2 NO-GO réels levés.
 
-## `0.35.1` — `local` — 2026-07-26
+## `0.35.1` — `internal` (dev) — 2026-07-26
 
 Correctif du mode « Posts en pleine largeur » (#983, rapporté par styx42) : espacements
 irréguliers et lignes horizontales parasites autour des marqueurs. Le trait de pied d'un post
@@ -146,7 +146,7 @@ marqueur porte désormais son propre rythme vertical, symétrique (il héritait 
 et de rien en dessous) ; il reste traversant, à la largeur des posts qu'il sépare. Le mode encart
 est inchangé à l'identique.
 
-## `0.35.0` — `local` — 2026-07-26
+## `0.35.0` — `internal` (dev) — 2026-07-26
 
 Agrandissement des GIF (#973, [AMENDEMENT-v1.5-2] au contrat images, arbitrage XaTriX) :
 nouveau réglage « Agrandissement des GIF » (Réglages → Affichage) — S (×1, net) / M (×1,5) /
@@ -156,7 +156,7 @@ GIF inline ne changent pas ; les caps de largeur/hauteur continuent de borner le
 le décodage reste au natif (agrandissement au dessin, net à ×1). Répond aux retours de
 l'appel à tests tailles (GIF trop petits depuis le no-upscale strict).
 
-## `0.34.6` — `local` — 2026-07-26
+## `0.34.6` — `internal` (dev) — 2026-07-26
 
 Fixes pré-promotion (#953, bloquants F2/F3/F5/F6 de la review beta) : la réponse rapide
 survit à une rotation pendant l'envoi (l'état est restauré, plus de rejet fantôme du
@@ -166,7 +166,7 @@ en base — un compte ne peut plus lire ni effacer le brouillon d'un autre) ; la
 topic n'est plus soumise pendant un upload d'image en vol ; la spec navigation reflète le
 défaut plein écran de l'éditeur.
 
-## `0.34.5` — `local` — 2026-07-26
+## `0.34.5` — `internal` (dev) — 2026-07-26
 
 Réglage « Posts en pleine largeur » — Lot 5 (#884) de la passe images (#876), arbitrage
 XaTriX : optionnel, 2 états, défaut inchangé. Nouveau réglage dans Réglages → Topic :
@@ -180,7 +180,7 @@ encart par défaut est strictement inchangé (rendu byte-identique).
 
 ---
 
-## `0.34.4` — `local` — 2026-07-22
+## `0.34.4` — `internal` (dev) — 2026-07-22
 
 Les états d'erreur & retry — Lot 4 (#960) de la passe images (#876, contrat v1.5 §6,
 la mort de #813/B5) : registre d'essais par URL (UNE tentative probe + UNE tentative
@@ -195,7 +195,7 @@ embarqué, AVIF selon décodeur device avec état d'erreur propre + retry sinon.
 Sol P1..P4 + gate final (2 NO-GO fermés en TDD : générations qui gelaient un axe en
 vol, éviction du cache de géométrie). 513 tests :core:ui.
 
-## `0.34.3` — `local` — 2026-07-21
+## `0.34.3` — `internal` (dev) — 2026-07-21
 
 Le sizing & décodage density-aware — Lot 3 (#959) de la passe images (#876, contrat
 v1.5 §3/§7/§9) : équation unique en PIXELS PHYSIQUES (no-upscale réel : 1 px source ≤

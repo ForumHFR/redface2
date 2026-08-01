@@ -17,7 +17,7 @@ Voir SKILLS.md à la racine pour l'index humain des skills.
 
 ## Projet
 
-- Phase actuelle : **Phase 4 — UI & hygiène + Extensions** ([roadmap](docs/specs/roadmap.md)). Phases 0 à 3 livrées (bootstrap ; lecture du forum ; écriture poster/citer/upload ; messages MP + DT/MultiMP), bêta **0.18.0** publiée (Play open testing + F-Droid ; vue Drapeaux #603 livrée). En cours : refonte vue Topic (#604), aide & réglages, architecture d'extensions (#6 MPStorage, #7).
+- Phase actuelle : **Phase 4 — UI & hygiène + Extensions** ([roadmap](docs/specs/roadmap.md)). Phases 0 à 3 livrées (bootstrap ; lecture du forum ; écriture poster/citer/upload ; messages MP + DT/MultiMP), bêta **0.37.0** publiée (Play open testing + F-Droid ; vues Drapeaux #603 et Topic #604 livrées, passe images #876 soldée). En cours : itération 2 des vues Topic et Éditeur, aide & réglages, architecture d'extensions (#6 MPStorage, #7).
 - Licence : GPL-3.0-only
 - Documentation : GitHub Pages via `docs/` (Jekyll + just-the-docs)
 - Langue : code en anglais, issues et docs en francais
