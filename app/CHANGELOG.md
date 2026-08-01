@@ -42,13 +42,19 @@ gate Claude Fable 5). Classé bloquant pré-bêta au même titre que F2/F3/F5 de
   - Écarté : avancer la génération au rollback. Trop large — une rollback survient à **chaque**
     défilement disposant un effet en vol, et le bump recréerait tous les `PainterAttempt` de l'URL
     en relançant les effets de mesure, avec annulation possible d'un probe en vol.
-  - Surcoût mesuré du fix : un `tryReserve` refusé supplémentaire par occurrence observatrice, sans
+  - Surcoût du fix : un `tryReserve` refusé supplémentaire par occurrence observatrice, sans
     écriture, sans bump, sans requête réseau. Aucune boucle de recomposition possible.
+  - Résidu consigné, **auto-guérissant** : la course de même forme existe sur l'axe **probe**
+    (`IntrinsicMediaSizeMeasurer`), mais `settlePainterGeometry` settle l'axe probe à **chaque**
+    succès painter — l'axe painter étant désormais re-armé, tout painter qui aboutit guérit la probe
+    coincée. Résidu réel : « painter réussi avec dimensions inexploitables », dont le symptôme est
+    une boîte cold, pas une image absente. Durcissement symétrique possible après la bêta.
 
 ### Tests
 
 - `PainterAttemptRearmTest` (neuf) — la course de bout en bout : A gagne, B est refusée, A est
-  disposée en vol, **B reprend et settle**. Vérifié en échec avant le fix (`ComposeTimeoutException`).
+  disposée en vol, **B reprend et settle**. **Vérifié en échec avant le fix** — `AssertionError`
+  déterministe en phase 3 (« B must re-arm »), reproduite par un validateur distinct.
 - `MediaAttemptLedgerTest` — un test épingle que le refresh ne récupère **pas** une entrée rendue à
   `Untried` (la cause traitée au niveau composition, pas au ledger).
 - **Faux vert corrigé** : le test du verrou #5 settlait l'axe en `Succeeded` *avant* la rollback
