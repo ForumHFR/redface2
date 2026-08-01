@@ -16,6 +16,7 @@ Liste **vivante** des limitations connues de Redface 2 et des compromis **assum�
 
 - **Citations en mode connecté — pas de saut vers le post cité.** En authentifié, HFR sert l'en-tête de citation avec un lien dynamique `forum2.php?…&numreponse=M` au lieu du permalien statique `sujet_<post>_<page>.htm#tN`. Le parser extrait l'auteur de la citation mais laisse `page`/`numreponse` à `null` → le tap « aller au message cité » est inactif en mode connecté (il fonctionne en anonyme). Compromis Phase 2.
 - **Modèle de contenu de post gelé.** L'AST `PostContent` est sérialisé en base (Room) : ajouter un nouveau type de bloc/inline impose une migration. Les évolutions de rendu réutilisent les primitives existantes (ex. `LineBreak`) tant que possible.
+- **Repère « Dernier message lu » et liseré d'ancre rejoués au retour sur la page d'atterrissage** (#953/F4, bêta 0.37.0). Depuis le moteur de pagination in-ViewModel (#895), un changement de page préserve `scrollTo` et `forceRefresh` dans la requête ; or les deux surfaces visuelles les lisent en direct. Revenir sur la page d'arrivée dans la même session ré-affiche donc le bandeau et le liseré, déjà vus. **Strictement visuel** : le canal d'effet est latché (aucun scroll rejoué), le bypass de TTL a son propre latch consommable (aucun rechargement réseau), et les ancres persistées ne sont pas touchées. Correctif cadré pour l'après-bêta — dériver les deux surfaces du latch de consommation existant.
 
 ## Drapeaux et listes
 
