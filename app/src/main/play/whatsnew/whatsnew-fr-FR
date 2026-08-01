@@ -1,4 +1,4 @@
-Redface 2 v0.20.2 — dev.
+Redface 2 v0.25.0 — dev.
 
-- Gestes : un swipe démarré sur la bande du geste back système n'entre plus en conflit avec le changement d'onglet ou de page.
-- Sujet : tap sur le titre tronqué de la barre du haut pour l'afficher en entier (2 lignes), re-tap pour replier.
+- Citations : retour du BBCode [quotemsg] dans le champ par défaut — modifiable et intercalable, comme sur le site.
+- Les cartes de citation compactes deviennent une option : Réglages > Édition et publication > « Citations en cartes ».

@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.feature.editor
 
+import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
+
 /**
  * Plain request payload assisted-injected into [PostEditorViewModel]. Mirrors the
  * `PostEditorRoute` NavKey from `:app/navigation` without leaking Navigation 3
@@ -20,24 +22,19 @@ data class PostEditorRequest(
     val page: Int?,
     val subcat: Int?,
     /**
-     * `numreponse` of the post the user is quoting (Phase 2C, #146). `null` for a
-     * simple reply. When non-null, the ViewModel builds a quote `ReplyContext`
-     * and HFR returns a prefilled `[quotemsg=…]` block via `ReplyForm.initialContent`.
+     * #604 lot 3 (mockup P3) — the quote CARDS this editor opens with, in citation order :
+     * « Citer N » selections or a quick-reply escalation's armed cards. Consumed once into
+     * [PostEditorViewModel]'s `quotes` state ; the `[quotemsg]` blocks are materialised at
+     * SUBMIT (never prefetched into the field — citations are cards, the field is the user's
+     * text). Handed over in memory by `:app` (never serialised into the route) : the cards are
+     * deliberately transient, a process death keeps the text (#405 row) but drops the cards.
      */
-    val quotedNumreponse: Int? = null,
+    val initialQuotes: List<QuotedPostPreview> = emptyList(),
     /**
-     * `ref` parameter HFR included in the quote link of the source post when it was
-     * parseable. Opaque positional id, parsed from `Post.quoteRef`. Forwarded
-     * unchanged ; never synthesised. `null` when the source post had an obfuscated
-     * or absent quote link — HFR still quotes from [quotedNumreponse] alone.
+     * #790 (#604 lot 2) — `true` when this editor is the ESCALATION of a quick-reply sheet. The
+     * ViewModel then auto-applies the shared #405 draft row instead of surfacing the restore
+     * banner (appending to anything already typed — the escalation continues the same
+     * composition act).
      */
-    val quoteRef: Int? = null,
-    /**
-     * #291 multi-quote — `numreponse`s of the ADDITIONAL posts to quote after
-     * [quotedNumreponse], in selection order. The ViewModel replays the quote form
-     * fetch once per entry (same #146 contract, `quotedNumreponse` swapped) and
-     * concatenates the `[quotemsg]` prefills into the initial draft. Empty for a
-     * single quote or a plain reply.
-     */
-    val extraQuoteNumreponses: List<Int> = emptyList(),
+    val resumeSharedDraft: Boolean = false,
 )

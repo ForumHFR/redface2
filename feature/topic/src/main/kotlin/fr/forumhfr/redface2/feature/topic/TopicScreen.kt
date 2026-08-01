@@ -95,6 +95,8 @@ import fr.forumhfr.redface2.core.domain.author.isRf2Creator
 import fr.forumhfr.redface2.core.model.Poll
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.Topic
+import fr.forumhfr.redface2.core.model.postContentExcerpt
+import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
 import fr.forumhfr.redface2.core.ui.RedfacePlaceholderScreen
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
@@ -124,25 +126,22 @@ import kotlinx.coroutines.flow.first
 fun TopicScreen(
     request: TopicRequest,
     /**
-     * Open the reply editor for this topic. The lambda receives the topic's
-     * sub-category id (parsed from the loaded page) and the current page number ;
-     * cat and topicId are derived from [request]. Phase 2C-A only invokes this
-     * callback when the topic carries a valid `subcat` (otherwise the reply button
-     * stays disabled to avoid passing a sentinel value to the HFR write contract).
+     * Open the FULL-SCREEN reply editor for this topic — since #604 lot 1 this is the quick-reply
+     * sheet's ESCALATION only (the reply FAB opens the sheet). The lambda receives the topic's
+     * sub-category id, the current page, and the armed quote cards as FULL previews in citation
+     * order (lot 3 — empty for a plain escalation) ; cat and topicId are derived from [request].
+     * `:app` hands the previews to the editor through the in-memory handoff (never the route) with
+     * `resumeSharedDraft = true` (#790) so the editor auto-applies the sheet's #405 row and
+     * renders the same cards (mockup P3).
      */
-    onReply: (subcat: Int, page: Int) -> Unit,
+    onReply: (subcat: Int, page: Int, quotes: List<QuotedPostPreview>) -> Unit,
     /**
-     * Open the editor in quote mode (Phase 2C, #146). Same destination as [onReply],
-     * but the editor GETs HFR's quote form and hydrates the draft with the
-     * `[quotemsg=…]` block HFR prefills. The call-site supplies
-     * `quotedNumreponse = post.numreponse` (always known) and `quoteRef = post.quoteRef`
-     * (forwarded when known, may be `null`). HFR identifies the cited post by
-     * `numrep={numreponse}` alone — `ref` is positional/optional (#227, proven live;
-     * `HfrClient.getReplyForm` omits `&ref=` when null) — so « Citer » is gated on
-     * `Topic.canReply` (cf. the per-post gate below), never on the presence of a
-     * parsed quote link. Obfuscated/cached rows with `quoteRef = null` are supported.
+     * Vague 4 (#604) lot 1 — HFR accepted a reply POSTed from the quick-reply sheet. `:app` must
+     * refresh this topic route exactly like the full editor's onSubmitSucceeded (replace the route
+     * with `targetPage`/`scrollTo` and a bumped `submitSignal`, #200) — minus the editor pop,
+     * since the sheet never entered the back stack.
      */
-    onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int?) -> Unit,
+    onQuickReplySubmitted: (targetPage: Int?, scrollTo: Int?) -> Unit = { _, _ -> },
     /**
      * Open the editor in edit mode (Phase 2D, #147). HFR exposes the edit link on
      * the post's left toolbar only when the post belongs to the current user and
@@ -235,22 +234,30 @@ fun TopicScreen(
      */
     onScrollAnchorSaved: (TopicScrollAnchor) -> Unit = {},
     /**
-     * #291 — numreponses currently selected for multi-quote in THIS topic, in selection order.
-     * Owned by `:app` (the basket must survive the per-page entry swap, like the title cache);
-     * the screen only renders the count and the per-post toggle state.
+     * #291 / #604 lot 3 — the multi-quote selection of THIS topic as FULL previews, in selection
+     * order. Owned by `:app` (the basket must survive the per-page entry swap, like the title
+     * cache); the screen renders the count and the per-post toggle state, and under the
+     * full-screen threshold pre-arms the quick-reply sheet's cards from them.
      */
-    multiQuoteSelection: List<Int> = emptyList(),
+    multiQuoteSelections: List<QuotedPostPreview> = emptyList(),
     /**
      * #291 — toggles a post in the multi-quote basket. Only invoked under the same gate as
-     * [onQuote] (`shouldShowQuoteAction`): a topic the user cannot reply to has nothing to quote.
+     * « Citer » (`shouldShowQuoteAction`): a topic the user cannot reply to has nothing to quote.
      */
-    onToggleMultiQuote: (numreponse: Int) -> Unit = {},
+    onToggleMultiQuote: (preview: QuotedPostPreview) -> Unit = {},
     /**
-     * #291 — opens the editor pre-filled with every selected quote (same destination as
-     * [onQuote]; `:app` rides the selection on the route and clears the basket). Receives the
-     * topic's `(subcat, page)` like [onReply].
+     * #291 / #604 lot 3 — « Citer N » AT OR ABOVE the full-screen threshold : opens the editor
+     * with the basket's cards (`:app` hands the previews over in memory and clears the basket).
+     * Below the threshold the screen opens the quick-reply sheet itself and consumes the basket
+     * through [onClearMultiQuote] instead. Receives the topic's `(subcat, page)` like [onReply].
      */
     onMultiQuote: (subcat: Int, page: Int) -> Unit = { _, _ -> },
+    /**
+     * #604 lot 3 — clears the multi-quote basket after the sheet consumed it (« Citer N » below
+     * the threshold) : the cards live on in the sheet's ViewModel, and backing out must not
+     * re-arm a stale « Citer N » — same intent-consumed rule as the full-screen path.
+     */
+    onClearMultiQuote: () -> Unit = {},
     /**
      * #465 — the user's MANUAL poll-expansion choice for THIS topic, owned by `:app` so it survives
      * the per-page TopicRoute swap (like the multi-quote basket / scroll anchors). `null` means « no
@@ -451,16 +458,17 @@ fun TopicScreen(
         onIntent = viewModel::send,
         onBack = onBack,
         onReply = onReply,
-        onQuote = onQuote,
+        onQuickReplySubmitted = onQuickReplySubmitted,
         onEdit = onEdit,
         onEditFirstPost = onEditFirstPost,
         onOpenPage = onOpenPage,
         onGoToPost = onGoToPost,
         onOpenProfile = onOpenProfile,
         onDeleteRequest = { numreponse -> deleteCandidate = numreponse },
-        multiQuoteSelection = multiQuoteSelection,
+        multiQuoteSelections = multiQuoteSelections,
         onToggleMultiQuote = onToggleMultiQuote,
         onMultiQuote = onMultiQuote,
+        onClearMultiQuote = onClearMultiQuote,
         pollManualExpanded = pollManualExpanded,
         onPollExpansionChanged = onPollExpansionChanged,
     )
@@ -678,8 +686,7 @@ internal fun TopicContent(
     listState: LazyListState,
     onIntent: (TopicIntent) -> Unit,
     onBack: () -> Unit,
-    onReply: (subcat: Int, page: Int) -> Unit,
-    onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int?) -> Unit,
+    onReply: (subcat: Int, page: Int, quotes: List<QuotedPostPreview>) -> Unit,
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
@@ -689,15 +696,20 @@ internal fun TopicContent(
     // #292 — a per-post « Supprimer » tap; the screen owns the confirmation dialog, so this only
     // requests it (carrying the post's numreponse). Never invoked for the first post (excluded).
     onDeleteRequest: (numreponse: Int) -> Unit = {},
-    // #291 — multi-quote selection (owned by :app) + its two actions, threaded to the post menu
-    // (toggle) and the floating cluster (« Citer N »).
-    multiQuoteSelection: List<Int> = emptyList(),
-    onToggleMultiQuote: (numreponse: Int) -> Unit = {},
+    // #291 / #604 lot 3 — multi-quote selection (owned by :app, full previews) + its actions :
+    // toggle on the post menu, « Citer N » on the floating cluster (threshold-routed below),
+    // and the basket clear once the sheet consumed the cards.
+    multiQuoteSelections: List<QuotedPostPreview> = emptyList(),
+    onToggleMultiQuote: (preview: QuotedPostPreview) -> Unit = {},
     onMultiQuote: (subcat: Int, page: Int) -> Unit = { _, _ -> },
+    onClearMultiQuote: () -> Unit = {},
     // #465 — the topic's manual poll choice (owned by :app, null = follow the global default) +
     // the callback recording a tap on the poll card. Threaded to the header card's poll.
     pollManualExpanded: Boolean? = null,
     onPollExpansionChanged: (Boolean) -> Unit = {},
+    // Vague 4 (#604) lot 1 — HFR accepted a quick-reply POST: `:app` refreshes the topic route the
+    // same way the full editor's onSubmitSucceeded does (bumped submitSignal, #200), minus the pop.
+    onQuickReplySubmitted: (targetPage: Int?, scrollTo: Int?) -> Unit = { _, _ -> },
 ) {
     // #285 — the topic title and #284 — the page counter live in a persistent top app bar so they
     // stay visible while the user scrolls (the in-card title/caption scrolls away). While loading,
@@ -726,6 +738,13 @@ internal fun TopicContent(
     } else {
         null
     }
+    // Vague 4 (#604) lots 1-2 — the reply FAB and « Citer » both open the quick-reply sheet
+    // instead of navigating ; the sheet escalates to the full-screen editor through onReply.
+    // Local UI state (like the page picker) : non-null while the sheet is up, carrying the
+    // reply coordinates plus the card « Citer » pre-arms (null from the FAB).
+    var quickReplyFor by remember { mutableStateOf<QuickReplyLaunch?>(null) }
+    // #291 — the per-post toggle checkmarks and the « ❝N » count only need the numreponses.
+    val multiQuoteNumreponses = multiQuoteSelections.map { it.numreponse }
     Scaffold(
         modifier = if (scrollBehavior != null) {
             Modifier.nestedScroll(scrollBehavior.nestedScrollConnection)
@@ -750,10 +769,39 @@ internal fun TopicContent(
                 state = state,
                 loaded = loaded,
                 bottomActionsVisible = bottomActionsVisible,
-                multiQuoteSelection = multiQuoteSelection,
+                multiQuoteSelection = multiQuoteNumreponses,
                 onOpenPage = onOpenPage,
-                onReply = onReply,
-                onMultiQuote = onMultiQuote,
+                onReply = { subcat, page ->
+                    quickReplyFor = QuickReplyLaunch(
+                        request = QuickReplyRequest(
+                            cat = state.request.cat,
+                            subcat = subcat,
+                            topicId = state.request.post,
+                            page = page,
+                        ),
+                    )
+                },
+                // #604 lot 3 — threshold routing (mockup P3, « le cas qui force le plein
+                // écran ») : a small selection opens the quick-reply sheet with the cards
+                // pre-armed and consumes the basket HERE (the cards live on in the sheet's
+                // ViewModel) ; from MULTI_QUOTE_FULL_EDITOR_THRESHOLD up, the full-screen
+                // editor path (`:app`, in-memory handoff + basket clear) takes over.
+                onMultiQuote = { subcat, page ->
+                    if (multiQuoteOpensFullEditor(multiQuoteSelections.size)) {
+                        onMultiQuote(subcat, page)
+                    } else {
+                        quickReplyFor = QuickReplyLaunch(
+                            request = QuickReplyRequest(
+                                cat = state.request.cat,
+                                subcat = subcat,
+                                topicId = state.request.post,
+                                page = page,
+                            ),
+                            initialQuotes = multiQuoteSelections,
+                        )
+                        onClearMultiQuote()
+                    }
+                },
             )
         },
     ) { innerPadding ->
@@ -813,7 +861,19 @@ internal fun TopicContent(
                             state = state,
                             topic = mode.topic,
                             hiddenNumreponses = mode.hiddenNumreponses,
-                            onQuote = onQuote,
+                            // #604 lot 2 — « Citer » opens the quick-reply sheet with the card
+                            // pre-armed (1-citation session) instead of the full-screen editor.
+                            onQuoteRequested = { preview ->
+                                quickReplyFor = QuickReplyLaunch(
+                                    request = QuickReplyRequest(
+                                        cat = state.request.cat,
+                                        subcat = mode.topic.subcat,
+                                        topicId = state.request.post,
+                                        page = mode.topic.page,
+                                    ),
+                                    initialQuotes = listOf(preview),
+                                )
+                            },
                             onEdit = onEdit,
                             onEditFirstPost = onEditFirstPost,
                             onOpenPage = onOpenPage,
@@ -822,7 +882,7 @@ internal fun TopicContent(
                             onDeleteRequest = onDeleteRequest,
                             onDoubleTapRefresh = { onIntent(TopicIntent.Refresh) },
                             listState = listState,
-                            multiQuoteSelection = multiQuoteSelection,
+                            multiQuoteSelection = multiQuoteNumreponses,
                             onToggleMultiQuote = onToggleMultiQuote,
                             onSetAuthorBlocked = { author, blocked ->
                                 onIntent(TopicIntent.SetAuthorBlocked(author, blocked))
@@ -834,6 +894,21 @@ internal fun TopicContent(
                 }
             }
         }
+    }
+    quickReplyFor?.let { launch ->
+        QuickReplySheet(
+            request = launch.request,
+            initialQuotes = launch.initialQuotes,
+            onDismiss = { quickReplyFor = null },
+            onEscalate = { quotes ->
+                quickReplyFor = null
+                onReply(launch.request.subcat, launch.request.page, quotes)
+            },
+            onSubmitted = { targetPage, scrollTo ->
+                quickReplyFor = null
+                onQuickReplySubmitted(targetPage, scrollTo)
+            },
+        )
     }
 }
 
@@ -1158,7 +1233,7 @@ private fun TopicLoadedContent(
     hiddenNumreponses: Set<Int> = emptySet(),
     // Vague 3 (#604) — onReply dropped: the dissolved header card was its only consumer here
     // (the bottom FAB cluster replies from TopicContent's own callback).
-    onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int?) -> Unit,
+    onQuoteRequested: (preview: QuotedPostPreview) -> Unit,
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
@@ -1171,7 +1246,7 @@ private fun TopicLoadedContent(
     listState: LazyListState,
     // #291 — selection state + toggle for the post menu's multi-quote entry.
     multiQuoteSelection: List<Int> = emptyList(),
-    onToggleMultiQuote: (numreponse: Int) -> Unit = {},
+    onToggleMultiQuote: (preview: QuotedPostPreview) -> Unit = {},
     // #509 — block/unblock a post's author from the post menu (blacklist).
     onSetAuthorBlocked: (author: String, blocked: Boolean) -> Unit = { _, _ -> },
     // #465 — the topic's manual poll choice (owned by :app, null = follow the global default) + the
@@ -1201,7 +1276,15 @@ private fun TopicLoadedContent(
     // the selection: the placeholder exposes no deselect affordance (decision #1), so leaving it
     // selected would silently quote a masqué post. The basket is hoisted in :app; reuse its toggle.
     LaunchedEffect(hiddenNumreponses, multiQuoteSelection) {
-        multiQuoteSelection.filter { it in hiddenNumreponses }.forEach(onToggleMultiQuote)
+        multiQuoteSelection.filter { it in hiddenNumreponses }.forEach { numreponse ->
+            // Removal is keyed on the numreponse alone (cf. toggled()) — resolve the hidden post
+            // to rebuild a preview, or fall back to a tombstone if the page no longer carries it.
+            val hidden = topic.posts.firstOrNull { it.numreponse == numreponse }
+            onToggleMultiQuote(
+                hidden?.toQuotedPreview()
+                    ?: QuotedPostPreview(numreponse = numreponse, author = "", excerpt = ""),
+            )
+        }
     }
     // #282 — shared offset between the gesture (drives translationX) and the edge glow. A plain
     // MutableFloatState: the gesture writes it synchronously per frame (no coroutine/alloc), the draw
@@ -1345,8 +1428,8 @@ private fun TopicLoadedContent(
             val quoteAction: (() -> Unit)?
             val multiQuoteToggle: (() -> Unit)?
             if (shouldShowQuoteAction(topic, state.isAuthenticated)) {
-                quoteAction = { onQuote(topic.subcat, topic.page, post.numreponse, post.quoteRef) }
-                multiQuoteToggle = { onToggleMultiQuote(post.numreponse) }
+                quoteAction = { onQuoteRequested(post.toQuotedPreview()) }
+                multiQuoteToggle = { onToggleMultiQuote(post.toQuotedPreview()) }
             } else {
                 quoteAction = null
                 multiQuoteToggle = null
@@ -1487,7 +1570,7 @@ private fun TopicLoadedContent(
             // replying; a locked topic or an anonymous session has nothing to quote).
             multiQuoteSelected = post.numreponse in multiQuoteSelection,
             onToggleMultiQuote = if (shouldShowQuoteAction(topic, state.isAuthenticated)) {
-                { onToggleMultiQuote(post.numreponse) }
+                { onToggleMultiQuote(post.toQuotedPreview()) }
             } else {
                 null
             },
@@ -1907,7 +1990,7 @@ internal fun TopicPostCard(
     /**
      * #436 — toggles this post in/out of the multi-quote basket directly from the card footer
      * (RF1 quote+/quote- parity), without opening the « … » menu. Null under the same gate as
-     * [onQuote] (a non-postable topic has nothing to quote), so the « + » action and « Citer »
+     * « Citer » (a non-postable topic has nothing to quote), so the « + » action and « Citer »
      * appear together or not at all. The same [multiQuoteSelected] flag drives the glyph/label
      * here, the border, and the pill — one source of truth, they can never desynchronise.
      */
@@ -2653,6 +2736,35 @@ private fun ReplyFab(onClick: () -> Unit) {
 // not purged on logout, cf. CacheInvalidator), so these gates consult auth explicitly instead
 // of trusting `canReply` alone — symmetric with the « Créer topic » FAB
 // (CategoryViewModel.canCreateTopic).
+// #604 lots 2-3 — what opens the quick-reply sheet : the reply coordinates, plus the cards this
+// opening pre-arms (one for « Citer », the whole basket for « Citer N » under the full-screen
+// threshold, empty from the reply FAB).
+internal data class QuickReplyLaunch(
+    val request: QuickReplyRequest,
+    val initialQuotes: List<QuotedPostPreview> = emptyList(),
+)
+
+/**
+ * #604 lot 3 — « Citer N » routing (mockup P3 : « le cas qui force le plein écran ») : up to
+ * [MULTI_QUOTE_FULL_EDITOR_THRESHOLD] - 1 cards the quick-reply sheet stays comfortable with the
+ * keyboard open ; from the threshold up the selection goes straight to the full-screen editor.
+ * Pure so the boundary is unit-testable.
+ */
+internal fun multiQuoteOpensFullEditor(selectionCount: Int): Boolean =
+    selectionCount >= MULTI_QUOTE_FULL_EDITOR_THRESHOLD
+
+/** #604 lot 3 — cadrage Codex : « 3 citations = plein écran » (constante nommée, pas un réglage). */
+internal const val MULTI_QUOTE_FULL_EDITOR_THRESHOLD = 3
+
+// #604 lot 2 — the quote-card snapshot, built AT SELECTION TIME where the full Post is in scope
+// (cadrage Codex : the cards never re-parse a post ; the exact [quotemsg] is fetched at
+// materialisation). Uniqueness in the basket stays keyed on the numreponse.
+internal fun Post.toQuotedPreview(): QuotedPostPreview = QuotedPostPreview(
+    numreponse = numreponse,
+    author = author,
+    excerpt = postContentExcerpt(content),
+)
+
 internal fun shouldEnableReply(topic: Topic, isAuthenticated: Boolean): Boolean =
     topic.canReply && isAuthenticated
 

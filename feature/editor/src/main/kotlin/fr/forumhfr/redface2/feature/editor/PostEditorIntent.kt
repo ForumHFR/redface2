@@ -83,6 +83,23 @@ sealed interface PostEditorIntent {
 
     /** #405 — user tapped « Ignorer » on the draft banner: delete the cached draft and clear the banner. */
     data object DraftDiscardRequested : PostEditorIntent
+
+    /** #604 lot 3 — remove one quote card (✕). Identified by numreponse, like the sheet. */
+    data class QuoteRemoved(val numreponse: Int) : PostEditorIntent
+
+    /** #604 lot 3 — move a quote card one slot up ([delta] = -1) or down (+1) ; out-of-range = no-op. */
+    data class QuoteMoved(val numreponse: Int, val delta: Int) : PostEditorIntent
+
+    /** #436 (#604 lot 3) — « Tout vider » : drop every quote card. The typed body is untouched. */
+    data object QuotesCleared : PostEditorIntent
+
+    /**
+     * #604 lot 4a — the user is leaving the editor (system back). The ViewModel flushes the
+     * pending debounced autosave FIRST, then emits [PostEditorEffect.CloseCommitted] — closing
+     * through the ViewModel is what guarantees the last < 750 ms of typing reach the #405 row
+     * (a plain pop would cancel the debounce with the ViewModel).
+     */
+    data object CloseRequested : PostEditorIntent
 }
 
 /**
@@ -104,4 +121,11 @@ sealed interface PostEditorEffect {
         val targetPage: Int?,
         val scrollTo: Int? = null,
     ) : PostEditorEffect
+
+    /**
+     * #604 lot 4a — the draft is persisted, the editor may now actually pop (twin of the
+     * quick-reply escalation contract : the save is AWAITED before the effect, so navigation
+     * can never cancel it).
+     */
+    data object CloseCommitted : PostEditorEffect
 }

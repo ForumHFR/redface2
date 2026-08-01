@@ -16,6 +16,56 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.25.0` — `internal` (dev) — 2026-07-05
+
+**Citations : retour du BBCode inline par défaut** (arbitrage XaTriX sur #805, PR #818) + remise en phase des docs (PR #817).
+
+### Éditeur & réponse rapide
+- #805 : les **cartes de citation deviennent une option, désactivée par défaut**. Par défaut, « Citer » et « Citer N » insèrent le BBCode `[quotemsg]` directement dans le champ — modifiable, réponses intercalées possibles, parité avec le site. Les cartes compactes (#604 lots 2-3) restent disponibles via Réglages > Édition et publication > « Citations en cartes ».
+- La citation s'insère **à la fin du texte en cours, sans jamais perdre la frappe** (matérialisation à l'ouverture, annulée si la feuille est fermée) ; « Citer N » ≥ 3 ouvre toujours l'éditeur plein écran, désormais pré-rempli des blocs `[quotemsg]` fusionnés ; l'escalade feuille → plein écran et les brouillons (#405) suivent sans changement.
+
+### Docs
+- PR #817 : vitrine et specs réalignées sur le code (bêta 0.18.0, gestes Drapeaux post-#603, couverture Roborazzi réelle, ADR-001 amendé, specs v0.11.0).
+
+## `0.24.1` — `internal` (dev) — 2026-07-03
+
+**Fix express dogfood v220** (PR #810).
+
+### Vue Topic
+- #807 (nicko, Dintr-un lemn) : **capitalisation automatique en début de phrase dans la réponse rapide** — régression de surface du fix #237 (le champ de la feuille ne passait pas la consigne autoCap à l'IME).
+
+## `0.24.0` — `internal` (dev) — 2026-07-03
+
+**Phase « Vue Topic » (#604) — vague 4 « Postage », lot 4a polish** (PR #803 — cadrage + gate Codex NO-GO→fixes→GO, dogfood émulateur).
+
+### Vue Topic
+- **Réponse rapide** : le contenu de la feuille défile — plus de bouton « Envoyer » hors d'atteinte clavier ouvert sur petit écran ou en paysage.
+- **Éditeur plein écran** : quitter l'éditeur (retour système) enregistre d'abord le brouillon — les dernières frappes ne sont plus perdues si on sort dans la foulée ; le retour est inerte pendant un envoi en cours (impossible d'interrompre un POST en quittant).
+- **Accessibilité des cartes de citation** : TalkBack annonce le résultat des actions (« Citation de X retirée », « déplacée en position N ») et le focus est rendu à la carte voisine après un retrait.
+
+## `0.23.0` — `internal` (dev) — 2026-07-03
+
+**Phase « Vue Topic » (#604) — vague 4 « Postage », lot 3** (PRs #800 #801 — cadrage Codex 8 forks, gates GO-avec-réserves/GO, dogfood émulateur).
+
+### Vue Topic
+- **Citations en cartes dans l'éditeur plein écran** (mockup P3) : fini le pavé de BBCode `[quotemsg]` dans le champ — les citations s'affichent en cartes compactes au-dessus (réordonnables ↑/↓, supprimables ✕, « Tout vider » #436), le champ ne contient que votre texte, le BBCode est assemblé à l'envoi (un échec ne perd rien). La bascule réponse rapide → plein écran transporte les cartes.
+- **Le panier multi-citations (« Citer N ») choisit sa surface** : 1 ou 2 citations ouvrent la réponse rapide avec les cartes pré-armées ; 3 et plus filent directement en plein écran.
+
+## `0.22.0` — `internal` (dev) — 2026-07-03
+
+**Phase « Vue Topic » (#604) — vague 4 « Postage », lot 2** (PRs #797 #798 — cadrage 9 forks + gates Codex gpt-5.5, dogfood émulateur).
+
+### Vue Topic
+- **Citations-cartes dans la réponse rapide** : « Citer » ouvre désormais la feuille de réponse rapide avec une carte compacte « ❝ auteur — extrait » (citer un autre message ajoute une carte) ; suppression et réordonnancement ↑/↓ par carte ; l'envoi matérialise les `[quotemsg]` dans l'ordre des cartes, le texte à la suite ; la bascule plein écran emporte les citations. Un échec d'envoi ne perd ni le texte ni les cartes.
+- #790 (styx42, Dintr-un lemn) : **la bascule réponse rapide → plein écran reprend le texte automatiquement** — plus d'étape « Restaurer » sur ce chemin (la bannière reste pour les brouillons de sessions antérieures).
+
+## `0.21.0` — `internal` (dev) — 2026-07-03
+
+**Phase « Vue Topic » (#604) — vague 4 « Postage », lot 1** (PR #788 — cadrage + gate Codex gpt-5.5 NO-GO→fixes→GO, dogfood IME émulateur).
+
+### Vue Topic
+- **Réponse rapide en feuille** : le bouton ✎ ouvre une bottom sheet (champ texte, Envoyer, bouton plein écran) au lieu de l'éditeur complet. Le brouillon est partagé avec l'éditeur plein écran (#405) : l'escalade transfère le texte, la fermeture ne perd jamais la saisie (autosave), la réouverture reprend où on en était. Erreurs typées (anti-flood, sujet fermé, session) et « Confirmation avant publication » (#312) respectées. Citations, upload et smileys restent en plein écran (lots 2-4 à venir).
+
 ## `0.20.2` — `internal` (dev) — 2026-07-03
 
 **Retours bêta gestes + top bar Topic** (PRs #781, #786 — gates Codex gpt-5.5, dogfoods émulateur).

@@ -8,6 +8,7 @@ import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
 import fr.forumhfr.redface2.core.domain.editor.validateBbcodeDraft
 import fr.forumhfr.redface2.core.model.EditorSmiley
 import fr.forumhfr.redface2.core.model.PostContent
+import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 
 /**
@@ -27,17 +28,13 @@ data class PostEditorState(
     /** Sub-category id required by HFR's write contract. Null when unknown — reply disabled. */
     val subcat: Int?,
     /**
-     * `numreponse` of the post being quoted (Phase 2C, #146). When non-null the
-     * editor opened in quote mode : HFR prefills `[quotemsg=…]` and we hydrate
-     * the draft with it on form load. Same surface as a simple reply otherwise.
+     * #604 lot 3 (mockup P3) — the armed quote CARDS, in citation order. Seeded from
+     * [PostEditorRequest.initialQuotes], reorderable / removable / clearable from the UI
+     * (#436 « Tout vider »). The field never contains their BBCode : the `[quotemsg]`
+     * blocks are materialised fresh at submit, exactly like the quick-reply sheet
+     * (one implementation, `ReplyQuoteMaterializer`). Always empty in [PostEditorMode.Edit].
      */
-    val quotedNumreponse: Int? = null,
-    /**
-     * `ref` parameter HFR included in the quote link when parseable — opaque,
-     * forwarded as-is. May be null on a quote: HFR still quotes from
-     * [quotedNumreponse] alone when the toolbar link was obfuscated.
-     */
-    val quoteRef: Int? = null,
+    val quotes: List<QuotedPostPreview> = emptyList(),
     val draft: TextFieldValue = TextFieldValue(),
     val preview: PostContent = PostContent(blocks = emptyList()),
     val isPreviewVisible: Boolean = false,
@@ -138,7 +135,10 @@ data class PostEditorState(
             // `Topic.subcat` / `Topic.canReply`.
             (subcat != null && subcat >= 0) &&
             topicId != null &&
-            draft.text.isNotBlank() &&
+            // #604 lot 3 — a quotes-only reply is sendable (same rule as the quick-reply
+            // sheet : the materialised [quotemsg] blocks ARE the content). Edit keeps
+            // requiring a non-blank body — its cards list is always empty.
+            (draft.text.isNotBlank() || (mode == PostEditorMode.Reply && quotes.isNotEmpty())) &&
             !isSubmitting &&
             !isLoadingForm &&
             !isUploading

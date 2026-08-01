@@ -1,4 +1,4 @@
-Redface 2 v0.20.2 — dev.
+Redface 2 v0.25.0 — dev.
 
-- Gestures: a swipe starting on the system back-gesture band no longer competes with tab or page changes.
-- Topic: tap the truncated top-bar title to reveal it in full (2 lines), tap again to fold it back.
+- Quotes: back to inline [quotemsg] BBCode in the field by default — editable and interleavable, like the website.
+- Compact quote cards are now opt-in: Settings > Editing & publishing > "Quote cards".

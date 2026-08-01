@@ -353,6 +353,9 @@
     <string name="settings_confirm_before_posting_title">Confirmation avant publication</string>
     <string name="settings_confirm_before_posting_description">Avant chaque réponse, sujet ou MP envoyé.</string>
     <string name="settings_confirm_before_posting_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
+    <string name="settings_quote_cards_title">Citations en cartes</string>
+    <string name="settings_quote_cards_description">Représente les citations par des cartes compactes au-dessus du champ. Désactivé : la citation est insérée en BBCode, modifiable dans le texte.</string>
+    <string name="settings_quote_cards_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
 
     <!-- #459 PR3 — entrée vers l'écran « Mes images uploadées » depuis le catalogue de réglages. -->
     <string name="settings_section_images">Images</string>

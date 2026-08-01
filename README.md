@@ -26,7 +26,7 @@ Les spécifications complètes sont disponibles sur le site du projet :
 
 ## État
 
-Phase courante : **Phase 4 — Extensions + refonte UI** ([roadmap](https://forumhfr.github.io/redface2/specs/roadmap)). Phases 0 à 3 livrées (bootstrap ; lecture du forum ; écriture poster/citer/upload/smileys ; messages MP + DT/MultiMP + recherche), bêta **0.16.0** publiée (Play open testing + F-Droid). En cours : refonte des vues Drapeaux ([#603](https://github.com/ForumHFR/redface2/issues/603)) et Topic ([#604](https://github.com/ForumHFR/redface2/issues/604)), architecture d'extensions ([#6](https://github.com/ForumHFR/redface2/issues/6)/[#7](https://github.com/ForumHFR/redface2/issues/7)).
+Phase courante : **Phase 4 — Extensions + refonte UI** ([roadmap](https://forumhfr.github.io/redface2/specs/roadmap)). Phases 0 à 3 livrées (bootstrap ; lecture du forum ; écriture poster/citer/upload/smileys ; messages MP + DT/MultiMP + recherche), bêta **0.18.0** publiée (Play open testing + F-Droid ; refonte de la vue Drapeaux [#603](https://github.com/ForumHFR/redface2/issues/603) livrée). En cours : refonte de la vue Topic ([#604](https://github.com/ForumHFR/redface2/issues/604)), architecture d'extensions ([#6](https://github.com/ForumHFR/redface2/issues/6)/[#7](https://github.com/ForumHFR/redface2/issues/7)).
 
 ## Pourquoi réécrire ?
 

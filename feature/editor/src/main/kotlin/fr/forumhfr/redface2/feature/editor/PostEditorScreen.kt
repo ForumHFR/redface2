@@ -7,6 +7,7 @@ import fr.forumhfr.redface2.core.ui.editor.bannerText
 
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
@@ -47,10 +49,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
+import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitActions
 import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitButton
@@ -60,6 +65,8 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodePreview
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
 import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
 import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
+import fr.forumhfr.redface2.core.ui.editor.QuoteCardsCallbacks
+import fr.forumhfr.redface2.core.ui.editor.QuoteCardsColumn
 
 
 /**
@@ -72,6 +79,9 @@ import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
 fun PostEditorScreen(
     request: PostEditorRequest,
     onSubmitSucceeded: (targetPage: Int?, scrollTo: Int?) -> Unit,
+    // #604 lot 4a — pops this editor AFTER the ViewModel flushed the draft (CloseCommitted).
+    // Default keeps callers without the wiring on the platform back (no flush) — `:app` wires it.
+    onClose: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     viewModel: PostEditorViewModel = hiltViewModel<PostEditorViewModel, PostEditorViewModel.Factory>(
         creationCallback = { factory -> factory.create(request) },
@@ -83,8 +93,15 @@ fun PostEditorScreen(
             when (effect) {
                 is PostEditorEffect.SubmitSucceeded ->
                     onSubmitSucceeded(effect.targetPage, effect.scrollTo)
+                PostEditorEffect.CloseCommitted -> onClose?.invoke()
             }
         }
+    }
+    // #604 lot 4a — route the system back through the ViewModel so the pending autosave debounce
+    // is flushed BEFORE the pop (trading the predictive-back preview for never losing the last
+    // < 750 ms of typing — cadrage Codex, item 2). Only armed when `:app` wired the pop.
+    if (onClose != null) {
+        BackHandler { viewModel.submit(PostEditorIntent.CloseRequested) }
     }
     PostEditorContent(
         state = state,
@@ -154,6 +171,17 @@ private fun PostEditorContent(
                 // Multi-image upload — « n/N » progress under the toolbar while a batch (> 1 image)
                 // is in flight. A single upload keeps uploadProgress null (toolbar spinner only).
                 UploadProgressLabel(state.uploadProgress)
+
+                // #604 lot 3 (mockup P3) — the armed citations as cards ABOVE the field, the same
+                // rendering as the quick-reply sheet : the field only ever holds the user's text,
+                // the [quotemsg] blocks are materialised at submit. Scrolls internally past a few
+                // cards so a heavy multiquote can never crush the weighted field below. (Renders
+                // nothing without cards — the empty-check lives inside, detekt complexity budget.)
+                EditorQuoteCards(
+                    quotes = state.quotes,
+                    enabled = !state.isSubmitting,
+                    onIntent = onIntent,
+                )
 
                 BbcodeTextField(
                     value = state.draft,
@@ -337,6 +365,51 @@ internal fun DraftRestoreBanner(
         }
     }
 }
+
+/**
+ * #604 lot 3 (mockup P3) — the quote cards block of the full-screen editor : the shared
+ * [QuoteCard] rendering plus « Tout vider » (#436, shown from two cards up — for one card the
+ * per-card ✕ is the same act). The cards column scrolls internally above [MAX_VISIBLE_CARDS_HEIGHT]
+ * so a heavy multiquote (the case that FORCES the full screen) never crushes the draft field.
+ */
+@Composable
+private fun EditorQuoteCards(
+    quotes: List<QuotedPostPreview>,
+    enabled: Boolean,
+    onIntent: (PostEditorIntent) -> Unit,
+) {
+    // No early-return on empty (#604 lot 4a) : the shared column hosts the live region that
+    // announces the LAST removal — hiding the whole block would silence it.
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (quotes.size > 1) {
+            val clearAllLabel = stringResource(R.string.editor_quotes_clear_all_a11y)
+            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                TextButton(
+                    onClick = { onIntent(PostEditorIntent.QuotesCleared) },
+                    enabled = enabled,
+                    modifier = Modifier.semantics { contentDescription = clearAllLabel },
+                ) {
+                    Text(text = stringResource(R.string.editor_quotes_clear_all))
+                }
+            }
+        }
+        QuoteCardsColumn(
+            quotes = quotes,
+            enabled = enabled,
+            callbacks = QuoteCardsCallbacks(
+                onMoveUp = { numreponse -> onIntent(PostEditorIntent.QuoteMoved(numreponse, delta = -1)) },
+                onMoveDown = { numreponse -> onIntent(PostEditorIntent.QuoteMoved(numreponse, delta = 1)) },
+                onRemove = { numreponse -> onIntent(PostEditorIntent.QuoteRemoved(numreponse)) },
+            ),
+            modifier = Modifier
+                .heightIn(max = MAX_VISIBLE_CARDS_HEIGHT)
+                .verticalScroll(rememberScrollState()),
+        )
+    }
+}
+
+// #604 lot 3 — ~4 one-line cards ; past that the cards column scrolls internally.
+private val MAX_VISIBLE_CARDS_HEIGHT = 192.dp
 
 /**
  * Display state of [EditorSubmitBar]. [confirmArmed] is the « confirmation avant

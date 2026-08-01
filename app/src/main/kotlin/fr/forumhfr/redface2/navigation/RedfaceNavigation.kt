@@ -97,6 +97,7 @@ import fr.forumhfr.redface2.BuildConfig
 import fr.forumhfr.redface2.R
 import fr.forumhfr.redface2.core.ui.R as CoreUiR
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageSummary
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.shouldRevealNavBar
@@ -337,26 +338,19 @@ data class PostEditorRoute(
      */
     val subcat: Int? = null,
     /**
-     * `numreponse` of the post being quoted (Phase 2C, #146). `null` for a
-     * simple reply ; non-null when the user tapped « Citer » on a specific post.
-     * Routed verbatim into `PostEditorRequest.quotedNumreponse`.
+     * #790 (#604 lot 2) — `true` when this editor is the ESCALATION of a quick-reply sheet: the
+     * shared #405 draft row was just written by the sheet, so the editor auto-applies it instead
+     * of surfacing the restore banner (the escalation continues the same composition act). The
+     * text itself never rides the route — only this flag does. Defaulted so older serialised
+     * back stacks deserialise.
+     *
+     * #604 lot 3 — the quote args (`quotedNumreponse`/`quoteRef`/`extraQuoteNumreponses`) left
+     * this route : citations are CARDS handed over in memory (cf. `MultiQuoteNavState.
+     * pendingEditorQuotes`), transient by decision. Removing serialised fields is
+     * restore-safe — the decoder reads the class descriptor's elements and simply never
+     * touches extra keys an older back stack may have stored.
      */
-    val quotedNumreponse: Int? = null,
-    /**
-     * `ref` parameter extracted from HFR's quote link on the source post when HFR
-     * exposed it in clear HTML. Opaque positional id ; forwarded as-is to
-     * `HfrClient.getReplyForm`. `null` for a simple reply or for an obfuscated /
-     * absent quote link ; quote still works from `quotedNumreponse` alone.
-     */
-    val quoteRef: Int? = null,
-    /**
-     * #291 multi-quote — `numreponse`s of the ADDITIONAL posts to quote after
-     * [quotedNumreponse], in selection order. The editor replays the #146 quote
-     * form fetch once per entry and concatenates the `[quotemsg]` prefills —
-     * client-side only, no new HFR contract. Empty for single quote / plain
-     * reply ; defaulted so older serialised back stacks deserialise.
-     */
-    val extraQuoteNumreponses: List<Int> = emptyList(),
+    val resumeSharedDraft: Boolean = false,
 ) : RedfaceNavKey
 
 @Serializable
@@ -1093,6 +1087,12 @@ fun RedfaceApp(intent: Intent?) {
         // time (selecting in another topic resets it — quoting is a single-topic act). Plain
         // remember: losing it on process death just means re-selecting, like the markers above.
         var multiQuoteBasket by remember { mutableStateOf<MultiQuoteBasket?>(null) }
+        // #604 lot 3 — quote cards handed to the NEXT full-screen editor (mockup P3) : set right
+        // before pushing a PostEditorRoute (« Citer N » or a sheet escalation), consumed ONCE by
+        // the editor entry (read into the request, then cleared) so a later editor can never
+        // resurrect a stale citation set. In-memory on purpose — the cards are transient by
+        // decision (lot 2) : a process death keeps the #405 draft text but drops the cards.
+        var pendingEditorQuotes by remember { mutableStateOf<List<QuotedPostPreview>?>(null) }
         // #465 — per-topic MANUAL poll-expansion choice, keyed by (cat, post) (one poll per topic),
         // twin of topicTitleCache / topicScrollAnchorCache: a page change replaces the TopicRoute
         // (new nav entry → new ViewModel), so a `rememberSaveable` toggle inside the poll card was
@@ -1116,6 +1116,7 @@ fun RedfaceApp(intent: Intent?) {
                     // #291 — a write intention armed under another session must not survive the
                     // transition (Codex review: stale « Citer N » after logout/login).
                     multiQuoteBasket = null
+                    pendingEditorQuotes = null
                     resetStack(messagesBackStack, MessagesRoute, MessagesRoute)
                 }
                 is AuthState.Authenticated -> {
@@ -1128,6 +1129,7 @@ fun RedfaceApp(intent: Intent?) {
                     lastReconciledGeneration = 0
                     privateMessageSentSignal = null
                     multiQuoteBasket = null
+                    pendingEditorQuotes = null
                     resetStack(messagesBackStack, MessagesRoute, MessagesRoute)
                 }
             }
@@ -1312,10 +1314,12 @@ fun RedfaceApp(intent: Intent?) {
                         ),
                         multiQuoteNavState = MultiQuoteNavState(
                             basket = multiQuoteBasket,
-                            onToggle = { cat, post, numreponse ->
-                                multiQuoteBasket = multiQuoteBasket.toggled(cat, post, numreponse)
+                            onToggle = { cat, post, preview ->
+                                multiQuoteBasket = multiQuoteBasket.toggled(cat, post, preview)
                             },
                             onClear = { multiQuoteBasket = null },
+                            pendingEditorQuotes = pendingEditorQuotes,
+                            onEditorQuotesHandoff = { pendingEditorQuotes = it },
                         ),
                         topicPollNavState = TopicPollNavState(
                             expansions = topicPollExpansionCache,
@@ -1702,11 +1706,18 @@ private data class TopicScrollNavState(
 /**
  * #291 — multi-quote nav bundle threaded into [RedfaceNavHost], same shape as the other
  * hoisted-state bundles ([TopicScrollNavState], `TopicTitleNavState`).
+ *
+ * #604 lot 3 — also carries the editor quote HANDOFF : [pendingEditorQuotes] is set (via
+ * [onEditorQuotesHandoff]) right before a PostEditorRoute is pushed with citations (« Citer N »
+ * or a sheet escalation), read once by the editor entry into `PostEditorRequest.initialQuotes`,
+ * then cleared (null). Never serialised into the route — the cards are transient by decision.
  */
 private data class MultiQuoteNavState(
     val basket: MultiQuoteBasket?,
-    val onToggle: (cat: Int, post: Int, numreponse: Int) -> Unit,
+    val onToggle: (cat: Int, post: Int, preview: QuotedPostPreview) -> Unit,
     val onClear: () -> Unit,
+    val pendingEditorQuotes: List<QuotedPostPreview>? = null,
+    val onEditorQuotesHandoff: (List<QuotedPostPreview>?) -> Unit = {},
 )
 
 /**
@@ -1782,31 +1793,37 @@ private fun ResetNavBarScrollOffTopic(topRoute: NavKey?, onReset: () -> Unit) {
 /**
  * #291 — multi-quote selection, hoisted to RedfaceApp (same survival rationale as
  * [TopicScrollNavState]: a page change replaces the TopicRoute entry, so any state owned by the
- * topic screen dies with it). [numreponses] keeps SELECTION ORDER — the quotes are concatenated
- * in the order the user tapped them, not post order.
+ * topic screen dies with it). [selections] keeps SELECTION ORDER — the quotes are concatenated
+ * in the order the user tapped them, not post order. #604 lot 2 enriched the entries from bare
+ * numreponses to [QuotedPostPreview]s (author + excerpt captured at selection time) so the quote
+ * cards never re-parse a post ; uniqueness stays keyed on the numreponse alone.
  */
 internal data class MultiQuoteBasket(
     val cat: Int,
     val post: Int,
-    val numreponses: List<Int>,
+    val selections: List<QuotedPostPreview>,
 ) {
+    val numreponses: List<Int> get() = selections.map { it.numreponse }
+
     fun matches(cat: Int, post: Int): Boolean = this.cat == cat && this.post == post
 }
 
 /**
- * Toggles [numreponse] in the basket for topic ([cat], [post]). Selecting in a DIFFERENT topic
- * replaces the basket (one quoting act at a time); removing the last entry clears it to null so
- * the « Citer N » affordance disappears instead of advertising an empty selection.
+ * Toggles [preview] in the basket for topic ([cat], [post]) — presence is keyed on the
+ * numreponse, so re-tapping a selected post removes it whatever snapshot the caller rebuilt.
+ * Selecting in a DIFFERENT topic replaces the basket (one quoting act at a time); removing the
+ * last entry clears it to null so the « Citer N » affordance disappears instead of advertising
+ * an empty selection.
  */
-internal fun MultiQuoteBasket?.toggled(cat: Int, post: Int, numreponse: Int): MultiQuoteBasket? {
+internal fun MultiQuoteBasket?.toggled(cat: Int, post: Int, preview: QuotedPostPreview): MultiQuoteBasket? {
     val current = this?.takeIf { it.matches(cat, post) }
-        ?: return MultiQuoteBasket(cat, post, listOf(numreponse))
-    val next = if (numreponse in current.numreponses) {
-        current.numreponses - numreponse
+        ?: return MultiQuoteBasket(cat, post, listOf(preview))
+    val next = if (current.selections.any { it.numreponse == preview.numreponse }) {
+        current.selections.filterNot { it.numreponse == preview.numreponse }
     } else {
-        current.numreponses + numreponse
+        current.selections + preview
     }
-    return if (next.isEmpty()) null else current.copy(numreponses = next)
+    return if (next.isEmpty()) null else current.copy(selections = next)
 }
 
 /**
@@ -2390,7 +2407,13 @@ private fun RedfaceNavHost(
                         topicScrollNavState.onAnchorSaved(route.cat, route.post, route.page, anchor)
                     },
                     onOpenProfile = onOpenProfile,
-                    onReply = { subcat, page ->
+                    // #604 lots 1-3 — onReply is the quick-reply sheet's ESCALATION : the sheet
+                    // just persisted the shared #405 row, so the editor auto-applies it (#790,
+                    // resumeSharedDraft) instead of surfacing the restore banner. The armed quote
+                    // cards travel as FULL previews through the in-memory handoff (lot 3, mockup
+                    // P3) — the editor renders the same cards and materialises at submit.
+                    onReply = { subcat, page, quotes ->
+                        multiQuoteNavState.onEditorQuotesHandoff(quotes.takeIf { it.isNotEmpty() })
                         backStack.add(
                             PostEditorRoute(
                                 mode = PostEditorMode.Reply,
@@ -2398,35 +2421,40 @@ private fun RedfaceNavHost(
                                 topicId = route.post,
                                 page = page,
                                 subcat = subcat,
+                                resumeSharedDraft = true,
                             ),
                         )
                     },
-                    onQuote = { subcat, page, quotedNumreponse, quoteRef ->
-                        // Phase 2C (#146) — same destination as reply ; only the
-                        // editor's request differs (quotedNumreponse pulls the HFR
-                        // quote prefill). Route is `PostEditorMode.Reply` because
-                        // quote is a flavour of reply, not a new editor mode.
-                        backStack.add(
-                            PostEditorRoute(
-                                mode = PostEditorMode.Reply,
-                                cat = route.cat,
-                                topicId = route.post,
-                                page = page,
-                                subcat = subcat,
-                                quotedNumreponse = quotedNumreponse,
-                                quoteRef = quoteRef,
-                            ),
-                        )
+                    // Vague 4 (#604) lot 1 — a reply POSTed from the quick-reply sheet: same
+                    // refresh contract as the full editor's onSubmitSucceeded below (replace the
+                    // route with targetPage/scrollTo + a bumped submitSignal, #200/#226), minus
+                    // the pop — the sheet never entered the back stack.
+                    onQuickReplySubmitted = { targetPage, scrollTo ->
+                        val topicEntry = backStack.lastOrNull() as? TopicRoute
+                        if (topicEntry != null) {
+                            backStack.removeAt(backStack.lastIndex)
+                            backStack.add(
+                                topicEntry.copy(
+                                    page = targetPage ?: topicEntry.page,
+                                    scrollTo = scrollTo,
+                                    submitSignal = System.currentTimeMillis(),
+                                    postSubmitOverflowLanding = false,
+                                ),
+                            )
+                        }
                     },
-                    // #291 — selection of THIS topic's basket (another topic's selection must
-                    // never leak into the menu checkmarks or the « Citer N » FAB).
-                    multiQuoteSelection = multiQuoteNavState.basket
+                    // #291 / #604 lot 3 — selection of THIS topic's basket as full previews
+                    // (another topic's selection must never leak into the menu checkmarks or
+                    // the « Citer N » FAB) ; under the full-screen threshold the screen pre-arms
+                    // the sheet's cards from them and consumes the basket via onClearMultiQuote.
+                    multiQuoteSelections = multiQuoteNavState.basket
                         ?.takeIf { it.matches(route.cat, route.post) }
-                        ?.numreponses
+                        ?.selections
                         .orEmpty(),
-                    onToggleMultiQuote = { numreponse ->
-                        multiQuoteNavState.onToggle(route.cat, route.post, numreponse)
+                    onToggleMultiQuote = { preview ->
+                        multiQuoteNavState.onToggle(route.cat, route.post, preview)
                     },
+                    onClearMultiQuote = multiQuoteNavState.onClear,
                     // #465 — the topic's saved manual poll choice (null = follow the global
                     // default), and the callback recording a tap on the poll card. Hoisted to
                     // :app so it survives the per-page TopicRoute swap, keyed by (cat, post).
@@ -2437,15 +2465,18 @@ private fun RedfaceNavHost(
                         topicPollNavState.onExpansionChanged(route.cat, route.post, expanded)
                     },
                     onMultiQuote = { subcat, page ->
-                        // #291 — quote flavour of reply with the EXTRA numreponses riding the
-                        // route; the editor replays the #146 fetch per entry. The basket is
-                        // cleared on launch: the selection's intent is consumed, and backing
-                        // out of the editor should not re-arm a stale « Citer N ».
+                        // #291 / #604 lot 3 — quote flavour of reply : the basket's previews are
+                        // handed to the editor (cards, mockup P3) through the in-memory handoff.
+                        // The basket is cleared on launch: the selection's intent is consumed,
+                        // and backing out of the editor should not re-arm a stale « Citer N ».
+                        // resumeSharedDraft (Codex fork 4) : quoting is a continuation of this
+                        // topic's composition — any sheet-drafted text is picked up bannerless.
                         val selection = multiQuoteNavState.basket
                             ?.takeIf { it.matches(route.cat, route.post) }
-                            ?.numreponses
+                            ?.selections
                             .orEmpty()
                         if (selection.isNotEmpty()) {
+                            multiQuoteNavState.onEditorQuotesHandoff(selection)
                             backStack.add(
                                 PostEditorRoute(
                                     mode = PostEditorMode.Reply,
@@ -2453,9 +2484,7 @@ private fun RedfaceNavHost(
                                     topicId = route.post,
                                     page = page,
                                     subcat = subcat,
-                                    quotedNumreponse = selection.first(),
-                                    quoteRef = null,
-                                    extraQuoteNumreponses = selection.drop(1),
+                                    resumeSharedDraft = true,
                                 ),
                             )
                             multiQuoteNavState.onClear()
@@ -2565,6 +2594,13 @@ private fun RedfaceNavHost(
                 )
             }
             entry<PostEditorRoute> { route ->
+                // #604 lot 3 — consume the quote handoff ONCE : the previews reach the ViewModel
+                // through the assisted request (used only at first creation — a recomposition or
+                // configuration change reuses the existing VM, so the cleared handoff is moot),
+                // and the LaunchedEffect clears the slot so a LATER editor can never resurrect a
+                // stale citation set. Process death drops the handoff with the process : the
+                // restored editor keeps the #405 text, not the cards (transient by decision).
+                LaunchedEffect(Unit) { multiQuoteNavState.onEditorQuotesHandoff(null) }
                 PostEditorScreen(
                     request = PostEditorRequest(
                         mode = route.mode,
@@ -2573,10 +2609,16 @@ private fun RedfaceNavHost(
                         numreponse = route.numreponse,
                         page = route.page,
                         subcat = route.subcat,
-                        quotedNumreponse = route.quotedNumreponse,
-                        quoteRef = route.quoteRef,
-                        extraQuoteNumreponses = route.extraQuoteNumreponses,
+                        initialQuotes = multiQuoteNavState.pendingEditorQuotes.orEmpty(),
+                        resumeSharedDraft = route.resumeSharedDraft,
                     ),
+                    // #604 lot 4a — the system back reaches here only AFTER the ViewModel
+                    // flushed the draft row (CloseCommitted). Same guarded pop as onBack.
+                    onClose = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
                     onSubmitSucceeded = { targetPage, scrollTo ->
                         // Pop the editor and refresh the topic page. `targetPage` is parsed
                         // from HFR's success URL and tells us which page to land on;
