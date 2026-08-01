@@ -262,16 +262,56 @@ class MediaAttemptLedgerTest {
 
     @Test
     fun `a stale rollback never clobbers a fresh generation's state`() {
+        // The previous shape settled the fresh axis to SUCCEEDED before the stale rollback, so its
+        // final assertion held for the wrong reason: a succeeded axis denies any reservation with
+        // or without the rollback being discarded. The fresh axis is left IN-FLIGHT here, which is
+        // the only state where a mis-scoped rollback would actually be observable.
         val l = ledger()
-        val gen = l.generationOf(url)
-        assertTrue(l.tryReserve(url, gen, MediaAttemptKind.PAINTER))
+        val stale = l.generationOf(url)
+        assertTrue(l.tryReserve(url, stale, MediaAttemptKind.PAINTER))
+
         l.retryUrl(url) // fresh generation reopened the axis already
         val fresh = l.generationOf(url)
         assertTrue(l.tryReserve(url, fresh, MediaAttemptKind.PAINTER))
+
+        l.rollbackReservation(url, stale, MediaAttemptKind.PAINTER)
+
+        assertEquals("a stale rollback must not bump the generation", fresh, l.generationOf(url))
+        assertFalse(
+            "the fresh in-flight reservation must not reopen",
+            l.isUntried(url, MediaAttemptKind.PAINTER),
+        )
+        assertFalse(
+            "the fresh reservation must remain held",
+            l.tryReserve(url, fresh, MediaAttemptKind.PAINTER),
+        )
+
         l.settleSuccess(url, fresh, MediaAttemptKind.PAINTER)
-        // The old generation's late rollback must be discarded (the axis is succeeded now).
+        assertTrue(l.hasSucceeded(url, MediaAttemptKind.PAINTER))
+    }
+
+    @Test
+    fun `retryFailedUrls never bumps a rolled-back untried entry`() {
+        // #960 N1 — the refresh gesture is scoped to FAILURES (lock #1) and an axis rolled back to
+        // untried carries none, so the gesture cannot rescue a stuck loser. This pins the cause the
+        // N1 fix addresses at the composition layer: the ledger deliberately stays untouched here.
+        val l = ledger()
+        val gen = l.generationOf(url)
+        assertTrue(l.tryReserve(url, gen, MediaAttemptKind.PAINTER))
         l.rollbackReservation(url, gen, MediaAttemptKind.PAINTER)
-        assertFalse(l.tryReserve(url, fresh, MediaAttemptKind.PAINTER))
+        assertTrue(l.isUntried(url, MediaAttemptKind.PAINTER))
+
+        l.retryFailedUrls(setOf(url))
+
+        assertEquals("untried is not a refresh failure", gen, l.generationOf(url))
+        assertTrue(
+            "the refresh must leave the rolled-back axis untouched",
+            l.isUntried(url, MediaAttemptKind.PAINTER),
+        )
+        assertTrue(
+            "only a re-armed occurrence takes the reservation",
+            l.tryReserve(url, gen, MediaAttemptKind.PAINTER),
+        )
     }
 
     // ---------- retry manuel + refresh scopé (verrou #1) ----------

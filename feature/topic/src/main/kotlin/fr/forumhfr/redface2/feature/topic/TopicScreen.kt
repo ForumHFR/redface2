@@ -30,7 +30,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.systemGestures
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -64,6 +64,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -72,6 +73,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -122,6 +125,7 @@ import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
 import fr.forumhfr.redface2.core.ui.post.LocalPostImageActions
 import fr.forumhfr.redface2.core.ui.post.PostCardShell
+import fr.forumhfr.redface2.core.ui.post.PostCardShellFlatBottomEdge
 import fr.forumhfr.redface2.core.ui.post.PostIdentityBand
 import fr.forumhfr.redface2.core.ui.post.PostIdentityHeader
 import fr.forumhfr.redface2.core.ui.post.PostImageActions
@@ -1005,7 +1009,7 @@ internal fun TopicContent(
     // tap time) ; the sheet escalates to the full-screen editor through onReply. Local UI state
     // (like the page picker) : non-null while the sheet is up, carrying the reply coordinates
     // plus the card « Citer » pre-arms (null from the FAB).
-    var quickReplyFor by remember { mutableStateOf<QuickReplyLaunch?>(null) }
+    var quickReplyFor by rememberQuickReplyLaunch()
     // #291 — the per-post toggle checkmarks and the « ❝N » count only need the numreponses.
     val multiQuoteNumreponses = multiQuoteSelections.map { it.numreponse }
     Scaffold(
@@ -1129,8 +1133,8 @@ internal fun TopicContent(
 
                 is TopicUiState.Mode.Loaded -> {
                     // #182 (#937) — magnifier state hoisted above the pull-to-refresh wrapper:
-                    // the PTR suspension, the selection gate (LocalTopicZoomed) and the reset chip
-                    // read it here; the gesture and the draw layer consume it in TopicLoadedContent.
+                    // the PTR suspension and the reset chip read it here; the gesture and the draw
+                    // layer consume it in TopicLoadedContent.
                     val zoomAnimationScope = rememberCoroutineScope()
                     val zoomState = rememberTopicZoomState(
                         // Full route identity (§2.1) — two topics on the same page number must
@@ -1986,10 +1990,13 @@ private fun TopicLoadedContent(
                 )
             }
         }
-        items(
+        // #983 — indexed so a post can tell what FOLLOWS it (cf. TopicFollowingKind below). The key
+        // is unchanged (numreponse), so Lazy's item identity — and every #307/#412 anchor that
+        // depends on it — is untouched.
+        itemsIndexed(
             items = topic.posts,
-            key = { post -> post.numreponse },
-        ) { post ->
+            key = { _, post -> post.numreponse },
+        ) { index, post ->
             // « Citer » is enabled whenever the topic is postable — the `bddpost`
             // reply form was present (#213, same gate as Reply). It does NOT depend
             // on parsing a per-post quote link: HFR identifies the cited post by
@@ -2044,8 +2051,30 @@ private fun TopicLoadedContent(
             // (forceRefresh=false) keeps the #104 band tint alone; the amber arrival flash (#200)
             // is a third, independent layer.
             val showLastReadMarker = shouldShowLastReadMarker(state.request, post.numreponse)
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (post.numreponse in hiddenNumreponses && post.numreponse !in revealedHiddenPosts) {
+            // #983 — the flat shell's closing hairline is drawn only at an ordinary post → ordinary
+            // post boundary: everywhere else the NEXT element brings its own boundary (the separator's
+            // 2.dp rules, a placeholder's card border, a closing island's border) and the two traits
+            // stacked a few dp apart were the reported defect. What follows this post is not always
+            // the next list item — the separator lives inside this very item, and the closing island
+            // (poll / page boundary / end-of-topic / search footer) is a further one, which is why a
+            // trailing post declares NONE rather than guessing which island will close the list.
+            val nextPost = topic.posts.getOrNull(index + 1)
+            val followingKind = when {
+                showLastReadMarker -> TopicFollowingKind.NON_POST
+                nextPost == null -> TopicFollowingKind.NONE
+                isHiddenPost(nextPost, hiddenNumreponses, revealedHiddenPosts) ->
+                    TopicFollowingKind.NON_POST
+                else -> TopicFollowingKind.POST
+            }
+            val flatBottomEdge = if (
+                topicPostRequestsBottomHairline(state.fullWidthPosts, followingKind)
+            ) {
+                PostCardShellFlatBottomEdge.HAIRLINE
+            } else {
+                PostCardShellFlatBottomEdge.NONE
+            }
+            Column(verticalArrangement = topicPostChildrenArrangement(state.fullWidthPosts)) {
+                if (isHiddenPost(post, hiddenNumreponses, revealedHiddenPosts)) {
                     HiddenPostCard(
                         author = post.author,
                         onReveal = { revealedHiddenPosts = revealedHiddenPosts + post.numreponse },
@@ -2082,10 +2111,15 @@ private fun TopicLoadedContent(
                         onImageLongPress = postImageActions.onLongPress,
                         // #884 — « posts en pleine largeur »: boundary-less card, full bleed.
                         flat = state.fullWidthPosts,
+                        // #983 — who closes this post's bottom edge (derived above).
+                        flatBottomEdge = flatBottomEdge,
                     )
                 }
                 if (showLastReadMarker) {
-                    LastReadMarker()
+                    // #983 — the separator owns its own symmetric vertical rhythm in full-width
+                    // (no container adds a gap there), and stays edge to edge like the posts it cuts
+                    // through — it is a rule, not an island card.
+                    LastReadMarker(modifier = Modifier.separatorPadding(state.fullWidthPosts))
                 }
             }
         }
@@ -2235,9 +2269,12 @@ private fun TopicLoadedContent(
 @Composable
 // `internal` (#884): TopicListFullWidthAnchorTest mounts the real marker inside a post item to
 // guard the full-width toggle. Same visibility relaxation as other tested internals.
-internal fun LastReadMarker() {
+// #983 — [modifier] carries the separator's own vertical rhythm in full-width mode
+// (`Modifier.separatorPadding`): no container inserts a gap there, so the marker must be symmetric
+// on its own. It stays traversing (no horizontal inset) — cf. separatorPadding's KDoc.
+internal fun LastReadMarker(modifier: Modifier = Modifier) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -2675,6 +2712,15 @@ internal fun TopicPostCard(
      * Default `false`: the historical card.
      */
     flat: Boolean = false,
+    /**
+     * #983 — forwarded to [PostCardShell]: whether this flat post draws its own closing hairline, or
+     * draws none — because what follows brings its own boundary (separator rule, island border), or
+     * because it is the last post of the page. Derived by the list builder, the only place that knows
+     * the rendered sequence. Ignored when [flat] is false. Default
+     * [PostCardShellFlatBottomEdge.HAIRLINE] — the #884 behaviour, for previews and tests that mount
+     * a lone card.
+     */
+    flatBottomEdge: PostCardShellFlatBottomEdge = PostCardShellFlatBottomEdge.HAIRLINE,
     onQuote: (() -> Unit)?,
     /**
      * #823 — LONG press on « Citer » : opens the full-screen editor directly, a one-shot override
@@ -2737,6 +2783,8 @@ internal fun TopicPostCard(
     PostCardShell(
         // #884 — full-width mode: same node structure, boundary-less rendering (vague 2 contract).
         flat = flat,
+        // #983 — the sequence owner decides who closes this post's bottom edge.
+        flatBottomEdge = flatBottomEdge,
         // #436 — multi-quote selection outline (lot 1), unchanged.
         border = if (multiQuoteSelected) {
             BorderStroke(width = 2.dp, color = MaterialTheme.colorScheme.primary)
@@ -3621,6 +3669,86 @@ internal data class QuickReplyLaunch(
     val consumesBasket: Boolean = false,
 )
 
+/**
+ * The quick-reply sheet's mount-point state — non-null while the sheet is up, null once dismissed
+ * (see [QuickReplyLaunch] above for what an opening carries).
+ *
+ * #953 (F3) — SAVEABLE across activity recreation, unlike the deliberately non-saveable local UI
+ * states of this screen (`menuPost` / `imageMenuTarget`, see TopicLoadedContent) : those are
+ * ephemeral overflow menus with nothing in flight, whereas this state is the MOUNT POINT of the
+ * sheet's effect collector while [QuickReplyViewModel] — scoped to the topic's NAV ENTRY, so it
+ * survives the recreation — may hold an in-flight POST. Losing the mount point desynchronised
+ * sheet and ViewModel : the recreation tore the sheet down mid-submit (the #788 dismiss guards
+ * only cover user dismissal), the POST then succeeded into the VM's buffered effects Channel with
+ * no collector, and the stale SubmitSucceeded was REPLAYED at the next manual opening (instant
+ * close + phantom refresh/scroll + basket purge). Restoring the launch re-mounts the sheet over
+ * the SAME nav-entry ViewModel, so the buffered effect is consumed legitimately — the refresh of
+ * a POST that succeeded during the rotation IS the correct outcome. Every field is a plain value
+ * ([QuickReplyLaunchSaver]), so saving it costs nothing.
+ */
+@Composable
+internal fun rememberQuickReplyLaunch(): MutableState<QuickReplyLaunch?> =
+    rememberSaveable(stateSaver = QuickReplyLaunchSaver) { mutableStateOf(null) }
+
+/**
+ * #953 (F3) — explicit [Saver] for the (non-Parcelable) [QuickReplyLaunch] : the flat list is
+ * `[cat, subcat, topicId, page, consumesBasket, then numreponse/author/excerpt per quote]` —
+ * primitives only, all Bundle-safe. A null launch (sheet closed) is handled by [listSaver]
+ * itself : the empty list it produces is stored as null, restored as null, and this saver's
+ * `restore` only ever sees non-empty lists.
+ */
+internal val QuickReplyLaunchSaver: Saver<QuickReplyLaunch?, Any> = listSaver<QuickReplyLaunch?, Any>(
+    save = { launch ->
+        if (launch == null) {
+            emptyList()
+        } else {
+            buildList {
+                add(launch.request.cat)
+                add(launch.request.subcat)
+                add(launch.request.topicId)
+                add(launch.request.page)
+                add(launch.consumesBasket)
+                launch.initialQuotes.forEach { quote ->
+                    add(quote.numreponse)
+                    add(quote.author)
+                    add(quote.excerpt)
+                }
+            }
+        }
+    },
+    restore = { saved ->
+        if (saved.size < QUICK_REPLY_SAVER_HEADER_SIZE) {
+            null
+        } else {
+            QuickReplyLaunch(
+                request = QuickReplyRequest(
+                    cat = saved[0] as Int,
+                    subcat = saved[1] as Int,
+                    topicId = saved[2] as Int,
+                    page = saved[3] as Int,
+                ),
+                initialQuotes = saved
+                    .drop(QUICK_REPLY_SAVER_HEADER_SIZE)
+                    .chunked(QUICK_REPLY_SAVER_QUOTE_FIELDS)
+                    .map { (numreponse, author, excerpt) ->
+                        QuotedPostPreview(
+                            numreponse = numreponse as Int,
+                            author = author as String,
+                            excerpt = excerpt as String,
+                        )
+                    },
+                consumesBasket = saved[4] as Boolean,
+            )
+        }
+    },
+)
+
+/** [QuickReplyLaunchSaver] layout : request Ints + consumesBasket before the quote triplets. */
+private const val QUICK_REPLY_SAVER_HEADER_SIZE = 5
+
+/** [QuickReplyLaunchSaver] layout : numreponse, author, excerpt per armed quote. */
+private const val QUICK_REPLY_SAVER_QUOTE_FIELDS = 3
+
 /** #806 — the two composition surfaces a write tap can open. */
 internal enum class WritingSurface { SHEET, FULL_EDITOR }
 
@@ -3702,12 +3830,19 @@ internal fun shouldShowEditAction(
 // remove the whole topic) is applied at the call site by position, not here.
 // #600 (vague 3) — « Dernier message lu » separator gate. `forceRefresh` is #231's flag-tap
 // marker: the ONE navigation whose scrollTo is semantically « last read » (the flag handler only
-// sets scrollTo when resuming at the last-read page). Every route-replace (pagination #282,
-// citation jump #699, overflow landing #226) rebuilds the route WITHOUT forceRefresh, so the
-// marker never survives a navigation away from the landing. If forceRefresh ever grows another
-// producer, this gate needs its own dedicated route field — cf. TopicActionGatesTest.
+// sets scrollTo when resuming at the last-read page). Since #895, pagination and citation jumps
+// happen in-VM and can preserve these request fields instead of rebuilding the route. This gate is
+// intentionally unchanged for the beta; #953/F4 tracks the marker that can therefore outlive its
+// landing. If forceRefresh ever grows another producer, give this semantic its own field first.
 internal fun shouldShowLastReadMarker(request: TopicRequest, numreponse: Int): Boolean =
     request.forceRefresh && request.scrollTo == numreponse
+
+// #509 → #983 — a post renders as the collapsed blacklist placeholder while its author is hidden
+// AND the reader has not revealed it. Extracted because #983 needs the same predicate on the NEXT
+// post (a placeholder is an island, so the post above it must not draw its hairline), and two
+// copies of a two-clause condition drift.
+internal fun isHiddenPost(post: Post, hidden: Set<Int>, revealed: Set<Int>): Boolean =
+    post.numreponse in hidden && post.numreponse !in revealed
 
 internal fun shouldShowDeleteAction(
     topic: Topic,

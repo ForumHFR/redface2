@@ -12,13 +12,16 @@ import org.junit.Test
 
 /**
  * #876/#956 (Lot 1A) — EXHAUSTIVE segmentation pass over the REAL bench fixture
- * (`topic 148760`, anonymous capture of 2026-07-19 post-v1.4 synchronisation — charte :
- * fixtures come from live HFR and dictate exhaustiveness). Every §2-relevant bench case
- * (posts 2→14) gets its partition asserted here against the frozen contract v1.4
- * expectations ; quote/spoiler INNER paragraphs are partitioned by the test itself
- * (recursive call-site is Lot 1B's duty, the policy stays paragraph-scoped).
+ * (`topic 148760`, anonymous capture of 2026-07-19 post-v1.4 synchronisation, recaptured
+ * 2026-07-30 anonymously with POST 15 — tall images, #993 — and POST 16 — linked preview
+ * thumbnails, [AMENDEMENT-v1.5-4] #876 — charte : fixtures come from live HFR and dictate
+ * exhaustiveness). Every §2-relevant bench case (posts 2→16) gets its partition asserted
+ * here against the frozen contract v1.4 expectations ; quote/spoiler INNER paragraphs are
+ * partitioned by the test itself (recursive call-site is Lot 1B's duty, the policy stays
+ * paragraph-scoped).
  *
- * Asset shorthand : diberie ids (`…/Picture/Get/f/<id>` or `/r/<id>`), Pages assets by name.
+ * Asset shorthand : diberie ids (`…/Picture/Get/f/<id>` full size, `/r/<id>` resized or
+ * `/t/<id>` thumbnail), Pages assets by name.
  */
 class PostMediaSegmentationFixtureTest {
 
@@ -33,13 +36,14 @@ class PostMediaSegmentationFixtureTest {
                     .getResource("/fixtures/topic_page_banc_images_876.html"),
             ) { "Fixture not found" }.readText()
             val topic = TopicPageParser().parse(html)
-            // The 14 bench posts are XaTelitte's ; AAF interjections + community replies are
-            // filtered out by the « POST n — » marker of each bench post body.
+            // The 16 bench posts are XaTelitte's (14 initial + POST 15/POST 16 from the
+            // 2026-07-30 recapture) ; AAF interjections + community replies are filtered out
+            // by the « POST n — » marker of each bench post body.
             bodies = topic.posts.map { it.content }.filter { content ->
                 val first = firstText(content)
                 first.startsWith("POST ") || first.startsWith("Banc de test images")
             }
-            assertEquals("Le banc doit contenir les 14 posts XaTelitte", 14, bodies.size)
+            assertEquals("Le banc doit contenir les 16 posts XaTelitte", 16, bodies.size)
         }
 
         private fun firstText(content: PostContent): String {
@@ -289,5 +293,42 @@ class PostMediaSegmentationFixtureTest {
         val runs = mediaRuns(post(14))
         assertEquals(1, runs.size)
         assertTrue(ids(runs[0]).single().contains("mire-exif-o6"))
+    }
+
+    // ---------- post 15 : images plus hautes que le cap (#993, recapture 2026-07-30) ----------
+
+    @Test
+    fun `post 15 tall images are two isolated bare singleton runs`() {
+        val runs = mediaRuns(post(15))
+        // 15.1 (1080×2600) puis 15.2 (700×2800) : chacune isolée sur sa ligne, sans lien.
+        assertEquals(listOf(listOf("532267"), listOf("532268")), runs.map(::ids))
+        assertEquals(listOf(null, null), runs.map { it.images.single().linkUrl })
+    }
+
+    // ---------- post 16 : miniatures-aperçus liées ([AMENDEMENT-v1.5-4]) ----------
+
+    @Test
+    fun `post 16 linked previews - five linked singleton runs including both negative controls`() {
+        val runs = mediaRuns(post(16))
+        assertEquals(listOf(1, 1, 1, 1, 1), runs.map { it.images.size })
+        val base = "https://rehost.diberie.com/Picture/Get"
+        // 16.1/16.2/16.3 : vraies miniatures /t/ liées vers leur /f/ pleine taille, même hôte.
+        assertEquals(
+            listOf("$base/t/532963", "$base/t/532964", "$base/t/532965"),
+            runs.take(3).map { it.images.single().image.url },
+        )
+        assertEquals(
+            listOf("$base/f/532963", "$base/f/532964", "$base/f/532965"),
+            runs.take(3).map { it.images.single().linkUrl },
+        )
+        // 16.4 (contrôle négatif G1) : la vignette auto-liée reste un run lié, linkUrl == url —
+        // exclure son agrandissement est le rôle de l'éligibilité ([AMENDEMENT-v1.5-4]), pas du §2.
+        val selfLinked = runs[3].images.single()
+        assertEquals("$base/t/532965", selfLinked.image.url)
+        assertEquals(selfLinked.image.url, selfLinked.linkUrl)
+        // 16.5 (contrôle négatif taille) : la version /r/ 800×800 liée vers /f/ a la même topologie
+        // que 16.1-16.3 — le seuil des 400 px se joue sur les dimensions natives (§3), jamais ici.
+        assertEquals("$base/r/532965", runs[4].images.single().image.url)
+        assertEquals("$base/f/532965", runs[4].images.single().linkUrl)
     }
 }

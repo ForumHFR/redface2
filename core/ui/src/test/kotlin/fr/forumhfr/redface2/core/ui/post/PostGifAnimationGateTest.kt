@@ -95,7 +95,9 @@ class PostGifAnimationGateTest {
     }
 
     private fun measuredCache(): DefaultIntrinsicMediaSizeCache =
-        DefaultIntrinsicMediaSizeCache().apply { putSuccess(gifUrl, IntSize(400, 300)) }
+        DefaultIntrinsicMediaSizeCache().apply {
+            putSuccess(gifUrl, IntrinsicMediaMetadata(IntSize(400, 300), mimeType = null))
+        }
 
     private fun setGifPost(
         cache: IntrinsicMediaSizeCache = measuredCache(),

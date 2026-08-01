@@ -127,7 +127,7 @@ class PostRendererPainterGeometryTest {
 
         // The painter geometry lands in the measurement cache (the unique correction §6)…
         composeTestRule.waitUntil(timeoutMillis = 5_000) { cache.get(g2Url) != null }
-        assertEquals(IntSize(320, 240), cache.get(g2Url))
+        assertEquals(IntSize(320, 240), cache.get(g2Url)?.size)
         composeTestRule.waitForIdle()
         composeTestRule.runOnIdle {}
 
@@ -164,11 +164,16 @@ class PostRendererPainterGeometryTest {
         composeTestRule.waitUntil(timeoutMillis = 5_000) { cache.get(g2Url) != null }
         composeTestRule.waitForIdle()
 
-        composeTestRule.runOnIdle { cache.putSuccess("https://images.example.org/evictor.jpg", IntSize(1, 1)) }
+        composeTestRule.runOnIdle {
+            cache.putSuccess(
+                "https://images.example.org/evictor.jpg",
+                IntrinsicMediaMetadata(IntSize(1, 1), mimeType = null),
+            )
+        }
         composeTestRule.waitForIdle()
 
         composeTestRule.waitUntil(timeoutMillis = 5_000) { cache.get(g2Url) != null }
-        assertEquals("the immutable pair must be redeposited", IntSize(320, 240), cache.get(g2Url))
+        assertEquals("the immutable pair must be redeposited", IntSize(320, 240), cache.get(g2Url)?.size)
         composeTestRule.runOnIdle {}
         val healedHeight = composeTestRule.onNodeWithContentDescription("photo").getBoundsInRoot().height
         assertTrue("the box must recover its §3 size (was $healedHeight)", healedHeight > 60.dp)

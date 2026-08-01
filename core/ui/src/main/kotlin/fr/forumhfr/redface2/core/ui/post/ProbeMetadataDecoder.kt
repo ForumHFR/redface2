@@ -62,7 +62,14 @@ internal class ProbeMetadataDecoder(private val source: ImageSource) : Decoder {
         }.getOrDefault(false)
         val width = if (swapped) bounds.outHeight else bounds.outWidth
         val height = if (swapped) bounds.outWidth else bounds.outHeight
-        return DecodeResult(image = ProbeMetadataImage(width, height), isSampled = false)
+        // #973 ([AMENDEMENT-v1.5-2]) — the bounds decode also identifies the container's MIME
+        // (`outMimeType`, e.g. "image/gif"). It is the ONLY authoritative MIME source of the
+        // media pipeline: the URL extension never is, and BitmapFactory reports null when it
+        // cannot identify the format (MIME absent/inconnu → pas de MIME).
+        return DecodeResult(
+            image = ProbeMetadataImage(width, height, bounds.outMimeType),
+            isSampled = false,
+        )
     }
 
     object Factory : Decoder.Factory {
@@ -75,13 +82,16 @@ internal class ProbeMetadataDecoder(private val source: ImageSource) : Decoder {
 }
 
 /**
- * Metadata-only [Image]: carries the probed dimensions, owns NO pixels (zero reported size),
- * must never be cached across requests ([shareable] = false) and draws nothing if a bug ever
- * routes it to a render — a blank slot is a visible symptom, a crash would take the post down.
+ * Metadata-only [Image]: carries the probed dimensions and the decoded [mimeType] (#973 —
+ * `coil3.Image` has no MIME surface, so [measureIntrinsicMediaSize] reads it back through this
+ * carrier), owns NO pixels (zero reported size), must never be cached across requests
+ * ([shareable] = false) and draws nothing if a bug ever routes it to a render — a blank slot is
+ * a visible symptom, a crash would take the post down.
  */
-private class ProbeMetadataImage(
+internal class ProbeMetadataImage(
     override val width: Int,
     override val height: Int,
+    val mimeType: String?,
 ) : Image {
     override val size: Long get() = 0L
     override val shareable: Boolean get() = false

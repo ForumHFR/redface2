@@ -136,6 +136,49 @@ class RoomEditorDraftStoreTest {
     }
 
     @Test
+    fun `load returns nothing when the owning account is no longer active (#953 F2)`() = runTest {
+        // Editor session captured owner = alice; the user has since switched to bob. Even though
+        // alice's row exists, a load riding the stale alice snapshot must return nothing —
+        // account B must never seed its editor from account A's private draft.
+        coEvery { dao.get("alice|reply:29:123456") } returns EditorDraftEntity(
+            draftKey = "alice|reply:29:123456",
+            ownerId = "alice",
+            body = "alice wip",
+            subject = null,
+            recipients = null,
+            updatedAt = 1_700_000_000_000L,
+            isPrivate = false,
+        )
+        val store = store(AuthState.Authenticated("bob"))
+
+        assertNull(store.load(owner = "alice", key = "reply:29:123456"))
+        coVerify(exactly = 0) { dao.get(any()) }
+    }
+
+    @Test
+    fun `delete is a no-op when the owning account is no longer active (#953 F2)`() = runTest {
+        // bob is active : a submit landing on alice's stale session must NOT sweep alice's row —
+        // it must still be readable once alice is the active account again.
+        coEvery { dao.get("alice|reply:29:123456") } returns EditorDraftEntity(
+            draftKey = "alice|reply:29:123456",
+            ownerId = "alice",
+            body = "alice wip",
+            subject = null,
+            recipients = null,
+            updatedAt = 1_700_000_000_000L,
+            isPrivate = false,
+        )
+
+        store(AuthState.Authenticated("bob")).delete(owner = "alice", key = "reply:29:123456")
+
+        coVerify(exactly = 0) { dao.deleteByKey(any()) }
+        assertEquals(
+            Draft(body = "alice wip", updatedAt = 1_700_000_000_000L),
+            store(AuthState.Authenticated("alice")).load(owner = "alice", key = "reply:29:123456"),
+        )
+    }
+
+    @Test
     fun `delete targets the owner-scoped row key`() = runTest {
         val store = store(AuthState.Authenticated("xatrix"))
 

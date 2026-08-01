@@ -16,6 +16,156 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.37.0` — `local` — 2026-08-01
+
+**Promotion bêta** — première version proposée aux testeurs du canal ouvert depuis la 0.18.0.
+Cette entrée synthétise la série dev 0.19.0 → 0.36.1 ; les entrées détaillées ci-dessous restent
+la source des changements et correctifs intermédiaires.
+
+### Ajouté et modifié
+
+- **Vue Topic refondue** : top bar et sélecteur de page intégrés, frontières de page et repère de
+  dernière lecture plus lisibles, actions de post stabilisées, citations longues repliables et
+  option « Posts en pleine largeur » pour gagner de la place de lecture.
+- **Moteur de pagination in-ViewModel** : changement de page sans recréer l'écran ni flasher,
+  revisite instantanée des pages récentes avec leur position, retour fidèle après un saut de
+  citation et transitions de chargement discrètes.
+- **Loupe de lecture** : pincement jusqu'à 3× sur toute la page, déplacement borné et glisse amortie ;
+  les gestes incompatibles sont suspendus pendant le zoom et l'état se réinitialise au changement
+  de page ou de sujet.
+- **Images sous contrat** : séparation fiable entre images inline et blocs, taille mesurée sans
+  upscale, décodage adapté à la densité, grandes images mieux dimensionnées, miniatures liées et GIF
+  plus lisibles, menu d'actions, erreurs visibles et réessai sans recharger les images saines.
+- **Surfaces d'écriture consolidées** : réponse rapide ou éditeur plein écran selon le réglage
+  (plein écran par défaut, feuille encore expérimentale), citations multiples, brouillons robustes,
+  sélecteur de smileys et upload multiple disponibles sur les composeurs concernés ; clavier,
+  curseur et bouton d'envoi restent accessibles sur les écrans courts.
+
+---
+
+## `0.36.1` — `local` — 2026-08-01
+
+Correctif **N1**, trouvé pendant la review de promotion bêta (coupe 9/10, review GPT-5.6 Codex →
+gate Claude Fable 5). Classé bloquant pré-bêta au même titre que F2/F3/F5 de #953 : fonctionnel et
+**silencieux**.
+
+### Corrigé
+
+- **Course d'annulation du painter (#960)** : deux occurrences d'une même URL sur une page se
+  disputent l'unique réservation du painter. Quand la gagnante était disposée **en plein
+  chargement** (un défilement suffit), `rollbackReservation` rendait l'axe à `Untried` sans avancer
+  la génération — conforme au verrou #5, mais aucune clé de la perdante ne bougeait alors : ni
+  l'`attempt` mémoïsé, ni `failedFresh`. La perdante recomposait sans jamais rappeler
+  `reserveIfUntried()` et **restait figée sur son placeholder pour la durée de l'écran**.
+  - Aggravation : le **tirer-pour-rafraîchir ne récupérait pas** ce cas — `retryFailedUrls` ne bump
+    que les axes portant un `Failed` (verrou #1), et un axe rendu à `Untried` n'a pas de TTL. Seules
+    guérisons : recycler la perdante par défilement, une nouvelle occurrence composée plus loin, ou
+    quitter l'écran.
+  - **Fix** : `MediaAttemptLedger.isUntried(url, kind)` — bit snapshot-observable — devient une clé
+    du `LaunchedEffect` de réservation. Le rollback recompose la perdante **et** relance son effet.
+    Ni `rollbackReservation` ni `retryFailedUrls` ne sont touchés : verrous #5 et #1 intacts. Le
+    corps de l'effet reste gaté sur `failedFresh` **seul** — une failure expirée est encore
+    `Failed`, pas `Untried`, et doit continuer d'atteindre `reserveIfUntried()` pour consulter C1.
+  - Écarté : avancer la génération au rollback. Trop large — une rollback survient à **chaque**
+    défilement disposant un effet en vol, et le bump recréerait tous les `PainterAttempt` de l'URL
+    en relançant les effets de mesure, avec annulation possible d'un probe en vol.
+  - Surcoût du fix : un `tryReserve` refusé supplémentaire par occurrence observatrice, sans
+    écriture, sans bump, sans requête réseau. Aucune boucle de recomposition possible.
+  - Résidu consigné, **auto-guérissant** : la course de même forme existe sur l'axe **probe**
+    (`IntrinsicMediaSizeMeasurer`), mais `settlePainterGeometry` settle l'axe probe à **chaque**
+    succès painter — l'axe painter étant désormais re-armé, tout painter qui aboutit guérit la probe
+    coincée. Résidu réel : « painter réussi avec dimensions inexploitables », dont le symptôme est
+    une boîte cold, pas une image absente. Durcissement symétrique possible après la bêta.
+
+### Tests
+
+- `PainterAttemptRearmTest` (neuf) — la course de bout en bout : A gagne, B est refusée, A est
+  disposée en vol, **B reprend et settle**. **Vérifié en échec avant le fix** — `AssertionError`
+  déterministe en phase 3 (« B must re-arm »), reproduite par un validateur distinct.
+- `MediaAttemptLedgerTest` — un test épingle que le refresh ne récupère **pas** une entrée rendue à
+  `Untried` (la cause traitée au niveau composition, pas au ledger).
+- **Faux vert corrigé** : le test du verrou #5 settlait l'axe en `Succeeded` *avant* la rollback
+  tardive — sa dernière assertion tenait pour la mauvaise raison, un axe succeeded refusant toute
+  réservation que la rollback soit discardée ou non. Réécrit en laissant l'axe **in-flight**, seul
+  état où un mauvais scoping serait observable.
+
+---
+
+## `0.36.0` — `local` — 2026-07-30
+
+### Ajouté
+
+- **Agrandissement des miniatures-aperçus liées** (#876, `[AMENDEMENT-v1.5-4]` du contrat de rendu) : une
+  image de contenu enveloppée d'un lien vers une ressource DISTINCTE du MÊME hôte, et dont le plus grand
+  axe natif ne dépasse pas 400 px, voit son plafond no-upscale porté à `min(densité, 3)`. Une vignette
+  d'hébergeur de 150 px passe de 7,9 mm à 23,8 mm de large sur un S10e (480 dpi), soit la taille qu'elle
+  occupe déjà sur le rendu web. Signalé par tinc sur le fil DEV.
+  - Deux gardes ferment les faux positifs : le lien doit pointer **ailleurs** que l'image affichée (les
+    auto-liens sont exclus), et au-delà de 400 px natifs une image n'est plus une vignette.
+  - `mEffectif = max(mApercu, mGif)` — les deux multiplicateurs ne se cumulent JAMAIS, le plus grand
+    gagne, et ce `max` porte aussi le plancher `1,0` (sans lui, une densité < 1 rétrécirait l'image).
+  - Décodage inchangé (§7) : la source reste décodée au natif, l'agrandissement se fait au draw.
+  - Résiduels assumés et documentés au contrat : hôte à underscore rejeté (limitation du parseur,
+    fail-closed), point final terminal conservé, et un `[img]` pointant une URL de smiley perso reste
+    indistinguable d'une vignette (la classification se fait sur le token, jamais sur l'URL — I1).
+
+### Modifié
+
+- **Cap de hauteur des images bloc relevé de 50 % à 70 % de la fenêtre utile** (#993, arbitré XaTriX,
+  `[AMENDEMENT-v1.5-5]` du contrat de rendu) : sur S10e en portrait, une grande image passe d'un plafond
+  de 400 dp à ~496 dp — la cible des ~500 dp. Le plancher 400 dp est conservé et devient le garde des
+  fenêtres courtes : sous 571 dp d'utile c'est lui qui gouverne, ce qui préserve à l'identique le
+  comportement « cap = fenêtre entière » acté au gate A3 en split-screen (301 dp) et en paysage (288 dp).
+  Le changement ne peut jamais RÉDUIRE une image : il l'agrandit ou la laisse identique. Conséquence
+  assumée : une capture d'écran occupe au plus environ les deux tiers de l'écran. Aucun cap fixe en dp
+  n'est introduit — le cap reste proportionnel, clampé par la fenêtre. Annexe `matrice-invariants-876.md`
+  (I3.2) réalignée.
+- Banc de test images (topic 148760) : **POST 16** ajouté — 5 cas dont **2 contrôles négatifs** (vignette
+  auto-liée, version 800×800 liée). Le banc passe de 45 à 52 cas ; fixture parser recapturée.
+- Annexe `matrice-invariants-876.md` : I3.1/I3.4 mentionnent désormais l'exception `mEffectif`
+  (péremption qui datait de `[AMENDEMENT-v1.5-2]`, #973).
+
+### Notes de développement
+
+- 37 tests dédiés (22 purs JVM sur l'éligibilité, 15 Robolectric sur le renderer), dont un test qui
+  épingle le validateur d'autorité contre un durcissement en `host != null`, et un cas qui prouve le
+  non-cumul des deux multiplicateurs. Mutant `scaleCeiling = previewCeiling` vérifié tué.
+- Vérifié sur S10e réel : les 5 cas du POST 16 mesurés au pixel (210×450, 450×210, 450×450 pour les
+  vignettes liées ; 150×150 et 800×800 **inchangés** pour les deux contrôles négatifs).
+- Gouvernance : amendement rédigé par Sol (GPT-5.6 Codex xhigh) et gaté par Claude Fable 5 ; code par
+  Claude Fable 5 et gaté par Sol — 3 tours de gate, 2 NO-GO réels levés.
+
+## `0.35.1` — `local` — 2026-07-26
+
+Correctif du mode « Posts en pleine largeur » (#983, rapporté par styx42) : espacements
+irréguliers et lignes horizontales parasites autour des marqueurs. Le trait de pied d'un post
+n'est plus dessiné que d'un post à un autre — là où le marqueur « Dernier message lu », un
+placeholder de post masqué ou un îlot de fin (fin de sujet, frontière de page, footers de
+recherche) apporte déjà sa propre bordure, il était empilé quelques dp au-dessus d'elle. Et le
+marqueur porte désormais son propre rythme vertical, symétrique (il héritait de 8 dp au-dessus
+et de rien en dessous) ; il reste traversant, à la largeur des posts qu'il sépare. Le mode encart
+est inchangé à l'identique.
+
+## `0.35.0` — `local` — 2026-07-26
+
+Agrandissement des GIF (#973, [AMENDEMENT-v1.5-2] au contrat images, arbitrage XaTriX) :
+nouveau réglage « Agrandissement des GIF » (Réglages → Affichage) — S (×1, net) / M (×1,5) /
+L (×2,5), **défaut M**. S'applique aux GIF de contenu en bloc uniquement (identifiés par le
+MIME réel de la probe, jamais l'extension d'URL) ; les images normales, smileys, cc-images et
+GIF inline ne changent pas ; les caps de largeur/hauteur continuent de borner le résultat ;
+le décodage reste au natif (agrandissement au dessin, net à ×1). Répond aux retours de
+l'appel à tests tailles (GIF trop petits depuis le no-upscale strict).
+
+## `0.34.6` — `local` — 2026-07-26
+
+Fixes pré-promotion (#953, bloquants F2/F3/F5/F6 de la review beta) : la réponse rapide
+survit à une rotation pendant l'envoi (l'état est restauré, plus de rejet fantôme du
+résultat) ; les brouillons de réponse rapide sont strictement isolés entre comptes
+(re-capture de l'owner à chaque ouverture, sessions scellées, gardes de lecture/suppression
+en base — un compte ne peut plus lire ni effacer le brouillon d'un autre) ; la création de
+topic n'est plus soumise pendant un upload d'image en vol ; la spec navigation reflète le
+défaut plein écran de l'éditeur.
+
 ## `0.34.5` — `local` — 2026-07-26
 
 Réglage « Posts en pleine largeur » — Lot 5 (#884) de la passe images (#876), arbitrage

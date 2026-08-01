@@ -21,6 +21,7 @@ import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.post.POST_CARD_SHELL_DIVIDER_TAG
+import fr.forumhfr.redface2.core.ui.post.PostCardShellFlatBottomEdge
 import fr.forumhfr.redface2.core.ui.theme.LocalFoldLongQuotes
 import org.junit.Rule
 import org.junit.Test
@@ -83,6 +84,34 @@ class TopicPostCardFullWidthTest {
             .assertLeftPositionInRootIsEqualTo(12.dp)
         composeTestRule.onNodeWithText(BODY_TEXT, useUnmergedTree = true)
             .assertLeftPositionInRootIsEqualTo(12.dp)
+    }
+
+    @Test
+    fun `flat card leaves its bottom edge when the list says something else closes it`() {
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                TopicPostCard(
+                    post = samplePost(author = "Lt Ripley", content = paragraphContent()),
+                    citedCount = 0,
+                    onQuote = null,
+                    onEdit = null,
+                    flat = true,
+                    flatBottomEdge = PostCardShellFlatBottomEdge.NONE,
+                )
+            }
+        }
+
+        // #983 — the wiring of the sequence decision down to the shell: the card still bleeds edge
+        // to edge, but draws no hairline (the following separator / island brings the boundary).
+        composeTestRule.onNodeWithTag(POST_CARD_SHELL_DIVIDER_TAG, useUnmergedTree = true)
+            .assertDoesNotExist()
+        composeTestRule
+            .onNode(
+                SemanticsMatcher.expectValue(SemanticsProperties.IsTraversalGroup, true),
+                useUnmergedTree = true,
+            )
+            .assertLeftPositionInRootIsEqualTo(0.dp)
+            .assertWidthIsEqualTo(360.dp)
     }
 
     @Test

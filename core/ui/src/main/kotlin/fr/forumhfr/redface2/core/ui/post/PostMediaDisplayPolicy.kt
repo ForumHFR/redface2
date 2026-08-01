@@ -216,20 +216,6 @@ internal const val SMILEY_RELATIVE_MAX_WIDTH_FRACTION = 0.9f
 internal const val IMAGE_RELATIVE_MAX_WIDTH_FRACTION = 0.95f
 
 /**
- * #959 (Lot 3, contrat v1.5 §3) — the DEDICATED content-image sizing equation, all in PHYSICAL
- * pixels: `scale = min(1, maxWidthPx/w, maxHeightPx/h)`, the width rounds, and the height
- * DERIVES from the ROUNDED width by the native ratio — never rounded independently (§3 letter;
- * the derived height may exceed the height cap by one pixel, accepted: the caps constrain the
- * SCALE, not the rounded result). No-upscale comes from the `1` term — in physical pixels
- * (1 source px never spreads past 1 screen px), which is the whole density-aware point of the
- * lot. The HOSTS convert their caps (sp/dp → px) BEFORE calling and convert the result back at
- * the Compose boundary — no px↔dp/sp comparison ever happens in the policy (cadrage Sol r1).
- * A non-positive [maxWidthPx] applies no width cap (defensive:
- * a zero-width container must not collapse the image). Both axes floor to 1 px AFTER the
- * derivation, so a degenerate rounded-to-zero width yields a 1×1 slot — never a layout bomb.
- * Smileys keep [intrinsicSmileyDisplaySize] strictly unchanged (§9: 240/70/0.9 untouchable).
- */
-/**
  * #959 (Lot 3, contrat v1.5 §7) — the density-aware DECODE size, common to the inline and block
  * paths (replaces the flat 1024 bound). Exact order (cadrage Sol): start from the §3 displayed
  * width in physical px (the host ceils — Int in); extend the width to the next INCLUSIVE 256
@@ -260,11 +246,45 @@ internal const val DECODE_BUCKET_PX = 256
 /** §7 — hard decode bound per axis (px): a 2048² ARGB bitmap is the 16 MiB budget ceiling (E5). */
 internal const val DECODE_MAX_PX = 2048
 
-internal fun imageDisplaySizePx(nativePx: IntSize, maxWidthPx: Int, maxHeightPx: Int): IntSize {
+/**
+ * #959 (Lot 3, contrat v1.5 §3) — the DEDICATED content-image sizing equation, all in PHYSICAL
+ * pixels: `scale = min(1, maxWidthPx/w, maxHeightPx/h)`, the width rounds, and the height
+ * DERIVES from the ROUNDED width by the native ratio — never rounded independently (§3 letter;
+ * the derived height may exceed the height cap by one pixel, accepted: the caps constrain the
+ * SCALE, not the rounded result). No-upscale comes from the `1` term — in physical pixels
+ * (1 source px never spreads past 1 screen px), which is the whole density-aware point of the
+ * lot. The HOSTS convert their caps (sp/dp → px) BEFORE calling and convert the result back at
+ * the Compose boundary — no px↔dp/sp comparison ever happens in the policy (cadrage Sol r1).
+ * A non-positive [maxWidthPx] applies no width cap (defensive:
+ * a zero-width container must not collapse the image). Both axes floor to 1 px AFTER the
+ * derivation, so a degenerate rounded-to-zero width yields a 1×1 slot — never a layout bomb.
+ * Smileys keep [intrinsicSmileyDisplaySize] strictly unchanged (§9: 240/70/0.9 untouchable).
+ *
+ * [scaleCeiling] is `mEffectif = max(mApercu, mGif)`: the SAME no-upscale ceiling relaxed by its
+ * two sources — the factors NEVER multiply, the largest wins. `mGif` is the display-profile
+ * factor of an ELIGIBLE block GIF (#973, §8 [AMENDEMENT-v1.5-2]); `mApercu` is the
+ * [linkedPreviewUpscaleCeiling] `min(density, 3f)` of an ELIGIBLE linked preview thumbnail
+ * (#876, [AMENDEMENT-v1.5-4], [isEligibleLinkedPreview]); each is `1f` when its media is not
+ * eligible, so their `max` also floors `mEffectif` at `1f`. The no-upscale `1` term becomes
+ * `scale = min(mEffectif, maxWidthPx/w, maxHeightPx/h)`. The default (1f) is byte-identical to
+ * v1.5, so every non-eligible call site is untouched by construction; the hard caps re-clamp any
+ * push past them (a native dimension at its cap keeps scale ≤ 1). ELIGIBILITY stays with the
+ * renderer (atomic probe metadata, never the URL); the DECODE (§7, [decodeSizePx]) receives the
+ * already-multiplied width and its native clamp is terminal — the factor applies exactly ONCE.
+ */
+internal fun imageDisplaySizePx(
+    nativePx: IntSize,
+    maxWidthPx: Int,
+    maxHeightPx: Int,
+    scaleCeiling: Float = 1f,
+): IntSize {
     require(nativePx.width > 0 && nativePx.height > 0) { "nativePx must be positive" }
+    require(scaleCeiling > 0f) { "scaleCeiling must be positive" }
     val scale = minOf(
-        1f,
-        if (maxWidthPx > 0) maxWidthPx.toFloat() / nativePx.width else 1f,
+        scaleCeiling,
+        // The ceiling is the neutral term when no width cap applies (pre-#973 this was `1f`,
+        // which the default ceiling reproduces byte-identically).
+        if (maxWidthPx > 0) maxWidthPx.toFloat() / nativePx.width else scaleCeiling,
         maxHeightPx.toFloat() / nativePx.height,
     )
     val width = (nativePx.width * scale).roundToInt()

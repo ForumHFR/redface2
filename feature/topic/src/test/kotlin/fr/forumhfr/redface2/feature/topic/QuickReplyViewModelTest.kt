@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.topic
 
 import androidx.compose.ui.text.input.TextFieldValue
+import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.write.ReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
@@ -76,6 +77,85 @@ class QuickReplyViewModelTest {
         advanceUntilIdle()
 
         assertEquals("version plein écran", viewModel.state.value.text.text)
+    }
+
+    @Test
+    fun `reopening after an account switch captures the new owner and never surfaces the old draft`() = runTest {
+        // #953 F2 — the VM is nav-entry-scoped and OUTLIVES the sheet : alice opens (her draft
+        // seeds the field), closes, the account switches to bob, bob reopens the SAME VM. The
+        // opening must re-snapshot the owner : bob gets HIS row, never alice's private draft.
+        val store = FakeQuickReplyDraftStore(initialBody = "brouillon privé d'alice", activeOwner = "alice")
+        val viewModel = quickReplyViewModel(draftStore = store)
+        viewModel.onSheetOpened()
+        advanceUntilIdle()
+        assertEquals("brouillon privé d'alice", viewModel.state.value.text.text)
+        viewModel.onDismissed()
+        advanceUntilIdle()
+
+        store.activeOwner = "bob"
+        store.storedBody = "brouillon de bob"
+        viewModel.onSheetOpened()
+        advanceUntilIdle()
+
+        assertEquals(
+            "the reopening must ride bob's row — alice's draft must never resurface",
+            "brouillon de bob",
+            viewModel.state.value.text.text,
+        )
+    }
+
+    @Test
+    fun `reopening never exposes the previous account's text, even while the load is in flight`() = runTest {
+        // Gate Sol #953 F2 — the state SEQUENCE across a reopen must never show alice's text to
+        // bob, not even transiently while the new owner's row is still loading (the owner
+        // snapshot is gated to hold the load in flight).
+        val store = FakeQuickReplyDraftStore(initialBody = "brouillon privé d'alice", activeOwner = "alice")
+        val viewModel = quickReplyViewModel(draftStore = store)
+        viewModel.onSheetOpened()
+        advanceUntilIdle()
+        viewModel.onDismissed()
+        advanceUntilIdle()
+
+        store.activeOwner = "bob"
+        store.storedBody = "brouillon de bob"
+        val ownerGate = CompletableDeferred<Unit>()
+        store.ownerGate = ownerGate
+
+        viewModel.state.test {
+            assertEquals("brouillon privé d'alice", awaitItem().text.text) // pre-reopen baseline
+            viewModel.onSheetOpened()
+            // The masking state must land BEFORE the (still-gated) load completes.
+            assertEquals("bob must never see alice's text mid-load", "", awaitItem().text.text)
+            ownerGate.complete(Unit)
+            advanceUntilIdle()
+            assertEquals("brouillon de bob", awaitItem().text.text)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `tasks of a session whose owner never resolved no-op instead of adopting the next account`() = runTest {
+        // Gate Sol #953 F2 — currentOwner() resolving LATE (after an account switch + reopen)
+        // must not let the dead session's deferred writes ride the NEW owner : alice's flushed
+        // text must never land under bob's row, and alice's own row stays untouched.
+        val store = FakeQuickReplyDraftStore(initialBody = "brouillon d'alice", activeOwner = "alice")
+        val ownerGate = CompletableDeferred<Unit>()
+        store.ownerGate = ownerGate
+        val viewModel = quickReplyViewModel(draftStore = store)
+        viewModel.onSheetOpened() // session 1 : owner snapshot still pending
+        viewModel.onTextChanged(TextFieldValue("texte d'alice"))
+        viewModel.onDismissed() // flush scheduled, awaiting session 1's owner
+        advanceUntilIdle()
+
+        store.activeOwner = "bob"
+        viewModel.onSheetOpened() // seals session 1 before its owner ever resolved
+        ownerGate.complete(Unit) // the late resolution must not resurrect session 1's flush
+        advanceUntilIdle()
+
+        assertTrue("a sealed session's writes must no-op", store.savedBodies.isEmpty())
+        assertNull("no row may be created under bob", store.storedBody)
+        store.activeOwner = "alice"
+        assertEquals("alice's row is untouched", "brouillon d'alice", store.storedBody)
     }
 
     @Test
@@ -526,23 +606,52 @@ class QuickReplyViewModelTest {
 
 private class FakeQuickReplyDraftStore(
     initialBody: String? = null,
-    private val owner: String? = "xaat",
+    /** ACTIVE account — mutable so a test can switch accounts between two openings (#953 F2). */
+    var activeOwner: String? = "xaat",
 ) : EditorDraftStore {
-    var storedBody: String? = initialBody
+    /** One row per owner (single topic here), like the real store's `"<owner>|<key>"` keys. */
+    private val bodies = mutableMapOf<String, String>()
     val savedBodies = mutableListOf<String>()
 
-    override suspend fun currentOwner(): String? = owner
+    init {
+        val owner = activeOwner
+        if (initialBody != null && owner != null) bodies[owner] = initialBody
+    }
 
+    /** The ACTIVE account's row — the single-account accessor the historical tests use. */
+    var storedBody: String?
+        get() = activeOwner?.let(bodies::get)
+        set(value) {
+            val owner = activeOwner ?: return
+            if (value == null) bodies.remove(owner) else bodies[owner] = value
+        }
+
+    /** When set, [currentOwner] suspends until the test releases it (late-resolution races, gate Sol). */
+    var ownerGate: CompletableDeferred<Unit>? = null
+
+    override suspend fun currentOwner(): String? {
+        ownerGate?.await()
+        return activeOwner
+    }
+
+    // Same owner guards as RoomEditorDraftStore (#953 F2) : a session whose captured owner is
+    // no longer the active account reads nothing, writes nothing and deletes nothing.
     override suspend fun load(owner: String?, key: String): EditorDraftStore.Draft? =
-        storedBody?.let { EditorDraftStore.Draft(body = it) }
+        if (owner == null || owner != activeOwner) {
+            null
+        } else {
+            bodies[owner]?.let { EditorDraftStore.Draft(body = it) }
+        }
 
     override suspend fun save(owner: String?, key: String, draft: EditorDraftStore.Draft) {
-        storedBody = draft.body
+        if (owner == null || owner != activeOwner) return
+        bodies[owner] = draft.body
         savedBodies += draft.body
     }
 
     override suspend fun delete(owner: String?, key: String) {
-        storedBody = null
+        if (owner == null || owner != activeOwner) return
+        bodies.remove(owner)
     }
 }
 

@@ -7,6 +7,7 @@ import fr.forumhfr.redface2.core.database.RedfaceDatabase
 import fr.forumhfr.redface2.core.database.dao.TopicDao
 import fr.forumhfr.redface2.core.database.entities.FetchMode
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
+import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
@@ -731,6 +732,12 @@ class TopicRepositoryImplTest {
         override fun observeFontScale(): Flow<FontScalePreference> = MutableStateFlow(FontScalePreference.M)
 
         override suspend fun setFontScale(scale: FontScalePreference) = Unit
+
+        // #973 — the block-GIF display profile is irrelevant to TopicRepository; stubbed at the M default.
+        override fun observeMediaDisplayProfile(): Flow<MediaDisplayProfile> =
+            MutableStateFlow(MediaDisplayProfile.M)
+
+        override suspend fun setMediaDisplayProfile(profile: MediaDisplayProfile) = Unit
 
         override fun observeDebugBoundsOverlay(): Flow<Boolean> = MutableStateFlow(false)
 

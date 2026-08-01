@@ -1,4 +1,6 @@
-Redface 2 v0.34.5 — dev.
+Redface 2 v0.37.0 — bêta.
 
-- Nouveau réglage « Posts en pleine largeur » (Réglages → Topic) : les messages s'affichent bord à bord, sans encart — plus de place pour le texte et les images. Désactivé par défaut : rien ne change si vous n'y touchez pas.
-- Accessibilité : navigation TalkBack par titres de posts (pseudo), dans les deux modes.
+- La vue des sujets a été entièrement revue : navigation entre pages sans flash, retour précis aux citations, repères de lecture et mode pleine largeur.
+- Pincez la page pour zoomer jusqu'à 3×.
+- Les images respectent mieux leur taille et l'écran ; miniatures et GIF sont plus lisibles, avec actions, erreurs claires et réessai.
+- Répondre et citer est plus fluide — en plein écran (avec envoi d'images) ou via la réponse rapide expérimentale.

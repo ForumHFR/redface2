@@ -102,9 +102,36 @@ class PostMediaDisplayPolicyTest {
     fun `cold cap px clamps the useful window height per amendement Lot0-3`() {
         // S10e split réel (E11) : utile 903 px @3.0, plancher 400dp=1200px → cap = 903 (301 dp).
         assertEquals(903, blockImageColdCapPx(usefulHeightPx = 903, floor400DpPx = 1200))
-        // Portrait S10e : utile 1950 px, plancher 1200 → max(1200, 975) = 1200.
-        assertEquals(1200, blockImageColdCapPx(usefulHeightPx = 1950, floor400DpPx = 1200))
+        // Portrait S10e : utile 1950 px → 0,70 × 1950 = 1365 > plancher 1200 → cap = 1365.
+        // Depuis [AMENDEMENT-v1.5-5] (#993) la FRACTION gouverne en portrait ; le plancher 400 dp
+        // ne sert plus qu'en fenêtre courte (cas split ci-dessus).
+        assertEquals(1365, blockImageColdCapPx(usefulHeightPx = 1950, floor400DpPx = 1200))
+        // La cible de la décision #993 : fenêtre utile RÉELLE mesurée par sonde sur S10e portrait
+        // (2124 px = 708 dp @d3) → 0,70 × 2124 = 1487 px ≈ 496 dp, soit les ~500 dp arbitrés.
+        assertEquals(1487, blockImageColdCapPx(usefulHeightPx = 2124, floor400DpPx = 1200))
         assertEquals(0, usefulWindowHeightPx(100, 60, 60))
+    }
+
+    @Test
+    fun `cold cap crosses from the floor to the fraction regime between 1714 and 1715 px`() {
+        // #993 — LA frontière de régime du domaine (plancher 1200 px = 400 dp @d3), le seul
+        // endroit où le comportement change de main. En Float, 0,70f = 0,699999988… donc
+        // 1714 × 0,70f = 1199,79993f → round = 1200 : le plancher gouverne encore. Pour 1715 le
+        // produit RÉEL vaut 1200,49998 (strictement SOUS 1200,5) mais l'arrondi au plus proche de
+        // la multiplication Float tombe EXACTEMENT sur 1200,5f, puis roundToInt (ties vers +∞)
+        // donne 1201 : la fraction prend la main. Épinglé pour que ce double arrondi ne bouge pas
+        // silencieusement (changement de type, de coefficient ou d'ordre des opérations).
+        assertEquals(1200, blockImageColdCapPx(usefulHeightPx = 1714, floor400DpPx = 1200))
+        assertEquals(1201, blockImageColdCapPx(usefulHeightPx = 1715, floor400DpPx = 1200))
+    }
+
+    @Test
+    fun `cold cap fraction rounds an odd useful height to the nearest pixel`() {
+        // Complément au témoin de frontière ci-dessus : l'arrondi de la fraction, isolé loin des
+        // deux autres régimes. 1001 × 0,70 = 700,7 → 701 ; une TRONCATURE donnerait 700, et ni le
+        // plancher (400) ni le clamp à la hauteur utile (1001) ne peuvent masquer le résultat —
+        // le témoin discrimine donc l'arrondi seul.
+        assertEquals(701, blockImageColdCapPx(usefulHeightPx = 1001, floor400DpPx = 400))
     }
 
     @Test

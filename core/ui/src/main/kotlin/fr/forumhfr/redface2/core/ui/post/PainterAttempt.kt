@@ -100,16 +100,20 @@ internal class PainterAttempt(
      * met, the url becomes stable forever (no TTL advancement, no replayed probe). A success
      * WITHOUT usable geometry deposits nothing and leaves the probe axis retryable (C1) — §6
      * « aucune dimension exploitable → boîte cold CONSERVÉE ».
+     *
+     * #973 — the painter deposit carries NO MIME (only the probe's header decode identifies the
+     * container), and `putSuccessIfAbsent` guarantees it can never RECLASSIFY an entry the probe
+     * already fixed — in either direction (« AUCUN reclassement tardif »).
      */
     private fun settlePainterGeometry(state: AsyncImagePainter.State.Success) {
         val image = state.result.image
         if (image.width <= 0 || image.height <= 0) return
         val painterSize = IntSize(image.width, image.height)
-        val deposited = cache.putSuccessIfAbsent(url, painterSize)
-        if (!deposited && cache.get(url) != painterSize) {
+        val deposited = cache.putSuccessIfAbsent(url, IntrinsicMediaMetadata(painterSize, mimeType = null))
+        if (!deposited && cache.get(url)?.size != painterSize) {
             Log.d(
                 MEDIA_GEOMETRY_LOG_TAG,
-                "geometry disagreement for $url: kept=${cache.get(url)} painter=$painterSize " +
+                "geometry disagreement for $url: kept=${cache.get(url)?.size} painter=$painterSize " +
                     "(first valid pair wins, §3)",
             )
         }
@@ -132,11 +136,19 @@ internal fun rememberPainterAttempt(url: String): PainterAttempt {
     val cache = LocalIntrinsicMediaSizeCache.current
     val generation = ledger.generationOf(url)
     val attempt = remember(ledger, cache, url, generation) { PainterAttempt(ledger, cache, url, generation) }
-    // Keyed on failedFresh too: when a recomposition observes the failure EXPIRED (fresh → false)
+    // Keyed on failedFresh: when a recomposition observes the failure EXPIRED (fresh → false)
     // the effect re-runs and the reservation path consults C1 — reopening the axis in a new
     // generation instead of leaving a no-longer-fresh, still-failed axis stuck on the placeholder.
+    //
+    // #960 N1 — keyed on `untried` too: a loser denied while ANOTHER occurrence of the same url
+    // held the reservation must re-run when that winner is disposed mid-flight, since
+    // `rollbackReservation` returns the axis to untried WITHOUT bumping the generation (lock #5).
+    // Both `attempt` and `failedFresh` are unchanged by that rollback, so this bit is the only
+    // key that moves. The body stays gated on `failedFresh` ONLY: an EXPIRED failure is still
+    // `Failed`, not untried, and must keep reaching `reserveIfUntried()` to consult C1.
     val failedFresh = attempt.failedFresh
-    LaunchedEffect(attempt, failedFresh) {
+    val untried = ledger.isUntried(url, MediaAttemptKind.PAINTER)
+    LaunchedEffect(attempt, failedFresh, untried) {
         if (!failedFresh) attempt.reserveIfUntried()
     }
     DisposableEffect(attempt) { onDispose { attempt.rollbackIfUnsettled() } }

@@ -21,10 +21,16 @@ import kotlinx.coroutines.withContext
  * late write lands. The row key folds that owner into the domain context key
  * (`"<ownerId>|<contextKey>"`) so two accounts editing the same topic never collide.
  *
- * [save] additionally drops the write when the captured [owner] is no longer the active account
- * (switch or logout): a debounced autosave racing an account change must not leak account A's
- * content under account B, nor revive a row A's logout purge already swept (CacheInvalidator wipes
- * by the previous pseudo). No draft content is ever logged.
+ * Every operation additionally checks that the captured [owner] is still the active account
+ * (switch or logout otherwise), the same guard on all three verbs (#953 F2) :
+ *  - [save] drops the write — a debounced autosave racing an account change must not leak account
+ *    A's content under account B, nor revive a row A's logout purge already swept (CacheInvalidator
+ *    wipes by the previous pseudo) ;
+ *  - [load] reads nothing — a session riding a stale owner snapshot must never seed account B's
+ *    editor from account A's private row ;
+ *  - [delete] is a no-op — a submit landing after a switch must not sweep the previous account's
+ *    still-valid row.
+ * No draft content is ever logged.
  */
 @Singleton
 class RoomEditorDraftStore @Inject constructor(
@@ -37,7 +43,9 @@ class RoomEditorDraftStore @Inject constructor(
     override suspend fun currentOwner(): String? = withContext(ioDispatcher) { activeOwnerId() }
 
     override suspend fun load(owner: String?, key: String): Draft? = withContext(ioDispatcher) {
-        if (owner == null) return@withContext null
+        // #953 F2 — same owner guard as save : an anonymous session, or a session whose account
+        // is no longer active, reads nothing (the DAO is never touched).
+        if (owner == null || owner != activeOwnerId()) return@withContext null
         editorDraftDao.get(rowKey(owner, key))?.let { entity ->
             Draft(
                 body = entity.body,
@@ -71,7 +79,10 @@ class RoomEditorDraftStore @Inject constructor(
 
     override suspend fun delete(owner: String?, key: String) {
         withContext(ioDispatcher) {
-            if (owner == null) return@withContext
+            // #953 F2 — same owner guard as save : a delete riding a stale owner snapshot (e.g.
+            // a submit finishing after an account switch) must not sweep the previous account's
+            // still-valid row.
+            if (owner == null || owner != activeOwnerId()) return@withContext
             // Best-effort: callers AWAIT this on the post-success path (so the nav pop can't cancel
             // the delete before the row is gone), which means a throw here would abort the success
             // flow on a message HFR already accepted — crashing or stranding the editor. A local

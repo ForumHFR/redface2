@@ -11,6 +11,7 @@ import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
+import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
@@ -666,6 +667,22 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeMediaDisplayProfile(): Flow<MediaDisplayProfile> =
+        dataStore.data
+            // Default M ×1,5 (#973, [AMENDEMENT-v1.5-2] — chosen by XaTriX). Like the display
+            // density, no bootstrap mirror: the profile never paints the pre-first-frame window.
+            .map(::readMediaDisplayProfile)
+            .distinctUntilChanged()
+            .catch { emit(MediaDisplayProfile.M) }
+
+    override suspend fun setMediaDisplayProfile(profile: MediaDisplayProfile) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_MEDIA_DISPLAY_PROFILE] = profile.name
+            }
+        }
+    }
+
     override fun observeImgurClientId(): Flow<String> =
         dataStore.data
             // Default empty (#459): imgur is unconfigured until the user pastes their Client-ID.
@@ -808,6 +825,16 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         prefs[KEY_DISPLAY_DENSITY]
             ?.let { stored -> runCatching { DisplayDensity.valueOf(stored) }.getOrNull() }
             ?: DisplayDensity.COMFORT
+
+    /**
+     * Reads [KEY_MEDIA_DISPLAY_PROFILE] defensively (#973): an unknown / corrupt stored value
+     * (older build, manual edit) falls back to [MediaDisplayProfile.M] instead of crashing on
+     * `MediaDisplayProfile.valueOf`, same stance as [readDisplayDensity].
+     */
+    private fun readMediaDisplayProfile(prefs: Preferences): MediaDisplayProfile =
+        prefs[KEY_MEDIA_DISPLAY_PROFILE]
+            ?.let { stored -> runCatching { MediaDisplayProfile.valueOf(stored) }.getOrNull() }
+            ?: MediaDisplayProfile.M
 
     /**
      * Reads [KEY_IMMERSIVE_NAV_BAR_REVEAL] defensively (#518 follow-up): an unknown / corrupt stored
@@ -1070,6 +1097,8 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         // (FontScalePreference.name), both defensively parsed. No bootstrap mirror (cf. observers).
         val KEY_DISPLAY_DENSITY = stringPreferencesKey("display_density")
         val KEY_FONT_SCALE = stringPreferencesKey("font_scale")
+        // #973 — block-GIF display profile (MediaDisplayProfile.name, defensively parsed).
+        val KEY_MEDIA_DISPLAY_PROFILE = stringPreferencesKey("media_display_profile")
 
         // #445 — debug bounds overlay toggle (default false; exposed on the dev channel only).
         val KEY_DEBUG_BOUNDS_OVERLAY = booleanPreferencesKey("debug_bounds_overlay")

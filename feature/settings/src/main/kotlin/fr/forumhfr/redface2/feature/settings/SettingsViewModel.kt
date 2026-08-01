@@ -9,6 +9,7 @@ import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
+import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
@@ -195,6 +196,12 @@ class SettingsViewModel @Inject constructor(
             isLocked = { it.isUpdatingFontScale },
             apply = { state, value -> state.copy(fontScale = value) },
         )
+        // #973 — block-GIF display profile (enum), same collection shape as the display presets.
+        observePreference(
+            flow = userPreferencesRepository.observeMediaDisplayProfile(),
+            isLocked = { it.isUpdatingMediaDisplayProfile },
+            apply = { state, value -> state.copy(mediaDisplayProfile = value) },
+        )
         // #459 — Hébergeur d'images : provider (enum) + imgur Client-ID (text).
         observePreference(
             flow = userPreferencesRepository.observeUploadProvider(),
@@ -307,6 +314,7 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.FlagsAutoRefreshChanged -> updateFlagsAutoRefresh(intent.enabled)
             is SettingsIntent.DisplayDensityChanged -> updateDisplayDensity(intent.density)
             is SettingsIntent.FontScaleChanged -> updateFontScale(intent.scale)
+            is SettingsIntent.MediaDisplayProfileChanged -> updateMediaDisplayProfile(intent.profile)
             is SettingsIntent.SetUploadProvider -> updateUploadProvider(intent.provider)
             is SettingsIntent.SetImgurClientId -> updateImgurClientId(intent.text)
             is SettingsIntent.SetEditorImageInsert -> updateEditorImageInsert(intent.mode)
@@ -645,6 +653,35 @@ class SettingsViewModel @Inject constructor(
                             fontScale = previous,
                             isUpdatingFontScale = false,
                             fontScaleError = true,
+                        )
+                    }
+                }
+        }
+    }
+
+    // #973 — block-GIF display profile is an enum too; same bespoke optimistic-flip shape as
+    // updateDisplayDensity. previous is captured for revert.
+    private fun updateMediaDisplayProfile(desired: MediaDisplayProfile) {
+        val previous = _state.value.mediaDisplayProfile
+        _state.update {
+            it.copy(
+                mediaDisplayProfile = desired,
+                isUpdatingMediaDisplayProfile = true,
+                mediaDisplayProfileError = false,
+                mediaDisplayProfileTouchedLocally = true,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { userPreferencesRepository.setMediaDisplayProfile(desired) }
+                .onSuccess {
+                    _state.update { it.copy(mediaDisplayProfile = desired, isUpdatingMediaDisplayProfile = false) }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            mediaDisplayProfile = previous,
+                            isUpdatingMediaDisplayProfile = false,
+                            mediaDisplayProfileError = true,
                         )
                     }
                 }
