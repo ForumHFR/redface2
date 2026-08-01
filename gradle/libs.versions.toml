@@ -1,9 +1,9 @@
 [versions]
 agp = "9.2.0"
 kotlin = "2.3.21"
-ksp = "2.3.9"
+ksp = "2.3.10"
 hilt = "2.59.2"
-hilt-navigation-compose = "1.3.0"
+hilt-navigation-compose = "1.4.0"
 android-minSdk = "29"
 android-targetSdk = "36"
 android-compileSdk = "36"
@@ -12,7 +12,7 @@ androidx-test-core = "1.7.0"
 androidx-test-runner = "1.7.0"
 androidx-test-ext-junit = "1.3.0"
 androidx-activity = "1.13.0"
-androidx-lifecycle = "2.10.0"
+androidx-lifecycle = "2.11.0"
 compose-bom = "2026.05.01"
 navigation3 = "1.1.2"
 material3-adaptive = "1.2.0"
@@ -39,7 +39,7 @@ androidx-tracing = "1.3.0"
 # `@GraphicsMode(NATIVE)` is required on test classes that call `captureRoboImage`. Wired
 # only in `:core:ui` for the moment as a diagnostic channel for AMOLED quote rendering
 # (cf. PR #207).
-roborazzi = "1.63.0"
+roborazzi = "1.70.0"
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
