@@ -31,7 +31,30 @@ internal interface IntrinsicMediaSizeCache {
 
     fun putSuccess(url: String, size: IntSize)
 
+    /**
+     * Unconditional failure record — for RENDER-TIME writers only (the smiley error slot): their
+     * painter attempt is always current, a disposed painter never fires late. Async probes must
+     * use [putFailureIfEpoch] instead.
+     */
     fun putFailure(url: String, nowMillis: Long)
+
+    /**
+     * #813 — monotonic epoch bumped by [clearFailures]. An async probe captures it BEFORE probing
+     * and hands it back to [putFailureIfEpoch] : a probe that was already in flight when the user
+     * refreshed (its cancellation only lands at the next recomposition) can then no longer deposit
+     * a stale failure on top of the clear — the ghost would otherwise survive the refresh.
+     */
+    fun failureEpoch(): Int
+
+    /** Records the failure ONLY when no [clearFailures] happened since [epoch] was captured. */
+    fun putFailureIfEpoch(url: String, nowMillis: Long, epoch: Int)
+
+    /**
+     * #813 — drop every memoized failure (successes are kept: native sizes are immutable) and bump
+     * the failure epoch. Called on an explicit user refresh so a transient outage does not leave
+     * ghost images pinned to the cold fallback box until the TTL happens to be re-consulted.
+     */
+    fun clearFailures()
 }
 
 /**
@@ -55,6 +78,10 @@ internal class DefaultIntrinsicMediaSizeCache(
     private val insertionOrder = ArrayDeque<String>()
     private val lock = Any()
 
+    // #813 — bumped under [lock] by clearFailures; compared under the SAME lock in
+    // putFailureIfEpoch so "clear then stale write" can never interleave.
+    private var epoch = 0
+
     override fun get(url: String): IntSize? = (entries[url] as? Entry.Success)?.size
 
     override fun isFailureFresh(url: String, nowMillis: Long): Boolean {
@@ -65,6 +92,25 @@ internal class DefaultIntrinsicMediaSizeCache(
     override fun putSuccess(url: String, size: IntSize) = put(url, Entry.Success(size))
 
     override fun putFailure(url: String, nowMillis: Long) = put(url, Entry.Failure(nowMillis))
+
+    override fun failureEpoch(): Int = synchronized(lock) { epoch }
+
+    override fun putFailureIfEpoch(url: String, nowMillis: Long, epoch: Int) {
+        synchronized(lock) {
+            if (this.epoch == epoch) put(url, Entry.Failure(nowMillis))
+        }
+    }
+
+    override fun clearFailures() {
+        synchronized(lock) {
+            epoch++
+            val failed = entries.filterValues { it is Entry.Failure }.keys
+            failed.forEach { url ->
+                entries.remove(url)
+                insertionOrder.remove(url)
+            }
+        }
+    }
 
     private fun put(url: String, entry: Entry) {
         synchronized(lock) {
@@ -97,4 +143,14 @@ internal object ProcessIntrinsicMediaSizeCache :
  */
 internal val LocalIntrinsicMediaSizeCache = staticCompositionLocalOf<IntrinsicMediaSizeCache> {
     ProcessIntrinsicMediaSizeCache
+}
+
+/**
+ * #813 — public seam for the hosting screens (:feature modules cannot see the internal cache):
+ * drop the memoized measurement failures so the next measure pass re-probes them. Call it on an
+ * explicit user refresh, BEFORE bumping the media-refresh generation passed to [PostRenderer] —
+ * clearing after the bump would let the relaunched effect re-read a still-fresh failure.
+ */
+fun clearPostMediaMeasurementFailures() {
+    ProcessIntrinsicMediaSizeCache.clearFailures()
 }

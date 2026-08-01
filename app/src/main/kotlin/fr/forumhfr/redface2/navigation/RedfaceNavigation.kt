@@ -140,6 +140,7 @@ import fr.forumhfr.redface2.feature.settings.SettingsScreen
 import fr.forumhfr.redface2.feature.topic.TopicRequest
 import fr.forumhfr.redface2.feature.topic.TopicScreen
 import fr.forumhfr.redface2.feature.topic.TopicScrollAnchor
+import fr.forumhfr.redface2.feature.topic.TopicSubmitResult
 import java.time.Instant
 import kotlinx.serialization.Serializable
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -283,13 +284,11 @@ data class TopicRoute(
     val page: Int = 1,
     val scrollTo: Int? = null,
     /**
-     * Issue #200 — bumped to `System.currentTimeMillis()` by the navigation host when the
-     * editor pops back after a successful submit (reply / quote / edit / edit-FP /
-     * create-topic). The new value invalidates the route key so the topic screen rebuilds
-     * its ViewModel and `loadCurrentPage()` skips the cache to force-fetch the latest page
-     * — otherwise the cache-aside path would serve a stale page that doesn't include the
-     * post the user just published. `null` on the normal nav path (forum / flags / deep
-     * link) so the cache-first behaviour is preserved everywhere else.
+     * DEAD since #895 étape 4 (PR 2) — the historical #200 post-submit rebuild signal. The
+     * editor outcome now reaches the RETAINED topic ViewModel through [TopicSubmitNavState]
+     * (transient, never serialized) and the route is frozen at entry. The field is kept, unread,
+     * for serialization compat : a back stack persisted by an older build must keep
+     * deserialising (same stance as the removed quote args on [PostEditorRoute]).
      */
     val submitSignal: Long? = null,
     /**
@@ -300,13 +299,10 @@ data class TopicRoute(
      */
     val forceRefresh: Boolean = false,
     /**
-     * #226 — `true` only on the route re-pushed by [onNavigateToLastPage] after a plain reply
-     * overflowed onto a freshly created last page. Forwarded to `TopicRequest.postSubmitOverflowLanding`.
-     * Always paired with a fresh [submitSignal] (force-fetch, no stale cache) and tells the ViewModel
-     * this is the overflow *landing*: scroll to the end of the fresh page, do NOT redirect again to
-     * yet another last page (anti-chase under concurrent posting). Default `false` keeps every other
-     * route — including the initial post-submit refresh — unaffected; defaulted so older serialised
-     * back stacks deserialise without the field.
+     * DEAD since #895 étape 4 (PR 2) — the historical #226 overflow-landing marker of the
+     * route-replace era. The anti-chase guarantee now lives in
+     * `TopicViewModel.applySubmitResult` (single internal redirect budget). Kept, unread, for
+     * serialization compat like [submitSignal].
      */
     val postSubmitOverflowLanding: Boolean = false,
     /**
@@ -1089,26 +1085,20 @@ fun RedfaceApp(intent: Intent?) {
         // the entry recreation; keyed by (cat, post) so titles never bleed across categories.
         var topicTitleCache by remember { mutableStateOf(emptyMap<TopicTitleKey, String>()) }
 
-        // #307 — per-page scroll anchors keyed by (cat, post, page), twin of topicTitleCache: a page
-        // change destroys the nav entry (and its rememberSaveable LazyListState), so returning to an
-        // already-visited page used to land at the top. The topic screen saves its read position here
-        // on departure; the next landing on the same page restores it (unless the route carries a
-        // scrollTo / submitSignal, cf. resolveTopicScrollRestoration). RAM/session only, like titles.
+        // #307 — per-page scroll anchors keyed by (cat, post, page), twin of topicTitleCache. The
+        // topic screen saves its read position here on departure (under its CANONICAL page, #895) ;
+        // the next ENTRY on the same page restores it (unless the route carries a scrollTo, cf.
+        // resolveTopicScrollRestoration). Serves cross-entry restores only since #895 étape 4 —
+        // in-topic page changes stay inside the retained ViewModel. RAM/session only, like titles.
         var topicScrollAnchorCache by remember { mutableStateOf(emptyMap<TopicScrollKey, TopicScrollAnchor>()) }
-        // #412 — transient « land at the bottom » marker, lifecycle-matched to the anchor cache
-        // above (plain remember: lost on activity/process recreation, which falls back to the
-        // pre-#412 top landing instead of replaying a stale bottom scroll).
-        var topicPendingBottomLanding by remember { mutableStateOf<TopicScrollKey?>(null) }
-        // #782 — quote-jump return stack: each « aller au message cité » tap pushes the departure
-        // (page + tap-time anchor) so the system back unwinds the jump chain instead of leaving the
-        // topic. One stack at a time, keyed (cat, post) like the multi-quote basket; capped
-        // (TOPIC_JUMP_STACK_MAX). Plain remember on purpose: process death drops it and back exits
-        // the topic as before — a serialized chain would replay stale returns (cf. PR #420 stance).
-        var topicJumpStack by remember { mutableStateOf<TopicJumpStack?>(null) }
-        // #782 — the one return landing currently owed its anchor: armed by the back interception,
-        // matched + consumed by the next TopicRoute landing. Same transient lifecycle as
-        // topicPendingBottomLanding above.
-        var topicJumpPendingReturn by remember { mutableStateOf<TopicJumpReturn?>(null) }
+        // #895 étape 4 (PR 2) — pending full-editor submit outcome, published BEFORE the editor
+        // pop and consumed exactly once by the topic entry below (→ TopicViewModel.applySubmitResult).
+        // Keyed (cat, post) so another topic's entry can never consume it ; eventId is a strictly
+        // monotonic counter so two rapid submits with identical payloads both apply. Plain remember
+        // on purpose: process death drops it — the POST already reached HFR, the restored topic
+        // shows the cached page until a manual refresh (same stance as the other transient slots).
+        var topicPendingSubmit by remember { mutableStateOf<TopicPendingSubmit?>(null) }
+        var topicSubmitEventId by remember { mutableStateOf(0L) }
         // #291 — multi-quote basket: numreponses selected for quoting, in tap order, keyed by
         // (cat, post) so a page change (which destroys the topic nav entry, cf. titles above)
         // keeps the cross-page selection while a different topic never sees it. One basket at a
@@ -1157,6 +1147,8 @@ fun RedfaceApp(intent: Intent?) {
             // transition (Codex review: stale « Citer N » after logout/login).
             multiQuoteBasket = null
             pendingEditorQuotes = null
+            // #895 étape 4 — same rule for a submit outcome armed under another session.
+            topicPendingSubmit = null
             resetStack(messagesBackStack, MessagesRoute, MessagesRoute)
         }
 
@@ -1334,18 +1326,22 @@ fun RedfaceApp(intent: Intent?) {
                                     anchor,
                                 )
                             },
-                            pendingBottomLanding = topicPendingBottomLanding,
-                            onPendingBottomLanding = { topicPendingBottomLanding = it },
                         ),
-                        topicJumpNavState = TopicJumpNavState(
-                            stack = topicJumpStack,
-                            pendingReturn = topicJumpPendingReturn,
-                            onPush = { cat, post, entry ->
-                                topicJumpStack = topicJumpStack.pushedJump(cat, post, entry)
+                        topicSubmitNavState = TopicSubmitNavState(
+                            pending = topicPendingSubmit,
+                            onPublish = { cat, post, targetPage, scrollTo ->
+                                topicSubmitEventId += 1
+                                topicPendingSubmit = TopicPendingSubmit(
+                                    cat = cat,
+                                    post = post,
+                                    result = TopicSubmitResult(
+                                        eventId = topicSubmitEventId,
+                                        targetPage = targetPage,
+                                        scrollTo = scrollTo,
+                                    ),
+                                )
                             },
-                            onPop = { topicJumpStack = topicJumpStack?.popped() },
-                            onClear = { topicJumpStack = null },
-                            onPendingReturn = { topicJumpPendingReturn = it },
+                            onConsumed = { topicPendingSubmit = null },
                         ),
                         multiQuoteNavState = MultiQuoteNavState(
                             basket = multiQuoteBasket,
@@ -1712,53 +1708,64 @@ private data class TopicTitleNavState(
 
 /**
  * #307 — per-page scroll-anchor cache plumbed into [RedfaceNavHost], twin of [TopicTitleNavState].
- * A topic page change replaces the TopicRoute in place (#282), destroying the nav entry and the
- * `rememberSaveable` `LazyListState` with it, so returning to an already-visited page landed at the
- * top. The `var` backing [anchors] lives in [RedfaceApp] so it survives the entry recreation;
- * [onAnchorSaved] records the read position when a topic screen leaves the composition and the next
- * landing on the same `(cat, post, page)` ([TopicScrollKey]) restores it — unless the route carries
- * a higher-priority scroll (`scrollTo` / `submitSignal`, cf. [resolveTopicScrollRestoration]). Same
- * read-map + on-event-callback shape as [TopicTitleNavState] / [PrivateMessageNavState]; in-memory
- * only (session-scoped), never serialized into a route.
+ * The `var` backing [anchors] lives in [RedfaceApp] so it survives the nav-entry recreation;
+ * [onAnchorSaved] records the read position (under its CANONICAL page — the in-VM engine may have
+ * switched pages since entry, #895 étape 4) when a topic screen leaves the composition, and the
+ * next ENTRY landing on the same `(cat, post, page)` ([TopicScrollKey]) restores it — unless the
+ * route carries a higher-priority `scrollTo` (cf. [resolveTopicScrollRestoration]). In-topic page
+ * changes never consult this cache (the engine keeps its own per-page RAM anchors) : it serves
+ * CROSS-ENTRY restores only (reopen the same topic page later in the session). Same read-map +
+ * on-event-callback shape as [TopicTitleNavState] / [PrivateMessageNavState]; in-memory only
+ * (session-scoped), never serialized into a route.
  *
  * @property anchors last saved read position per visited topic page.
  * @property onAnchorSaved records a page's read position when its screen is disposed.
- * @property pendingBottomLanding #412 — the one page currently owed a bottom landing (armed by
- *   `onOpenPage` on a strict « page - 1 » step, cleared on any other page change and consumed by
- *   the screen after its first `Loaded`). Deliberately transient nav state, NOT a `TopicRoute`
- *   field: a serialized route would replay the bottom landing on process/configuration restore and
- *   could override the user's restored position (Codex review on PR #420). Losing it with the
- *   composition just falls back to the pre-#412 top landing.
- * @property onPendingBottomLanding rewrites the pending key (null clears it).
  */
 private data class TopicScrollNavState(
     val anchors: Map<TopicScrollKey, TopicScrollAnchor>,
     val onAnchorSaved: (cat: Int, post: Int, page: Int, anchor: TopicScrollAnchor) -> Unit,
-    val pendingBottomLanding: TopicScrollKey? = null,
-    val onPendingBottomLanding: (TopicScrollKey?) -> Unit = {},
 )
 
 /**
- * #782 — quote-jump return bundle threaded into [RedfaceNavHost], same hoisted-state shape as
- * [TopicScrollNavState] (the `var`s live in [RedfaceApp] so they survive the per-jump TopicRoute
- * replacement, which destroys the nav entry).
- *
- * @property stack the active topic's return stack, or `null` (no pending returns anywhere).
- * @property pendingReturn the one return landing currently owed its anchor (armed by the back
- *   interception, consumed by the next TopicRoute landing) — cf. [TopicJumpReturn].
- * @property onPush records a departure right before a quote jump replaces the route.
- * @property onPop drops the entry the back interception is returning to.
- * @property onClear empties the stack — manual page navigation and leaving the topic invalidate
- *   the return chain (browser-like: a new navigation clears the forward history of the gesture).
- * @property onPendingReturn arms (or clears, `null`) the return landing.
+ * #895 étape 4 (PR 2) — the one pending full-editor submit outcome, keyed to its topic. Published
+ * by the editor entries BEFORE their pop (cf. [TopicSubmitNavState.onPublish]) and consumed exactly
+ * once by the topic entry below, which forwards [TopicPendingSubmit.result] to
+ * `TopicViewModel.applySubmitResult`.
  */
-private data class TopicJumpNavState(
-    val stack: TopicJumpStack?,
-    val pendingReturn: TopicJumpReturn?,
-    val onPush: (cat: Int, post: Int, entry: TopicJumpEntry) -> Unit,
-    val onPop: () -> Unit,
-    val onClear: () -> Unit,
-    val onPendingReturn: (TopicJumpReturn?) -> Unit,
+private data class TopicPendingSubmit(
+    val cat: Int,
+    val post: Int,
+    val result: TopicSubmitResult,
+) {
+    fun matches(cat: Int, post: Int): Boolean = this.cat == cat && this.post == post
+}
+
+/**
+ * #895 étape 4 (PR 2) — whether [below] (the nav entry under the editor being popped) is the
+ * topic a successful submit targeted. Publishing without this guard would arm an outcome that a
+ * LATER unrelated open of the same topic would consume — e.g. an editor opened straight from the
+ * Flags list (`onReplyFlag`) pops back to the LIST, not to a topic entry.
+ */
+private fun isTopicEntryFor(below: Any?, cat: Int, topicId: Int): Boolean {
+    val topic = below as? TopicRoute ?: return false
+    return topic.cat == cat && topic.post == topicId
+}
+
+/**
+ * #895 étape 4 (PR 2) — post-submit handoff bundle threaded into [RedfaceNavHost], same
+ * hoisted-state shape as [TopicScrollNavState]. Replaces the historical route-replace +
+ * `submitSignal` rebuild (PR #420 stance : one-shot intentions are transient nav state, never
+ * route fields).
+ *
+ * @property pending the one submit outcome currently owed to a topic entry, or `null`.
+ * @property onPublish arms the outcome for `(cat, post)` — called BEFORE the editor pop so the
+ *   revealed topic entry finds it on first recomposition ; stamps a fresh monotonic eventId.
+ * @property onConsumed clears the slot once the topic screen applied the result.
+ */
+private data class TopicSubmitNavState(
+    val pending: TopicPendingSubmit?,
+    val onPublish: (cat: Int, post: Int, targetPage: Int?, scrollTo: Int?) -> Unit,
+    val onConsumed: () -> Unit,
 )
 
 /**
@@ -1942,8 +1949,8 @@ private fun RedfaceNavHost(
     topicTitleNavState: TopicTitleNavState,
     // #307 — per-page scroll-anchor cache, same hoisting rationale as topicTitleNavState.
     topicScrollNavState: TopicScrollNavState,
-    // #782 — quote-jump return stack, same hoisting rationale (survives the per-jump entry swap).
-    topicJumpNavState: TopicJumpNavState,
+    // #895 étape 4 (PR 2) — post-submit handoff (editor → retained topic ViewModel), same rationale.
+    topicSubmitNavState: TopicSubmitNavState,
     // #291 — multi-quote basket, same hoisting rationale (survives the per-page entry swap).
     multiQuoteNavState: MultiQuoteNavState,
     // #465 — per-topic poll-expansion cache, same hoisting rationale (survives the per-page swap).
@@ -1969,8 +1976,8 @@ private fun RedfaceNavHost(
         // le backStack → ça passe par transitionSpec : on le détecte par le changement de racine de pile
         // (chaque onglet a une racine distincte) pour ne pas hériter du slide de drill-down.
         transitionSpec = { navForwardTransform(initialState, targetState) },
-        popTransitionSpec = { navPopTransform(initialState, targetState) },
-        predictivePopTransitionSpec = { navPopTransform(initialState, targetState) },
+        popTransitionSpec = { navSharedAxisXBack() },
+        predictivePopTransitionSpec = { navSharedAxisXBack() },
         entryDecorators = listOf(
             rememberSaveableStateHolderNavEntryDecorator(),
             rememberViewModelStoreNavEntryDecorator(),
@@ -2429,68 +2436,19 @@ private fun RedfaceNavHost(
                     },
                 )
             }
-            entry<TopicRoute>(metadata = mapOf(TOPIC_SCENE_METADATA_KEY to true)) { route ->
-                // #782 — THIS topic's quote-jump return stack (another topic's stack must never arm
-                // the in-topic back interception).
-                val jumpStack = topicJumpNavState.stack?.takeIf { it.matches(route.cat, route.post) }
-                // #782 — after a quote jump (#699), back returns to the previous reading position
-                // (page + tap-time anchor) instead of leaving the topic; once the chain is unwound
-                // the handler disables itself and the next back pops out as before. Composed INSIDE
-                // the entry so it registers after — and therefore wins over — NavDisplay's own back
-                // handling and the app-level TabRootBackHandler. Known trade-off: while enabled it
-                // suppresses the predictive-pop preview for this gesture, which is correct — the
-                // route is replaced in place, there is no destination underneath to preview.
-                BackHandler(enabled = jumpStack != null) {
-                    val jumpEntry = jumpStack?.entries?.lastOrNull() ?: return@BackHandler
-                    topicJumpNavState.onPop()
-                    // Hand the captured anchor to the NEXT landing through the transient pending
-                    // slot; the landing matches it against its exact (cat, post, page) and consumes
-                    // it (cf. TopicJumpReturn — never a route field, PR #420 stance).
-                    topicJumpNavState.onPendingReturn(
-                        TopicJumpReturn(
-                            key = TopicScrollKey(route.cat, route.post, jumpEntry.page),
-                            anchor = jumpEntry.anchor,
-                        ),
-                    )
-                    // A return is not a « page - 1 » reading step (same rule as onGoToPost below).
-                    topicScrollNavState.onPendingBottomLanding(null)
-                    backStack[backStack.lastIndex] = TopicRoute(
-                        cat = route.cat,
-                        post = route.post,
-                        page = jumpEntry.page,
-                        scrollTo = null,
-                    )
-                }
-                // #782 — the return anchor owed to THIS landing, if the interception above armed one.
-                val jumpReturnAnchor = topicJumpNavState.pendingReturn
-                    ?.takeIf { it.key == TopicScrollKey(route.cat, route.post, route.page) }
-                    ?.anchor
-                // #782 — one-shot consumption, keyed on the route (one run per landing). Clearing
-                // recomposes this entry with the pending slot empty, but the screen already LATCHED
-                // the resolved anchor at first composition (TopicScrollRestorationEffects applies it
-                // from a LaunchedEffect(Unit) closure), so the flip can neither re-scroll nor change
-                // the landing — same one-shot stance as onStartAtBottomConsumed (#412).
-                LaunchedEffect(route) {
-                    if (jumpReturnAnchor != null) topicJumpNavState.onPendingReturn(null)
-                }
-                // #307 — resolve what the initial scroll of this landing should do. Strict priority
-                // (route scrollTo > post-submit landing > jump return (#782) > saved anchor > top)
-                // lives in the pure resolver; only a RestoreSaved outcome hands the screen an anchor
-                // to apply — the Follow* levels resolve to null so the existing ScrollToPost /
-                // ScrollToEndOfPage effects (#200/#226/#344) keep sole ownership of their landings.
+            entry<TopicRoute> { route ->
+                // #895 étape 4 (PR 2) — the route is FROZEN at entry : every in-topic page change,
+                // quote jump, jump return and post-submit landing now lives inside the retained
+                // TopicViewModel (single nav entry, single LazyListState — no more per-page entry
+                // swap). The route's page/scrollTo describe the ENTRY intention only.
+                // #307 — resolve what the initial ENTRY scroll should do. Strict priority (route
+                // scrollTo > saved anchor > top) lives in the pure resolver; only a RestoreSaved
+                // outcome hands the screen an anchor to apply — FollowScrollTo resolves to null so
+                // the ScrollToPost effect keeps sole ownership of its landing.
                 val scrollRestoration = resolveTopicScrollRestoration(
                     scrollTo = route.scrollTo,
-                    submitSignal = route.submitSignal,
                     savedAnchor = topicScrollNavState
                         .anchors[TopicScrollKey(route.cat, route.post, route.page)],
-                    // #412 — armed by onOpenPage on a strict « page - 1 » step; transient nav
-                    // state rather than a route field (Codex review on PR #420: a serialized
-                    // flag would replay the bottom landing on process/config restore).
-                    previousPageLanding = topicScrollNavState.pendingBottomLanding ==
-                        TopicScrollKey(route.cat, route.post, route.page),
-                    // #782 — the tap-time departure anchor beats the disposal-saved one: an
-                    // intra-page jump already overwrote the latter with the cited post's position.
-                    jumpReturnAnchor = jumpReturnAnchor,
                 )
                 TopicScreen(
                     request = TopicRequest(
@@ -2498,9 +2456,7 @@ private fun RedfaceNavHost(
                         post = route.post,
                         page = route.page,
                         scrollTo = route.scrollTo,
-                        submitSignal = route.submitSignal,
                         forceRefresh = route.forceRefresh,
-                        postSubmitOverflowLanding = route.postSubmitOverflowLanding,
                         titleHint = topicTitleNavState.titles[TopicTitleKey(route.cat, route.post)],
                         resolveScrollToPage = route.resolveScrollToPage,
                     ),
@@ -2509,15 +2465,15 @@ private fun RedfaceNavHost(
                     },
                     restoreScrollAnchor =
                         (scrollRestoration as? TopicScrollRestoration.RestoreSaved)?.anchor,
-                    startAtBottom = scrollRestoration is TopicScrollRestoration.StartAtBottom,
-                    onStartAtBottomConsumed = {
-                        // One-shot: once the screen has executed (or skipped) the bottom landing
-                        // for this page, drop the marker so it can never replay.
-                        topicScrollNavState.onPendingBottomLanding(null)
+                    onScrollAnchorSaved = { page, anchor ->
+                        topicScrollNavState.onAnchorSaved(route.cat, route.post, page, anchor)
                     },
-                    onScrollAnchorSaved = { anchor ->
-                        topicScrollNavState.onAnchorSaved(route.cat, route.post, route.page, anchor)
-                    },
+                    // #895 étape 4 (PR 2) — the pending submit outcome for THIS topic, if any ;
+                    // the screen forwards it to the retained ViewModel and acknowledges.
+                    pendingSubmitResult = topicSubmitNavState.pending
+                        ?.takeIf { it.matches(route.cat, route.post) }
+                        ?.result,
+                    onSubmitResultConsumed = topicSubmitNavState.onConsumed,
                     onOpenProfile = onOpenProfile,
                     // #792 — « Envoyer un MP » from a post's menu : the NEW-conversation composer
                     // opens with the post's author prefilled (the route arg was designed for this).
@@ -2559,24 +2515,6 @@ private fun RedfaceNavHost(
                                 resumeSharedDraft = true,
                             ),
                         )
-                    },
-                    // Vague 4 (#604) lot 1 — a reply POSTed from the quick-reply sheet: same
-                    // refresh contract as the full editor's onSubmitSucceeded below (replace the
-                    // route with targetPage/scrollTo + a bumped submitSignal, #200/#226), minus
-                    // the pop — the sheet never entered the back stack.
-                    onQuickReplySubmitted = { targetPage, scrollTo ->
-                        val topicEntry = backStack.lastOrNull() as? TopicRoute
-                        if (topicEntry != null) {
-                            backStack.removeAt(backStack.lastIndex)
-                            backStack.add(
-                                topicEntry.copy(
-                                    page = targetPage ?: topicEntry.page,
-                                    scrollTo = scrollTo,
-                                    submitSignal = System.currentTimeMillis(),
-                                    postSubmitOverflowLanding = false,
-                                ),
-                            )
-                        }
                     },
                     // #291 / #604 lot 3 — selection of THIS topic's basket as full previews
                     // (another topic's selection must never leak into the menu checkmarks or
@@ -2663,84 +2601,14 @@ private fun RedfaceNavHost(
                             ),
                         )
                     },
-                    onOpenPage = { targetPage ->
-                        // #412 — a one-page step backwards lands at the bottom of the target page
-                        // (reading direction) unless that page has a saved anchor. Strict
-                        // « page - 1 » so pager jumps further back keep the top landing; any other
-                        // page change clears a stale marker.
-                        topicScrollNavState.onPendingBottomLanding(
-                            TopicScrollKey(route.cat, route.post, targetPage)
-                                .takeIf { targetPage == route.page - 1 },
-                        )
-                        // #782 — a MANUAL page navigation (swipe, pager, FAB, boundary card)
-                        // invalidates the quote-jump return chain, browser-like: back after it
-                        // exits the topic instead of replaying a stale return.
-                        topicJumpNavState.onClear()
-                        // #282 — replace the top entry IN PLACE rather than removeAt + add. The two-step
-                        // version briefly leaves the parent on top (size-1), an observable intermediate
-                        // state NavDisplay can start transitioning toward; an indexed set is a single
-                        // mutation straight from TopicRoute(page=N) to TopicRoute(page=target).
-                        backStack[backStack.lastIndex] = TopicRoute(
-                            cat = route.cat,
-                            post = route.post,
-                            page = targetPage,
-                            scrollTo = null,
-                        )
-                    },
-                    onGoToPost = { targetPage, numreponse, sourceAnchor ->
-                        // #699 — jump to a cited post: the same single-mutation in-place replace as
-                        // onOpenPage (#282), with the deep-link scroll anchor so the landing scrolls
-                        // to and highlights the target (#200 mechanism). Uniform whether the cited
-                        // post is on the current page or another. Not a « page - 1 » reading step —
-                        // clear any stale bottom-landing marker (same rule as onOpenPage's takeIf).
-                        topicScrollNavState.onPendingBottomLanding(null)
-                        // #782 — remember the departure (page + tap-time anchor, captured by the
-                        // screen from its LazyListState) so the back interception above can unwind
-                        // this jump. Pushing on a different topic resets the stack (pushedJump).
-                        topicJumpNavState.onPush(
-                            route.cat,
-                            route.post,
-                            TopicJumpEntry(page = route.page, anchor = sourceAnchor),
-                        )
-                        backStack[backStack.lastIndex] = TopicRoute(
-                            cat = route.cat,
-                            post = route.post,
-                            page = targetPage,
-                            scrollTo = numreponse,
-                        )
-                    },
                     onBack = {
                         // #285 — explicit back affordance in the topic top bar. Pop to the screen that
                         // opened the topic (list / flags). Guard size > 1 so we never pop a tab root
-                        // (mirrors the global back handling used across the other entries).
-                        // #782 — the arrow's contract is « leave the topic » : it never unwinds the
-                        // quote-jump chain, and leaving drops the chain with it.
-                        topicJumpNavState.onClear()
+                        // (mirrors the global back handling used across the other entries). The #782
+                        // quote-jump chain lives (and dies) with the ViewModel — nothing to clear here.
                         if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)
                         }
-                    },
-                    onNavigateToLastPage = { lastPage ->
-                        // #226 — the plain reply overflowed onto a freshly created page; land the user
-                        // there (their reply lives on the last page, not the stale form page). Carry a
-                        // fresh submitSignal so the destination ViewModel force-fetches the page — a
-                        // plain cache-aside load could serve a TTL-fresh row that pre-dates the reply
-                        // (the original #226 failure). The `postSubmitOverflowLanding` flag is what
-                        // keeps the old anti-chase guarantee WITHOUT dropping the refresh: the landing
-                        // ViewModel scrolls to the end but never re-emits NavigateToLastPage, so a
-                        // concurrent post that pushes totalPages further during the refresh window does
-                        // not start a moving-tail chase. Indexed set (not removeAt + add) for the same
-                        // single-mutation reason as onOpenPage (#282).
-                        // #782 — a page change like onOpenPage: drop the quote-jump return chain.
-                        topicJumpNavState.onClear()
-                        backStack[backStack.lastIndex] = TopicRoute(
-                            cat = route.cat,
-                            post = route.post,
-                            page = lastPage,
-                            scrollTo = null,
-                            submitSignal = System.currentTimeMillis(),
-                            postSubmitOverflowLanding = true,
-                        )
                     },
                     // #518 follow-up — report scroll facts so RedfaceApp can reveal the hidden system
                     // nav bar per the chosen mode. `active` is false (no-op) unless immersive + a
@@ -2776,41 +2644,25 @@ private fun RedfaceNavHost(
                         }
                     },
                     onSubmitSucceeded = { targetPage, scrollTo ->
-                        // Pop the editor and refresh the topic page. `targetPage` is parsed
-                        // from HFR's success URL and tells us which page to land on;
-                        // `scrollTo` is the numreponse the parser extracted from the
-                        // `#t{N}` URL fragment (quote / edit post), or null when HFR
-                        // anchored `#bas` (plain reply). The bumped `submitSignal` invalidates
-                        // the route key so the topic screen rebuilds its ViewModel and
-                        // force-fetches the page — without it, the cache-aside path would
-                        // serve a page that pre-dates the freshly-published post (#200).
-                        // Guard the pop the same way the global `onBack` lambda does:
-                        // never collapse the back stack below the tab root.
+                        // #895 étape 4 (PR 2) — publish the outcome BEFORE the pop, so the revealed
+                        // topic entry finds it on first recomposition and hands it to its RETAINED
+                        // ViewModel (in-place force refresh + landing, #200/#226 — the historical
+                        // route-replace + submitSignal rebuild is gone). `targetPage` is parsed
+                        // from HFR's success URL; `scrollTo` is the numreponse from the `#t{N}`
+                        // fragment (quote / edit), or null when HFR anchored `#bas` (plain reply →
+                        // bottom landing). Guarded on the entry below actually being THIS topic —
+                        // an editor opened from the Flags list (onReplyFlag) pops back to the list,
+                        // and a pending outcome armed there would fire on a LATER unrelated open
+                        // of the topic.
+                        val topicId = route.topicId
+                        val below = backStack.getOrNull(backStack.lastIndex - 1)
+                        if (topicId != null && isTopicEntryFor(below, route.cat, topicId)) {
+                            topicSubmitNavState.onPublish(route.cat, topicId, targetPage, scrollTo)
+                        }
+                        // Same guarded pop as the global `onBack` lambda: never collapse below the
+                        // tab root.
                         if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)
-                        }
-                        val topicEntry = backStack.lastOrNull() as? TopicRoute
-                        if (topicEntry != null) {
-                            backStack.removeAt(backStack.lastIndex)
-                            backStack.add(
-                                topicEntry.copy(
-                                    page = targetPage ?: topicEntry.page,
-                                    // Issue #200 — do NOT fall back to topicEntry.scrollTo here.
-                                    // A topic opened from Flags / deep link / search may already carry
-                                    // a `scrollTo` (the post the user was originally jumping to). After
-                                    // a plain reply, the parser returns scrollTo=null because HFR anchors
-                                    // `#bas` — if we re-use the previous scrollTo, the topic screen scrolls
-                                    // back to that old post and never to the freshly-published reply, and
-                                    // the `ScrollToEndOfPage` fallback in `TopicViewModel.maybeEmitScroll`
-                                    // is silently suppressed (it gates on `target == null`).
-                                    scrollTo = scrollTo,
-                                    submitSignal = System.currentTimeMillis(),
-                                    // #226 — a fresh submit may itself overflow, so it must be allowed
-                                    // to redirect once. Reset the landing flag the previous route may
-                                    // have carried (topicEntry could already be an overflow landing).
-                                    postSubmitOverflowLanding = false,
-                                ),
-                            )
                         }
                     },
                 )
@@ -2834,37 +2686,20 @@ private fun RedfaceNavHost(
                         }
                     },
                     onSubmitSucceeded = { targetPage, scrollTo ->
-                        // Phase 2D (#148) — pop the FP form, replace the topic route below
-                        // with one that refreshes the target page and scrolls to the edited
-                        // first post. Same pattern as `PostEditorRoute.onSubmitSucceeded`;
-                        // `submitSignal` bumps the route key so the topic screen rebuilds
-                        // and force-fetches the page (issue #200) — otherwise the cache-
-                        // aside path could serve a stale page that pre-dates the FP edit.
+                        // Phase 2D (#148) / #895 étape 4 (PR 2) — publish the FP-edit outcome
+                        // BEFORE the pop (same handoff as `PostEditorRoute.onSubmitSucceeded`) :
+                        // the revealed topic entry hands it to its retained ViewModel, which
+                        // force-fetches the target page (#200) and lands on the edited first
+                        // post. Guarded on the entry below being THIS topic (route.topicId is
+                        // null in New mode, whose success path is onNewTopicCreated below).
+                        val topicId = route.topicId
+                        val cat = route.cat
+                        val below = backStack.getOrNull(backStack.lastIndex - 1)
+                        if (cat != null && topicId != null && isTopicEntryFor(below, cat, topicId)) {
+                            topicSubmitNavState.onPublish(cat, topicId, targetPage, scrollTo)
+                        }
                         if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)
-                        }
-                        val topicEntry = backStack.lastOrNull() as? TopicRoute
-                        if (topicEntry != null) {
-                            backStack.removeAt(backStack.lastIndex)
-                            backStack.add(
-                                topicEntry.copy(
-                                    page = targetPage ?: topicEntry.page,
-                                    // Issue #200 — do NOT fall back to topicEntry.scrollTo here.
-                                    // A topic opened from Flags / deep link / search may already carry
-                                    // a `scrollTo` (the post the user was originally jumping to). After
-                                    // a plain reply, the parser returns scrollTo=null because HFR anchors
-                                    // `#bas` — if we re-use the previous scrollTo, the topic screen scrolls
-                                    // back to that old post and never to the freshly-published reply, and
-                                    // the `ScrollToEndOfPage` fallback in `TopicViewModel.maybeEmitScroll`
-                                    // is silently suppressed (it gates on `target == null`).
-                                    scrollTo = scrollTo,
-                                    submitSignal = System.currentTimeMillis(),
-                                    // #226 — a fresh submit may itself overflow, so it must be allowed
-                                    // to redirect once. Reset the landing flag the previous route may
-                                    // have carried (topicEntry could already be an overflow landing).
-                                    postSubmitOverflowLanding = false,
-                                ),
-                            )
                         }
                     },
                     onNewTopicCreated = { cat, subcat, newTopicId, newNumreponse, subject ->
@@ -2888,11 +2723,10 @@ private fun RedfaceNavHost(
                                     cat = cat,
                                     post = newTopicId,
                                     page = 1,
+                                    // A freshly-created topic has no cache row, so the plain
+                                    // cache-aside load fetches live and scrolls to the first
+                                    // post (#206) — no force-fetch signal needed (#895 PR 2).
                                     scrollTo = newNumreponse,
-                                    // Bump the route key like the reply/quote/edit paths so the
-                                    // topic screen builds fresh (not from a stale cache entry)
-                                    // and scrolls to the freshly-created first post (#206).
-                                    submitSignal = System.currentTimeMillis(),
                                 ),
                             )
                         } else {
@@ -3032,8 +2866,6 @@ private const val TAB_FADE_IN_MS = 140
 private const val TAB_FADE_OUT_MS = 80
 private const val SLIDE_DIVISOR = 4
 
-private fun navInstant(): ContentTransform = EnterTransition.None togetherWith ExitTransition.None
-
 /** Shared-axis X, sens AVANT : l'entrant glisse depuis la droite, le sortant part vers la gauche. */
 private fun navSharedAxisXForward(): ContentTransform =
     (slideInHorizontally(tween(DRILL_MS, easing = EmphasizedDecelerate)) { it / SLIDE_DIVISOR } +
@@ -3051,26 +2883,6 @@ private fun navSharedAxisXBack(): ContentTransform =
 /** Fade-through court entre onglets (contenus sans relation spatiale → pas de slide). */
 private fun navTabFadeThrough(): ContentTransform =
     fadeIn(tween(TAB_FADE_IN_MS, delayMillis = 30)) togetherWith fadeOut(tween(TAB_FADE_OUT_MS))
-
-/**
- * Marks a [TopicRoute] NavEntry so [isTopicScene] can recognise a topic scene without relying on the
- * route type: nav3 1.1.1 exposes `Scene.key` as `route.toString()` (a String), not the route object,
- * so an `is TopicRoute` test on the scene key would never match. The entry's public metadata is the
- * stable signal instead.
- */
-internal const val TOPIC_SCENE_METADATA_KEY = "fr.forumhfr.redface2.topicScene"
-
-/**
- * True iff [metadata] carries the topic-scene marker. Null/empty/other-keys/false → false. Extracted
- * as a pure function so the marker contract (incl. the empty-`entries` → null case) is unit-testable
- * without a Compose/nav3 runtime.
- */
-internal fun isTopicSceneMetadata(metadata: Map<String, Any>?): Boolean =
-    metadata?.get(TOPIC_SCENE_METADATA_KEY) == true
-
-/** True when this scene's top entry is a [TopicRoute] (tagged via [TOPIC_SCENE_METADATA_KEY]). */
-private fun Scene<NavKey>.isTopicScene(): Boolean =
-    isTopicSceneMetadata(entries.lastOrNull()?.metadata)
 
 /**
  * Pure : une navigation AVANT est un drill-down (push) — par opposition à un changement d'onglet ou un
@@ -3095,16 +2907,15 @@ private fun Scene<NavKey>.isForwardDrillDownTo(to: Scene<NavKey>): Boolean =
     )
 
 /**
- * Transition AVANT (push/replace non-pop) : instantané pour le swipe topic→topic (#282), shared-axis X
- * avant pour un drill-down (push intra-onglet, toute profondeur), fade-through sinon (changement
- * d'onglet ou remplacement de pile — contenus sans relation spatiale parent/enfant).
+ * Transition AVANT (push/replace non-pop) : shared-axis X avant pour un drill-down (push
+ * intra-onglet, toute profondeur), fade-through sinon (changement d'onglet ou remplacement de
+ * pile — contenus sans relation spatiale parent/enfant). #895 étape 5 : le cas spécial
+ * « instantané topic→topic » (swipe de page #282) est mort avec la route figée — un changement
+ * de page ne traverse plus la navigation, et un vrai topic→topic (deep link pendant la lecture)
+ * mérite la même transition que tout autre remplacement.
  */
 private fun navForwardTransform(from: Scene<NavKey>, to: Scene<NavKey>): ContentTransform = when {
-    from.isTopicScene() && to.isTopicScene() -> navInstant()
     from.isForwardDrillDownTo(to) -> navSharedAxisXForward()
     else -> navTabFadeThrough()
 }
 
-/** Transition ARRIÈRE (pop / retour prédictif) : instantané topic→topic, sinon shared-axis X arrière. */
-private fun navPopTransform(from: Scene<NavKey>, to: Scene<NavKey>): ContentTransform =
-    if (from.isTopicScene() && to.isTopicScene()) navInstant() else navSharedAxisXBack()

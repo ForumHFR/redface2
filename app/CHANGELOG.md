@@ -16,6 +16,61 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.29.0` — `internal` (dev) — 2026-07-13
+
+**Lot de nuit 12→13/07** (#813 images fantômes, #862 épinglés drapeaux, trio éditeur #873/#900/#872, garde citation #583, fix loupe #913 de la veille). Chantiers cadrés + gatés hors-bande (GPT-5.6 Sol) ; vérification visuelle émulateur non réalisée cette nuit (hôte KVM HS — reboot machine requis), couverture par tests JVM/Robolectric + fixtures serveur réelles.
+
+### Vue topic
+- **#813 — les images fantômes se récupèrent** : une image inline dont le premier chargement a échoué (hébergeur en panne, coupure) restait un carré quasi invisible jusqu'à « citer puis revenir ». Le tirer-pour-rafraîchir (et le double-tap) relance désormais mesure ET chargement. (PR #919)
+- **#913 — la loupe de recherche reste cohérente** après la fermeture d'une recherche pendant une transition de page (reliquat de la veille). (PR #914)
+
+### Drapeaux
+- **#862 — les sujets épinglés flaggés apparaissent dans les listes** (favoris/cyan/rouges) : le serveur les omet de ses buckets dans TOUTES les catégories (prouvé par captures) ; le supplément `topics/last` couvre maintenant les 19 catégories, en UN balayage partagé par les trois types (barrière de génération au refresh — cadrage Sol 5 rounds). (PR #922)
+
+### Éditeur
+- **#873 — l'aperçu affiche les smileys standards** (`:jap:`, `:lol:`, `:pt1cable:`… — 51 tokens), validés contre la table canonique (pas de faux positifs type `10:30:45`). Les persos `[:name]` restent en texte (résolution d'URL = suivi) ; les émoticônes ponctuation (`:)`, `:D`) volontairement non converties en aperçu. (PR #921)
+- **#900 — panneau smileys wiki compacté** : ligne de titre retirée (les onglets nomment la surface, TalkBack garde une annonce paneTitle) — une rangée de plus visible. (PR #921)
+- **#872 — le libellé « Contenu BBCode » ne se rogne plus** aux grandes tailles de police (réservation du label indexée sur l'échelle de police). (PR #921)
+- **#583 — une citation qui ne se matérialise pas bloque l'envoi** (erreur retryable) au lieu de poster silencieusement SANS le bloc cité. (PR #922)
+
+## `0.28.1` — `internal` (dev) — 2026-07-13
+
+**Stale-while-switching** (#910, PR #911 — retour immédiat de XaTriX sur la 0.28.0 : « ça saute/flash toujours sur une page non connue »).
+
+### Vue topic
+- **Plus de squelette flashé sur un changement de page rapide** : la page quittée reste affichée (hairline discrète) pendant que la nouvelle charge ; le squelette n'apparaît que si le chargement dépasse ~250 ms. Une page en cache Room (session antérieure) bascule sans aucun flash.
+- La pilule ne dit plus jamais « Chargement… » par-dessus un contenu affiché ; la barre (loupe, repli auto-hide, titre) ne change plus d'état pendant le chargement d'un switch.
+- Gardes : un switch échoué affiche l'erreur (jamais un état figé) ; pull-to-refresh inactif pendant la transition.
+
+## `0.28.0` — `internal` (dev) — 2026-07-12
+
+**Zéro flash au changement de page** (#895 étapes 4-5, PRs #905/#907/#908 — le fond du chantier, après les quick wins de 0.27.3).
+
+### Vue topic — moteur de pagination in-ViewModel
+- **Plus aucun flash au changement de page** : la pagination vit dans un seul écran retenu (une seule entrée de navigation pour tout le topic) — plus de squelette plein écran ni de barre recréée entre deux pages ; le squelette ne reste que pour une page jamais visitée.
+- **Revisite instantanée** : les 5 dernières pages lues sont gardées en mémoire — y revenir est immédiat, à la position exacte où on les avait laissées.
+- **Retour de citation fidèle** (#782 renforcé) : après « aller au message cité », le retour ramène à la position exacte du tap, même en chaîne ; un changement de page manuel réinitialise la chaîne (comportement navigateur), un 2e retour sort du topic.
+- **Landing « page précédente » conservé** (#412) : reculer d'une page atterrit en bas (sens de lecture), sauf position déjà connue pour cette page.
+- Post-submit : la publication rafraîchit la bonne page dans le MÊME écran (débordement #226 géré en interne, plus de re-navigation) ; la position de lecture survit à la mort de process (page + ancre).
+- Nettoyage : transition instantanée topic→topic supprimée (code mort de l'ère « une route par page »).
+
+## `0.27.4` — `internal` (dev) — 2026-07-12
+
+**Duo picker smileys** (retours tinc/nicko du jour sur le fil DEV — fixes livrés en parallèle par sub-agents, gates Codex GO).
+
+### Éditeur — sélecteur de smileys
+- **Fini les petits smileys flous** (#871, PR #903) : les persos plus petits que la cellule s'affichent à leur taille intrinsèque (même pipeline de mesure que le rendu des posts, #175), jamais étirés ; cap 44 dp conservé, builtins inchangés.
+- **Curseur en fin de mot** (#901, PR #904) : la recherche restaurée à la réouverture du panneau (#824) garde le terme et place le curseur à la FIN — effacer ou compléter est immédiat.
+
+## `0.27.3` — `internal` (dev) — 2026-07-12
+
+**Quick wins zéro-flash** (#895, PR #899 — premier lot du chantier « zéro flash au changement de page » ; le fond, pagination intra-topic dans un même ViewModel, suit dans un lot dédié).
+
+### Vue Topic — changement de page
+- **La pilule de la barre dit la vérité** : une page servie du cache pendant son actualisation affiche « page X / Y » (le contenu réellement à l'écran) au lieu de « Chargement… » ; « Chargement… » est réservé au vrai chargement sans contenu.
+- **Signal d'actualisation discret** : fine barre de progression (2 dp) sous la top bar pendant l'actualisation d'une page en cache — bande toujours réservée, aucun décalage de mise en page ; annonce d'accessibilité « actualisation en cours » sur la pilule.
+- **Prefetch sans réseau inutile** : le préchargement des pages voisines ne refait plus de requête quand la page est déjà en cache (et n'écrase jamais une version authentifiée — garde couverte par tests).
+
 ## `0.27.2` — `internal` (dev) — 2026-07-12
 
 **Recherche intra-topic v2** (#894, retours XaTriX sur 0.27.1 — contrat `transsearch` re-vérifié live, cadrage + gates Codex, dogfoods sur le serveur réel).

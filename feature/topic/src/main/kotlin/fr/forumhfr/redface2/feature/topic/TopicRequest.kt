@@ -6,14 +6,6 @@ data class TopicRequest(
     val page: Int,
     val scrollTo: Int?,
     /**
-     * Issue #200 — non-null when the topic screen is being reopened after an editor
-     * submit (reply / quote / edit / edit-FP). The ViewModel bypasses the cache-aside
-     * path and force-fetches the page so the freshly-published post is visible. The
-     * value itself is a `System.currentTimeMillis()` timestamp from the navigation
-     * host — only its presence/absence matters, not its magnitude.
-     */
-    val submitSignal: Long? = null,
-    /**
      * #231 — `true` when the topic is opened from a drapeau/flag (the user's intent is
      * to catch up on new posts). The cache-aside path still shows the cached page
      * instantly but **always** refreshes afterwards, bypassing the 60s snappy-cache TTL
@@ -27,24 +19,14 @@ data class TopicRequest(
      */
     val forceRefresh: Boolean = false,
     /**
-     * Display-only fallback title for the top app bar while a freshly-navigated page is still
-     * loading. A page change replaces the `TopicRoute` (new nav entry → new ViewModel → `Loading`
-     * with no topic yet), which would otherwise flash the generic « Sujet » fallback. `:app` keeps
-     * a per-topic title cache and feeds the last known title here so the bar stays stable. Never
-     * used once the page is `Loaded` (the real `Topic.title` wins).
+     * Display-only fallback title for the top app bar while the ENTRY page is still loading (a
+     * topic freshly opened from a list / flag / deep link starts in `Loading` with no topic yet),
+     * which would otherwise flash the generic « Sujet » fallback. `:app` keeps a per-topic title
+     * cache and feeds the last known title here so the bar stays stable. Never used once a page is
+     * `Loaded` (the real `Topic.title` wins) — in-topic page changes stay inside the retained
+     * ViewModel (#895 étape 4) and never come back through this hint.
      */
     val titleHint: String? = null,
-    /**
-     * #226 — `true` only on the route the navigation host re-pushes after a plain reply overflowed
-     * onto a freshly created last page (see `TopicEffect.NavigateToLastPage`). It is paired with a
-     * fresh [submitSignal] so the ViewModel force-fetches that page (never a stale cache-aside row —
-     * the original #226 failure), but it marks this as the overflow **landing**: the ViewModel must
-     * NOT re-emit `NavigateToLastPage` even if a concurrent post pushed `totalPages` further while we
-     * refreshed (that would chase a moving tail). It scrolls to the end instead, surfacing the freshly
-     * published reply. `false` on every other path — including the initial post-submit refresh, which
-     * is the route allowed to redirect once.
-     */
-    val postSubmitOverflowLanding: Boolean = false,
     /**
      * #750 — `true` when [page] is NOT trusted to contain [scrollTo]: HFR email-notification links
      * always serialise `page=1` while carrying the real target as `numreponse`. Before the first

@@ -1,0 +1,8 @@
+GET https://forum.hardware.fr/webservices/rest_api.php?uri=forums/hardwarefr/categories/13/topics/last/&page=1&results_per_page=100
+Capturé le 2026-07-13 (~01h30), session authentifiée XaTelitte (compte agent), via curl.
+Contexte #862 : un favori (flag_owntopic=3) venait d'être posé sur le sticky id=100217
+« Rappel sur les droits d'auteurs » (cat 13 Discussions, sous-catégorie 422) — posé puis
+retiré via addflag.php/delflag.php dans la même session de capture. Le topics/last NIVEAU
+CATÉGORIE liste les stickies des SOUS-catégories (ids 73768/121565 subcat 432, 100217/1
+subcat 422) avec leur flag_owntopic per-user : c'est la source du supplément #251/#862.
+Aucune donnée sensible (titres publics + état de lecture du compte agent). Non modifié.

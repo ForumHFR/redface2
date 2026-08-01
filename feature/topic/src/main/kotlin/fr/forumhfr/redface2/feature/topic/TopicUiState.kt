@@ -76,6 +76,14 @@ data class TopicUiState(
      * answers a topic page), so there is no separate "results list" model here.
      */
     val search: TopicSearchUiState = TopicSearchUiState(),
+    /**
+     * #782 / #895 étape 4 — `true` while the in-VM quote-jump chain is non-empty, i.e. the next
+     * back gesture should unwind one jump ([TopicViewModel.returnFromJump]) instead of leaving
+     * the topic. Drives the screen's `BackHandler(enabled = …)` — the interception moved from
+     * `:app` (route-replace era) into the screen, next to the ViewModel that owns the chain.
+     * Kept in lock-step with every jump-stack mutation (push / pop / clear).
+     */
+    val canReturnFromJump: Boolean = false,
 ) {
     /**
      * Helper used by the screen / ViewModel : `true` when the user has navigated to a
@@ -369,8 +377,32 @@ sealed interface TopicEffect {
      * (force-refreshed) page so the user can see their freshly-published reply at the
      * bottom. Distinct from [ScrollToPost] because we don't know the new numreponse
      * — the parser couldn't extract it from the `#bas` fragment.
+     *
+     * Gate #895 r3 — [page] scopes the landing : the screen re-validates it against the CURRENT
+     * `state.request.page` and DROPS a stale effect (a buffered landing consumed after a page
+     * switch must never scroll the new page — the ViewModel's atomicity cannot cover the channel
+     * and the UI consumer). [ScrollToPost] needs no scope : its numreponse lives on exactly one
+     * page, so a stale one simply resolves to « absent » on the new page.
      */
-    data object ScrollToEndOfPage : TopicEffect
+    data class ScrollToEndOfPage(val page: Int) : TopicEffect
+
+    /**
+     * #895 (étape 4) — land back on a previously visited page at the exact reading position the
+     * user left it (raw `LazyListState` primitives, cf. [TopicScrollAnchor]). Emitted by the
+     * in-ViewModel page engine when a page switch resolves its landing to a saved anchor
+     * (revisit / #782 jump return). Unwired until the navigation switch-over (PR 2) : the
+     * route-replace paths never emit it. [page] : same stale-drop contract as [ScrollToEndOfPage].
+     */
+    data class ScrollToAnchor(val anchor: TopicScrollAnchor, val page: Int) : TopicEffect
+
+    /**
+     * #895 (étape 4) — land at the top of a freshly-switched page (no scrollTo, no saved anchor,
+     * not a `page - 1` reading step). The explicit default landing of the in-ViewModel page
+     * engine — without it a page switch inside one entry would keep the previous page's scroll
+     * offset (the entry, and its `LazyListState`, now survive the switch). [page] : same
+     * stale-drop contract as [ScrollToEndOfPage].
+     */
+    data class ScrollToTop(val page: Int) : TopicEffect
 
     /**
      * Issue #200 — emitted when the post-submit force refresh (`refreshTopicPage`) fails.
@@ -389,22 +421,6 @@ sealed interface TopicEffect {
      * current page stays on screen (cache-first); the screen surfaces a Toast inviting a retry.
      */
     data object RefreshFailed : TopicEffect
-
-    /**
-     * Issue #226 — emitted after a plain-reply submit when the reply overflowed the topic onto a
-     * newly-created page but HFR's success URL anchored the OLD page (the one the form was on). The
-     * ViewModel detects this in `forceRefreshCurrentPage`: the force-refreshed page reports a
-     * `totalPages` greater than `request.page` while `scrollTo` is null (plain reply — quote/edit
-     * carry a `#t{N}` scrollTo and are excluded). The navigation host re-routes to [page] (= the new
-     * `totalPages`) with `scrollTo = null`, a **fresh `submitSignal`** AND
-     * `postSubmitOverflowLanding = true` (cf. `TopicRequest`). The fresh `submitSignal` makes the new
-     * ViewModel force-fetch that last page — never a stale cache-aside row — and the landing flag
-     * makes it emit [ScrollToEndOfPage] (surfacing the freshly-published post) **without** re-emitting
-     * `NavigateToLastPage`: if a concurrent post bumped `totalPages` further during the refresh, the
-     * flag breaks the moving-tail chase. Defensive: works whether HFR anchored the old page (the bug)
-     * or the new one.
-     */
-    data class NavigateToLastPage(val page: Int) : TopicEffect
 
     /**
      * #292 — emitted after a post was successfully deleted. The screen surfaces a confirmation

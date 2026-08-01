@@ -32,7 +32,29 @@ class ReplyQuoteMaterializer @Inject constructor(
      */
     suspend fun fetchFormWithQuotes(context: ReplyContext, extraQuoteNumreponses: List<Int>): ReplyForm {
         val form = replyRepository.fetchReplyForm(context)
-        if (extraQuoteNumreponses.isEmpty() || !context.isQuote) return form
+        return when {
+            !context.isQuote -> form
+
+            // #583 — the SINGLE-quote path gets the same blank-prefill guard the multi-quote loop
+            // always had : HFR resolves the prefill by `numrep` alone (contract proven live
+            // 2026-07-12 — page/p are ignored), so a 200-OK form with a BLANK prefill means the
+            // quote was NOT materialised (unresolved numrep, session edge, markup change). Failing
+            // the fetch keeps the caller's retryable error path — posting the reply SILENTLY
+            // without its quote block was the reported symptom.
+            extraQuoteNumreponses.isEmpty() -> {
+                check(form.initialContent.isNotBlank()) { "quote prefill came back blank" }
+                form
+            }
+
+            else -> form.copy(initialContent = mergedPrefills(form, context, extraQuoteNumreponses))
+        }
+    }
+
+    private suspend fun mergedPrefills(
+        form: ReplyForm,
+        context: ReplyContext,
+        extraQuoteNumreponses: List<Int>,
+    ): String {
         val prefills = buildList {
             add(form.initialContent)
             extraQuoteNumreponses.forEach { numreponse ->
@@ -44,7 +66,7 @@ class ReplyQuoteMaterializer @Inject constructor(
                 )
             }
         }
-        val merged = prefills
+        return prefills
             .map { prefill ->
                 prefill.trimEnd().also { trimmed ->
                     // Codex review — a 200-OK form whose prefill came back BLANK would silently
@@ -55,6 +77,5 @@ class ReplyQuoteMaterializer @Inject constructor(
                 }
             }
             .joinToString(separator = "\n\n", postfix = "\n\n")
-        return form.copy(initialContent = merged)
     }
 }

@@ -57,6 +57,8 @@
     <string name="topic_search_prev_result">Résultat précédent</string>
     <string name="topic_search_next_result">Résultat suivant</string>
     <string name="topic_search_results_end">Aucun résultat suivant</string>
+    <!-- #895 — description a11y de la pilule quand la page affichée (cache) se rafraîchit. -->
+    <string name="topic_page_indicator_refreshing_a11y">Page %1$d sur %2$d, actualisation en cours</string>
     <string name="topic_error_title">Erreur de chargement</string>
     <string name="topic_error_body">Impossible d’ouvrir la page %1$d.\n\n%2$s</string>
     <string name="topic_post_index_prefix">#%1$d • </string>

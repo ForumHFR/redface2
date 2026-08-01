@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.parser
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
+import fr.forumhfr.redface2.core.model.SmileyKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -422,4 +423,132 @@ class BbcodeContentParserTest {
 
         [url]https://example.com[/url][/quotemsg]
     """.trimIndent()
+
+    // ----- #873 : smileys dans l'aperçu ---------------------------------------------------------
+
+    @Test
+    fun `builtin word smiley in prose becomes a sprite with text around`() {
+        val ast = parser.parse("merci :jap: bonne nuit")
+        val paragraph = ast.blocks.single() as PostBlock.Paragraph
+        assertEquals(
+            listOf(
+                PostInline.Text("merci "),
+                PostInline.Smiley(
+                    kind = SmileyKind.Builtin(":jap:"),
+                    imageUrl = "https://forum-images.hardware.fr/icones/smilies/jap.gif",
+                ),
+                PostInline.Text(" bonne nuit"),
+            ),
+            paragraph.inlines,
+        )
+    }
+
+    @Test
+    fun `a colon-wrapped run that is not a builtin token stays text`() {
+        val ast = parser.parse("rendez-vous vers 10:30:45 pile")
+        val paragraph = ast.blocks.single() as PostBlock.Paragraph
+        assertEquals(listOf(PostInline.Text("rendez-vous vers 10:30:45 pile")), paragraph.inlines)
+    }
+
+    @Test
+    fun `punctuation emoticons are deliberately left as text`() {
+        // Ambiguous in free prose (URLs, code) — cf. splitSmileyRuns KDoc. HFR would convert
+        // them server-side, but a missing sprite beats a wrong hit in a live preview.
+        val ast = parser.parse("bien vu :) enfin :D")
+        val paragraph = ast.blocks.single() as PostBlock.Paragraph
+        assertEquals(listOf(PostInline.Text("bien vu :) enfin :D")), paragraph.inlines)
+    }
+
+    @Test
+    fun `perso smiley keeps its token as a null-url sprite (renderer shows the text)`() {
+        val ast = parser.parse("gg [:pierre tramo:3] !")
+        val paragraph = ast.blocks.single() as PostBlock.Paragraph
+        assertEquals(
+            listOf(
+                PostInline.Text("gg "),
+                PostInline.Smiley(kind = SmileyKind.Perso("pierre tramo:3"), imageUrl = null),
+                PostInline.Text(" !"),
+            ),
+            paragraph.inlines,
+        )
+    }
+
+    @Test
+    fun `smileys are detected inside inline formatting`() {
+        val ast = parser.parse("[b]bravo :love:[/b]")
+        val paragraph = ast.blocks.single() as PostBlock.Paragraph
+        val strong = paragraph.inlines.single() as PostInline.Strong
+        assertTrue(strong.children.any { it is PostInline.Smiley })
+    }
+
+    @Test
+    fun `smileys are NOT converted inside raw-text blocks`() {
+        val ast = parser.parse("[code]if (a :jap: b) {}[/code]")
+        val block = ast.blocks.single() as PostBlock.CodeBlock
+        assertEquals("if (a :jap: b) {}", block.text)
+    }
+
+    @Test
+    fun `two adjacent builtin smileys both convert`() {
+        val ast = parser.parse(":lol: :non:")
+        val paragraph = ast.blocks.single() as PostBlock.Paragraph
+        assertEquals(2, paragraph.inlines.count { it is PostInline.Smiley })
+    }
+
+    @Test
+    fun `a rejected candidate does not mask a genuine token sharing its colon (segmentation)`() {
+        // Gate Sol r1 — non-overlapping scanning ate the shared colon : `:inconnu:` (rejected)
+        // consumed the `:` that opens `:jap:`. The scan must resume INSIDE a rejected candidate.
+        val ast = parser.parse(":inconnu:jap: ok")
+        val paragraph = ast.blocks.single() as PostBlock.Paragraph
+        assertEquals(
+            listOf(
+                PostInline.Text(":inconnu"),
+                PostInline.Smiley(
+                    kind = SmileyKind.Builtin(":jap:"),
+                    imageUrl = "https://forum-images.hardware.fr/icones/smilies/jap.gif",
+                ),
+                PostInline.Text(" ok"),
+            ),
+            paragraph.inlines,
+        )
+    }
+
+    @Test
+    fun `a smiley inside a link label keeps the link and converts the sprite`() {
+        val ast = parser.parse("[url=https://example.com]regarde :jap:[/url]")
+        val paragraph = ast.blocks.single() as PostBlock.Paragraph
+        val link = paragraph.inlines.single() as PostInline.Link
+        assertEquals("https://example.com", link.url)
+        assertEquals(
+            listOf(
+                PostInline.Text("regarde "),
+                PostInline.Smiley(
+                    kind = SmileyKind.Builtin(":jap:"),
+                    imageUrl = "https://forum-images.hardware.fr/icones/smilies/jap.gif",
+                ),
+            ),
+            link.children,
+        )
+    }
+
+    @Test
+    fun `invariant - the parser converts every builtin token except the 7 punctuation emoticons`() {
+        // Makes the deliberate exclusion EXPLICIT by exercising the REAL scan (gate Sol r2 — a
+        // copied regex would not fail if SMILEY_CANDIDATE_REGEX drifted) : every word-form builtin
+        // token must convert through parse(), the ambiguous punctuation emoticons — and only
+        // them — must stay text. A future BUILTIN_HFR_SMILEYS addition lands on the right side of
+        // the line or fails here.
+        val punctuationEmoticons = setOf(":)", ":(", ":D", ";)", ":o", ":p", ":'(")
+        fr.forumhfr.redface2.core.model.BUILTIN_HFR_SMILEYS.forEach { smiley ->
+            val ast = parser.parse("avant ${smiley.token} après")
+            val paragraph = ast.blocks.single() as PostBlock.Paragraph
+            val converted = paragraph.inlines.any { it is PostInline.Smiley }
+            if (smiley.token in punctuationEmoticons) {
+                assertTrue("token ${smiley.token} doit rester du texte", !converted)
+            } else {
+                assertTrue("token ${smiley.token} doit devenir un sprite", converted)
+            }
+        }
+    }
 }

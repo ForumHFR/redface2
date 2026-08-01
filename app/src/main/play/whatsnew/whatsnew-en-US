@@ -1,5 +1,7 @@
-Redface 2 v0.27.2 — dev.
+Redface 2 v0.29.0 — dev.
 
-- In-topic search: non-filtered author search works again.
-- Searches start from the current page (site parity); new "Search from the beginning" option.
-- Filtered results: "Show next results" button when HFR truncates the list (~200).
+- Ghost images now recover on pull-to-refresh.
+- Pinned topics finally show up in the flag lists.
+- The editor preview renders standard smileys.
+- A failed quote prefill blocks the send instead of silently posting without it.
+- Misc: denser smiley panel, editor label, search icon consistency.

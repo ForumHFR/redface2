@@ -69,4 +69,35 @@ class IntrinsicMediaSizeCacheTest {
         assertEquals(IntSize(9, 9), cache.get("a"))
         assertEquals(IntSize(2, 2), cache.get("b"))
     }
+
+    @Test
+    fun `clearFailures drops failures but preserves successes (813 refresh contract)`() {
+        val cache = DefaultIntrinsicMediaSizeCache()
+        cache.putSuccess("ok", IntSize(70, 50))
+        cache.putFailure("ghost", nowMillis = 0L)
+        cache.clearFailures()
+        assertEquals(IntSize(70, 50), cache.get("ok"))
+        assertFalse("a cleared failure must not stay fresh", cache.isFailureFresh("ghost", nowMillis = 0L))
+    }
+
+    @Test
+    fun `clearFailures frees the failed url's insertion slot (no ghost eviction)`() {
+        val cache = DefaultIntrinsicMediaSizeCache(maxEntries = 2)
+        cache.putSuccess("a", IntSize(1, 1))
+        cache.putFailure("ghost", nowMillis = 0L)
+        cache.clearFailures()
+        // Would evict "a" if "ghost" still occupied a slot in the insertion order.
+        cache.putSuccess("b", IntSize(2, 2))
+        assertEquals(IntSize(1, 1), cache.get("a"))
+        assertEquals(IntSize(2, 2), cache.get("b"))
+    }
+
+    @Test
+    fun `a failure recorded after clearFailures is fresh again (TTL restarts on the new failure)`() {
+        val cache = DefaultIntrinsicMediaSizeCache(failureTtlMillis = 1_000L)
+        cache.putFailure("ghost", nowMillis = 0L)
+        cache.clearFailures()
+        cache.putFailure("ghost", nowMillis = 5_000L)
+        assertTrue(cache.isFailureFresh("ghost", nowMillis = 5_500L))
+    }
 }

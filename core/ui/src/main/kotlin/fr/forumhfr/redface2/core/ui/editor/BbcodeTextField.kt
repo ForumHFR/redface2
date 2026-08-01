@@ -197,16 +197,27 @@ private fun BbcodeFieldImpl(
         bringCursorIntoView.bringIntoView(layout.getCursorRect(cursorOffset))
     }
 
+    // #872 — the floating label's headroom must follow the FONT scale, not a fixed dp : the
+    // minimized label renders at bodySmall (sp), so the historical 8.dp reservation (M3's own
+    // `OutlinedTextFieldTopPadding`) clips its top at fontScale > 1 — thibw's truncated
+    // « Contenu BBCode ». Half the label's line height equals exactly 8.dp at fontScale 1
+    // (16.sp / 2) and stretches with the user's setting beyond it.
+    val labelLineHeight = MaterialTheme.typography.bodySmall.lineHeight
+    val labelHeadroom = if (labelLineHeight.isSp) {
+        with(LocalDensity.current) { (labelLineHeight / 2).toDp() }.coerceAtLeast(8.dp)
+    } else {
+        8.dp
+    }
     BasicTextField(
         value = value,
         onValueChange = onValueChange,
         readOnly = readOnly,
         // The real M3 OutlinedTextField merges the label into the field's semantics node and
-        // reserves 8.dp above the box for the floating label's upper half (internal
-        // `OutlinedTextFieldTopPadding`) — without it the minimized label is clipped at the top.
+        // reserves headroom above the box for the floating label's upper half — without it the
+        // minimized label is clipped at the top (cf. labelHeadroom above).
         modifier = modifier
             .semantics(mergeDescendants = true) {}
-            .padding(top = 8.dp)
+            .padding(top = labelHeadroom)
             .focusRequester(focusRequester),
         // M3 OutlinedTextField defaults the content to LocalTextStyle coloured onSurface and
         // the caret to primary — replicated here since BasicTextField has no colour scheme.
