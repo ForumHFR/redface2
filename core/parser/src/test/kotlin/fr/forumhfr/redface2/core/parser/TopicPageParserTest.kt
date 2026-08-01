@@ -109,6 +109,43 @@ class TopicPageParserTest {
     }
 
     @Test
+    fun `parse poll FORM shape single-choice as read-only (#697)`() {
+        // The not-yet-voted shape (radios + « Voter ») — what EVERY anonymous fetch gets. It used
+        // to be silently dropped (no .sondageLeft bars → null).
+        val topic = parser.parse(fixture("topic_poll_form_meteo.html"))
+
+        requireNotNull(topic.poll).also { poll ->
+            assertEquals("Qui doit être TT cet été ?", poll.question)
+            assertEquals(
+                listOf("Thoulisse", "Wurst", "Tuxerman", "Autre"),
+                poll.options.map { it.text },
+            )
+            assertFalse("4 radio inputs = single choice", poll.multipleChoice)
+            assertFalse("form shape carries no results", poll.resultsAvailable)
+            assertFalse(poll.hasVoted)
+            assertEquals(0, poll.totalVotes)
+            assertTrue(poll.options.all { it.votes == 0 })
+        }
+    }
+
+    @Test
+    fun `parse poll FORM shape multi-choice via checkbox inputs (#697)`() {
+        val topic = parser.parse(fixture("topic_poll_form_multi_bourse.html"))
+
+        requireNotNull(topic.poll).also { poll ->
+            assertEquals(5, poll.options.size)
+            assertTrue("checkbox inputs = multiple choice", poll.multipleChoice)
+            assertFalse(poll.resultsAvailable)
+        }
+    }
+
+    @Test
+    fun `results shape still parses with resultsAvailable true (#697)`() {
+        val topic = parser.parse(fixture("topic_khakha_page_2.html"))
+        assertTrue(requireNotNull(topic.poll).resultsAvailable)
+    }
+
+    @Test
     fun `parse khakha late page with nested quotes`() {
         val topic = parser.parse(fixture("topic_khakha_page_146.html"))
 

@@ -19,6 +19,11 @@ data class TopicRequest(
      * instantly but **always** refreshes afterwards, bypassing the 60s snappy-cache TTL
      * that would otherwise serve a followed topic stale. Ordinary in-app navigation
      * leaves it `false` to keep back-nav snappy.
+     *
+     * ⚠️ #600 (vague 3) piggybacks on this flag as the « last read » discriminator
+     * (`shouldShowLastReadMarker`): the flag tap is its ONLY producer today, and the only
+     * navigation whose [scrollTo] means « last read post ». Adding another producer of
+     * `forceRefresh=true` requires giving the marker its own dedicated field first.
      */
     val forceRefresh: Boolean = false,
     /**
@@ -40,4 +45,13 @@ data class TopicRequest(
      * is the route allowed to redirect once.
      */
     val postSubmitOverflowLanding: Boolean = false,
+    /**
+     * #750 — `true` when [page] is NOT trusted to contain [scrollTo]: HFR email-notification links
+     * always serialise `page=1` while carrying the real target as `numreponse`. Before the first
+     * load the ViewModel resolves the actual page through HFR's server-side redirect (same probe
+     * as the search results, #277) and adopts it as the REAL target page — timeout / failure falls
+     * back to [page], never worse than before. `false` on every in-app navigation (quote taps and
+     * search results already carry a trusted page).
+     */
+    val resolveScrollToPage: Boolean = false,
 )

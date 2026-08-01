@@ -1,9 +1,4 @@
-Redface 2 v0.18.0 — beta.
+Redface 2 v0.20.2 — dev.
 
-Flags view redesign:
-- New top bar (flag + short name + "+read", retractable search, round avatar).
-- Translucent bar: the list scrolls underneath.
-- "redface" pull-to-refresh loader.
-- Configurable "+read" cue, avatar and glyph; search on the DT tab.
-- Long-press: quick actions, go to page, post a message.
-- Improved accessibility and per-tab scroll preservation.
+- Gestures: a swipe starting on the system back-gesture band no longer competes with tab or page changes.
+- Topic: tap the truncated top-bar title to reveal it in full (2 lines), tap again to fold it back.

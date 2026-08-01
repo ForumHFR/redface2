@@ -7,16 +7,22 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.systemGestures
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -29,12 +35,13 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SmallFloatingActionButton
@@ -66,12 +73,15 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -152,6 +162,13 @@ fun TopicScreen(
      */
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
+    /**
+     * #699 — jump to the post a quote header cites: `(page, numreponse)` parsed from the citation
+     * href. `:app` wires it to the same in-place `TopicRoute` replace as [onOpenPage], but with
+     * `scrollTo = numreponse` so the landing scrolls to and highlights the cited post (the #200
+     * deep-link mechanism) — one uniform path whether the target is on this page or another.
+     */
+    onGoToPost: (page: Int, numreponse: Int) -> Unit,
     /**
      * #285 — leave the topic and go back to the screen that opened it (topic list / flags).
      * Wired to a back-stack pop in `:app`. Surfaced as an explicit back arrow in the top app
@@ -438,6 +455,7 @@ fun TopicScreen(
         onEdit = onEdit,
         onEditFirstPost = onEditFirstPost,
         onOpenPage = onOpenPage,
+        onGoToPost = onGoToPost,
         onOpenProfile = onOpenProfile,
         onDeleteRequest = { numreponse -> deleteCandidate = numreponse },
         multiQuoteSelection = multiQuoteSelection,
@@ -665,6 +683,8 @@ internal fun TopicContent(
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
+    // #699 — quote-header tap, threaded down to the post cards (cf. TopicScreen KDoc).
+    onGoToPost: (page: Int, numreponse: Int) -> Unit = { _, _ -> },
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
     // #292 — a per-post « Supprimer » tap; the screen owns the confirmation dialog, so this only
     // requests it (carrying the post's numreponse). Never invoked for the first post (excluded).
@@ -680,8 +700,9 @@ internal fun TopicContent(
     onPollExpansionChanged: (Boolean) -> Unit = {},
 ) {
     // #285 — the topic title and #284 — the page counter live in a persistent top app bar so they
-    // stay visible while the user scrolls (the in-card title/caption scrolls away). When the page
-    // is still loading / errored, fall back to a generic title and the requested page.
+    // stay visible while the user scrolls (the in-card title/caption scrolls away). While loading,
+    // the title falls back to the cached hint (or a generic label) and the counter to « Chargement… »
+    // — never a page total that has not been parsed yet (#622).
     val loaded = state.mode as? TopicUiState.Mode.Loaded
     // #411 — bottom action cluster hides on scroll-down, re-appears on scroll-up (RF1 parity).
     val bottomActionsVisible = rememberBottomActionsVisible(listState)
@@ -694,10 +715,7 @@ internal fun TopicContent(
     } else {
         state.request.titleHint?.takeIf { it.isNotBlank() } ?: fallbackTitle
     }
-    val barCurrentPage = loaded?.topic?.page ?: state.request.page
-    val barTotalPages = loaded?.topic?.totalPages
-        ?: state.availablePages.lastOrNull()
-        ?: state.request.page
+    val barPageIndicator = topicBarPageIndicator(state, loaded)
     val backLabel = stringResource(R.string.topic_back)
     // Build 89 follow-up — when the user opted into auto-hide, give the top bar an `enterAlways`
     // scroll behaviour (collapses on scroll-down, snaps back on the first scroll-up). Otherwise
@@ -718,51 +736,25 @@ internal fun TopicContent(
             TopicTopBar(
                 state = state,
                 barTitle = barTitle,
-                barCurrentPage = barCurrentPage,
-                barTotalPages = barTotalPages,
+                barPageIndicator = barPageIndicator,
                 backLabel = backLabel,
                 scrollBehavior = scrollBehavior,
                 onBack = onBack,
                 onIntent = onIntent,
+                loaded = loaded,
+                onOpenPage = onOpenPage,
             )
         },
         floatingActionButton = {
-            // #283 + bonus — quick access to "poster" and page-change without scrolling back to the
-            // header. Only in Loaded mode (needs subcat/page/canReply). The Scaffold applies the
-            // navigation-bar insets to this slot, so no manual padding here. Coexists with the #300
-            // scrollbar (right edge, auto-hiding) — a slight bottom-right overlap is acceptable.
-            val current = loaded
-            if (current != null) {
-                // #411 — tuck the cluster away while reading down, reveal it on the first upward
-                // scroll. AnimatedVisibility in the Scaffold's FAB slot simply collapses to nothing
-                // when hidden; the slide/fade mirrors the collapsible top bar (#286/#338).
-                AnimatedVisibility(
-                    visible = bottomActionsVisible,
-                    enter = fadeIn() + slideInVertically { it },
-                    exit = fadeOut() + slideOutVertically { it },
-                ) {
-                    TopicBottomActions(
-                        showReply = shouldEnableReply(current.topic, state.isAuthenticated),
-                        showPageFabs = state.showPageFabs,
-                        canGoPrevious = state.canGoPrevious,
-                        canGoNext = state.canGoNext,
-                        // #291 — the « Citer N » FAB shares the reply gate: quoting IS replying.
-                        multiQuoteCount = effectiveMultiQuoteCount(
-                            current.topic,
-                            state.isAuthenticated,
-                            multiQuoteSelection,
-                        ),
-                        // Clamp to [1, totalPages]: `canGoPrevious/Next` are derived from `request.page`
-                        // while the target is computed from the parsed `topic.page`; if those ever desync
-                        // (HFR clamps an out-of-range page to the last one), the clamp keeps navigation in
-                        // bounds — same robustness as the header guard and the swipe (#282).
-                        onPreviousPage = { onOpenPage((current.topic.page - 1).coerceAtLeast(1)) },
-                        onNextPage = { onOpenPage((current.topic.page + 1).coerceAtMost(current.topic.totalPages)) },
-                        onReply = { onReply(current.topic.subcat, current.topic.page) },
-                        onMultiQuote = { onMultiQuote(current.topic.subcat, current.topic.page) },
-                    )
-                }
-            }
+            TopicBottomActionsHost(
+                state = state,
+                loaded = loaded,
+                bottomActionsVisible = bottomActionsVisible,
+                multiQuoteSelection = multiQuoteSelection,
+                onOpenPage = onOpenPage,
+                onReply = onReply,
+                onMultiQuote = onMultiQuote,
+            )
         },
     ) { innerPadding ->
         Surface(
@@ -773,18 +765,9 @@ internal fun TopicContent(
         ) {
             when (val mode = state.mode) {
                 TopicUiState.Mode.Loading -> {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(24.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                    ) {
-                        CircularProgressIndicator()
-                        Text(
-                            text = stringResource(R.string.topic_loading),
-                            style = MaterialTheme.typography.bodyLarge,
-                        )
-                    }
+                    // #604 — skeleton loading (mockup « Chargement A ») : loader centré + cartes
+                    // fantômes, à la place de l'ancien spinner nu aligné en haut à gauche.
+                    TopicLoadingSkeleton()
                 }
 
                 is TopicUiState.Mode.Error -> {
@@ -830,11 +813,11 @@ internal fun TopicContent(
                             state = state,
                             topic = mode.topic,
                             hiddenNumreponses = mode.hiddenNumreponses,
-                            onReply = onReply,
                             onQuote = onQuote,
                             onEdit = onEdit,
                             onEditFirstPost = onEditFirstPost,
                             onOpenPage = onOpenPage,
+                            onGoToPost = onGoToPost,
                             onOpenProfile = onOpenProfile,
                             onDeleteRequest = onDeleteRequest,
                             onDoubleTapRefresh = { onIntent(TopicIntent.Refresh) },
@@ -855,25 +838,74 @@ internal fun TopicContent(
 }
 
 /**
+ * #622 — subtitle of the persistent top bar. « page X / N » only once the response is PARSED: the
+ * previous fallback chain used `availablePages.lastOrNull()` during Loading, which can be stale from
+ * an earlier navigation (a wrong total displayed while the spinner runs, corrected on arrival).
+ * `availablePages` itself stays untouched — the Error path deliberately keeps the last-known page
+ * grid as context (see the ViewModel), so Error shows the requested page over that last-known total
+ * while Loading shows a plain « Chargement… ».
+ */
+@Composable
+private fun topicBarPageIndicator(state: TopicUiState, loaded: TopicUiState.Mode.Loaded?): String = when {
+    loaded != null -> stringResource(
+        R.string.topic_page_indicator,
+        loaded.topic.page,
+        loaded.topic.totalPages,
+    )
+
+    state.mode is TopicUiState.Mode.Error -> stringResource(
+        R.string.topic_page_indicator,
+        state.request.page,
+        state.availablePages.lastOrNull() ?: state.request.page,
+    )
+
+    else -> stringResource(R.string.topic_loading)
+}
+
+// #772 — extra room for the title's second line (titleMedium line height) while the title is
+// expanded; the small M3 top app bar keeps a fixed container height and would clip it otherwise.
+private val TopBarExpandedTitleExtraHeight = 24.dp
+
+/**
  * #285/#284 + Chantier C (#546) — the topic top app bar (title + page counter + back) plus the
  * intra-topic search affordance : a search icon in `actions` (only when the loaded page exposes a
  * usable, authenticated transsearch form) that opens the [TopicSearchBar] directly beneath the bar.
  * Extracted from `TopicContent` to keep that builder under detekt's cyclomatic-complexity cap.
+ * Internal (not private) so the Robolectric UI test can drive the #772 title expansion directly,
+ * same pattern as [TopicPostCard].
  */
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
-@Suppress("LongParameterList") // hoisted bar : title/page/back inputs + the search intent sink.
-private fun TopicTopBar(
+@Suppress("LongParameterList") // hoisted bar : title/page/back inputs + search sink + page picker.
+internal fun TopicTopBar(
     state: TopicUiState,
     barTitle: String,
-    barCurrentPage: Int,
-    barTotalPages: Int,
+    barPageIndicator: String,
     backLabel: String,
     scrollBehavior: androidx.compose.material3.TopAppBarScrollBehavior?,
     onBack: () -> Unit,
     onIntent: (TopicIntent) -> Unit,
+    // Vague 3 (#604) — the loaded page (null while loading / on error). Non-null makes the page
+    // indicator a tappable pill opening the page-picker sheet — the header card's page navigation
+    // (jump field + range row) now lives HERE, the reading surface's single page-change home
+    // besides the ‹/› FABs and the horizontal swipe (#282).
+    loaded: TopicUiState.Mode.Loaded? = null,
+    onOpenPage: (Int) -> Unit = {},
 ) {
     val searchLabel = stringResource(R.string.topic_search_open)
+    var pagePickerOpen by remember { mutableStateOf(false) }
+    val pagePickerLabel = stringResource(R.string.topic_page_picker_open)
+    // #772 — tap on the title reveals it in full (2 lines max), tap again folds it back. Transient
+    // by design (arbitrage XaTriX) : a page change (route replace → fresh composition, the very
+    // loss the hoisted poll expansion #465 works around) or leaving the screen resets it. The
+    // post/page key is a safety net should a refactor ever reuse the composition across pages.
+    var titleExpanded by remember(state.request.post, state.request.page) { mutableStateOf(false) }
+    val titleToggleLabel = stringResource(
+        if (titleExpanded) R.string.topic_title_collapse else R.string.topic_title_expand,
+    )
+    val titleStateLabel = stringResource(
+        if (titleExpanded) R.string.topic_title_expanded else R.string.topic_title_collapsed,
+    )
     Column {
         TopAppBar(
             title = {
@@ -881,13 +913,34 @@ private fun TopicTopBar(
                     Text(
                         text = barTitle,
                         style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
+                        maxLines = if (titleExpanded) 2 else 1,
                         overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .clickable(onClickLabel = titleToggleLabel) {
+                                val expanding = !titleExpanded
+                                titleExpanded = expanding
+                                if (expanding) {
+                                    // enterAlways may hold the bar partially collapsed — re-deploy
+                                    // it so the freshly granted second line shows instead of
+                                    // staying clipped behind the current height offset.
+                                    scrollBehavior?.state?.heightOffset = 0f
+                                }
+                            }
+                            .semantics { stateDescription = titleStateLabel },
                     )
                     Text(
-                        text = stringResource(R.string.topic_page_indicator, barCurrentPage, barTotalPages),
+                        text = barPageIndicator,
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (loaded != null) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        modifier = if (loaded != null) {
+                            Modifier.clickable(onClickLabel = pagePickerLabel) { pagePickerOpen = true }
+                        } else {
+                            Modifier
+                        },
                     )
                 }
             },
@@ -915,10 +968,48 @@ private fun TopicTopBar(
                     }
                 }
             },
+            // #772 — the small M3 top app bar has a FIXED container height that never grows for a
+            // 2-line title : grant the extra line height while expanded, else keep the M3 default.
+            expandedHeight = if (titleExpanded) {
+                TopAppBarDefaults.TopAppBarExpandedHeight + TopBarExpandedTitleExtraHeight
+            } else {
+                TopAppBarDefaults.TopAppBarExpandedHeight
+            },
             scrollBehavior = scrollBehavior,
         )
         if (state.search.isActive) {
             TopicSearchBar(search = state.search, onIntent = onIntent)
+        }
+    }
+    // Vague 3 (#604) — page-picker sheet: the dissolved header card's TopicPageNavigation
+    // (prev/next + jump field + compact range row), verbatim, in a bottom sheet anchored to the
+    // top-bar pill. The Error path keeps its own inline TopicPageNavigation — recovery navigation
+    // must not hide behind a sheet (cadrage Codex vague 3).
+    if (pagePickerOpen && loaded != null) {
+        ModalBottomSheet(onDismissRequest = { pagePickerOpen = false }) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .navigationBarsPadding(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.topic_page_picker_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                TopicPageNavigation(
+                    currentPage = loaded.topic.page,
+                    availablePages = state.availablePages,
+                    canGoPrevious = state.canGoPrevious,
+                    canGoNext = state.canGoNext,
+                    onOpenPage = { target ->
+                        pagePickerOpen = false
+                        onOpenPage(target)
+                    },
+                )
+            }
         }
     }
 }
@@ -1065,11 +1156,14 @@ private fun TopicLoadedContent(
     // #509 — `numreponse` of posts whose author is blacklisted; rendered as a collapsed
     // "post masqué" placeholder instead of the full card (the post stays in the list).
     hiddenNumreponses: Set<Int> = emptySet(),
-    onReply: (subcat: Int, page: Int) -> Unit,
+    // Vague 3 (#604) — onReply dropped: the dissolved header card was its only consumer here
+    // (the bottom FAB cluster replies from TopicContent's own callback).
     onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int?) -> Unit,
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
+    // #699 — quote-header tap, forwarded into each TopicPostCard's PostRenderer.
+    onGoToPost: (page: Int, numreponse: Int) -> Unit = { _, _ -> },
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
     onDeleteRequest: (numreponse: Int) -> Unit = {},
     /** #382 — double-tap anywhere on the list refreshes the current page (RF1 parity). */
@@ -1128,6 +1222,12 @@ private fun TopicLoadedContent(
     // the gesture (whose pointerInput does not re-key on this) always sees the current state.
     val entryLifecycle = LocalLifecycleOwner.current.lifecycle
     val swipeEnabled: () -> Boolean = { entryLifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) }
+    // #752 — system-gesture band widths for the swipe's start dead-zone, resolved here (composable)
+    // and handed as ALWAYS-FRESH lambdas (rememberUpdatedState) so the currentPage-keyed
+    // pointerInput sees rotation/split-screen changes ; px conversion happens per gesture.
+    val gestureDensity = rememberUpdatedState(LocalDensity.current)
+    val gestureLayoutDirection = rememberUpdatedState(LocalLayoutDirection.current)
+    val systemGestureInsets = rememberUpdatedState(WindowInsets.systemGestures)
     // #282 (P2-b) — if the loaded page re-keys while we stay Loaded (a force-refresh or page jump that
     // lands the same screen on a new page), drop any residual translation so the page is never left
     // frozen off-centre. Keyed on `topic.page` ONLY — never `topic.totalPages`: a page-count change
@@ -1182,6 +1282,14 @@ private fun TopicLoadedContent(
                     haptics = haptics,
                     onOpenPage = onOpenPage,
                     enabled = swipeEnabled,
+                    leftGestureInsetPx = {
+                        systemGestureInsets.value
+                            .getLeft(gestureDensity.value, gestureLayoutDirection.value)
+                    },
+                    rightGestureInsetPx = {
+                        systemGestureInsets.value
+                            .getRight(gestureDensity.value, gestureLayoutDirection.value)
+                    },
                 ),
             )
             // #382 — double-tap anywhere on the list to refresh the page (RF1 parity). Child
@@ -1200,36 +1308,23 @@ private fun TopicLoadedContent(
             },
     ) {
         item {
-            // Phase 2D #148 — the « Modifier le premier message » action is
-            // exposed only when (a) we are on page 1 (FP lives there by
-            // definition), (b) HFR rendered the FP edit link in the toolbar
-            // (`Topic.isFirstPostOwner`, parsed from the first post on the
-            // page) and (c) the topic is postable WITH a real sub-category.
-            // #213 — unlike Reply/Quote/Edit-post (gated on `canReply` alone,
-            // subcat=0 OK for a category without sub-category), FP edit also
-            // requires `subcat > 0`: the FP recategorise flow
-            // (TopicFormViewModel/TopicFormState) is NOT relaxed for subcat=0
-            // (its sub-category dropdown contract for a 0-subcat category is not
-            // captured yet), so offering it on an IA-style topic would open an
-            // editor that fails with MissingSubcat. Kept strict to avoid a
-            // button-shows-but-submit-fails regression (FP-in-0-subcat = #213 follow-up).
-            // `numreponse` of the FP comes from the first post, not `topic.post`.
-            // #220 — the gate (incl. the auth clause) is the testable `shouldShowEditFirstPost`.
-            val editFirstPostAction: (() -> Unit)? =
-                if (shouldShowEditFirstPost(topic, state.isAuthenticated)) {
-                    { onEditFirstPost(topic.subcat, topic.page, topic.posts.first().numreponse) }
-                } else {
-                    null
-                }
-            TopicHeaderCard(
-                topic = topic,
-                state = state,
-                onReply = onReply,
-                onEditFirstPost = editFirstPostAction,
-                onOpenPage = onOpenPage,
-                pollManualExpanded = pollManualExpanded,
-                onPollExpansionChanged = onPollExpansionChanged,
-            )
+            // Vague 3 (#604, mockup « Lecture A ») — the header card is DISSOLVED: title and page
+            // indicator live in the top app bar (tappable page pill → picker sheet), « Répondre »
+            // in the bottom FAB cluster (#283), « Modifier le premier message » in the first
+            // post's « … » menu (Phase 2D #148 gates unchanged), and the scrollTo indicator is
+            // gone (the amber highlight on arrival is the affordance). This LEAD slot must keep
+            // occupying index 0 unconditionally: every index-based scroll computation
+            // (ScrollToPost's `index + 1`, end-of-page `posts.size`, saved anchors #307, the
+            // re-anchor steps #412) assumes exactly one item before the posts — a poll-less topic
+            // renders it zero-size instead of dropping it.
+            topic.poll?.let { poll ->
+                TopicPollCard(
+                    poll = poll,
+                    expandedDefault = state.pollsExpandedDefault,
+                    manualExpanded = pollManualExpanded,
+                    onExpansionChanged = onPollExpansionChanged,
+                )
+            }
         }
         items(
             items = topic.posts,
@@ -1273,30 +1368,45 @@ private fun TopicLoadedContent(
             // #509 — a blacklisted author's post is replaced by a collapsed placeholder (the post is
             // kept in the list to preserve index/anchor/numreponse invariants), until the reader taps
             // « Afficher ». The placeholder exposes no quote/edit/menu action by design (decision #1).
-            if (post.numreponse in hiddenNumreponses && post.numreponse !in revealedHiddenPosts) {
-                HiddenPostCard(
-                    author = post.author,
-                    onReveal = { revealedHiddenPosts = revealedHiddenPosts + post.numreponse },
-                )
-            } else {
-                TopicPostCard(
-                    post = post,
-                    highlighted = highlight == post.numreponse,
-                    citedCount = citationCounts[post.numreponse] ?: 0,
-                    // #330 — render the author signature beneath the body when the reading preference
-                    // is on (the signature is always parsed/cached on the Post; this is render-only).
-                    showSignature = state.showSignatures,
-                    onQuote = quoteAction,
-                    onEdit = editAction,
-                    onOpenProfile = profileAction,
-                    onOpenMenu = { menuPost = post },
-                    // #436 — same membership source as the menu entry (PostMenuSheet).
-                    multiQuoteSelected = post.numreponse in multiQuoteSelection,
-                    // #436 — per-post add/remove affordance (RF1 quote+/quote- parity), reachable
-                    // without opening the « … » menu. Null/non-null under the SAME gate as « Citer »
-                    // (derived together above), so the « + » and « Citer » always appear as a pair.
-                    onToggleMultiQuote = multiQuoteToggle,
-                )
+            // Vague 3 (#600) — traversing « Dernier message lu » separator BELOW the last-read post
+            // (mockup « Lecture A »). Rendered INSIDE this post's item (a Column, not an extra list
+            // item) so every index-based scroll computation stays untouched (lead item + posts.size
+            // invariants). Gated on forceRefresh: #231 sets it ONLY on a drapeau/flag tap — the one
+            // navigation whose scrollTo semantically IS « last read ». A quote jump / deep link
+            // (forceRefresh=false) keeps the #104 band tint alone; the amber arrival flash (#200)
+            // is a third, independent layer.
+            val showLastReadMarker = shouldShowLastReadMarker(state.request, post.numreponse)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (post.numreponse in hiddenNumreponses && post.numreponse !in revealedHiddenPosts) {
+                    HiddenPostCard(
+                        author = post.author,
+                        onReveal = { revealedHiddenPosts = revealedHiddenPosts + post.numreponse },
+                    )
+                } else {
+                    TopicPostCard(
+                        post = post,
+                        highlighted = highlight == post.numreponse,
+                        citedCount = citationCounts[post.numreponse] ?: 0,
+                        // #699 — makes sourced quote headers tappable (jump to the cited post).
+                        onGoToCitedPost = onGoToPost,
+                        // #330 — render the author signature beneath the body when the reading preference
+                        // is on (the signature is always parsed/cached on the Post; this is render-only).
+                        showSignature = state.showSignatures,
+                        onQuote = quoteAction,
+                        onEdit = editAction,
+                        onOpenProfile = profileAction,
+                        onOpenMenu = { menuPost = post },
+                        // #436 — same membership source as the menu entry (PostMenuSheet).
+                        multiQuoteSelected = post.numreponse in multiQuoteSelection,
+                        // #436 — per-post add/remove affordance (RF1 quote+/quote- parity), reachable
+                        // without opening the « … » menu. Null/non-null under the SAME gate as « Citer »
+                        // (derived together above), so the « + » and « Citer » always appear as a pair.
+                        onToggleMultiQuote = multiQuoteToggle,
+                    )
+                }
+                if (showLastReadMarker) {
+                    LastReadMarker()
+                }
             }
         }
         // #379 — explicit end-of-topic marker after the last post of the LAST page. The
@@ -1309,14 +1419,20 @@ private fun TopicLoadedContent(
         // correct for a stateless sentinel.
         if (topic.page == topic.totalPages) {
             item {
-                EndOfTopicFooter()
+                EndOfTopicCard()
             }
         } else if (topic.page < topic.totalPages) {
-            // #110 (nicko) — symmetric marker on an intermediate page: « Suite à la page suivante »,
-            // purely informative (navigation lives in the page controls / swipe #282). Same no-key
-            // sentinel rationale as EndOfTopicFooter above.
+            // Vague 3 (#604) — the #110 hairline marker becomes an actionable boundary card
+            // (beta feedback by thibw & styx42 : the divider read too weak, and an intermediate
+            // page's end was indistinguishable from the topic's). Tapping opens the next page
+            // through the SAME onOpenPage as the › FAB / swipe (#282) — a strict « page + 1 »
+            // step never arms the #412 bottom landing, so the reader lands at the top of the
+            // next page, which is the natural continuation. Same no-key sentinel rationale.
             item {
-                MorePagesFooter()
+                PageBoundaryCard(
+                    donePage = topic.page,
+                    onNextPage = { onOpenPage(topic.page + 1) },
+                )
             }
         }
     }
@@ -1338,6 +1454,18 @@ private fun TopicLoadedContent(
         } else {
             null
         }
+        // Vague 3 (#604) — « Modifier le premier message » migrated here from the dissolved
+        // header card (Phase 2D #148, gates unchanged incl. the strict `subcat > 0` of #213 —
+        // cf. shouldShowEditFirstPost): the action acts on the topic through its FIRST post,
+        // so its natural home is that post's contextual menu.
+        val menuEditFirstPostAction: (() -> Unit)? = if (
+            isFirstPostOfTopic(topic, post) &&
+            shouldShowEditFirstPost(topic, state.isAuthenticated)
+        ) {
+            { onEditFirstPost(topic.subcat, topic.page, topic.posts.first().numreponse) }
+        } else {
+            null
+        }
         PostMenuSheet(
             post = post,
             permalink = buildPostPermalink(
@@ -1349,6 +1477,7 @@ private fun TopicLoadedContent(
             citedCount = citationCounts[post.numreponse] ?: 0,
             onDismiss = { menuPost = null },
             onDelete = menuDeleteAction,
+            onEditFirstPost = menuEditFirstPostAction,
             // #395 — same profileId gate as the post card (#208): Publicité rows and
             // anonymous reads expose no profile link, the hero stays inert.
             onOpenProfile = post.profileId?.let { profileId ->
@@ -1376,142 +1505,115 @@ private fun TopicLoadedContent(
 }
 
 /**
- * #379 — sober end-of-topic marker: a centred label between two hairlines, rendered as the
- * LAST LazyColumn item of the topic's last page only. Pure presentation — the condition
- * (`topic.page == topic.totalPages`) lives at the call site.
+ * #600 → vague 3 (#604) — traversing « Dernier message lu » separator (mockup « Lecture A ») :
+ * a full-width primary rule with a centred primary pill. Rendered below the last-read post,
+ * INSIDE that post's list item (cf. call site — the index math must not see an extra item).
+ * Beta feedback by Colonel MythO : the #104 band tint alone (one notch of tint on the identity
+ * band) was too subtle to spot when catching up from a flag.
  */
 @Composable
-private fun EndOfTopicFooter() {
+private fun LastReadMarker() {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 8.dp),
+        modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        val ruleColor = MaterialTheme.colorScheme.primary.copy(alpha = LAST_READ_RULE_ALPHA)
         HorizontalDivider(
             modifier = Modifier.weight(1f),
-            color = MaterialTheme.colorScheme.outlineVariant,
+            thickness = 2.dp,
+            color = ruleColor,
         )
         Text(
-            text = stringResource(R.string.topic_end_of_topic),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            text = stringResource(R.string.topic_last_read_marker),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onPrimary,
+            modifier = Modifier
+                .background(
+                    color = MaterialTheme.colorScheme.primary,
+                    shape = MaterialTheme.shapes.extraLarge,
+                )
+                .padding(horizontal = 10.dp, vertical = 3.dp),
         )
         HorizontalDivider(
             modifier = Modifier.weight(1f),
-            color = MaterialTheme.colorScheme.outlineVariant,
+            thickness = 2.dp,
+            color = ruleColor,
         )
+    }
+}
+
+// #600 — the mockup's rule opacity : strong enough to traverse, calmer than the full-strength pill.
+private const val LAST_READ_RULE_ALPHA = 0.55f
+
+/**
+ * #379 → vague 3 (#604) — calm end-of-topic endcard: an outlined card with a centred title and
+ * the #379 caption, rendered as the LAST LazyColumn item of the topic's last page only. Visually
+ * OPPOSITE to [PageBoundaryCard] (outline vs filled primaryContainer) so an intermediate page's
+ * end and the topic's end can never be confused again (beta feedback by thibw & styx42). Pure
+ * presentation — the condition (`topic.page == topic.totalPages`) lives at the call site.
+ */
+@Composable
+private fun EndOfTopicCard() {
+    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = stringResource(R.string.topic_end_of_topic_title),
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Text(
+                text = stringResource(R.string.topic_end_of_topic),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
 /**
- * #110 (nicko) — symmetric « more pages below » marker, mirroring [EndOfTopicFooter] but rendered as the
- * LAST LazyColumn item of an INTERMEDIATE page (`topic.page < topic.totalPages`, condition at the call
- * site). Informative only — no tap action (navigation is the page controls / swipe #282). Same style.
+ * #110 → vague 3 (#604) — actionable page-boundary card on an INTERMEDIATE page
+ * (`topic.page < topic.totalPages`, condition at the call site): « Page N terminée » plus a
+ * « continue » affordance, the whole card tappable (mockup « Lecture A », arbitré fil DEV).
+ * [onNextPage] delegates to the caller's onOpenPage — the same in-place route replace as the
+ * › FAB and the horizontal swipe (#282), so scroll restoration semantics stay uniform.
  */
 @Composable
-private fun MorePagesFooter() {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+private fun PageBoundaryCard(donePage: Int, onNextPage: () -> Unit) {
+    val nextPageLabel = stringResource(R.string.topic_page_boundary_next, donePage + 1)
+    // Card(onClick) over an inner Row.clickable (gate Codex) : the whole surface is declared as
+    // ONE interactive Material component, and the action's wording is already the card's visible
+    // subtitle — TalkBack reads it as content, no custom onClickLabel needed.
+    Card(
+        onClick = onNextPage,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        ),
+        modifier = Modifier.fillMaxWidth(),
     ) {
-        HorizontalDivider(
-            modifier = Modifier.weight(1f),
-            color = MaterialTheme.colorScheme.outlineVariant,
-        )
-        Text(
-            text = stringResource(R.string.topic_more_pages),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        HorizontalDivider(
-            modifier = Modifier.weight(1f),
-            color = MaterialTheme.colorScheme.outlineVariant,
-        )
-    }
-}
-
-@Composable
-@Suppress("LongParameterList") // state-hoisted Composable : each param has a distinct call-site.
-private fun TopicHeaderCard(
-    topic: Topic,
-    state: TopicUiState,
-    onReply: (subcat: Int, page: Int) -> Unit,
-    onEditFirstPost: (() -> Unit)?,
-    onOpenPage: (Int) -> Unit,
-    // #465 — manual poll choice (null = follow the global default) + its toggle callback, both
-    // owned by :app so the expand/collapse choice survives the per-page TopicRoute swap.
-    pollManualExpanded: Boolean? = null,
-    onPollExpansionChanged: (Boolean) -> Unit = {},
-) {
-    Card {
-        Column(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(
-                text = topic.title,
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = stringResource(
-                    R.string.topic_caption,
-                    topic.post,
-                    topic.page,
-                    topic.totalPages,
-                ),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            state.request.scrollTo?.let { target ->
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = stringResource(R.string.topic_scroll_to, target),
+                    text = stringResource(R.string.topic_page_boundary_done, donePage),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    text = nextPageLabel,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
                 )
             }
-            TopicPageNavigation(
-                currentPage = topic.page,
-                availablePages = state.availablePages,
-                canGoPrevious = state.canGoPrevious,
-                canGoNext = state.canGoNext,
-                onOpenPage = onOpenPage,
-            )
-            topic.poll?.let { poll ->
-                TopicPollCard(
-                    poll = poll,
-                    expandedDefault = state.pollsExpandedDefault,
-                    manualExpanded = pollManualExpanded,
-                    onExpansionChanged = onPollExpansionChanged,
-                )
-            }
-            Button(
-                onClick = { onReply(topic.subcat, topic.page) },
-                // #213 — enabled only when HFR rendered the `bddpost` reply form
-                // (authenticated, non-locked topic → `canReply`). #220 — also gated on the
-                // live auth state so a stale cached `canReply = true` row (the topic cache is
-                // not purged on logout) never offers Reply to a logged-out user. `subcat = 0`
-                // (cat without sub-category, e.g. IA) is a valid postable value and is forwarded.
-                enabled = shouldEnableReply(topic, state.isAuthenticated),
-            ) {
-                Text(text = stringResource(R.string.topic_reply))
-            }
-            // Phase 2D #148 — « Modifier le premier message » lives in the header
-            // card because it acts on the topic, not on a single post. We render
-            // it as an OutlinedButton to stay visually subordinate to the primary
-            // « Répondre » action above.
-            if (onEditFirstPost != null) {
-                OutlinedButton(onClick = onEditFirstPost) {
-                    Text(text = stringResource(R.string.topic_edit_first_post))
-                }
-            }
+            RedfaceVectorIcon(resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_chevron_right)
         }
     }
 }
@@ -1664,26 +1766,35 @@ private fun TopicPollCard(
             if (revealed) {
                 poll.options.forEach { option ->
                     Text(
-                        text = stringResource(
-                            R.string.topic_poll_option,
-                            option.text,
-                            option.percentage,
-                            option.votes,
-                        ),
+                        // #697 — the FORM shape carries no numbers : render the bare label instead
+                        // of a misleading « 0.0% (0 votes) ».
+                        text = if (poll.resultsAvailable) {
+                            stringResource(
+                                R.string.topic_poll_option,
+                                option.text,
+                                option.percentage,
+                                option.votes,
+                            )
+                        } else {
+                            option.text
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                val choiceLabel = if (poll.multipleChoice) {
+                    stringResource(R.string.topic_poll_multiple_choices)
+                } else {
+                    stringResource(R.string.topic_poll_single_choice)
+                }
                 Text(
-                    text = stringResource(
-                        R.string.topic_poll_summary,
-                        poll.totalVotes,
-                        if (poll.multipleChoice) {
-                            stringResource(R.string.topic_poll_multiple_choices)
-                        } else {
-                            stringResource(R.string.topic_poll_single_choice)
-                        },
-                    ),
+                    // #697 — no total on the FORM shape either ; a factual hint replaces it (the
+                    // in-app vote is #779, so no promise about WHERE to vote).
+                    text = if (poll.resultsAvailable) {
+                        stringResource(R.string.topic_poll_summary, poll.totalVotes, choiceLabel)
+                    } else {
+                        stringResource(R.string.topic_poll_no_results, choiceLabel)
+                    },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1801,6 +1912,11 @@ internal fun TopicPostCard(
      * here, the border, and the pill — one source of truth, they can never desynchronise.
      */
     onToggleMultiQuote: (() -> Unit)? = null,
+    /**
+     * #699 — forwarded to [PostRenderer] so a sourced quote's header can jump to the cited post.
+     * Null keeps the headers inert (previews/tests that render a card without navigation).
+     */
+    onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
 ) {
     // #287 — structural spacing from the active density preset (Comfort = the historical rhythm).
     val m = LocalDisplayMetrics.current
@@ -1873,7 +1989,7 @@ internal fun TopicPostCard(
                 verticalArrangement = Arrangement.spacedBy(m.postSpacing),
             ) {
                 // #281 — topic posts are selectable/copyable (opt-in; default is OFF in PostRenderer).
-                PostRenderer(content = post.content, selectable = true)
+                PostRenderer(content = post.content, selectable = true, onGoToCitedPost = onGoToCitedPost)
                 // #330 — the author signature (web parity), gated by the reading preference. Rendered
                 // with the shared PostRenderer (the signature is BBCode/HTML like the body) but in a
                 // subdued style: a divider separates it from the body and a reduced alpha makes it
@@ -2349,11 +2465,73 @@ private fun ImmersiveNavBarScrollReporter(
 }
 
 /**
+ * #283/#599 — Scaffold-slot host of the bottom cluster. Extracted from [TopicContent] for the
+ * detekt cyclomatic-complexity budget. The Scaffold applies the navigation-bar insets to its FAB
+ * slot, so no manual padding here; coexists with the #300 scrollbar (slight bottom-right overlap
+ * accepted).
+ *
+ * #599 (vague 3) — composed in EVERY mode, not just Loaded: the slots reserve their geometry from
+ * the skeleton on (all invisible while loading), so an affordance that materialises after the
+ * parse (« Répondre » needs canReply+auth) lands in its final position instead of shifting the
+ * ‹/› page FABs sideways (misclics, dev feedback antiseptiqueIncolore). The null guards on the
+ * callbacks are unreachable while a slot is invisible — belt-and-braces.
+ */
+@Composable
+@Suppress("LongParameterList") // hoisted Scaffold-slot host, mirrors the other hosts in this file.
+private fun TopicBottomActionsHost(
+    state: TopicUiState,
+    loaded: TopicUiState.Mode.Loaded?,
+    bottomActionsVisible: Boolean,
+    multiQuoteSelection: List<Int>,
+    onOpenPage: (Int) -> Unit,
+    onReply: (subcat: Int, page: Int) -> Unit,
+    onMultiQuote: (subcat: Int, page: Int) -> Unit,
+) {
+    // #411 — tuck the cluster away while reading down, reveal it on the first upward scroll.
+    // AnimatedVisibility in the Scaffold's FAB slot simply collapses to nothing when hidden;
+    // the slide/fade mirrors the collapsible top bar (#286/#338).
+    AnimatedVisibility(
+        visible = bottomActionsVisible,
+        enter = fadeIn() + slideInVertically { it },
+        exit = fadeOut() + slideOutVertically { it },
+    ) {
+        TopicBottomActions(
+            showReply = loaded != null && shouldEnableReply(loaded.topic, state.isAuthenticated),
+            showPageFabs = state.showPageFabs,
+            canGoPrevious = loaded != null && state.canGoPrevious,
+            canGoNext = loaded != null && state.canGoNext,
+            // #291 — the « Citer N » FAB shares the reply gate: quoting IS replying.
+            multiQuoteCount = loaded?.let {
+                effectiveMultiQuoteCount(it.topic, state.isAuthenticated, multiQuoteSelection)
+            } ?: 0,
+            // Clamp to [1, totalPages]: `canGoPrevious/Next` are derived from `request.page` while
+            // the target is computed from the parsed `topic.page`; if those ever desync (HFR clamps
+            // an out-of-range page to the last one), the clamp keeps navigation in bounds — same
+            // robustness as the header guard and the swipe (#282).
+            onPreviousPage = { loaded?.let { onOpenPage((it.topic.page - 1).coerceAtLeast(1)) } },
+            onNextPage = { loaded?.let { onOpenPage((it.topic.page + 1).coerceAtMost(it.topic.totalPages)) } },
+            onReply = { loaded?.let { onReply(it.topic.subcat, it.topic.page) } },
+            onMultiQuote = { loaded?.let { onMultiQuote(it.topic.subcat, it.topic.page) } },
+        )
+    }
+}
+
+/**
  * #283 + bonus — the floating bottom-action cluster: previous/next page mini-FABs and a « Répondre »
  * extended FAB, so posting and page-change are reachable without scrolling back up to the header. Pure
  * presentation: each affordance is gated on the same flags the header already uses, and reuses the
- * existing `onReply`/`onOpenPage` callbacks. Renders nothing when nothing is available (anon + single
- * page), so the Scaffold reserves no FAB space.
+ * existing `onReply`/`onOpenPage` callbacks.
+ *
+ * #599 (vague 3 Lecture) — FIXED-slot geometry: every affordance owns a reserved [FabSlot] of the
+ * small-FAB footprint, empty-but-measured while unavailable, so nothing ever shifts sideways when an
+ * affordance (dis)appears — page 1 hides ‹ without moving ›, and « Répondre » materialising after
+ * the parse no longer displaces the page FABs under the user's finger (misclics,
+ * dev feedback antiseptiqueIncolore). Two deliberate exceptions:
+ *  - the #383 « FABs de page » preference OFF drops the ‹/› SLOTS entirely (the user opted out of
+ *    page navigation here; there is nothing to keep stable);
+ *  - the « ❝N » multi-quote slot is reserved like the others (its arming is a user action, but its
+ *    appearance must not shift « Répondre »).
+ * An empty slot renders nothing and carries no semantics — invisible to TalkBack.
  */
 @Composable
 @Suppress("LongParameterList") // hoisted action cluster, mirrors other hoisted composables in this file
@@ -2370,42 +2548,59 @@ private fun TopicBottomActions(
 ) {
     val previousLabel = stringResource(R.string.topic_fab_previous_page)
     val nextLabel = stringResource(R.string.topic_fab_next_page)
-    // #383 — the preference only governs the ‹/› page FABs; « Répondre » keeps its own gate.
-    val showPrevious = showPageFabs && canGoPrevious
-    val showNext = showPageFabs && canGoNext
-    // #291 — appears as soon as the basket holds one post of this topic (call-site zeroes the
-    // count when quoting is unavailable). NOT governed by the #383 page-FABs preference: it is
-    // a write affordance the user explicitly armed, not page navigation.
-    val showMultiQuote = multiQuoteCount > 0
-    val showAnyAction = showReply || showPrevious || showNext || showMultiQuote
-    if (showAnyAction) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (showPrevious) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // #291/#599 — the « ❝N » multi-quote slot sits at the FAR LEFT of the cluster: arming the
+        // basket materialises it without shifting ‹ › ✎ (nothing is to its left), and while empty
+        // its reserved footprint reads as leading whitespace instead of a hole inside the cluster.
+        // NOT governed by the #383 page-FABs preference: it is a write affordance the user
+        // explicitly armed, not page navigation (call-site zeroes the count when quoting is
+        // unavailable).
+        FabSlot(visible = multiQuoteCount > 0) {
+            MultiQuoteFab(count = multiQuoteCount, onClick = onMultiQuote)
+        }
+        // #383 — the preference only governs the ‹/› page FABs; « Répondre » keeps its own gate.
+        if (showPageFabs) {
+            FabSlot(visible = canGoPrevious) {
                 PageFab(
                     description = previousLabel,
                     iconRes = fr.forumhfr.redface2.core.ui.R.drawable.ic_chevron_left,
                     onClick = onPreviousPage,
                 )
             }
-            if (showNext) {
+            FabSlot(visible = canGoNext) {
                 PageFab(
                     description = nextLabel,
                     iconRes = fr.forumhfr.redface2.core.ui.R.drawable.ic_chevron_right,
                     onClick = onNextPage,
                 )
             }
-            if (showMultiQuote) {
-                MultiQuoteFab(count = multiQuoteCount, onClick = onMultiQuote)
-            }
-            if (showReply) {
-                ReplyFab(onClick = onReply)
-            }
+        }
+        FabSlot(visible = showReply) {
+            ReplyFab(onClick = onReply)
         }
     }
 }
+
+/**
+ * #599 — one reserved position of the bottom cluster: the small-FAB footprint is ALWAYS measured
+ * (min-sized empty Box) so sibling slots never shift when this affordance (dis)appears. The « ❝N »
+ * slot may grow past the minimum for a two-digit count — the rare 9→10 growth is accepted.
+ */
+@Composable
+private fun FabSlot(visible: Boolean, content: @Composable () -> Unit) {
+    Box(
+        modifier = Modifier.sizeIn(minWidth = FAB_SLOT_SIZE, minHeight = FAB_SLOT_SIZE),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (visible) content()
+    }
+}
+
+/** #599 — M3 small-FAB container footprint, the reserved geometry of every [FabSlot]. */
+private val FAB_SLOT_SIZE = 40.dp
 
 @Composable
 private fun MultiQuoteFab(count: Int, onClick: () -> Unit) {
@@ -2476,6 +2671,15 @@ internal fun shouldShowEditAction(topic: Topic, post: Post, isAuthenticated: Boo
 // #292 — « Supprimer » shares the « Modifier » gate: HFR exposes deletion through the same edit
 // form, so any post the user can edit, they can delete. The first-post exclusion (deleting it would
 // remove the whole topic) is applied at the call site by position, not here.
+// #600 (vague 3) — « Dernier message lu » separator gate. `forceRefresh` is #231's flag-tap
+// marker: the ONE navigation whose scrollTo is semantically « last read » (the flag handler only
+// sets scrollTo when resuming at the last-read page). Every route-replace (pagination #282,
+// citation jump #699, overflow landing #226) rebuilds the route WITHOUT forceRefresh, so the
+// marker never survives a navigation away from the landing. If forceRefresh ever grows another
+// producer, this gate needs its own dedicated route field — cf. TopicActionGatesTest.
+internal fun shouldShowLastReadMarker(request: TopicRequest, numreponse: Int): Boolean =
+    request.forceRefresh && request.scrollTo == numreponse
+
 internal fun shouldShowDeleteAction(topic: Topic, post: Post, isAuthenticated: Boolean): Boolean =
     post.isEditable && topic.canReply && isAuthenticated
 

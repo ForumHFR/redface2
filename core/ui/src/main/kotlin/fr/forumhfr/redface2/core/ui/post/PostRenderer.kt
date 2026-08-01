@@ -78,6 +78,7 @@ import coil3.request.ImageRequest
 import coil3.request.crossfade
 import coil3.size.Precision
 import coil3.size.Scale
+import fr.forumhfr.redface2.core.ui.motion.rememberAnimationsEnabled
 import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.core.ui.theme.LocalFoldLongQuotes
 import fr.forumhfr.redface2.core.ui.theme.LocalIgnoreInlineColors
@@ -207,6 +208,10 @@ fun PostRenderer(
     // surfaces outside scope (the editor BBCode preview and private-message thread keep their prior
     // non-selectable behaviour). Topic posts pass `selectable = true`.
     selectable: Boolean = false,
+    // #699 — invoked with the cited post's `(page, numreponse)` when the reader taps a sourced
+    // quote's header. Null (default) keeps the header inert — only the topic reading surface wires
+    // it (the editor preview, MP threads and signatures have nowhere meaningful to navigate).
+    onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
 ) {
     if (selectable) {
         // #281 — allow selecting / copying a post's text. The SelectionContainer is wrapped at this
@@ -215,10 +220,15 @@ fun PostRenderer(
         // inside a SelectionContainer; inline media carry a U+FFFC placeholder that can pollute a
         // copied selection spanning them (known, acceptable limitation).
         SelectionContainer(modifier = modifier) {
-            PostBlocksRenderer(blocks = content.blocks, quoteDepth = 0)
+            PostBlocksRenderer(blocks = content.blocks, quoteDepth = 0, onGoToCitedPost = onGoToCitedPost)
         }
     } else {
-        PostBlocksRenderer(blocks = content.blocks, modifier = modifier, quoteDepth = 0)
+        PostBlocksRenderer(
+            blocks = content.blocks,
+            modifier = modifier,
+            quoteDepth = 0,
+            onGoToCitedPost = onGoToCitedPost,
+        )
     }
 }
 
@@ -227,6 +237,7 @@ private fun PostBlocksRenderer(
     blocks: List<PostBlock>,
     modifier: Modifier = Modifier,
     quoteDepth: Int,
+    onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
 ) {
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -235,8 +246,8 @@ private fun PostBlocksRenderer(
         blocks.forEach { block ->
             when (block) {
                 is PostBlock.Paragraph -> ParagraphBlock(block.inlines)
-                is PostBlock.Quote -> QuoteBlock(block, quoteDepth)
-                is PostBlock.Spoiler -> SpoilerBlock(block, quoteDepth)
+                is PostBlock.Quote -> QuoteBlock(block, quoteDepth, onGoToCitedPost)
+                is PostBlock.Spoiler -> SpoilerBlock(block, quoteDepth, onGoToCitedPost)
                 is PostBlock.Image -> ImageBlock(block)
                 is PostBlock.Fixed -> FixedBlock(block)
                 is PostBlock.CodeBlock -> CodeBlockBlock(block)
@@ -377,23 +388,28 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
 }
 
 @Composable
-private fun QuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
+private fun QuoteBlock(
+    block: PostBlock.Quote,
+    quoteDepth: Int,
+    onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
+) {
     if (isCollapsedQuoteDepth(quoteDepth)) {
-        CollapsedQuoteBlock(block, quoteDepth)
+        CollapsedQuoteBlock(block, quoteDepth, onGoToCitedPost)
         return
     }
     // #332 — the long-quote fold is gated on the user preference (default ON = historical fold).
     // When OFF we skip FoldableQuoteBlock entirely and fall through to the normal expanded render,
     // exactly as if the quote were not "long". The depth fold above is unaffected.
     if (LocalFoldLongQuotes.current && isLongQuote(block, quoteDepth)) {
-        FoldableQuoteBlock(block, quoteDepth)
+        FoldableQuoteBlock(block, quoteDepth, onGoToCitedPost)
         return
     }
     QuoteFrame(quoteDepth = quoteDepth, isBareQuote = isBareQuote(block)) {
-        QuoteHeader(block)
+        QuoteHeader(block, onGoToCitedPost)
         PostBlocksRenderer(
             blocks = block.content.blocks,
             quoteDepth = quoteDepth + 1,
+            onGoToCitedPost = onGoToCitedPost,
         )
     }
 }
@@ -403,16 +419,39 @@ private fun QuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
  * reads as a quotation, not a stray indented paragraph. A bare quote (no author) falls back to the
  * generic "Citation" label. Extracted so the expanded, depth-collapsed and long-fold variants share
  * one source of truth for the header text.
+ *
+ * #699 — when the quote carries its source coordinates (`page` + `numreponse`, parsed from the
+ * citation href) AND the surface wired [onGoToCitedPost], the header becomes the « go to the cited
+ * post » affordance: primary tint + tap. Quotes whose href HFR served in the dynamic `forum2.php`
+ * form (coordinates unparsed, cf. PostContentParser) keep the inert neutral header — no invented
+ * fallback target.
  */
 @Composable
-private fun QuoteHeader(block: PostBlock.Quote) {
-    Text(
-        text = block.author
-            ?.let { stringResource(R.string.post_quote_author, it) }
-            ?: stringResource(R.string.post_quote_bare),
-        style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
+private fun QuoteHeader(
+    block: PostBlock.Quote,
+    onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
+) {
+    val page = block.page
+    val numreponse = block.numreponse
+    val text = block.author
+        ?.let { stringResource(R.string.post_quote_author, it) }
+        ?: stringResource(R.string.post_quote_bare)
+    if (onGoToCitedPost != null && page != null && numreponse != null) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.clickable(
+                onClickLabel = stringResource(R.string.post_quote_go_to),
+            ) { onGoToCitedPost(page, numreponse) },
+        )
+    } else {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
 
 /**
@@ -424,7 +463,11 @@ private fun QuoteHeader(block: PostBlock.Quote) {
  * real [quoteDepth] when expanded so a long quote that also nests deeply still hits the depth rule.
  */
 @Composable
-private fun FoldableQuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
+private fun FoldableQuoteBlock(
+    block: PostBlock.Quote,
+    quoteDepth: Int,
+    onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
+) {
     var expanded by rememberSaveable(block) { mutableStateOf(false) }
     QuoteFrame(
         quoteDepth = quoteDepth,
@@ -435,7 +478,9 @@ private fun FoldableQuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            QuoteHeader(block)
+            // #699 — the header keeps its own go-to-cited-post tap INSIDE the frame's fold toggle:
+            // its clickable consumes the tap, the rest of the frame still folds/unfolds.
+            QuoteHeader(block, onGoToCitedPost)
             Text(
                 text = if (expanded) {
                     stringResource(R.string.post_quote_hide)
@@ -450,6 +495,7 @@ private fun FoldableQuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
             PostBlocksRenderer(
                 blocks = block.content.blocks,
                 quoteDepth = quoteDepth + 1,
+                onGoToCitedPost = onGoToCitedPost,
             )
         }
     }
@@ -526,7 +572,11 @@ private fun QuoteFrame(
 private val QUOTE_ACCENT_WIDTH: Dp = 4.dp
 
 @Composable
-private fun CollapsedQuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
+private fun CollapsedQuoteBlock(
+    block: PostBlock.Quote,
+    quoteDepth: Int,
+    onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
+) {
     // Issue #3 mandates the masked tail beyond N=3 nested quotes stays *collapsible* — the user
     // must be able to ask for the deeper sub-tree on demand. We reset quoteDepth to 0 once
     // revealed so the user gets another N levels before the next collapse, instead of an
@@ -562,17 +612,22 @@ private fun CollapsedQuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
         }
         if (revealed) {
             // #252 — same "Citation"/"Citation de X" header rule as the expanded QuoteBlock.
-            QuoteHeader(block)
+            QuoteHeader(block, onGoToCitedPost)
             PostBlocksRenderer(
                 blocks = block.content.blocks,
                 quoteDepth = 0,
+                onGoToCitedPost = onGoToCitedPost,
             )
         }
     }
 }
 
 @Composable
-private fun SpoilerBlock(block: PostBlock.Spoiler, quoteDepth: Int) {
+private fun SpoilerBlock(
+    block: PostBlock.Spoiler,
+    quoteDepth: Int,
+    onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
+) {
     var revealed by rememberSaveable(block) { mutableStateOf(false) }
     Card(
         colors = CardDefaults.cardColors(
@@ -610,6 +665,7 @@ private fun SpoilerBlock(block: PostBlock.Spoiler, quoteDepth: Int) {
                 PostBlocksRenderer(
                     blocks = block.content.blocks,
                     quoteDepth = quoteDepth,
+                    onGoToCitedPost = onGoToCitedPost,
                 )
             }
         }

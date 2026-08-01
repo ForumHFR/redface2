@@ -25,6 +25,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
@@ -95,6 +97,10 @@ fun BbcodeTextField(
     // Multi-image upload — true makes the field non-editable while a batch is in flight so the user
     // cannot move the caret between two programmatic [img] insertions. Default false = editable.
     readOnly: Boolean = false,
+    // #555 — true requests focus (and thus the IME) once on first composition. Opening an editor
+    // pre-filled with a LONG post never focused the field by itself: the #447 caret-follow effect
+    // is gated on `isFocused`, and nothing set the focus — keyboard closed, follow inert.
+    autoFocus: Boolean = false,
 ) {
     if (fillViewport) {
         BoxWithConstraints(modifier = modifier) {
@@ -115,6 +121,7 @@ fun BbcodeTextField(
                     label = label,
                     placeholder = placeholder,
                     readOnly = readOnly,
+                    autoFocus = autoFocus,
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = viewportMinHeight),
@@ -128,6 +135,7 @@ fun BbcodeTextField(
             label = label,
             placeholder = placeholder,
             readOnly = readOnly,
+            autoFocus = autoFocus,
             modifier = modifier.fillMaxWidth(),
         )
     }
@@ -146,11 +154,21 @@ private fun BbcodeFieldImpl(
     placeholder: String?,
     modifier: Modifier,
     readOnly: Boolean = false,
+    autoFocus: Boolean = false,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
     val bringCursorIntoView = remember { BringIntoViewRequester() }
+    val focusRequester = remember { FocusRequester() }
     var textLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
+
+    // #555 — programmatic focus on entry (one-shot). Without it an editor hydrated with existing
+    // content never opens the IME: the caret sits at the end of the text but the field waits for a
+    // tap, and the #447 caret-follow below stays inert (`isFocused` gate). Firing after the first
+    // composition also lets the follow effect scroll straight to that end-of-text caret.
+    LaunchedEffect(Unit) {
+        if (autoFocus) focusRequester.requestFocus()
+    }
 
     // #447 — follow the caret through the EXTERNAL scrollable while typing. Keyed on the
     // layout result (a new one lands after every text change) AND the selection (caret moves
@@ -172,7 +190,8 @@ private fun BbcodeFieldImpl(
         // `OutlinedTextFieldTopPadding`) — without it the minimized label is clipped at the top.
         modifier = modifier
             .semantics(mergeDescendants = true) {}
-            .padding(top = 8.dp),
+            .padding(top = 8.dp)
+            .focusRequester(focusRequester),
         // M3 OutlinedTextField defaults the content to LocalTextStyle coloured onSurface and
         // the caret to primary — replicated here since BasicTextField has no colour scheme.
         textStyle = LocalTextStyle.current.merge(

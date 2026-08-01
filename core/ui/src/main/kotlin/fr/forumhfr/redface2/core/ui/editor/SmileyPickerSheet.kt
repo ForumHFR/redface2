@@ -22,6 +22,7 @@ import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -29,6 +30,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
@@ -118,13 +121,22 @@ private fun WikiTabContent(
     onQueryChange: (String) -> Unit,
     onSmileyClicked: (String) -> Unit,
 ) {
+    // #250 — reveal search on tab switch: focus + IME as soon as the Wiki tab composes, instead of
+    // waiting for an extra tap on the field. `LaunchedEffect(Unit)` fires on each ENTRY into the
+    // tab (the `when (tabIndex)` swaps this content in) and never again while the user stays on it.
+    val searchFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        searchFocus.requestFocus()
+    }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedTextField(
             value = state.query,
             onValueChange = onQueryChange,
             singleLine = true,
             label = { Text(stringResource(R.string.editor_smiley_search_label)) },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .focusRequester(searchFocus),
         )
         when (val wiki = state.wiki) {
             WikiSearchState.Idle -> Text(

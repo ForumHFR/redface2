@@ -16,6 +16,63 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.20.2` — `internal` (dev) — 2026-07-03
+
+**Retours bêta gestes + top bar Topic** (PRs #781, #786 — gates Codex gpt-5.5, dogfoods émulateur).
+
+### Gestes (Drapeaux & Vue Topic)
+- #752 : **zone morte au départ des swipes sur les bandes de gestes système** — un swipe horizontal qui démarre dans la bande latérale (navigation gestuelle) est laissé au geste back système au lieu d'entrer en compétition avec le changement d'onglet (Drapeaux) ou de page (Topic, #282) ; fini la frontière imprévisible au ras du bord. Navigation 3 boutons : comportement strictement inchangé (insets nuls). Bornes clampées contre les insets aberrants (split-screen/foldable).
+
+### Vue Topic
+- #772 (tinc) : **titre dépliable au tap** — le titre tronqué de la top bar se déplie sur 2 lignes au tap (la barre grandit d'une ligne), re-tap ou changement de page le replie ; la pilule « page X / Y » garde sa propre cible (sélecteur de page). Annonces TalkBack dédiées (afficher/réduire + état).
+
+## `0.20.1` — `internal` (dev) — 2026-07-03
+
+**Quick wins vue Drapeaux — retours bêta 0.18.0** (PRs #776, #777 — cadrage + gate Codex gpt-5.5).
+
+### Drapeaux
+- #751 (thibw) : le raccourci **« +lus »** (tap sur la zone type de la pilule) fonctionne désormais sur **tous les onglets** — Lu et Favoris rejoignent Cyan et DT (même chemin persisté, même anti-double-tap ; l'indicateur œil/anneau et le suffixe du picker suivent l'état sur chaque onglet).
+- #753 (Dintr-un lemn) : le texte de l'état vide « aucune catégorie avec un message non lu » pointe la bonne action — la bascule « +lus » pour revoir les sujets lus (l'ancien texte prescrivait « Masquer les catégories sans non-lu », qui ne réaffiche que les catégories vides).
+
+## `0.20.0` — `internal` (dev) — 2026-07-03
+
+**Phase « Vue Topic » (#604) — vague 3 : redesign de la lecture** (PRs #770, #771, #773, #774 — cadrage + gates Codex gpt-5.5, dogfoods émulateur par lot).
+
+### Vue Topic
+- #599 : **slots FAB figés** — ‹ › ✎ ❝N occupent des emplacements réservés (40 dp) dès le squelette ; plus aucun décalage quand une action apparaît/disparaît (retour antiseptiqueIncolore). Le slot multi-citation vit à l'extrême gauche du cluster.
+- **Header dissous** (mockup « Lecture A ») : la carte d'en-tête du sujet disparaît — le titre et « page X / Y » vivent dans la top bar ; la **pilule « page X / Y » devient cliquable** et ouvre un sélecteur de page en feuille (préc./suiv., saisie, grille) ; « Modifier le premier message » migre dans le menu « … » du premier post (gates #148/#213 inchangées) ; le sondage devient une carte autonome en tête de liste (invariants d'index préservés). L'indicateur scrollTo disparaît (la surbrillance d'arrivée suffit).
+- **Frontières de page lisibles** (retours thibw & styx42) : en fin de page intermédiaire, carte primaire « Page N terminée » + « Continuer vers la page N+1 » (tap = même navigation que le FAB ›, arrivée en haut) ; en fin de sujet, carte outline calme « Fin du sujet » — les deux états ne se confondent plus.
+- #600 : **repère « Dernier message lu » traversant** (retour Colonel MythO) — règle primaire + pilule centrée sous le dernier message lu, à l'ouverture depuis un drapeau uniquement (gate sémantique testée) ; couche distincte de la surbrillance d'arrivée (#200) et de la teinte d'ancre (#104).
+
+## `0.19.2` — `internal` (dev) — 2026-07-03
+
+**Phase « Vue Topic » (#604) — fin de la vague 2 : #459 complet** (PR #768, gate Codex gpt-5.5).
+
+### Éditeurs
+- #459 (2/2) : **upload d'images dans les deux composeurs MP** (réponse et nouvelle conversation) — bouton Uploader, sélection multiple (max 10), un `[img]` par image dans l'ordre, compteur n/N, erreurs typées ; le vocabulaire d'upload (erreurs, progression) est promu dans `:core:ui`, partagé par toutes les surfaces d'édition.
+
+## `0.19.1` — `internal` (dev) — 2026-07-02
+
+**Phase « Vue Topic » (#604) — vague 2 : quick wins navigation & éditeurs** (PRs #763, #764, #765, #766 — cadrage + gates Codex gpt-5.5).
+
+### Vue Topic
+- #699 : l'en-tête d'une citation sourcée (« Citation de X ») devient cliquable (teinté couleur primaire) — tap = saut vers le message cité, avec scroll et surbrillance à l'arrivée, même s'il est sur une autre page. Chaînable de citation en citation.
+- #750 : un lien de notification **email** ouvre enfin le sujet au bon message — HFR met toujours `page=1` dans ces liens ; la vraie page est résolue via le redirect serveur (mécanisme #277 de la recherche) pendant que le squelette s'affiche. Échec réseau = comportement d'avant, jamais pire.
+- #762 : le titre du sujet s'affiche désormais réellement dès la première frame quand on ouvre depuis la liste Drapeaux ou un listing de forum (le cache de titres n'était alimenté qu'après un premier chargement — l'annonce 0.19.0 est maintenant vraie).
+
+### Éditeurs
+- #555 : ouvrir un éditeur (répondre, citer, **éditer un long message**) lève le clavier immédiatement, champ déjà focus — plus besoin de taper dans le champ pour commencer.
+- #250 : l'onglet Wiki du sélecteur de smileys donne le focus à la recherche dès l'ouverture — on tape directement.
+- #459 (1/2) : **upload d'images dans le composeur « nouveau sujet »** — bouton Uploader, sélection multiple (max 10), un `[img]` par image dans l'ordre, compteur n/N, erreurs typées ; même moteur que l'éditeur de réponse. (Reste : le composeur MP.)
+
+## `0.19.0` — `internal` (dev) — 2026-07-02
+
+**Phase « Vue Topic » (#604) — vague 1 : écran de chargement** (mockup « Chargement A » arbitré sur le fil DEV, cadrage + gate Codex gpt-5.5).
+
+### Vue Topic
+- Chargement d'une page : loader centré + « Chargement de la page demandée » + cartes squelettes animées (fini le spinner nu en haut à gauche). Nouvelle primitive partagée `SkeletonBox` dans `:core:ui` (le shimmer d'images #249 y délègue) ; l'animation respecte le réglage système « réduire les animations ».
+- #622 : le compteur de la barre du haut affiche « Chargement… » tant que la page n'est pas parsée — plus jamais un total périmé d'une navigation précédente (« 3 / 10 » corrigé en « 3 / 20 » à l'arrivée). Le contexte du chemin d'erreur (grille des pages connues) est conservé.
+
 ## `0.18.0` — `open` (beta) — 2026-06-29
 
 **Promotion bêta — clôture de la phase « refonte de la vue Drapeaux » (#603)** (cumul des dev 0.17.0 → 0.17.30 + audit de clôture multi-agent Claude Opus + Codex gpt-5.5).

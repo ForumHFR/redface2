@@ -2,6 +2,8 @@ package fr.forumhfr.redface2.feature.messages
 
 import androidx.compose.ui.text.input.TextFieldValue
 import fr.forumhfr.redface2.core.model.PostContent
+import fr.forumhfr.redface2.core.ui.editor.UploadError
+import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 
 /**
  * MVI state of the new-conversation composer (#301 follow-up). Mirrors
@@ -41,6 +43,15 @@ data class PrivateMessageComposeUiState(
     val restorableDraft: String? = null,
     val restorableSubject: String? = null,
     val restorableRecipients: String? = null,
+    /**
+     * #459 — `true` while an image upload (single or batch) is in flight: toolbar spinner + body
+     * field locked (`readOnly`) so the caret cannot move between two programmatic `[img]` insertions.
+     */
+    val isUploading: Boolean = false,
+    /** #459 — typed upload failure surfaced as a dismissible banner (shared `:core:ui` taxonomy). */
+    val uploadError: UploadError? = null,
+    /** #459 — « n/N » batch counter (null for a single image). */
+    val uploadProgress: UploadProgress? = null,
 ) {
     /** All three user-typed fields are required — HFR's « remplir tous les champs » rule. */
     val canSubmit: Boolean

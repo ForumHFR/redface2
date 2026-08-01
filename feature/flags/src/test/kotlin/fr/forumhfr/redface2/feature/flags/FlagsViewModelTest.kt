@@ -188,7 +188,10 @@ class FlagsViewModelTest {
         vm.consumeRecallListToTop()
         assertFalse(vm.recallListToTop.value)
 
-        vm.selectTab(FlagTab.Red) // re-tap the same tab: no-op, no recall (keeps scroll position)
+        // #751 — the re-tap flips Red's filter now, but it is a FILTER action, not a tab
+        // transition: it must still never raise the recall (FilterFlipScrollResetEffect owns
+        // the scroll on a flip).
+        vm.selectTab(FlagTab.Red)
         assertFalse("re-tapping the already-selected tab must not recall", vm.recallListToTop.value)
     }
 
@@ -305,6 +308,75 @@ class FlagsViewModelTest {
         vm.selectTab(FlagTab.Cyan)
         assertEquals(FlagTab.Cyan, vm.selectedTab.value)
         assertEquals(true, vm.flagsViewSettings.value.unreadOnly)
+    }
+
+    @Test
+    fun `re-tapping the already selected Favorite tab toggles its unread-only filter`() = runTest {
+        // #751 (thibw) — the « +lus » shortcut used to no-op outside Cyan/DT.
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = viewModel(auth, flags, forum)
+
+        vm.selectTab(FlagTab.Favorite)
+        // FAVORITE defaults to unreadOnly = false (show all); the first re-tap flips it on.
+        assertEquals(false, vm.flagsViewSettings.value.unreadOnly)
+        vm.selectTab(FlagTab.Favorite)
+        assertEquals(true, vm.flagsViewSettings.value.unreadOnly)
+        vm.selectTab(FlagTab.Favorite)
+        assertEquals(false, vm.flagsViewSettings.value.unreadOnly)
+        assertEquals(FlagTab.Favorite, vm.selectedTab.value)
+        assertTrue("re-tap must not refetch", flags.refreshCalls.isEmpty())
+    }
+
+    @Test
+    fun `flipping Favorite does not clobber Cyan's pending flip`() = runTest {
+        // #751 — the optimistic shim is a per-type map: a Favorite write gated in flight must not
+        // erase a concurrent Cyan pending value (the old CYAN-only shim guaranteed this by never
+        // touching other types; the map must keep that isolation).
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository()
+        prefs.blockUnreadOnlySetUntil = kotlinx.coroutines.CompletableDeferred()
+        val vm = viewModel(auth, flags, forum, prefs)
+
+        vm.selectTab(FlagTab.Cyan) // re-tap: CYAN true → pending false, write gated
+        assertEquals(false, vm.cyanUnreadOnly.value)
+
+        vm.selectTab(FlagTab.Favorite) // real transition
+        vm.selectTab(FlagTab.Favorite) // re-tap: FAVORITE false → pending true, write gated
+        assertEquals(true, vm.favoriteUnreadOnly.value)
+        assertEquals("Cyan's optimistic flip must survive the Favorite write", false, vm.cyanUnreadOnly.value)
+
+        prefs.blockUnreadOnlySetUntil!!.complete(Unit)
+        assertEquals(false, vm.cyanUnreadOnly.value)
+        assertEquals(true, vm.favoriteUnreadOnly.value)
+    }
+
+    @Test
+    fun `rapid double re-tap on Favorite flips twice via the optimistic value`() = runTest {
+        // #751 gate (Codex) — same-type equivalent of the Cyan shim test below: two rapid re-taps
+        // on Favorite before either write persists must net back to the start (false → true →
+        // false), proving the second tap read the optimistic map value, not the lagging store.
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository()
+        val vm = viewModel(auth, flags, forum, prefs)
+
+        vm.selectTab(FlagTab.Favorite) // real transition
+        prefs.blockUnreadOnlySetUntil = kotlinx.coroutines.CompletableDeferred()
+
+        vm.selectTab(FlagTab.Favorite) // re-tap: false → write(true) gated, pending = true
+        vm.selectTab(FlagTab.Favorite) // re-tap: reads optimistic true → write(false) gated
+        prefs.blockUnreadOnlySetUntil!!.complete(Unit) // release both gated writes (FIFO)
+
+        assertEquals(
+            "two rapid re-taps must net back to the start, not lose the second flip",
+            false,
+            vm.flagsViewSettings.value.unreadOnly,
+        )
     }
 
     @Test

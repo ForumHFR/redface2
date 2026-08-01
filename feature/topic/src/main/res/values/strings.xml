@@ -1,6 +1,4 @@
 <resources>
-    <string name="topic_scroll_to">Scroll ciblé demandé vers le post %1$d.</string>
-    <string name="topic_reply">Répondre depuis ce topic</string>
     <!-- #283 — bottom floating action cluster: reach reply + page change without scrolling to the header. -->
     <string name="topic_fab_reply">Répondre</string>
     <string name="topic_fab_previous_page">Page précédente</string>
@@ -17,9 +15,19 @@
     <string name="topic_post_hidden_by_author">Post de %1$s masqué</string>
     <string name="topic_post_hidden_reveal">Afficher</string>
     <string name="topic_loading">Chargement…</string>
-    <!-- #379 — marqueur explicite de fin de sujet, rendu après le dernier post de la DERNIÈRE page. -->
+    <!-- #604 — libellé du skeleton de chargement (mockup « Chargement A »), sous le loader centré. -->
+    <string name="topic_loading_body">Chargement de la page demandée</string>
+    <!-- #379 → vague 3 (#604) — endcard calme de fin de sujet (titre + légende #379), rendue après
+         le dernier post de la DERNIÈRE page. -->
+    <string name="topic_end_of_topic_title">Fin du sujet</string>
     <string name="topic_end_of_topic">Dernier message du sujet</string>
-    <string name="topic_more_pages">Suite à la page suivante</string>
+    <!-- #110 → vague 3 (#604) — carte de frontière de page actionnable en fin de page intermédiaire
+         (mockup « Lecture A ») : titre + libellé d'action (aussi onClickLabel TalkBack). -->
+    <string name="topic_page_boundary_done">Page %1$d terminée</string>
+    <!-- #600 → vague 3 (#604) — pilule du séparateur traversant « dernier lu » (mockup Lecture A),
+         affiché sous le dernier message lu à l'ouverture depuis un drapeau. -->
+    <string name="topic_last_read_marker">Dernier message lu</string>
+    <string name="topic_page_boundary_next">Continuer vers la page %1$d</string>
     <!-- #285 — top app bar : back affordance (content description) + fallback title shown while
          the topic page has not loaded yet (or errored), so the bar never reads blank. -->
     <string name="topic_back">Retour</string>
@@ -39,7 +47,6 @@
     <string name="topic_search_results_end">Aucun résultat suivant</string>
     <string name="topic_error_title">Erreur de chargement</string>
     <string name="topic_error_body">Impossible d’ouvrir la page %1$d.\n\n%2$s</string>
-    <string name="topic_caption">post %1$d • page %2$d / %3$d</string>
     <string name="topic_post_index_prefix">#%1$d • </string>
     <!-- #362 — per-post contextual menu (post number, permalink copy, edit marker, citations). -->
     <!-- #436 — pastille de la bande d'identité quand le post est au panier multi-quote (#291). -->
@@ -73,6 +80,9 @@
         <item quantity="other">cité %1$d fois</item>
     </plurals>
     <string name="topic_poll_option">%1$s — %2$.1f%% (%3$d votes)</string>
+    <!-- #697 — forme « formulaire » (pas encore voté / lecture anonyme) : options sans résultats,
+         et remplacement du résumé total-votes par cette mention factuelle. -->
+    <string name="topic_poll_no_results">Résultats disponibles après vote • %1$s</string>
     <string name="topic_poll_summary">%1$d votes au total • %2$s</string>
     <string name="topic_poll_multiple_choices">multi-choix</string>
     <string name="topic_poll_single_choice">choix unique</string>
@@ -103,4 +113,12 @@
     <string name="topic_post_delete_failed_login">Vous devez être connecté pour supprimer ce message.</string>
     <string name="topic_post_delete_failed_locked">Ce sujet est fermé : suppression impossible.</string>
     <string name="topic_post_delete_failed_generic">La suppression a échoué. Réessayez.</string>
+    <!-- Vague 3 (#604) : pilule page de la top bar + feuille de navigation. -->
+    <string name="topic_page_picker_open">Changer de page</string>
+    <string name="topic_page_picker_title">Aller à une page</string>
+    <!-- #772 : titre de la top bar dépliable au tap (1 ligne ↔ 2 lignes). -->
+    <string name="topic_title_expand">Afficher le titre complet</string>
+    <string name="topic_title_collapse">Réduire le titre</string>
+    <string name="topic_title_expanded">Titre développé</string>
+    <string name="topic_title_collapsed">Titre réduit</string>
 </resources>

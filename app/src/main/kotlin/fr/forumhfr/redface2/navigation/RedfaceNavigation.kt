@@ -308,6 +308,14 @@ data class TopicRoute(
      * back stacks deserialise without the field.
      */
     val postSubmitOverflowLanding: Boolean = false,
+    /**
+     * #750 — `true` when [page] is untrusted: HFR email-notification links always say `page=1`
+     * while the real target travels as `numreponse`. Forwarded to `TopicRequest.resolveScrollToPage`
+     * so the ViewModel resolves the actual page (server-side redirect probe, #277 mechanism) before
+     * the first load. Only the email deep-link path sets it; defaulted so older serialised back
+     * stacks deserialise without the field.
+     */
+    val resolveScrollToPage: Boolean = false,
 ) : RedfaceNavKey
 
 @Serializable
@@ -1896,6 +1904,10 @@ private fun RedfaceNavHost(
                     // #676 v2 — [page] is chosen by the caller: row tap + sheet « Ouvrir » resume at
                     // lastReadPage, « 1er non-lu » jumps to lastReadPage+1, « dernière page » to totalPages.
                     onOpenFlag = { flag, page ->
+                        // #762 — seed the title cache from the row so the topic's top bar shows
+                        // the real title during the very first load (the cache was otherwise only
+                        // fed by onTitleLoaded AFTER a page parse, i.e. from the second page on).
+                        topicTitleNavState.onTitleLoaded(flag.cat, flag.topicId, flag.title)
                         backStack.add(
                             TopicRoute(
                                 cat = flag.cat,
@@ -2277,6 +2289,9 @@ private fun RedfaceNavHost(
                         highlightTitle = route.highlightTitle,
                     ),
                     onOpenTopic = { topic ->
+                        // #762 — same seeding as onOpenFlag: the listing row already knows the
+                        // title, show it in the top bar from the first frame of the load.
+                        topicTitleNavState.onTitleLoaded(topic.cat, topic.topicId, topic.title)
                         backStack.add(
                             TopicRoute(
                                 cat = topic.cat,
@@ -2358,6 +2373,7 @@ private fun RedfaceNavHost(
                         forceRefresh = route.forceRefresh,
                         postSubmitOverflowLanding = route.postSubmitOverflowLanding,
                         titleHint = topicTitleNavState.titles[TopicTitleKey(route.cat, route.post)],
+                        resolveScrollToPage = route.resolveScrollToPage,
                     ),
                     onTitleLoaded = { title ->
                         topicTitleNavState.onTitleLoaded(route.cat, route.post, title)
@@ -2497,6 +2513,20 @@ private fun RedfaceNavHost(
                             post = route.post,
                             page = targetPage,
                             scrollTo = null,
+                        )
+                    },
+                    onGoToPost = { targetPage, numreponse ->
+                        // #699 — jump to a cited post: the same single-mutation in-place replace as
+                        // onOpenPage (#282), with the deep-link scroll anchor so the landing scrolls
+                        // to and highlights the target (#200 mechanism). Uniform whether the cited
+                        // post is on the current page or another. Not a « page - 1 » reading step —
+                        // clear any stale bottom-landing marker (same rule as onOpenPage's takeIf).
+                        topicScrollNavState.onPendingBottomLanding(null)
+                        backStack[backStack.lastIndex] = TopicRoute(
+                            cat = route.cat,
+                            post = route.post,
+                            page = targetPage,
+                            scrollTo = numreponse,
                         )
                     },
                     onBack = {
@@ -2710,10 +2740,22 @@ internal fun parseHfrDeepLink(uri: Uri): ParsedDeepLink? = when (uri.path) {
         val cat = uri.getQueryParameter("cat")?.toIntOrNull() ?: return null
         val post = uri.getQueryParameter("post")?.toIntOrNull() ?: return null
         val page = uri.getQueryParameter("page")?.toIntOrNull() ?: 1
+        // #750 — the `numreponse` QUERY param is the fallback target: HFR email-notification
+        // links carry it alongside the fragment, and some mail clients strip the fragment.
         val scrollTo = uri.fragment?.removePrefix("t")?.toIntOrNull()
+            ?: uri.getQueryParameter("numreponse")?.toIntOrNull()
         ParsedDeepLink(
             destination = TopLevelDestination.Flags,
-            route = TopicRoute(cat = cat, post = post, page = page, scrollTo = scrollTo),
+            route = TopicRoute(
+                cat = cat,
+                post = post,
+                page = page,
+                scrollTo = scrollTo,
+                // #750 — email links always serialise `page=1` whatever page the target post
+                // lives on; a page-1 link WITH an anchor is therefore untrusted and the real
+                // page is resolved before the first load. An explicit page > 1 is trusted as-is.
+                resolveScrollToPage = scrollTo != null && page == 1,
+            ),
         )
     }
 

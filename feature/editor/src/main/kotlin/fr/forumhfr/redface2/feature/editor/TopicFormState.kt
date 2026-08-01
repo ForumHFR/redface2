@@ -1,4 +1,6 @@
 package fr.forumhfr.redface2.feature.editor
+import fr.forumhfr.redface2.core.ui.editor.UploadError
+import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 
 import fr.forumhfr.redface2.core.ui.editor.WikiSearchState
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
@@ -96,6 +98,16 @@ data class TopicFormState(
      */
     val restorableDraft: String? = null,
     val restorableSubject: String? = null,
+    /**
+     * #459 — `true` while an image upload (single or batch) is in flight. Drives the toolbar
+     * spinner AND locks the body field (`readOnly`) so the caret cannot move between two
+     * programmatic `[img]` insertions. Mirrors [PostEditorState.isUploading].
+     */
+    val isUploading: Boolean = false,
+    /** #459 — typed upload failure surfaced as a dismissible banner ; mirrors [PostEditorState.uploadError]. */
+    val uploadError: UploadError? = null,
+    /** #459 — « n/N » batch counter (null for a single image) ; mirrors [PostEditorState.uploadProgress]. */
+    val uploadProgress: UploadProgress? = null,
 ) {
     /**
      * Submit is allowed when the mode-specific routing context is complete,
@@ -183,6 +195,15 @@ sealed interface TopicFormIntent {
 
     /** Phase 2F-E (#189) — insert `[img]url[/img]` for a validated remote image URL. */
     data class ImageUrlInserted(val url: String) : TopicFormIntent
+
+    /**
+     * #459 — images picked by the photo picker, as Uri strings in pick order. Read + uploaded
+     * sequentially, one `[img]` inserted per success. Mirrors [PostEditorIntent.ImagesPicked].
+     */
+    data class ImagesPicked(val uris: List<String>) : TopicFormIntent
+
+    /** #459 — dismiss the upload-error banner. Mirrors [PostEditorIntent.UploadErrorDismissed]. */
+    data object UploadErrorDismissed : TopicFormIntent
 
     /** #405 — restore the editor from the cached draft (subject + body). */
     data object DraftRestoreRequested : TopicFormIntent
