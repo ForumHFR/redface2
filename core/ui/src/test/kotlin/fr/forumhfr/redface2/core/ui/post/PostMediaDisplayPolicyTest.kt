@@ -126,6 +126,15 @@ class PostMediaDisplayPolicyTest {
     }
 
     @Test
+    fun `cold cap fraction rounds an odd useful height to the nearest pixel`() {
+        // Complément au témoin de frontière ci-dessus : l'arrondi de la fraction, isolé loin des
+        // deux autres régimes. 1001 × 0,70 = 700,7 → 701 ; une TRONCATURE donnerait 700, et ni le
+        // plancher (400) ni le clamp à la hauteur utile (1001) ne peuvent masquer le résultat —
+        // le témoin discrimine donc l'arrondi seul.
+        assertEquals(701, blockImageColdCapPx(usefulHeightPx = 1001, floor400DpPx = 400))
+    }
+
+    @Test
     fun `smiley content scale is Fit so tiny perso sprites stay readable`() {
         // Dogfood on v33 showed the opposite failure of PR #126: Inside kept 15×15 historical
         // perso at native size, making them nearly invisible on phones. Fit restores a readable
