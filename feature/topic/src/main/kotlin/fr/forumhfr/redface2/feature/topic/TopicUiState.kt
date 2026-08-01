@@ -21,6 +21,13 @@ data class TopicUiState(
      */
     val isAuthenticated: Boolean = false,
     /**
+     * #545 — pseudo of the authenticated session, `null` while anonymous. Feeds the ownership
+     * fallback [isOwnPostBySession] : profiles with `affichoutils=0` get no post toolbar from
+     * HFR, so `Post.isEditable`/`Post.isOwnPost` are blind there and the gates need the session
+     * pseudo to recognise the user's own posts by author instead.
+     */
+    val connectedPseudo: String? = null,
+    /**
      * #292 — `numreponse` of the post whose deletion is currently in flight, or `null` when no
      * delete is running. Drives the per-post « Supprimer » affordance (disabled / busy) and guards
      * against a double-submit. Cleared when the delete settles (success or failure).
@@ -58,10 +65,10 @@ data class TopicUiState(
      * #806 — mirrors `UserPreferencesRepository.observeWritingSurfacePreset()`. Feeds
      * [writingSurfaceFor] AT TAP TIME on the three write entry points (reply FAB, « Citer »,
      * « Citer N ») to pick the quick-reply sheet or the full-screen editor. Default
-     * [WritingSurfacePreset.SHEET] = the 0.25.1 behaviour. A preset change never migrates an
-     * already-open sheet (the decision is only ever taken on the next tap).
+     * [WritingSurfacePreset.FULL_EDITOR] since the sheet is experimental opt-in (#951). A preset
+     * change never migrates an already-open sheet (the decision is only ever taken on the next tap).
      */
-    val writingSurfacePreset: WritingSurfacePreset = WritingSurfacePreset.SHEET,
+    val writingSurfacePreset: WritingSurfacePreset = WritingSurfacePreset.FULL_EDITOR,
     /**
      * #335 — `true` while a manual pull-to-refresh of the current page is in flight. Drives the
      * Material3 `PullToRefreshBox` spinner. Set on the `Refresh` intent, cleared in the refresh

@@ -478,9 +478,9 @@ class PostContentParserTest {
 
     @Test
     fun `orphan nbsp runs between paragraphs survive as empty lines (real fixture)`() {
-        // #466 — suite of #333/#280. HFR encodes a deliberate blank line BETWEEN two paragraphs
-        // not as `<br /><br />` (the shape #423 already handled) but as an EXTRA `&nbsp;` inside
-        // the orphan text node separating two sibling <p>. Real witness on the single-page topic
+        // #466 — suite of #333/#280. HFR also encodes blank lines BETWEEN two paragraphs through
+        // the orphan `&nbsp;` text node separating sibling <p>, rather than the `<br /><br />`
+        // shape #423 already handled. Real witness on the single-page topic
         // (post #9762063, captured fixture): `…C'est normal.</p>&nbsp;&nbsp;&nbsp;<p><br />Pour
         // trouver une solution…</p>` — 3 `&nbsp;` between the two paragraphs. The parser used to
         // swallow that whitespace and emit two separate Paragraph blocks, losing the blank lines.
@@ -506,9 +506,8 @@ class PostContentParserTest {
             paragraph.inlines.filterIsInstance<PostInline.Text>()
                 .any { it.value.contains("C'est normal.") },
         )
-        // The triple `&nbsp;` run folds into blank lines (>= 2 LineBreaks) between the two authored
-        // lines; the exact count for a bare run is pinned by the synthetic test below. A lone
-        // `&nbsp;` separator never folds, so >= 2 here proves the multi-nbsp blank lines survived.
+        // The triple `&nbsp;` run folds into blank lines between the two authored lines; the exact
+        // count for a bare run is pinned by the synthetic test below.
         val breaksBetween = run {
             val inlines = paragraph.inlines
             val from = inlines.indexOfLast {
@@ -519,14 +518,13 @@ class PostContentParserTest {
             }
             inlines.subList(from + 1, to).count { it is PostInline.LineBreak }
         }
-        // EXACTLY 3: the triple `&nbsp;` run yields 3 separator breaks (1 boundary + 2 empty lines).
-        // The second <p> opens with a border `<br />` (`<p><br />Pour…`) which must be edge-trimmed
-        // (#466 Codex review) — were it kept it would push this to 4 and render a spurious 3rd empty
-        // line. Pinning the exact count guards that border-break trim on the real fixture.
+        // #532 live contract: 3 `&nbsp;` + the following paragraph's leading `<br />` represent
+        // 4 visible empty lines. Text needs 5 newline characters to leave 4 empty lines between the
+        // two non-empty lines.
         assertEquals(
-            "the triple orphan &nbsp; run must yield EXACTLY 3 LineBreaks (border <br> trimmed), " +
+            "3 orphan &nbsp; plus the leading <br> must yield exactly 5 LineBreaks, " +
                 "got=$breaksBetween",
-            3,
+            5,
             breaksBetween,
         )
     }
@@ -552,11 +550,10 @@ class PostContentParserTest {
     }
 
     @Test
-    fun `merging paragraphs trims border breaks but keeps separator breaks - 466 codex`() {
-        // #466 (Codex review) — when two <p> merge over a >=2 `&nbsp;` run, a trailing `<br>` on the
-        // first <p> and a leading `<br>` on the second are BORDER breaks (the legacy sub-parse
-        // edge-trimmed them via flushParagraph). Only the separator breaks (here 2) plus any INTERIOR
-        // break survive. DERIVED FROM the issue #466 encoding, not a raw hfr-mcp capture.
+    fun `merging paragraphs trims trailing border break and counts leading break - 466 532`() {
+        // #466/#532 — a trailing `<br>` on the first <p> remains a border break and is trimmed. The
+        // leading `<br>` on the second <p> is part of HFR's captured empty-line contract and adds one
+        // visible line. DERIVED FROM the issue encoding, not a raw hfr-mcp capture.
         val parser = PostContentParser()
         val element = jsoupBody(
             "<div id=\"para1\"><p>A<br /></p>&nbsp;&nbsp;<p><br />B</p></div>",
@@ -571,9 +568,11 @@ class PostContentParserTest {
             paragraphs.size,
         )
         assertEquals(
-            "2 orphan &nbsp; ⇒ 2 separator LineBreaks; the border <br>s of both <p> are trimmed",
+            "2 nbsp + 1 leading br represent 3 empty lines and require 4 LineBreaks",
             listOf(
                 PostInline.Text("A"),
+                PostInline.LineBreak,
+                PostInline.LineBreak,
                 PostInline.LineBreak,
                 PostInline.LineBreak,
                 PostInline.Text("B"),
@@ -667,11 +666,10 @@ class PostContentParserTest {
     }
 
     @Test
-    fun `single orphan nbsp between paragraphs stays two separate blocks`() {
-        // #466 guard — a LONE `&nbsp;` between two <p> is HFR's normal paragraph separator (it is
-        // present between ~every pair of sibling <p>), NOT an authored blank line. Folding it in
-        // would add a spurious empty line to virtually every multi-paragraph post, so the parser
-        // must keep two distinct Paragraph blocks in that case (legacy behaviour preserved).
+    fun `single orphan nbsp between paragraphs renders one empty line`() {
+        // #532 supersedes the old #466 assumption that a lone `&nbsp;` was structural only. The live
+        // server contract proves it represents one visible blank line, so the paragraphs merge with
+        // 2 LineBreaks (one boundary + one empty typographic line).
         //
         // NOTE: this HTML input is DERIVED FROM THE ISSUE #466 encoding (`</p>&nbsp;<p>`), not a
         // raw hfr-mcp capture — it isolates the single-separator boundary so the fix can be pinned
@@ -686,12 +684,19 @@ class PostContentParserTest {
 
         val paragraphs = result.ast.blocks.filterIsInstance<PostBlock.Paragraph>()
         assertEquals(
-            "a lone &nbsp; separator must keep two distinct Paragraph blocks, got=${result.ast.blocks}",
-            2,
+            "a lone &nbsp; separator must merge the paragraphs, got=${result.ast.blocks}",
+            1,
             paragraphs.size,
         )
-        assertEquals("premier paragraphe", (paragraphs[0].inlines.single() as PostInline.Text).value)
-        assertEquals("second paragraphe", (paragraphs[1].inlines.single() as PostInline.Text).value)
+        assertEquals(
+            listOf(
+                PostInline.Text("premier paragraphe"),
+                PostInline.LineBreak,
+                PostInline.LineBreak,
+                PostInline.Text("second paragraphe"),
+            ),
+            paragraphs.single().inlines,
+        )
     }
 
     @Test
@@ -699,8 +704,8 @@ class PostContentParserTest {
         // #466 — focused boundary check on the EXACT encoding documented in the issue:
         // `<p>A</p>&nbsp;&nbsp;&nbsp;<p>B</p>` (3 orphan `&nbsp;`). DERIVED FROM THE ISSUE #466
         // encoding, not a raw hfr-mcp capture (the real multi-run shape is also pinned by the
-        // `topic_page_single.html` fixture test above). A run of 3 ⇒ one paragraph boundary +
-        // two authored empty lines, kept as 3 LineBreaks inside ONE paragraph.
+        // `topic_page_single.html` fixture test above). #532 establishes 3 visible empty lines,
+        // represented by 4 LineBreaks between the two non-empty lines.
         val parser = PostContentParser()
         val element = jsoupBody(
             "<div id=\"para1\"><p>A</p>&nbsp;&nbsp;&nbsp;<p>B</p></div>",
@@ -710,14 +715,16 @@ class PostContentParserTest {
 
         val paragraphs = result.ast.blocks.filterIsInstance<PostBlock.Paragraph>()
         assertEquals(
-            "the two paragraphs separated by a >=2 nbsp run must merge into ONE block, got=${result.ast.blocks}",
+            "the two paragraphs separated by an nbsp run must merge into ONE block, " +
+                "got=${result.ast.blocks}",
             1,
             paragraphs.size,
         )
         assertEquals(
-            "3 orphan &nbsp; fold into 3 LineBreaks between A and B (1 boundary + 2 empty lines)",
+            "3 orphan &nbsp; represent 3 empty lines and require 4 LineBreaks between A and B",
             listOf(
                 PostInline.Text("A"),
+                PostInline.LineBreak,
                 PostInline.LineBreak,
                 PostInline.LineBreak,
                 PostInline.LineBreak,

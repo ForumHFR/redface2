@@ -142,6 +142,10 @@ class QuickReplyViewModel @AssistedInject constructor(
      */
     private var materializeJob: Job? = null
 
+    // #868-#870 (gate Sol) — one opening at a time : a re-open cancels the previous opening's
+    // seed/arm work so two rapid openings can never finish out of order (last opening wins).
+    private var openJob: Job? = null
+
     /** #405 — the SAME key the full-screen reply editor uses for this topic. */
     private val draftKey: String = EditorDraftKey.reply(request.cat, request.topicId)
 
@@ -183,23 +187,29 @@ class QuickReplyViewModel @AssistedInject constructor(
      */
     fun onSheetOpened(initialQuotes: List<QuotedPostPreview> = emptyList()) {
         materializeJob?.cancel()
-        viewModelScope.launch {
+        openJob?.cancel()
+        openJob = viewModelScope.launch {
             initJob.join()
             val body = draftStore.load(draftOwner, draftKey)?.body.orEmpty()
             _state.update {
                 it.copy(text = TextFieldValue(text = body, selection = TextRange(body.length)))
             }
-            if (initialQuotes.isEmpty() && _state.value.quotes.isEmpty()) return@launch
+            // #870 — the delivered set IS the citation session : quotes armed under a PREVIOUS
+            // sheet session never resurrect on a new opening (they used to merge idempotently,
+            // desynchronising the sheet from the « Citer N » FAB). Nothing the user selected is
+            // lost anymore : since #868/#869 the hoisted basket survives until an actual send, so
+            // a re-open via « Citer N » re-delivers the full selection — which supersedes the old
+            // fold-into-inline behaviour the cards-OFF branch had for the same no-drop reason.
+            if (initialQuotes.isEmpty()) {
+                if (_state.value.quotes.isNotEmpty()) _state.update { it.copy(quotes = emptyList()) }
+                return@launch
+            }
+            _state.update { it.copy(quotes = emptyList()) }
             if (userPreferencesRepository.observeQuoteCardsEnabled().first()) {
+                // Through onQuoteAdded : keeps the dedup + #808 cap semantics of a manual add.
                 initialQuotes.forEach(::onQuoteAdded)
             } else {
-                // Gate Codex (finding 1) — cards armed under a previous cards-ON session must not
-                // survive an OFF opening : rendered again, they would re-arm the cards submit
-                // path against the arbitrage. They are FOLDED into this opening's inline insert
-                // instead (nothing the user cited is dropped), deduplicated like cards were.
-                val pending = (_state.value.quotes + initialQuotes).distinctBy { it.numreponse }
-                _state.update { it.copy(quotes = emptyList()) }
-                materializeInlineQuotes(pending)
+                materializeInlineQuotes(initialQuotes.distinctBy { it.numreponse })
             }
         }
     }

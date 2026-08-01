@@ -213,27 +213,27 @@ class SearchViewModelTest {
 
     @Test
     fun `CategorySelected re-runs the search scoped to the picked category`() = runTest {
+        val initialPivot = listOf(
+            SearchPivotCategory(id = 1, label = "Hardware", isSelected = true),
+            SearchPivotCategory(id = 10, label = "Programmation", isSelected = false),
+        )
         coEvery { repo.search(SearchRequest(query = "android", category = SearchCategoryScope.All)) } returns
             fakePage(
                 topics = listOf(fakeTopic(1, "global hit", cat = 1)),
-                pivot = listOf(
-                    SearchPivotCategory(id = 1, label = "Hardware", isSelected = true),
-                    SearchPivotCategory(id = 10, label = "Programmation", isSelected = false),
-                ),
+                pivot = initialPivot,
             )
+        val selectedScope = SearchCategoryScope.Category(id = 10, name = "Programmation")
         coEvery {
             repo.search(
                 SearchRequest(
                     query = "android",
-                    category = SearchCategoryScope.Category(id = 10, name = "Programmation"),
+                    category = selectedScope,
                 ),
             )
         } returns fakePage(
             topics = listOf(fakeTopic(99, "prog hit", cat = 10)),
-            pivot = listOf(
-                SearchPivotCategory(id = 1, label = "Hardware", isSelected = false),
-                SearchPivotCategory(id = 10, label = "Programmation", isSelected = true),
-            ),
+            pivot = emptyList(),
+            requestedCategory = selectedScope,
         )
 
         val vm = SearchViewModel(repo, initialPseudo = null)
@@ -247,8 +247,44 @@ class SearchViewModelTest {
         )
 
         val final = vm.state.value
+        assertEquals(initialPivot, final.pivotCategories)
         assertEquals(10, final.selectedCategory?.id)
         assertEquals("prog hit", final.results.first().title)
+    }
+
+    @Test
+    fun `Submit after category re-scope clears the preserved pivot when the fresh search has none`() = runTest {
+        val initialPivot = listOf(
+            SearchPivotCategory(id = 1, label = "Hardware", isSelected = true),
+            SearchPivotCategory(id = 10, label = "Programmation", isSelected = false),
+        )
+        val allCategoriesRequest = SearchRequest(query = "android", category = SearchCategoryScope.All)
+        coEvery { repo.search(allCategoriesRequest) } returnsMany listOf(
+            fakePage(topics = listOf(fakeTopic(1, "global hit", cat = 1)), pivot = initialPivot),
+            fakePage(topics = emptyList(), pivot = emptyList()),
+        )
+        val selectedScope = SearchCategoryScope.Category(id = 10, name = "Programmation")
+        coEvery {
+            repo.search(SearchRequest(query = "android", category = selectedScope))
+        } returns fakePage(
+            topics = listOf(fakeTopic(99, "prog hit", cat = 10)),
+            pivot = emptyList(),
+            requestedCategory = selectedScope,
+        )
+
+        val vm = SearchViewModel(repo, initialPseudo = null)
+        vm.submit(SearchIntent.QueryChanged("android"))
+        vm.submit(SearchIntent.Submit)
+        vm.submit(SearchIntent.CategorySelected(initialPivot.last()))
+        assertEquals(initialPivot, vm.state.value.pivotCategories)
+
+        vm.submit(SearchIntent.EditCriteria)
+        vm.submit(SearchIntent.Submit)
+
+        val final = vm.state.value
+        assertTrue(final.pivotCategories.isEmpty())
+        assertNull(final.selectedCategory)
+        assertTrue(final.results.isEmpty())
     }
 
     @Test
@@ -756,9 +792,10 @@ class SearchViewModelTest {
     private fun fakePage(
         topics: List<SearchTopicResult>,
         pivot: List<SearchPivotCategory>,
+        requestedCategory: SearchCategoryScope = SearchCategoryScope.All,
     ): SearchResultPage = SearchResultPage(
         query = "test",
-        requestedCategory = SearchCategoryScope.All,
+        requestedCategory = requestedCategory,
         selectedCategory = pivot.firstOrNull { it.isSelected },
         pivotCategories = pivot,
         topics = topics,

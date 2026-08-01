@@ -16,6 +16,65 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.32.0` — `internal` (dev) — 2026-07-15
+
+Décision produit #951 : la feuille de réponse rapide n'est pas correctement terminée.
+
+- Éditeur : la **feuille de réponse rapide passe en expérimental** (opt-in). Le défaut de
+  « Surface d'écriture » devient **« Toujours plein écran »** ; les deux presets feuille sont
+  étiquetés « (expérimental) » dans les réglages (pattern #805). Les utilisateurs qui avaient
+  déjà choisi un preset gardent leur choix.
+
+## `0.31.0` — `internal` (dev) — 2026-07-15
+
+Premier lot du chantier couleurs #883 (arbitrage XaTriX sur la galerie V2 : la refonte
+complète des palettes part en phase suivante, seul le tertiaire change maintenant).
+
+- Thème : l'accent tertiaire **ambre** (« jaune ») est remplacé par une **ardoise** dans les
+  5 palettes (Rose clair/sombre, AMOLED, Rouge REDFACE1 clair/sombre). Visible sur la bande du
+  post ciblé (ancre de scroll), le bouton d'envoi armé, les barres des citations imbriquées
+  alternées et le badge sticky/lock des listes forum. Le jaune des drapeaux favoris
+  (FlagPalette) est découplé et ne change pas.
+
+## `0.30.1` — `internal` (dev) — 2026-07-15
+
+Lot v1.1 de la loupe — retours communautaires 0.30.0 (fil DEV), même journée.
+
+- Loupe : plafond de zoom relevé à **3×** (demande unanime) ; au-delà, place au futur viewer d'images.
+- Loupe : **glisse verticale amortie** après un déplacement zoomé (décélération rapide, bornée, jamais après un pincement — le « lancer en sucette » de RF1 est structurellement impossible) (#182).
+- Fix #946 : pincer sur une citation dépliée ne la replie plus (le changement structurel du mode replié jetait l'état des citations).
+
+## `0.30.0` — `internal` (dev) — 2026-07-15
+
+Chantier pinch-to-zoom #182 (option A) — POC #935 GO (3 relevés, matrices émulateur + S10e), durcissement #936, production #937.
+
+- **Loupe globale de lecture** : pinch-to-zoom graphique éphémère de la page topic (esprit RF1) — plafond 2,5×, rubber-band saturant, pan 1 doigt (Y = vrai scroll + complément borné au bord bas), chip « 1× », reset au changement de page/sujet (#182, #935, #937).
+- Pendant le zoom : swipe de page, pull-to-refresh, double-tap refresh et sélection suspendus ; **taps/appuis longs inertes (mode replié annoncé sur le fil DEV)** — dézoomer pour interagir.
+- `topicPageSwipe` : annulation multi-touch native (2e doigt pendant un drag non commité = spring-back, jamais de navigation) (#936).
+- 32 tests ajoutés (maths de mapping, matrice de gestes, multi-touch swipe) ; gates croisés Sol/gpt-5.5/review Claude indépendante.
+
+## `0.29.2` — `internal` (dev) — 2026-07-13
+
+**Batch autonome de l'après-midi** (5 chantiers, gates croisés Claude Fable 5 ↔ GPT 5.6 Sol : deux fixes codés par Sol et gatés par Claude, trois l'inverse).
+
+### Fixes
+- **#918 — recherche globale** : la rangée d'onglets catégories ne disparaît plus après une bascule de catégorie (HFR n'embarque pas le pivot dans les réponses mono-catégorie ; il est désormais conservé). [codé par Sol]
+- **#545 — édition de ses propres posts** : les profils HFR avec « Affichage des outils » désactivée (affichoutils=0) retrouvent Modifier/Supprimer — l'ownership est reconnu par le pseudo de session quand HFR ne sert pas la toolbar (cause reproduite live ; les gardes MP-à-soi/auto-masquage suivent).
+- **#532 — lignes vides alignées sur le web** : contrat serveur capturé live (HFR compresse : n lignes vides → floor(n/2)+1 visibles, sans plafond) ; l'app sous-rendait ces runs depuis #466. Rendu visible sur les posts multi-paragraphes. [codé par Sol]
+- **#872 (a) — libellé « Contenu BBCode »** : épinglé au-dessus du viewport scrollable des éditeurs plein écran — il ne peut plus être rogné par le scroll d'ouverture, à aucun fontScale (nom accessible conservé via la sémantique du champ).
+
+### Améliorations
+- **#900 (volet 2) — panneau smileys** : la grille se cale sur 62 % de la hauteur d'écran (plancher 320 dp) — la feuille atteint ~3/4 de l'écran (mesuré 73,8 % au dogfood), réponse au retour de CharLee.
+
+## `0.29.1` — `internal` (dev) — 2026-07-13
+
+**Trio multiquote** (#868/#869/#870, PR #920 — le lot retenu de la nuit, mergé après dogfood émulateur complet des 8 contrats du cadrage, au matin post-reboot).
+
+### Vue topic / composer
+- **#868 — le FAB « Citer N » survit** à l'ouverture de l'éditeur + retour sans envoi : le panier n'est plus vidé à l'OUVERTURE mais à l'**envoi réussi** d'une session qui l'a consommé (flag explicite porté par le chemin d'ouverture — « Citer » simple, réponse, édition et échecs d'envoi ne le vident jamais ; « Tout vider » reste le reset manuel).
+- **#869 — le compteur repart de N**, plus jamais de reset à 1 après un aller-retour.
+- **#870 — plus de citations fantômes** : la feuille de réponse remet ses citations exactement au set livré à chaque ouverture (plus de fusion avec une session précédente).
+
 ## `0.29.0` — `internal` (dev) — 2026-07-13
 
 **Lot de nuit 12→13/07** (#813 images fantômes, #862 épinglés drapeaux, trio éditeur #873/#900/#872, garde citation #583, fix loupe #913 de la veille). Chantiers cadrés + gatés hors-bande (GPT-5.6 Sol) ; vérification visuelle émulateur non réalisée cette nuit (hôte KVM HS — reboot machine requis), couverture par tests JVM/Robolectric + fixtures serveur réelles.

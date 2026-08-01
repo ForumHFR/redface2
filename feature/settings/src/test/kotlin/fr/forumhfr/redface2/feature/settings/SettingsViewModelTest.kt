@@ -1413,8 +1413,8 @@ class SettingsViewModelTest {
     fun `writingSurfacePreset re-syncs continuously from the persisted preference (#788)`() = runTest {
         val viewModel = newViewModel()
         assertEquals(
-            "#806 — SHEET is the default (the 0.25.1 behaviour)",
-            WritingSurfacePreset.SHEET,
+            "#951 — FULL_EDITOR is the default (the sheet is experimental opt-in)",
+            WritingSurfacePreset.FULL_EDITOR,
             viewModel.state.value.writingSurfacePreset,
         )
 
@@ -1441,11 +1441,11 @@ class SettingsViewModelTest {
         repository.failOnWritingSurfacePresetSet = true
         val viewModel = newViewModel()
 
-        viewModel.submit(SettingsIntent.SetWritingSurfacePreset(WritingSurfacePreset.FULL_EDITOR))
+        viewModel.submit(SettingsIntent.SetWritingSurfacePreset(WritingSurfacePreset.SHEET))
 
         assertEquals(
             "must revert to the previous value on failure",
-            WritingSurfacePreset.SHEET,
+            WritingSurfacePreset.FULL_EDITOR,
             viewModel.state.value.writingSurfacePreset,
         )
         assertFalse(viewModel.state.value.isUpdatingWritingSurfacePreset)
@@ -2134,7 +2134,8 @@ class SettingsViewModelTest {
         }
 
         // #806 — writing-surface preset. Same optimistic-flip seam, enum-typed.
-        private val writingSurfacePreset = MutableStateFlow(WritingSurfacePreset.SHEET)
+        // FULL_EDITOR mirrors the production default (#951).
+        private val writingSurfacePreset = MutableStateFlow(WritingSurfacePreset.FULL_EDITOR)
         var writingSurfacePresetSetCalls: Int = 0
             private set
         var failOnWritingSurfacePresetSet: Boolean = false

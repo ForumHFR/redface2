@@ -11,15 +11,19 @@ package fr.forumhfr.redface2.core.model.editor
  */
 enum class WritingSurfacePreset {
     /**
-     * Default — the 0.25.1 behaviour, exactly: every write action opens the quick-reply sheet,
-     * except a multi-quote basket of 3+ cards which goes straight to the full-screen editor
-     * (the #604 lot 3 threshold, which guards THIS preset only).
+     * The 0.25.1 behaviour, exactly: every write action opens the quick-reply sheet, except a
+     * multi-quote basket of 3+ cards which goes straight to the full-screen editor (the #604
+     * lot 3 threshold, which guards THIS preset only). Experimental opt-in while the sheet is
+     * not feature-complete (#951).
      */
     SHEET,
 
     /** The sheet for plain replies; any citation (single « Citer » or « Citer N ») opens the full-screen editor. */
     SHEET_EXCEPT_QUOTES,
 
-    /** Every write action opens the full-screen editor; the quick-reply sheet never shows. */
+    /**
+     * Default — every write action opens the full-screen editor; the quick-reply sheet never
+     * shows. Became the default when the sheet moved to experimental status (#951).
+     */
     FULL_EDITOR,
 }

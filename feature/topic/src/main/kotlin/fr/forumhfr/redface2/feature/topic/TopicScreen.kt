@@ -56,7 +56,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.minimumInteractiveComponentSize
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.pullToRefresh
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -64,8 +66,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -75,6 +79,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -87,6 +93,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -159,9 +166,15 @@ fun TopicScreen(
      * (#790): the sheet JUST wrote the #405 row, so the editor auto-applies it (appending to any
      * typed text) WITHOUT a banner — re-proposing a draft the user is visibly continuing would be
      * noise. Defaults to a no-op for non-topic callers (previews/tests never escalate).
+     * #868-#870 — `consumesBasket` forwards the sheet session's basket consumption : true only when
+     * the escalated sheet was opened by « Citer N » (its successful submit then empties the basket).
      */
-    onEscalateToFullEditor: (subcat: Int, page: Int, quotes: List<QuotedPostPreview>) -> Unit =
-        { _, _, _ -> },
+    onEscalateToFullEditor: (
+        subcat: Int,
+        page: Int,
+        quotes: List<QuotedPostPreview>,
+        consumesBasket: Boolean,
+    ) -> Unit = { _, _, _, _ -> },
     /**
      * Open the editor in edit mode (Phase 2D, #147). HFR exposes the edit link on
      * the post's left toolbar only when the post belongs to the current user and
@@ -912,8 +925,13 @@ internal fun TopicContent(
     onReply: (subcat: Int, page: Int, quotes: List<QuotedPostPreview>) -> Unit,
     // #843 — the quick-reply sheet's escalation (resumeSharedDraft = true, silent append) ; distinct
     // from [onReply] which is a COLD full-editor open (resumeSharedDraft = false → restore banner).
-    onEscalateToFullEditor: (subcat: Int, page: Int, quotes: List<QuotedPostPreview>) -> Unit =
-        { _, _, _ -> },
+    // #868-#870 — carries the session's basket consumption (cf. TopicScreen KDoc).
+    onEscalateToFullEditor: (
+        subcat: Int,
+        page: Int,
+        quotes: List<QuotedPostPreview>,
+        consumesBasket: Boolean,
+    ) -> Unit = { _, _, _, _ -> },
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
@@ -1047,6 +1065,10 @@ internal fun TopicContent(
                     when (writingSurfaceFor(state.writingSurfacePreset, quoteCount = selection.size)) {
                         WritingSurface.FULL_EDITOR -> onMultiQuote(subcat, page)
                         WritingSurface.SHEET -> {
+                            // #868/#869 — the basket is NO LONGER cleared here : closing the sheet
+                            // without sending keeps the selection armed (the « Citer N » FAB and
+                            // counter survive a cancel). The clear happens on the sheet's
+                            // SubmitSucceeded (or its escalation's) via consumesBasket below.
                             quickReplyFor = QuickReplyLaunch(
                                 request = QuickReplyRequest(
                                     cat = state.request.cat,
@@ -1055,8 +1077,8 @@ internal fun TopicContent(
                                     page = page,
                                 ),
                                 initialQuotes = selection,
+                                consumesBasket = true,
                             )
-                            onClearMultiQuote()
                         }
                     }
                 },
@@ -1103,16 +1125,37 @@ internal fun TopicContent(
                 }
 
                 is TopicUiState.Mode.Loaded -> {
-                    // #335 — pull-to-refresh only wraps the loaded content (Loading/Error don't need
-                    // it). PullToRefreshBox layers a vertical nested-scroll connection on top of the
-                    // top-bar enterAlways behaviour (#338) and the horizontal page swipe (#282); the
-                    // pull only engages on overscroll at the top of the list, so the read position is
-                    // preserved on refresh (the ViewModel emits no scroll effect).
-                    PullToRefreshBox(
-                        isRefreshing = state.isRefreshing,
-                        // #813 — user refresh also clears + re-probes failed media measurements.
-                        onRefresh = refreshWithMediaRetry,
-                        modifier = Modifier.fillMaxSize(),
+                    // #182 (#937) — magnifier state hoisted above the pull-to-refresh wrapper:
+                    // the PTR suspension, the selection gate (LocalTopicZoomed) and the reset chip
+                    // read it here; the gesture and the draw layer consume it in TopicLoadedContent.
+                    val zoomAnimationScope = rememberCoroutineScope()
+                    val zoomState = rememberTopicZoomState(
+                        // Full route identity (§2.1) — two topics on the same page number must
+                        // never share a zoom ; a page change of the same topic resets too.
+                        pageKey = Triple(state.request.cat, state.request.post, mode.topic.page),
+                        animationScope = zoomAnimationScope,
+                    )
+                    // derivedStateOf: the composition only recomposes on the 1× ↔ zoomed TRANSITION,
+                    // never per pinch frame (scale/panX are read in the draw phase only).
+                    val isZoomed by remember(zoomState) { derivedStateOf { zoomState.zoomed } }
+                    // #335 — pull-to-refresh only wraps the loaded content; the pull only engages on
+                    // overscroll at the top of the list, so the read position is preserved on refresh.
+                    // POC #182 : PullToRefreshBox (m3 1.4.0) does not expose `enabled`, so the wrapper
+                    // becomes the low-level Modifier.pullToRefresh + the default Indicator — the pull
+                    // gesture is fully suspended while zoomed (a gate in onRefresh would be too late:
+                    // the gesture would still be consumed and the indicator armed).
+                    val pullToRefreshState = rememberPullToRefreshState()
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .pullToRefresh(
+                                isRefreshing = state.isRefreshing,
+                                state = pullToRefreshState,
+                                enabled = !isZoomed,
+                                // #813 — user refresh also clears + re-probes failed media
+                                // measurements.
+                                onRefresh = refreshWithMediaRetry,
+                            ),
                     ) {
                         // #300/#351 — the intra-page scrollbar now rides inside PostListScaffold
                         // (overlaying the list's right edge, outside the scrolled element), so the
@@ -1123,11 +1166,17 @@ internal fun TopicContent(
                         // is provided to the post renderers so QuoteBlock masks a citation OF a
                         // blocked author. Scoped to the reading list only — the quick-reply sheet
                         // and editor previews (outside this provider) keep the empty default.
-                        CompositionLocalProvider(LocalBlockedQuoteAuthors provides mode.blockedQuoteAuthors) {
+                        // #946 — LocalTopicZoomed is deliberately NOT provided here any more :
+                        // its only consumer was the `selectable` flip, whose structural swap
+                        // destroyed the posts' saveable state on every zoom engage.
+                        CompositionLocalProvider(
+                            LocalBlockedQuoteAuthors provides mode.blockedQuoteAuthors,
+                        ) {
                             TopicLoadedContent(
                                 state = state,
                                 topic = mode.topic,
                                 hiddenNumreponses = mode.hiddenNumreponses,
+                                zoomState = zoomState,
                                 // #604 lot 2 / #806 — « Citer » opens the quick-reply sheet with the
                                 // card pre-armed (1-citation session), unless the preset routes any
                                 // citation to the full-screen editor (decision at tap time). #843 —
@@ -1179,6 +1228,51 @@ internal fun TopicContent(
                                 mediaRefreshGeneration = mediaRefreshGeneration,
                             )
                         }
+                        PullToRefreshDefaults.Indicator(
+                            state = pullToRefreshState,
+                            isRefreshing = state.isRefreshing,
+                            modifier = Modifier.align(Alignment.TopCenter),
+                        )
+                        if (isZoomed) {
+                            // #182 — discreet, always-visible reset affordance while zoomed
+                            // (contract RESET). Chrome: stays OUTSIDE the zoomed layer.
+                            val zoomResetDescription = stringResource(R.string.topic_zoom_reset)
+                            Surface(
+                                onClick = {
+                                    // Anchored on the viewport centre: the content the reader is
+                                    // looking at stays put while the scale animates back to 1×.
+                                    zoomState.settleAnchoredTo(
+                                        targetScale = 1f,
+                                        anchorX = zoomState.viewportWidthPx / 2f,
+                                        anchorY = zoomState.viewportHeightPx / 2f,
+                                        listState = listState,
+                                    )
+                                },
+                                shape = MaterialTheme.shapes.large,
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                shadowElevation = 3.dp,
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(12.dp)
+                                    // #937 — a11y : 48 dp minimum touch target, named action,
+                                    // explicit button role (validation 5.5).
+                                    .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+                                    .semantics {
+                                        contentDescription = zoomResetDescription
+                                        role = Role.Button
+                                    },
+                            ) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
+                                ) {
+                                    Text(
+                                        text = stringResource(R.string.topic_zoom_reset_chip),
+                                        style = MaterialTheme.typography.labelLarge,
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1192,10 +1286,21 @@ internal fun TopicContent(
             onEscalate = { quotes ->
                 quickReplyFor = null
                 // #843 — genuine escalation: resumeSharedDraft = true (silent append), NOT the cold
-                // onReply path which surfaces the restore banner.
-                onEscalateToFullEditor(launch.request.subcat, launch.request.page, quotes)
+                // onReply path which surfaces the restore banner. #868-#870 — the escalated editor
+                // inherits this session's basket consumption.
+                onEscalateToFullEditor(
+                    launch.request.subcat,
+                    launch.request.page,
+                    quotes,
+                    launch.consumesBasket,
+                )
             },
             onSubmitted = { targetPage, scrollTo ->
+                // #868/#869 — a SUCCESSFUL send of a basket-consuming session (« Citer N » ≤ 2)
+                // finally consumes the selection ; a dismiss/cancel above never does.
+                if (launch.consumesBasket) {
+                    onClearMultiQuote()
+                }
                 quickReplyFor = null
                 onQuickReplySubmitted(targetPage, scrollTo)
             },
@@ -1645,6 +1750,9 @@ private fun TopicLoadedContent(
     /** #879 — filtered search : « résultats suivants » footer tap. */
     onSearchNextResults: () -> Unit = {},
     listState: LazyListState,
+    // POC #182 (#935) — magnifier state: the gesture + draw layer attach to the list here, and
+    // swipe/double-tap/list-scroll are suspended while zoomed.
+    zoomState: TopicZoomState,
     // #291 — selection state + toggle for the post menu's multi-quote entry.
     multiQuoteSelection: List<Int> = emptyList(),
     onToggleMultiQuote: (preview: QuotedPostPreview) -> Unit = {},
@@ -1738,7 +1846,11 @@ private fun TopicLoadedContent(
     // interrupting the transition → frozen screen. The lambda reads `lifecycle.currentState` live, so
     // the gesture (whose pointerInput does not re-key on this) always sees the current state.
     val entryLifecycle = LocalLifecycleOwner.current.lifecycle
-    val swipeEnabled: () -> Boolean = { entryLifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) }
+    // POC #182 — the page swipe (and its edge hint) are suspended while zoomed. Gesture-time read
+    // through the lambda: no recomposition per pinch frame.
+    val swipeEnabled: () -> Boolean = {
+        entryLifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && !zoomState.zoomed
+    }
     // #752 — system-gesture band widths for the swipe's start dead-zone, resolved here (composable)
     // and handed as ALWAYS-FRESH lambdas (rememberUpdatedState) so the currentPage-keyed
     // pointerInput sees rotation/split-screen changes ; px conversion happens per gesture.
@@ -1757,8 +1869,13 @@ private fun TopicLoadedContent(
     // (#300/#351). The swipe machinery stays feature-owned and is threaded through `listModifier`,
     // applied to the LazyColumn itself (so the list follows the finger and the scrollbar overlay stays
     // fixed); the contentPadding / verticalArrangement / scrollbar gate are passed unchanged.
+    // POC #182 — native list scrolling is suspended while zoomed: the vertical axis is driven by
+    // the magnifier's controlled dispatchRawDelta (screen deltas divided by scale — 1:1 under the
+    // finger). derivedStateOf: recomposes on the 1× ↔ zoomed transition only.
+    val zoomSuspendsScroll by remember(zoomState) { derivedStateOf { zoomState.zoomed } }
     PostListScaffold(
         listState = listState,
+        userScrollEnabled = !zoomSuspendsScroll,
         // #283 — extra bottom padding so the last post's right-aligned actions clear the floating
         // bottom-action cluster (the Scaffold FAB slot floats over the content). Harmless extra
         // breathing room when the cluster is absent (anon + single page).
@@ -1769,6 +1886,12 @@ private fun TopicLoadedContent(
         // a denser feed, cf. the #287 density feedback).
         verticalArrangement = Arrangement.spacedBy(8.dp),
         listModifier = Modifier
+            // POC #182 (#935) — the magnifier gesture listens FIRST (Initial pass) so that, once
+            // pinching, consuming the moves starves the sibling swipe / child scrollers below. It
+            // must also sit BEFORE the zoom graphicsLayer at the end of this chain: centroids are
+            // read in the untransformed local space that TopicZoomMath models (same coordinate
+            // rule as topicPageSwipe).
+            .topicMagnifier(zoomState, listState)
             // #285 — system-bar insets (status + navigation) are now consumed by the Scaffold/TopAppBar
             // in TopicContent and applied via the content Surface's padding(innerPadding); the list no
             // longer adds statusBarsPadding()/navigationBarsPadding() here to avoid double-insetting.
@@ -1818,10 +1941,30 @@ private fun TopicLoadedContent(
             .pointerInput(Unit) {
                 detectTapGestures(
                     onDoubleTap = {
-                        haptics.performHapticFeedback(HapticFeedbackType.Confirm)
-                        onDoubleTapRefresh()
+                        // #182 — double-tap refresh is suspended while zoomed (contract ZOOMÉ).
+                        // The magnifier already consumes the down on its Initial pass while
+                        // zoomed (replied mode), so this guard is DEFENSE IN DEPTH — it keeps
+                        // the suspension correct even if the modifier stacking ever changes.
+                        if (!zoomState.zoomed) {
+                            haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+                            onDoubleTapRefresh()
+                        }
                     },
                 )
+            }
+            // POC #182 — the zoom draw layer, LAST in the chain (innermost): the magnifier and the
+            // swipe read their pointers in untransformed space, and the swipe's own translation
+            // layer (identity while zoomed — the swipe is suspended) composes OUTSIDE this scale.
+            // Top-left origin per the contract; scale/panX are frame-state reads (no recomposition).
+            .graphicsLayer {
+                val zoomScale = zoomState.scale.floatValue
+                scaleX = zoomScale
+                scaleY = zoomScale
+                translationX = zoomState.panX.floatValue
+                // Bounded complement of the real scroll at the bottom edge (contract amendment,
+                // POC iter 1) — never exposes uncomposed content, see TopicZoomState.panY.
+                translationY = zoomState.panY.floatValue
+                transformOrigin = TransformOrigin(0f, 0f)
             },
     ) {
         item {
@@ -1877,7 +2020,9 @@ private fun TopicLoadedContent(
             // Phase 2D (#147) — « Modifier » is exposed by HFR only on the
             // user's own posts of an unlocked topic. Same canReply gate as
             // Citer (#213) to refuse a read-only topic (no reply form).
-            val editAction: (() -> Unit)? = if (shouldShowEditAction(topic, post, state.isAuthenticated)) {
+            val editAction: (() -> Unit)? = if (
+                shouldShowEditAction(topic, post, state.isAuthenticated, state.connectedPseudo)
+            ) {
                 { onEdit(topic.subcat, topic.page, post.numreponse) }
             } else {
                 null
@@ -1998,7 +2143,7 @@ private fun TopicLoadedContent(
         val menuDeleteAction: (() -> Unit)? = if (
             state.deletingNumreponse == null &&
             !isFirstPostOfTopic(topic, post) &&
-            shouldShowDeleteAction(topic, post, state.isAuthenticated)
+            shouldShowDeleteAction(topic, post, state.isAuthenticated, state.connectedPseudo)
         ) {
             { onDeleteRequest(post.numreponse) }
         } else {
@@ -2010,7 +2155,7 @@ private fun TopicLoadedContent(
         // so its natural home is that post's contextual menu.
         val menuEditFirstPostAction: (() -> Unit)? = if (
             isFirstPostOfTopic(topic, post) &&
-            shouldShowEditFirstPost(topic, state.isAuthenticated)
+            shouldShowEditFirstPost(topic, state.isAuthenticated, state.connectedPseudo)
         ) {
             { onEditFirstPost(topic.subcat, topic.page, topic.posts.first().numreponse) }
         } else {
@@ -2035,7 +2180,9 @@ private fun TopicLoadedContent(
             },
             // #792 — « Envoyer un MP » : auth-gated, never on own posts, real profiles only
             // (« Publicité » rows are not messageable). Carries the author pseudo to `:app`.
-            onSendPrivateMessage = if (shouldShowSendPrivateMessage(post, state.isAuthenticated)) {
+            onSendPrivateMessage = if (
+                shouldShowSendPrivateMessage(post, state.isAuthenticated, state.connectedPseudo)
+            ) {
                 { onSendPrivateMessage(post.author) }
             } else {
                 null
@@ -2052,7 +2199,9 @@ private fun TopicLoadedContent(
             // either way `numreponse in hiddenNumreponses` tells whether the author is blacklisted, so
             // the entry flips between Masquer / Ne plus masquer. Hidden for the user's own posts.
             authorBlocked = post.numreponse in hiddenNumreponses,
-            onToggleBlockAuthor = if (post.isOwnPost) {
+            // #509 + #545 — never offer self-masking, including when the toolbar-blind parser
+            // could not flag the post as own (affichoutils=0 profiles).
+            onToggleBlockAuthor = if (isOwnPostEffective(post, state.connectedPseudo)) {
                 null
             } else {
                 { onSetAuthorBlocked(post.author, post.numreponse !in hiddenNumreponses) }
@@ -2644,6 +2793,12 @@ internal fun TopicPostCard(
                 CompositionLocalProvider(LocalPostImageActions provides imageActions) {
                     PostRenderer(
                         content = post.content,
+                        // #946 — `selectable` must NOT depend on the zoom: flipping it swaps the
+                        // SelectionContainer in/out of the tree, which STRUCTURALLY recreates the
+                        // whole post subtree and throws away every rememberSaveable below it (the
+                        // expanded long quotes collapsed on pinch, proven by the field logs and
+                        // TopicZoomQuoteFoldTest). Selection stays inert at >1× anyway: the
+                        // magnifier consumes the down (replied mode), no selection can start.
                         selectable = true,
                         onGoToCitedPost = onGoToCitedPost,
                         mediaRefreshGeneration = mediaRefreshGeneration,
@@ -3439,6 +3594,13 @@ private fun ReplyFab(onClick: () -> Unit) {
 internal data class QuickReplyLaunch(
     val request: QuickReplyRequest,
     val initialQuotes: List<QuotedPostPreview> = emptyList(),
+    /**
+     * #868-#870 — true only when this opening consumed the hoisted multi-quote basket
+     * (« Citer N » under the sheet threshold) : a successful submit of THIS session (or of its
+     * full-screen escalation) then empties the basket. « Citer » simple and the reply FAB leave
+     * the basket alone — they never shipped it.
+     */
+    val consumesBasket: Boolean = false,
 )
 
 /** #806 — the two composition surfaces a write tap can open. */
@@ -3448,12 +3610,12 @@ internal enum class WritingSurface { SHEET, FULL_EDITOR }
  * #806 — which surface a write tap opens, from the user's [preset] and the number of citations the
  * tap carries (0 for the reply FAB, 1 for « Citer », the basket size for « Citer N »).
  *
- * - [WritingSurfacePreset.SHEET] (default) keeps the 0.25.1 routing exactly : the quick-reply
- *   sheet, except a multi-quote basket of [MULTI_QUOTE_FULL_EDITOR_THRESHOLD]+ cards (mockup P3 :
- *   « le cas qui force le plein écran », #604 lot 3) — up to that the sheet stays comfortable with
- *   the keyboard open.
+ * - [WritingSurfacePreset.SHEET] (experimental opt-in, #951) keeps the 0.25.1 routing exactly :
+ *   the quick-reply sheet, except a multi-quote basket of [MULTI_QUOTE_FULL_EDITOR_THRESHOLD]+
+ *   cards (mockup P3 : « le cas qui force le plein écran », #604 lot 3) — up to that the sheet
+ *   stays comfortable with the keyboard open.
  * - [WritingSurfacePreset.SHEET_EXCEPT_QUOTES] : any citation (1..N) opens the full-screen editor.
- * - [WritingSurfacePreset.FULL_EDITOR] : always the full-screen editor.
+ * - [WritingSurfacePreset.FULL_EDITOR] (default since #951) : always the full-screen editor.
  *
  * Pure so the routing table is unit-testable ([MultiQuoteRoutingTest]).
  */
@@ -3497,11 +3659,25 @@ internal fun shouldShowQuoteAction(topic: Topic, isAuthenticated: Boolean): Bool
 // logged-in surface), never on the user's own posts, and only for authors with a real HFR
 // profile (`profileId != null` : « Publicité » rows and anonymous reads are not messageable —
 // same gate as the profile hero). Topic lock is irrelevant : the MP leaves the topic entirely.
-internal fun shouldShowSendPrivateMessage(post: Post, isAuthenticated: Boolean): Boolean =
-    isAuthenticated && !post.isOwnPost && post.profileId != null
+internal fun shouldShowSendPrivateMessage(
+    post: Post,
+    isAuthenticated: Boolean,
+    connectedPseudo: String?,
+): Boolean =
+    isAuthenticated && !isOwnPostEffective(post, connectedPseudo) && post.profileId != null
 
-internal fun shouldShowEditAction(topic: Topic, post: Post, isAuthenticated: Boolean): Boolean =
-    post.isEditable && topic.canReply && isAuthenticated
+// #545 — `post.isEditable` is blind when the profile disables « Affichage des outils »
+// (affichoutils=0 : HFR strips the whole toolbar), so ownership-by-pseudo is an OR-fallback.
+// HFR's edit form itself works regardless of the option — only the link was missing.
+internal fun shouldShowEditAction(
+    topic: Topic,
+    post: Post,
+    isAuthenticated: Boolean,
+    connectedPseudo: String?,
+): Boolean =
+    (post.isEditable || isOwnPostBySession(post, connectedPseudo)) &&
+        topic.canReply &&
+        isAuthenticated
 
 // #292 — « Supprimer » shares the « Modifier » gate: HFR exposes deletion through the same edit
 // form, so any post the user can edit, they can delete. The first-post exclusion (deleting it would
@@ -3515,8 +3691,15 @@ internal fun shouldShowEditAction(topic: Topic, post: Post, isAuthenticated: Boo
 internal fun shouldShowLastReadMarker(request: TopicRequest, numreponse: Int): Boolean =
     request.forceRefresh && request.scrollTo == numreponse
 
-internal fun shouldShowDeleteAction(topic: Topic, post: Post, isAuthenticated: Boolean): Boolean =
-    post.isEditable && topic.canReply && isAuthenticated
+internal fun shouldShowDeleteAction(
+    topic: Topic,
+    post: Post,
+    isAuthenticated: Boolean,
+    connectedPseudo: String?,
+): Boolean =
+    (post.isEditable || isOwnPostBySession(post, connectedPseudo)) &&
+        topic.canReply &&
+        isAuthenticated
 
 // #292 — the topic's first post is `topic.posts.first()` on page 1. Deleting it would remove the whole
 // topic (out of scope for this MVP), so the call site excludes it from the delete affordance. Position
@@ -3528,10 +3711,19 @@ internal fun isFirstPostOfTopic(topic: Topic, post: Post): Boolean =
 // Phase 2D #148 / #220 — « Modifier le premier message ». 6-way conjunction by design: auth,
 // FP ownership, postable topic, a real sub-category (FP recategorise is NOT relaxed for subcat=0,
 // cf. #213), page 1 (the FP lives there), non-empty posts. Each clause guards a distinct invariant.
+// #545 — `isFirstPostOwner` is parser-derived from the FIRST post's edit link, itself absent for
+// affichoutils=0 profiles ; ownership-by-pseudo of that same first post is the OR-fallback.
 @Suppress("ComplexCondition")
-internal fun shouldShowEditFirstPost(topic: Topic, isAuthenticated: Boolean): Boolean =
+internal fun shouldShowEditFirstPost(
+    topic: Topic,
+    isAuthenticated: Boolean,
+    connectedPseudo: String?,
+): Boolean =
     isAuthenticated &&
-        topic.isFirstPostOwner &&
+        (
+            topic.isFirstPostOwner ||
+                topic.posts.firstOrNull()?.let { isOwnPostBySession(it, connectedPseudo) } == true
+            ) &&
         topic.canReply &&
         topic.subcat > 0 &&
         topic.page == 1 &&

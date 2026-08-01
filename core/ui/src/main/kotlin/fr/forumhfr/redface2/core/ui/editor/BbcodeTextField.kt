@@ -32,12 +32,14 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.isFinite
 
@@ -106,29 +108,63 @@ fun BbcodeTextField(
     autoFocus: Boolean = false,
 ) {
     if (fillViewport) {
+        // #872 — the label is PINNED above the scrollable viewport instead of floating on the
+        // field's top border. The floating label lives inside the #275/#410 viewport, so any
+        // scroll (typically #447/#880's open-time bring-into-view of an end-of-text caret in a
+        // compressed editor) could park it half-clipped at the viewport's top edge — thibw's
+        // « Contenu BBCode » truncated at fontScale 1 whenever the draft banner compressed the
+        // field. A pinned line is immune to the viewport's scroll at any fontScale (a very long
+        // label on a narrow display ellipsizes horizontally instead of clipping glyphs); the
+        // field keeps its placeholder, an ACCESSIBLE name (gate Sol : the DecorationBox no
+        // longer carries the label, so the impl merges it as contentDescription), and the focus
+        // colour still flows into the pinned line through the hoisted interactionSource.
+        val interactionSource = remember { MutableInteractionSource() }
+        val isFocused by interactionSource.collectIsFocusedAsState()
+        // The bounded-height contract is checked on the CALLER's constraints (gate Sol : an inner
+        // weighted box would see post-measure constraints and could let an unbounded host through).
         BoxWithConstraints(modifier = modifier) {
             require(maxHeight.isFinite) {
                 "BbcodeTextField(fillViewport = true) requires a bounded-height host " +
                     "(weighted/fixed box) — an unbounded host would nest two unbounded " +
                     "same-direction scrollables and break the heightIn(min) contract."
             }
-            val viewportMinHeight = maxHeight
-            Column(
-                modifier = Modifier
-                    .verticalScroll(rememberScrollState())
-                    .testTag(BBCODE_FIELD_VIEWPORT_TAG),
-            ) {
-                BbcodeFieldImpl(
-                    value = value,
-                    onValueChange = onValueChange,
-                    label = label,
-                    placeholder = placeholder,
-                    readOnly = readOnly,
-                    autoFocus = autoFocus,
+            Column {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (isFocused) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = viewportMinHeight),
+                        .padding(bottom = 4.dp)
+                        .testTag(BBCODE_FIELD_PINNED_LABEL_TAG),
                 )
+                BoxWithConstraints(modifier = Modifier.weight(1f)) {
+                    val viewportMinHeight = maxHeight
+                    Column(
+                        modifier = Modifier
+                            .verticalScroll(rememberScrollState())
+                            .testTag(BBCODE_FIELD_VIEWPORT_TAG),
+                    ) {
+                        BbcodeFieldImpl(
+                            value = value,
+                            onValueChange = onValueChange,
+                            label = label,
+                            floatingLabel = false,
+                            placeholder = placeholder,
+                            readOnly = readOnly,
+                            autoFocus = autoFocus,
+                            interactionSource = interactionSource,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = viewportMinHeight),
+                        )
+                    }
+                }
             }
         }
     } else {
@@ -147,6 +183,9 @@ fun BbcodeTextField(
 /** Test tag of the #275/#410 scrollable viewport wrapping the grown field. */
 const val BBCODE_FIELD_VIEWPORT_TAG = "bbcode_field_viewport"
 
+/** Test tag of the #872 pinned label rendered ABOVE the viewport in `fillViewport` mode. */
+const val BBCODE_FIELD_PINNED_LABEL_TAG = "bbcode_field_pinned_label"
+
 @Suppress("LongParameterList") // Compose component impl: mirrors BbcodeTextField's idiomatic surface
 // (value/onValueChange/label/placeholder/modifier + readOnly) — a config holder would hurt clarity.
 @Composable
@@ -158,9 +197,16 @@ private fun BbcodeFieldImpl(
     modifier: Modifier,
     readOnly: Boolean = false,
     autoFocus: Boolean = false,
+    // #872 — false in fillViewport mode: the label is pinned OUTSIDE the scrollable by the
+    // caller, so the decoration renders no floating label (and needs no headroom reservation);
+    // the label then reaches assistive tech as the field's contentDescription instead of the
+    // DecorationBox's merged label node.
+    floatingLabel: Boolean = true,
+    // #872 — hoisted by the fillViewport wrapper so the pinned label can mirror the focus colour.
+    interactionSource: MutableInteractionSource? = null,
 ) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isFocused by interactionSource.collectIsFocusedAsState()
+    val fieldInteractions = interactionSource ?: remember { MutableInteractionSource() }
+    val isFocused by fieldInteractions.collectIsFocusedAsState()
     val bringCursorIntoView = remember { BringIntoViewRequester() }
     val focusRequester = remember { FocusRequester() }
     var textLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
@@ -201,12 +247,14 @@ private fun BbcodeFieldImpl(
     // minimized label renders at bodySmall (sp), so the historical 8.dp reservation (M3's own
     // `OutlinedTextFieldTopPadding`) clips its top at fontScale > 1 — thibw's truncated
     // « Contenu BBCode ». Half the label's line height equals exactly 8.dp at fontScale 1
-    // (16.sp / 2) and stretches with the user's setting beyond it.
+    // (16.sp / 2) and stretches with the user's setting beyond it. No label (fillViewport mode :
+    // the caller pins it outside the scrollable) → nothing floats, no headroom.
     val labelLineHeight = MaterialTheme.typography.bodySmall.lineHeight
-    val labelHeadroom = if (labelLineHeight.isSp) {
-        with(LocalDensity.current) { (labelLineHeight / 2).toDp() }.coerceAtLeast(8.dp)
-    } else {
-        8.dp
+    val labelHeadroom = when {
+        !floatingLabel -> 0.dp
+        labelLineHeight.isSp ->
+            with(LocalDensity.current) { (labelLineHeight / 2).toDp() }.coerceAtLeast(8.dp)
+        else -> 8.dp
     }
     BasicTextField(
         value = value,
@@ -216,7 +264,13 @@ private fun BbcodeFieldImpl(
         // reserves headroom above the box for the floating label's upper half — without it the
         // minimized label is clipped at the top (cf. labelHeadroom above).
         modifier = modifier
-            .semantics(mergeDescendants = true) {}
+            .semantics(mergeDescendants = true) {
+                // #872 — pinned-label mode : the DecorationBox no longer carries the label, so
+                // the field itself must expose its accessible name (gate Sol). TalkBack then
+                // announces « <label>, <valeur>, zone d'édition » ; the editable value is NOT
+                // masked (contentDescription complements EditableText on text fields).
+                if (!floatingLabel) contentDescription = label
+            }
             .padding(top = labelHeadroom)
             .focusRequester(focusRequester),
         // M3 OutlinedTextField defaults the content to LocalTextStyle coloured onSurface and
@@ -229,7 +283,7 @@ private fun BbcodeFieldImpl(
         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
         minLines = 5,
         onTextLayout = { textLayout = it },
-        interactionSource = interactionSource,
+        interactionSource = fieldInteractions,
         cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
         decorationBox = { innerTextField ->
             OutlinedTextFieldDefaults.DecorationBox(
@@ -244,8 +298,8 @@ private fun BbcodeFieldImpl(
                 enabled = true,
                 singleLine = false,
                 visualTransformation = VisualTransformation.None,
-                interactionSource = interactionSource,
-                label = { Text(label) },
+                interactionSource = fieldInteractions,
+                label = if (floatingLabel) ({ Text(label) }) else null,
                 placeholder = placeholder?.let { hint -> { Text(hint) } },
             )
         },

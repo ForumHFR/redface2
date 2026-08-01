@@ -545,6 +545,50 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `state carries the connected pseudo for the ownership fallback (#545)`() = runTest {
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"))
+        val vm = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = auth,
+        )
+        assertEquals("xaat", vm.state.value.connectedPseudo)
+
+        auth.emit(AuthState.Anonymous) // logout → the fallback must stop matching anything
+        assertEquals(null, vm.state.value.connectedPseudo)
+    }
+
+    @Test
+    fun `DeletePost proceeds for an own-by-pseudo post without an edit link (#545)`() = runTest {
+        // affichoutils=0 : the toolbar (and its edit link) is absent, so isEditable=false even on
+        // the user's own post. Ownership-by-pseudo must let the deletion through.
+        val loaded = fakeTopic(
+            page = 2,
+            totalPages = 3,
+            posts = listOf(fakePost(numreponse = 777, isEditable = false, author = "xaat")),
+        )
+        val refreshed = fakeTopic(page = 2, totalPages = 3, title = "refreshed")
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(loaded) }),
+            refreshTopicsToReturn = listOf(refreshed),
+        )
+        val deleteRepo = FakeDeletePostRepository(DeletePostResult.Success(deletedWholeTopic = false))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            deletePostRepository = deleteRepo,
+        )
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.DeletePost(777))
+            assertEquals(TopicEffect.PostDeleted, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(777, deleteRepo.calls.single().numreponse)
+    }
+
+    @Test
     fun `state topBarAutoHide reflects the user preference (build 89)`() = runTest {
         val on = topicViewModel(
             request = topicRequest(page = 1),
@@ -638,7 +682,7 @@ class TopicViewModelTest {
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
             userPreferencesRepository = FakeUserPreferencesRepository(),
         )
-        assertEquals(WritingSurfacePreset.SHEET, default.state.value.writingSurfacePreset)
+        assertEquals(WritingSurfacePreset.FULL_EDITOR, default.state.value.writingSurfacePreset)
     }
 
     @Test
@@ -3682,8 +3726,9 @@ internal class FakeUserPreferencesRepository(
     private val confirmBeforePosting: Boolean = false,
     // #805 — quote rendering in the composer; false mirrors the production default (inline BBCode).
     private val quoteCardsEnabled: Boolean = false,
-    // #806 — writing-surface preset; SHEET mirrors the production default (0.25.1 behaviour).
-    private val writingSurfacePreset: WritingSurfacePreset = WritingSurfacePreset.SHEET,
+    // #951 — writing-surface preset; FULL_EDITOR mirrors the production default (the
+    // quick-reply sheet is experimental opt-in).
+    private val writingSurfacePreset: WritingSurfacePreset = WritingSurfacePreset.FULL_EDITOR,
 ) : UserPreferencesRepository {
     override fun observeProxyConfig(): Flow<ProxyConfig> = MutableStateFlow(ProxyConfig())
 

@@ -651,7 +651,7 @@ class TopicRepositoryImplTest {
 
         // #806 — writing surface is irrelevant to TopicRepositoryImpl; stubbed at its default.
         override fun observeWritingSurfacePreset(): Flow<WritingSurfacePreset> =
-            MutableStateFlow(WritingSurfacePreset.SHEET)
+            MutableStateFlow(WritingSurfacePreset.FULL_EDITOR)
 
         override suspend fun setWritingSurfacePreset(preset: WritingSurfacePreset) = Unit
 

@@ -117,6 +117,8 @@
     <string name="topic_poll_show">(afficher)</string>
     <string name="topic_poll_hide">(masquer)</string>
     <string name="topic_retry">Réessayer</string>
+    <string name="topic_zoom_reset_chip">1×</string>
+    <string name="topic_zoom_reset">Revenir au zoom normal</string>
     <string name="topic_page_previous">Précédent</string>
     <string name="topic_page_next">Suivant</string>
     <string name="topic_page_indicator">page %1$d / %2$d</string>
