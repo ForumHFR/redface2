@@ -16,6 +16,47 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.34.1` — `internal` (dev) — 2026-07-20
+
+Le renderer segmenté branché — Lot 1B (#957, PR #966), le lot visible de la passe
+images (#876, contrat v1.4).
+
+- Modifié : la topologie inline/bloc des images est désormais STRUCTURELLE (§2) — les
+  galeries deviennent des colonnes de blocs espacés de 8 dp (fini le collage B3), les
+  petites images isolées deviennent des blocs à taille native, les images en pleine
+  phrase restent dans le flux du texte (fini la rupture de paragraphe), les fragments
+  de texte entre galeries survivent à leur place (le tout-ou-rien tinc est mort).
+- Ajouté : respiration de 4 dp de chaque côté des images de contenu dans la prose (§4) ;
+  boîte d'attente déterministe des blocs non mesurés (cold §6, plafond fenêtre v1.4) ;
+  le rafraîchissement explicite (#813) recrée aussi les painters des blocs.
+- Retiré : la promotion mesurée (#224 option B) et ses seuils — la mesure ne fait plus
+  que dimensionner.
+- Verdicts banc S10e (topic 148760) : structure 2.7/3.1/3.x/4.x/5.x/8.x/13.1 verte,
+  témoins #175/#256 inchangés ; B1/B4 partiels attendus (Lot 3), B5 au Lot 4.
+- Gate GPT-5.6 Sol : GO au r3 (2 NO-GO instructifs, dont un vrai bug §4 corrigé avant
+  merge). 427 tests :core:ui.
+
+## `0.34.0` — `internal` (dev) — 2026-07-20
+
+Premier lot applicatif de la passe images (#876, contrat v1.4 gelé) — Lot 1A (#956, PR #964).
+
+- Ajouté : policy pure de segmentation `InlineSegment`/`MediaRun` (topologie inline/bloc
+  décidée par la structure de l'AST, contrat §2) + 48 tests dont 14 sur la fixture réelle
+  du banc images (topic 148760, 45 cas). AUCUN changement visuel : la policy n'est pas
+  encore branchée au renderer (Lot 1B).
+- Fixture `topic_page_banc_images_876.html` + provenance ; divergence de canal de capture
+  fichée #963.
+
+## `0.33.0` — `internal` (dev) — 2026-07-19
+
+Premier lot du chantier « barres » #882 (P1) — deux reviews indépendantes (Codex GO + code-review
+multi-agents, aucune issue retenue).
+
+- Vue Topic : la **rangée d'actions du post** (Répondre, Citer, etc.) passe à une hauteur de
+  **48 dp réels** (cible tactile conforme) et la **pill dynamique « Ajouté à la citation »** est
+  supprimée. Résultat : **zéro décalage de mise en page** au tap « + Citer » (plus de saut du post)
+  et un gain d'environ **16 dp par post** en préset Confort.
+
 ## `0.32.0` — `internal` (dev) — 2026-07-15
 
 Décision produit #951 : la feuille de réponse rapide n'est pas correctement terminée.

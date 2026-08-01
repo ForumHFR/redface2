@@ -23,7 +23,8 @@ import java.time.Instant
 
 /**
  * #436 — the per-post « + » multi-quote affordance in [TopicPostCard]'s footer (RF1 quote+/quote-
- * parity). The card already received the SELECTED state (border + pill, #436 lot 1) ; this proves
+ * parity). The card already received the SELECTED state (border, #436 lot 1 ; the dynamic pill was
+ * dropped by #882 P1 — cf. [TopicPostActionsRowTest]) ; this proves
  * the new ACTION: it shows under the same gate as « Citer », flips its label/contentDescription on
  * membership, and fires the toggle on tap. Pure UI behaviour — the visibility gate itself
  * (`shouldShowQuoteAction`) is unit-tested in [TopicActionGatesTest] ; here we pin the wiring that

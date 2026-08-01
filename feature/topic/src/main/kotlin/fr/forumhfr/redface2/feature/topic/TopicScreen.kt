@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -710,8 +711,9 @@ private fun RemoveTopicFlagConfirmDialog(
  * #197 — keep [target] anchored at the top of the viewport while upstream block images settle.
  *
  * An UNMEASURED `PostBlock.Image` (cold intrinsic cache) renders a `SubcomposeAsyncImage` that
- * starts at `blockImageMinHeight` (160.dp) while loading/erroring and settles to its exact
- * web-parity box (`blockImageDisplaySize`, ≤ 200.dp tall since #610) once the intrinsic size lands.
+ * starts in the deterministic §6 COLD slot (`coldBlockSlotDp`, since #957 — formerly the
+ * `blockImageMinHeight` 160.dp grow-on-load slot) while loading/erroring and settles to its exact
+ * web-parity box (`blockImageDisplaySize`) once the intrinsic size lands.
  * Any block image in a post *above* the deep-link target shifts the cumulative scroll offset (in
  * either direction) *after* the initial one-shot `scrollToItem`, leaving the target scrolled
  * off-screen. A warm cache sizes the box exactly before the first measure (#249), which is why #197
@@ -2631,7 +2633,7 @@ private fun CreatorPseudoText(author: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-// Rich post card : each optional affordance (multi-quote border + pill + « + »
+// Rich post card : each optional affordance (multi-quote border + « + »
 // toggle, citation badge, profile tap, contextual menu, edit, quote) is its own guarded branch, so
 // the cyclomatic count is inherently high — same call as PostRenderer. Splitting it would scatter a
 // single visual unit across helpers. LongParameterList : state-hoisted, each param has a distinct
@@ -2679,9 +2681,10 @@ internal fun TopicPostCard(
     onOpenMenu: () -> Unit = {},
     /**
      * #436 — true when this post sits in the multi-quote basket (#291). Marks the card with a
-     * primary border + an « Ajouté à la citation » pill rendered BELOW the identity band (moved out of
-     * the band so it no longer grows it on selection), so the selection is visible without opening the
-     * per-post menu (dev feedback by Dintr-un lemn).
+     * primary border and flips the footer toggle to « ✓ Cité », so the selection is visible without
+     * opening the per-post menu (dev feedback by Dintr-un lemn). The dynamic « Ajouté à la citation »
+     * pill was DROPPED (#882 P1): it grew the card on every tap and shifted the whole content below
+     * it — the border + button flip + TalkBack `selected` state carry the signal without layout shift.
      */
     multiQuoteSelected: Boolean = false,
     /**
@@ -2689,7 +2692,7 @@ internal fun TopicPostCard(
      * (RF1 quote+/quote- parity), without opening the « … » menu. Null under the same gate as
      * « Citer » (a non-postable topic has nothing to quote), so the « + » action and « Citer »
      * appear together or not at all. The same [multiQuoteSelected] flag drives the glyph/label
-     * here, the border, and the pill — one source of truth, they can never desynchronise.
+     * here and the border — one source of truth, they can never desynchronise.
      */
     onToggleMultiQuote: (() -> Unit)? = null,
     /**
@@ -2719,7 +2722,9 @@ internal fun TopicPostCard(
     // once so the body slot knows whether the footer slot will render (it owns the card's bottom
     // padding when there is no footer, so the body↔card bottom gap stays exactly m.cardBodyBottom).
     val hasFooter = onQuote != null || onEdit != null || onToggleMultiQuote != null
-    val hasBadges = citedCount > 0 || multiQuoteSelected
+    // #882 P1 — only the STABLE citation-count pill gates the badges strip now: the dynamic
+    // « Ajouté à la citation » pill is gone, so multi-quote selection never grows the card.
+    val hasBadges = citedCount > 0
     PostCardShell(
         // #436 — multi-quote selection outline (lot 1), unchanged.
         border = if (multiQuoteSelected) {
@@ -2752,15 +2757,14 @@ internal fun TopicPostCard(
                 )
             }
         },
-        // #436/#476 follow-up (XaTriX) — citation + multi-quote pills sit OUT of the identity band (the
-        // secondaryContainer Surface above): when the « Ajouté à la citation » pill appeared inside the
-        // band, the coloured band itself grew taller (« pop »). On the shell's badges slot — the neutral
-        // card surface just below the band — the band keeps a FIXED height; only the neutral area grows.
+        // #239/#863 — the citation-count pill sits OUT of the identity band (the secondaryContainer
+        // Surface above), on the shell's badges slot — the neutral card surface just below the band.
+        // Since #882 P1 this strip is STABLE for a given page: it only carries the server-side
+        // « cité N fois » count, so tapping « + Citer » never adds/removes a pill (no layout shift).
         badges = if (hasBadges) {
             {
                 TopicPostBadges(
                     citedCount = citedCount,
-                    multiQuoteSelected = multiQuoteSelected,
                     horizontalPadding = m.cardBodyHorizontal,
                 )
             }
@@ -2833,15 +2837,13 @@ internal fun TopicPostCard(
                     onEdit = onEdit,
                     onToggleMultiQuote = onToggleMultiQuote,
                     multiQuoteSelected = multiQuoteSelected,
-                    // Reinjected paddings (#351): the actions row keeps the body gutters, a
-                    // m.postSpacing gap above it (the spacing the single body Column used to apply
-                    // between the body content and this row) and the card's m.cardBodyBottom below.
-                    modifier = Modifier.padding(
-                        start = m.cardBodyHorizontal,
-                        top = m.postSpacing,
-                        end = m.cardBodyHorizontal,
-                        bottom = m.cardBodyBottom,
-                    ),
+                    // Reinjected paddings (#351/#882 P1): the actions row keeps the body gutters
+                    // but NO vertical margins any more — the 48 dp M3 touch target of its buttons
+                    // IS the row's layout (the ~14 dp of built-in minimumInteractiveComponentSize
+                    // whitespace around the 20 dp label already provides the breathing room that
+                    // the old m.postSpacing/m.cardBodyBottom paddings duplicated, inflating the
+                    // footer to ~64 dp for 20 dp of useful text).
+                    modifier = Modifier.padding(horizontal = m.cardBodyHorizontal),
                 )
             }
         } else {
@@ -2968,15 +2970,19 @@ private fun TopicPostIdentityHeader(
 }
 
 /**
- * #239/#436/#476 — the citation + multi-quote pill strip rendered (via [PostCardShell]'s badges slot)
- * on the neutral card surface just below the identity band, so a pill appearing/disappearing grows the
- * card downward without resizing the tinted band. The call site renders this only when at least one
- * pill is present (`null` badges slot otherwise), so the strip is never an empty row.
+ * #239/#476 — the citation-count pill strip rendered (via [PostCardShell]'s badges slot) on the
+ * neutral card surface just below the identity band. The call site renders this only when the pill
+ * is present (`null` badges slot otherwise), so the strip is never an empty row.
+ *
+ * #882 P1 — the strip now carries ONLY the stable « cité N fois » pill. The dynamic basket-membership
+ * pill (« Ajouté à la citation », #436) was removed: appearing on tap, it grew the card and shifted
+ * everything below by its own height. The selection signal survives without it — primary card border,
+ * « + Citer » → « ✓ Cité » button flip, and the TalkBack `selected` state on the toggle (all three
+ * live independently of this strip).
  */
 @Composable
 private fun TopicPostBadges(
     citedCount: Int,
-    multiQuoteSelected: Boolean,
     horizontalPadding: Dp,
 ) {
     Row(
@@ -3003,29 +3009,22 @@ private fun TopicPostBadges(
                 )
             }
         }
-        if (multiQuoteSelected) {
-            // #436 — basket-membership pill. primaryContainer : echoes the primary multi-quote
-            // border so the two marks read as one selection signal.
-            Surface(
-                color = MaterialTheme.colorScheme.primaryContainer,
-                shape = MaterialTheme.shapes.small,
-            ) {
-                Text(
-                    text = stringResource(R.string.topic_post_multiquote_selected),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                )
-            }
-        }
     }
 }
+
+/** #882 P1 — test hook for the footer actions row (height / layout-stability assertions). */
+const val TOPIC_POST_ACTIONS_ROW_TAG = "topic_post_actions_row"
 
 /**
  * #146/#147/#436 — the topic post card's footer actions (Modifier / multi-quote « + » / Citer),
  * rendered (via [PostCardShell]'s footer slot) right-aligned and as sober TextButtons so they stay
- * subordinate to the post content. The body↔footer gap and the card's bottom padding ride on
- * [modifier] (reinjected by the call site). « Supprimer » (#292) moved to the contextual menu (#418).
+ * subordinate to the post content. Horizontal gutters ride on [modifier] (reinjected by the call
+ * site). « Supprimer » (#292) moved to the contextual menu (#418).
+ *
+ * #882 P1 — the row IS the 48 dp M3 touch target: no vertical margins are stacked around it any
+ * more (the buttons' own `minimumInteractiveComponentSize` whitespace is the breathing room). The
+ * `heightIn(min = …)` guard is a MINIMUM, never a fixed height: under a large fontScale the grown
+ * buttons make the row taller — labels must never clip.
  */
 // LongParameterList: state-hoisted Composable, each param has a distinct call-site.
 @Suppress("LongParameterList")
@@ -3041,7 +3040,10 @@ private fun TopicPostActions(
     modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .testTag(TOPIC_POST_ACTIONS_ROW_TAG),
         horizontalArrangement = Arrangement.End,
     ) {
         if (onEdit != null) {
@@ -3052,7 +3054,7 @@ private fun TopicPostActions(
         if (onToggleMultiQuote != null) {
             // #436 — per-post add/remove to the multi-quote basket (RF1 quote+/quote- parity), next to
             // « Citer » (same gate). The glyph + word switch on multiQuoteSelected, echoing the card
-            // border + pill. The colour (muted onSurfaceVariant when absent, primary when present) is a
+            // border. The colour (muted onSurfaceVariant when absent, primary when present) is a
             // SECONDARY cue : the « + »/« ✓ » glyph and the word change carry the state without relying
             // on colour. TalkBack reads the long add/remove label via contentDescription, not the glyph.
             val mqContentDesc = stringResource(
@@ -3074,7 +3076,7 @@ private fun TopicPostActions(
                 // #436 — the contentDescription carries the ACTION (« Ajouter/Retirer de la citation
                 // multiple »); `selected` carries the STATE so TalkBack announces « sélectionné »
                 // independently of the action verb (a real toggle, not a one-shot button). Sighted
-                // state stays non-colour-only via the glyph + word + border + pill.
+                // state stays non-colour-only via the glyph + word + border.
                 modifier = Modifier.semantics {
                     contentDescription = mqContentDesc
                     selected = multiQuoteSelected
