@@ -83,21 +83,29 @@ internal sealed interface TopicScrollRestoration {
  *     [TopicScrollRestoration.FollowScrollTo] ;
  *  2. post-submit route (`submitSignal != null`, covers the #344 `ScrollToEndOfPage` path and the
  *     #226 overflow landing) → [TopicScrollRestoration.FollowSubmitLanding] ;
- *  3. saved anchor for the page → [TopicScrollRestoration.RestoreSaved] ;
- *  4. « page précédente » navigation (#412, `previousPageLanding`) →
+ *  3. quote-jump return anchor (#782, `jumpReturnAnchor` — the position captured at the tap that
+ *     started the jump, handed back by the back interception) → [TopicScrollRestoration.RestoreSaved].
+ *     ABOVE the saved anchor on purpose: an intra-page jump overwrites the disposal-saved anchor of
+ *     the same `(cat, post, page)` with the CITED post's position, so on a return the tap-time
+ *     capture is the only truthful one. A return route never carries `scrollTo`/`submitSignal`, so
+ *     in practice this level owns its landing ;
+ *  4. saved anchor for the page → [TopicScrollRestoration.RestoreSaved] ;
+ *  5. « page précédente » navigation (#412, `previousPageLanding`) →
  *     [TopicScrollRestoration.StartAtBottom] ;
- *  5. nothing → [TopicScrollRestoration.StartAtTop].
+ *  6. nothing → [TopicScrollRestoration.StartAtTop].
  *
- * Pure so the five levels are unit-testable without Compose/nav3 (cf. `TopicScrollRestorationTest`).
+ * Pure so the six levels are unit-testable without Compose/nav3 (cf. `TopicScrollRestorationTest`).
  */
 internal fun resolveTopicScrollRestoration(
     scrollTo: Int?,
     submitSignal: Long?,
     savedAnchor: TopicScrollAnchor?,
     previousPageLanding: Boolean = false,
+    jumpReturnAnchor: TopicScrollAnchor? = null,
 ): TopicScrollRestoration = when {
     scrollTo != null -> TopicScrollRestoration.FollowScrollTo
     submitSignal != null -> TopicScrollRestoration.FollowSubmitLanding
+    jumpReturnAnchor != null -> TopicScrollRestoration.RestoreSaved(jumpReturnAnchor)
     savedAnchor != null -> TopicScrollRestoration.RestoreSaved(savedAnchor)
     previousPageLanding -> TopicScrollRestoration.StartAtBottom
     else -> TopicScrollRestoration.StartAtTop

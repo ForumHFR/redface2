@@ -6,6 +6,7 @@ import fr.forumhfr.redface2.core.ui.editor.bannerText
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -63,12 +64,17 @@ import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
  * - Submit button + error banner.
  */
 @Composable
+@Suppress("LongParameterList") // One callback per navigation outcome — each wired to a distinct :app pop.
 fun TopicFormScreen(
     request: TopicFormRequest,
     onSubmitSucceeded: (targetPage: Int?, scrollTo: Int?) -> Unit,
     // #206 workaround — `subject` is the exact posted title, forwarded to the category
     // listing so it can highlight the freshly-created row (HFR never returns the new id).
     onNewTopicCreated: (cat: Int, subcat: Int, newTopicId: Int?, newNumreponse: Int?, subject: String) -> Unit,
+    // #803 pattern (state-hygiene audit 2026-07-05) — pops this form AFTER the ViewModel flushed
+    // the draft (CloseCommitted). Default keeps callers without the wiring on the platform back
+    // (no flush) — `:app` wires it. Mirrors PostEditorScreen.onClose.
+    onClose: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     viewModel: TopicFormViewModel = hiltViewModel<TopicFormViewModel, TopicFormViewModel.Factory>(
         creationCallback = { factory -> factory.create(request) },
@@ -101,25 +107,37 @@ fun TopicFormScreen(
                         effect.subject,
                     )
                 }
+                TopicFormEffect.CloseCommitted -> onClose?.invoke()
             }
         }
     }
 
+    // #803 pattern — route the system back through the ViewModel so the pending autosave debounce
+    // is flushed BEFORE the pop (trading the predictive-back preview for never losing the last
+    // < 750 ms of typing — same trade-off as PostEditorScreen). Only armed when `:app` wired the pop.
+    if (onClose != null) {
+        BackHandler { viewModel.submit(TopicFormIntent.CloseRequested) }
+    }
+
+    // #441 — the picker is driven by the shared controller (same wiring as the MP composers
+    // and PostEditorScreen) ; only SmileySelected stays an intent (draft mutation).
+    val smileyPicker = viewModel.smileyPicker
     TopicFormContent(
         state = state,
         onIntent = viewModel::submit,
+        onOpenSmileys = smileyPicker::open,
         modifier = modifier,
     )
 
     // Sheet hoisted as a sibling of the scrollable content : if it lived inside
     // the `Column.verticalScroll`, the bottom sheet would get squashed by the
     // scroll container's measurement. Same rationale as `PostEditorScreen`.
-    val pickerState = state.smileyPicker
-    if (pickerState is SmileyPickerState.Open) {
+    val pickerState by smileyPicker.state.collectAsStateWithLifecycle()
+    (pickerState as? SmileyPickerState.Open)?.let { picker ->
         SmileyPickerSheet(
-            state = pickerState,
-            onDismiss = { viewModel.submit(TopicFormIntent.SmileyPickerDismissed) },
-            onQueryChange = { viewModel.submit(TopicFormIntent.SmileySearchQueryChanged(it)) },
+            state = picker,
+            onDismiss = smileyPicker::dismiss,
+            onQueryChange = smileyPicker::onQueryChanged,
             onSmileyClicked = { viewModel.submit(TopicFormIntent.SmileySelected(it)) },
         )
     }
@@ -129,6 +147,9 @@ fun TopicFormScreen(
 internal fun TopicFormContent(
     state: TopicFormState,
     onIntent: (TopicFormIntent) -> Unit,
+    // #441 — opens the shared smiley picker controller (the sheet host lives in
+    // TopicFormScreen, next to the controller's state collection).
+    onOpenSmileys: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var imageUrlDialogOpen by remember { mutableStateOf(false) }
@@ -247,7 +268,7 @@ internal fun TopicFormContent(
                     onConfirmSubmit = { onIntent(TopicFormIntent.SubmitConfirmed) },
                     onDisarmConfirm = { onIntent(TopicFormIntent.SubmitConfirmationDismissed) },
                     onOpenOptions = { optionsSheetOpen = true },
-                    onOpenSmileys = { onIntent(TopicFormIntent.SmileyPickerOpened) },
+                    onOpenSmileys = onOpenSmileys,
                 ),
             )
         }

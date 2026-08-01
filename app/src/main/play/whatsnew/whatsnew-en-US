@@ -1,4 +1,7 @@
-Redface 2 v0.25.0 — dev.
+Redface 2 v0.26.0 — dev.
 
-- Quotes: back to inline [quotemsg] BBCode in the field by default — editable and interleavable, like the website.
-- Compact quote cards are now opt-in: Settings > Editing & publishing > "Quote cards".
+- Long-press an image: copy URL, open, save.
+- Quotes: blacklisted authors hidden inside quotes too, back returns to your reading spot after a quote jump, long quotes collapse to a preview.
+- Images sized like the website.
+- Long-press: page FABs → first/last, Quote → full editor.
+- Smiley search restored on reopen; empty-categories filter fixed on the read tab.

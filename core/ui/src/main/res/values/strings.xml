@@ -4,10 +4,19 @@
     <string name="post_quote_bare">Citation</string>
     <!-- #699 : libellé a11y du tap sur l'en-tête d'une citation sourcée (aller au message cité). -->
     <string name="post_quote_go_to">Aller au message cité</string>
+    <!-- #785 : placeholder d'une citation dont l'auteur est black-listé. Le pseudo reste visible,
+         cohérent avec topic_post_hidden_by_author côté posts (le lecteur sait QUI est masqué). -->
+    <string name="post_quote_blocked_author">Citation de %1$s masquée</string>
     <string name="post_quote_collapsed">Citation imbriquée repliée</string>
     <string name="post_quote_collapsed_revealed">Citations imbriquées</string>
     <string name="post_quote_show">Afficher</string>
     <string name="post_quote_hide">Masquer</string>
+    <!-- #784 : aperçu borné des citations longues. Libellés visibles du dépli/repli, plus les
+         libellés a11y du tap sur le corps/cadre — distincts de post_quote_go_to (saut du header). -->
+    <string name="post_quote_expand">Déplier</string>
+    <string name="post_quote_collapse">Replier</string>
+    <string name="post_quote_expand_label">Déplier la citation</string>
+    <string name="post_quote_collapse_label">Replier la citation</string>
     <string name="post_spoiler_default_label">Spoiler</string>
     <string name="post_spoiler_show">(afficher)</string>
     <string name="post_spoiler_hide">(masquer)</string>
@@ -15,6 +24,8 @@
     <string name="post_image_error">Image indisponible</string>
     <string name="post_image_error_with_alt">Image indisponible — %1$s</string>
     <string name="post_image_open_link">Ouvrir l\'image</string>
+    <!-- #831 : libellé a11y de l'appui long sur une image de post (menu contextuel image). -->
+    <string name="post_image_options_action">Options de l\'image</string>
     <string name="bbcode_action_bold">Gras</string>
     <string name="bbcode_action_italic">Italique</string>
     <string name="bbcode_action_underline">Souligné</string>

@@ -14,9 +14,11 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -40,186 +42,201 @@ class SettingsViewModel @Inject constructor(
     val state: StateFlow<SettingsState> = _state.asStateFlow()
 
     init {
-        // One-shot hydration of every persisted preference into `_state`. We deliberately
-        // use `.first()` (point-in-time read) rather than a long-lived collect, so toggling
-        // a preference from inside this screen does not race with itself via the observe
-        // path. Each `.copy(...)` keeps the other fields intact — never replace the whole
-        // state with a partial config, that would wipe the maintenance fields.
+        // #788 — continuous hydration: every persisted preference is COLLECTED for the VM's
+        // whole life, not read once. Each Settings destination scopes its own SettingsViewModel
+        // to its NavBackStackEntry, so a value written from a sub-page instance (or any other
+        // writer) must also land in the retained root instance — the previous one-shot
+        // `.first()` + touched-locally latch kept it stale forever. Each `.copy(...)` keeps the
+        // other fields intact — never replace the whole state with a partial config, that would
+        // wipe the maintenance fields.
         viewModelScope.launch {
+            // The proxy stays a point-in-time read: it is an explicit-save FORM (host / port /
+            // credentials typed locally), so a continuous re-sync would clobber in-progress edits.
             val config = userPreferencesRepository.observeProxyConfig().first()
             _state.update { it.copyFromProxy(config) }
         }
-        hydratePreference(
-            read = { userPreferencesRepository.observeIgnoreTopicCache().first() },
-            isLocked = { it.ignoreTopicCacheTouchedLocally || it.isUpdatingIgnoreTopicCache },
+        observePreference(
+            flow = userPreferencesRepository.observeIgnoreTopicCache(),
+            isLocked = { it.isUpdatingIgnoreTopicCache },
             apply = { state, value -> state.copy(ignoreTopicCache = value) },
         )
-        hydratePreference(
-            read = { userPreferencesRepository.observeDebugBoundsOverlay().first() },
-            isLocked = { it.debugBoundsOverlayTouchedLocally || it.isUpdatingDebugBoundsOverlay },
+        observePreference(
+            flow = userPreferencesRepository.observeDebugBoundsOverlay(),
+            isLocked = { it.isUpdatingDebugBoundsOverlay },
             apply = { state, value -> state.copy(debugBoundsOverlay = value) },
         )
-        hydratePreference(
-            read = { userPreferencesRepository.observeFlagsGroupByCategory().first() },
-            isLocked = { it.flagsGroupByCategoryTouchedLocally || it.isUpdatingFlagsGroupByCategory },
+        observePreference(
+            flow = userPreferencesRepository.observeFlagsGroupByCategory(),
+            isLocked = { it.isUpdatingFlagsGroupByCategory },
             apply = { state, value -> state.copy(flagsGroupByCategory = value) },
         )
-        hydratePreference(
-            read = { userPreferencesRepository.observeFlagsHideReadCategories().first() },
-            isLocked = { it.flagsHideReadCategoriesTouchedLocally || it.isUpdatingFlagsHideReadCategories },
+        observePreference(
+            flow = userPreferencesRepository.observeFlagsHideReadCategories(),
+            isLocked = { it.isUpdatingFlagsHideReadCategories },
             apply = { state, value -> state.copy(flagsHideReadCategories = value) },
         )
-        hydratePreference(
-            read = { userPreferencesRepository.observeFlagsPerTabOverride().first() },
-            isLocked = { it.flagsPerTabOverrideTouchedLocally || it.isUpdatingFlagsPerTabOverride },
+        observePreference(
+            flow = userPreferencesRepository.observeFlagsPerTabOverride(),
+            isLocked = { it.isUpdatingFlagsPerTabOverride },
             apply = { state, value -> state.copy(flagsPerTabOverride = value) },
         )
-        hydratePreference(
-            read = { userPreferencesRepository.observeThemeMode().first() },
-            isLocked = { it.themeModeTouchedLocally || it.isUpdatingThemeMode },
+        observePreference(
+            flow = userPreferencesRepository.observeThemeMode(),
+            isLocked = { it.isUpdatingThemeMode },
             apply = { state, value -> state.copy(themeMode = value) },
         )
-        hydratePreference(
-            read = { userPreferencesRepository.observeAmoledEnabled().first() },
-            isLocked = { it.amoledTouchedLocally || it.isUpdatingAmoled },
+        observePreference(
+            flow = userPreferencesRepository.observeAmoledEnabled(),
+            isLocked = { it.isUpdatingAmoled },
             apply = { state, value -> state.copy(amoledEnabled = value) },
         )
-        hydratePreference(
-            read = { userPreferencesRepository.observeTopicTopBarAutoHide().first() },
-            isLocked = { it.topicTopBarAutoHideTouchedLocally || it.isUpdatingTopicTopBarAutoHide },
+        observePreference(
+            flow = userPreferencesRepository.observeTopicTopBarAutoHide(),
+            isLocked = { it.isUpdatingTopicTopBarAutoHide },
             apply = { state, value -> state.copy(topicTopBarAutoHide = value) },
         )
-        hydratePreference(
-            read = { userPreferencesRepository.observeTopicPageFabs().first() },
-            isLocked = { it.topicPageFabsTouchedLocally || it.isUpdatingTopicPageFabs },
+        observePreference(
+            flow = userPreferencesRepository.observeTopicPageFabs(),
+            isLocked = { it.isUpdatingTopicPageFabs },
             apply = { state, value -> state.copy(topicPageFabs = value) },
         )
-        hydratePreference(
-            read = { userPreferencesRepository.observeMpUnreadBadge().first() },
-            isLocked = { it.mpUnreadBadgeTouchedLocally || it.isUpdatingMpUnreadBadge },
+        observePreference(
+            flow = userPreferencesRepository.observeMpUnreadBadge(),
+            isLocked = { it.isUpdatingMpUnreadBadge },
             apply = { state, value -> state.copy(mpUnreadBadge = value) },
         )
-        hydratePreference(
-            read = { userPreferencesRepository.observeTopicPollsExpanded().first() },
-            isLocked = { it.topicPollsExpandedTouchedLocally || it.isUpdatingTopicPollsExpanded },
+        observePreference(
+            flow = userPreferencesRepository.observeTopicPollsExpanded(),
+            isLocked = { it.isUpdatingTopicPollsExpanded },
             apply = { state, value -> state.copy(topicPollsExpanded = value) },
         )
-        hydratePreference(
-            read = { userPreferencesRepository.observeTopicSignatures().first() },
-            isLocked = { it.topicSignaturesTouchedLocally || it.isUpdatingTopicSignatures },
+        observePreference(
+            flow = userPreferencesRepository.observeTopicSignatures(),
+            isLocked = { it.isUpdatingTopicSignatures },
             apply = { state, value -> state.copy(topicSignatures = value) },
         )
-        hydratePreference(
-            read = { userPreferencesRepository.observeFoldLongQuotes().first() },
-            isLocked = { it.foldLongQuotesTouchedLocally || it.isUpdatingFoldLongQuotes },
+        observePreference(
+            flow = userPreferencesRepository.observeFoldLongQuotes(),
+            isLocked = { it.isUpdatingFoldLongQuotes },
             apply = { state, value -> state.copy(foldLongQuotes = value) },
         )
-        hydratePreference(
-            read = { userPreferencesRepository.observeShowScrollbar().first() },
-            isLocked = { it.showScrollbarTouchedLocally || it.isUpdatingShowScrollbar },
+        observePreference(
+            flow = userPreferencesRepository.observeShowScrollbar(),
+            isLocked = { it.isUpdatingShowScrollbar },
             apply = { state, value -> state.copy(showScrollbar = value) },
         )
-        hydratePreference(
-            read = { userPreferencesRepository.observeNavBarLabels().first() },
-            isLocked = { it.navBarLabelsTouchedLocally || it.isUpdatingNavBarLabels },
+        observePreference(
+            flow = userPreferencesRepository.observeNavBarLabels(),
+            isLocked = { it.isUpdatingNavBarLabels },
             apply = { state, value -> state.copy(navBarLabels = value) },
         )
-        hydratePreference(
-            read = { userPreferencesRepository.observeFunnyEmptyState().first() },
-            isLocked = { it.funnyEmptyStateTouchedLocally || it.isUpdatingFunnyEmptyState },
+        observePreference(
+            flow = userPreferencesRepository.observeFunnyEmptyState(),
+            isLocked = { it.isUpdatingFunnyEmptyState },
             apply = { state, value -> state.copy(funnyEmptyState = value) },
         )
-        hydratePreference(
-            read = { userPreferencesRepository.observeHideSystemNavBar().first() },
-            isLocked = { it.hideSystemNavBarTouchedLocally || it.isUpdatingHideSystemNavBar },
+        observePreference(
+            flow = userPreferencesRepository.observeHideSystemNavBar(),
+            isLocked = { it.isUpdatingHideSystemNavBar },
             apply = { state, value -> state.copy(hideSystemNavBar = value) },
         )
-        hydratePreference(
-            read = { userPreferencesRepository.observeImmersiveBackButton().first() },
-            isLocked = { it.immersiveBackButtonTouchedLocally || it.isUpdatingImmersiveBackButton },
+        observePreference(
+            flow = userPreferencesRepository.observeImmersiveBackButton(),
+            isLocked = { it.isUpdatingImmersiveBackButton },
             apply = { state, value -> state.copy(immersiveBackButton = value) },
         )
-        hydratePreference(
-            read = { userPreferencesRepository.observeImmersiveNavBarReveal().first() },
-            isLocked = { it.immersiveNavBarRevealTouchedLocally || it.isUpdatingImmersiveNavBarReveal },
+        observePreference(
+            flow = userPreferencesRepository.observeImmersiveNavBarReveal(),
+            isLocked = { it.isUpdatingImmersiveNavBarReveal },
             apply = { state, value -> state.copy(immersiveNavBarReveal = value) },
         )
-        hydratePreference(
-            read = { userPreferencesRepository.observeAccentColor().first() },
-            isLocked = { it.accentColorTouchedLocally || it.isUpdatingAccentColor },
+        observePreference(
+            flow = userPreferencesRepository.observeAccentColor(),
+            isLocked = { it.isUpdatingAccentColor },
             apply = { state, value -> state.copy(accentColor = value) },
         )
-        hydratePreference(
-            read = { userPreferencesRepository.observeConfirmBeforePosting().first() },
-            isLocked = { it.confirmBeforePostingTouchedLocally || it.isUpdatingConfirmBeforePosting },
+        observePreference(
+            flow = userPreferencesRepository.observeConfirmBeforePosting(),
+            isLocked = { it.isUpdatingConfirmBeforePosting },
             apply = { state, value -> state.copy(confirmBeforePosting = value) },
         )
-        hydratePreference(
-            read = { userPreferencesRepository.observeQuoteCardsEnabled().first() },
-            isLocked = { it.quoteCardsEnabledTouchedLocally || it.isUpdatingQuoteCardsEnabled },
+        observePreference(
+            flow = userPreferencesRepository.observeQuoteCardsEnabled(),
+            isLocked = { it.isUpdatingQuoteCardsEnabled },
             apply = { state, value -> state.copy(quoteCardsEnabled = value) },
         )
-        hydratePreference(
-            read = { userPreferencesRepository.observeShowDtSection().first() },
-            isLocked = { it.showDtSectionTouchedLocally || it.isUpdatingShowDtSection },
+        observePreference(
+            flow = userPreferencesRepository.observeShowDtSection(),
+            isLocked = { it.isUpdatingShowDtSection },
             apply = { state, value -> state.copy(showDtSection = value) },
         )
-        hydratePreference(
-            read = { userPreferencesRepository.observeSyncPrivateMessagesWriteEnabled().first() },
-            isLocked = {
-                it.syncPrivateMessagesWriteEnabledTouchedLocally || it.isUpdatingSyncPrivateMessagesWriteEnabled
-            },
+        observePreference(
+            flow = userPreferencesRepository.observeSyncPrivateMessagesWriteEnabled(),
+            isLocked = { it.isUpdatingSyncPrivateMessagesWriteEnabled },
             apply = { state, value -> state.copy(syncPrivateMessagesWriteEnabled = value) },
         )
-        hydratePreference(
-            read = { userPreferencesRepository.observeFlagsAutoRefresh().first() },
-            isLocked = { it.flagsAutoRefreshTouchedLocally || it.isUpdatingFlagsAutoRefresh },
+        observePreference(
+            flow = userPreferencesRepository.observeFlagsAutoRefresh(),
+            isLocked = { it.isUpdatingFlagsAutoRefresh },
             apply = { state, value -> state.copy(flagsAutoRefresh = value) },
         )
-        hydratePreference(
-            read = { userPreferencesRepository.observeDisplayDensity().first() },
-            isLocked = { it.displayDensityTouchedLocally || it.isUpdatingDisplayDensity },
+        observePreference(
+            flow = userPreferencesRepository.observeDisplayDensity(),
+            isLocked = { it.isUpdatingDisplayDensity },
             apply = { state, value -> state.copy(displayDensity = value) },
         )
-        hydratePreference(
-            read = { userPreferencesRepository.observeFontScale().first() },
-            isLocked = { it.fontScaleTouchedLocally || it.isUpdatingFontScale },
+        observePreference(
+            flow = userPreferencesRepository.observeFontScale(),
+            isLocked = { it.isUpdatingFontScale },
             apply = { state, value -> state.copy(fontScale = value) },
         )
-        // #459 — Hébergeur d'images : provider (enum) + imgur Client-ID (text). Same one-shot
-        // hydration + touched-locally guard as the other prefs.
-        hydratePreference(
-            read = { userPreferencesRepository.observeUploadProvider().first() },
-            isLocked = { it.uploadProviderTouchedLocally || it.isUpdatingUploadProvider },
+        // #459 — Hébergeur d'images : provider (enum) + imgur Client-ID (text).
+        observePreference(
+            flow = userPreferencesRepository.observeUploadProvider(),
+            isLocked = { it.isUpdatingUploadProvider },
             apply = { state, value -> state.copy(uploadProvider = value) },
         )
-        hydratePreference(
-            read = { userPreferencesRepository.observeImgurClientId().first() },
+        // #459 / #788 — the imgur Client-ID persists on each keystroke, so its re-sync guard is
+        // the TOUCH latch, not an in-flight flag: once the user typed in THIS instance, an echoed
+        // (or concurrent) emission must never rewrite the field mid-typing. An untouched instance
+        // still follows external writes like every other pref.
+        observePreference(
+            flow = userPreferencesRepository.observeImgurClientId(),
             isLocked = { it.imgurClientIdTouchedLocally },
             apply = { state, value -> state.copy(imgurClientId = value) },
         )
-        // #459 PR-images follow-up — editor image insert mode (enum), same hydration shape.
-        hydratePreference(
-            read = { userPreferencesRepository.observeEditorImageInsert().first() },
-            isLocked = { it.editorImageInsertTouchedLocally || it.isUpdatingEditorImageInsert },
+        // #459 PR-images follow-up — editor image insert mode (enum), same collection shape.
+        observePreference(
+            flow = userPreferencesRepository.observeEditorImageInsert(),
+            isLocked = { it.isUpdatingEditorImageInsert },
             apply = { state, value -> state.copy(editorImageInsert = value) },
+        )
+        // #806 — writing-surface preset (enum), same collection shape.
+        observePreference(
+            flow = userPreferencesRepository.observeWritingSurfacePreset(),
+            isLocked = { it.isUpdatingWritingSurfacePreset },
+            apply = { state, value -> state.copy(writingSurfacePreset = value) },
         )
     }
 
     /**
-     * One-shot hydration of a persisted preference into [_state] (point-in-time `first()`,
-     * cf. the init comment). [isLocked] is the startup-race guard: if the user already
-     * flipped the toggle (or a write is in flight) while this coroutine was suspended on
-     * the read, the stale snapshot must NOT overwrite the local change.
+     * Long-lived re-sync of a persisted preference into [_state] (#788 gate rule: a ViewModel
+     * that caches persisted data re-syncs continuously, not once). The repository Flows are
+     * `distinctUntilChanged`, so this collect only wakes up on real changes. [isLocked] guards
+     * the only window where an emission must be ignored: an optimistic write in flight
+     * (`isUpdating*`) — on success DataStore re-emits the desired value (no-op convergence),
+     * on failure nothing is emitted and the local revert stands. The imgur Client-ID passes its
+     * touch latch instead (see the init call site).
      */
-    private fun <T> hydratePreference(
-        read: suspend () -> T,
+    private fun <T> observePreference(
+        flow: Flow<T>,
         isLocked: (SettingsState) -> Boolean,
         apply: (SettingsState, T) -> SettingsState,
     ) {
         viewModelScope.launch {
-            val value = read()
-            _state.update { current -> if (isLocked(current)) current else apply(current, value) }
+            flow.collect { value ->
+                _state.update { current -> if (isLocked(current)) current else apply(current, value) }
+            }
         }
     }
 
@@ -287,6 +304,7 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.SetUploadProvider -> updateUploadProvider(intent.provider)
             is SettingsIntent.SetImgurClientId -> updateImgurClientId(intent.text)
             is SettingsIntent.SetEditorImageInsert -> updateEditorImageInsert(intent.mode)
+            is SettingsIntent.SetWritingSurfacePreset -> updateWritingSurfacePreset(intent.preset)
         }
     }
 
@@ -390,12 +408,12 @@ class SettingsViewModel @Inject constructor(
 
     private fun updateIgnoreTopicCache(desired: Boolean) {
         val previous = _state.value.ignoreTopicCache
-        // Optimistic flip — the UI reflects the intent immediately, the gate flag locks the
-        // switch while DataStore is writing, and `ignoreTopicCacheTouchedLocally = true`
-        // forbids the still-running startup hydration from overwriting this change with a
-        // stale snapshot later. We keep the touched flag at `true` for the rest of the VM's
-        // lifetime: even after a failure-revert the user has expressed an intent, so a late
-        // hydration value would no longer be the source of truth.
+        // Optimistic flip — the UI reflects the intent immediately and the gate flag locks the
+        // switch while DataStore is writing. `isUpdatingIgnoreTopicCache = true` is also what
+        // blanks the continuous #788 re-sync for the write's duration, so an emission of the
+        // OLD value cannot undo the flip mid-flight. `ignoreTopicCacheTouchedLocally` stays a
+        // write marker only — it is no longer consulted by the hydration guard (#788), so an
+        // external write made later (e.g. from another Settings destination's VM) re-syncs here.
         _state.update {
             it.copy(
                 ignoreTopicCache = desired,
@@ -407,10 +425,11 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             runCatching { userPreferencesRepository.setIgnoreTopicCache(desired) }
                 .onSuccess {
-                    // Re-affirm `ignoreTopicCache = desired` explicitly. Without this, a stale
-                    // hydration that resumed *between* the optimistic flip and onSuccess could
-                    // have left the field at a wrong value; reasserting here makes the final
-                    // state self-consistent regardless of interleaving.
+                    // Re-affirm `ignoreTopicCache = desired` explicitly. The #788 re-sync is
+                    // gated on `isUpdating*` while the write is in flight, but a conflated
+                    // emission of the OLD value could theoretically land right after the gate
+                    // drops; reasserting here makes the final state self-consistent regardless
+                    // of interleaving (DataStore then re-emits `desired` — a no-op).
                     _state.update {
                         it.copy(
                             ignoreTopicCache = desired,
@@ -682,10 +701,43 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    // #806 — writing-surface preset is an enum, same optimistic-flip shape as editorImageInsert.
+    // The #788 continuous re-sync (observePreference in init) keeps every SettingsViewModel
+    // instance aligned; `isUpdatingWritingSurfacePreset` gates the re-sync during the write.
+    private fun updateWritingSurfacePreset(desired: WritingSurfacePreset) {
+        val previous = _state.value.writingSurfacePreset
+        _state.update {
+            it.copy(
+                writingSurfacePreset = desired,
+                isUpdatingWritingSurfacePreset = true,
+                writingSurfacePresetError = false,
+                writingSurfacePresetTouchedLocally = true,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { userPreferencesRepository.setWritingSurfacePreset(desired) }
+                .onSuccess {
+                    _state.update {
+                        it.copy(writingSurfacePreset = desired, isUpdatingWritingSurfacePreset = false)
+                    }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            writingSurfacePreset = previous,
+                            isUpdatingWritingSurfacePreset = false,
+                            writingSurfacePresetError = true,
+                        )
+                    }
+                }
+        }
+    }
+
     // #459 — imgur Client-ID is a free-text preference persisted on each change (no save button).
-    // The optimistic value is shown immediately and the touched-locally guard blocks a late
-    // hydration from clobbering in-progress typing; a persist failure raises the error flag without
-    // reverting the typed text (it would be hostile to wipe what the user just typed).
+    // The optimistic value is shown immediately and the touched-locally latch permanently opts
+    // this instance out of the #788 re-sync (an echoed emission must not rewrite the field while
+    // the user is typing); a persist failure raises the error flag without reverting the typed
+    // text (it would be hostile to wipe what the user just typed).
     // Persist-on-keystroke writes are serialised : each keystroke cancels the previous in-flight write
     // so a slower/older write (or its failure) can never land after a newer one and strand a stale
     // Client-ID or a spurious error flag (review #459). CancellationException is rethrown, not treated
@@ -1230,9 +1282,10 @@ class SettingsViewModel @Inject constructor(
 
     /**
      * Shared optimistic-flip machinery for a persisted boolean preference (the Drapeaux view
-     * toggles). Flips the field immediately via [optimistic] (which also sets the `*TouchedLocally`
-     * guard so a late `init` hydration can't clobber it), persists [desired] on a background
-     * coroutine, then reconciles the final state from the persist [Result] via [onSettled] (success
+     * toggles). Flips the field immediately via [optimistic] (whose `isUpdating*` flag also gates
+     * the continuous #788 re-sync for the write's duration; the `*TouchedLocally` flag it sets is
+     * a write marker only, no longer consulted), persists [desired] on a background coroutine,
+     * then reconciles the final state from the persist [Result] via [onSettled] (success
      * re-affirms the value, failure reverts and raises the error flag — both captured in the
      * caller's closures). Mirrors the bespoke `updateIgnoreTopicCache` contract, factored because
      * the two new toggles are identical bar their state fields.

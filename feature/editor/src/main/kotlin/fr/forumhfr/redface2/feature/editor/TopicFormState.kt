@@ -2,8 +2,6 @@ package fr.forumhfr.redface2.feature.editor
 import fr.forumhfr.redface2.core.ui.editor.UploadError
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 
-import fr.forumhfr.redface2.core.ui.editor.WikiSearchState
-import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import androidx.compose.ui.text.input.TextFieldValue
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
 import fr.forumhfr.redface2.core.domain.editor.validateBbcodeDraft
@@ -70,18 +68,14 @@ data class TopicFormState(
      * POST anyway and #154 explicitly forbids exposing the legacy anonymous flow.
      */
     val isAnonymous: Boolean = false,
-    /**
-     * Phase 2F-C (#11 partial) — smiley picker visibility + wiki search state, mirrored
-     * from [PostEditorState.smileyPicker]. Reusing the same sealed types
-     * ([SmileyPickerState] / [WikiSearchState]) defined in `PostEditorState.kt` keeps the
-     * two surfaces consistent and avoids forking a parallel sheet UI.
-     */
-    val smileyPicker: SmileyPickerState = SmileyPickerState.Hidden,
+    // #441 — the smiley picker state no longer lives here : visibility + wiki search moved
+    // to the shared `SmileyPickerController` exposed as `TopicFormViewModel.smileyPicker`.
     /**
      * HFR user id parsed from the form HTML (cf. [TopicForm.userId]). Used by the wiki
-     * smiley search call. `null` when the form is anonymous or unparseable — the
-     * repository falls back to `user_id=0`. Same anti-clobber rule as the other hydrated
-     * fields : a silent `InvalidHashCheck` refetch must never erase a previously known id.
+     * smiley search call (read by the `SmileyPickerController` lambda). `null` when the
+     * form is anonymous or unparseable — the controller falls back to `user_id=0`. Same
+     * anti-clobber rule as the other hydrated fields : a silent `InvalidHashCheck` refetch
+     * must never erase a previously known id.
      */
     val userId: Int? = null,
     /**
@@ -188,9 +182,12 @@ sealed interface TopicFormIntent {
     data class ToggleSignature(val enabled: Boolean) : TopicFormIntent
     data class ToggleSmileyDisabled(val disabled: Boolean) : TopicFormIntent
     data class ToggleEmailNotification(val enabled: Boolean) : TopicFormIntent
-    data object SmileyPickerOpened : TopicFormIntent
-    data object SmileyPickerDismissed : TopicFormIntent
-    data class SmileySearchQueryChanged(val query: String) : TopicFormIntent
+    /**
+     * The user tapped a smiley in the picker : insert the token at the caret. #441 — open /
+     * dismiss / query-change are no longer intents (the sheet talks directly to the shared
+     * `SmileyPickerController` exposed as `TopicFormViewModel.smileyPicker`) ; only the
+     * insertion stays MVI because it mutates the draft.
+     */
     data class SmileySelected(val token: String) : TopicFormIntent
 
     /** Phase 2F-E (#189) — insert `[img]url[/img]` for a validated remote image URL. */
@@ -210,6 +207,15 @@ sealed interface TopicFormIntent {
 
     /** #405 — discard the cached draft : delete the row and clear the banner. */
     data object DraftDiscardRequested : TopicFormIntent
+
+    /**
+     * #803 pattern (state-hygiene audit 2026-07-05) — the user is leaving the form (system
+     * back). The ViewModel flushes the pending debounced autosave FIRST, then emits
+     * [TopicFormEffect.CloseCommitted] — closing through the ViewModel is what guarantees the
+     * last < 750 ms of typing reach the #405 row (a plain pop would cancel the debounce with
+     * the ViewModel). Mirrors [PostEditorIntent.CloseRequested].
+     */
+    data object CloseRequested : TopicFormIntent
 }
 
 /**
@@ -244,6 +250,13 @@ sealed interface TopicFormEffect {
         /** Exact subject the user posted ; used to highlight the new row in the listing (#206). */
         val subject: String,
     ) : TopicFormEffect
+
+    /**
+     * #803 pattern — the draft is persisted, the form may now actually pop (the save is AWAITED
+     * before the effect, so navigation can never cancel it). Mirrors
+     * `PostEditorEffect.CloseCommitted`.
+     */
+    data object CloseCommitted : TopicFormEffect
 }
 
 internal fun TopicFormState.withDraft(updated: TextFieldValue): TopicFormState =

@@ -75,6 +75,15 @@ fun SmileyPickerSheet(
         // dark mode toggle) does not reset the user back to the Standard tab while the
         // bottom-sheet is still open.
         var tabIndex by rememberSaveable { mutableStateOf(0) }
+        // #824 — land on the Wiki tab when a restored search materialises. An initial-value
+        // capture is NOT enough: the controller may deliver the restored Open state a frame
+        // after the sheet first composes, and the saveable registry can also replay a stale
+        // Standard selection over the computed initial (both observed at dogfood). Keying the
+        // effect on "has a query" keeps it one-shot per restore and inert during typing —
+        // the search field only exists on the Wiki tab, so forcing index 1 there is a no-op.
+        LaunchedEffect(state.query.isNotEmpty()) {
+            if (state.query.isNotEmpty()) tabIndex = 1
+        }
         Column(
             modifier = Modifier
                 .fillMaxWidth()

@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -31,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -139,6 +141,13 @@ internal fun QuickReplySheet(
             }
             // #604 lot 4a — shared column : cards + live-region announcements + post-removal
             // focus (always composed ; renders nothing visible without cards).
+            // #808 — the cards block is CAPPED and scrolls internally so a heavy selection can
+            // never push the field and « Envoyer » under the IME fold : the field is the priority
+            // surface. Same pattern as the editor's EditorQuoteCards (192dp) and
+            // RecipientManagerSheet. Unconditional cap (no isImeVisible gate) : the field
+            // autofocuses on open so the IME is quasi-permanent here, and the cap also covers
+            // landscape ; nested same-direction scroll has a working precedent in
+            // RecipientManagerSheet.
             QuoteCardsColumn(
                 quotes = state.quotes,
                 enabled = !state.isSubmitting,
@@ -147,6 +156,10 @@ internal fun QuickReplySheet(
                     onMoveDown = { numreponse -> viewModel.onQuoteMoved(numreponse, delta = 1) },
                     onRemove = viewModel::onQuoteRemoved,
                 ),
+                modifier = Modifier
+                    .heightIn(max = QUICK_REPLY_MAX_CARDS_HEIGHT)
+                    .verticalScroll(rememberScrollState())
+                    .testTag("quick_reply_quote_cards"),
             )
             OutlinedTextField(
                 value = state.text,
@@ -238,3 +251,12 @@ internal fun QuickReplySubmitError.messageRes(): Int = when (this) {
 
 // #604 lot 3 — QuoteCard / QuoteCardControls promoted to `:core:ui` (core.ui.editor.QuoteCards):
 // the full-screen editor renders the same cards (mockup P3), one rendering for both surfaces.
+
+/**
+ * #808 — cap of the quote-cards block inside the sheet : two full one-line cards (2 x 48dp
+ * touch-target rows + 8dp spacing) plus the hint of a third, so the field and « Envoyer » always
+ * stay reachable with the IME up. The editor's sibling cap is 192dp (~4 cards) — the sheet is a
+ * tighter surface, it gets the smaller budget. `internal` : QuickReplyQuoteCardsCapTest mounts
+ * the capped block with this exact value to pin the budget.
+ */
+internal val QUICK_REPLY_MAX_CARDS_HEIGHT = 112.dp

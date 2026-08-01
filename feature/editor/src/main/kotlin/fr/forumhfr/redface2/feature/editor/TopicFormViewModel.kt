@@ -2,8 +2,7 @@ package fr.forumhfr.redface2.feature.editor
 import fr.forumhfr.redface2.core.ui.editor.UploadError
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 
-import fr.forumhfr.redface2.core.ui.editor.WikiSearchState
-import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.ViewModel
@@ -112,8 +111,6 @@ class TopicFormViewModel @AssistedInject constructor(
 
     private var loadedForm: TopicForm? = null
     private var submitJob: Job? = null
-    /** In-flight wiki smiley search ; cancelled on next query change / picker close / selection. */
-    private var smileySearchJob: Job? = null
 
     /**
      * #405 — stable, content-free draft key. New uses the category key ; EditFirstPost needs the
@@ -223,26 +220,74 @@ class TopicFormViewModel @AssistedInject constructor(
      * The store stamps `updatedAt` and is a no-op without an active session.
      */
     private fun scheduleAutosave() {
+        if (draftKey == null) return
+        autosaveJob?.cancel()
+        autosaveJob = viewModelScope.launch {
+            delay(AUTOSAVE_DEBOUNCE_MS)
+            persistDraftNow()
+        }
+    }
+
+    /**
+     * Immediate write of the current subject + body (both blank = delete the row, cf.
+     * [scheduleAutosave]). Reads [_state] AFTER the debounce delay — the previous shape captured
+     * a snapshot at scheduling time, which the #803 dirty-close flush would have re-persisted
+     * stale (state-hygiene audit 2026-07-05). Mirrors `PostEditorViewModel.persistDraftNow`.
+     */
+    private suspend fun persistDraftNow() {
         val key = draftKey ?: return
         val snapshot = _state.value
         val body = snapshot.draft.text
         val subject = snapshot.subject.text
-        autosaveJob?.cancel()
-        autosaveJob = viewModelScope.launch {
-            delay(AUTOSAVE_DEBOUNCE_MS)
-            if (body.isBlank() && subject.isBlank()) {
-                draftStore.delete(draftOwner, key)
-            } else {
-                draftStore.save(
-                    draftOwner,
-                    key,
-                    EditorDraftStore.Draft(body = body, subject = subject.ifBlank { null }),
-                )
-            }
+        if (body.isBlank() && subject.isBlank()) {
+            draftStore.delete(draftOwner, key)
+        } else {
+            draftStore.save(
+                draftOwner,
+                key,
+                EditorDraftStore.Draft(body = body, subject = subject.ifBlank { null }),
+            )
         }
     }
 
-    @Suppress("CyclomaticComplexMethod") // MVI when-dispatch over 16 intent variants ; flat by design.
+    /** #803 pattern — one-shot latch : a committed close is never re-emitted. */
+    private var closeRequested = false
+
+    /**
+     * #803 pattern (ported from `PostEditorViewModel.onCloseRequested`, state-hygiene audit
+     * 2026-07-05) — dirty close : flush the pending debounce so the last keystrokes reach the
+     * #405 row, THEN let the UI pop (CloseCommitted). Without this, a system back < 750 ms after
+     * typing cancelled the debounce with the ViewModel and silently dropped the tail of the draft.
+     *
+     * Two guards (gate #803) :
+     * - INERT while a POST is in flight — popping would cancel the submit with the viewModelScope
+     *   and leave the server state unknown with a repostable draft ; on failure `isSubmitting`
+     *   drops and the back works again, on success SubmitSucceeded / NewTopicCreated pops anyway ;
+     * - ONE-SHOT — a second back racing the first CloseCommitted must not emit a second effect
+     *   (each `onClose` pops blindly : the second pop would remove the screen BELOW).
+     */
+    private fun onCloseRequested() {
+        if (_state.value.isSubmitting || closeRequested) return
+        closeRequested = true
+        autosaveJob?.cancel()
+        viewModelScope.launch {
+            // The close must NEVER stay blocked on a failing flush (Room is not contractually
+            // non-throwing — disk full, corrupted store) : the one-shot latch is already set, so
+            // a swallowed failure here only costs the last <750 ms of typing (the debounced
+            // autosave already persisted the rest) while a rethrow would leave the screen
+            // unclosable. CancellationException still propagates (scope teardown is not an error).
+            try {
+                persistDraftNow()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // Best effort — the previous debounced write is what remains.
+            }
+            _effects.send(TopicFormEffect.CloseCommitted)
+        }
+    }
+
+    @Suppress("CyclomaticComplexMethod") // MVI when-dispatch over the TopicFormIntent variants ; flat by design.
     fun submit(intent: TopicFormIntent) {
         when (intent) {
             is TopicFormIntent.SubjectChanged -> onSubjectChanged(intent.value)
@@ -262,15 +307,13 @@ class TopicFormViewModel @AssistedInject constructor(
                 _state.update { it.copy(smileyDisabled = intent.disabled) }
             is TopicFormIntent.ToggleEmailNotification ->
                 _state.update { it.copy(emailNotificationEnabled = intent.enabled) }
-            TopicFormIntent.SmileyPickerOpened -> onSmileyPickerOpened()
-            TopicFormIntent.SmileyPickerDismissed -> onSmileyPickerDismissed()
-            is TopicFormIntent.SmileySearchQueryChanged -> onSmileySearchQueryChanged(intent.query)
             is TopicFormIntent.SmileySelected -> onSmileySelected(intent.token)
             is TopicFormIntent.ImageUrlInserted -> onImageUrlInserted(intent.url)
             is TopicFormIntent.ImagesPicked -> onImagesPicked(intent.uris)
             TopicFormIntent.UploadErrorDismissed -> _state.update { it.copy(uploadError = null) }
             TopicFormIntent.DraftRestoreRequested -> onDraftRestoreRequested()
             TopicFormIntent.DraftDiscardRequested -> onDraftDiscardRequested()
+            TopicFormIntent.CloseRequested -> onCloseRequested()
         }
     }
 
@@ -314,85 +357,36 @@ class TopicFormViewModel @AssistedInject constructor(
         draftKey?.let { key -> draftStore.delete(draftOwner, key) }
     }
 
-    private fun onSmileyPickerOpened() {
-        _state.update { current ->
-            if (current.smileyPicker is SmileyPickerState.Open) current
-            else current.copy(smileyPicker = SmileyPickerState.Open())
-        }
-    }
-
-    private fun onSmileyPickerDismissed() {
-        smileySearchJob?.cancel()
-        smileySearchJob = null
-        _state.update { it.copy(smileyPicker = SmileyPickerState.Hidden) }
-    }
-
-    private fun onSmileySearchQueryChanged(query: String) {
-        _state.update { current ->
-            val open = current.smileyPicker as? SmileyPickerState.Open ?: return@update current
-            current.copy(smileyPicker = open.copy(query = query))
-        }
-        // Cancel in-flight searches so an older response can't overwrite a newer query.
-        smileySearchJob?.cancel()
-        if (query.length <= 2) {
-            // Mirrors the HFR web composer's `query.length > 2` gate. Below threshold we
-            // reset the wiki branch to Idle so the picker can render the Standard tab.
-            _state.update { current ->
-                val open = current.smileyPicker as? SmileyPickerState.Open ?: return@update current
-                current.copy(smileyPicker = open.copy(wiki = WikiSearchState.Idle))
-            }
-            return
-        }
-        smileySearchJob = viewModelScope.launch {
-            // 300 ms matches the JS `find_smilies_timer` debounce embedded in HFR's
-            // /compressed/message.js, identical to `PostEditorViewModel`. Flip to
-            // `Loading` AFTER the debounce so a fast burst of keystrokes does not
-            // flash the spinner before the actual network call.
-            delay(SMILEY_SEARCH_DEBOUNCE_MS)
-            // Identity guard against the « same query typed twice in a 300 ms window »
-            // race : if a second `onSmileySearchQueryChanged` arrived with the same
-            // query while the first was still in its debounce, the older job's
-            // `coroutineContext[Job]` is no longer the active `smileySearchJob`.
-            if (coroutineContext[Job] !== smileySearchJob) return@launch
-            _state.update { current ->
-                val open = current.smileyPicker as? SmileyPickerState.Open ?: return@update current
-                if (open.query != query) return@update current
-                current.copy(smileyPicker = open.copy(wiki = WikiSearchState.Loading))
-            }
-            val effectiveUserId = _state.value.userId ?: 0
-            val outcome = runCatching { smileyRepository.searchWiki(effectiveUserId, query) }
-            outcome.fold(
-                onSuccess = { items ->
-                    _state.update { current ->
-                        val open = current.smileyPicker as? SmileyPickerState.Open
-                            ?: return@update current
-                        // Drop the result if the user closed the picker or typed a different
-                        // query while we were waiting on the network.
-                        if (open.query != query) return@update current
-                        current.copy(smileyPicker = open.copy(wiki = WikiSearchState.Results(items)))
-                    }
-                },
-                onFailure = { error ->
-                    if (error is CancellationException) throw error
-                    diagnostics.record(
-                        DiagnosticsLog.Level.WARN,
-                        LOG_TAG_VM,
-                        "wiki smiley search failed: ${error::class.simpleName}",
-                    )
-                    _state.update { current ->
-                        val open = current.smileyPicker as? SmileyPickerState.Open
-                            ?: return@update current
-                        if (open.query != query) return@update current
-                        current.copy(smileyPicker = open.copy(wiki = WikiSearchState.Error))
-                    }
-                },
+    /**
+     * #441 — smiley picker (Standard + Wiki search), delegated to the shared
+     * [SmileyPickerController] exactly like the MP composers (#387/#440) and
+     * `PostEditorViewModel` : the controller owns open/dismiss/query, the 300 ms debounce
+     * and its race guards, and the #824 restore-search-on-reopen contract. This ViewModel
+     * keeps only the insertion ([onSmileySelected] — a draft mutation, so it stays an MVI
+     * intent) ; the mixed wiring is deliberate, do not re-route it for « consistency ».
+     *
+     * Lifecycle (réserve Codex #441) : the editorial context is frozen at construction
+     * (`@Assisted request` ; one `TopicFormRoute` nav entry = one ViewModel), so the
+     * controller can never be re-armed for another topic/form — no targeted reset needed
+     * beyond the ViewModel's own death.
+     *
+     * Failure logging stays a policy of THIS feature (the MP composers keep the controller's
+     * no-op default) : class name only — never the query nor the userId (anti-leak test).
+     */
+    val smileyPicker = SmileyPickerController(
+        scope = viewModelScope,
+        searchWiki = smileyRepository::searchWiki,
+        userId = { _state.value.userId },
+        onSearchFailed = { error ->
+            diagnostics.record(
+                DiagnosticsLog.Level.WARN,
+                LOG_TAG_VM,
+                "wiki smiley search failed: ${error::class.simpleName}",
             )
-        }
-    }
+        },
+    )
 
     private fun onSmileySelected(token: String) {
-        smileySearchJob?.cancel()
-        smileySearchJob = null
         _state.update { current ->
             val draft = current.draft
             val selection = draft.selection
@@ -407,13 +401,15 @@ class TopicFormViewModel @AssistedInject constructor(
                 selection = TextRange(outcome.selectionStart, outcome.selectionEnd),
             )
             val withDraft = current.withDraft(updatedDraft)
-            val withPreview = if (withDraft.isPreviewVisible) {
+            if (withDraft.isPreviewVisible) {
                 withDraft.copy(preview = previewParser.parsePreview(withDraft.draft.text))
             } else {
                 withDraft
             }
-            withPreview.copy(smileyPicker = SmileyPickerState.Hidden)
         }
+        // Close the picker on successful insertion (#824 restores the search on the next
+        // open) — same contract as PostEditorViewModel.onSmileySelected.
+        smileyPicker.dismiss()
         scheduleAutosave()
     }
 
@@ -1010,11 +1006,6 @@ class TopicFormViewModel @AssistedInject constructor(
 
     private companion object {
         private const val LOG_TAG_VM = "TopicFormVM"
-
-        // HFR's web composer waits 300 ms after the last keystroke before calling
-        // `find_smilies`, cf. `/compressed/message.js`. Mirror it so the wiki endpoint
-        // sees roughly the same query rate as the web client.
-        private const val SMILEY_SEARCH_DEBOUNCE_MS = 300L
 
         // #405 — idle window after the last edit before the draft is persisted (cf. PostEditorViewModel).
         private const val AUTOSAVE_DEBOUNCE_MS = 750L

@@ -9,6 +9,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -68,6 +70,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -95,17 +98,22 @@ import fr.forumhfr.redface2.core.domain.author.isRf2Creator
 import fr.forumhfr.redface2.core.model.Poll
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.Topic
+import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.postContentExcerpt
 import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
 import fr.forumhfr.redface2.core.ui.RedfacePlaceholderScreen
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
+import fr.forumhfr.redface2.core.ui.post.LocalPostImageActions
 import fr.forumhfr.redface2.core.ui.post.PostCardShell
 import fr.forumhfr.redface2.core.ui.post.PostIdentityBand
 import fr.forumhfr.redface2.core.ui.post.PostIdentityHeader
+import fr.forumhfr.redface2.core.ui.post.PostImageActions
+import fr.forumhfr.redface2.core.ui.post.PostImageTarget
 import fr.forumhfr.redface2.core.ui.post.PostListScaffold
 import fr.forumhfr.redface2.core.ui.post.PostRenderer
+import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 import fr.forumhfr.redface2.core.ui.theme.LocalIgnoreInlineColors
 import fr.forumhfr.redface2.core.ui.theme.rememberCreatorPseudoBrush
@@ -166,8 +174,13 @@ fun TopicScreen(
      * href. `:app` wires it to the same in-place `TopicRoute` replace as [onOpenPage], but with
      * `scrollTo = numreponse` so the landing scrolls to and highlights the cited post (the #200
      * deep-link mechanism) — one uniform path whether the target is on this page or another.
+     *
+     * #782 — also carries [sourceAnchor], the reader's EXACT position captured AT TAP TIME from the
+     * screen-owned `LazyListState`, so `:app` can push a return entry before replacing the route.
+     * Tap-time capture is mandatory: the disposal-saved anchor (#307) is written AFTER the jump has
+     * scrolled away, so an intra-page jump would overwrite it with the cited post's position.
      */
-    onGoToPost: (page: Int, numreponse: Int) -> Unit,
+    onGoToPost: (page: Int, numreponse: Int, sourceAnchor: TopicScrollAnchor) -> Unit,
     /**
      * #285 — leave the topic and go back to the screen that opened it (topic list / flags).
      * Wired to a back-stack pop in `:app`. Surfaced as an explicit back arrow in the top app
@@ -256,6 +269,8 @@ fun TopicScreen(
      * #604 lot 3 — clears the multi-quote basket after the sheet consumed it (« Citer N » below
      * the threshold) : the cards live on in the sheet's ViewModel, and backing out must not
      * re-arm a stale « Citer N » — same intent-consumed rule as the full-screen path.
+     * #436 — also « Tout vider » : a long press on the « Citer N » FAB empties the whole basket
+     * in one gesture. Owned by `:app` (the basket lives there); the screen only triggers the reset.
      */
     onClearMultiQuote: () -> Unit = {},
     /**
@@ -462,7 +477,20 @@ fun TopicScreen(
         onEdit = onEdit,
         onEditFirstPost = onEditFirstPost,
         onOpenPage = onOpenPage,
-        onGoToPost = onGoToPost,
+        // #782 — enrich the quote jump with the CURRENT scroll anchor, read at tap time from the
+        // screen-owned LazyListState (raw index/offset, header-aware — same shape as the #307
+        // disposal save). TopicContent and everything below keep the plain (page, numreponse)
+        // callback; only this seam knows about the list state.
+        onGoToPost = { page, numreponse ->
+            onGoToPost(
+                page,
+                numreponse,
+                TopicScrollAnchor(
+                    index = lazyListState.firstVisibleItemIndex,
+                    offset = lazyListState.firstVisibleItemScrollOffset,
+                ),
+            )
+        },
         onOpenProfile = onOpenProfile,
         onDeleteRequest = { numreponse -> deleteCandidate = numreponse },
         multiQuoteSelections = multiQuoteSelections,
@@ -489,12 +517,13 @@ fun TopicScreen(
 /**
  * #197 — keep [target] anchored at the top of the viewport while upstream block images settle.
  *
- * `PostBlock.Image` renders a `SubcomposeAsyncImage` that starts at `blockImageMinHeight` (160.dp)
- * while loading/erroring and grows to its decoded height (up to `blockImageMaxHeight`, 480.dp) once
- * Coil resolves the bitmap. Any block image in a post *above* the deep-link target shifts the
- * cumulative scroll offset by up to +320.dp *after* the initial one-shot `scrollToItem`, leaving the
- * target scrolled off-screen. A warm image cache decodes synchronously before the first measure,
- * which is why #197 only reproduces on a cold cache.
+ * An UNMEASURED `PostBlock.Image` (cold intrinsic cache) renders a `SubcomposeAsyncImage` that
+ * starts at `blockImageMinHeight` (160.dp) while loading/erroring and settles to its exact
+ * web-parity box (`blockImageDisplaySize`, ≤ 200.dp tall since #610) once the intrinsic size lands.
+ * Any block image in a post *above* the deep-link target shifts the cumulative scroll offset (in
+ * either direction) *after* the initial one-shot `scrollToItem`, leaving the target scrolled
+ * off-screen. A warm cache sizes the box exactly before the first measure (#249), which is why #197
+ * only reproduces on a cold cache.
  *
  * Each frame we re-pin the target to the top (when it has drifted) and stop once the minimum
  * settle window has elapsed *and* its position has held still for [REANCHOR_STABLE_FRAMES]
@@ -680,7 +709,11 @@ private const val REANCHOR_STABLE_FRAMES = 3
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-@Suppress("LongParameterList") // state-hoisted Composable : each param has a distinct call-site.
+// LongParameterList: state-hoisted Composable, each param has a distinct call-site.
+// CyclomaticComplexMethod: the #806 tap-time surface routing adds one two-branch `when` per write
+// entry point (FAB / « Citer » / « Citer N ») — flat dispatches, the decision table itself lives
+// in the pure `writingSurfaceFor`.
+@Suppress("LongParameterList", "CyclomaticComplexMethod")
 internal fun TopicContent(
     state: TopicUiState,
     listState: LazyListState,
@@ -702,6 +735,7 @@ internal fun TopicContent(
     multiQuoteSelections: List<QuotedPostPreview> = emptyList(),
     onToggleMultiQuote: (preview: QuotedPostPreview) -> Unit = {},
     onMultiQuote: (subcat: Int, page: Int) -> Unit = { _, _ -> },
+    // #436 — empties the whole basket (« Tout vider », long-press on the « Citer N » FAB).
     onClearMultiQuote: () -> Unit = {},
     // #465 — the topic's manual poll choice (owned by :app, null = follow the global default) +
     // the callback recording a tap on the poll card. Threaded to the header card's poll.
@@ -738,10 +772,11 @@ internal fun TopicContent(
     } else {
         null
     }
-    // Vague 4 (#604) lots 1-2 — the reply FAB and « Citer » both open the quick-reply sheet
-    // instead of navigating ; the sheet escalates to the full-screen editor through onReply.
-    // Local UI state (like the page picker) : non-null while the sheet is up, carrying the
-    // reply coordinates plus the card « Citer » pre-arms (null from the FAB).
+    // Vague 4 (#604) lots 1-2 / #806 — the reply FAB and « Citer » open the quick-reply sheet
+    // when the user's writing-surface preset routes them there (writingSurfaceFor, decided at
+    // tap time) ; the sheet escalates to the full-screen editor through onReply. Local UI state
+    // (like the page picker) : non-null while the sheet is up, carrying the reply coordinates
+    // plus the card « Citer » pre-arms (null from the FAB).
     var quickReplyFor by remember { mutableStateOf<QuickReplyLaunch?>(null) }
     // #291 — the per-post toggle checkmarks and the « ❝N » count only need the numreponses.
     val multiQuoteNumreponses = multiQuoteSelections.map { it.numreponse }
@@ -771,37 +806,54 @@ internal fun TopicContent(
                 bottomActionsVisible = bottomActionsVisible,
                 multiQuoteSelection = multiQuoteNumreponses,
                 onOpenPage = onOpenPage,
+                // #806 — the surface is decided AT TAP TIME from the preset (never re-evaluated
+                // on recomposition, never migrating an already-open sheet). No quotes here, so
+                // only the FULL_EDITOR preset skips the sheet.
                 onReply = { subcat, page ->
-                    quickReplyFor = QuickReplyLaunch(
-                        request = QuickReplyRequest(
-                            cat = state.request.cat,
-                            subcat = subcat,
-                            topicId = state.request.post,
-                            page = page,
-                        ),
-                    )
-                },
-                // #604 lot 3 — threshold routing (mockup P3, « le cas qui force le plein
-                // écran ») : a small selection opens the quick-reply sheet with the cards
-                // pre-armed and consumes the basket HERE (the cards live on in the sheet's
-                // ViewModel) ; from MULTI_QUOTE_FULL_EDITOR_THRESHOLD up, the full-screen
-                // editor path (`:app`, in-memory handoff + basket clear) takes over.
-                onMultiQuote = { subcat, page ->
-                    if (multiQuoteOpensFullEditor(multiQuoteSelections.size)) {
-                        onMultiQuote(subcat, page)
-                    } else {
-                        quickReplyFor = QuickReplyLaunch(
+                    when (writingSurfaceFor(state.writingSurfacePreset, quoteCount = 0)) {
+                        WritingSurface.SHEET -> quickReplyFor = QuickReplyLaunch(
                             request = QuickReplyRequest(
                                 cat = state.request.cat,
                                 subcat = subcat,
                                 topicId = state.request.post,
                                 page = page,
                             ),
-                            initialQuotes = multiQuoteSelections,
                         )
-                        onClearMultiQuote()
+                        // Same :app path as the sheet's escalation — in-memory quote handoff
+                        // (empty) + PostEditorRoute(resumeSharedDraft = true).
+                        WritingSurface.FULL_EDITOR -> onReply(subcat, page, emptyList())
                     }
                 },
+                // #604 lot 3 / #806 — preset routing (mockup P3, « le cas qui force le plein
+                // écran ») : when the sheet wins, the cards are pre-armed and the basket is
+                // consumed HERE (they live on in the sheet's ViewModel) ; when the full-screen
+                // editor wins (3+ under SHEET, any citation under SHEET_EXCEPT_QUOTES, always
+                // under FULL_EDITOR), the `:app` path (in-memory handoff + basket clear) takes
+                // over. The sheet branch snapshots the selection BEFORE its local clear so the
+                // launch can never observe a half-emptied basket ; the full-editor branch
+                // delegates to the existing `:app` contract, which reads the hoisted basket and
+                // hands it over BEFORE clearing it (RedfaceNavigation, « Citer N » entry) — the
+                // local snapshot is not what that branch ships (gate Codex #806).
+                onMultiQuote = { subcat, page ->
+                    val selection = multiQuoteSelections.toList()
+                    when (writingSurfaceFor(state.writingSurfacePreset, quoteCount = selection.size)) {
+                        WritingSurface.FULL_EDITOR -> onMultiQuote(subcat, page)
+                        WritingSurface.SHEET -> {
+                            quickReplyFor = QuickReplyLaunch(
+                                request = QuickReplyRequest(
+                                    cat = state.request.cat,
+                                    subcat = subcat,
+                                    topicId = state.request.post,
+                                    page = page,
+                                ),
+                                initialQuotes = selection,
+                            )
+                            onClearMultiQuote()
+                        }
+                    }
+                },
+                // #436 — « Tout vider » : the long press on « ❝N » resets the hoisted basket.
+                onClearMultiQuote = onClearMultiQuote,
             )
         },
     ) { innerPadding ->
@@ -857,39 +909,61 @@ internal fun TopicContent(
                         // (overlaying the list's right edge, outside the scrolled element), so the
                         // manual Box + LazyListScrollbar wrapper is gone. PullToRefreshBox stays the
                         // feature's wrapper (its refresh state belongs to the ViewModel).
-                        TopicLoadedContent(
-                            state = state,
-                            topic = mode.topic,
-                            hiddenNumreponses = mode.hiddenNumreponses,
-                            // #604 lot 2 — « Citer » opens the quick-reply sheet with the card
-                            // pre-armed (1-citation session) instead of the full-screen editor.
-                            onQuoteRequested = { preview ->
-                                quickReplyFor = QuickReplyLaunch(
-                                    request = QuickReplyRequest(
-                                        cat = state.request.cat,
-                                        subcat = mode.topic.subcat,
-                                        topicId = state.request.post,
-                                        page = mode.topic.page,
-                                    ),
-                                    initialQuotes = listOf(preview),
-                                )
-                            },
-                            onEdit = onEdit,
-                            onEditFirstPost = onEditFirstPost,
-                            onOpenPage = onOpenPage,
-                            onGoToPost = onGoToPost,
-                            onOpenProfile = onOpenProfile,
-                            onDeleteRequest = onDeleteRequest,
-                            onDoubleTapRefresh = { onIntent(TopicIntent.Refresh) },
-                            listState = listState,
-                            multiQuoteSelection = multiQuoteNumreponses,
-                            onToggleMultiQuote = onToggleMultiQuote,
-                            onSetAuthorBlocked = { author, blocked ->
-                                onIntent(TopicIntent.SetAuthorBlocked(author, blocked))
-                            },
-                            pollManualExpanded = pollManualExpanded,
-                            onPollExpansionChanged = onPollExpansionChanged,
-                        )
+                        //
+                        // #785 — the blacklist applies inside quotes too: the canonical blocked set
+                        // is provided to the post renderers so QuoteBlock masks a citation OF a
+                        // blocked author. Scoped to the reading list only — the quick-reply sheet
+                        // and editor previews (outside this provider) keep the empty default.
+                        CompositionLocalProvider(LocalBlockedQuoteAuthors provides mode.blockedQuoteAuthors) {
+                            TopicLoadedContent(
+                                state = state,
+                                topic = mode.topic,
+                                hiddenNumreponses = mode.hiddenNumreponses,
+                                // #604 lot 2 / #806 — « Citer » opens the quick-reply sheet with the
+                                // card pre-armed (1-citation session), unless the preset routes any
+                                // citation to the full-screen editor (decision at tap time; same :app
+                                // path as the sheet's escalation, resumeSharedDraft = true).
+                                onQuoteRequested = { preview ->
+                                    when (writingSurfaceFor(state.writingSurfacePreset, quoteCount = 1)) {
+                                        WritingSurface.SHEET -> quickReplyFor = QuickReplyLaunch(
+                                            request = QuickReplyRequest(
+                                                cat = state.request.cat,
+                                                subcat = mode.topic.subcat,
+                                                topicId = state.request.post,
+                                                page = mode.topic.page,
+                                            ),
+                                            initialQuotes = listOf(preview),
+                                        )
+                                        WritingSurface.FULL_EDITOR ->
+                                            onReply(mode.topic.subcat, mode.topic.page, listOf(preview))
+                                    }
+                                },
+                                // #823 — LONG press on « Citer » : one-shot override of the #806
+                                // preset — always the full-screen editor, through the same :app path
+                                // as the FULL_EDITOR branch above (in-memory handoff +
+                                // resumeSharedDraft = true, #790). Deliberately does NOT consult
+                                // writingSurfaceFor: the gesture IS the routing decision (identical
+                                // to the tap under the FULL_EDITOR preset).
+                                onQuoteFullEditorRequested = { preview ->
+                                    onReply(mode.topic.subcat, mode.topic.page, listOf(preview))
+                                },
+                                onEdit = onEdit,
+                                onEditFirstPost = onEditFirstPost,
+                                onOpenPage = onOpenPage,
+                                onGoToPost = onGoToPost,
+                                onOpenProfile = onOpenProfile,
+                                onDeleteRequest = onDeleteRequest,
+                                onDoubleTapRefresh = { onIntent(TopicIntent.Refresh) },
+                                listState = listState,
+                                multiQuoteSelection = multiQuoteNumreponses,
+                                onToggleMultiQuote = onToggleMultiQuote,
+                                onSetAuthorBlocked = { author, blocked ->
+                                    onIntent(TopicIntent.SetAuthorBlocked(author, blocked))
+                                },
+                                pollManualExpanded = pollManualExpanded,
+                                onPollExpansionChanged = onPollExpansionChanged,
+                            )
+                        }
                     }
                 }
             }
@@ -1234,6 +1308,10 @@ private fun TopicLoadedContent(
     // Vague 3 (#604) — onReply dropped: the dissolved header card was its only consumer here
     // (the bottom FAB cluster replies from TopicContent's own callback).
     onQuoteRequested: (preview: QuotedPostPreview) -> Unit,
+    // #823 — LONG press on « Citer » : same preview payload as [onQuoteRequested], but routed
+    // STRAIGHT to the full-screen editor by the caller (never through writingSurfaceFor — the
+    // gesture IS the one-shot routing decision, overriding the #806 preset).
+    onQuoteFullEditorRequested: (preview: QuotedPostPreview) -> Unit,
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
@@ -1267,6 +1345,40 @@ private fun TopicLoadedContent(
     // it needs a Hilt ViewModel). Deliberately NOT rememberSaveable: Post is not Parcelable
     // and losing an open overflow menu across process death is acceptable.
     var menuPost by remember { mutableStateOf<Post?>(null) }
+    // #831 — post image whose contextual menu is open (null = closed). Same local-UI-state
+    // rationale as menuPost above (no async data in the sheet itself); the target is a small
+    // value type but deliberately NOT rememberSaveable either — losing an open image menu across
+    // process death is acceptable, and symmetry with menuPost keeps ONE dismissal model.
+    var imageMenuTarget by remember { mutableStateOf<PostImageTarget?>(null) }
+    // #831 — one stable handler instance provided (via TopicPostCard) to the post bodies'
+    // LocalPostImageActions; remembered so providing it never invalidates the cards.
+    val postImageActions = remember { PostImageActions(onLongPress = { imageMenuTarget = it }) }
+    // #831 — « Enregistrer l'image » seam. A dedicated thin @HiltViewModel (precedent
+    // QuickReplyViewModel) so the save survives the sheet's dismissal; feedback = Toast
+    // (feature-topic convention, no SnackbarHost in TopicScreen).
+    val imageActionsViewModel: PostImageActionsViewModel = hiltViewModel()
+    val imageActionsContext = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(imageActionsViewModel) {
+        imageActionsViewModel.effects.collect { effect ->
+            val messageRes = when (effect) {
+                PostImageActionsViewModel.SaveImageEffect.SAVED ->
+                    R.string.topic_image_menu_saved
+                PostImageActionsViewModel.SaveImageEffect.FAILED_FETCH ->
+                    R.string.topic_image_menu_save_failed_fetch
+                PostImageActionsViewModel.SaveImageEffect.FAILED_STORAGE ->
+                    R.string.topic_image_menu_save_failed_storage
+                PostImageActionsViewModel.SaveImageEffect.FAILED_TOO_LARGE ->
+                    R.string.topic_image_menu_save_failed_too_large
+            }
+            // The @StringRes overload resolves at show() time — no LocalContext resource query
+            // (LocalContextGetResourceValueCall) for a one-shot Toast.
+            android.widget.Toast.makeText(
+                imageActionsContext,
+                messageRes,
+                android.widget.Toast.LENGTH_SHORT,
+            ).show()
+        }
+    }
     // #509 — posts the reader chose to reveal despite the author being blacklisted. Temporary and
     // re-keyed on `topic.page`, not persisted: re-hiding on a page change is the intended "masqué by
     // default" behaviour (decision #6). This composable instance is bound to one (cat, post), so the
@@ -1426,12 +1538,18 @@ private fun TopicLoadedContent(
             // both inside the same branch keeps them in lock-step — they can never drift apart — and
             // avoids a second decision point in this already-dense list builder.
             val quoteAction: (() -> Unit)?
+            // #823 — the « Citer » long press (full-editor override) is derived INSIDE the same
+            // branch as the tap, so the gesture can never outlive or outreach « Citer » itself
+            // (a non-postable topic exposes neither).
+            val quoteLongPressAction: (() -> Unit)?
             val multiQuoteToggle: (() -> Unit)?
             if (shouldShowQuoteAction(topic, state.isAuthenticated)) {
                 quoteAction = { onQuoteRequested(post.toQuotedPreview()) }
+                quoteLongPressAction = { onQuoteFullEditorRequested(post.toQuotedPreview()) }
                 multiQuoteToggle = { onToggleMultiQuote(post.toQuotedPreview()) }
             } else {
                 quoteAction = null
+                quoteLongPressAction = null
                 multiQuoteToggle = null
             }
             // Phase 2D (#147) — « Modifier » is exposed by HFR only on the
@@ -1476,6 +1594,9 @@ private fun TopicLoadedContent(
                         // is on (the signature is always parsed/cached on the Post; this is render-only).
                         showSignature = state.showSignatures,
                         onQuote = quoteAction,
+                        // #823 — full-editor long-press override, same gate as « Citer »
+                        // (derived together above).
+                        onQuoteLongPress = quoteLongPressAction,
                         onEdit = editAction,
                         onOpenProfile = profileAction,
                         onOpenMenu = { menuPost = post },
@@ -1485,6 +1606,8 @@ private fun TopicLoadedContent(
                         // without opening the « … » menu. Null/non-null under the SAME gate as « Citer »
                         // (derived together above), so the « + » and « Citer » always appear as a pair.
                         onToggleMultiQuote = multiQuoteToggle,
+                        // #831 — long-press on a post image opens the image contextual menu.
+                        onImageLongPress = postImageActions.onLongPress,
                     )
                 }
                 if (showLastReadMarker) {
@@ -1583,6 +1706,16 @@ private fun TopicLoadedContent(
             } else {
                 { onSetAuthorBlocked(post.author, post.numreponse !in hiddenNumreponses) }
             },
+        )
+    }
+    // #831 — per-image contextual menu, opened by a long-press on a post image (wired through
+    // LocalPostImageActions inside TopicPostCard). Hosted at the same level as PostMenuSheet so
+    // the two sheets share one lifecycle model.
+    imageMenuTarget?.let { target ->
+        PostImageMenuSheet(
+            target = target,
+            onSave = imageActionsViewModel::saveImage,
+            onDismiss = { imageMenuTarget = null },
         )
     }
 }
@@ -1969,6 +2102,14 @@ internal fun TopicPostCard(
      */
     showSignature: Boolean = false,
     onQuote: (() -> Unit)?,
+    /**
+     * #823 — LONG press on « Citer » : opens the full-screen editor directly, a one-shot override
+     * of the #806 writing-surface preset (decided at gesture time ; under the FULL_EDITOR preset
+     * it is identical to the tap). Null under the same gate as [onQuote] (both are derived in the
+     * same branch at the call site) and for previews/tests that only exercise the tap. Ignored
+     * while [onQuote] is null — no « Citer » button, nothing to long-press.
+     */
+    onQuoteLongPress: (() -> Unit)? = null,
     onEdit: (() -> Unit)?,
     /**
      * Phase 2 finish (#208) — tapping the avatar or author opens the profile bottom sheet.
@@ -2000,6 +2141,14 @@ internal fun TopicPostCard(
      * Null keeps the headers inert (previews/tests that render a card without navigation).
      */
     onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
+    /**
+     * #831 — provided as [LocalPostImageActions] around the BODY renderer only, so a long-press
+     * on a post image (inline `[img]`, block, promoted) opens the image contextual menu. The
+     * signature render below stays OUTSIDE the provider on purpose — signatures keep their
+     * historical inert images, same stance as MP threads and the editor preview (default null).
+     * Null (previews/tests) leaves every image inert.
+     */
+    onImageLongPress: ((PostImageTarget) -> Unit)? = null,
 ) {
     // #287 — structural spacing from the active density preset (Comfort = the historical rhythm).
     val m = LocalDisplayMetrics.current
@@ -2072,7 +2221,15 @@ internal fun TopicPostCard(
                 verticalArrangement = Arrangement.spacedBy(m.postSpacing),
             ) {
                 // #281 — topic posts are selectable/copyable (opt-in; default is OFF in PostRenderer).
-                PostRenderer(content = post.content, selectable = true, onGoToCitedPost = onGoToCitedPost)
+                // #831 — the image-actions handler rides a CompositionLocal read inside the two image
+                // render paths of PostRenderer, so neither the frozen content models nor the invariant
+                // AnnotatedString (#175) change. Wrapped around the BODY only (cf. onImageLongPress KDoc).
+                val imageActions = remember(onImageLongPress) {
+                    onImageLongPress?.let { PostImageActions(onLongPress = it) }
+                }
+                CompositionLocalProvider(LocalPostImageActions provides imageActions) {
+                    PostRenderer(content = post.content, selectable = true, onGoToCitedPost = onGoToCitedPost)
+                }
                 // #330 — the author signature (web parity), gated by the reading preference. Rendered
                 // with the shared PostRenderer (the signature is BBCode/HTML like the body) but in a
                 // subdued style: a divider separates it from the body and a reduced alpha makes it
@@ -2098,6 +2255,7 @@ internal fun TopicPostCard(
             {
                 TopicPostActions(
                     onQuote = onQuote,
+                    onQuoteLongPress = onQuoteLongPress,
                     onEdit = onEdit,
                     onToggleMultiQuote = onToggleMultiQuote,
                     multiQuoteSelected = multiQuoteSelected,
@@ -2295,9 +2453,14 @@ private fun TopicPostBadges(
  * subordinate to the post content. The body↔footer gap and the card's bottom padding ride on
  * [modifier] (reinjected by the call site). « Supprimer » (#292) moved to the contextual menu (#418).
  */
+// LongParameterList: state-hoisted Composable, each param has a distinct call-site.
+@Suppress("LongParameterList")
 @Composable
 private fun TopicPostActions(
     onQuote: (() -> Unit)?,
+    // #823 — LONG press on « Citer » : straight to the full-screen editor (one-shot override of
+    // the #806 writing-surface preset). Null keeps a plain tap-only « Citer ».
+    onQuoteLongPress: (() -> Unit)?,
     onEdit: (() -> Unit)?,
     onToggleMultiQuote: (() -> Unit)?,
     multiQuoteSelected: Boolean,
@@ -2355,10 +2518,50 @@ private fun TopicPostActions(
             }
         }
         if (onQuote != null) {
-            TextButton(onClick = onQuote) {
-                Text(text = stringResource(R.string.topic_post_quote))
-            }
+            QuoteTextButton(onQuote = onQuote, onQuoteLongPress = onQuoteLongPress)
         }
+    }
+}
+
+/**
+ * #823 — the « Citer » footer action, hand-rolled so a LONG press can open the full-screen editor
+ * directly (a one-shot override of the #806 writing-surface preset ; under the FULL_EDITOR preset
+ * the gesture is identical to the tap). A real M3 [TextButton] is a Surface(onClick) whose inner
+ * clickable swallows the pointer input of any combinedClickable stacked on its modifier — the same
+ * trap as the FABs (#436/#822, pinned by [MultiQuoteFabClearTest]) — so this button carries the
+ * combinedClickable itself. Shape / labelLarge / primary content colour / content padding / min
+ * size / 48 dp touch target replicate the M3 TextButton defaults of the sibling footer actions,
+ * and combinedClickable brings the built-in long-press haptics plus the TalkBack announcement via
+ * onLongClickLabel. A null [onQuoteLongPress] falls back to a plain clickable so no long-press
+ * semantics are advertised (ForumListRow idiom, #457).
+ */
+@Composable
+private fun QuoteTextButton(onQuote: () -> Unit, onQuoteLongPress: (() -> Unit)?) {
+    val longPressLabel = stringResource(R.string.topic_post_quote_full_editor)
+    val interaction = if (onQuoteLongPress != null) {
+        Modifier.combinedClickable(
+            onClick = onQuote,
+            onLongClick = onQuoteLongPress,
+            onLongClickLabel = longPressLabel,
+            role = Role.Button,
+        )
+    } else {
+        Modifier.clickable(role = Role.Button, onClick = onQuote)
+    }
+    Box(
+        modifier = Modifier
+            .minimumInteractiveComponentSize()
+            .clip(ButtonDefaults.textShape)
+            .then(interaction)
+            .defaultMinSize(minWidth = ButtonDefaults.MinWidth, minHeight = ButtonDefaults.MinHeight)
+            .padding(ButtonDefaults.TextButtonContentPadding),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = stringResource(R.string.topic_post_quote),
+            color = MaterialTheme.colorScheme.primary,
+            style = MaterialTheme.typography.labelLarge,
+        )
     }
 }
 
@@ -2569,6 +2772,8 @@ private fun TopicBottomActionsHost(
     onOpenPage: (Int) -> Unit,
     onReply: (subcat: Int, page: Int) -> Unit,
     onMultiQuote: (subcat: Int, page: Int) -> Unit,
+    // #436 — empties the whole basket (« Tout vider », long-press on the « Citer N » FAB).
+    onClearMultiQuote: () -> Unit,
 ) {
     // #411 — tuck the cluster away while reading down, reveal it on the first upward scroll.
     // AnimatedVisibility in the Scaffold's FAB slot simply collapses to nothing when hidden;
@@ -2593,8 +2798,15 @@ private fun TopicBottomActionsHost(
             // robustness as the header guard and the swipe (#282).
             onPreviousPage = { loaded?.let { onOpenPage((it.topic.page - 1).coerceAtLeast(1)) } },
             onNextPage = { loaded?.let { onOpenPage((it.topic.page + 1).coerceAtMost(it.topic.totalPages)) } },
+            // #822 — long press on ‹/› jumps to the first/last page. Both targets are in bounds by
+            // construction (1 and the parsed totalPages) ; same belt-and-braces null-guard as the
+            // single-page steps above. The #383 preference gate is untouched — the gestures live on
+            // FABs already governed by showPageFabs.
+            onFirstPage = { loaded?.let { onOpenPage(1) } },
+            onLastPage = { loaded?.let { onOpenPage(it.topic.totalPages) } },
             onReply = { loaded?.let { onReply(it.topic.subcat, it.topic.page) } },
             onMultiQuote = { loaded?.let { onMultiQuote(it.topic.subcat, it.topic.page) } },
+            onClearMultiQuote = onClearMultiQuote,
         )
     }
 }
@@ -2626,11 +2838,17 @@ private fun TopicBottomActions(
     multiQuoteCount: Int,
     onPreviousPage: () -> Unit,
     onNextPage: () -> Unit,
+    // #822 — long press on ‹/› jumps straight to the first/last page (tap keeps the single step).
+    onFirstPage: () -> Unit,
+    onLastPage: () -> Unit,
     onReply: () -> Unit,
     onMultiQuote: () -> Unit,
+    onClearMultiQuote: () -> Unit,
 ) {
     val previousLabel = stringResource(R.string.topic_fab_previous_page)
     val nextLabel = stringResource(R.string.topic_fab_next_page)
+    val firstPageLabel = stringResource(R.string.topic_fab_first_page)
+    val lastPageLabel = stringResource(R.string.topic_fab_last_page)
     Row(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -2642,7 +2860,7 @@ private fun TopicBottomActions(
         // explicitly armed, not page navigation (call-site zeroes the count when quoting is
         // unavailable).
         FabSlot(visible = multiQuoteCount > 0) {
-            MultiQuoteFab(count = multiQuoteCount, onClick = onMultiQuote)
+            MultiQuoteFab(count = multiQuoteCount, onClick = onMultiQuote, onClear = onClearMultiQuote)
         }
         // #383 — the preference only governs the ‹/› page FABs; « Répondre » keeps its own gate.
         if (showPageFabs) {
@@ -2651,6 +2869,9 @@ private fun TopicBottomActions(
                     description = previousLabel,
                     iconRes = fr.forumhfr.redface2.core.ui.R.drawable.ic_chevron_left,
                     onClick = onPreviousPage,
+                    // #822 — long press jumps to page 1.
+                    onLongClick = onFirstPage,
+                    onLongClickLabel = firstPageLabel,
                 )
             }
             FabSlot(visible = canGoNext) {
@@ -2658,6 +2879,9 @@ private fun TopicBottomActions(
                     description = nextLabel,
                     iconRes = fr.forumhfr.redface2.core.ui.R.drawable.ic_chevron_right,
                     onClick = onNextPage,
+                    // #822 — long press jumps to the last page.
+                    onLongClick = onLastPage,
+                    onLongClickLabel = lastPageLabel,
                 )
             }
         }
@@ -2685,35 +2909,89 @@ private fun FabSlot(visible: Boolean, content: @Composable () -> Unit) {
 /** #599 — M3 small-FAB container footprint, the reserved geometry of every [FabSlot]. */
 private val FAB_SLOT_SIZE = 40.dp
 
+// `internal` (#436): MultiQuoteFabClearTest mounts the FAB directly to pin the « Tout vider »
+// long-press wiring (tap → onClick, long press → onClear) without standing up the whole screen.
 @Composable
-private fun MultiQuoteFab(count: Int, onClick: () -> Unit) {
-    // #291 — same SmallFloatingActionButton footprint as PageFab/ReplyFab; the glyph is a
-    // decorative « ❝N » (no Material icons — detekt ForbiddenImport blocks
-    // androidx.compose.material.*) and the real label rides on contentDescription for TalkBack.
+internal fun MultiQuoteFab(count: Int, onClick: () -> Unit, onClear: () -> Unit) {
+    // #291 — same small-FAB footprint as PageFab/ReplyFab; the glyph is a decorative « ❝N » (no
+    // Material icons — detekt ForbiddenImport blocks androidx.compose.material.*) and the real
+    // label rides on contentDescription for TalkBack.
+    // #436 — a LONG PRESS empties the whole basket (« Tout vider »), on the FAB where the user
+    // sees the count (XaTriX arbitrage: not in the post menu nor the editor). Hand-rolled FAB
+    // (pattern FlagItem) : a NON-clickable Surface carries the combinedClickable, because a real
+    // SmallFloatingActionButton's inner clickable swallows the pointer input of any
+    // combinedClickable stacked on its modifier — neither gesture ever fires (pinned by
+    // MultiQuoteFabClearTest). combinedClickable brings the built-in long-press haptics and
+    // exposes « Tout vider » through onLongClickLabel for TalkBack. Shape/colors/elevation and
+    // the labelLarge glyph mirror the M3 small-FAB defaults of the sibling FABs.
     val label = pluralStringResource(R.plurals.topic_fab_multi_quote, count, count)
-    SmallFloatingActionButton(
-        onClick = onClick,
-        modifier = Modifier.semantics { contentDescription = label },
+    val clearLabel = stringResource(R.string.topic_fab_multi_quote_clear)
+    Surface(
+        modifier = Modifier
+            .semantics { contentDescription = label }
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onClear,
+                onLongClickLabel = clearLabel,
+                role = Role.Button,
+            ),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        shadowElevation = 6.dp,
     ) {
-        Text("❝$count")
+        Box(
+            modifier = Modifier.sizeIn(minWidth = FAB_SLOT_SIZE, minHeight = FAB_SLOT_SIZE),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("❝$count", style = MaterialTheme.typography.labelLarge)
+        }
     }
 }
 
+// `internal` (#822): PageFabLongPressTest mounts the FAB directly to pin the gesture split
+// (tap → onClick, long press → onLongClick) without standing up the whole screen — same
+// visibility relaxation as MultiQuoteFab above.
 @Composable
-private fun PageFab(
+internal fun PageFab(
     description: String,
     @DrawableRes iconRes: Int,
     onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onLongClickLabel: String,
 ) {
     // #360 / ADR-015 — chevron en vector stroke unifié (poids optique aligné sur la flèche retour),
     // dimensionné en dp via le primitive partagé :core:ui plutôt qu'un glyphe « ‹ »/« › » dépendant
     // de la police. Pas de Material icons (detekt ForbiddenImport). L'étiquette a11y reste sur le FAB,
     // donc l'icône est décorative.
-    SmallFloatingActionButton(
-        onClick = onClick,
-        modifier = Modifier.semantics { contentDescription = description },
+    // #822 — a LONG PRESS jumps straight to the first/last page (‹ → page 1, › → totalPages), on
+    // the same FAB as the single-page step. Hand-rolled FAB (pattern #820, cloned from
+    // MultiQuoteFab above): a NON-clickable Surface carries the combinedClickable, because a real
+    // SmallFloatingActionButton's inner clickable swallows the pointer input of any
+    // combinedClickable stacked on its modifier — neither gesture ever fires (pinned by
+    // MultiQuoteFabClearTest). combinedClickable brings the built-in long-press haptics and
+    // announces the jump through onLongClickLabel for TalkBack. Shape/colors/elevation and the
+    // FAB_SLOT_SIZE footprint mirror the M3 small-FAB defaults of the sibling ReplyFab.
+    Surface(
+        modifier = Modifier
+            .semantics { contentDescription = description }
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick,
+                onLongClickLabel = onLongClickLabel,
+                role = Role.Button,
+            ),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        shadowElevation = 6.dp,
     ) {
-        RedfaceVectorIcon(resId = iconRes)
+        Box(
+            modifier = Modifier.sizeIn(minWidth = FAB_SLOT_SIZE, minHeight = FAB_SLOT_SIZE),
+            contentAlignment = Alignment.Center,
+        ) {
+            RedfaceVectorIcon(resId = iconRes)
+        }
     }
 }
 
@@ -2736,24 +3014,43 @@ private fun ReplyFab(onClick: () -> Unit) {
 // not purged on logout, cf. CacheInvalidator), so these gates consult auth explicitly instead
 // of trusting `canReply` alone — symmetric with the « Créer topic » FAB
 // (CategoryViewModel.canCreateTopic).
-// #604 lots 2-3 — what opens the quick-reply sheet : the reply coordinates, plus the cards this
-// opening pre-arms (one for « Citer », the whole basket for « Citer N » under the full-screen
-// threshold, empty from the reply FAB).
+// #604 lots 2-3 / #806 — what opens the quick-reply sheet : the reply coordinates, plus the cards
+// this opening pre-arms (one for « Citer », the whole basket for « Citer N », empty from the reply
+// FAB) — whenever [writingSurfaceFor] routed the tap to the sheet rather than the editor.
 internal data class QuickReplyLaunch(
     val request: QuickReplyRequest,
     val initialQuotes: List<QuotedPostPreview> = emptyList(),
 )
 
-/**
- * #604 lot 3 — « Citer N » routing (mockup P3 : « le cas qui force le plein écran ») : up to
- * [MULTI_QUOTE_FULL_EDITOR_THRESHOLD] - 1 cards the quick-reply sheet stays comfortable with the
- * keyboard open ; from the threshold up the selection goes straight to the full-screen editor.
- * Pure so the boundary is unit-testable.
- */
-internal fun multiQuoteOpensFullEditor(selectionCount: Int): Boolean =
-    selectionCount >= MULTI_QUOTE_FULL_EDITOR_THRESHOLD
+/** #806 — the two composition surfaces a write tap can open. */
+internal enum class WritingSurface { SHEET, FULL_EDITOR }
 
-/** #604 lot 3 — cadrage Codex : « 3 citations = plein écran » (constante nommée, pas un réglage). */
+/**
+ * #806 — which surface a write tap opens, from the user's [preset] and the number of citations the
+ * tap carries (0 for the reply FAB, 1 for « Citer », the basket size for « Citer N »).
+ *
+ * - [WritingSurfacePreset.SHEET] (default) keeps the 0.25.1 routing exactly : the quick-reply
+ *   sheet, except a multi-quote basket of [MULTI_QUOTE_FULL_EDITOR_THRESHOLD]+ cards (mockup P3 :
+ *   « le cas qui force le plein écran », #604 lot 3) — up to that the sheet stays comfortable with
+ *   the keyboard open.
+ * - [WritingSurfacePreset.SHEET_EXCEPT_QUOTES] : any citation (1..N) opens the full-screen editor.
+ * - [WritingSurfacePreset.FULL_EDITOR] : always the full-screen editor.
+ *
+ * Pure so the routing table is unit-testable ([MultiQuoteRoutingTest]).
+ */
+internal fun writingSurfaceFor(preset: WritingSurfacePreset, quoteCount: Int): WritingSurface = when (preset) {
+    WritingSurfacePreset.FULL_EDITOR -> WritingSurface.FULL_EDITOR
+    WritingSurfacePreset.SHEET_EXCEPT_QUOTES ->
+        if (quoteCount > 0) WritingSurface.FULL_EDITOR else WritingSurface.SHEET
+    WritingSurfacePreset.SHEET ->
+        if (quoteCount >= MULTI_QUOTE_FULL_EDITOR_THRESHOLD) WritingSurface.FULL_EDITOR else WritingSurface.SHEET
+}
+
+/**
+ * #604 lot 3 — cadrage Codex : « 3 citations = plein écran », a named constant. Since #806 the
+ * user setting is the PRESET above ; this threshold remains a constant guarding the
+ * [WritingSurfacePreset.SHEET] preset only (the other presets ignore it by construction).
+ */
 internal const val MULTI_QUOTE_FULL_EDITOR_THRESHOLD = 3
 
 // #604 lot 2 — the quote-card snapshot, built AT SELECTION TIME where the full Post is in scope

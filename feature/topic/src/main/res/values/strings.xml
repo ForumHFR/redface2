@@ -3,11 +3,17 @@
     <string name="topic_fab_reply">Répondre</string>
     <string name="topic_fab_previous_page">Page précédente</string>
     <string name="topic_fab_next_page">Page suivante</string>
+    <!-- #822 — appui long sur les FAB ‹/› : saut direct à la première / dernière page
+         (onLongClickLabel TalkBack). -->
+    <string name="topic_fab_first_page">Aller à la première page</string>
+    <string name="topic_fab_last_page">Aller à la dernière page</string>
     <!-- #291 — FAB « Citer N » : ouvre l'éditeur pré-rempli avec les citations sélectionnées. -->
     <plurals name="topic_fab_multi_quote">
         <item quantity="one">Citer %1$d message sélectionné</item>
         <item quantity="other">Citer %1$d messages sélectionnés</item>
     </plurals>
+    <!-- #436 — appui long sur le FAB « Citer N » : vide tout le panier de citation multiple. -->
+    <string name="topic_fab_multi_quote_clear">Vider la sélection de citations</string>
     <!-- #291 — entrée du menu contextuel : ajoute/retire le post du panier de citation multiple. -->
     <string name="topic_post_menu_multi_quote_add">Ajouter à la citation multiple</string>
     <string name="topic_post_menu_multi_quote_remove">Retirer de la citation multiple</string>
@@ -74,6 +80,17 @@
         <item quantity="one">Cité %1$d fois sur cette page</item>
         <item quantity="other">Cité %1$d fois sur cette page</item>
     </plurals>
+    <!-- #831 — menu contextuel d'appui long sur les images de post (PostImageMenuSheet).
+         « Ouvrir dans le navigateur » et son échec réutilisent topic_post_menu_open_in_browser /
+         topic_post_menu_no_browser. -->
+    <string name="topic_image_menu_save">Enregistrer l\'image</string>
+    <string name="topic_image_menu_saved">Image enregistrée dans Pictures/Redface2</string>
+    <string name="topic_image_menu_save_failed_fetch">Téléchargement de l\'image impossible</string>
+    <string name="topic_image_menu_save_failed_storage">Enregistrement de l\'image impossible</string>
+    <string name="topic_image_menu_save_failed_too_large">Image trop volumineuse pour être enregistrée</string>
+    <string name="topic_image_menu_copy_url">Copier l\'URL de l\'image</string>
+    <string name="topic_image_menu_url_copied">URL copiée</string>
+    <string name="topic_image_menu_full_size_soon">Afficher en taille réelle (à venir)</string>
     <!-- #239 — badge on a post showing how many posts of the CURRENT page cite it. -->
     <plurals name="topic_post_cited_count">
         <item quantity="one">cité %1$d fois</item>
@@ -95,6 +112,9 @@
     <string name="topic_page_jump_label">Aller à la page</string>
     <string name="topic_page_jump_action">Y aller</string>
     <string name="topic_post_quote">Citer</string>
+    <!-- #823 — appui long sur « Citer » : ouvre directement l'éditeur plein écran, sans passer
+         par le preset de surface d'écriture (#806). onLongClickLabel TalkBack. -->
+    <string name="topic_post_quote_full_editor">Citer dans l\'éditeur plein écran</string>
     <string name="topic_post_edit">Modifier</string>
     <string name="topic_edit_first_post">Modifier le premier message</string>
     <string name="topic_post_submit_refresh_failed">Message envoyé, mais le rafraîchissement de la page a échoué. Tirez pour réessayer.</string>

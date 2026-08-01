@@ -30,6 +30,7 @@ import fr.forumhfr.redface2.core.model.search.SearchRequest
 import fr.forumhfr.redface2.core.model.search.SearchResultPage
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostResult
 import fr.forumhfr.redface2.core.model.AuthState
@@ -509,6 +510,27 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `state writingSurfacePreset reflects the user preference (#806)`() = runTest {
+        val fullEditor = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            userPreferencesRepository = FakeUserPreferencesRepository(
+                writingSurfacePreset = WritingSurfacePreset.FULL_EDITOR,
+            ),
+        )
+        assertEquals(WritingSurfacePreset.FULL_EDITOR, fullEditor.state.value.writingSurfacePreset)
+
+        val default = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            userPreferencesRepository = FakeUserPreferencesRepository(),
+        )
+        assertEquals(WritingSurfacePreset.SHEET, default.state.value.writingSurfacePreset)
+    }
+
+    @Test
     fun `DeletePost success emits PostDeleted and force-refreshes the current page (#292)`() = runTest {
         // Page 2 so the editable post 777 is NOT the first post (the FP lives on page 1 and is
         // excluded from deletion). Editable + authenticated + canReply → the VM gate lets it through.
@@ -786,6 +808,40 @@ class TopicViewModelTest {
             assertEquals(setOf(100), assertMode<TopicUiState.Mode.Loaded>(awaitItem()).hiddenNumreponses)
             viewModel.send(TopicIntent.SetAuthorBlocked("Alice", blocked = false))
             assertEquals(emptySet<Int>(), assertMode<TopicUiState.Mode.Loaded>(awaitItem()).hiddenNumreponses)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `the canonical blocked set is exposed for quote masking and re-filters live (#785)`() = runTest {
+        // #785 — the screen provides Loaded.blockedQuoteAuthors to the quote renderer
+        // (LocalBlockedQuoteAuthors), so the set must (a) land with the initial load — even when the
+        // blocked author has NO post on the page, only citations of them — and (b) follow live
+        // blacklist changes through the same seam as hiddenNumreponses (loadedMode).
+        val topic = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            posts = listOf(fakePost(100, author = "Alice"), fakePost(101, author = "Bob")),
+        )
+        val blacklist = FakeBlacklistRepository(blockedCanonicals = setOf("charlie"))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            blacklistRepository = blacklist,
+        )
+
+        viewModel.state.test {
+            val initial = assertMode<TopicUiState.Mode.Loaded>(awaitItem())
+            // charlie posts nothing on this page (hiddenNumreponses empty), yet the canonical set is
+            // exposed so a CITATION of charlie in Alice/Bob's posts can be masked by the renderer.
+            assertEquals(setOf("charlie"), initial.blockedQuoteAuthors)
+            assertEquals(emptySet<Int>(), initial.hiddenNumreponses)
+
+            blacklist.block("Alice")
+            val refiltered = assertMode<TopicUiState.Mode.Loaded>(awaitItem())
+            assertEquals(setOf("charlie", "alice"), refiltered.blockedQuoteAuthors)
+            assertEquals(setOf(100), refiltered.hiddenNumreponses)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -2109,12 +2165,13 @@ private class FakeStreamingTopicRepository(
 
 /**
  * No-op preferences fake for the topic ViewModel tests. Only [observeTopicTopBarAutoHide]
- * (build 89 follow-up), [observeTopicPageFabs] (#383), [observeTopicPollsExpanded] (#456) and
- * [observeTopicSignatures] (#330) are read by [TopicViewModel] — everything else returns the
- * DataStore default so the fake stays a thin stand-in. The relevant values are
- * constructor-injectable so tests can assert they reach state.
+ * (build 89 follow-up), [observeTopicPageFabs] (#383), [observeTopicPollsExpanded] (#456),
+ * [observeTopicSignatures] (#330) and [observeWritingSurfacePreset] (#806) are read by
+ * [TopicViewModel] — everything else returns the DataStore default so the fake stays a thin
+ * stand-in. The relevant values are constructor-injectable so tests can assert they reach state.
  */
 // Internal (not private) so QuickReplyViewModelTest reuses the single fake of this wide interface.
+@Suppress("LongParameterList") // one constructor knob per observed pref — grows with TopicViewModel's reads.
 internal class FakeUserPreferencesRepository(
     private val topicTopBarAutoHide: Boolean = false,
     private val topicPageFabs: Boolean = true,
@@ -2123,6 +2180,8 @@ internal class FakeUserPreferencesRepository(
     private val confirmBeforePosting: Boolean = false,
     // #805 — quote rendering in the composer; false mirrors the production default (inline BBCode).
     private val quoteCardsEnabled: Boolean = false,
+    // #806 — writing-surface preset; SHEET mirrors the production default (0.25.1 behaviour).
+    private val writingSurfacePreset: WritingSurfacePreset = WritingSurfacePreset.SHEET,
 ) : UserPreferencesRepository {
     override fun observeProxyConfig(): Flow<ProxyConfig> = MutableStateFlow(ProxyConfig())
 
@@ -2184,6 +2243,11 @@ internal class FakeUserPreferencesRepository(
     override fun observeQuoteCardsEnabled(): Flow<Boolean> = MutableStateFlow(quoteCardsEnabled)
 
     override suspend fun setQuoteCardsEnabled(enabled: Boolean) = Unit
+
+    override fun observeWritingSurfacePreset(): Flow<WritingSurfacePreset> =
+        MutableStateFlow(writingSurfacePreset)
+
+    override suspend fun setWritingSurfacePreset(preset: WritingSurfacePreset) = Unit
 
     override fun observeShowDtSection(): Flow<Boolean> = MutableStateFlow(false)
 

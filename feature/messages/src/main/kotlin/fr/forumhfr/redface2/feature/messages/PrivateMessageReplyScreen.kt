@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.messages
 
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -54,6 +55,9 @@ import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 fun PrivateMessageReplyScreen(
     request: PrivateMessageReplyRequest,
     onSubmitSucceeded: (threadId: Int, page: Int) -> Unit,
+    // #803 pattern — the actual pop. Invoked only on CloseCommitted (after the ViewModel flushed
+    // the draft), never directly by the chrome: both the system back and the header arrow route
+    // through PrivateMessageReplyViewModel.onCloseRequested first.
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -66,14 +70,21 @@ fun PrivateMessageReplyScreen(
             when (effect) {
                 is PrivateMessageReplyEffect.SubmitSucceeded ->
                     onSubmitSucceeded(effect.threadId, effect.page)
+                // #803 pattern — the pop happens only AFTER the ViewModel flushed the draft.
+                PrivateMessageReplyEffect.CloseCommitted -> onBack()
             }
         }
     }
+    // #803 pattern (state-hygiene audit 2026-07-05) — every close path (system back below, header
+    // arrow via onCloseRequested in the content wiring) routes through the ViewModel so the
+    // pending autosave debounce is flushed BEFORE the pop (trading the predictive-back preview
+    // for never losing the last < 750 ms of typing — same trade-off as PostEditorScreen).
+    BackHandler { viewModel.onCloseRequested() }
     PrivateMessageReplyContent(
         state = state,
         // #618 — auto-open the recipient-manager sheet when entered from the Participants sheet.
         autoOpenRecipientManager = request.openRecipientManager,
-        onBack = onBack,
+        onBack = viewModel::onCloseRequested,
         onContentChanged = viewModel::onContentChanged,
         onToolbarAction = viewModel::onToolbarAction,
         onTogglePreview = viewModel::onTogglePreview,

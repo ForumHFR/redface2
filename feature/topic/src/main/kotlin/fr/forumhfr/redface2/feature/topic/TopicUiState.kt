@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.feature.topic
 
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.model.Topic
+import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 
 data class TopicUiState(
     val request: TopicRequest,
@@ -53,6 +54,14 @@ data class TopicUiState(
      */
     val showSignatures: Boolean = false,
     /**
+     * #806 — mirrors `UserPreferencesRepository.observeWritingSurfacePreset()`. Feeds
+     * [writingSurfaceFor] AT TAP TIME on the three write entry points (reply FAB, « Citer »,
+     * « Citer N ») to pick the quick-reply sheet or the full-screen editor. Default
+     * [WritingSurfacePreset.SHEET] = the 0.25.1 behaviour. A preset change never migrates an
+     * already-open sheet (the decision is only ever taken on the next tap).
+     */
+    val writingSurfacePreset: WritingSurfacePreset = WritingSurfacePreset.SHEET,
+    /**
      * #335 — `true` while a manual pull-to-refresh of the current page is in flight. Drives the
      * Material3 `PullToRefreshBox` spinner. Set on the `Refresh` intent, cleared in the refresh
      * coroutine's `finally` (so a cancellation — e.g. a delete starting mid-refresh — never leaves
@@ -93,6 +102,16 @@ data class TopicUiState(
              * first emission (combine with the blacklist) so a blocked post never flashes before hiding.
              */
             val hiddenNumreponses: Set<Int> = emptySet(),
+            /**
+             * #785 — canonical pseudos (cf. `canonicalizePseudo`) of the black-listed authors — the
+             * same blacklist snapshot [hiddenNumreponses] was computed from. The screen provides it
+             * to the post renderers (`LocalBlockedQuoteAuthors`) so a citation OF a blocked author
+             * inside another user's post is masked too. Kept in lock-step with [hiddenNumreponses]
+             * by `TopicViewModel.loadedMode` — the single construction seam for this mode — so the
+             * post-level and quote-level masks can never diverge across the load / refresh /
+             * force-refresh / post-delete / search / live-refilter paths.
+             */
+            val blockedQuoteAuthors: Set<String> = emptySet(),
         ) : Mode
 
         data class Error(

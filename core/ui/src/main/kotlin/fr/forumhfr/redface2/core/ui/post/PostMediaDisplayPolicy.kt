@@ -22,14 +22,17 @@ import kotlin.math.roundToInt
  * small size directly, while perso smileys use the 70×50 cold-cache fallback while measurement is
  * in flight (and as the default `collectInlineMedia` resolver in tests).
  *
- * Inline `[img]` ([inlineImage]) is now sized like smileys (#224 option A): measured intrinsic native
- * size (no-upscale + absolute cap [INLINE_IMAGE_MAX_WIDTH_SP]×[INLINE_IMAGE_MAX_HEIGHT_SP]) then the
- * relative `0.9 × contentWidth` cap, via the same `IntrinsicMediaSizeCache` + `imageDisplayBox` in
- * PostRenderer. The **production cold fallback** (unmeasured `[img]`) is the one-line
- * [INLINE_IMAGE_MIN_HEIGHT_SP] square in `imageDisplayBox` (#253, no giant Fit flash). The fixed
- * 240×180 [inlineImage] bucket is now only the **default `collectInlineMedia` resolver** (legacy bucket
- * exercised by tests), not the runtime fallback. This kills both the empty frame around a small reaction
- * image and the overflow in a narrow quote.
+ * `[img]` — inline AND block — follows ONE policy since #610, the HFR-web parity rule
+ * `img { max-width: 90%; max-height: 200px }` ([imageParityDisplaySize]): measured intrinsic native
+ * size, no upscale, height capped to [IMAGE_MAX_HEIGHT_UNITS], width capped to the relative
+ * `0.9 × contentWidth`. The inline path (`imageDisplayBox` in PostRenderer, #224 option A) applies it
+ * in **sp** via the same `IntrinsicMediaSizeCache`; the block path ([blockImageDisplaySize]) applies
+ * it in **dp** — so a lone posted photo and the same photo inside prose render at the same size (the
+ * pre-#610 divergence was the issue). The **production cold fallback** (unmeasured inline `[img]`) is
+ * the one-line [INLINE_IMAGE_MIN_HEIGHT_SP] square in `imageDisplayBox` (#253, no giant Fit flash).
+ * The fixed 240×180 [inlineImage] bucket is now only the **default `collectInlineMedia` resolver**
+ * (legacy bucket exercised by tests), not the runtime fallback. This kills the empty frame around a
+ * small reaction image, the overflow in a narrow quote, and the full-width blow-up of block images.
  *
  * Why this took fixed buckets as a stopgap in #109: Compose `InlineTextContent` requires a **fixed**
  * `Placeholder` size when the `AnnotatedString` is built, so intrinsic sizing needs async-measure →
@@ -102,16 +105,17 @@ internal object PostMediaDisplayPolicy {
     )
 
     /**
-     * Block-level `[img]` rendered standalone via `PostBlock.Image`. Width matches the parent
-     * column; height is bounded so a 4000×3000 RAW screenshot doesn't blow up the post and
-     * destroy the scroll position.
-     *
-     * The min/max pair matters during the async lifecycle of `SubcomposeAsyncImage`: while
-     * loading or on error the bitmap has no intrinsic size yet, so without [blockImageMinHeight]
+     * Legacy slot for an UNMEASURED block-level `[img]` (cold cache before the measure effect lands,
+     * or a measurement failure — dead host / 404). Only that placeholder path still uses this pair:
+     * while loading or on error the bitmap has no intrinsic size yet, so without [blockImageMinHeight]
      * the container would collapse to the height of the loading label (~16dp), making the
-     * loading/error UX barely visible AND causing a layout jump when the bitmap finally
-     * resolves. The min reserves a stable visual slot; the max keeps long portrait shots in
-     * check (cf. issue #109 review by Codex on PR #126).
+     * loading/error UX barely visible AND causing a layout jump when the bitmap finally resolves.
+     * The min reserves a stable visual slot; the max keeps a load-without-measurement in check
+     * (cf. issue #109 review by Codex on PR #126).
+     *
+     * #610 — a MEASURED block image no longer touches this slot: it renders at its exact
+     * [blockImageDisplaySize] (web-parity `max-width:90% / max-height:200`, no upscale), replacing
+     * the former full-width fit clamped to this [160, 480] dp range.
      */
     val blockImageMaxHeight: Dp = 480.dp
     val blockImageMinHeight: Dp = 160.dp
@@ -122,29 +126,29 @@ internal object PostMediaDisplayPolicy {
     }
 
     /**
-     * #249 — exact RESERVED height (dp) for a block `[img]`, computed BEFORE the bitmap arrives so the
-     * loading placeholder occupies the same vertical slot the loaded image will, hence zero layout
-     * shift (anti-CLS) when it crossfades in.
+     * #249/#610 — exact display size (in **dp** units) for a MEASURED block `[img]`, computed BEFORE
+     * the bitmap arrives so the container occupies exactly the slot the loaded image will fill, hence
+     * zero layout shift (anti-CLS, #249) when it crossfades in.
      *
-     * Reuses the same measured intrinsic size the #175/#224 path already caches: at the block width
-     * [availableWidthDp] the image will render `availableWidthDp × (h/w)` tall (`ContentScale.Fit`,
-     * full width), so we reserve exactly that, clamped to the existing [blockImageMinHeight] /
-     * [blockImageMaxHeight] slot. A landscape shot narrower-than-tall and a portrait shot both land on
-     * their real height; only the rare clamp cases differ — exactly the bounds the loaded image already
-     * obeys, so no over-reserve vs the #175 sizing.
+     * #610 — the size is the unified HFR-web parity policy ([imageParityDisplaySize]): native size,
+     * no upscale, height ≤ [IMAGE_MAX_HEIGHT_UNITS] (web `max-height: 200px`), width ≤
+     * [SMILEY_RELATIVE_MAX_WIDTH_FRACTION] × [availableWidthDp] (web `max-width: 90%`). Before →
+     * after: a measured block image used to FILL the column width — upscaling any source narrower
+     * than the column — with its height `width × h/w` clamped to the [blockImageMinHeight] /
+     * [blockImageMaxHeight] (160/480 dp) slot; it now renders at its capped NATIVE size, the same
+     * numbers the inline path produces in sp, so a lone posted photo and the same photo inside prose
+     * finally match.
      *
      * [measured] is `null` for a not-yet-measured image — a cold cache before the measure effect lands,
      * or a measurement failure (dead host / 404). Both the paragraph effect (#175/#224) and, since the
      * #249 follow-up, the standalone `PostBlock.Image` effect feed the cache; callers fall back to the
-     * legacy [blockImageMinHeight] slot until (or unless) a size lands.
+     * legacy [blockImageMinHeight]-anchored slot until (or unless) a size lands.
      */
-    fun reservedBlockImageHeight(measured: PixelSize?, availableWidthDp: Float): Dp? {
+    fun blockImageDisplaySize(measured: PixelSize?, availableWidthDp: Float): PixelSize? {
         val size = measured?.takeIf { it.width > 0 && it.height > 0 }
         if (size == null || availableWidthDp <= 0f) return null
-        val rawHeight = availableWidthDp * (size.height.toFloat() / size.width.toFloat())
-        return rawHeight
-            .coerceIn(blockImageMinHeight.value, blockImageMaxHeight.value)
-            .dp
+        val maxWidthDp = (availableWidthDp * SMILEY_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
+        return imageParityDisplaySize(size, maxWidthUnits = maxWidthDp)
     }
 
     /**
@@ -248,20 +252,37 @@ internal val builtinPreseedSize = PixelSize(16, 16)
 internal val persoColdFallbackSize = PixelSize(70, 50)
 
 /**
- * #224 (option A) — absolute caps for an inline `[img]`, in **sp** (intrinsic native px treated as
- * logical/CSS px, like the smiley path). More generous than the smiley height cap: an inline reaction
- * image or embedded photo can be taller than an emotive glyph, yet stays bounded so it never dominates
- * the post (a genuinely large photo belongs in a standalone `PostBlock.Image`, [blockImageMaxHeight]).
- * The real horizontal limit is the relative `0.9 × contentWidth` applied renderer-side via [capToWidth].
+ * #610 — HFR-web parity height cap for ANY `[img]`, inline or block: the web rule is
+ * `img { max-height: 200px }`, mirrored here with the native px treated as logical units (`.sp` on the
+ * inline path so the image tracks the text size, `.dp` on the block path — documented fontScale
+ * asymmetry: inline grows with the user font, block does not, exactly like text vs images on the web).
+ * Replaces (#610, before → after) the former `INLINE_IMAGE_MAX_HEIGHT_SP` (200 sp → same 200, the
+ * inline path was already at web parity) and the MEASURED-path use of
+ * [PostMediaDisplayPolicy.blockImageMaxHeight] (480 dp → 200 dp; the block path exceeded the web cap
+ * 2.4×, the visible #610 divergence).
  */
-internal const val INLINE_IMAGE_MAX_HEIGHT_SP = 200
-internal const val INLINE_IMAGE_MAX_WIDTH_SP = 240
+internal const val IMAGE_MAX_HEIGHT_UNITS = 200
 
 /**
- * #257 — upper bound (px) for the **decode** size of an inline `[img]`. The inline AsyncImage requests
- * the inline cap converted to px (density × fontScale) clamped to this, so Coil decodes ONE stable
- * bitmap that survives the cold→measured box growth without a re-decode + pixelated upscale. 1024 covers
- * the 240×200 sp cap on any realistic density/fontScale while staying cheap to decode and cache.
+ * #610 — block-promotion width threshold. Before #610 this was `INLINE_IMAGE_MAX_WIDTH_SP` (240), the
+ * ABSOLUTE inline display width cap; the display cap is now the RELATIVE `0.9 × contentWidth` (web
+ * `max-width: 90%`, [SMILEY_RELATIVE_MAX_WIDTH_FRACTION]) applied renderer-side, so no absolute width
+ * cap exists any more (before → after: an image measured 300 px wide rendered 240 sp wide; it now
+ * renders 300 sp, or `0.9 × container` if narrower). The 240 value survives ONLY as the
+ * `shouldPromoteImagesToBlocks` "this is a real photo" width threshold: with #610 sizing identical on
+ * both paths, promotion is purely layout semantics (own centred line, block loading/error UX, #257
+ * tap-through), and the threshold keeps its pre-#610 calibration.
+ */
+internal const val IMAGE_PROMOTION_WIDTH_UNITS = 240
+
+/**
+ * #257/#610 — fixed decode size (px) for an inline `[img]`: the render request decodes at this bound
+ * (INEXACT Fit) so Coil produces ONE stable bitmap that survives the cold→measured box growth without
+ * a re-decode + pixelated upscale. Before #610 the request size derived from the absolute 240×200 sp
+ * display cap converted to px (density × fontScale) and clamped here; that width cap is now relative
+ * to the container, so the request uses this flat bound directly — it covers `0.9 × container` at any
+ * realistic phone density/fontScale, stays cheap to decode and cache, and Coil never decodes past the
+ * source, so a small image still decodes at native.
  *
  * Distinct from `INTRINSIC_PROBE_SIZE_PX` (also 1024): that one bounds the **measure** probe in
  * `IntrinsicMediaSizeMeasurer`, this one bounds the **render** decode here. Same value, different role —
@@ -309,6 +330,29 @@ internal fun intrinsicSmileyDisplaySize(
         height = (nativePx.height * scale).roundToInt().coerceAtLeast(1),
     )
 }
+
+/**
+ * #610 — the unified `[img]` display policy shared by the inline path (`imageDisplayBox` in
+ * PostRenderer, sp units) and the block path ([PostMediaDisplayPolicy.blockImageDisplaySize], dp
+ * units): HFR-web `img { max-width: 90%; max-height: 200px }` parity. No upscale, height capped to
+ * [maxHeightUnits] (default [IMAGE_MAX_HEIGHT_UNITS]), width capped to [maxWidthUnits] — the caller
+ * passes the RELATIVE cap (≈ `0.9 ×` its container width, in its own units), the only width limit
+ * since #610. A non-positive [maxWidthUnits] applies no width cap (defensive, mirrors [capToWidth]:
+ * a zero-width container must not collapse the image to a sliver).
+ *
+ * Thin wrapper over [intrinsicSmileyDisplaySize] (same math: uniform scale ≤ 1, ≥ 1 px per axis),
+ * named separately so `[img]` call sites read as the #610 contract and can evolve independently of
+ * the smiley caps.
+ */
+internal fun imageParityDisplaySize(
+    nativePx: PixelSize,
+    maxWidthUnits: Int,
+    maxHeightUnits: Int = IMAGE_MAX_HEIGHT_UNITS,
+): PixelSize = intrinsicSmileyDisplaySize(
+    nativePx = nativePx,
+    maxWidthSp = if (maxWidthUnits > 0) maxWidthUnits else Int.MAX_VALUE,
+    maxHeightSp = maxHeightUnits,
+)
 
 /**
  * #175 — scale [size] down so its width fits [maxWidthSp] (the relative cap, ≈90% of the content

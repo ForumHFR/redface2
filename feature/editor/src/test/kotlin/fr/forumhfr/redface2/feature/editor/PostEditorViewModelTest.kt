@@ -2,7 +2,6 @@ package fr.forumhfr.redface2.feature.editor
 import fr.forumhfr.redface2.core.ui.editor.UploadError
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 
-import fr.forumhfr.redface2.core.ui.editor.WikiSearchState
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
@@ -32,6 +31,7 @@ import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
 import fr.forumhfr.redface2.core.domain.upload.UploadException
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadedImage
 import fr.forumhfr.redface2.core.domain.upload.UploadedImageRecord
@@ -69,7 +69,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import fr.forumhfr.redface2.core.model.EditorSmiley
-import fr.forumhfr.redface2.core.model.EditorSmileySource
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @Suppress("LargeClass") // One class per ViewModel keeps every code path co-located with its
@@ -818,114 +817,46 @@ class PostEditorViewModelTest {
             quoteMaterializer = ReplyQuoteMaterializer(replyRepository),
         )
 
-    // ----- Phase 2F-B (#11) : smiley picker ----------------------------------
+    // ----- Phase 2F-B (#11) / #441 : smiley picker ----------------------------------
+    // The picker machinery (open/dismiss, ≤ 2-chars gate, debounce, stale-result guards,
+    // #824 restore-on-reopen) lives in the shared SmileyPickerController and is covered by
+    // SmileyPickerControllerTest — no duplicate coverage here. These tests only exercise
+    // what stays a ViewModel concern : the insertion intent, the userId plumbed from the
+    // parsed form, and the diagnostics policy on search failure.
 
     @Test
-    fun `SmileyPickerOpened transitions the state to Open`() = runTest {
+    fun `the wiki search carries the form's parsed userId (#441)`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm().copy(userId = 54_596))
         val viewModel = newReplyViewModel()
-        viewModel.state.test {
-            skipItems(1) // initial idle state
-            viewModel.submit(PostEditorIntent.SmileyPickerOpened)
-            val opened = expectMostRecentItem()
-            val picker = opened.smileyPicker
-            assert(picker is SmileyPickerState.Open) {
-                "expected Open, got $picker"
-            }
-            cancelAndIgnoreRemainingEvents()
-        }
-    }
+        testScheduler.advanceUntilIdle() // form fetch → userId hydrated into state
 
-    @Test
-    fun `SmileyPickerDismissed sets the state back to Hidden`() = runTest {
-        val viewModel = newReplyViewModel()
-        viewModel.submit(PostEditorIntent.SmileyPickerOpened)
-        viewModel.submit(PostEditorIntent.SmileyPickerDismissed)
-        viewModel.state.test {
-            val state = expectMostRecentItem()
-            assert(state.smileyPicker == SmileyPickerState.Hidden) {
-                "expected Hidden after dismiss, got ${state.smileyPicker}"
-            }
-            cancelAndIgnoreRemainingEvents()
-        }
-    }
-
-    @Test
-    fun `short queries stay below the 2-char threshold and do not hit the repository`() = runTest {
-        val viewModel = newReplyViewModel()
-        viewModel.submit(PostEditorIntent.SmileyPickerOpened)
-        viewModel.submit(PostEditorIntent.SmileySearchQueryChanged("ja"))
-        // The 2-char query is below threshold, so no debounce kicks in either ; assert by
-        // call-count rather than racing the dispatcher.
-        assertEquals(0, smileyRepository.callCount)
-        viewModel.state.test {
-            val state = expectMostRecentItem()
-            val picker = state.smileyPicker as SmileyPickerState.Open
-            assertEquals(WikiSearchState.Idle, picker.wiki)
-            assertEquals("ja", picker.query)
-            cancelAndIgnoreRemainingEvents()
-        }
-    }
-
-    @Test
-    fun `queries above the threshold hit the repository after the debounce`() = runTest {
-        val viewModel = newReplyViewModel()
-        viewModel.submit(PostEditorIntent.SmileyPickerOpened)
-        viewModel.submit(PostEditorIntent.SmileySearchQueryChanged("jap"))
-        // Advance through the 300 ms debounce.
+        viewModel.smileyPicker.open()
+        viewModel.smileyPicker.onQueryChanged("jap")
         testScheduler.advanceTimeBy(400L)
         testScheduler.runCurrent()
+
         assertEquals(1, smileyRepository.callCount)
         assertEquals("jap", smileyRepository.lastQuery)
+        assertEquals(54_596, smileyRepository.lastUserId)
     }
 
     @Test
-    fun `successful wiki search lands as Results in the picker`() = runTest {
-        val viewModel = newReplyViewModel()
-        viewModel.submit(PostEditorIntent.SmileyPickerOpened)
-        viewModel.submit(PostEditorIntent.SmileySearchQueryChanged("jap"))
+    fun `the wiki search falls back to user id 0 while the form exposed no userId`() = runTest {
+        val viewModel = newReplyViewModel() // fake form carries no userId → state.userId null
+        viewModel.smileyPicker.open()
+        viewModel.smileyPicker.onQueryChanged("jap")
         testScheduler.advanceTimeBy(400L)
         testScheduler.runCurrent()
-        smileyRepository.completeNext(
-            listOf(
-                EditorSmiley(
-                    token = "[:haha jap]",
-                    imageUrl = "https://forum-images.hardware.fr/images/perso/haha%20jap.gif",
-                    source = EditorSmileySource.WIKI,
-                ),
-            ),
-        )
-        viewModel.state.test {
-            val state = expectMostRecentItem()
-            val picker = state.smileyPicker as SmileyPickerState.Open
-            val wiki = picker.wiki as WikiSearchState.Results
-            assertEquals(1, wiki.items.size)
-            assertEquals("[:haha jap]", wiki.items[0].token)
-            cancelAndIgnoreRemainingEvents()
-        }
-    }
 
-    @Test
-    fun `failed wiki search lands as Error and keeps the picker open`() = runTest {
-        val viewModel = newReplyViewModel()
-        viewModel.submit(PostEditorIntent.SmileyPickerOpened)
-        viewModel.submit(PostEditorIntent.SmileySearchQueryChanged("jap"))
-        testScheduler.advanceTimeBy(400L)
-        testScheduler.runCurrent()
-        smileyRepository.failNext(java.io.IOException("offline"))
-        viewModel.state.test {
-            val state = expectMostRecentItem()
-            val picker = state.smileyPicker as SmileyPickerState.Open
-            assertEquals(WikiSearchState.Error, picker.wiki)
-            cancelAndIgnoreRemainingEvents()
-        }
+        assertEquals(0, smileyRepository.lastUserId)
     }
 
     @Test
     fun `failed wiki search does not leak user id or query through diagnostics`() = runTest {
         val diagnostics = DiagnosticsLog()
         val viewModel = newReplyViewModel(diagnostics = diagnostics)
-        viewModel.submit(PostEditorIntent.SmileyPickerOpened)
-        viewModel.submit(PostEditorIntent.SmileySearchQueryChanged("secret"))
+        viewModel.smileyPicker.open()
+        viewModel.smileyPicker.onQueryChanged("secret")
         testScheduler.advanceTimeBy(400L)
         testScheduler.runCurrent()
 
@@ -944,40 +875,19 @@ class PostEditorViewModelTest {
     @Test
     fun `SmileySelected inserts the token at the caret and closes the picker`() = runTest {
         val viewModel = newReplyViewModel()
-        viewModel.submit(PostEditorIntent.ContentChanged(
-            androidx.compose.ui.text.input.TextFieldValue("hello", androidx.compose.ui.text.TextRange(5)),
-        ))
-        viewModel.submit(PostEditorIntent.SmileyPickerOpened)
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("hello", TextRange(5))))
+        viewModel.smileyPicker.open()
         viewModel.submit(PostEditorIntent.SmileySelected(":jap:"))
         viewModel.state.test {
             val state = expectMostRecentItem()
             // Surrounding spaces convention from `putSmiley` is honoured.
             assertEquals("hello :jap: ", state.draft.text)
             assertEquals(12, state.draft.selection.start)
-            // Picker auto-closes so the user can keep typing.
-            assertEquals(SmileyPickerState.Hidden, state.smileyPicker)
             cancelAndIgnoreRemainingEvents()
         }
-    }
-
-    @Test
-    fun `SmileySelected cancels the in-flight wiki search`() = runTest {
-        val viewModel = newReplyViewModel()
-        viewModel.submit(PostEditorIntent.SmileyPickerOpened)
-        viewModel.submit(PostEditorIntent.SmileySearchQueryChanged("jap"))
-        testScheduler.advanceTimeBy(400L)
-        testScheduler.runCurrent()
-        assertEquals(1, smileyRepository.callCount)
-
-        viewModel.submit(PostEditorIntent.SmileySelected(":jap:"))
-        testScheduler.runCurrent()
-
-        assertEquals(1, smileyRepository.cancellationCount)
-        viewModel.state.test {
-            val state = expectMostRecentItem()
-            assertEquals(SmileyPickerState.Hidden, state.smileyPicker)
-            cancelAndIgnoreRemainingEvents()
-        }
+        // Picker auto-closes (through the controller) so the user can keep typing ;
+        // #824 makes the same controller restore the search on the next open.
+        assertEquals(SmileyPickerState.Hidden, viewModel.smileyPicker.state.value)
     }
 
     @Test
@@ -2298,6 +2208,12 @@ class PostEditorViewModelTest {
         override suspend fun setQuoteCardsEnabled(enabled: Boolean) {
             quoteCardsEnabled.value = enabled
         }
+
+        // #806 — the writing-surface preset routes taps in :feature:topic, not here; default stub.
+        override fun observeWritingSurfacePreset(): Flow<WritingSurfacePreset> =
+            MutableStateFlow(WritingSurfacePreset.SHEET)
+
+        override suspend fun setWritingSurfacePreset(preset: WritingSurfacePreset) = Unit
 
         override fun observeShowDtSection(): Flow<Boolean> = MutableStateFlow(false)
 

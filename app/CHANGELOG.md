@@ -16,6 +16,50 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.26.0` — `internal` (dev) — 2026-07-07
+
+**Vague 5 Vue Topic (#604)** : interactions image, lot citations, rendu média parité web, gestes d'appui long, recherche smileys, fix Drapeaux.
+
+### Lecture (vue Topic)
+- #831 (partiel) : **appui long sur une image de post → menu contextuel** (PR #837) — Copier l'URL, Ouvrir dans le navigateur, Enregistrer (octets originaux via le cache disque Coil, GIF préservés ; « Taille réelle » arrive avec le viewer #182). Le tap court sur une image liée ouvre toujours le navigateur (#257). Limite connue : le menu n'est pas accessible sur les images `[url=][img]` restées inline dans un paragraphe mixte — l'issue #831 reste ouverte pour ce cas.
+- #610 : le dimensionnement des `[img]` s'aligne sur HFR web (max-width 90 %, max-height ~200 dp, PR #836) — parité visuelle avec le site, ni upscale ni débordement.
+- #256 : fast-path de rendu pour le marqueur `hfr-cc-image` (PR #835) — matching strict sur la query (garde anti-fragment), règle « un intrus = pas de marqueur ».
+
+### Citations
+- #785 : la black-list masque aussi le **contenu des citations** d'un auteur bloqué (PR #838) — bandeau « Citation de X masquée », tap pour révéler.
+- #782 : après un saut vers un post cité, **le retour ramène à la position de lecture précédente** (PR #839) — pile de retour par onglet, vidée à la sortie du topic.
+- #784 : les **citations longues sont repliées** avec un aperçu (PR #840) — tap sur le corps pour déplier, l'en-tête continue de sauter au post cité.
+
+### Gestes
+- #822/#823 : appui long sur les **FAB de pagination → première/dernière page**, appui long sur **Citer → éditeur plein écran** (PR #833) — haptique + libellés TalkBack.
+
+### Éditeur
+- #441/#824 : recherche de smileys unifiée derrière `SmileyPickerController` (un seul chemin feuille/plein écran) et **recherche restaurée à la réouverture** du picker, onglet inclus (PR #834).
+
+### Drapeaux
+- #825 : le filtre « masquer les catégories vides » ne s'applique plus à l'**onglet lus** (PR #832).
+
+## `0.25.2` — `internal` (dev) — 2026-07-05
+
+**Presets de surface d'écriture (#806)** + lot d'hygiène d'état (audit rf2-10) + deux fixes de veille.
+
+### Éditeur & réponse rapide
+- #806 : réglage « **Surface d'écriture** » (Réglages > Édition et publication, PR #829) — « Toujours la feuille » (défaut, comportement actuel), « Feuille sauf citations » (toute citation ouvre l'éditeur plein écran — la demande du fil DEV), « Toujours plein écran ». L'escalade feuille → plein écran reste disponible partout ; réglage orthogonal à « Citations en cartes ».
+- #808 : dans la feuille de réponse rapide, le bloc de cartes de citation est plafonné (~2 cartes, scroll interne, PR #827) — le champ et « Envoyer » restent toujours visibles clavier levé.
+- #794 : la recherche du wiki smileys applique un **ET implicite** entre les termes (PR #828) — « chat noir » cherche l'intersection, plus l'union ; les opérateurs saisis (`+`/`-`) sont préservés.
+
+### Corrections d'état (audit 05/07, PR #826)
+- Réglages : les valeurs ne sont plus jamais périmées au retour sur l'écran (re-synchronisation continue, gate #788).
+- Éditeurs (sujet, MP compose/réponse) : la dernière frappe n'est plus perdue à la fermeture (flush du brouillon avant fermeture, pattern #803) ; une fermeture ne peut plus rester bloquée par un stockage défaillant.
+- Lecture : les couleurs `[color]` illisibles sont éclaircies/assombries a minima selon le thème (teinte préservée) — un `[#000080]` redevient lisible en sombre/AMOLED.
+
+## `0.25.1` — `internal` (dev) — 2026-07-05
+
+**Citation multiple : action « Tout vider »** (dernier volet de #436, PR #820).
+
+### Éditeur & réponse rapide
+- #436 : un **appui long sur le FAB « ❝N »** vide toute la sélection de citation multiple d'un coup (haptique + libellé TalkBack « Vider la sélection de citations »). Le tap court reste inchangé (ouvre l'éditeur / la feuille). Rendu en FAB « maison » (`Surface` + `combinedClickable`) pour que le geste long soit reconnu là où le compteur est visible. Clôt #436 (les volets marquage des posts et panier survivant au back étaient déjà livrés).
+
 ## `0.25.0` — `internal` (dev) — 2026-07-05
 
 **Citations : retour du BBCode inline par défaut** (arbitrage XaTriX sur #805, PR #818) + remise en phase des docs (PR #817).

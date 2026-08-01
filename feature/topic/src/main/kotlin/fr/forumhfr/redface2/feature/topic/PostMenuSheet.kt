@@ -384,10 +384,10 @@ private fun openPermalinkInBrowser(context: Context, permalink: String, failureF
 /**
  * Plays the sheet's hide animation, then invokes [onDismiss] once the sheet is actually
  * off-screen — same Material 3 « animated dismiss » idiom as ProfilePreviewSheet's
- * `hideThenNavigate`.
+ * `hideThenNavigate`. `internal` (#831): shared with [PostImageMenuSheet].
  */
 @OptIn(ExperimentalMaterial3Api::class)
-private fun hideThenDismiss(
+internal fun hideThenDismiss(
     coroutineScope: CoroutineScope,
     sheetState: SheetState,
     onDismiss: () -> Unit,

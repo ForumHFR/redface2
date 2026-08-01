@@ -27,6 +27,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.FlagType
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -360,6 +361,22 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         persist {
             dataStore.edit { prefs ->
                 prefs[KEY_QUOTE_CARDS_ENABLED] = enabled
+            }
+        }
+    }
+
+    override fun observeWritingSurfacePreset(): Flow<WritingSurfacePreset> =
+        dataStore.data
+            // Default SHEET (#806): the 0.25.1 behaviour — quick-reply sheet everywhere, with the
+            // 3+ multi-quote threshold escalating to the full-screen editor.
+            .map(::readWritingSurfacePreset)
+            .distinctUntilChanged()
+            .catch { emit(WritingSurfacePreset.SHEET) }
+
+    override suspend fun setWritingSurfacePreset(preset: WritingSurfacePreset) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_WRITING_SURFACE_PRESET] = preset.name
             }
         }
     }
@@ -760,6 +777,12 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             ?.let { stored -> runCatching { EditorImageInsert.valueOf(stored) }.getOrNull() }
             ?: EditorImageInsert.REDUCED
 
+    /** Reads [KEY_WRITING_SURFACE_PRESET] defensively; unknown / corrupt value → [WritingSurfacePreset.SHEET]. */
+    private fun readWritingSurfacePreset(prefs: Preferences): WritingSurfacePreset =
+        prefs[KEY_WRITING_SURFACE_PRESET]
+            ?.let { stored -> runCatching { WritingSurfacePreset.valueOf(stored) }.getOrNull() }
+            ?: WritingSurfacePreset.SHEET
+
     /**
      * Reads [KEY_DISPLAY_DENSITY] defensively (#287): an unknown / corrupt stored value (older
      * build, manual edit) falls back to [DisplayDensity.COMFORT] instead of crashing on
@@ -981,6 +1004,9 @@ class DataStoreUserPreferencesRepository @Inject constructor(
 
         // #805 arbitrage — quote cards in the composer (default OFF = inline [quotemsg] BBCode).
         val KEY_QUOTE_CARDS_ENABLED = booleanPreferencesKey("quote_cards_enabled")
+
+        // #806 — writing-surface preset (WritingSurfacePreset.name, defensively parsed).
+        val KEY_WRITING_SURFACE_PRESET = stringPreferencesKey("writing_surface_preset")
 
         // Opt-in « DT » placeholder tab on the Drapeaux screen (MPStorage sync lands later, #6).
         val KEY_FLAGS_SHOW_DT_SECTION = booleanPreferencesKey("flags_show_dt_section")

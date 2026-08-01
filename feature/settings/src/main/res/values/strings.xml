@@ -353,6 +353,17 @@
     <string name="settings_confirm_before_posting_title">Confirmation avant publication</string>
     <string name="settings_confirm_before_posting_description">Avant chaque réponse, sujet ou MP envoyé.</string>
     <string name="settings_confirm_before_posting_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
+    <!-- #806 — surface d'écriture : quelle surface s'ouvre quand on répond ou cite depuis un sujet
+         (feuille de réponse rapide ou éditeur plein écran). Le réglage choisit la SURFACE seulement ;
+         le rendu des citations (cartes ou BBCode) reste le réglage « Citations en cartes » ci-dessous. -->
+    <string name="settings_writing_surface_title">Surface d\'écriture</string>
+    <string name="settings_writing_surface_sheet">Toujours la feuille</string>
+    <string name="settings_writing_surface_sheet_description">Répondre et citer ouvrent la feuille de réponse rapide ; à partir de 3 citations, l\'éditeur plein écran prend le relais.</string>
+    <string name="settings_writing_surface_sheet_except_quotes">Feuille sauf citations</string>
+    <string name="settings_writing_surface_sheet_except_quotes_description">Répondre ouvre la feuille ; toute citation ouvre l\'éditeur plein écran.</string>
+    <string name="settings_writing_surface_full_editor">Toujours plein écran</string>
+    <string name="settings_writing_surface_full_editor_description">Répondre et citer ouvrent directement l\'éditeur plein écran.</string>
+    <string name="settings_writing_surface_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
     <string name="settings_quote_cards_title">Citations en cartes</string>
     <string name="settings_quote_cards_description">Représente les citations par des cartes compactes au-dessus du champ. Désactivé : la citation est insérée en BBCode, modifiable dans le texte.</string>
     <string name="settings_quote_cards_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>

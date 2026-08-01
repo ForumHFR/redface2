@@ -1081,6 +1081,16 @@ fun RedfaceApp(intent: Intent?) {
         // above (plain remember: lost on activity/process recreation, which falls back to the
         // pre-#412 top landing instead of replaying a stale bottom scroll).
         var topicPendingBottomLanding by remember { mutableStateOf<TopicScrollKey?>(null) }
+        // #782 — quote-jump return stack: each « aller au message cité » tap pushes the departure
+        // (page + tap-time anchor) so the system back unwinds the jump chain instead of leaving the
+        // topic. One stack at a time, keyed (cat, post) like the multi-quote basket; capped
+        // (TOPIC_JUMP_STACK_MAX). Plain remember on purpose: process death drops it and back exits
+        // the topic as before — a serialized chain would replay stale returns (cf. PR #420 stance).
+        var topicJumpStack by remember { mutableStateOf<TopicJumpStack?>(null) }
+        // #782 — the one return landing currently owed its anchor: armed by the back interception,
+        // matched + consumed by the next TopicRoute landing. Same transient lifecycle as
+        // topicPendingBottomLanding above.
+        var topicJumpPendingReturn by remember { mutableStateOf<TopicJumpReturn?>(null) }
         // #291 — multi-quote basket: numreponses selected for quoting, in tap order, keyed by
         // (cat, post) so a page change (which destroys the topic nav entry, cf. titles above)
         // keeps the cross-page selection while a different topic never sees it. One basket at a
@@ -1311,6 +1321,16 @@ fun RedfaceApp(intent: Intent?) {
                             },
                             pendingBottomLanding = topicPendingBottomLanding,
                             onPendingBottomLanding = { topicPendingBottomLanding = it },
+                        ),
+                        topicJumpNavState = TopicJumpNavState(
+                            stack = topicJumpStack,
+                            pendingReturn = topicJumpPendingReturn,
+                            onPush = { cat, post, entry ->
+                                topicJumpStack = topicJumpStack.pushedJump(cat, post, entry)
+                            },
+                            onPop = { topicJumpStack = topicJumpStack?.popped() },
+                            onClear = { topicJumpStack = null },
+                            onPendingReturn = { topicJumpPendingReturn = it },
                         ),
                         multiQuoteNavState = MultiQuoteNavState(
                             basket = multiQuoteBasket,
@@ -1704,6 +1724,29 @@ private data class TopicScrollNavState(
 )
 
 /**
+ * #782 — quote-jump return bundle threaded into [RedfaceNavHost], same hoisted-state shape as
+ * [TopicScrollNavState] (the `var`s live in [RedfaceApp] so they survive the per-jump TopicRoute
+ * replacement, which destroys the nav entry).
+ *
+ * @property stack the active topic's return stack, or `null` (no pending returns anywhere).
+ * @property pendingReturn the one return landing currently owed its anchor (armed by the back
+ *   interception, consumed by the next TopicRoute landing) — cf. [TopicJumpReturn].
+ * @property onPush records a departure right before a quote jump replaces the route.
+ * @property onPop drops the entry the back interception is returning to.
+ * @property onClear empties the stack — manual page navigation and leaving the topic invalidate
+ *   the return chain (browser-like: a new navigation clears the forward history of the gesture).
+ * @property onPendingReturn arms (or clears, `null`) the return landing.
+ */
+private data class TopicJumpNavState(
+    val stack: TopicJumpStack?,
+    val pendingReturn: TopicJumpReturn?,
+    val onPush: (cat: Int, post: Int, entry: TopicJumpEntry) -> Unit,
+    val onPop: () -> Unit,
+    val onClear: () -> Unit,
+    val onPendingReturn: (TopicJumpReturn?) -> Unit,
+)
+
+/**
  * #291 — multi-quote nav bundle threaded into [RedfaceNavHost], same shape as the other
  * hoisted-state bundles ([TopicScrollNavState], `TopicTitleNavState`).
  *
@@ -1884,6 +1927,8 @@ private fun RedfaceNavHost(
     topicTitleNavState: TopicTitleNavState,
     // #307 — per-page scroll-anchor cache, same hoisting rationale as topicTitleNavState.
     topicScrollNavState: TopicScrollNavState,
+    // #782 — quote-jump return stack, same hoisting rationale (survives the per-jump entry swap).
+    topicJumpNavState: TopicJumpNavState,
     // #291 — multi-quote basket, same hoisting rationale (survives the per-page entry swap).
     multiQuoteNavState: MultiQuoteNavState,
     // #465 — per-topic poll-expansion cache, same hoisting rationale (survives the per-page swap).
@@ -2106,6 +2151,9 @@ private fun RedfaceNavHost(
                         }
                         privateMessageNavState.onConversationSent()
                     },
+                    // #803 pattern (state-hygiene audit 2026-07-05) — invoked only on
+                    // CloseCommitted, after the ViewModel flushed the private draft. The screen
+                    // routes the system back AND the header arrow through the ViewModel first.
                     onBack = {
                         if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)
@@ -2170,6 +2218,9 @@ private fun RedfaceNavHost(
                             )
                         }
                     },
+                    // #803 pattern (state-hygiene audit 2026-07-05) — invoked only on
+                    // CloseCommitted, after the ViewModel flushed the private draft. The screen
+                    // routes the system back AND the header arrow through the ViewModel first.
                     onBack = {
                         if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)
@@ -2364,11 +2415,54 @@ private fun RedfaceNavHost(
                 )
             }
             entry<TopicRoute>(metadata = mapOf(TOPIC_SCENE_METADATA_KEY to true)) { route ->
+                // #782 — THIS topic's quote-jump return stack (another topic's stack must never arm
+                // the in-topic back interception).
+                val jumpStack = topicJumpNavState.stack?.takeIf { it.matches(route.cat, route.post) }
+                // #782 — after a quote jump (#699), back returns to the previous reading position
+                // (page + tap-time anchor) instead of leaving the topic; once the chain is unwound
+                // the handler disables itself and the next back pops out as before. Composed INSIDE
+                // the entry so it registers after — and therefore wins over — NavDisplay's own back
+                // handling and the app-level TabRootBackHandler. Known trade-off: while enabled it
+                // suppresses the predictive-pop preview for this gesture, which is correct — the
+                // route is replaced in place, there is no destination underneath to preview.
+                BackHandler(enabled = jumpStack != null) {
+                    val jumpEntry = jumpStack?.entries?.lastOrNull() ?: return@BackHandler
+                    topicJumpNavState.onPop()
+                    // Hand the captured anchor to the NEXT landing through the transient pending
+                    // slot; the landing matches it against its exact (cat, post, page) and consumes
+                    // it (cf. TopicJumpReturn — never a route field, PR #420 stance).
+                    topicJumpNavState.onPendingReturn(
+                        TopicJumpReturn(
+                            key = TopicScrollKey(route.cat, route.post, jumpEntry.page),
+                            anchor = jumpEntry.anchor,
+                        ),
+                    )
+                    // A return is not a « page - 1 » reading step (same rule as onGoToPost below).
+                    topicScrollNavState.onPendingBottomLanding(null)
+                    backStack[backStack.lastIndex] = TopicRoute(
+                        cat = route.cat,
+                        post = route.post,
+                        page = jumpEntry.page,
+                        scrollTo = null,
+                    )
+                }
+                // #782 — the return anchor owed to THIS landing, if the interception above armed one.
+                val jumpReturnAnchor = topicJumpNavState.pendingReturn
+                    ?.takeIf { it.key == TopicScrollKey(route.cat, route.post, route.page) }
+                    ?.anchor
+                // #782 — one-shot consumption, keyed on the route (one run per landing). Clearing
+                // recomposes this entry with the pending slot empty, but the screen already LATCHED
+                // the resolved anchor at first composition (TopicScrollRestorationEffects applies it
+                // from a LaunchedEffect(Unit) closure), so the flip can neither re-scroll nor change
+                // the landing — same one-shot stance as onStartAtBottomConsumed (#412).
+                LaunchedEffect(route) {
+                    if (jumpReturnAnchor != null) topicJumpNavState.onPendingReturn(null)
+                }
                 // #307 — resolve what the initial scroll of this landing should do. Strict priority
-                // (route scrollTo > post-submit landing > saved anchor > top) lives in the pure
-                // resolver; only a RestoreSaved outcome hands the screen an anchor to apply — the
-                // Follow* levels resolve to null so the existing ScrollToPost / ScrollToEndOfPage
-                // effects (#200/#226/#344) keep sole ownership of their landings.
+                // (route scrollTo > post-submit landing > jump return (#782) > saved anchor > top)
+                // lives in the pure resolver; only a RestoreSaved outcome hands the screen an anchor
+                // to apply — the Follow* levels resolve to null so the existing ScrollToPost /
+                // ScrollToEndOfPage effects (#200/#226/#344) keep sole ownership of their landings.
                 val scrollRestoration = resolveTopicScrollRestoration(
                     scrollTo = route.scrollTo,
                     submitSignal = route.submitSignal,
@@ -2379,6 +2473,9 @@ private fun RedfaceNavHost(
                     // flag would replay the bottom landing on process/config restore).
                     previousPageLanding = topicScrollNavState.pendingBottomLanding ==
                         TopicScrollKey(route.cat, route.post, route.page),
+                    // #782 — the tap-time departure anchor beats the disposal-saved one: an
+                    // intra-page jump already overwrote the latter with the cited post's position.
+                    jumpReturnAnchor = jumpReturnAnchor,
                 )
                 TopicScreen(
                     request = TopicRequest(
@@ -2454,6 +2551,8 @@ private fun RedfaceNavHost(
                     onToggleMultiQuote = { preview ->
                         multiQuoteNavState.onToggle(route.cat, route.post, preview)
                     },
+                    // #436 — « Tout vider » : a long press on the « Citer N » FAB empties the
+                    // whole hoisted basket (same reset path as the post-editor launch / logout).
                     onClearMultiQuote = multiQuoteNavState.onClear,
                     // #465 — the topic's saved manual poll choice (null = follow the global
                     // default), and the callback recording a tap on the poll card. Hoisted to
@@ -2533,6 +2632,10 @@ private fun RedfaceNavHost(
                             TopicScrollKey(route.cat, route.post, targetPage)
                                 .takeIf { targetPage == route.page - 1 },
                         )
+                        // #782 — a MANUAL page navigation (swipe, pager, FAB, boundary card)
+                        // invalidates the quote-jump return chain, browser-like: back after it
+                        // exits the topic instead of replaying a stale return.
+                        topicJumpNavState.onClear()
                         // #282 — replace the top entry IN PLACE rather than removeAt + add. The two-step
                         // version briefly leaves the parent on top (size-1), an observable intermediate
                         // state NavDisplay can start transitioning toward; an indexed set is a single
@@ -2544,13 +2647,21 @@ private fun RedfaceNavHost(
                             scrollTo = null,
                         )
                     },
-                    onGoToPost = { targetPage, numreponse ->
+                    onGoToPost = { targetPage, numreponse, sourceAnchor ->
                         // #699 — jump to a cited post: the same single-mutation in-place replace as
                         // onOpenPage (#282), with the deep-link scroll anchor so the landing scrolls
                         // to and highlights the target (#200 mechanism). Uniform whether the cited
                         // post is on the current page or another. Not a « page - 1 » reading step —
                         // clear any stale bottom-landing marker (same rule as onOpenPage's takeIf).
                         topicScrollNavState.onPendingBottomLanding(null)
+                        // #782 — remember the departure (page + tap-time anchor, captured by the
+                        // screen from its LazyListState) so the back interception above can unwind
+                        // this jump. Pushing on a different topic resets the stack (pushedJump).
+                        topicJumpNavState.onPush(
+                            route.cat,
+                            route.post,
+                            TopicJumpEntry(page = route.page, anchor = sourceAnchor),
+                        )
                         backStack[backStack.lastIndex] = TopicRoute(
                             cat = route.cat,
                             post = route.post,
@@ -2562,6 +2673,9 @@ private fun RedfaceNavHost(
                         // #285 — explicit back affordance in the topic top bar. Pop to the screen that
                         // opened the topic (list / flags). Guard size > 1 so we never pop a tab root
                         // (mirrors the global back handling used across the other entries).
+                        // #782 — the arrow's contract is « leave the topic » : it never unwinds the
+                        // quote-jump chain, and leaving drops the chain with it.
+                        topicJumpNavState.onClear()
                         if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)
                         }
@@ -2577,6 +2691,8 @@ private fun RedfaceNavHost(
                         // concurrent post that pushes totalPages further during the refresh window does
                         // not start a moving-tail chase. Indexed set (not removeAt + add) for the same
                         // single-mutation reason as onOpenPage (#282).
+                        // #782 — a page change like onOpenPage: drop the quote-jump return chain.
+                        topicJumpNavState.onClear()
                         backStack[backStack.lastIndex] = TopicRoute(
                             cat = route.cat,
                             post = route.post,
@@ -2669,6 +2785,14 @@ private fun RedfaceNavHost(
                         page = route.page,
                         numreponse = route.numreponse,
                     ),
+                    // #803 pattern (state-hygiene audit 2026-07-05) — the system back reaches here
+                    // only AFTER the ViewModel flushed the draft row (CloseCommitted). Same guarded
+                    // pop as PostEditorRoute.onClose.
+                    onClose = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
                     onSubmitSucceeded = { targetPage, scrollTo ->
                         // Phase 2D (#148) — pop the FP form, replace the topic route below
                         // with one that refreshes the target page and scrolls to the edited

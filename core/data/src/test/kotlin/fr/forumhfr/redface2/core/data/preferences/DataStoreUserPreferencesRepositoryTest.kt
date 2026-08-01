@@ -23,6 +23,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.FlagType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -1070,6 +1071,41 @@ class DataStoreUserPreferencesRepositoryTest {
         repository.setEditorImageInsert(EditorImageInsert.REDUCED)
         repository.observeEditorImageInsert().test {
             assertEquals(EditorImageInsert.REDUCED, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observeWritingSurfacePreset defaults to SHEET on an empty store`() = runTest(dispatcher) {
+        // #806 — SHEET is the default (the 0.25.1 behaviour), never the enum's first ordinal by chance.
+        repository.observeWritingSurfacePreset().test {
+            assertEquals(WritingSurfacePreset.SHEET, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setWritingSurfacePreset persists and round-trips FULL_EDITOR then SHEET`() = runTest(dispatcher) {
+        repository.setWritingSurfacePreset(WritingSurfacePreset.FULL_EDITOR)
+        repository.observeWritingSurfacePreset().test {
+            assertEquals(WritingSurfacePreset.FULL_EDITOR, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setWritingSurfacePreset(WritingSurfacePreset.SHEET)
+        repository.observeWritingSurfacePreset().test {
+            assertEquals(WritingSurfacePreset.SHEET, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `corrupt writing_surface_preset value falls back to SHEET instead of crashing`() = runTest(dispatcher) {
+        // An unknown value (older build / manual edit) must degrade to SHEET, not crash valueOf.
+        dataStore.edit { prefs -> prefs[stringPreferencesKey("writing_surface_preset")] = "HOLODECK" }
+
+        repository.observeWritingSurfacePreset().test {
+            assertEquals(WritingSurfacePreset.SHEET, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
     }

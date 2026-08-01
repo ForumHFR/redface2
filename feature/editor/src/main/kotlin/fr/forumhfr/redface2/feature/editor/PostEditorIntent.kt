@@ -38,22 +38,12 @@ sealed interface PostEditorIntent {
     /** Toggle « Activer la notification par email du sujet » (HFR `emaill=1`). */
     data class ToggleEmailNotification(val enabled: Boolean) : PostEditorIntent
 
-    /** Phase 2F-B (#11) — opens the smiley picker bottom-sheet on the Standard tab. */
-    data object SmileyPickerOpened : PostEditorIntent
-
-    /** Phase 2F-B (#11) — dismisses the smiley picker (sheet swipe-down or back press). */
-    data object SmileyPickerDismissed : PostEditorIntent
-
-    /**
-     * Phase 2F-B (#11) — the user typed in the wiki search field. The ViewModel debounces
-     * and gates on `query.length > 2` before hitting the network, matching HFR's web
-     * composer behaviour (`find_smilies_timer` 300 ms debounce).
-     */
-    data class SmileySearchQueryChanged(val query: String) : PostEditorIntent
-
     /**
      * Phase 2F-B (#11) — the user tapped a smiley in the picker. The ViewModel inserts the
      * token at the current caret position via the formatter helper and closes the sheet.
+     * #441 — open / dismiss / query-change are no longer intents : the sheet talks directly
+     * to the shared `SmileyPickerController` exposed as `PostEditorViewModel.smileyPicker` ;
+     * only the insertion stays MVI because it mutates the draft.
      */
     data class SmileySelected(val token: String) : PostEditorIntent
 
