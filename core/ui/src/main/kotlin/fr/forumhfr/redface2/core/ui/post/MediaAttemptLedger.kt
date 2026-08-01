@@ -60,6 +60,17 @@ internal class MediaAttemptLedger(
     /** Snapshot-observable generation of [url] (0 until first mutation). */
     fun generationOf(url: String): Int = entries[url]?.generation ?: 0
 
+    /**
+     * #960 N1 — snapshot-observable re-arm bit: true when [kind] is untried in the CURRENT
+     * generation, an unknown [url] included. A loser denied while another occurrence held the
+     * reservation observes this flip when [rollbackReservation] returns the axis to untried
+     * WITHOUT bumping the generation (lock #5), and re-runs its reservation effect. Without it
+     * the loser's keys never move — the axis stays untried forever and the occurrence is stuck
+     * on its placeholder, out of reach of the refresh gesture (which only bumps FAILED axes).
+     */
+    fun isUntried(url: String, kind: MediaAttemptKind): Boolean =
+        (entries[url]?.axis(kind) ?: AxisState.Untried) == AxisState.Untried
+
     /** True while [kind] holds a failure younger than the TTL (drives the error slot). */
     fun isFailedFresh(url: String, kind: MediaAttemptKind, nowMillis: Long): Boolean {
         val failed = entries[url]?.axis(kind) as? AxisState.Failed ?: return false

@@ -136,11 +136,19 @@ internal fun rememberPainterAttempt(url: String): PainterAttempt {
     val cache = LocalIntrinsicMediaSizeCache.current
     val generation = ledger.generationOf(url)
     val attempt = remember(ledger, cache, url, generation) { PainterAttempt(ledger, cache, url, generation) }
-    // Keyed on failedFresh too: when a recomposition observes the failure EXPIRED (fresh → false)
+    // Keyed on failedFresh: when a recomposition observes the failure EXPIRED (fresh → false)
     // the effect re-runs and the reservation path consults C1 — reopening the axis in a new
     // generation instead of leaving a no-longer-fresh, still-failed axis stuck on the placeholder.
+    //
+    // #960 N1 — keyed on `untried` too: a loser denied while ANOTHER occurrence of the same url
+    // held the reservation must re-run when that winner is disposed mid-flight, since
+    // `rollbackReservation` returns the axis to untried WITHOUT bumping the generation (lock #5).
+    // Both `attempt` and `failedFresh` are unchanged by that rollback, so this bit is the only
+    // key that moves. The body stays gated on `failedFresh` ONLY: an EXPIRED failure is still
+    // `Failed`, not untried, and must keep reaching `reserveIfUntried()` to consult C1.
     val failedFresh = attempt.failedFresh
-    LaunchedEffect(attempt, failedFresh) {
+    val untried = ledger.isUntried(url, MediaAttemptKind.PAINTER)
+    LaunchedEffect(attempt, failedFresh, untried) {
         if (!failedFresh) attempt.reserveIfUntried()
     }
     DisposableEffect(attempt) { onDispose { attempt.rollbackIfUnsettled() } }
