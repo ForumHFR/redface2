@@ -329,6 +329,14 @@ class TopicViewModel @AssistedInject constructor(
                 _state.update { it.copy(showSignatures = show) }
             }
             .launchIn(viewModelScope)
+        // #884 — mirror the full-width-posts preference so the screen can switch the post cards
+        // between the inset card and an edge-to-edge layout without a refetch (rendered in a
+        // later wave).
+        userPreferencesRepository.observeTopicFullWidthPosts()
+            .onEach { fullWidth ->
+                _state.update { it.copy(fullWidthPosts = fullWidth) }
+            }
+            .launchIn(viewModelScope)
         // #806 — mirror the writing-surface preset so the screen can route each write tap
         // (reply FAB / « Citer » / « Citer N ») to the sheet or the full-screen editor.
         userPreferencesRepository.observeWritingSurfacePreset()

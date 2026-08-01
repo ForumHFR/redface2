@@ -16,6 +16,35 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.34.5` — `local` — 2026-07-26
+
+Réglage « Posts en pleine largeur » — Lot 5 (#884) de la passe images (#876), arbitrage
+XaTriX : optionnel, 2 états, défaut inchangé. Nouveau réglage dans Réglages → Topic :
+en pleine largeur, les posts s'affichent bord à bord (fond plat, bande d'identité sur
+toute la largeur, fine ligne de séparation) au lieu des encarts — plus de place pour le
+texte ET les images (le dimensionnement de la passe images s'applique à la largeur
+gagnée). Les gouttières ne disparaissent qu'entre les posts : sondages, frontières de
+page et fin de sujet gardent leur respiration. Accessibilité : chaque post est un groupe
+TalkBack avec le pseudo en titre (navigation par titres), dans les deux modes. Le mode
+encart par défaut est strictement inchangé (rendu byte-identique).
+
+---
+
+## `0.34.4` — `local` — 2026-07-22
+
+Les états d'erreur & retry — Lot 4 (#960) de la passe images (#876, contrat v1.5 §6,
+la mort de #813/B5) : registre d'essais par URL (UNE tentative probe + UNE tentative
+painter par génération — une URL morte n'est plus re-requêtée à chaque recomposition
+ni par chaque occurrence), TTL négatif 60 s qui ouvre une NOUVELLE génération (jamais
+la courante), slot d'erreur VISIBLE dans la boîte réservée (bloc ET inline — fini le
+vide silencieux), retry manuel par TAP sur le slot (« Réessayer », universel : corps
+de post, MP, aperçu, signatures), pull-to-refresh scopé aux SEULES images en échec de
+la page (les images saines ne sont jamais re-décodées), protocole G2 (une image dont
+la mesure échoue prend sa boîte de son propre décodage — SVG s'affiche ainsi), coil-svg
+embarqué, AVIF selon décodeur device avec état d'erreur propre + retry sinon. Gates
+Sol P1..P4 + gate final (2 NO-GO fermés en TDD : générations qui gelaient un axe en
+vol, éviction du cache de géométrie). 513 tests :core:ui.
+
 ## `0.34.3` — `local` — 2026-07-21
 
 Le sizing & décodage density-aware — Lot 3 (#959) de la passe images (#876, contrat

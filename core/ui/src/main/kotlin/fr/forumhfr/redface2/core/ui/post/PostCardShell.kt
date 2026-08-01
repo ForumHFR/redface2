@@ -5,11 +5,16 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.isTraversalGroup
+import androidx.compose.ui.semantics.semantics
 
 /**
  * #351 — the neutral anatomy shared by the topic post card and the private-message thread card.
@@ -37,32 +42,69 @@ import androidx.compose.ui.graphics.Color
  * slot's own job (the densities differ: the topic reads its gutters from the display-metrics preset,
  * the MP uses a fixed 16.dp) so the shell adds no padding of its own — it is purely the vertical
  * stack inside a `Card`. `selectable`/highlight tinting are deliberately NOT handled here.
+ *
+ * [flat] is the full-width mode (#884 — « posts en pleine largeur ») : the SAME `Card` (the node
+ * structure never changes, so slot memoization stays positional — the #946 guarantee) rendered
+ * boundary-less — [RectangleShape], transparent container, and `onSurface` content colour (pinned
+ * explicitly: it is what `contentColorFor(surfaceContainer)` resolves to in the default mode, so
+ * text cannot drift when the background goes transparent). A hairline `outlineVariant`
+ * [HorizontalDivider] drawn STRICTLY after the slots closes the post instead of the card boundary —
+ * except when [border] is supplied (multi-quote selection #436): the outline already closes the
+ * post on all four sides, and stacking the hairline under it would double-stroke the bottom edge.
+ * The default (`flat = false`) rendering is byte-identical to the pre-#884 card; existing call-sites
+ * pass nothing.
+ *
+ * A11y (#884) : the card is one TalkBack traversal group in BOTH modes ([isTraversalGroup] composed
+ * onto the caller's [modifier]) — M3's `Surface` only sets the deprecated `IsContainer` key, so the
+ * shell owns the real one.
  */
 @Composable
-@Suppress("LongParameterList") // Slot shell: 2 mandatory slots + modifier/border + 2 optional slots.
+@Suppress("LongParameterList") // Slot shell: 2 mandatory slots + modifier/flat/border + 2 optional slots.
 fun PostCardShell(
     header: @Composable () -> Unit,
     body: @Composable () -> Unit,
     modifier: Modifier = Modifier,
+    flat: Boolean = false,
     border: BorderStroke? = null,
     badges: (@Composable () -> Unit)? = null,
     footer: (@Composable () -> Unit)? = null,
 ) {
     Card(
-        modifier = modifier,
+        modifier = modifier.semantics { isTraversalGroup = true },
         border = border,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        ),
+        shape = if (flat) RectangleShape else CardDefaults.shape,
+        colors = if (flat) {
+            CardDefaults.cardColors(
+                containerColor = Color.Transparent,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+            )
+        } else {
+            CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            )
+        },
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             header()
             badges?.invoke()
             body()
             footer?.invoke()
+            if (flat && border == null) {
+                HorizontalDivider(
+                    modifier = Modifier.testTag(POST_CARD_SHELL_DIVIDER_TAG),
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                )
+            }
         }
     }
 }
+
+/**
+ * #884 — tag of the hairline that closes a `flat` [PostCardShell] (dividers have no text/semantics
+ * to assert on; testTag is invisible to TalkBack). Public so feature-module tests can pin its
+ * ABSENCE on their default card rendering — same precedent as `BBCODE_FIELD_PINNED_LABEL_TAG`.
+ */
+const val POST_CARD_SHELL_DIVIDER_TAG = "PostCardShellDivider"
 
 /**
  * #351/#104 — a tinted identity strip: a full-width [Surface] across the top of the card that hosts

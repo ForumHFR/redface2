@@ -352,6 +352,17 @@ interface UserPreferencesRepository {
     suspend fun setFoldLongQuotes(enabled: Boolean)
 
     /**
+     * #884 — whether topic posts render FULL-WIDTH (edge-to-edge, without the card inset).
+     * Default `false`: the inset card is the historical layout and stays the baseline; full
+     * width is the opt-in for readers who want the messages bord à bord. Pure render-time
+     * switch (no refetch). Observed by `:feature:topic`, toggled in Settings.
+     */
+    fun observeTopicFullWidthPosts(): Flow<Boolean>
+
+    /** Persists [observeTopicFullWidthPosts]. Default `false` until the first call. */
+    suspend fun setTopicFullWidthPosts(enabled: Boolean)
+
+    /**
      * #105 — whether the intra-page reading scrollbar ([LazyListScrollbar], the thin auto-hiding
      * fast-scroll thumb on the right edge of a topic page / private-message thread) is shown. Default
      * `true` (the historical behaviour); `false` hides it entirely (sujets AND MP) — the beta feedback

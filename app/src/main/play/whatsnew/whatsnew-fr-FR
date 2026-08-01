@@ -1,3 +1,4 @@
-Redface 2 v0.34.3 — dev.
+Redface 2 v0.34.5 — dev.
 
-- Passe images, tailles fines : plus aucun flou (décodage à la taille affichée réelle de l'écran), plus d'agrandissement artificiel — chaque image s'affiche au plus à sa taille native. Les GIF ne s'animent que visibles à l'écran (économie batterie), et les dimensions des grandes photos ne sont plus tronquées.
+- Nouveau réglage « Posts en pleine largeur » (Réglages → Topic) : les messages s'affichent bord à bord, sans encart — plus de place pour le texte et les images. Désactivé par défaut : rien ne change si vous n'y touchez pas.
+- Accessibilité : navigation TalkBack par titres de posts (pseudo), dans les deux modes.

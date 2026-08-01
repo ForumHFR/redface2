@@ -1119,6 +1119,45 @@ class SettingsViewModelTest {
         assertTrue(viewModel.state.value.foldLongQuotesError)
     }
 
+    // ──────────────────────────────────────────────────────────────────────
+    // Full-width posts (#884)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `init hydrates fullWidthPosts from a persisted true`() = runTest {
+        // Default is false — only a persisted opt-IN exercises the hydration path.
+        repository.emitFullWidthPosts(true)
+
+        val viewModel = newViewModel()
+
+        assertTrue(viewModel.state.value.fullWidthPosts)
+        assertFalse(viewModel.state.value.fullWidthPostsError)
+    }
+
+    @Test
+    fun `FullWidthPostsChanged persists the flip`() = runTest {
+        val viewModel = newViewModel()
+        assertFalse("posts keep the card inset by default", viewModel.state.value.fullWidthPosts)
+
+        viewModel.submit(SettingsIntent.FullWidthPostsChanged(true))
+
+        assertTrue(viewModel.state.value.fullWidthPosts)
+        assertFalse(viewModel.state.value.isUpdatingFullWidthPosts)
+        assertEquals(1, repository.fullWidthPostsSetCalls)
+    }
+
+    @Test
+    fun `FullWidthPostsChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnFullWidthPostsSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.FullWidthPostsChanged(true))
+
+        assertFalse("failed persist must revert to the previous value", viewModel.state.value.fullWidthPosts)
+        assertFalse(viewModel.state.value.isUpdatingFullWidthPosts)
+        assertTrue(viewModel.state.value.fullWidthPostsError)
+    }
+
     @Test
     fun `init hydrates showScrollbar from a persisted false`() = runTest {
         // #105 — default is true; only a persisted opt-OUT exercises the hydration path.
@@ -1989,6 +2028,24 @@ class SettingsViewModelTest {
 
         fun emitFoldLongQuotes(value: Boolean) {
             foldLongQuotes.value = value
+        }
+
+        // #884 — posts en pleine largeur. Même seam optimistic-flip ; default FALSE (encart).
+        private val fullWidthPosts = MutableStateFlow(false)
+        var fullWidthPostsSetCalls: Int = 0
+            private set
+        var failOnFullWidthPostsSet: Boolean = false
+
+        override fun observeTopicFullWidthPosts(): Flow<Boolean> = fullWidthPosts
+
+        override suspend fun setTopicFullWidthPosts(enabled: Boolean) {
+            fullWidthPostsSetCalls += 1
+            check(!failOnFullWidthPostsSet) { "boom" }
+            fullWidthPosts.value = enabled
+        }
+
+        fun emitFullWidthPosts(value: Boolean) {
+            fullWidthPosts.value = value
         }
 
         // #105 — afficher l'ascenseur. Même seam optimistic-flip ; default TRUE (ascenseur affiché).

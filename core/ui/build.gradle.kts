@@ -67,6 +67,9 @@ dependencies {
     // #175 — FakeImageLoaderEngine + ColorImage(width,height) give deterministic intrinsic-size
     // measurements under Robolectric (no network/decode), and runTest drives the suspend measure.
     testImplementation(libs.coil.test)
+    // #960 P4 — the exotic-formats integration test drives the REAL SvgDecoder (prod parity:
+    // RedfaceApplication registers it in the singleton loader).
+    testImplementation(libs.coil.svg)
     testImplementation(libs.kotlinx.coroutines.test)
     // #130 — Robolectric runtime hosts `createComposeRule()` on JVM ; the manifest is debug-only
     // and pulls the Activity surrogate the rule mounts internally ; the BOM platform aligns the

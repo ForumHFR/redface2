@@ -341,6 +341,11 @@
     <string name="settings_fold_long_quotes_title">Replier les longues citations</string>
     <string name="settings_fold_long_quotes_description">Les longues citations sont repliées sur une ligne, dépliables au clic ; sinon elles restent affichées en entier.</string>
     <string name="settings_fold_long_quotes_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
+
+    <!-- #884 — Lecture. Posts en pleine largeur (bord à bord, sans l'encart historique). -->
+    <string name="settings_full_width_posts_title">Posts en pleine largeur</string>
+    <string name="settings_full_width_posts_description">Affiche les messages bord à bord, sans encart.</string>
+    <string name="settings_full_width_posts_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
     <string name="settings_show_scrollbar_title">Afficher l\'ascenseur</string>
     <string name="settings_show_scrollbar_description">Affiche l\'ascenseur de défilement sur le bord droit lors de la lecture d\'un sujet ou d\'un message privé.</string>
     <string name="settings_show_scrollbar_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>

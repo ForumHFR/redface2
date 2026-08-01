@@ -6,6 +6,7 @@ import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import coil3.gif.AnimatedImageDecoder
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
+import coil3.svg.SvgDecoder
 import dagger.hilt.android.HiltAndroidApp
 import fr.forumhfr.redface2.core.data.cache.CacheInvalidator
 import fr.forumhfr.redface2.core.data.editor.DraftRetentionPurger
@@ -49,6 +50,12 @@ class RedfaceApplication : Application(), SingletonImageLoader.Factory {
                 // routes only HFR through the user proxy ; external hosts stay direct.
                 add(OkHttpNetworkFetcherFactory(callFactory = { imageClient }))
                 add(AnimatedImageDecoder.Factory())
+                // #960 P4 — SVG [img] payloads. The header-only intrinsic probe cannot read SVG
+                // bounds by design (BitmapFactory), so an SVG settles a PROBE failure and takes
+                // its box from the painter geometry through the G2 protocol (§6). NOTE: Coil 3
+                // service-loads the decoders of classpath artifacts already; the explicit add
+                // documents the roster and survives a disabled service loader.
+                add(SvgDecoder.Factory())
             }
             .build()
 

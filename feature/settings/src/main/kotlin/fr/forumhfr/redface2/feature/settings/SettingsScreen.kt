@@ -550,6 +550,17 @@ internal fun buildSettingsCatalogue(
                     .takeIf { state.foldLongQuotesError },
                 onCheckedChange = { onIntent(SettingsIntent.FoldLongQuotesChanged(it)) },
             ),
+            // #884 — posts en pleine largeur (bord à bord, sans encart), arbitrage passe images.
+            toggleRow(
+                id = "full_width_posts",
+                title = stringResource(R.string.settings_full_width_posts_title),
+                description = stringResource(R.string.settings_full_width_posts_description),
+                checked = state.fullWidthPosts,
+                enabled = state.canToggleFullWidthPosts,
+                errorRes = R.string.settings_full_width_posts_persist_failed
+                    .takeIf { state.fullWidthPostsError },
+                onCheckedChange = { onIntent(SettingsIntent.FullWidthPostsChanged(it)) },
+            ),
             // #105 — afficher l'ascenseur de lecture (sujets et MP), retour bêta styx42.
             toggleRow(
                 id = "show_scrollbar",

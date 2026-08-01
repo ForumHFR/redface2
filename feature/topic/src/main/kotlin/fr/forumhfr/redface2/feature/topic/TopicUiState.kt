@@ -62,6 +62,13 @@ data class TopicUiState(
      */
     val showSignatures: Boolean = false,
     /**
+     * #884 — mirrors `UserPreferencesRepository.observeTopicFullWidthPosts()`. When `true`, the
+     * post cards render edge-to-edge (full width, without the card inset). Default `false` keeps
+     * the historical inset card. Flips on the first preference emission; pure render-time switch
+     * (consumed by the screen in a later wave), toggling never refetches.
+     */
+    val fullWidthPosts: Boolean = false,
+    /**
      * #806 — mirrors `UserPreferencesRepository.observeWritingSurfacePreset()`. Feeds
      * [writingSurfaceFor] AT TAP TIME on the three write entry points (reply FAB, « Citer »,
      * « Citer N ») to pick the quick-reply sheet or the full-screen editor. Default

@@ -665,6 +665,25 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `state fullWidthPosts reflects the user preference (#884)`() = runTest {
+        val inset = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            userPreferencesRepository = FakeUserPreferencesRepository(topicFullWidthPosts = false),
+        )
+        assertEquals(false, inset.state.value.fullWidthPosts)
+
+        val fullWidth = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            userPreferencesRepository = FakeUserPreferencesRepository(topicFullWidthPosts = true),
+        )
+        assertEquals(true, fullWidth.state.value.fullWidthPosts)
+    }
+
+    @Test
     fun `state writingSurfacePreset reflects the user preference (#806)`() = runTest {
         val fullEditor = topicViewModel(
             request = topicRequest(page = 1),
@@ -3712,9 +3731,10 @@ private class FakeStreamingEmissionTopicRepository(
 /**
  * No-op preferences fake for the topic ViewModel tests. Only [observeTopicTopBarAutoHide]
  * (build 89 follow-up), [observeTopicPageFabs] (#383), [observeTopicPollsExpanded] (#456),
- * [observeTopicSignatures] (#330) and [observeWritingSurfacePreset] (#806) are read by
- * [TopicViewModel] — everything else returns the DataStore default so the fake stays a thin
- * stand-in. The relevant values are constructor-injectable so tests can assert they reach state.
+ * [observeTopicSignatures] (#330), [observeTopicFullWidthPosts] (#884) and
+ * [observeWritingSurfacePreset] (#806) are read by [TopicViewModel] — everything else returns
+ * the DataStore default so the fake stays a thin stand-in. The relevant values are
+ * constructor-injectable so tests can assert they reach state.
  */
 // Internal (not private) so QuickReplyViewModelTest reuses the single fake of this wide interface.
 @Suppress("LongParameterList") // one constructor knob per observed pref — grows with TopicViewModel's reads.
@@ -3723,6 +3743,8 @@ internal class FakeUserPreferencesRepository(
     private val topicPageFabs: Boolean = true,
     private val topicPollsExpanded: Boolean = false,
     private val topicSignatures: Boolean = false,
+    // #884 — full-width posts; false mirrors the production default (historical card inset).
+    private val topicFullWidthPosts: Boolean = false,
     private val confirmBeforePosting: Boolean = false,
     // #805 — quote rendering in the composer; false mirrors the production default (inline BBCode).
     private val quoteCardsEnabled: Boolean = false,
@@ -3827,6 +3849,10 @@ internal class FakeUserPreferencesRepository(
     override fun observeFoldLongQuotes(): Flow<Boolean> = MutableStateFlow(true)
 
     override suspend fun setFoldLongQuotes(enabled: Boolean) = Unit
+
+    override fun observeTopicFullWidthPosts(): Flow<Boolean> = MutableStateFlow(topicFullWidthPosts)
+
+    override suspend fun setTopicFullWidthPosts(enabled: Boolean) = Unit
 
     override fun observeShowScrollbar(): Flow<Boolean> = MutableStateFlow(true)
 

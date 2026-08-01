@@ -94,6 +94,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -127,7 +128,8 @@ import fr.forumhfr.redface2.core.ui.post.PostImageActions
 import fr.forumhfr.redface2.core.ui.post.PostImageTarget
 import fr.forumhfr.redface2.core.ui.post.PostListScaffold
 import fr.forumhfr.redface2.core.ui.post.PostRenderer
-import fr.forumhfr.redface2.core.ui.post.clearPostMediaMeasurementFailures
+import fr.forumhfr.redface2.core.ui.post.collectPostMediaUrls
+import fr.forumhfr.redface2.core.ui.post.retryFailedPostMedia
 import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 import fr.forumhfr.redface2.core.ui.theme.LocalIgnoreInlineColors
@@ -966,15 +968,14 @@ internal fun TopicContent(
     // the title falls back to the cached hint (or a generic label) and the counter to « Chargement… »
     // — never a page total that has not been parsed yet (#622).
     val loaded = state.mode as? TopicUiState.Mode.Loaded
-    // #813 — media-retry generation for the post renderers, bumped on each EXPLICIT user refresh
-    // (pull-to-refresh, double-tap) so ghost inline images re-probe (failed measure) and restart
-    // their painter. Failures are cleared BEFORE the bump (Sol framing) — the other order would let
-    // the relaunched measure effect re-read a still-fresh failure and skip the probe. Saveable so a
-    // config change mid-session keeps the count monotonic (a fresh composition retries on its own).
-    var mediaRefreshGeneration by rememberSaveable { mutableIntStateOf(0) }
+    // #813/#960 — an EXPLICIT user refresh (pull-to-refresh, double-tap) retries the media that
+    // FAILED among the displayed posts' urls, strictly scoped (Sol r3, lock #1): the ledger bumps
+    // only the failed urls' generations, so healthy images are never re-probed nor re-decoded.
+    // Replaces the pre-#960 process-wide clear + screen-owned refresh-generation bump.
     val refreshWithMediaRetry = {
-        clearPostMediaMeasurementFailures()
-        mediaRefreshGeneration++
+        loaded?.let { mode ->
+            retryFailedPostMedia(mode.topic.posts.flatMapTo(HashSet()) { collectPostMediaUrls(it.content) })
+        }
         onIntent(TopicIntent.Refresh)
     }
     // #411 — bottom action cluster hides on scroll-down, re-appears on scroll-up (RF1 parity).
@@ -1226,8 +1227,6 @@ internal fun TopicContent(
                                 },
                                 pollManualExpanded = pollManualExpanded,
                                 onPollExpansionChanged = onPollExpansionChanged,
-                                // #813 — explicit-refresh retry for ghost inline images.
-                                mediaRefreshGeneration = mediaRefreshGeneration,
                             )
                         }
                         PullToRefreshDefaults.Indicator(
@@ -1764,8 +1763,6 @@ private fun TopicLoadedContent(
     // callback recording a tap on the poll card. Threaded down to the header card's poll.
     pollManualExpanded: Boolean? = null,
     onPollExpansionChanged: (Boolean) -> Unit = {},
-    /** #813 — screen-owned media-retry generation, threaded to each card's body renderer. */
-    mediaRefreshGeneration: Int = 0,
 ) {
     // Scroll-anchor (#104 follow-up): the post the reader was sent to (quote link, deep link, last-read).
     // Marked by tinting ONLY its identity band with tertiaryContainer (XaTriX: the left-rail attempt was
@@ -1875,18 +1872,17 @@ private fun TopicLoadedContent(
     // the magnifier's controlled dispatchRawDelta (screen deltas divided by scale — 1:1 under the
     // finger). derivedStateOf: recomposes on the 1× ↔ zoomed transition only.
     val zoomSuspendsScroll by remember(zoomState) { derivedStateOf { zoomState.zoomed } }
+    // #884 (vague 3) — list geometry switched by the « posts en pleine largeur » preference. The
+    // historical values (#283 bottom clearance, #398 local side gutter, #287 8 dp rhythm) moved to
+    // TopicListLayout.kt and stay byte-identical in card mode; full-width drops the side gutters
+    // and the inter-item gap (posts touch, the shell hairline separates them) while every NON-post
+    // island below re-inserts its own 8/4 dp inset via this shared modifier.
+    val islandModifier = Modifier.islandPadding(state.fullWidthPosts)
     PostListScaffold(
         listState = listState,
         userScrollEnabled = !zoomSuspendsScroll,
-        // #283 — extra bottom padding so the last post's right-aligned actions clear the floating
-        // bottom-action cluster (the Scaffold FAB slot floats over the content). Harmless extra
-        // breathing room when the cluster is absent (anon + single page).
-        // #398 — the nav host no longer pads screens by 8 dp/side, so the reader carries its own
-        // 8 dp side gutter here (previously 0 + 8 host = 8). Same effective 8 dp, now owned locally.
-        contentPadding = PaddingValues(start = 8.dp, top = 16.dp, end = 8.dp, bottom = 88.dp),
-        // 8 dp vertical rhythm, matching the 8 dp effective side gutters — a uniform grid (and
-        // a denser feed, cf. the #287 density feedback).
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = topicListContentPadding(state.fullWidthPosts),
+        verticalArrangement = topicListArrangement(state.fullWidthPosts),
         listModifier = Modifier
             // POC #182 (#935) — the magnifier gesture listens FIRST (Initial pass) so that, once
             // pinching, consuming the moves starves the sibling swipe / child scrollers below. It
@@ -1985,6 +1981,8 @@ private fun TopicLoadedContent(
                     expandedDefault = state.pollsExpandedDefault,
                     manualExpanded = pollManualExpanded,
                     onExpansionChanged = onPollExpansionChanged,
+                    // #884 — island: keeps its inset when the posts go full-width.
+                    modifier = islandModifier,
                 )
             }
         }
@@ -2051,6 +2049,9 @@ private fun TopicLoadedContent(
                     HiddenPostCard(
                         author = post.author,
                         onReveal = { revealedHiddenPosts = revealedHiddenPosts + post.numreponse },
+                        // #884 — the placeholder is an island too: it stays an inset card
+                        // (revealing swaps in the full-width post).
+                        modifier = islandModifier,
                     )
                 } else {
                     TopicPostCard(
@@ -2079,8 +2080,8 @@ private fun TopicLoadedContent(
                         onToggleMultiQuote = multiQuoteToggle,
                         // #831 — long-press on a post image opens the image contextual menu.
                         onImageLongPress = postImageActions.onLongPress,
-                        // #813 — explicit-refresh retry for ghost inline images.
-                        mediaRefreshGeneration = mediaRefreshGeneration,
+                        // #884 — « posts en pleine largeur »: boundary-less card, full bleed.
+                        flat = state.fullWidthPosts,
                     )
                 }
                 if (showLastReadMarker) {
@@ -2108,15 +2109,15 @@ private fun TopicLoadedContent(
             if (state.search.status != TopicSearchStatus.Loading) {
                 item {
                     if (state.search.hasMoreFilteredResults) {
-                        SearchMoreResultsCard(onNext = onSearchNextResults)
+                        SearchMoreResultsCard(onNext = onSearchNextResults, modifier = islandModifier)
                     } else if (state.search.status == TopicSearchStatus.Done) {
-                        EndOfSearchResultsCard()
+                        EndOfSearchResultsCard(modifier = islandModifier)
                     }
                 }
             }
         } else if (topic.page == topic.totalPages) {
             item {
-                EndOfTopicCard()
+                EndOfTopicCard(modifier = islandModifier)
             }
         } else if (topic.page < topic.totalPages) {
             // Vague 3 (#604) — the #110 hairline marker becomes an actionable boundary card
@@ -2129,6 +2130,8 @@ private fun TopicLoadedContent(
                 PageBoundaryCard(
                     donePage = topic.page,
                     onNextPage = { onOpenPage(topic.page + 1) },
+                    // #884 — island: keeps its inset when the posts go full-width.
+                    modifier = islandModifier,
                 )
             }
         }
@@ -2230,7 +2233,9 @@ private fun TopicLoadedContent(
  * band) was too subtle to spot when catching up from a flag.
  */
 @Composable
-private fun LastReadMarker() {
+// `internal` (#884): TopicListFullWidthAnchorTest mounts the real marker inside a post item to
+// guard the full-width toggle. Same visibility relaxation as other tested internals.
+internal fun LastReadMarker() {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -2272,8 +2277,8 @@ private const val LAST_READ_RULE_ALPHA = 0.55f
  * presentation — the condition (`topic.page == topic.totalPages`) lives at the call site.
  */
 @Composable
-private fun EndOfTopicCard() {
-    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+private fun EndOfTopicCard(modifier: Modifier = Modifier) {
+    OutlinedCard(modifier = modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -2301,7 +2306,9 @@ private fun EndOfTopicCard() {
  * › FAB and the horizontal swipe (#282), so scroll restoration semantics stay uniform.
  */
 @Composable
-private fun PageBoundaryCard(donePage: Int, onNextPage: () -> Unit) {
+// `internal` (#884): TopicListFullWidthAnchorTest mounts the real boundary card as the list's
+// closing island to guard the full-width toggle. Same visibility relaxation as other tested internals.
+internal fun PageBoundaryCard(donePage: Int, onNextPage: () -> Unit, modifier: Modifier = Modifier) {
     val nextPageLabel = stringResource(R.string.topic_page_boundary_next, donePage + 1)
     // Card(onClick) over an inner Row.clickable (gate Codex) : the whole surface is declared as
     // ONE interactive Material component, and the action's wording is already the card's visible
@@ -2312,7 +2319,7 @@ private fun PageBoundaryCard(donePage: Int, onNextPage: () -> Unit) {
             containerColor = MaterialTheme.colorScheme.primaryContainer,
             contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
         ),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
     ) {
         Row(
             modifier = Modifier
@@ -2343,14 +2350,14 @@ private fun PageBoundaryCard(donePage: Int, onNextPage: () -> Unit) {
  * web parity with HFR's own « Résultats suivants » button, never the canonical pager.
  */
 @Composable
-private fun SearchMoreResultsCard(onNext: () -> Unit) {
+private fun SearchMoreResultsCard(onNext: () -> Unit, modifier: Modifier = Modifier) {
     Card(
         onClick = onNext,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.primaryContainer,
             contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
         ),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
     ) {
         Row(
             modifier = Modifier
@@ -2379,8 +2386,8 @@ private fun SearchMoreResultsCard(onNext: () -> Unit) {
  * language : end of RESULTS, not of the topic).
  */
 @Composable
-private fun EndOfSearchResultsCard() {
-    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+private fun EndOfSearchResultsCard(modifier: Modifier = Modifier) {
+    OutlinedCard(modifier = modifier.fillMaxWidth()) {
         Text(
             text = stringResource(R.string.topic_search_results_list_end),
             style = MaterialTheme.typography.bodySmall,
@@ -2500,6 +2507,7 @@ private fun TopicPollCard(
     // per-page TopicRoute swap. `null` = no manual choice yet → follow [expandedDefault] (#456).
     manualExpanded: Boolean?,
     onExpansionChanged: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     // #456 — the preference seeds the initial state; #465 — once the user taps, the manual choice
     // (owned by :app, keyed by topic) wins and survives navigation between the topic's pages. The
@@ -2509,7 +2517,7 @@ private fun TopicPollCard(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         ),
-        modifier = Modifier.clickable { onExpansionChanged(!revealed) },
+        modifier = modifier.clickable { onExpansionChanged(!revealed) },
     ) {
         Column(
             modifier = Modifier
@@ -2659,6 +2667,14 @@ internal fun TopicPostCard(
      * subdued style. No-op when the post has no signature. Default `false`.
      */
     showSignature: Boolean = false,
+    /**
+     * #884 — « posts en pleine largeur » (vague 3): forwarded to [PostCardShell]. `true` renders
+     * this card boundary-less (transparent, rectangular, closed by the shell hairline) so it can
+     * bleed edge to edge in the list; the INTERNAL paddings below (header 12.dp, body 12/10.dp,
+     * footer) are deliberately UNTOUCHED — the validated flat look keeps the text gutters.
+     * Default `false`: the historical card.
+     */
+    flat: Boolean = false,
     onQuote: (() -> Unit)?,
     /**
      * #823 — LONG press on « Citer » : opens the full-screen editor directly, a one-shot override
@@ -2708,13 +2724,6 @@ internal fun TopicPostCard(
      * Null (previews/tests) leaves every image inert.
      */
     onImageLongPress: ((PostImageTarget) -> Unit)? = null,
-    /**
-     * #813 — screen-owned media-retry generation, forwarded to the BODY [PostRenderer] : bumped by
-     * the screen on an explicit user refresh so ghost inline images (failed measure/painter)
-     * re-probe without leaving the screen. The signature render keeps the default 0 (inert images,
-     * same stance as [onImageLongPress]). Default 0 for previews/tests.
-     */
-    mediaRefreshGeneration: Int = 0,
 ) {
     // #287 — structural spacing from the active density preset (Comfort = the historical rhythm).
     val m = LocalDisplayMetrics.current
@@ -2726,6 +2735,8 @@ internal fun TopicPostCard(
     // « Ajouté à la citation » pill is gone, so multi-quote selection never grows the card.
     val hasBadges = citedCount > 0
     PostCardShell(
+        // #884 — full-width mode: same node structure, boundary-less rendering (vague 2 contract).
+        flat = flat,
         // #436 — multi-quote selection outline (lot 1), unchanged.
         border = if (multiQuoteSelected) {
             BorderStroke(width = 2.dp, color = MaterialTheme.colorScheme.primary)
@@ -2805,7 +2816,6 @@ internal fun TopicPostCard(
                         // magnifier consumes the down (replied mode), no selection can start.
                         selectable = true,
                         onGoToCitedPost = onGoToCitedPost,
-                        mediaRefreshGeneration = mediaRefreshGeneration,
                     )
                 }
                 // #330 — the author signature (web parity), gated by the reading preference. Rendered
@@ -2900,17 +2910,23 @@ private fun TopicPostIdentityHeader(
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
-                val pseudoModifier = if (onOpenProfile != null) {
-                    Modifier
-                        .weight(weight = 1f, fill = false)
-                        .clickable(
-                            onClick = onOpenProfile,
-                            role = Role.Button,
-                            onClickLabel = openProfileLabel,
-                        )
-                } else {
-                    Modifier.weight(weight = 1f, fill = false)
-                }
+                // #884 a11y (vague 3) — heading() rides on the REAL pseudo text node (both variants
+                // below share this modifier), so TalkBack heading navigation jumps post to post on
+                // the pseudo itself. The shared PostIdentityHeader adds NO wrapper heading around a
+                // supplied slot — this node is the post's single heading.
+                val pseudoModifier = (
+                    if (onOpenProfile != null) {
+                        Modifier
+                            .weight(weight = 1f, fill = false)
+                            .clickable(
+                                onClick = onOpenProfile,
+                                role = Role.Button,
+                                onClickLabel = openProfileLabel,
+                            )
+                    } else {
+                        Modifier.weight(weight = 1f, fill = false)
+                    }
+                    ).semantics { heading() }
                 // #221 — the RF2 creator's pseudo gets the gold sheen easter egg. remember() keyed on
                 // the author so canonicalizePseudo (NFC + char walk) runs once per author, not on every
                 // recomposition of this hot list row — same off-the-render-path stance as #509.

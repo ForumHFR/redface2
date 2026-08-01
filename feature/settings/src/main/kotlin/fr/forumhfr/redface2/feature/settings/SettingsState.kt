@@ -132,6 +132,12 @@ data class SettingsState(
     val isUpdatingFoldLongQuotes: Boolean = false,
     val foldLongQuotesError: Boolean = false,
     val foldLongQuotesTouchedLocally: Boolean = false,
+    // #884 — posts en pleine largeur dans la lecture de sujet. Même machinerie optimistic-flip +
+    // garde de course au démarrage. Default FALSE (encart historique) : la pleine largeur est l'opt-in.
+    val fullWidthPosts: Boolean = false,
+    val isUpdatingFullWidthPosts: Boolean = false,
+    val fullWidthPostsError: Boolean = false,
+    val fullWidthPostsTouchedLocally: Boolean = false,
     // #105 — afficher l'ascenseur de lecture. Même machinerie optimistic-flip + garde de course au
     // démarrage. Default TRUE (ascenseur historique) : le toggle est l'opt-out (retour bêta styx42).
     val showScrollbar: Boolean = true,
@@ -307,6 +313,10 @@ data class SettingsState(
     val canToggleFoldLongQuotes: Boolean
         get() = !isUpdatingFoldLongQuotes
 
+    // #884 — the full-width-posts toggle is gated only by its own write.
+    val canToggleFullWidthPosts: Boolean
+        get() = !isUpdatingFullWidthPosts
+
     // #105 — the show-scrollbar toggle is gated only by its own write.
     val canToggleShowScrollbar: Boolean
         get() = !isUpdatingShowScrollbar
@@ -457,6 +467,9 @@ sealed interface SettingsIntent {
 
     /** #332 — replier les longues citations sur une ligne. */
     data class FoldLongQuotesChanged(val enabled: Boolean) : SettingsIntent
+
+    /** #884 — afficher les posts en pleine largeur (bord à bord, sans encart). */
+    data class FullWidthPostsChanged(val enabled: Boolean) : SettingsIntent
 
     /** #105 — afficher l'ascenseur de lecture (sujets et MP). */
     data class ShowScrollbarChanged(val enabled: Boolean) : SettingsIntent
