@@ -2,15 +2,20 @@ package fr.forumhfr.redface2.core.ui.editor
 
 import fr.forumhfr.redface2.core.ui.R
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -33,17 +38,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil3.SingletonImageLoader
 import coil3.compose.AsyncImage
 import coil3.compose.LocalPlatformContext
@@ -52,8 +59,6 @@ import fr.forumhfr.redface2.core.model.EditorSmiley
 import fr.forumhfr.redface2.core.model.EditorSmileySource
 import fr.forumhfr.redface2.core.ui.post.LocalIntrinsicMediaSizeCache
 import fr.forumhfr.redface2.core.ui.post.LocalMediaAttemptLedger
-import fr.forumhfr.redface2.core.ui.post.PixelSize
-import fr.forumhfr.redface2.core.ui.post.intrinsicSmileyDisplaySize
 import fr.forumhfr.redface2.core.ui.post.measureAndCacheIntrinsicMediaSize
 
 /**
@@ -71,6 +76,10 @@ import fr.forumhfr.redface2.core.ui.post.measureAndCacheIntrinsicMediaSize
  * into the editor's `TextFieldValue` via the formatter helper. The sheet then dismisses
  * itself through [onDismiss] so the user can keep typing — chained insertions re-open it.
  */
+// LongParameterList: the sheet's four callbacks + modifier are each a distinct call-site concern,
+// and #989 adds the layout spec as a defaulted sixth. Bundling them would only move the parameter
+// list into a wrapper type nobody else needs — same stance as RedfaceTheme.
+@Suppress("LongParameterList")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SmileyPickerSheet(
@@ -79,6 +88,7 @@ fun SmileyPickerSheet(
     onQueryChange: (String) -> Unit,
     onSmileyClicked: (String) -> Unit,
     modifier: Modifier = Modifier,
+    layout: SmileyPickerLayoutSpec = SmileyPickerLayoutSpec.Current,
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -106,7 +116,9 @@ fun SmileyPickerSheet(
                 // line is gone (the Standard/Wiki tabs already name the surface visually), spacing
                 // tightened 12 → 8 dp. The sheet keeps an ACCESSIBLE name through paneTitle —
                 // TalkBack still announces the surface (gate Sol r1). Touch targets keep 48 dp.
-                .padding(horizontal = 16.dp, vertical = 8.dp)
+                // #989 — the horizontal padding is a spike knob (rogner les marges = one of the
+                // levers on the cell width); the vertical one stays at the #900 value.
+                .padding(horizontal = layout.gridPadding, vertical = 8.dp)
                 .semantics { paneTitle = sheetTitle },
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -123,11 +135,12 @@ fun SmileyPickerSheet(
                 )
             }
             when (tabIndex) {
-                0 -> StandardTabContent(onSmileyClicked = onSmileyClicked)
+                0 -> StandardTabContent(onSmileyClicked = onSmileyClicked, layout = layout)
                 else -> WikiTabContent(
                     state = state,
                     onQueryChange = onQueryChange,
                     onSmileyClicked = onSmileyClicked,
+                    layout = layout,
                 )
             }
         }
@@ -135,8 +148,8 @@ fun SmileyPickerSheet(
 }
 
 @Composable
-private fun StandardTabContent(onSmileyClicked: (String) -> Unit) {
-    SmileyGrid(items = BUILTIN_HFR_SMILEYS, onSmileyClicked = onSmileyClicked)
+private fun StandardTabContent(onSmileyClicked: (String) -> Unit, layout: SmileyPickerLayoutSpec) {
+    SmileyPickerGrid(items = BUILTIN_HFR_SMILEYS, onSmileyClicked = onSmileyClicked, layout = layout)
 }
 
 @Composable
@@ -144,6 +157,7 @@ private fun WikiTabContent(
     state: SmileyPickerState.Open,
     onQueryChange: (String) -> Unit,
     onSmileyClicked: (String) -> Unit,
+    layout: SmileyPickerLayoutSpec,
 ) {
     // #250 — reveal search on tab switch: focus + IME as soon as the Wiki tab composes, instead of
     // waiting for an extra tap on the field. `LaunchedEffect(Unit)` fires on each ENTRY into the
@@ -222,15 +236,27 @@ private fun WikiTabContent(
                         modifier = Modifier.padding(vertical = 8.dp),
                     )
                 } else {
-                    SmileyGrid(items = wiki.items, onSmileyClicked = onSmileyClicked)
+                    SmileyPickerGrid(items = wiki.items, onSmileyClicked = onSmileyClicked, layout = layout)
                 }
             }
         }
     }
 }
 
+/**
+ * The picker's grid of smileys, driven by a [SmileyPickerLayoutSpec].
+ *
+ * Public since #989 so the device spike can render the REAL grid under alternative specs instead of
+ * comparing a copy against itself. Callers inside the sheet pass the spec down from
+ * [SmileyPickerSheet]; the default is the shipped geometry.
+ */
 @Composable
-private fun SmileyGrid(items: List<EditorSmiley>, onSmileyClicked: (String) -> Unit) {
+fun SmileyPickerGrid(
+    items: List<EditorSmiley>,
+    onSmileyClicked: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    layout: SmileyPickerLayoutSpec = SmileyPickerLayoutSpec.Current,
+) {
     // #900 volet 2 (CharLee, TU #2791061) — the grid cap scales with the screen so the sheet
     // reaches ~3/4 of a phone display instead of the fixed 320 dp, which wasted the bottom half
     // on tall screens. The 320 dp FLOOR keeps short screens (landscape, split-screen) exactly at
@@ -239,23 +265,45 @@ private fun SmileyGrid(items: List<EditorSmiley>, onSmileyClicked: (String) -> U
     // headroom for the sheet chrome (tabs + search field), which grows with fontScale on its own.
     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
     val gridHeightCap = maxOf(SMILEY_GRID_MIN_HEIGHT_CAP, screenHeight * SMILEY_GRID_SCREEN_FRACTION)
-    LazyVerticalGrid(
-        // #236 — denser grid: smaller min cell (was 64.dp) packs more smileys per row.
-        columns = GridCells.Adaptive(minSize = 48.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(max = gridHeightCap),
-    ) {
-        items(items = items, key = { it.token to it.imageUrl }) { smiley ->
-            SmileyCell(smiley = smiley, onClick = { onSmileyClicked(smiley.token) })
+    // #989 — the constraints give the grid its own width, which is what turns `Adaptive`'s implicit
+    // column count into a KNOWN cell width ([smileyGridGeometry]) — and therefore an image cap that
+    // follows the cell instead of the hardcoded 44 dp.
+    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
+        val geometry = smileyGridGeometry(
+            availableWidth = maxWidth,
+            density = LocalDensity.current,
+            spec = layout,
+        )
+        LazyVerticalGrid(
+            // #236 — denser grid: smaller min cell (was 64.dp) packs more smileys per row. #989 —
+            // `Fixed` over the SOLVED count, not a hardcoded 5: same responsive result as
+            // `Adaptive(minCellWidth)`, but the cell knows its size.
+            columns = GridCells.Fixed(geometry.columns),
+            horizontalArrangement = Arrangement.spacedBy(layout.cellSpacing),
+            verticalArrangement = Arrangement.spacedBy(layout.cellSpacing),
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = gridHeightCap),
+        ) {
+            items(items = items, key = { it.token to it.imageUrl }) { smiley ->
+                SmileyCell(
+                    smiley = smiley,
+                    geometry = geometry,
+                    layout = layout,
+                    onClick = { onSmileyClicked(smiley.token) },
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun SmileyCell(smiley: EditorSmiley, onClick: () -> Unit) {
+private fun SmileyCell(
+    smiley: EditorSmiley,
+    geometry: SmileyGridGeometry,
+    layout: SmileyPickerLayoutSpec,
+    onClick: () -> Unit,
+) {
     val description = stringResource(R.string.editor_smiley_insert_description, smiley.token)
     // #871 — persos reuse the posts' intrinsic-measurement pipeline (#175) : a bounded Coil probe
     // shares the SingletonImageLoader caches with the rendering AsyncImage below (no double
@@ -281,14 +329,28 @@ private fun SmileyCell(smiley: EditorSmiley, onClick: () -> Unit) {
         }
     }
     val measuredPx = if (smiley.source == EditorSmileySource.WIKI) sizeCache.get(smiley.imageUrl)?.size else null
+    val outlineColor = MaterialTheme.colorScheme.outlineVariant
     Box(
         modifier = Modifier
-            // #236 — 48.dp keeps the Material minimum touch target while the grid gets denser.
-            .size(48.dp)
+            // #236 — 48.dp kept the Material minimum touch target while the grid got denser. #989 —
+            // the cell now fills its solved column and takes its height from the spec's ratio,
+            // floored at that same 48 dp minimum ([smileyGridGeometry]).
+            .fillMaxWidth()
+            .height(geometry.cellHeight)
+            .then(
+                if (layout.cellOutline) {
+                    Modifier.border(1.dp, outlineColor, RoundedCornerShape(CELL_OUTLINE_RADIUS))
+                } else {
+                    Modifier
+                }
+            )
             .clickable(onClick = onClick)
             .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
     ) {
+        if (layout.debugOverlay) {
+            SmileyCellDebugOverlay(smiley = smiley, measuredPx = measuredPx)
+        }
         AsyncImage(
             model = smiley.imageUrl,
             // contentDescription is on the parent Box so the click target carries it ;
@@ -300,7 +362,16 @@ private fun SmileyCell(smiley: EditorSmiley, onClick: () -> Unit) {
             // cramped at once. ContentScale.Fit preserves aspect ratios in both cases.
             // #871 — the perso box is the measured no-upscale size, so Fit never stretches a
             // small sprite past its native scale ; the parent Box centres it in the cell.
-            modifier = Modifier.size(smileyCellImageSize(smiley.source, measuredPx)),
+            // #989 — the cap now follows the cell and the ceiling comes from the spec.
+            modifier = Modifier
+                .size(pickerSmileyImageSize(smiley.source, measuredPx, geometry, layout))
+                .then(
+                    if (layout.debugOverlay) {
+                        Modifier.border(1.dp, DEBUG_IMAGE_BOX_COLOR)
+                    } else {
+                        Modifier
+                    }
+                ),
             contentScale = ContentScale.Fit,
             // Pixel-art builtins stay crisp unfiltered ; persos (photos, rich art, GIF frames)
             // look better bilinear-filtered when the cell cap scales them down.
@@ -313,38 +384,38 @@ private fun SmileyCell(smiley: EditorSmiley, onClick: () -> Unit) {
 }
 
 /**
- * #816 — the picker's per-source thumbnail size : builtins near their ~15 px native scale,
- * persos mirroring their relative size in a rendered post.
- *
- * #871 (thibw) — a MEASURED perso applies the posts' no-upscale + cap policy (#175,
- * [intrinsicSmileyDisplaySize]) at the forum scale (1 native px ≈ 1 dp, the picker analogue of
- * the renderer's `px → sp`) : a sprite smaller than the [WIKI_CELL_IMAGE_SIZE_DP] cell renders
- * at its crisp native size (centred by the cell), a larger one shrinks to fit, aspect ratio
- * preserved. An UNMEASURED perso (cold cache, or measurement failure — dead URL) keeps the
- * pre-#871 cell-filling square as provisional fallback. Pure — pinned by unit test.
+ * #989 spike aid (XaTriX's explicit ask: « affiche les containers pour debug et aider au choix ») —
+ * paints the cell box and states the smiley's MEASURED native size, so a screenshot shows whether a
+ * thumbnail looks small because of its source file, because the cap bit into it, or because the
+ * intrinsic probe has not landed yet. The border colour carries the measurement state: an
+ * unmeasured perso is the case where the cap-filling fallback is what you are looking at, not the
+ * policy (cadrage Sol, risque nº4 — capturing a cold cache and judging the size from it).
  */
-internal fun smileyCellImageSize(source: EditorSmileySource, measuredPx: IntSize?): DpSize = when (source) {
-    EditorSmileySource.BUILTIN -> DpSize(20.dp, 20.dp)
-    EditorSmileySource.WIKI -> {
-        val nativePx = measuredPx?.takeIf { it.width > 0 && it.height > 0 }
-        if (nativePx == null) {
-            DpSize(WIKI_CELL_IMAGE_SIZE_DP.dp, WIKI_CELL_IMAGE_SIZE_DP.dp)
-        } else {
-            val display = intrinsicSmileyDisplaySize(
-                nativePx = PixelSize(nativePx.width, nativePx.height),
-                maxWidthSp = WIKI_CELL_IMAGE_SIZE_DP,
-                maxHeightSp = WIKI_CELL_IMAGE_SIZE_DP,
-            )
-            DpSize(display.width.dp, display.height.dp)
-        }
+@Composable
+private fun SmileyCellDebugOverlay(smiley: EditorSmiley, measuredPx: IntSize?) {
+    val isPerso = smiley.source == EditorSmileySource.WIKI
+    val stateColor = when {
+        !isPerso -> DEBUG_BUILTIN_COLOR
+        measuredPx != null -> DEBUG_MEASURED_COLOR
+        else -> DEBUG_UNMEASURED_COLOR
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, stateColor)
+            // The measurement label is a developer aid, not content: TalkBack must keep announcing
+            // the cell's own contentDescription, not "70×50" (gate Sol r2).
+            .clearAndSetSemantics {},
+        contentAlignment = Alignment.BottomCenter,
+    ) {
+        Text(
+            text = measuredPx?.let { "${it.width}×${it.height}" } ?: "?",
+            style = MaterialTheme.typography.labelSmall,
+            fontSize = DEBUG_LABEL_SIZE,
+            color = stateColor,
+        )
     }
 }
-
-/**
- * #816/#871 — the perso thumbnail slot inside the 48.dp cell : the fixed size of an unmeasured
- * perso, and the per-axis cap of a measured one.
- */
-internal const val WIKI_CELL_IMAGE_SIZE_DP = 44
 
 /**
  * #900 volet 2 — the grid's height budget : [SMILEY_GRID_SCREEN_FRACTION] of the screen height,
@@ -354,3 +425,13 @@ internal const val WIKI_CELL_IMAGE_SIZE_DP = 44
  */
 private val SMILEY_GRID_MIN_HEIGHT_CAP = 320.dp
 private const val SMILEY_GRID_SCREEN_FRACTION = 0.62f
+
+/** #989 — corner radius of the optional cell hairline (candidate product option). */
+private val CELL_OUTLINE_RADIUS = 8.dp
+
+/** #989 — debug overlay palette: image box, then the per-cell measurement state. */
+private val DEBUG_IMAGE_BOX_COLOR = Color(0xFFE23A4E)
+private val DEBUG_MEASURED_COLOR = Color(0xFF34C0CE)
+private val DEBUG_UNMEASURED_COLOR = Color(0xFFFFB020)
+private val DEBUG_BUILTIN_COLOR = Color(0xFF8E8E93)
+private val DEBUG_LABEL_SIZE = 7.sp
