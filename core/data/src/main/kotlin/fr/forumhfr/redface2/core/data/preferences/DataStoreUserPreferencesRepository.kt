@@ -20,6 +20,7 @@ import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenChoice
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
@@ -683,6 +684,21 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeSmileyPickerDecoration(): Flow<SmileyPickerDecoration> =
+        dataStore.data
+            // Default NONE (#989): delimiters are opt-in selection aids, not thumbnail resizing.
+            .map(::readSmileyPickerDecoration)
+            .distinctUntilChanged()
+            .catch { emit(SmileyPickerDecoration.NONE) }
+
+    override suspend fun setSmileyPickerDecoration(decoration: SmileyPickerDecoration) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_SMILEY_PICKER_DECORATION] = decoration.name
+            }
+        }
+    }
+
     override fun observeImgurClientId(): Flow<String> =
         dataStore.data
             // Default empty (#459): imgur is unconfigured until the user pastes their Client-ID.
@@ -835,6 +851,16 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         prefs[KEY_MEDIA_DISPLAY_PROFILE]
             ?.let { stored -> runCatching { MediaDisplayProfile.valueOf(stored) }.getOrNull() }
             ?: MediaDisplayProfile.M
+
+    /**
+     * Reads [KEY_SMILEY_PICKER_DECORATION] defensively (#989): an unknown / corrupt stored value
+     * (older build, manual edit) falls back to [SmileyPickerDecoration.NONE] instead of crashing on
+     * `SmileyPickerDecoration.valueOf`, same stance as [readMediaDisplayProfile].
+     */
+    private fun readSmileyPickerDecoration(prefs: Preferences): SmileyPickerDecoration =
+        prefs[KEY_SMILEY_PICKER_DECORATION]
+            ?.let { stored -> runCatching { SmileyPickerDecoration.valueOf(stored) }.getOrNull() }
+            ?: SmileyPickerDecoration.NONE
 
     /**
      * Reads [KEY_IMMERSIVE_NAV_BAR_REVEAL] defensively (#518 follow-up): an unknown / corrupt stored
@@ -1099,6 +1125,8 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val KEY_FONT_SCALE = stringPreferencesKey("font_scale")
         // #973 — block-GIF display profile (MediaDisplayProfile.name, defensively parsed).
         val KEY_MEDIA_DISPLAY_PROFILE = stringPreferencesKey("media_display_profile")
+        // #989 — smiley picker cell delimiter (SmileyPickerDecoration.name, defensively parsed).
+        val KEY_SMILEY_PICKER_DECORATION = stringPreferencesKey("smiley_picker_decoration")
 
         // #445 — debug bounds overlay toggle (default false; exposed on the dev channel only).
         val KEY_DEBUG_BOUNDS_OVERLAY = booleanPreferencesKey("debug_bounds_overlay")
