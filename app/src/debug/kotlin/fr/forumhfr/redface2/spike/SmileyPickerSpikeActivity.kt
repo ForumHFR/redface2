@@ -30,6 +30,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.model.BUILTIN_HFR_SMILEYS
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.core.ui.editor.SmileyCellDecoration
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerGrid
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerLayoutSpec
 import fr.forumhfr.redface2.core.ui.editor.smileyGridGeometry
@@ -37,7 +38,8 @@ import fr.forumhfr.redface2.core.ui.editor.smileyGridGeometry
 /** What the bench is currently showing — hoisted into the Activity so `adb` and the chips agree. */
 internal data class SpikeUiState(
     val preset: SpikePreset = SPIKE_PRESETS.first(),
-    val outline: Boolean = false,
+    /** #989 — index dans SmileyCellDecoration.entries : 0 aucun, 1 liseré, 2 séparateurs. */
+    val decoration: Int = 0,
     val debug: Boolean = false,
     /**
      * Show the Standard tab's corpus (the ~25 builtins) instead of the perso one. The two tabs
@@ -98,7 +100,7 @@ class SmileyPickerSpikeActivity : ComponentActivity() {
         val requested = intent.getStringExtra(EXTRA_PRESET)
         return copy(
             preset = SPIKE_PRESETS.firstOrNull { it.id == requested } ?: preset,
-            outline = intent.getBooleanExtra(EXTRA_OUTLINE, outline),
+            decoration = intent.getIntExtra(EXTRA_DECORATION, decoration),
             debug = intent.getBooleanExtra(EXTRA_DEBUG, debug),
             builtin = intent.getBooleanExtra(EXTRA_BUILTIN, builtin),
         )
@@ -106,7 +108,7 @@ class SmileyPickerSpikeActivity : ComponentActivity() {
 
     private companion object {
         const val EXTRA_PRESET = "preset"
-        const val EXTRA_OUTLINE = "outline"
+        const val EXTRA_DECORATION = "deco"
         const val EXTRA_DEBUG = "debug"
         const val EXTRA_BUILTIN = "builtin"
     }
@@ -114,7 +116,17 @@ class SmileyPickerSpikeActivity : ComponentActivity() {
 
 @Composable
 private fun SmileyPickerSpikeScreen(state: SpikeUiState, onState: (SpikeUiState) -> Unit) {
-    val spec = state.preset.spec.copy(cellOutline = state.outline, debugOverlay = state.debug)
+    val decoration = SmileyCellDecoration.entries[state.decoration.coerceIn(0, SmileyCellDecoration.entries.lastIndex)]
+    val spec = state.preset.spec.copy(
+        cellDecoration = decoration,
+        debugOverlay = state.debug,
+        // Les séparateurs continus n'ont de sens qu'accolés : sans quoi ce sont des tirets. Mais
+        // supprimer l'écart libère de la place et le solveur trouve alors 6 colonnes au lieu de 5 :
+        // on relève donc minCellWidth pour comparer à géométrie ÉGALE, sinon on comparerait deux
+        // grilles différentes et pas deux styles de délimitation.
+        cellSpacing = if (decoration == SmileyCellDecoration.SEPARATORS) 0.dp else state.preset.spec.cellSpacing,
+        minCellWidth = if (decoration == SmileyCellDecoration.SEPARATORS) 64.dp else state.preset.spec.minCellWidth,
+    )
 
     Column(modifier = Modifier.fillMaxSize()) {
         // --- captured area: the sheet's own geometry, plus a caption to identify the shot ---------
@@ -141,7 +153,7 @@ private fun SmileyPickerSpikeScreen(state: SpikeUiState, onState: (SpikeUiState)
                     geometry.capWidth.value,
                     geometry.capHeight.value,
                     spec.persoScaleCeiling,
-                    if (state.outline) " · liseré" else "",
+                    " · " + decoration.name.lowercase(),
                 ) + if (state.builtin) " · onglet Standard" else "",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -175,8 +187,17 @@ private fun SmileyPickerSpikeScreen(state: SpikeUiState, onState: (SpikeUiState)
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Liseré", style = MaterialTheme.typography.labelMedium)
-                Switch(checked = state.outline, onCheckedChange = { onState(state.copy(outline = it)) })
+                Text("Déco", style = MaterialTheme.typography.labelMedium)
+                Switch(
+                    checked = state.decoration > 0,
+                    onCheckedChange = { onState(state.copy(decoration = if (it) 1 else 0)) },
+                )
+                Spacer(modifier = Modifier.padding(horizontal = 4.dp))
+                FilterChip(
+                    selected = state.decoration == 2,
+                    onClick = { onState(state.copy(decoration = if (state.decoration == 2) 0 else 2)) },
+                    label = { Text("sépar.") },
+                )
                 Spacer(modifier = Modifier.padding(horizontal = 6.dp))
                 Text("Debug", style = MaterialTheme.typography.labelMedium)
                 Switch(checked = state.debug, onCheckedChange = { onState(state.copy(debug = it)) })

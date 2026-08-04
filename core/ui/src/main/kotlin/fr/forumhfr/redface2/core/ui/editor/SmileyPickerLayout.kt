@@ -27,15 +27,33 @@ import kotlin.math.roundToInt
  * `IntrinsicMediaSizeCache`) — never the display policy. Keeping the divergence on this side of the
  * seam is what lets the picker relax the no-upscale rule without re-opening the contract.
  */
+/**
+ * #989 — the three delimiter styles put in front of XaTriX for the grid.
+ */
+enum class SmileyCellDecoration {
+    /** Nothing: vignettes float in the grid, as shipped today. */
+    NONE,
+
+    /** A rounded hairline around each cell — each vignette reads as its own target. */
+    OUTLINE,
+
+    /**
+     * Continuous separators, table-like: each cell draws its RIGHT and BOTTOM edge only, so adjacent
+     * edges line up into unbroken rules across the grid. Needs zero spacing to actually join up —
+     * with a gap, per-cell edges read as dashes rather than lines.
+     */
+    SEPARATORS,
+}
+
 data class SmileyPickerLayoutSpec(
     /** Minimum column width — the same role as `GridCells.Adaptive(minSize)`. */
-    val minCellWidth: Dp = 48.dp,
+    val minCellWidth: Dp = 56.dp,
     /** Cell width / height. `1f` is the shipped square cell; `70f / 50f` is the dominant perso format. */
-    val cellAspectRatio: Float = 1f,
+    val cellAspectRatio: Float = 70f / 50f,
     /** Horizontal padding of the sheet content around the grid. */
-    val gridPadding: Dp = 16.dp,
+    val gridPadding: Dp = 8.dp,
     /** Gap between cells, on both axes. */
-    val cellSpacing: Dp = 8.dp,
+    val cellSpacing: Dp = 4.dp,
     /** Breathing room subtracted from the cell to get the image cap, per axis. */
     val imageInset: Dp = 4.dp,
     /** Upscale ceiling of a MEASURED perso. `1f` = no upscale, the #871 policy. */
@@ -44,8 +62,13 @@ data class SmileyPickerLayoutSpec(
     val builtinImageSize: Dp = 20.dp,
     /** Material's minimum touch target: the cell height never goes below it, whatever the ratio. */
     val minCellHeight: Dp = 48.dp,
-    /** Hairline around each cell — a candidate product option, not just a debug aid (#989). */
-    val cellOutline: Boolean = false,
+    /**
+     * #989 — how a cell is visually delimited. A candidate PRODUCT option (XaTriX wants it
+     * user-settable), not a debug aid: on a corpus this heterogeneous, a delimiter is what makes a
+     * tiny sprite read as a target rather than as a stray pixel — the « affordance » route, as
+     * opposed to upscaling the thumbnail and lying about its published size (preset « F », rejected).
+     */
+    val cellDecoration: SmileyCellDecoration = SmileyCellDecoration.NONE,
     /** Spike-only: overlay the cell box, the image box and the measured native size. */
     val debugOverlay: Boolean = false,
 ) {

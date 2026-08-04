@@ -36,6 +36,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -338,10 +340,28 @@ private fun SmileyCell(
             .fillMaxWidth()
             .height(geometry.cellHeight)
             .then(
-                if (layout.cellOutline) {
-                    Modifier.border(1.dp, outlineColor, RoundedCornerShape(CELL_OUTLINE_RADIUS))
-                } else {
-                    Modifier
+                when (layout.cellDecoration) {
+                    SmileyCellDecoration.OUTLINE ->
+                        Modifier.border(1.dp, outlineColor, RoundedCornerShape(CELL_OUTLINE_RADIUS))
+                    // #989 — right + bottom edges only: adjacent cells share their rules, so the
+                    // grid reads as a continuous table instead of a set of boxes. Requires the spec
+                    // to drop the spacing to 0, otherwise the edges never meet.
+                    SmileyCellDecoration.SEPARATORS -> Modifier.drawBehind {
+                        val stroke = 1.dp.toPx()
+                        drawLine(
+                            color = outlineColor,
+                            start = Offset(size.width - stroke / 2f, 0f),
+                            end = Offset(size.width - stroke / 2f, size.height),
+                            strokeWidth = stroke,
+                        )
+                        drawLine(
+                            color = outlineColor,
+                            start = Offset(0f, size.height - stroke / 2f),
+                            end = Offset(size.width, size.height - stroke / 2f),
+                            strokeWidth = stroke,
+                        )
+                    }
+                    SmileyCellDecoration.NONE -> Modifier
                 }
             )
             .clickable(onClick = onClick)
