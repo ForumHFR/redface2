@@ -21,7 +21,9 @@ import fr.forumhfr.redface2.core.domain.topic.TopicRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicSearchRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostResult
+import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.write.FlagAddContext
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.model.TopicSearchForm
 import fr.forumhfr.redface2.core.model.TopicSearchRequest
@@ -1337,6 +1339,47 @@ class TopicViewModel @AssistedInject constructor(
                 // Removing forever and the anti double-tap guard wedges until the VM is recreated.
                 _removeTopicFlagState.value = RemoveTopicFlagState.Idle
             }
+        }
+    }
+
+    /**
+     * #986 — place a favourite ON THIS POST (demande thibw). `addflag.php` anchors a favourite on a
+     * position, not on a topic: the title HFR puts on its own button is « Mettre un favori sur cette
+     * position pour y revenir plus tard ». Hence a post-level action rather than a topic-level one.
+     *
+     * The `ref` HFR expects is the post's 1-based rank inside its page, and we do NOT re-derive it:
+     * [Post.quoteRef] already carries the value HFR itself emitted in the post toolbar (parsed since
+     * #146, persisted since Room v5). Re-computing it from a list index would break on the « Reprise
+     * du message précédent » recap that opens pages 2+, which HFR numbers `ref=0` — it does not
+     * consume a rank. A post with no parseable `ref` (obfuscated `md_*cryptlink` toolbar, anonymous
+     * read) simply gets no action: the caller gates on it, and we never guess a position.
+     *
+     * No optimistic UI: the repository owns cache reconciliation, and HFR has no undo for this.
+     */
+    fun addFavoriteAtPost(post: Post) {
+        val ref = post.quoteRef ?: return
+        val state = _state.value
+        val topic = (state.mode as? TopicUiState.Mode.Loaded)?.topic ?: return
+        viewModelScope.launch {
+            val context = FlagAddContext(
+                cat = state.request.cat,
+                subcat = topic.subcat,
+                topicId = state.request.post,
+                page = state.request.page,
+                numreponse = post.numreponse,
+                ref = ref,
+            )
+            // Same defensive fold as confirmRemoveTopicFlag (#809): the repository mutates caches in
+            // `.onSuccess`, past its internal runCatching, so a raw throw must still reach the user
+            // as feedback instead of crashing the screen. Cancellation propagates untouched.
+            val result = runCatching { flagRepository.addFlag(context) }
+                .getOrElse { raised ->
+                    if (raised is CancellationException) throw raised
+                    Result.failure(raised)
+                }
+            _effects.trySend(
+                if (result.isSuccess) TopicEffect.PostFavoriteAdded else TopicEffect.PostFavoriteAddFailed,
+            )
         }
     }
 

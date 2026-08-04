@@ -65,6 +65,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withContext
@@ -3414,6 +3415,75 @@ class TopicViewModelTest {
         assertEquals(false, viewModel.returnFromJump())
     }
 
+    // ─── #986 — poser un favori sur un post ──────────────────────────────────────
+
+    @Test
+    fun `addFavoriteAtPost sends the position HFR expects and emits Added (#986)`() = runTest {
+        val flagRepo = FakeFlagRepository()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 7),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(7, 9)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            flagRepository = flagRepo,
+        )
+        advanceUntilIdle()
+
+        // quoteRef is HFR's OWN 1-based rank of this post inside its page: it is forwarded as-is,
+        // never re-derived from a list index (the « Reprise du message précédent » recap that opens
+        // pages 2+ is numbered ref=0 by HFR and consumes no rank).
+        viewModel.addFavoriteAtPost(fakePost(numreponse = 4242).copy(quoteRef = 24))
+        advanceUntilIdle()
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.PostFavoriteAdded, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(1, flagRepo.addFlagCalls)
+        val context = flagRepo.lastAddContext
+        assertEquals(4242, context?.numreponse)
+        assertEquals(24, context?.ref)
+        assertEquals(7, context?.page)
+    }
+
+    @Test
+    fun `addFavoriteAtPost emits Failed when the repository refuses (#986)`() = runTest {
+        val flagRepo = FakeFlagRepository(addResult = Result.failure(IllegalStateException("nope")))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(2, 3)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            flagRepository = flagRepo,
+        )
+        advanceUntilIdle()
+
+        viewModel.addFavoriteAtPost(fakePost(numreponse = 1).copy(quoteRef = 3))
+        advanceUntilIdle()
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.PostFavoriteAddFailed, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `addFavoriteAtPost does nothing without a parseable ref (#986)`() = runTest {
+        // Obfuscated md_*cryptlink toolbar or anonymous read: no rank, so no position to name.
+        // The UI already hides the entry; the ViewModel refuses too rather than guessing.
+        val flagRepo = FakeFlagRepository()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(2, 3)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            flagRepository = flagRepo,
+        )
+        advanceUntilIdle()
+
+        viewModel.addFavoriteAtPost(fakePost(numreponse = 1))
+        advanceUntilIdle()
+
+        assertEquals(0, flagRepo.addFlagCalls)
+    }
+
     @Suppress("LongParameterList") // test builder mirroring the Topic model's fields, all defaulted.
     private fun fakeTopic(
         page: Int,
@@ -3590,10 +3660,13 @@ private class FakeDeletePostRepository(
 private class FakeFlagRepository(
     private val flagToFind: Flag? = null,
     private val removeResult: Result<Unit> = Result.success(Unit),
+    private val addResult: Result<Unit> = Result.success(Unit),
 ) : FlagRepository {
     var findFlagCalls = 0
     var removeFlagCalls = 0
     var lastRemovedFlag: Flag? = null
+    var addFlagCalls = 0
+    var lastAddContext: FlagAddContext? = null
     var findFlagGate: CompletableDeferred<Unit>? = null
     var removeFlagGate: CompletableDeferred<Unit>? = null
 
@@ -3618,8 +3691,9 @@ private class FakeFlagRepository(
     }
 
     override suspend fun addFlag(context: FlagAddContext): Result<Unit> {
-        // #986 — the UI entry point is not wired yet; present to satisfy the interface.
-        return Result.success(Unit)
+        addFlagCalls++
+        lastAddContext = context
+        return addResult
     }
 
     override suspend fun removeFlag(flag: Flag): Result<Unit> {
