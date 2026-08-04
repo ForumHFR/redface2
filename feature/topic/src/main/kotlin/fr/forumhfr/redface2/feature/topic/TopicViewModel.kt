@@ -1361,9 +1361,19 @@ class TopicViewModel @AssistedInject constructor(
         // of pages 2+ with `ref=0`, and a favourite cannot be anchored on a recap. Without this the
         // action reached FlagAddContext's `require(ref >= 1)` and failed as a Toast on an entry that
         // should never have been offered.
-        val ref = post.quoteRef?.takeIf { it >= 1 } ?: return
         val state = _state.value
-        val topic = (state.mode as? TopicUiState.Mode.Loaded)?.topic ?: return
+        // #986 gate Sol r2 (BLOQUANT) — resolve the post INSIDE the displayed page instead of
+        // trusting the one handed over. The menu sheet's `menuPost` survives a Loaded→Loaded swap, so
+        // a page change with the sheet open would otherwise pair a stale post with the current
+        // topic's page and file the favourite at a position that matches neither. If the post is not
+        // on the displayed page, there is no position to name and we abandon.
+        //
+        // `ref` must also be >= 1: HFR numbers the « Reprise du message précédent » recap of pages 2+
+        // with `ref=0`, and a favourite cannot be anchored on a recap.
+        val topic = (state.mode as? TopicUiState.Mode.Loaded)?.topic
+        val displayed = topic?.posts?.firstOrNull { it.numreponse == post.numreponse }
+        val ref = displayed?.quoteRef?.takeIf { it >= 1 }
+        if (topic == null || displayed == null || ref == null) return
         viewModelScope.launch {
             // Same defensive fold as confirmRemoveTopicFlag (#809), EXTENDED to the context
             // construction itself: `FlagAddContext` validates its tuple with `require`, so building
@@ -1384,7 +1394,7 @@ class TopicViewModel @AssistedInject constructor(
                     // `request.page` would place the favourite on a page the user is not looking at,
                     // silently — nothing on screen would betray it.
                     page = topic.page,
-                    numreponse = post.numreponse,
+                    numreponse = displayed.numreponse,
                     ref = ref,
                 )
                 flagRepository.addFlag(context)
