@@ -65,6 +65,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withContext
@@ -3414,6 +3415,175 @@ class TopicViewModelTest {
         assertEquals(false, viewModel.returnFromJump())
     }
 
+    // ─── #986 — poser un favori sur un post ──────────────────────────────────────
+
+    @Test
+    fun `addFavoriteAtPost sends the position HFR expects and emits Added (#986)`() = runTest {
+        val flagRepo = FakeFlagRepository()
+        val anchoredPost = fakePost(numreponse = 4242).copy(quoteRef = 24)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 7),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(flow { emit(fakeTopic(7, 9, posts = listOf(anchoredPost))) }),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            flagRepository = flagRepo,
+        )
+        advanceUntilIdle()
+
+        // quoteRef is HFR's OWN 1-based rank of this post inside its page: it is forwarded as-is,
+        // never re-derived from a list index (the « Reprise du message précédent » recap that opens
+        // pages 2+ is numbered ref=0 by HFR and consumes no rank).
+        viewModel.addFavoriteAtPost(anchoredPost)
+        advanceUntilIdle()
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.PostFavoriteAdded, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(1, flagRepo.addFlagCalls)
+        val context = flagRepo.lastAddContext
+        assertEquals(4242, context?.numreponse)
+        assertEquals(24, context?.ref)
+        // The DISPLAYED topic's page, not request.page — see the ViewModel's comment.
+        assertEquals(7, context?.page)
+    }
+
+    @Test
+    fun `addFavoriteAtPost emits Failed when the repository refuses (#986)`() = runTest {
+        val flagRepo = FakeFlagRepository(addResult = Result.failure(IllegalStateException("nope")))
+        val onPage = fakePost(numreponse = 1).copy(quoteRef = 3)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(flow { emit(fakeTopic(2, 3, posts = listOf(onPage))) }),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            flagRepository = flagRepo,
+        )
+        advanceUntilIdle()
+
+        viewModel.addFavoriteAtPost(onPage)
+        advanceUntilIdle()
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.PostFavoriteAddFailed, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `addFavoriteAtPost does nothing without a parseable ref (#986)`() = runTest {
+        // Obfuscated md_*cryptlink toolbar or anonymous read: no rank, so no position to name.
+        // The UI already hides the entry; the ViewModel refuses too rather than guessing.
+        val flagRepo = FakeFlagRepository()
+        val noRefPost = fakePost(numreponse = 1)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(flow { emit(fakeTopic(2, 3, posts = listOf(noRefPost))) }),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            flagRepository = flagRepo,
+        )
+        advanceUntilIdle()
+
+        viewModel.addFavoriteAtPost(noRefPost)
+        advanceUntilIdle()
+
+        assertEquals(0, flagRepo.addFlagCalls)
+    }
+
+    @Test
+    fun `addFavoriteAtPost survives the SUBCAT_UNKNOWN sentinel instead of crashing (#986)`() = runTest {
+        // Topic.subcat can be -1 (logged-out / prefetch row, or a cache predating subcat
+        // persistence). FlagAddContext validates `subcat >= 0` with `require`, so building it
+        // unprotected would throw IllegalArgumentException straight out of the coroutine. The
+        // sentinel must degrade to a null subcat — HFR gets an empty `subcat=`, like delflag does.
+        val flagRepo = FakeFlagRepository()
+        val onPage = fakePost(numreponse = 77).copy(quoteRef = 5)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 4),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(flow { emit(fakeTopic(4, 6, subcat = -1, posts = listOf(onPage))) }),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            flagRepository = flagRepo,
+        )
+        advanceUntilIdle()
+
+        viewModel.addFavoriteAtPost(onPage)
+        advanceUntilIdle()
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.PostFavoriteAdded, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(null, flagRepo.lastAddContext?.subcat)
+    }
+
+    @Test
+    fun `addFavoriteAtPost refuses a recap post, numbered ref 0 by HFR (#986)`() = runTest {
+        // Pages 2+ open on a « Reprise du message précédent » recap that HFR numbers ref=0. A
+        // favourite cannot be anchored on it, and FlagAddContext refuses ref < 1 — so the action must
+        // never even reach the repository (gate Sol: the entry was offered and failed as a Toast).
+        val flagRepo = FakeFlagRepository()
+        val recap = fakePost(numreponse = 9).copy(quoteRef = 0)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(flow { emit(fakeTopic(2, 3, posts = listOf(recap))) }),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            flagRepository = flagRepo,
+        )
+        advanceUntilIdle()
+
+        viewModel.addFavoriteAtPost(recap)
+        advanceUntilIdle()
+
+        assertEquals(0, flagRepo.addFlagCalls)
+    }
+
+    @Test
+    fun `addFavoriteAtPost refuses a post left over from a previous page (#986)`() = runTest {
+        // Gate Sol r2 (BLOQUANT) : the menu sheet's selected post survives a Loaded→Loaded swap. If
+        // the page changes while the sheet is open, acting would pair a STALE post with the CURRENT
+        // page — a favourite filed at a position matching neither. The post is therefore resolved
+        // inside the displayed page, and abandoned when absent. This test performs a real switch.
+        val stalePost = fakePost(numreponse = 111).copy(quoteRef = 4)
+        val freshPost = fakePost(numreponse = 222).copy(quoteRef = 1)
+        val flagRepo = FakeFlagRepository()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(
+                    flow { emit(fakeTopic(1, 5, posts = listOf(stalePost))) },
+                    flow { emit(fakeTopic(2, 5, posts = listOf(freshPost))) },
+                ),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            flagRepository = flagRepo,
+        )
+        advanceUntilIdle()
+
+        viewModel.switchToPage(2)
+        advanceUntilIdle()
+        assertEquals(2, (viewModel.state.value.mode as TopicUiState.Mode.Loaded).topic.page)
+
+        // The sheet still holds page 1's post: the action must do nothing at all.
+        viewModel.addFavoriteAtPost(stalePost)
+        advanceUntilIdle()
+        assertEquals(0, flagRepo.addFlagCalls)
+
+        // A post of the page actually displayed goes through, anchored on that page.
+        viewModel.addFavoriteAtPost(freshPost)
+        advanceUntilIdle()
+        assertEquals(1, flagRepo.addFlagCalls)
+        assertEquals(2, flagRepo.lastAddContext?.page)
+        assertEquals(222, flagRepo.lastAddContext?.numreponse)
+    }
+
     @Suppress("LongParameterList") // test builder mirroring the Topic model's fields, all defaulted.
     private fun fakeTopic(
         page: Int,
@@ -3590,10 +3760,13 @@ private class FakeDeletePostRepository(
 private class FakeFlagRepository(
     private val flagToFind: Flag? = null,
     private val removeResult: Result<Unit> = Result.success(Unit),
+    private val addResult: Result<Unit> = Result.success(Unit),
 ) : FlagRepository {
     var findFlagCalls = 0
     var removeFlagCalls = 0
     var lastRemovedFlag: Flag? = null
+    var addFlagCalls = 0
+    var lastAddContext: FlagAddContext? = null
     var findFlagGate: CompletableDeferred<Unit>? = null
     var removeFlagGate: CompletableDeferred<Unit>? = null
 
@@ -3618,8 +3791,9 @@ private class FakeFlagRepository(
     }
 
     override suspend fun addFlag(context: FlagAddContext): Result<Unit> {
-        // #986 — the UI entry point is not wired yet; present to satisfy the interface.
-        return Result.success(Unit)
+        addFlagCalls++
+        lastAddContext = context
+        return addResult
     }
 
     override suspend fun removeFlag(flag: Flag): Result<Unit> {

@@ -158,6 +158,12 @@
     <string name="topic_remove_flag_dialog_message">Retirer le drapeau de « %1$s » ? Cette action est définitive depuis l\'app.</string>
     <string name="topic_remove_flag_dialog_confirm">Retirer</string>
     <string name="topic_remove_flag_dialog_cancel">Annuler</string>
+    <!-- #986 — l'action est au niveau du POST : addflag.php ancre le favori sur une position
+         (numreponse/page/ref), pas sur le sujet. HFR n'offre aucun undo, le message ne doit donc
+         rien promettre de tel. -->
+    <string name="topic_post_menu_add_favorite">Mettre un favori ici</string>
+    <string name="topic_post_favorite_added">Favori posé sur ce message</string>
+    <string name="topic_post_favorite_failed">Impossible de poser le favori</string>
     <string name="topic_remove_flag_success">Drapeau retiré</string>
     <string name="topic_remove_flag_failure">Impossible de retirer le drapeau</string>
     <string name="topic_remove_flag_not_found">Aucun drapeau trouvé pour ce sujet</string>

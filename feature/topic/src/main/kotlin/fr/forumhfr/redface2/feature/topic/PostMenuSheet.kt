@@ -106,6 +106,14 @@ internal fun PostMenuSheet(
      */
     onSendPrivateMessage: (() -> Unit)? = null,
     /**
+     * #986 — « Mettre un favori ici » (demande thibw). Post-level and not topic-level because
+     * `addflag.php` anchors the favourite on a POSITION: HFR's own button says « Mettre un favori
+     * sur cette position pour y revenir plus tard ». Null hides the entry — the caller gates on an
+     * authenticated session AND a parseable `Post.quoteRef` (HFR's own 1-based rank of the post in
+     * its page), because without that rank we cannot name the position and will not guess it.
+     */
+    onAddFavorite: (() -> Unit)? = null,
+    /**
      * #291 — whether this post already sits in the multi-quote basket; flips the entry's
      * label between « Ajouter à » and « Retirer de » la citation multiple.
      */
@@ -208,6 +216,21 @@ internal fun PostMenuSheet(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(stringResource(R.string.topic_post_menu_open_in_browser))
+            }
+
+            if (onAddFavorite != null) {
+                Spacer(Modifier.height(8.dp))
+                // #986 — hide first, then act: same order as the other real actions, so the
+                // resulting Toast never fires under a still-visible sheet.
+                OutlinedButton(
+                    onClick = {
+                        onAddFavorite()
+                        hideThenDismiss(coroutineScope, sheetState, onDismiss)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.topic_post_menu_add_favorite))
+                }
             }
 
             if (onEditFirstPost != null) {

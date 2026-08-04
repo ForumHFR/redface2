@@ -474,6 +474,16 @@ sealed interface TopicEffect {
     data object TopicFlagRemovalFailed : TopicEffect
 
     /**
+     * #986 — a favourite was placed on a specific post position (`addflag.php` anchors on
+     * `numreponse`/`page`/`ref`, not on the topic). One-shot feedback; HFR offers no undo, so the
+     * message must not promise one.
+     */
+    data object PostFavoriteAdded : TopicEffect
+
+    /** #986 — the favourite could not be placed (network, session, or unrecognised HFR page). */
+    data object PostFavoriteAddFailed : TopicEffect
+
+    /**
      * #809 — the long-press resolved to no removable drapeau : topic not flagged, anonymous
      * session, or an unresolvable lookup (resolve failure folds here — cf. TopicViewModel).
      */

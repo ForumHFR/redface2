@@ -21,7 +21,9 @@ import fr.forumhfr.redface2.core.domain.topic.TopicRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicSearchRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostResult
+import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.write.FlagAddContext
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.model.TopicSearchForm
 import fr.forumhfr.redface2.core.model.TopicSearchRequest
@@ -1337,6 +1339,77 @@ class TopicViewModel @AssistedInject constructor(
                 // Removing forever and the anti double-tap guard wedges until the VM is recreated.
                 _removeTopicFlagState.value = RemoveTopicFlagState.Idle
             }
+        }
+    }
+
+    /**
+     * #986 — place a favourite ON THIS POST (demande thibw). `addflag.php` anchors a favourite on a
+     * position, not on a topic: the title HFR puts on its own button is « Mettre un favori sur cette
+     * position pour y revenir plus tard ». Hence a post-level action rather than a topic-level one.
+     *
+     * The `ref` HFR expects is the post's 1-based rank inside its page, and we do NOT re-derive it:
+     * [Post.quoteRef] already carries the value HFR itself emitted in the post toolbar (parsed since
+     * #146, persisted since Room v5). Re-computing it from a list index would break on the « Reprise
+     * du message précédent » recap that opens pages 2+, which HFR numbers `ref=0` — it does not
+     * consume a rank. A post with no parseable `ref` (obfuscated `md_*cryptlink` toolbar, anonymous
+     * read) simply gets no action: the caller gates on it, and we never guess a position.
+     *
+     * No optimistic UI: the repository owns cache reconciliation, and HFR has no undo for this.
+     */
+    fun addFavoriteAtPost(post: Post) {
+        // #986 gate Sol — `ref` must be >= 1: HFR numbers the « Reprise du message précédent » recap
+        // of pages 2+ with `ref=0`, and a favourite cannot be anchored on a recap. Without this the
+        // action reached FlagAddContext's `require(ref >= 1)` and failed as a Toast on an entry that
+        // should never have been offered.
+        val state = _state.value
+        // #986 gate Sol r2 (BLOQUANT) — resolve the post INSIDE the displayed page instead of
+        // trusting the one handed over. The menu sheet's `menuPost` survives a Loaded→Loaded swap, so
+        // a page change with the sheet open would otherwise pair a stale post with the current
+        // topic's page and file the favourite at a position that matches neither. If the post is not
+        // on the displayed page, there is no position to name and we abandon.
+        //
+        // `ref` must also be >= 1: HFR numbers the « Reprise du message précédent » recap of pages 2+
+        // with `ref=0`, and a favourite cannot be anchored on a recap.
+        val topic = (state.mode as? TopicUiState.Mode.Loaded)?.topic
+        val displayed = topic?.posts?.firstOrNull { it.numreponse == post.numreponse }
+        val ref = displayed?.quoteRef?.takeIf { it >= 1 }
+        if (topic == null || displayed == null || ref == null) return
+        viewModelScope.launch {
+            // Same defensive fold as confirmRemoveTopicFlag (#809), EXTENDED to the context
+            // construction itself: `FlagAddContext` validates its tuple with `require`, so building
+            // it outside this runCatching would let an IllegalArgumentException escape the coroutine
+            // and crash the screen. The concrete case is `Topic.subcat == SUBCAT_UNKNOWN` (-1, a
+            // logged-out/prefetch row or a pre-v4 cache): it is mapped to `null` below — HFR then
+            // gets an empty `subcat=`, exactly like `delflag` does for a missing sub-category — but
+            // the guard stays because a validated value object must never be built unprotected.
+            val result = runCatching {
+                val context = FlagAddContext(
+                    cat = state.request.cat,
+                    subcat = topic.subcat.takeIf { it >= 0 },
+                    topicId = state.request.post,
+                    // #986 gate Sol (BLOQUANT) — the page of the DISPLAYED topic, never
+                    // `request.page`: during a page switch `request` already points at the target
+                    // while the previous page is still rendered as provisional, and intra-topic
+                    // search swaps the displayed Topic without touching `request.page`. Anchoring on
+                    // `request.page` would place the favourite on a page the user is not looking at,
+                    // silently — nothing on screen would betray it.
+                    page = topic.page,
+                    numreponse = displayed.numreponse,
+                    ref = ref,
+                )
+                flagRepository.addFlag(context)
+            }
+                .getOrElse { raised ->
+                    if (raised is CancellationException) throw raised
+                    Result.failure(raised)
+                }
+            // The repository wraps its own body in runCatching, so a cancellation can come back as
+            // a FAILED Result rather than a raised throwable: re-raise it instead of reporting a
+            // user-facing failure for work that was simply cancelled (gate Sol).
+            (result.exceptionOrNull() as? CancellationException)?.let { throw it }
+            _effects.trySend(
+                if (result.isSuccess) TopicEffect.PostFavoriteAdded else TopicEffect.PostFavoriteAddFailed,
+            )
         }
     }
 

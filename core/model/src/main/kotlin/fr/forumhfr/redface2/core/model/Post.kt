@@ -15,10 +15,16 @@ data class Post(
     /**
      * `ref` parameter parsed from HFR's quote link href
      * (`/message.php?...&numrep={numreponse}&ref={N}&...`). Phase 2C (#146) :
-     * needed to build the quote GET URL. The value is opaque to the app —
-     * `ref` correlates with the post position inside the current topic page,
-     * but the exact contract is undocumented (cf. `docs/specs/protocol-hfr.md`
-     * § Quote). The app forwards whatever HFR shipped, never re-derives it.
+     * needed to build the quote GET URL. The app forwards whatever HFR shipped,
+     * never re-derives it.
+     *
+     * #986 — the contract is no longer opaque: `ref` is the **1-based rank of the post inside its
+     * page**. Established on the fixtures: 40 links per page numbered 1..40, incremented by one even
+     * when `numreponse` jumps (520051→1, 520052→2, **520054**→3), and on pages 2+ the « Reprise du
+     * message précédent » recap carries **`ref=0`** — it does not consume a rank. This is why the
+     * value must never be recomputed from a list index: on any page but the first, the recap would
+     * shift every rank by one. The same `ref` is what `addflag.php` needs to anchor a favourite on a
+     * position, so `Post.quoteRef` is also the source for that mutation.
      * `null` when HFR did not expose a *clear* quote link for this post (obfuscated
      * `md_*cryptlink` toolbar, locked topic, anonymous read, future server-side
      * change). Forwarded as-is when non-null; when `null` the quote GET omits `&ref=`

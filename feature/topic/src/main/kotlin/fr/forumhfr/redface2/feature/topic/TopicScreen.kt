@@ -409,6 +409,8 @@ fun TopicScreen(
     // #809 — flag-removal feedback messages (resolved upfront, same rationale).
     val flagRemovedMsg = stringResource(R.string.topic_remove_flag_success)
     val flagRemoveFailedMsg = stringResource(R.string.topic_remove_flag_failure)
+    val favoriteAddedMsg = stringResource(R.string.topic_post_favorite_added)
+    val favoriteFailedMsg = stringResource(R.string.topic_post_favorite_failed)
     val flagNotFoundMsg = stringResource(R.string.topic_remove_flag_not_found)
     // #292 — delete feedback messages, resolved upfront (same rationale as refreshFailedMsg).
     val deleteSuccessMsg = stringResource(R.string.topic_post_delete_success)
@@ -616,6 +618,21 @@ fun TopicScreen(
                         android.widget.Toast.LENGTH_LONG,
                     ).show()
                 }
+                TopicEffect.PostFavoriteAdded -> {
+                    // #986 — addflag confirmé ; le repository a déjà réconcilié le cache Drapeaux.
+                    android.widget.Toast.makeText(
+                        context,
+                        favoriteAddedMsg,
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+                TopicEffect.PostFavoriteAddFailed -> {
+                    android.widget.Toast.makeText(
+                        context,
+                        favoriteFailedMsg,
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                }
                 TopicEffect.TopicFlagNotFound -> {
                     android.widget.Toast.makeText(
                         context,
@@ -654,6 +671,9 @@ fun TopicScreen(
         onOpenProfile = onOpenProfile,
         onSendPrivateMessage = onSendPrivateMessage,
         onDeleteRequest = { numreponse -> deleteCandidate = numreponse },
+        // #986 — le ViewModel construit le FlagAddContext depuis la page courante et le `ref`
+        // que HFR a émis pour ce post ; l'écran ne calcule aucune position.
+        onAddFavorite = viewModel::addFavoriteAtPost,
         multiQuoteSelections = multiQuoteSelections,
         onToggleMultiQuote = onToggleMultiQuote,
         onMultiQuote = onMultiQuote,
@@ -951,6 +971,8 @@ internal fun TopicContent(
     // #292 — a per-post « Supprimer » tap; the screen owns the confirmation dialog, so this only
     // requests it (carrying the post's numreponse). Never invoked for the first post (excluded).
     onDeleteRequest: (numreponse: Int) -> Unit = {},
+    /** #986 — « Mettre un favori ici » : le post porte la position que HFR attend (`quoteRef`). */
+    onAddFavorite: (Post) -> Unit = {},
     // #291 / #604 lot 3 — multi-quote selection (owned by :app, full previews) + its actions :
     // toggle on the post menu, « Citer N » on the floating cluster (threshold-routed below),
     // and the basket clear once the sheet consumed the cards.
@@ -1221,6 +1243,7 @@ internal fun TopicContent(
                                 onOpenProfile = onOpenProfile,
                                 onSendPrivateMessage = onSendPrivateMessage,
                                 onDeleteRequest = onDeleteRequest,
+                                onAddFavorite = onAddFavorite,
                                 onDoubleTapRefresh = refreshWithMediaRetry,
                                 onSearchNextResults = { onIntent(TopicIntent.SearchNextResultsPage) },
                                 listState = listState,
@@ -1750,6 +1773,8 @@ private fun TopicLoadedContent(
     // #792 — « Envoyer un MP » entry of the post menu (gated at the mount below).
     onSendPrivateMessage: (author: String) -> Unit = {},
     onDeleteRequest: (numreponse: Int) -> Unit = {},
+    /** #986 — « Mettre un favori ici » : le post porte la position que HFR attend (`quoteRef`). */
+    onAddFavorite: (Post) -> Unit = {},
     /** #382 — double-tap anywhere on the list refreshes the current page (RF1 parity). */
     onDoubleTapRefresh: () -> Unit = {},
     /** #879 — filtered search : « résultats suivants » footer tap. */
@@ -2212,6 +2237,15 @@ private fun TopicLoadedContent(
             onDismiss = { menuPost = null },
             onDelete = menuDeleteAction,
             onEditFirstPost = menuEditFirstPostAction,
+            // #986 — « Mettre un favori ici » : session authentifiée + un `ref` HFR exploitable.
+            // `Post.quoteRef` porte le rang que HFR a lui-même émis pour ce post dans sa page ; sans
+            // lui (toolbar obfusquée en cryptlink, lecture anonyme) on ne peut pas nommer la
+            // position, donc l'entrée disparaît plutôt que de deviner.
+            onAddFavorite = if (state.isAuthenticated && (post.quoteRef ?: 0) >= 1) {
+                { onAddFavorite(post) }
+            } else {
+                null
+            },
             // #395 — same profileId gate as the post card (#208): Publicité rows and
             // anonymous reads expose no profile link, the hero stays inert.
             onOpenProfile = post.profileId?.let { profileId ->
