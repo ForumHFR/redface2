@@ -54,6 +54,18 @@ data class FlagTopicEntity(
      * persistence.
      */
     val lastPostReadId: Long?,
+    /**
+     * #638 — REST `last_position`, the 1-based GLOBAL index of the last post read in the topic.
+     * Nullable on disk: pre-v16 rows backfill to `NULL`, and anonymous rows never carry it.
+     * See [fr.forumhfr.redface2.core.model.Flag.lastPosition].
+     */
+    val lastPosition: Int? = null,
+    /**
+     * #638 — `results_per_page` of the topic's REST `posts` href. `defaultValue` matches the v16
+     * migration's `DEFAULT 40` so the exported schema and a migrated database agree.
+     */
+    @ColumnInfo(defaultValue = "40")
+    val postsPerPage: Int = 40,
     val firstPostAuthor: String,
     val lastReplyAuthor: String,
     /**

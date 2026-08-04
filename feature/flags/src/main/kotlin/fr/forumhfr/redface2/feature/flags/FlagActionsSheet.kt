@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.model.Flag
+import fr.forumhfr.redface2.core.model.pageToOpen
 import fr.forumhfr.redface2.core.model.pagesToRead
 import fr.forumhfr.redface2.core.ui.FlagMarker
 import fr.forumhfr.redface2.core.ui.formatLastReplyTimestamp
@@ -184,17 +185,16 @@ internal fun flagLastReadPage(lastReadPage: Int): Int = lastReadPage.coerceAtLea
 internal fun flagLastPage(totalPages: Int): Int = totalPages.coerceAtLeast(1)
 
 /**
- * First-unread page (#676 v2): the page right after the last-read one, clamped to `1..totalPages`. REST
- * only gives the last-read position, so « first unread » is `lastReadPage + 1` when there is unread
- * content; with nothing unread it collapses to the resume page (and the action is disabled anyway).
+ * First-unread page (#676 v2) — now delegating to [pageToOpen] (#638).
+ *
+ * The previous implementation was `lastReadPage + 1` whenever anything was unread, which SKIPPED
+ * posts when the user had stopped mid-page: on the real fixture `rest_cat23_participated.json`
+ * (`last_position = 479`, page 12, 541 posts) it answered page 13 while post 480 — the last of
+ * page 12 — was still unread. `pageToOpen` only advances when `last_position` proves the last-read
+ * post sat at a page boundary, so both this action and the row tap now share ONE rule.
  * Pure → unit-tested.
  */
-internal fun flagFirstUnreadPage(lastReadPage: Int, totalPages: Int, hasUnread: Boolean): Int =
-    if (hasUnread) {
-        (lastReadPage + 1).coerceIn(1, flagLastPage(totalPages))
-    } else {
-        flagLastReadPage(lastReadPage)
-    }
+internal fun flagFirstUnreadPage(flag: Flag): Int = flag.pageToOpen()
 
 /**
  * #676 v2 — the QUICK icon row: the frequent primary actions. Distinct from [menuActions]: open
@@ -218,7 +218,7 @@ private fun quickActions(
         SheetActionItem(
             iconRes = CoreUiR.drawable.ic_ms_arrow_downward,
             label = stringResource(R.string.flags_sheet_quick_first_unread),
-            onClick = { actions.onOpen(flagFirstUnreadPage(flag.lastReadPage, flag.totalPages, flag.hasUnread)) },
+            onClick = { actions.onOpen(flagFirstUnreadPage(flag)) },
             iconTint = variant,
             // Codex: disabled when there is nothing unread, so it never duplicates « Ouvrir ».
             enabled = flag.hasUnread,

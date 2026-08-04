@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.data.flags
 import fr.forumhfr.redface2.core.data.forum.RestListEnvelope
 import fr.forumhfr.redface2.core.data.forum.RestTopic
 import fr.forumhfr.redface2.core.model.FlagType
+import fr.forumhfr.redface2.core.model.pageToOpen
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -50,6 +51,12 @@ class RestFlagMappersTest {
         assertEquals(2_783_256L, flag.lastPostReadId)
         // posts.count=541, results_per_page=40 → totalPages = ceil(541/40) = 14
         assertEquals(14, flag.totalPages)
+        // #638 — last_position (1-based GLOBAL index of the last read post) must survive the mapping:
+        // its value used to be dropped, only its nullity was read. 479 % 40 = 39 → mid-page stop, so
+        // Flag.pageToOpen() must NOT advance (post 480, last of page 12, is still unread).
+        assertEquals(479, flag.lastPosition)
+        assertEquals(40, flag.postsPerPage)
+        assertEquals(12, flag.pageToOpen())
         // replyCount = max(count - 1, 0)
         assertEquals(540, flag.replyCount)
         assertEquals("XaTriX", flag.firstPostAuthor)
