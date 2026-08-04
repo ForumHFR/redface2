@@ -1357,26 +1357,46 @@ class TopicViewModel @AssistedInject constructor(
      * No optimistic UI: the repository owns cache reconciliation, and HFR has no undo for this.
      */
     fun addFavoriteAtPost(post: Post) {
-        val ref = post.quoteRef ?: return
+        // #986 gate Sol — `ref` must be >= 1: HFR numbers the « Reprise du message précédent » recap
+        // of pages 2+ with `ref=0`, and a favourite cannot be anchored on a recap. Without this the
+        // action reached FlagAddContext's `require(ref >= 1)` and failed as a Toast on an entry that
+        // should never have been offered.
+        val ref = post.quoteRef?.takeIf { it >= 1 } ?: return
         val state = _state.value
         val topic = (state.mode as? TopicUiState.Mode.Loaded)?.topic ?: return
         viewModelScope.launch {
-            val context = FlagAddContext(
-                cat = state.request.cat,
-                subcat = topic.subcat,
-                topicId = state.request.post,
-                page = state.request.page,
-                numreponse = post.numreponse,
-                ref = ref,
-            )
-            // Same defensive fold as confirmRemoveTopicFlag (#809): the repository mutates caches in
-            // `.onSuccess`, past its internal runCatching, so a raw throw must still reach the user
-            // as feedback instead of crashing the screen. Cancellation propagates untouched.
-            val result = runCatching { flagRepository.addFlag(context) }
+            // Same defensive fold as confirmRemoveTopicFlag (#809), EXTENDED to the context
+            // construction itself: `FlagAddContext` validates its tuple with `require`, so building
+            // it outside this runCatching would let an IllegalArgumentException escape the coroutine
+            // and crash the screen. The concrete case is `Topic.subcat == SUBCAT_UNKNOWN` (-1, a
+            // logged-out/prefetch row or a pre-v4 cache): it is mapped to `null` below — HFR then
+            // gets an empty `subcat=`, exactly like `delflag` does for a missing sub-category — but
+            // the guard stays because a validated value object must never be built unprotected.
+            val result = runCatching {
+                val context = FlagAddContext(
+                    cat = state.request.cat,
+                    subcat = topic.subcat.takeIf { it >= 0 },
+                    topicId = state.request.post,
+                    // #986 gate Sol (BLOQUANT) — the page of the DISPLAYED topic, never
+                    // `request.page`: during a page switch `request` already points at the target
+                    // while the previous page is still rendered as provisional, and intra-topic
+                    // search swaps the displayed Topic without touching `request.page`. Anchoring on
+                    // `request.page` would place the favourite on a page the user is not looking at,
+                    // silently — nothing on screen would betray it.
+                    page = topic.page,
+                    numreponse = post.numreponse,
+                    ref = ref,
+                )
+                flagRepository.addFlag(context)
+            }
                 .getOrElse { raised ->
                     if (raised is CancellationException) throw raised
                     Result.failure(raised)
                 }
+            // The repository wraps its own body in runCatching, so a cancellation can come back as
+            // a FAILED Result rather than a raised throwable: re-raise it instead of reporting a
+            // user-facing failure for work that was simply cancelled (gate Sol).
+            (result.exceptionOrNull() as? CancellationException)?.let { throw it }
             _effects.trySend(
                 if (result.isSuccess) TopicEffect.PostFavoriteAdded else TopicEffect.PostFavoriteAddFailed,
             )

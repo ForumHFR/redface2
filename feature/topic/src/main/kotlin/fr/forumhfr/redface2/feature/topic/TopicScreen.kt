@@ -2241,7 +2241,7 @@ private fun TopicLoadedContent(
             // `Post.quoteRef` porte le rang que HFR a lui-même émis pour ce post dans sa page ; sans
             // lui (toolbar obfusquée en cryptlink, lecture anonyme) on ne peut pas nommer la
             // position, donc l'entrée disparaît plutôt que de deviner.
-            onAddFavorite = if (state.isAuthenticated && post.quoteRef != null) {
+            onAddFavorite = if (state.isAuthenticated && (post.quoteRef ?: 0) >= 1) {
                 { onAddFavorite(post) }
             } else {
                 null
