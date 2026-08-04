@@ -4,6 +4,7 @@ import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.search.SearchTextScope
+import fr.forumhfr.redface2.core.model.write.FlagAddContext
 import java.time.LocalDate
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
@@ -325,6 +326,56 @@ class HfrClientTest {
         assertEquals("deadbeef", fields["hash_check"])
         assertEquals("prive", fields["cat"])
         assertEquals("""{"data":[]}""", fields["content_form"])
+    }
+
+    @Test
+    fun `addFlag builds the addflag URL on the authenticated client without owntopic mapping`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("<html><body>Favori positionné</body></html>"))
+        val context = FlagAddContext(
+            cat = 23,
+            subcat = 550,
+            topicId = 21748,
+            page = 1,
+            numreponse = 520054,
+            ref = 3,
+        )
+
+        val html = client.addFlag(context)
+
+        assertTrue(html.contains("Favori positionné"))
+        val request = server.takeRequest()
+        val url = requireNotNull(request.requestUrl)
+        assertEquals("authenticated", request.headers["X-RF2-Client"])
+        assertEquals("GET", request.method)
+        assertEquals("/user/addflag.php", url.encodedPath)
+        assertEquals(
+            "config=hfr.inc&cat=23&post=21748&numreponse=520054&page=1&ref=3" +
+                "&p=1&sondage=0&owntopic=0&subcat=550",
+            url.encodedQuery,
+        )
+    }
+
+    @Test
+    fun `addFlag emits an empty subcat when the topic has none`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("<html><body>ok</body></html>"))
+
+        client.addFlag(
+            FlagAddContext(cat = 5, subcat = null, topicId = 1000, page = 1, numreponse = 4242, ref = 1),
+        )
+
+        val url = requireNotNull(server.takeRequest().requestUrl)
+        assertEquals("", url.queryParameter("subcat"))
+    }
+
+    @Test
+    fun `addFlag raises SessionExpired when HFR serves the login form`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(302).addHeader("Location", "/login.php"))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("<html>login</html>"))
+        val context = FlagAddContext(cat = 23, subcat = 550, topicId = 35395, page = 1, numreponse = 1, ref = 1)
+
+        val error = runCatching { client.addFlag(context) }.exceptionOrNull()
+
+        assertTrue("expected SessionExpiredException, got $error", error is SessionExpiredException)
     }
 
     @Test
