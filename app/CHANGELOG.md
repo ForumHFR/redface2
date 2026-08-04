@@ -16,6 +16,28 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.39.0` — `internal` (dev) — 2026-08-04
+
+### Modifié
+
+- **Sélecteur de smileys : les perso sont bien plus grands** ([#989](https://github.com/ForumHFR/redface2/issues/989), demande **XaTriX**, retour initial de **nicko**). La grille tombait sur 6 colonnes de 48 dp avec un cap image de 44 dp en dur. Or le corpus perso est massivement **paysage 7:5** — `70×50` pèse **31 %** des 74 perso du top 100 HFR mesurés — donc une cellule *carrée* capait ce format sur la largeur en laissant 17 dp de hauteur morts. Les défauts passent au **preset « E »** : cellule au ratio du corpus, 5 colonnes de 65,33×48 dp, marges 8, écart 4, cap 61,33×44. Le format dominant passe de 44×31 à **61×44, surface doublée**, et sature les deux axes à la fois — plus rien n'est gaspillé. Coût : 3 vignettes visibles en moins, contre 18 pour le même gain en cellule carrée. La **règle** de calcul est inchangée, seuls les défauts bougent : un test rejoue l'ancienne géométrie pour le prouver.
+
+### Ajouté
+
+- **Réglage « Délimiteur du sélecteur de smileys »** (Affichage) : aucun (défaut), contour, ou quadrillage. Persisté en DataStore, sur le modèle du profil d'agrandissement des GIF ([#973](https://github.com/ForumHFR/redface2/issues/973)) — enum de domaine, lecture tolérante, mise à jour optimiste avec rollback, `CompositionLocal` semé par le thème (le sélecteur est ouvert depuis quatre écrans).
+
+### Rejeté, et tracé
+
+- **Un plafond d'upscale ×1,5 des petits smileys (preset « F ») est refusé.** Testé sur device puis écarté sur objection de **XaTriX**, confirmée par arbitrage **GPT-5 Codex** : le facteur est nécessairement **non uniforme** — les smileys déjà au cap ne bougent pas, seuls les petits grandissent. Le sélecteur promettait alors une taille que le message ne respecte pas, au moment précis où l'utilisateur choisit. Et l'upscale uniforme est impossible dans une cellule bornée (débordement, ou moins de colonnes, ou un zoom qui ment quand même). `persoScaleCeiling = 1` est désormais **pinné par un test qui cite ce refus**. La piste retenue à la place — aider la sélection sans toucher la taille — est tracée en [#1022](https://github.com/ForumHFR/redface2/issues/1022) (loupe à l'appui long).
+
+### Interne
+
+- Développement à deux mains : couche domain+data par **GPT-5 Codex**, couche UI et géométrie par **Claude Opus 5**. Gate final **Claude Fable 5**, deux bloquants trouvés : (1) l'option « Quadrillage » était **inopérante en production** — des traits continus n'existent que si les cellules sont accolées, et la neutralisation de l'écart ne vivait que dans le banc de test debug, donc le réglage aurait affiché des tirets disjoints ; (2) trois fakes de `UserPreferencesRepository` manquaient dans `feature:editor` et `feature:flags`, CI rouge à la clé.
+- Artefact de décision (7 géométries, captures device réelles) : https://forumhfr.github.io/artifacts/smileys-picker-989/
+- 1963 tests verts sur `core:ui`, `core:data`, `feature:settings`, `feature:topic`, `feature:editor`, `feature:flags` et `app`.
+
+---
+
 ## `0.38.1` — `internal` (dev) — 2026-08-04
 
 ### Ajouté

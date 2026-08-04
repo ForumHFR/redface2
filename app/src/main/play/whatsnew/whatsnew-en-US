@@ -1,3 +1,4 @@
-Redface 2 v0.38.1 — dev.
+Redface 2 v0.39.0 — dev.
 
-- New: "Add a bookmark here" in a post's menu. The bookmark lands on that exact post so you can come back to it later, just like on the website.
+- Custom smileys are much bigger in the picker: the cell now follows their own shape, and the most common one doubles in area.
+- New setting (Display): visually separate the smileys in the picker, with outlines or a grid. Off by default.

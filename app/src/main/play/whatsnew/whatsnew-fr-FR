@@ -1,3 +1,4 @@
-Redface 2 v0.38.1 — dev.
+Redface 2 v0.39.0 — dev.
 
-- Nouveau : « Mettre un favori ici » dans le menu d'un message. Le favori se pose sur ce message précis, pour y revenir plus tard — comme sur le site.
+- Les smileys perso sont bien plus grands dans le sélecteur : la cellule suit enfin leur format, et le plus courant d'entre eux double de surface.
+- Nouveau réglage (Affichage) : séparer visuellement les smileys du sélecteur, par contour ou par quadrillage. Désactivé par défaut.
