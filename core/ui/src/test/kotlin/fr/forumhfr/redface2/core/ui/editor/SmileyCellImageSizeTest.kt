@@ -4,6 +4,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.model.EditorSmileySource
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -31,13 +32,25 @@ class SmileyCellImageSizeTest {
     /** The S10e is exactly xxhdpi. */
     private val s10e = Density(3f)
 
-    /** S10e portrait: 360 dp screen − 2 × 16 dp of sheet padding. */
-    private val shippedGeometry = smileyGridGeometry(328.dp, s10e)
+    /** S10e portrait with the SHIPPED spec (preset « E » since #989): 360 dp − 2 × 8 dp of padding. */
+    private val shippedGeometry = smileyGridGeometry(344.dp, s10e)
 
+    /**
+     * The pre-#989 geometry, kept explicit so the historical numbers stay documented and the switch
+     * to « E » is provably a deliberate change of DEFAULTS and not a change of the sizing rule.
+     */
+    private val preE = SmileyPickerLayoutSpec(
+        minCellWidth = 48.dp,
+        cellAspectRatio = 1f,
+        gridPadding = 16.dp,
+        cellSpacing = 8.dp,
+    )
+
+    /** Historical helper: the pre-#989 spec, on which the #816/#871 assertions below were written. */
     private fun size(
         source: EditorSmileySource,
         measuredPx: IntSize?,
-        spec: SmileyPickerLayoutSpec = SmileyPickerLayoutSpec.Current,
+        spec: SmileyPickerLayoutSpec = preE,
     ) = pickerSmileyImageSize(source, measuredPx, smileyGridGeometry(328.dp, s10e, spec), spec)
 
     /** Compact margins + a 56 dp minimum — the geometry of the #989 candidates. */
@@ -53,12 +66,55 @@ class SmileyCellImageSizeTest {
     // --- Iso-behaviour with the shipped spec (pre-#989 values, unchanged) ---
 
     @Test
-    fun `shipped spec still solves to six 48 dp columns with a 44 dp cap`() {
-        assertEquals(6, shippedGeometry.columns)
-        assertEquals(48.dp, shippedGeometry.cellWidth)
+    fun `shipped spec solves to five landscape cells — preset E (#989)`() {
+        assertEquals(5, shippedGeometry.columns)
+        assertEquals(65.33f, shippedGeometry.cellWidth.value, 0.02f)
+        // Floored at the Material touch minimum: 65.33 / 1.4 = 46.7 dp would be under it.
         assertEquals(48.dp, shippedGeometry.cellHeight)
-        assertEquals(44.dp, shippedGeometry.capWidth)
+        assertEquals(61.33f, shippedGeometry.capWidth.value, 0.02f)
         assertEquals(44.dp, shippedGeometry.capHeight)
+    }
+
+    @Test
+    fun `the shipped cap saturates both axes on the dominant 70x50 perso (#989)`() {
+        // The whole point of the landscape cell: at this ratio the dominant format is limited by
+        // BOTH axes at once, so no room is wasted. 44×31 before, 61×44 now — surface doubled.
+        assertEquals(
+            DpSize(61.dp, 44.dp),
+            pickerSmileyImageSize(EditorSmileySource.WIKI, IntSize(70, 50), shippedGeometry),
+        )
+    }
+
+    @Test
+    fun `no-upscale survives the new defaults — a small sprite keeps its native size`() {
+        // Preset « F » (ceiling 1.5) was REJECTED: a non-uniform factor makes the picker promise a
+        // size the post will not honour (#1022). The shipped ceiling stays 1.
+        assertEquals(1f, SmileyPickerLayoutSpec.Current.persoScaleCeiling)
+        assertEquals(
+            DpSize(39.dp, 15.dp),
+            pickerSmileyImageSize(EditorSmileySource.WIKI, IntSize(39, 15), shippedGeometry),
+        )
+    }
+
+    @Test
+    fun `no delimiter is drawn by default (#989)`() {
+        assertEquals(SmileyPickerDecoration.NONE, SmileyPickerLayoutSpec.Current.cellDecoration)
+    }
+
+    @Test
+    fun `the pre-#989 geometry is unchanged when its spec is requested explicitly`() {
+        // Guards the extraction itself: the SIZING RULE did not change, only the defaults did.
+        val geometry = smileyGridGeometry(328.dp, s10e, preE)
+        assertEquals(6, geometry.columns)
+        assertEquals(48.dp, geometry.cellWidth)
+        assertEquals(48.dp, geometry.cellHeight)
+        assertEquals(44.dp, geometry.capWidth)
+        assertEquals(44.dp, geometry.capHeight)
+        // The historical numbers of the dominant perso, for the record.
+        assertEquals(
+            DpSize(44.dp, 31.dp),
+            pickerSmileyImageSize(EditorSmileySource.WIKI, IntSize(70, 50), geometry, preE),
+        )
     }
 
     @Test
@@ -132,7 +188,8 @@ class SmileyCellImageSizeTest {
 
     @Test
     fun `compact margins alone keep six columns and widen the cell`() {
-        val spec = SmileyPickerLayoutSpec(gridPadding = 8.dp, cellSpacing = 4.dp)
+        // Preset « C » of the spike: trimmed margins on the pre-#989 48 dp minimum.
+        val spec = preE.copy(gridPadding = 8.dp, cellSpacing = 4.dp)
         val geometry = smileyGridGeometry(compactWidth, s10e, spec)
         assertEquals(6, geometry.columns)
         assertEquals(54.dp, geometry.cellWidth)
@@ -185,7 +242,7 @@ class SmileyCellImageSizeTest {
 
     @Test
     fun `the ceiling never lets a perso overflow its cap`() {
-        val spec = SmileyPickerLayoutSpec(persoScaleCeiling = 4f)
+        val spec = preE.copy(persoScaleCeiling = 4f)
         // Cap 44 wins over a ×4 ceiling: 15 × 4 = 60 would overflow the 48 dp cell.
         assertEquals(DpSize(44.dp, 44.dp), size(EditorSmileySource.WIKI, IntSize(15, 15), spec))
     }

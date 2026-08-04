@@ -6,6 +6,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 
 /**
  * Structural spacing metrics driven by the [DisplayDensity] preset (#287 lot B).
@@ -93,6 +94,14 @@ val LocalShowScrollbar = staticCompositionLocalOf { true }
  * media and non-GIF blocks keep the strict v1.5 no-upscale.
  */
 val LocalMediaDisplayProfile = staticCompositionLocalOf { MediaDisplayProfile.M }
+
+/**
+ * #989 — the smiley picker's cell delimiter, seeded from
+ * [ReadingDisplaySettings.smileyPickerDecoration] by `RedfaceTheme`. Read by `SmileyPickerGrid` so
+ * flipping the setting re-decorates the grid without threading the preference through every editor
+ * call site (the picker lives in `:core:ui` and is opened from four different screens).
+ */
+val LocalSmileyPickerDecoration = staticCompositionLocalOf { SmileyPickerDecoration.NONE }
 
 /**
  * #785 — canonical pseudos (cf. `canonicalizePseudo`) of the black-listed authors, provided by the

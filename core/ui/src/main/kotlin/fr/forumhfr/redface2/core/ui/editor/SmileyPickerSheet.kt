@@ -56,10 +56,12 @@ import androidx.compose.ui.unit.sp
 import coil3.SingletonImageLoader
 import coil3.compose.AsyncImage
 import coil3.compose.LocalPlatformContext
+import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.model.BUILTIN_HFR_SMILEYS
 import fr.forumhfr.redface2.core.model.EditorSmiley
 import fr.forumhfr.redface2.core.model.EditorSmileySource
 import fr.forumhfr.redface2.core.ui.post.LocalIntrinsicMediaSizeCache
+import fr.forumhfr.redface2.core.ui.theme.LocalSmileyPickerDecoration
 import fr.forumhfr.redface2.core.ui.post.LocalMediaAttemptLedger
 import fr.forumhfr.redface2.core.ui.post.measureAndCacheIntrinsicMediaSize
 
@@ -270,6 +272,15 @@ fun SmileyPickerGrid(
     // #989 — the constraints give the grid its own width, which is what turns `Adaptive`'s implicit
     // column count into a KNOWN cell width ([smileyGridGeometry]) — and therefore an image cap that
     // follows the cell instead of the hardcoded 44 dp.
+    // #989 — the delimiter comes from the user setting, not from the call site: the picker is opened
+    // from four screens and none of them should have to know about it. The spec still wins when it
+    // explicitly asks for a decoration (the debug bench does), so the bench can compare styles.
+    val settingDecoration = LocalSmileyPickerDecoration.current
+    val layout = if (layout.cellDecoration == SmileyPickerDecoration.NONE) {
+        layout.copy(cellDecoration = settingDecoration)
+    } else {
+        layout
+    }
     BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
         val geometry = smileyGridGeometry(
             availableWidth = maxWidth,
@@ -341,12 +352,12 @@ private fun SmileyCell(
             .height(geometry.cellHeight)
             .then(
                 when (layout.cellDecoration) {
-                    SmileyCellDecoration.OUTLINE ->
+                    SmileyPickerDecoration.OUTLINE ->
                         Modifier.border(1.dp, outlineColor, RoundedCornerShape(CELL_OUTLINE_RADIUS))
                     // #989 — right + bottom edges only: adjacent cells share their rules, so the
                     // grid reads as a continuous table instead of a set of boxes. Requires the spec
                     // to drop the spacing to 0, otherwise the edges never meet.
-                    SmileyCellDecoration.SEPARATORS -> Modifier.drawBehind {
+                    SmileyPickerDecoration.SEPARATORS -> Modifier.drawBehind {
                         val stroke = 1.dp.toPx()
                         drawLine(
                             color = outlineColor,
@@ -361,7 +372,7 @@ private fun SmileyCell(
                             strokeWidth = stroke,
                         )
                     }
-                    SmileyCellDecoration.NONE -> Modifier
+                    SmileyPickerDecoration.NONE -> Modifier
                 }
             )
             .clickable(onClick = onClick)

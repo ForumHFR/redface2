@@ -4,6 +4,7 @@ import androidx.compose.runtime.Immutable
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 
 /**
  * Bundle of the two #287 reading presets passed to `RedfaceTheme` as a single parameter.
@@ -25,4 +26,9 @@ data class ReadingDisplaySettings(
     // #973 (§8 [AMENDEMENT-v1.5-2]) — enlargement profile of eligible block GIFs (S/M/L). Default
     // M (×1,5), the shipped choice (XaTriX 26/07); provided as LocalMediaDisplayProfile.
     val mediaDisplayProfile: MediaDisplayProfile = MediaDisplayProfile.M,
+    // #989 — cell delimiter of the smiley picker. NONE by default (XaTriX): the delimiter is an aid
+    // to SELECTION on a very heterogeneous corpus, never a change of thumbnail size — the preset
+    // that enlarged small smileys was rejected for making the picker lie about the published size
+    // (#1022). Provided as LocalSmileyPickerDecoration.
+    val smileyPickerDecoration: SmileyPickerDecoration = SmileyPickerDecoration.NONE,
 )

@@ -30,7 +30,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.model.BUILTIN_HFR_SMILEYS
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
-import fr.forumhfr.redface2.core.ui.editor.SmileyCellDecoration
+import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerGrid
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerLayoutSpec
 import fr.forumhfr.redface2.core.ui.editor.smileyGridGeometry
@@ -38,7 +38,7 @@ import fr.forumhfr.redface2.core.ui.editor.smileyGridGeometry
 /** What the bench is currently showing — hoisted into the Activity so `adb` and the chips agree. */
 internal data class SpikeUiState(
     val preset: SpikePreset = SPIKE_PRESETS.first(),
-    /** #989 — index dans SmileyCellDecoration.entries : 0 aucun, 1 liseré, 2 séparateurs. */
+    /** #989 — index dans SmileyPickerDecoration.entries : 0 aucun, 1 liseré, 2 séparateurs. */
     val decoration: Int = 0,
     val debug: Boolean = false,
     /**
@@ -116,7 +116,9 @@ class SmileyPickerSpikeActivity : ComponentActivity() {
 
 @Composable
 private fun SmileyPickerSpikeScreen(state: SpikeUiState, onState: (SpikeUiState) -> Unit) {
-    val decoration = SmileyCellDecoration.entries[state.decoration.coerceIn(0, SmileyCellDecoration.entries.lastIndex)]
+    val decoration = SmileyPickerDecoration.entries[
+        state.decoration.coerceIn(0, SmileyPickerDecoration.entries.lastIndex),
+    ]
     val spec = state.preset.spec.copy(
         cellDecoration = decoration,
         debugOverlay = state.debug,
@@ -124,8 +126,8 @@ private fun SmileyPickerSpikeScreen(state: SpikeUiState, onState: (SpikeUiState)
         // supprimer l'écart libère de la place et le solveur trouve alors 6 colonnes au lieu de 5 :
         // on relève donc minCellWidth pour comparer à géométrie ÉGALE, sinon on comparerait deux
         // grilles différentes et pas deux styles de délimitation.
-        cellSpacing = if (decoration == SmileyCellDecoration.SEPARATORS) 0.dp else state.preset.spec.cellSpacing,
-        minCellWidth = if (decoration == SmileyCellDecoration.SEPARATORS) 64.dp else state.preset.spec.minCellWidth,
+        cellSpacing = if (decoration == SmileyPickerDecoration.SEPARATORS) 0.dp else state.preset.spec.cellSpacing,
+        minCellWidth = if (decoration == SmileyPickerDecoration.SEPARATORS) 64.dp else state.preset.spec.minCellWidth,
     )
 
     Column(modifier = Modifier.fillMaxSize()) {

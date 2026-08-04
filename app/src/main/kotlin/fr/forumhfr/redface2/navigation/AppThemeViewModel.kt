@@ -8,6 +8,7 @@ import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
@@ -81,6 +82,13 @@ class AppThemeViewModel @Inject constructor(
     val mediaDisplayProfile: StateFlow<MediaDisplayProfile> =
         userPreferencesRepository.observeMediaDisplayProfile()
             .stateIn(viewModelScope, SharingStarted.Eagerly, MediaDisplayProfile.M)
+
+    // #989 — the smiley picker's cell delimiter, collected at the shell like the reading presets so
+    // RedfaceTheme can seed LocalSmileyPickerDecoration. Seed = NONE, the shipped default (an
+    // unknown persisted value already falls back to NONE in the repository).
+    val smileyPickerDecoration: StateFlow<SmileyPickerDecoration> =
+        userPreferencesRepository.observeSmileyPickerDecoration()
+            .stateIn(viewModelScope, SharingStarted.Eagerly, SmileyPickerDecoration.NONE)
 
     // #666 — show the labels under the bottom-nav icons. Eagerly collected at the shell so the
     // NavigationSuiteScaffold can drop the labels. No bootstrap mirror; seed = the `true` default.

@@ -5,6 +5,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.model.EditorSmileySource
 import kotlin.math.roundToInt
 
@@ -27,24 +28,6 @@ import kotlin.math.roundToInt
  * `IntrinsicMediaSizeCache`) — never the display policy. Keeping the divergence on this side of the
  * seam is what lets the picker relax the no-upscale rule without re-opening the contract.
  */
-/**
- * #989 — the three delimiter styles put in front of XaTriX for the grid.
- */
-enum class SmileyCellDecoration {
-    /** Nothing: vignettes float in the grid, as shipped today. */
-    NONE,
-
-    /** A rounded hairline around each cell — each vignette reads as its own target. */
-    OUTLINE,
-
-    /**
-     * Continuous separators, table-like: each cell draws its RIGHT and BOTTOM edge only, so adjacent
-     * edges line up into unbroken rules across the grid. Needs zero spacing to actually join up —
-     * with a gap, per-cell edges read as dashes rather than lines.
-     */
-    SEPARATORS,
-}
-
 data class SmileyPickerLayoutSpec(
     /** Minimum column width — the same role as `GridCells.Adaptive(minSize)`. */
     val minCellWidth: Dp = 56.dp,
@@ -68,7 +51,7 @@ data class SmileyPickerLayoutSpec(
      * tiny sprite read as a target rather than as a stray pixel — the « affordance » route, as
      * opposed to upscaling the thumbnail and lying about its published size (preset « F », rejected).
      */
-    val cellDecoration: SmileyCellDecoration = SmileyCellDecoration.NONE,
+    val cellDecoration: SmileyPickerDecoration = SmileyPickerDecoration.NONE,
     /** Spike-only: overlay the cell box, the image box and the measured native size. */
     val debugOverlay: Boolean = false,
 ) {
