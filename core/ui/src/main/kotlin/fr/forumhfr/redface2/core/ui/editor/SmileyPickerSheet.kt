@@ -276,10 +276,24 @@ fun SmileyPickerGrid(
     // from four screens and none of them should have to know about it. The spec still wins when it
     // explicitly asks for a decoration (the debug bench does), so the bench can compare styles.
     val settingDecoration = LocalSmileyPickerDecoration.current
-    val layout = if (layout.cellDecoration == SmileyPickerDecoration.NONE) {
-        layout.copy(cellDecoration = settingDecoration)
+    val resolved = if (layout.cellDecoration == SmileyPickerDecoration.NONE) {
+        settingDecoration
     } else {
-        layout
+        layout.cellDecoration
+    }
+    val layout = when (resolved) {
+        // #989 gate Fable (BLOQUANT) — continuous rules only exist when cells are ADJACENT: with a
+        // gap, per-cell edges read as disjoint dashes, not as a table. The bench neutralised the
+        // spacing itself, so shipping the option without porting that compensation would have given
+        // users dashes instead of the grid the setting promises. Dropping the spacing frees width, so
+        // `minCellWidth` absorbs it to keep the SAME column count: the solver's step
+        // (minCellWidth + cellSpacing) is unchanged by construction.
+        SmileyPickerDecoration.SEPARATORS -> layout.copy(
+            cellDecoration = resolved,
+            minCellWidth = layout.minCellWidth + layout.cellSpacing,
+            cellSpacing = 0.dp,
+        )
+        else -> layout.copy(cellDecoration = resolved)
     }
     BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
         val geometry = smileyGridGeometry(

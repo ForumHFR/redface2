@@ -15,10 +15,11 @@ import kotlin.math.roundToInt
  * `SmileyCell` were private with their constants inlined, so a debug-only Activity could only ever
  * have duplicated them — and then compared a copy against itself).
  *
- * [Current] reproduces the shipped picker **to the dp**: `Adaptive(48.dp)` columns, 16 dp of sheet
- * padding, 8 dp of spacing, a square 48 dp cell, a 44 dp per-axis image cap and the no-upscale
- * ceiling inherited from #871. Every spike preset is a deviation from it, and the preset XaTriX
- * retains becomes the fix by changing these defaults — no second implementation.
+ * [Current] IS the shipped geometry. Since #989 that is preset « E »: `Adaptive(56.dp)`-equivalent
+ * columns, 8 dp of sheet padding, 4 dp of spacing, a cell at the corpus' own 7:5 ratio (floored at
+ * the 48 dp touch minimum) and the no-upscale ceiling inherited from #871. On a 360 dp phone it
+ * solves to 5 cells of 65,33×48 dp with a 61,33×44 cap — the dominant 70×50 perso then saturates
+ * BOTH axes at once, where the previous square 48 dp cell left it at 44×31.
  *
  * IMPORTANT — this is the PICKER's policy, deliberately DISTINCT from the posts' one
  * ([fr.forumhfr.redface2.core.ui.post.intrinsicSmileyDisplaySize], which §9 of the images contract

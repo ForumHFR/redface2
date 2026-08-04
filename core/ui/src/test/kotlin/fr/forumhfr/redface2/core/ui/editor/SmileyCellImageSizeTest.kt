@@ -118,6 +118,25 @@ class SmileyCellImageSizeTest {
     }
 
     @Test
+    fun `the separators mode keeps the column count while dropping the spacing (#989)`() {
+        // Gate Fable (BLOQUANT): continuous rules only exist when cells are adjacent, so the grid
+        // neutralises the spacing in that mode — and must absorb it into minCellWidth, otherwise the
+        // freed width silently adds a column and the option changes the geometry it decorates.
+        val e = SmileyPickerLayoutSpec.Current
+        val separators = e.copy(
+            cellDecoration = SmileyPickerDecoration.SEPARATORS,
+            minCellWidth = e.minCellWidth + e.cellSpacing,
+            cellSpacing = 0.dp,
+        )
+        val plain = smileyGridGeometry(344.dp, s10e, e)
+        val ruled = smileyGridGeometry(344.dp, s10e, separators)
+        assertEquals("same column count in both modes", plain.columns, ruled.columns)
+        // Without the spacing the cells are slightly wider — they now touch, which is the point.
+        // 1032 px / 5 = 206 px (integer division, like Adaptive) → 68,67 dp.
+        assertEquals(68.67f, ruled.cellWidth.value, 0.05f)
+    }
+
+    @Test
     fun `builtin sprites render near their native scale`() {
         assertEquals(DpSize(20.dp, 20.dp), size(EditorSmileySource.BUILTIN, measuredPx = null))
     }
