@@ -32,6 +32,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.write.FlagAddContext
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Category
@@ -2383,6 +2384,12 @@ class FlagsViewModelTest {
 
         override fun clearSessionCache() {
             clearSessionCacheCallCount += 1
+        }
+
+        override suspend fun addFlag(context: FlagAddContext): Result<Unit> {
+            // #986 — not exercised by the Drapeaux-view tests (posting a favourite is a topic-screen
+            // action); present to satisfy the interface.
+            return Result.success(Unit)
         }
 
         override suspend fun removeFlag(flag: Flag): Result<Unit> {

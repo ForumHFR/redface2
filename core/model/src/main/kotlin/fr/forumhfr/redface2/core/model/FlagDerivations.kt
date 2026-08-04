@@ -62,8 +62,14 @@ const val DEFAULT_POSTS_PER_PAGE = 40
 fun Flag.pageToOpen(): Int {
     val current = lastReadPage.coerceAtLeast(1)
     val position = lastPosition ?: 0
-    // A 1-based global index lands on a page boundary exactly when it divides the page size.
-    val stoppedAtPageEnd = position > 0 && postsPerPage > 0 && position % postsPerPage == 0
+    val divides = position > 0 && postsPerPage > 0 && position % postsPerPage == 0
+    // A 1-based global index lands on a page boundary exactly when it divides the page size — but
+    // only trust it when it also lands on the page the marker claims. Cross-checking the two REST
+    // fields against each other guards a stale or inconsistent pair (cross-review Sol: a row
+    // carrying lastReadPage = 12 with lastPosition = 40 would otherwise advance on the strength of
+    // a position belonging to page 1).
+    val positionPage = if (divides) position / postsPerPage else 0
+    val stoppedAtPageEnd = divides && positionPage == current
     val advances = hasUnread && lastReadPage < totalPages && stoppedAtPageEnd
     return if (advances) (current + 1).coerceAtMost(totalPages) else current
 }
