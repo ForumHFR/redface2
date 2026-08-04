@@ -1,4 +1,3 @@
-Redface 2 v0.38.0 — dev.
+Redface 2 v0.38.1 — dev.
 
-- Flags: when the last post you read was the last one on its page, the topic now opens on the NEXT page instead of reopening the one you had finished.
-- The "first unread" shortcut no longer skips a post when you had stopped mid-page.
+- New: "Add a bookmark here" in a post's menu. The bookmark lands on that exact post so you can come back to it later, just like on the website.

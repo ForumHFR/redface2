@@ -16,6 +16,20 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.38.1` — `internal` (dev) — 2026-08-04
+
+### Ajouté
+
+- **« Mettre un favori ici » dans le menu contextuel d'un message** ([#986](https://github.com/ForumHFR/redface2/issues/986), demande **thibw**) : l'action est au niveau du MESSAGE et pas du sujet, parce que `addflag.php` ancre le favori sur une position — le title du bouton HFR lui-même dit « Mettre un favori sur cette position pour y revenir plus tard ». Le `ref` attendu n'est pas recalculé : `Post.quoteRef` porte déjà la valeur émise par HFR dans la toolbar du message (parsée depuis #146, persistée Room v5). Le dériver d'un index de liste serait faux dès la page 2, où le rappel « Reprise du message précédent » porte `ref=0` et ne consomme pas de rang — contrat désormais documenté dans le KDoc de `quoteRef`, qui le déclarait opaque. Aucun undo côté HFR, les libellés n'en promettent pas.
+
+### Interne
+
+- Gate Codex en trois passes, **cinq défauts trouvés dont quatre bloquants**, aucun détectable par la CI, detekt, lint ou les tests initiaux : (1) `Topic.subcat` peut valoir le sentinel `SUBCAT_UNKNOWN` (-1) que le `require` de `FlagAddContext` rejette — l'IAE partait hors du `runCatching` et crashait l'écran ; (2) la position était ancrée sur `request.page`, qui n'est pas la page affichée pendant un changement de page ni en recherche intra-topic — favori posé **silencieusement** sur une page non regardée ; (3) l'entrée s'affichait sur les rappels de page (`quoteRef = 0`) pour échouer à coup sûr ; (4) le post sélectionné survivant à un changement de page, l'action appariait un post périmé avec la page courante ; (5) une `CancellationException` encapsulée dans un `Result.failure` était rapportée comme échec utilisateur.
+- Un test annonçant un changement de page sans appeler `switchToPage()` — donc ne prouvant rien — a été remplacé par le scénario réel.
+- 121 tests verts sur `TopicViewModelTest`, dont 6 sur cette action.
+
+---
+
 ## `0.38.0` — `internal` (dev) — 2026-08-04
 
 ### Corrigé

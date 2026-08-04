@@ -1,4 +1,3 @@
-Redface 2 v0.38.0 — dev.
+Redface 2 v0.38.1 — dev.
 
-- Drapeaux : quand le dernier message lu était le dernier de sa page, le sujet s'ouvre enfin sur la page suivante au lieu de rouvrir celle déjà lue.
-- Le raccourci « 1er non-lu » ne saute plus un message quand la lecture s'était arrêtée en milieu de page.
+- Nouveau : « Mettre un favori ici » dans le menu d'un message. Le favori se pose sur ce message précis, pour y revenir plus tard — comme sur le site.
