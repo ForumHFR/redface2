@@ -8,6 +8,7 @@ import fr.forumhfr.redface2.core.database.dao.TopicDao
 import fr.forumhfr.redface2.core.database.entities.FetchMode
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
@@ -738,6 +739,11 @@ class TopicRepositoryImplTest {
             MutableStateFlow(MediaDisplayProfile.M)
 
         override suspend fun setMediaDisplayProfile(profile: MediaDisplayProfile) = Unit
+
+        override fun observeSmileyPickerDecoration(): Flow<SmileyPickerDecoration> =
+            MutableStateFlow(SmileyPickerDecoration.NONE)
+
+        override suspend fun setSmileyPickerDecoration(decoration: SmileyPickerDecoration) = Unit
 
         override fun observeDebugBoundsOverlay(): Flow<Boolean> = MutableStateFlow(false)
 

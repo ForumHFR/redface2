@@ -16,6 +16,7 @@ import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
@@ -54,6 +55,7 @@ import java.time.ZoneOffset
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -2753,6 +2755,12 @@ class FlagsViewModelTest {
             MutableStateFlow(MediaDisplayProfile.M)
 
         override suspend fun setMediaDisplayProfile(profile: MediaDisplayProfile) = Unit
+
+        // #989 — délimiteur du picker : non exercé ici, présent pour satisfaire l'interface.
+        override fun observeSmileyPickerDecoration(): Flow<SmileyPickerDecoration> =
+            flowOf(SmileyPickerDecoration.NONE)
+
+        override suspend fun setSmileyPickerDecoration(decoration: SmileyPickerDecoration) = Unit
 
         override fun observeDebugBoundsOverlay(): Flow<Boolean> = MutableStateFlow(false)
 
