@@ -13,10 +13,13 @@ import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
+import fr.forumhfr.redface2.core.model.write.FlagAddContext
+import fr.forumhfr.redface2.core.model.write.FlagAddResult
 import fr.forumhfr.redface2.core.model.write.FlagDeleteResult
 import fr.forumhfr.redface2.core.network.HfrApiClient
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.network.HfrRestFlagBucket
+import fr.forumhfr.redface2.core.parser.write.FlagAddResponseParser
 import fr.forumhfr.redface2.core.parser.write.FlagDeleteResponseParser
 import java.util.EnumMap
 import javax.inject.Inject
@@ -69,14 +72,15 @@ import kotlinx.serialization.json.Json
  * while the repository attempts a background refresh. [clearSessionCache] still
  * clears the process cache immediately on logout / account switch.
  */
-// #99 added the HTML mutation collaborators (HfrClient + delflag parser) on top of the
-// existing REST read deps ; all 8 are distinct Hilt-injected singletons, a parameter object
+// #99/#986 added the HTML mutation collaborators (HfrClient + add/delflag parsers) on top of the
+// existing REST read deps ; all 9 are distinct Hilt-injected singletons, a parameter object
 // would only hide the dependency surface from DI.
 @Suppress("LongParameterList")
 @Singleton
 class DefaultFlagRepository @Inject constructor(
     private val apiClient: HfrApiClient,
     private val hfrClient: HfrClient,
+    private val flagAddResponseParser: FlagAddResponseParser,
     private val flagDeleteResponseParser: FlagDeleteResponseParser,
     private val forumRepository: ForumRepository,
     private val authRepository: AuthRepository,
@@ -248,6 +252,44 @@ class DefaultFlagRepository @Inject constructor(
     }
 
     /**
+     * Adds a favourite via `addflag.php` (#986) and reconciles only the cache rows we can
+     * prove from the existing state.
+     *
+     * Flow :
+     * 1. Resolve the authenticated user ; abort with a failed [Result] if anonymous (the
+     *    addflag GET would land on the login page anyway).
+     * 2. GET `/user/addflag.php` through [HfrClient] (HTML mutation per ADR-003) and
+     *    classify the body with [FlagAddResponseParser]. Network + Jsoup parse are both
+     *    on [ioDispatcher], matching [removeFlag]'s dispatcher boundary.
+     * 3. **Success** → mark any already cached row for the same `(cat, topicId)` as
+     *    [Flag.isFavorite], persist those warmed lists back to Room, and re-broadcast
+     *    only the updated warm tabs. We deliberately do **not** fabricate a new
+     *    [FlagType.FAVORITE] row : `addflag.php` returns no title / counters / authors,
+     *    so the favourite bucket is authoritatively populated by the next REST refresh.
+     * 4. **Failure / unexpected page** → touch no cache, return [Result.failure].
+     *
+     * A [SessionExpiredException] (or any transport error) raised by [HfrClient] propagates
+     * as a failed [Result] via [runCatching] — no cache is mutated.
+     */
+    override suspend fun addFlag(context: FlagAddContext): Result<Unit> {
+        val userId = currentUserId()
+            ?: return Result.failure(IllegalStateException("Adding a favourite requires an authenticated HFR session"))
+
+        return runCatching {
+            val result = withContext(ioDispatcher) {
+                val response = hfrClient.addFlag(context)
+                flagAddResponseParser.parse(response)
+            }
+            when (result) {
+                FlagAddResult.Success -> Unit
+                FlagAddResult.Failure -> throw FlagAddFailedException(context.topicId)
+            }
+        }.onSuccess {
+            markFavoriteInCaches(userId = userId, context = context)
+        }
+    }
+
+    /**
      * #809 — resolves the full [Flag] for a `(cat, topicId)` pair so callers outside the Drapeaux
      * view (the topic top-bar long-press) can feed [removeFlag] the complete object it keys the
      * `delflag.php` mutation on. Never fabricates a partial [Flag].
@@ -331,6 +373,46 @@ class DefaultFlagRepository @Inject constructor(
         // network deletion already confirmed).
         if (updated != null) {
             refreshes.getValue(flag.type).emit(updated)
+        }
+    }
+
+    /**
+     * Marks existing cached rows for [context]'s topic as favourites after a confirmed
+     * `addflag.php` success. The mutation endpoint returns only a confirmation page, so
+     * this method updates rows it already owns but never invents a full favourite-bucket row.
+     */
+    private suspend fun markFavoriteInCaches(userId: String, context: FlagAddContext) {
+        val updated: List<Pair<FlagType, FlagsResult.Success>> = synchronized(cachedSuccesses) {
+            cachedSuccesses.entries.mapNotNull { (type, current) ->
+                var changed = false
+                val flags = current.flags.map { flag ->
+                    if (flag.cat == context.cat && flag.topicId == context.topicId && !flag.isFavorite) {
+                        changed = true
+                        flag.copy(isFavorite = true)
+                    } else {
+                        flag
+                    }
+                }
+                if (changed) {
+                    val success = FlagsResult.Success(flags)
+                    cachedSuccesses[type] = success
+                    type to success
+                } else {
+                    null
+                }
+            }
+        }
+
+        updated.forEach { (type, success) ->
+            runCatching {
+                flagCacheStore.replace(userId = userId, type = type, flags = success.flags)
+            }.onFailure { throwable ->
+                Log.w(LOG_TAG, "Could not persist added favourite marker for $type", throwable)
+            }
+        }
+
+        updated.forEach { (type, success) ->
+            refreshes.getValue(type).emit(success)
         }
     }
 
@@ -680,3 +762,12 @@ class DefaultFlagRepository @Inject constructor(
  */
 class FlagDeleteFailedException(topicId: Int) :
     Exception("HFR did not confirm the drapeau removal for topic $topicId")
+
+/**
+ * Raised internally by [DefaultFlagRepository.addFlag] when HFR's `addflag.php` response
+ * did not carry the « Favori positionné » confirmation. It is the cause wrapped in the
+ * failed [Result] returned to the caller, so the UI can surface a generic "could not add"
+ * message. No response body is carried — the page can embed session metadata.
+ */
+class FlagAddFailedException(topicId: Int) :
+    Exception("HFR did not confirm the favourite add for topic $topicId")

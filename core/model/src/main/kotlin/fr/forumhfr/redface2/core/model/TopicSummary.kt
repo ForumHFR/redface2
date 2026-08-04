@@ -36,8 +36,10 @@ data class TopicSummary(
     /**
      * Authenticated-only field. Page index (1-based) of the last post the user
      * read for this topic, parsed from `links.posts.href?page=N`. **Not** REST's
-     * `last_position`, which is the per-post offset inside that page, not a page
-     * number. `null` on anonymous payloads or when the auth href omits `page`.
+     * `last_position`, which is the 1-based index of that post in the WHOLE topic
+     * (not an offset inside the page, and not a page number — corrected in #638,
+     * where that index is what tells a page-boundary stop from a mid-page one).
+     * `null` on anonymous payloads or when the auth href omits `page`.
      */
     val lastReadPage: Int?,
     /**

@@ -199,6 +199,13 @@ class AppAccountViewModelTest {
             clearSessionCacheCallCount += 1
         }
 
+        override suspend fun addFlag(
+            context: fr.forumhfr.redface2.core.model.write.FlagAddContext,
+        ): Result<Unit> {
+            // Not exercised in these tests — included to satisfy the interface (#986).
+            return Result.success(Unit)
+        }
+
         override suspend fun removeFlag(flag: fr.forumhfr.redface2.core.model.Flag): Result<Unit> {
             // Not exercised in these tests — included to satisfy the interface (#99).
             return Result.success(Unit)

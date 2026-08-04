@@ -30,6 +30,7 @@ import fr.forumhfr.redface2.core.domain.topic.TopicPageEmission
 import fr.forumhfr.redface2.core.domain.topic.TopicRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicSearchRepository
 import fr.forumhfr.redface2.core.model.TopicSearchForm
+import fr.forumhfr.redface2.core.model.write.FlagAddContext
 import fr.forumhfr.redface2.core.model.TopicSearchRequest
 import fr.forumhfr.redface2.core.model.search.SearchRequest
 import fr.forumhfr.redface2.core.model.search.SearchResultPage
@@ -3614,6 +3615,11 @@ private class FakeFlagRepository(
         findFlagGate?.await()
         findFlagError?.let { throw it }
         return flagToFind
+    }
+
+    override suspend fun addFlag(context: FlagAddContext): Result<Unit> {
+        // #986 — the UI entry point is not wired yet; present to satisfy the interface.
+        return Result.success(Unit)
     }
 
     override suspend fun removeFlag(flag: Flag): Result<Unit> {

@@ -409,3 +409,23 @@ val MIGRATION_14_15: Migration = object : Migration(14, 15) {
         db.execSQL("ALTER TABLE posts ADD COLUMN citedCount INTEGER")
     }
 }
+
+/**
+ * v15 → v16 (#638) — adds `flag_topics.lastPosition` (REST `last_position`, the 1-based global index
+ * of the last post read) and `flag_topics.postsPerPage` (`results_per_page` of the topic's posts
+ * href). Together they let `Flag.pageToOpen()` tell « stopped at the bottom of the page » from
+ * « stopped mid-page » — the two cases that need opposite navigation.
+ *
+ * `lastPosition` is nullable so pre-v16 rows backfill to `NULL`, which `pageToOpen` treats as
+ * « unknown » and degrades to the previous behaviour. `postsPerPage` takes `DEFAULT 40` (HFR's
+ * value) so migrated rows stay usable until the next fetch overwrites them.
+ *
+ * Pure DDL, no row rewrite — flags are a short-lived cache (30 s TTL) and the next fetch replaces
+ * every row.
+ */
+val MIGRATION_15_16: Migration = object : Migration(15, 16) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE flag_topics ADD COLUMN lastPosition INTEGER")
+        db.execSQL("ALTER TABLE flag_topics ADD COLUMN postsPerPage INTEGER NOT NULL DEFAULT 40")
+    }
+}

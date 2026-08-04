@@ -28,7 +28,7 @@ import fr.forumhfr.redface2.core.database.entities.UploadedImageEntity
         UploadedImageEntity::class,
         MpStorageLocationEntity::class,
     ],
-    version = 15,
+    version = 16,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)

@@ -13,9 +13,11 @@ import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
+import fr.forumhfr.redface2.core.model.write.FlagAddContext
 import fr.forumhfr.redface2.core.network.HfrApiClient
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.network.HfrRestFlagBucket
+import fr.forumhfr.redface2.core.parser.write.FlagAddResponseParser
 import fr.forumhfr.redface2.core.parser.write.FlagDeleteResponseParser
 import io.mockk.every
 import io.mockk.coEvery
@@ -1099,6 +1101,126 @@ class DefaultFlagRepositoryTest {
     }
 
     @Test
+    fun `addFlag success marks existing cached topic as favorite and Room`() = runTest {
+        val (apiClient, forumRepository) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+        }
+        val flagDao = stubFlagDao()
+        val hfrClient = mockk<HfrClient>()
+        val context = sampleFlagAddContext()
+        coEvery { hfrClient.addFlag(context) } returns ADD_SUCCESS_HTML
+        val repo = buildRepository(apiClient, forumRepository, flagDao = flagDao, hfrClient = hfrClient)
+
+        repo.observe(FlagType.CYAN).test {
+            assertEquals(FlagsResult.Loading, awaitItem())
+            val seeded = awaitItem() as FlagsResult.Success
+            assertEquals(false, seeded.flags.single { it.topicId == 35395 }.isFavorite)
+
+            val result = repo.addFlag(context)
+            assertTrue("expected success, got $result", result.isSuccess)
+
+            val updated = awaitItem() as FlagsResult.Success
+            assertEquals(true, updated.flags.single { it.topicId == 35395 }.isFavorite)
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify { hfrClient.addFlag(context) }
+        coVerify {
+            flagDao.replaceForType(
+                userId = "xat",
+                type = FlagType.CYAN,
+                rows = match { rows -> rows.singleOrNull { it.topicId == 35395 }?.isFavorite == true },
+            )
+        }
+    }
+
+    @Test
+    fun `addFlag failure touches no cache and returns failure`() = runTest {
+        val (apiClient, forumRepository) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+        }
+        val flagDao = stubFlagDao()
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.addFlag(any()) } returns ADD_FAILURE_HTML
+        val repo = buildRepository(apiClient, forumRepository, flagDao = flagDao, hfrClient = hfrClient)
+
+        repo.observe(FlagType.CYAN).test {
+            assertEquals(FlagsResult.Loading, awaitItem())
+            awaitItem() as FlagsResult.Success
+
+            val result = repo.addFlag(sampleFlagAddContext())
+            assertTrue("expected failure, got $result", result.isFailure)
+            assertTrue(result.exceptionOrNull() is FlagAddFailedException)
+
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify(exactly = 0) {
+            flagDao.replaceForType(
+                userId = "xat",
+                type = FlagType.CYAN,
+                rows = match { rows -> rows.any { it.topicId == 35395 && it.isFavorite } },
+            )
+        }
+    }
+
+    @Test
+    fun `addFlag session expiry touches no cache and returns failure`() = runTest {
+        val (apiClient, forumRepository) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+        }
+        val flagDao = stubFlagDao()
+        val hfrClient = mockk<HfrClient>()
+        val expired = SessionExpiredException("https://forum.hardware.fr/login.php")
+        coEvery { hfrClient.addFlag(any()) } throws expired
+        val repo = buildRepository(apiClient, forumRepository, flagDao = flagDao, hfrClient = hfrClient)
+
+        repo.observe(FlagType.CYAN).test {
+            assertEquals(FlagsResult.Loading, awaitItem())
+            awaitItem() as FlagsResult.Success
+
+            val result = repo.addFlag(sampleFlagAddContext())
+            assertTrue("expected failure, got $result", result.isFailure)
+            assertTrue(result.exceptionOrNull() is SessionExpiredException)
+
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify(exactly = 0) {
+            flagDao.replaceForType(
+                userId = "xat",
+                type = FlagType.CYAN,
+                rows = match { rows -> rows.any { it.topicId == 35395 && it.isFavorite } },
+            )
+        }
+    }
+
+    @Test
+    fun `addFlag fails fast when anonymous without hitting the network`() = runTest {
+        val apiClient = mockk<HfrApiClient>(relaxed = true)
+        val hfrClient = mockk<HfrClient>(relaxed = true)
+        val anonymousAuth = mockk<AuthRepository>()
+        every { anonymousAuth.observeAuthState() } returns flowOf(AuthState.Anonymous)
+        val repo = buildRepository(
+            apiClient = apiClient,
+            forumRepository = stubForumRepository(sampleCategories),
+            authRepository = anonymousAuth,
+            hfrClient = hfrClient,
+        )
+
+        val result = repo.addFlag(sampleFlagAddContext())
+        assertTrue("anonymous addFlag must fail", result.isFailure)
+        coVerify(exactly = 0) {
+            hfrClient.addFlag(any())
+        }
+    }
+
+    @Test
     fun `removeFlag success drops the item from the exposed cache and Room`() = runTest {
         // Seed the in-memory cache with the captured cat23 participated flag (topic 35395).
         val (apiClient, forumRepository) = wireDeps {
@@ -1437,6 +1559,7 @@ class DefaultFlagRepositoryTest {
     ): DefaultFlagRepository = DefaultFlagRepository(
         apiClient = apiClient,
         hfrClient = hfrClient,
+        flagAddResponseParser = FlagAddResponseParser(),
         flagDeleteResponseParser = FlagDeleteResponseParser(),
         forumRepository = forumRepository,
         authRepository = authRepository,
@@ -1461,6 +1584,15 @@ class DefaultFlagRepositoryTest {
         coEvery { dao.getLastFetchedAt(any(), any()) } returns null
         return dao
     }
+
+    private fun sampleFlagAddContext(): FlagAddContext = FlagAddContext(
+        cat = 23,
+        subcat = 550,
+        topicId = 35395,
+        page = 12,
+        numreponse = 2786758,
+        ref = 4,
+    )
 
     private fun flagEntity(
         type: FlagType,
@@ -1536,5 +1668,13 @@ class DefaultFlagRepositoryTest {
             """<html><body><div class="hop">Drapeau effacé avec succès</div></body></html>"""
         const val DELETE_FAILURE_HTML =
             """<html><body><div class="hop">Aucun favori n'est repertorié</div></body></html>"""
+
+        // Minimal addflag.php response bodies for repository branch tests. They are NOT captured
+        // fixtures: the success shape mirrors the `.hop` wrapper used by the delflag fixture, and
+        // the marker sentence is the live-verified #986 contract.
+        const val ADD_SUCCESS_HTML =
+            """<html><body><div class="hop">Favori positionné</div></body></html>"""
+        const val ADD_FAILURE_HTML =
+            """<html><body><div class="hop">Favori non positionné</div></body></html>"""
     }
 }
