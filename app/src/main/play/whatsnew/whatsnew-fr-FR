@@ -1,6 +1,4 @@
-Redface 2 v0.37.0 — bêta.
+Redface 2 v0.38.0 — dev.
 
-- La vue des sujets a été entièrement revue : navigation entre pages sans flash, retour précis aux citations, repères de lecture et mode pleine largeur.
-- Pincez la page pour zoomer jusqu'à 3×.
-- Les images respectent mieux leur taille et l'écran ; miniatures et GIF sont plus lisibles, avec actions, erreurs claires et réessai.
-- Répondre et citer est plus fluide — en plein écran (avec envoi d'images) ou via la réponse rapide expérimentale.
+- Drapeaux : quand le dernier message lu était le dernier de sa page, le sujet s'ouvre enfin sur la page suivante au lieu de rouvrir celle déjà lue.
+- Le raccourci « 1er non-lu » ne saute plus un message quand la lecture s'était arrêtée en milieu de page.

@@ -16,6 +16,26 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.38.0` — `internal` (dev) — 2026-08-04
+
+### Corrigé
+
+- **Drapeaux — passage à la page suivante quand le dernier lu est en bas de page** ([#638](https://github.com/ForumHFR/redface2/issues/638), retours **thony94** et **MisterDams**) : le tap sur une ligne ouvrait `flag.lastReadPage`, donc quand le dernier message lu était le dernier de sa page et qu'une page suivante existait, l'app rouvrait la page déjà lue avec le message en bas. `lastReadPage + 1` n'était pas le correctif : un arrêt en milieu de page aurait fait sauter les non-lus restants. Le discriminant est REST `last_position` (index global 1-based du dernier message lu) — **déjà désérialisé, mais dont seule la nullité était lue**, la valeur étant jetée. Nouveau `Flag.pageToOpen()` : n'avance que si `last_position % postsPerPage == 0` ET que la page déduite égale `lastReadPage`. Conservative par construction — toute incertitude (pas de non-lu, dernière page, `last_position` absent/`0`/incohérent, dernier lu supprimé [#394](https://github.com/ForumHFR/redface2/issues/394)) retombe sur le comportement précédent : on peut ne pas avancer, on ne saute jamais un message. Décision prise avant navigation, pour ne pas rejouer le flash de [#477](https://github.com/ForumHFR/redface2/issues/477). Aucune bannière à construire : HFR ouvre la page N+1 sur un rappel « Reprise du message précédent ».
+- **Drapeaux — « 1er non-lu » sautait un message** (trouvé en corrigeant #638) : le raccourci d'appui long rendait `lastReadPage + 1` dès qu'il y avait du non-lu. Sur la fixture `rest_cat23_participated.json` (`last_position` 479, page 12, 541 messages) il envoyait en page 13 alors que le message 480 n'était pas lu. Les deux chemins partagent désormais la même règle.
+
+### Ajouté
+
+- **Couche protocole pour poser un favori depuis l'app** ([#986](https://github.com/ForumHFR/redface2/issues/986), demande **thibw**) : `HfrClient.addFlag`, `FlagAddContext`, `FlagAddResult`, `FlagAddResponseParser` et `FlagRepository.addFlag`. Contrat `addflag.php` relevé en live : `ref` est le rang 1-based du message dans sa page, `owntopic` est ignoré par HFR (addflag ne pose que des favoris, cyan/red étant automatiques). **Pas encore d'entrée UI** — le point d'entrée et le choix du message d'ancrage restent à cadrer.
+
+### Interne
+
+- Migration Room 15 → 16 : `flag_topics.lastPosition` (nullable) et `flag_topics.postsPerPage` (`DEFAULT 40`, issu de `results_per_page` par sujet — pas un 40 en dur, le serveur normalise et l'option de profil `topicpp` existe).
+- KDoc de `TopicSummary.lastReadPage` corrigé : `last_position` est un index global, pas un offset dans la page.
+- Relectures croisées : cadrage et review par **GPT-5 Codex**, gate final par **Claude Fable 5**. Trois bloquants trouvés avant merge — trois fakes non compilables (`addFlag` abstraite), les 14 tests de migration cassés par le bump en v16 (`addMigrations` s'arrêtait à 14→15) et le recoupement `lastPosition`/`lastReadPage` manquant.
+- 1495 tests verts sur `core:model`, `core:database`, `core:data`, `core:network`, `core:parser`, `feature:flags`, `feature:topic`, `app`.
+
+---
+
 ## `0.37.0` — `open` (beta) — 2026-08-01
 
 **Promotion bêta** — première version proposée aux testeurs du canal ouvert depuis la 0.18.0.
