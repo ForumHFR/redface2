@@ -4,11 +4,56 @@ import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.Topic
 import java.time.Instant
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TopicActionGatesTest {
+
+    @Test
+    fun `favorite menu action exposes resolved HFR state and fails closed (#986)`() {
+        assertEquals(
+            PostFavoriteAction.HIDDEN,
+            favoriteActionFor(isAuthenticated = false, quoteRef = 1, state = FavoriteAtPostState.Unknown),
+        )
+        assertEquals(
+            PostFavoriteAction.HIDDEN,
+            favoriteActionFor(isAuthenticated = true, quoteRef = 0, state = FavoriteAtPostState.Unknown),
+        )
+        assertEquals(
+            PostFavoriteAction.CHECKING,
+            favoriteActionFor(isAuthenticated = true, quoteRef = 1, state = FavoriteAtPostState.Resolving),
+        )
+        assertEquals(
+            PostFavoriteAction.ADD,
+            favoriteActionFor(
+                isAuthenticated = true,
+                quoteRef = 1,
+                state = FavoriteAtPostState.Ready(topicHasFavorite = false),
+            ),
+        )
+        assertEquals(
+            PostFavoriteAction.MOVE,
+            favoriteActionFor(
+                isAuthenticated = true,
+                quoteRef = 1,
+                state = FavoriteAtPostState.Ready(topicHasFavorite = true),
+            ),
+        )
+        assertEquals(
+            PostFavoriteAction.UNAVAILABLE,
+            favoriteActionFor(isAuthenticated = true, quoteRef = 1, state = FavoriteAtPostState.Unavailable),
+        )
+        assertEquals(
+            PostFavoriteAction.ADDING,
+            favoriteActionFor(
+                isAuthenticated = true,
+                quoteRef = 1,
+                state = FavoriteAtPostState.Adding(topicHadFavorite = false),
+            ),
+        )
+    }
 
     @Test
     fun `last-read marker requires the flag-tap route AND the matching post`() {

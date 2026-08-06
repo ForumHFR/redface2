@@ -26,6 +26,7 @@ import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsChoice
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsChoiceGroup
@@ -180,6 +181,13 @@ fun SettingsDisplayScreen(
                 onSelected = { viewModel.submit(SettingsIntent.MediaDisplayProfileChanged(it)) },
             )
 
+            SmileyPickerDecorationSetting(
+                selected = state.smileyPickerDecoration,
+                enabled = state.canChangeSmileyPickerDecoration,
+                error = state.smileyPickerDecorationError,
+                onSelected = { viewModel.submit(SettingsIntent.SmileyPickerDecorationChanged(it)) },
+            )
+
             // Immersive full-screen (#518).
             Text(
                 text = stringResource(R.string.settings_display_fullscreen_title),
@@ -296,6 +304,55 @@ private fun DisplayToggleRow(
             )
         }
         Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
+    }
+}
+
+/**
+ * #989 — délimiteur des cellules du picker de smileys. Extrait comme ses voisins pour garder l'écran
+ * hôte sous le budget de complexité de detekt. « Aucun » est le défaut : le délimiteur aide à
+ * repérer une vignette sur un corpus très hétérogène, il ne change PAS la taille des smileys — le
+ * preset qui agrandissait les petits a été rejeté parce qu'il faisait promettre au picker une taille
+ * que le message ne respecte pas (#1022).
+ */
+@Composable
+private fun SmileyPickerDecorationSetting(
+    selected: SmileyPickerDecoration,
+    enabled: Boolean,
+    error: Boolean,
+    onSelected: (SmileyPickerDecoration) -> Unit,
+) {
+    val options = listOf(
+        RedfaceSettingsChoice(
+            SmileyPickerDecoration.NONE,
+            stringResource(R.string.settings_display_smiley_decoration_none),
+        ),
+        RedfaceSettingsChoice(
+            SmileyPickerDecoration.OUTLINE,
+            stringResource(R.string.settings_display_smiley_decoration_outline),
+        ),
+        RedfaceSettingsChoice(
+            SmileyPickerDecoration.SEPARATORS,
+            stringResource(R.string.settings_display_smiley_decoration_separators),
+        ),
+    )
+    Text(
+        text = stringResource(R.string.settings_display_smiley_decoration_title),
+        style = MaterialTheme.typography.titleMedium,
+        color = MaterialTheme.colorScheme.onSurface,
+    )
+    Text(
+        text = stringResource(R.string.settings_display_smiley_decoration_intro),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    RedfaceSettingsChoiceGroup(
+        options = options,
+        selected = selected,
+        onSelected = onSelected,
+        enabled = enabled,
+    )
+    if (error) {
+        PreferencePersistError(R.string.settings_display_smiley_decoration_persist_failed)
     }
 }
 

@@ -109,6 +109,7 @@ import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.pageToOpen
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageSummary
@@ -534,8 +535,11 @@ fun FlagsRoute(
                                 // state just changed), cf. FlagsViewModel.onFlagOpened.
                                 onOpenFlag = { flag ->
                                     viewModel.onFlagOpened()
-                                    // Row tap resumes at the last-read page; the sheet picks other pages.
-                                    onOpenFlag(flag, flag.lastReadPage)
+                                    // #638 — the row tap opens the page the READER needs: the
+                                    // last-read one, or the next one when the last-read post was
+                                    // the last of its page (thony94 / MisterDams). The sheet still
+                                    // offers the explicit « resume » / « last page » choices.
+                                    onOpenFlag(flag, flag.pageToOpen())
                                 },
                                 onRefresh = viewModel::refresh,
                                 onLoginRequested = onLoginRequested,

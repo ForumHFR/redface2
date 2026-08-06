@@ -21,7 +21,9 @@ import fr.forumhfr.redface2.core.domain.topic.TopicRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicSearchRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostResult
+import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.write.FlagAddContext
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.model.TopicSearchForm
 import fr.forumhfr.redface2.core.model.TopicSearchRequest
@@ -117,6 +119,15 @@ class TopicViewModel @AssistedInject constructor(
      * unavailable until an unrelated reload.
      */
     private var searchFormJob: Job? = null
+
+    // #986 — account-scoped owner token for the resolve → optional confirm → add interaction.
+    // A logout/account switch cancels both jobs, advances the token and resets the visible state,
+    // so a late result can never describe or mutate the next account's UI state.
+    private var favoriteAuthGeneration: Int = 0
+    private var favoriteResolveJob: Job? = null
+    private var favoriteAddJob: Job? = null
+    private val _favoriteAtPostState = MutableStateFlow<FavoriteAtPostState>(FavoriteAtPostState.Unknown)
+    val favoriteAtPostState: StateFlow<FavoriteAtPostState> = _favoriteAtPostState.asStateFlow()
 
     /**
      * Chantier C (#546), generalized by #895 étape 4 — monotonic token guarding against ANY stale
@@ -291,12 +302,19 @@ class TopicViewModel @AssistedInject constructor(
         // at submit. Symmetric with the « Créer topic » FAB (CategoryViewModel.canCreateTopic).
         authRepository.observeAuthState()
             .onEach { authState ->
+                val connectedPseudo = (authState as? AuthState.Authenticated)?.pseudo
+                if (!_state.value.connectedPseudo.equals(connectedPseudo, ignoreCase = true)) {
+                    favoriteAuthGeneration++
+                    favoriteResolveJob?.cancel()
+                    favoriteAddJob?.cancel()
+                    _favoriteAtPostState.value = FavoriteAtPostState.Unknown
+                }
                 _state.update {
                     it.copy(
                         isAuthenticated = authState is AuthState.Authenticated,
                         // #545 — carry the session pseudo for the ownership fallback (profiles
                         // with affichoutils=0 get no toolbar : isEditable/isOwnPost are blind).
-                        connectedPseudo = (authState as? AuthState.Authenticated)?.pseudo,
+                        connectedPseudo = connectedPseudo,
                     )
                 }
             }
@@ -1336,6 +1354,147 @@ class TopicViewModel @AssistedInject constructor(
                 // throws outside its Result (or the coroutine is cancelled). Otherwise the state stays
                 // Removing forever and the anti double-tap guard wedges until the VM is recreated.
                 _removeTopicFlagState.value = RemoveTopicFlagState.Idle
+            }
+        }
+    }
+
+    /**
+     * #986 — refresh the topic-level HFR favourite state when an eligible post menu opens. The
+     * repository performs a bounded-fresh category-scoped lookup; a failure stays visibly
+     * unavailable and can never degrade to the destructive `Ready(false)` path.
+     */
+    fun resolveFavoriteAtPostState() {
+        val state = _state.value
+        val pseudo = state.connectedPseudo
+        val interactionInProgress = _favoriteAtPostState.value is FavoriteAtPostState.Adding ||
+            _favoriteAtPostState.value is FavoriteAtPostState.ConfirmingMove
+        val eligiblePseudo = pseudo?.takeIf { state.isAuthenticated }
+        val canResolve = state.mode is TopicUiState.Mode.Loaded && !interactionInProgress
+        if (eligiblePseudo != null && canResolve) {
+            val authGeneration = favoriteAuthGeneration
+            favoriteResolveJob?.cancel()
+            _favoriteAtPostState.value = FavoriteAtPostState.Resolving
+            favoriteResolveJob = viewModelScope.launch {
+                val result = runCatching {
+                    flagRepository.resolveFavorite(cat = request.cat, topicId = request.post)
+                }.getOrElse { raised ->
+                    if (raised is CancellationException) throw raised
+                    Result.failure(raised)
+                }
+                (result.exceptionOrNull() as? CancellationException)?.let { throw it }
+                val stillOwned = authGeneration == favoriteAuthGeneration &&
+                    _state.value.connectedPseudo.equals(eligiblePseudo, ignoreCase = true)
+                if (stillOwned) {
+                    _favoriteAtPostState.value = result.fold(
+                        onSuccess = { FavoriteAtPostState.Ready(topicHasFavorite = it) },
+                        onFailure = { FavoriteAtPostState.Unavailable },
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * #986 — first favourite adds directly; an existing favourite raises the confirmation state
+     * because HFR will replace its unknown current position and offers no undo.
+     */
+    fun requestAddFavoriteAtPost(post: Post) {
+        val ready = _favoriteAtPostState.value as? FavoriteAtPostState.Ready ?: return
+        if (ready.topicHasFavorite) {
+            _favoriteAtPostState.value = FavoriteAtPostState.ConfirmingMove(post)
+        } else {
+            startFavoriteAdd(post = post, topicHadFavorite = false)
+        }
+    }
+
+    fun cancelMoveFavorite() {
+        if (_favoriteAtPostState.value is FavoriteAtPostState.ConfirmingMove) {
+            _favoriteAtPostState.value = FavoriteAtPostState.Ready(topicHasFavorite = true)
+        }
+    }
+
+    fun confirmMoveFavorite() {
+        val confirming = _favoriteAtPostState.value as? FavoriteAtPostState.ConfirmingMove ?: return
+        startFavoriteAdd(post = confirming.post, topicHadFavorite = true)
+    }
+
+    /**
+     * Captures the raw HFR tuple from the post currently displayed, then validates it and performs
+     * the mutation inside the coroutine. [FlagAddContext] deliberately validates every field with
+     * `require`; keeping its construction under [runCatching] prevents malformed cached/route data
+     * from escaping synchronously through the Compose click handler.
+     */
+    private fun startFavoriteAdd(post: Post, topicHadFavorite: Boolean) {
+        val request = favoriteAddRequest(post)
+        if (request == null) {
+            _favoriteAtPostState.value = FavoriteAtPostState.Ready(topicHadFavorite)
+            return
+        }
+
+        val authGeneration = favoriteAuthGeneration
+        _favoriteAtPostState.value = FavoriteAtPostState.Adding(topicHadFavorite)
+        favoriteAddJob = viewModelScope.launch {
+            try {
+                val result = runCatching {
+                    flagRepository.addFlag(request.toContext()).getOrThrow()
+                }
+                (result.exceptionOrNull() as? CancellationException)?.let { throw it }
+                val stillOwned = authGeneration == favoriteAuthGeneration &&
+                    _state.value.connectedPseudo.equals(request.pseudo, ignoreCase = true)
+                if (stillOwned) {
+                    _favoriteAtPostState.value = FavoriteAtPostState.Ready(
+                        topicHasFavorite = result.isSuccess || topicHadFavorite,
+                    )
+                    _effects.trySend(
+                        if (result.isSuccess) TopicEffect.PostFavoriteAdded else TopicEffect.PostFavoriteAddFailed,
+                    )
+                }
+            } finally {
+                if (
+                    authGeneration == favoriteAuthGeneration &&
+                    _favoriteAtPostState.value is FavoriteAtPostState.Adding
+                ) {
+                    _favoriteAtPostState.value = FavoriteAtPostState.Ready(topicHadFavorite)
+                }
+            }
+        }
+    }
+
+    private data class FavoriteAddRequest(
+        val pseudo: String,
+        val cat: Int,
+        val subcat: Int?,
+        val topicId: Int,
+        val page: Int,
+        val numreponse: Int,
+        val ref: Int,
+    ) {
+        fun toContext(): FlagAddContext = FlagAddContext(
+            cat = cat,
+            subcat = subcat,
+            topicId = topicId,
+            page = page,
+            numreponse = numreponse,
+            ref = ref,
+        )
+    }
+
+    private fun favoriteAddRequest(post: Post): FavoriteAddRequest? {
+        val state = _state.value
+        val topic = (state.mode as? TopicUiState.Mode.Loaded)?.topic ?: return null
+        val displayed = topic.posts.firstOrNull { it.numreponse == post.numreponse }
+        return displayed?.quoteRef?.takeIf { it >= 1 }?.let { ref ->
+            state.connectedPseudo?.takeIf { state.isAuthenticated }?.let { pseudo ->
+                FavoriteAddRequest(
+                    pseudo = pseudo,
+                    cat = state.request.cat,
+                    subcat = topic.subcat.takeIf { it >= 0 },
+                    topicId = state.request.post,
+                    // The displayed page wins during provisional switches and search.
+                    page = topic.page,
+                    numreponse = displayed.numreponse,
+                    ref = ref,
+                )
             }
         }
     }

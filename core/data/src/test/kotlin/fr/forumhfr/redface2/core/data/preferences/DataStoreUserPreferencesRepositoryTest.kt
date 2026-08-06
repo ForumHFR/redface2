@@ -16,6 +16,7 @@ import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenChoice
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
@@ -1233,6 +1234,48 @@ class DataStoreUserPreferencesRepositoryTest {
 
         repository.observeMediaDisplayProfile().test {
             assertEquals(MediaDisplayProfile.M, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observeSmileyPickerDecoration defaults to NONE on an empty store`() = runTest(dispatcher) {
+        // #989 — no delimiter is the default; decoration stays opt-in and never changes thumbnail size.
+        repository.observeSmileyPickerDecoration().test {
+            assertEquals(SmileyPickerDecoration.NONE, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setSmileyPickerDecoration persists and round-trips OUTLINE then SEPARATORS then NONE`() =
+        runTest(dispatcher) {
+            repository.setSmileyPickerDecoration(SmileyPickerDecoration.OUTLINE)
+            repository.observeSmileyPickerDecoration().test {
+                assertEquals(SmileyPickerDecoration.OUTLINE, awaitItem())
+                cancelAndIgnoreRemainingEvents()
+            }
+
+            repository.setSmileyPickerDecoration(SmileyPickerDecoration.SEPARATORS)
+            repository.observeSmileyPickerDecoration().test {
+                assertEquals(SmileyPickerDecoration.SEPARATORS, awaitItem())
+                cancelAndIgnoreRemainingEvents()
+            }
+
+            repository.setSmileyPickerDecoration(SmileyPickerDecoration.NONE)
+            repository.observeSmileyPickerDecoration().test {
+                assertEquals(SmileyPickerDecoration.NONE, awaitItem())
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `corrupt smiley_picker_decoration value falls back to NONE instead of crashing`() = runTest(dispatcher) {
+        // #989 — an unknown value (older build / manual edit) must degrade to NONE, not crash valueOf.
+        dataStore.edit { prefs -> prefs[stringPreferencesKey("smiley_picker_decoration")] = "DOTTED" }
+
+        repository.observeSmileyPickerDecoration().test {
+            assertEquals(SmileyPickerDecoration.NONE, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
     }

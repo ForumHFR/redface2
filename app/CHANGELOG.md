@@ -16,7 +16,104 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
-## `0.37.0` — `local` — 2026-08-01
+## `0.40.0` — `open` (beta) — 2026-08-06
+
+Promotion en bêta du lot dev 0.38.0 → 0.39.1 : sélecteur de smileys (#989), correctifs
+de drapeaux (#638) et favori posé sur un message (#986).
+
+### Ajouté
+
+- **Le sélecteur de smileys affiche 5 colonnes sur tous les téléphones**, et les smileys perso du format dominant (`70×50`) atteignent enfin leur taille d'origine — 61×44 dp contre 44×31 avant ([#989](https://github.com/ForumHFR/redface2/issues/989), demandé par **XaTriX**). La politique de colonnes a basculé d'un « minimum de cellule » vers une **largeur de cellule cible**, seule forme qui tienne la promesse indépendamment de la densité.
+- **Délimiteur de cellule réglable** dans Réglages → Affichage : aucun (défaut), liseré par cellule, ou séparateurs continus. Il aide à repérer une vignette dans un corpus très hétérogène et ne change **pas** la taille des smileys — le preset qui agrandissait les petits a été écarté parce qu'il faisait promettre au picker une taille que le message ne respecte pas.
+- **« Mettre un favori HFR ici »** dans le menu contextuel d'un message ([#986](https://github.com/ForumHFR/redface2/issues/986), demandé par **thibw**). L'action est au niveau du message et non du sujet parce que le favori HFR s'ancre sur une position. Le libellé devient **« Déplacer le favori HFR ici »**, avec confirmation, quand le sujet porte déjà un favori : HFR n'en conserve qu'un par sujet et n'offre pas d'undo, donc poser ailleurs remplace le repère existant.
+
+### Corrigé
+
+- **Un sujet dont le dernier message lu terminait une page s'ouvrait sur cette page, pas sur la suivante** ([#638](https://github.com/ForumHFR/redface2/issues/638), signalé par **XaTriX**). Le champ `last_position` de l'API était bien désérialisé mais sa valeur jetée : impossible de savoir que la lecture s'était arrêtée en bas de page. Le raccourci « 1er non-lu » de l'appui long souffrait du même défaut ; les deux chemins partagent désormais une règle unique.
+- **L'onglet Favoris pouvait ignorer un favori tout juste posé** pendant 30 secondes : la réconciliation de cache ne marquait que les lignes déjà présentes, donc un premier favori sur un sujet sans drapeau ne mettait rien à jour.
+- Régression de la promotion elle-même, trouvée en code review : la borne haute de la page à ouvrir avait disparu, et une ligne de cache périmée pouvait viser une page au-delà de la dernière.
+
+## `0.39.1` — `internal` (dev) — 2026-08-06
+
+### Corrigé
+
+- **Le sélecteur de smileys affichait 6 colonnes chez la majorité des utilisateurs** ([#989](https://github.com/ForumHFR/redface2/issues/989), signalé par **XaTriX**). Le preset livré en 0.39.0 annonçait 5 colonnes : il ne les donnait que sur **360 dp**, la largeur du seul appareil sur lequel le spike avait été mesuré — et un écran étroit. La politique de « minimum de cellule » (`Adaptive(56.dp)`) prenait une 6ᵉ colonne dès ~372 dp, donc sur 384–430 dp.
+- **Le ratio 7:5 du corpus était inopérant sur TOUS les téléphones**, défaut trouvé au gate et invisible à l'usage : `cellHeight = max(cellWidth / 1.4, 48.dp)` ne dépasse le plancher tactile qu'au-delà d'une cellule de 67,2 dp, jamais atteinte en portrait avec l'ancienne politique — pas même sur un S10e (65,33 / 1,4 = 46,7). `capHeight` restait donc à 44 dp, **identique à avant #989**, le format dominant `70×50` était inatteignable et le paramètre `cellAspectRatio` ne faisait rien. Tout le gain de 0.39.0 venait du seul déblocage du cap en largeur.
+
+Le « minimum de cellule » est remplacé par une **largeur cible dérivée du format dominant** (`max(70 + inset, (50 + inset) × ratio)`), résolue en pixels entiers, encadrée par un plancher de colonnes (5 dès 324 dp de largeur **disponible**, 4 en dessous) et un plafond au minimum tactile. Toutes les valeurs sont lues depuis le spec, jamais en dur — le mode séparateurs et les presets du banc de test mutent ces champs et casseraient en silence sinon. Résultat : **5 colonnes de 360 à 430 dp**, dominant à sa taille **native dès 411 dp**, S10e inchangé, et paysage à 9 colonnes.
+
+- **Plafond de largeur du sélecteur porté de 640 à 840 dp** : la valeur par défaut de Material 3 convient à une feuille de texte, pas à une grille visuelle — elle bridait le paysage à 624 dp. Pas de levée totale : sur une tablette de 1280 dp, cela donnerait des rangées de ~15 vignettes, centre hors zone de pouce.
+- **Compensation du mode « quadrillage » rendue structurelle** : les colonnes se résolvent avec l'écart nominal et l'écart de rendu n'entre que dans la largeur de cellule. L'ancienne forme mutait le spec et portait un biais de numérateur masqué par la division entière.
+
+### Rectification du changelog 0.39.0
+
+L'entrée précédente annonçait « 5 colonnes » et « surface doublée » comme résultats généraux. Les deux ne valaient qu'à 360 dp : le facteur de surface tombait à ×1,57 sur un Pixel 7. Corrigé par la présente version.
+
+### Interne
+
+- `round` plutôt que `floor` dans le solveur est un arbitrage **assumé et documenté** : il garantit les 5 colonnes mais peut rétrécir le dominant jusqu'à ~10 % sous son natif sur écran étroit ; `floor` garantirait le natif au prix de 4 colonnes sur un 360 dp. Tranché par XaTriX en faveur de la densité.
+- **Le garde-fou qui manquait** : une matrice de 8 écrans réels est désormais pinnée. Un balayage de 7 densités × 115 largeurs existait déjà… pour le minimum tactile, mais aucun test ne vérifiait le nombre de colonnes — le garde-fou visait la mauvaise propriété. `SmileyCellImageSizeTest` passe de 21 à 27 cas.
+- Chaîne de production : cahier des charges rédigé par **Claude Fable 5** (matrice recalculée par script), implémentation par **GPT-5 Codex** en worktree isolé, relecture par **Claude Opus 5**, gate final par **Claude Fable 5** — conformité vérifiée valeur par valeur contre un solveur de référence, plus un balayage de ~10 000 largeurs × 7 densités sans violation du minimum tactile.
+
+---
+
+## `0.39.0` — `internal` (dev) — 2026-08-04
+
+### Modifié
+
+- **Sélecteur de smileys : les perso sont bien plus grands** ([#989](https://github.com/ForumHFR/redface2/issues/989), demande **XaTriX**, retour initial de **nicko**). La grille tombait sur 6 colonnes de 48 dp avec un cap image de 44 dp en dur. Or le corpus perso est massivement **paysage 7:5** — `70×50` pèse **31 %** des 74 perso du top 100 HFR mesurés — donc une cellule *carrée* capait ce format sur la largeur en laissant 17 dp de hauteur morts. Les défauts passent au **preset « E »** : cellule au ratio du corpus, 5 colonnes de 65,33×48 dp, marges 8, écart 4, cap 61,33×44. Le format dominant passe de 44×31 à **61×44, surface doublée**, et sature les deux axes à la fois — plus rien n'est gaspillé. Coût : 3 vignettes visibles en moins, contre 18 pour le même gain en cellule carrée. La **règle** de calcul est inchangée, seuls les défauts bougent : un test rejoue l'ancienne géométrie pour le prouver.
+
+### Ajouté
+
+- **Réglage « Délimiteur du sélecteur de smileys »** (Affichage) : aucun (défaut), contour, ou quadrillage. Persisté en DataStore, sur le modèle du profil d'agrandissement des GIF ([#973](https://github.com/ForumHFR/redface2/issues/973)) — enum de domaine, lecture tolérante, mise à jour optimiste avec rollback, `CompositionLocal` semé par le thème (le sélecteur est ouvert depuis quatre écrans).
+
+### Rejeté, et tracé
+
+- **Un plafond d'upscale ×1,5 des petits smileys (preset « F ») est refusé.** Testé sur device puis écarté sur objection de **XaTriX**, confirmée par arbitrage **GPT-5 Codex** : le facteur est nécessairement **non uniforme** — les smileys déjà au cap ne bougent pas, seuls les petits grandissent. Le sélecteur promettait alors une taille que le message ne respecte pas, au moment précis où l'utilisateur choisit. Et l'upscale uniforme est impossible dans une cellule bornée (débordement, ou moins de colonnes, ou un zoom qui ment quand même). `persoScaleCeiling = 1` est désormais **pinné par un test qui cite ce refus**. La piste retenue à la place — aider la sélection sans toucher la taille — est tracée en [#1022](https://github.com/ForumHFR/redface2/issues/1022) (loupe à l'appui long).
+
+### Interne
+
+- Développement à deux mains : couche domain+data par **GPT-5 Codex**, couche UI et géométrie par **Claude Opus 5**. Gate final **Claude Fable 5**, deux bloquants trouvés : (1) l'option « Quadrillage » était **inopérante en production** — des traits continus n'existent que si les cellules sont accolées, et la neutralisation de l'écart ne vivait que dans le banc de test debug, donc le réglage aurait affiché des tirets disjoints ; (2) trois fakes de `UserPreferencesRepository` manquaient dans `feature:editor` et `feature:flags`, CI rouge à la clé.
+- Artefact de décision (7 géométries, captures device réelles) : https://forumhfr.github.io/artifacts/smileys-picker-989/
+- 1963 tests verts sur `core:ui`, `core:data`, `feature:settings`, `feature:topic`, `feature:editor`, `feature:flags` et `app`.
+
+---
+
+## `0.38.1` — `internal` (dev) — 2026-08-04
+
+### Ajouté
+
+- **« Mettre un favori ici » dans le menu contextuel d'un message** ([#986](https://github.com/ForumHFR/redface2/issues/986), demande **thibw**) : l'action est au niveau du MESSAGE et pas du sujet, parce que `addflag.php` ancre le favori sur une position — le title du bouton HFR lui-même dit « Mettre un favori sur cette position pour y revenir plus tard ». Le `ref` attendu n'est pas recalculé : `Post.quoteRef` porte déjà la valeur émise par HFR dans la toolbar du message (parsée depuis #146, persistée Room v5). Le dériver d'un index de liste serait faux dès la page 2, où le rappel « Reprise du message précédent » porte `ref=0` et ne consomme pas de rang — contrat désormais documenté dans le KDoc de `quoteRef`, qui le déclarait opaque. Aucun undo côté HFR, les libellés n'en promettent pas.
+
+### Interne
+
+- Gate Codex en trois passes, **cinq défauts trouvés dont quatre bloquants**, aucun détectable par la CI, detekt, lint ou les tests initiaux : (1) `Topic.subcat` peut valoir le sentinel `SUBCAT_UNKNOWN` (-1) que le `require` de `FlagAddContext` rejette — l'IAE partait hors du `runCatching` et crashait l'écran ; (2) la position était ancrée sur `request.page`, qui n'est pas la page affichée pendant un changement de page ni en recherche intra-topic — favori posé **silencieusement** sur une page non regardée ; (3) l'entrée s'affichait sur les rappels de page (`quoteRef = 0`) pour échouer à coup sûr ; (4) le post sélectionné survivant à un changement de page, l'action appariait un post périmé avec la page courante ; (5) une `CancellationException` encapsulée dans un `Result.failure` était rapportée comme échec utilisateur.
+- Un test annonçant un changement de page sans appeler `switchToPage()` — donc ne prouvant rien — a été remplacé par le scénario réel.
+- 121 tests verts sur `TopicViewModelTest`, dont 6 sur cette action.
+
+---
+
+## `0.38.0` — `internal` (dev) — 2026-08-04
+
+### Corrigé
+
+- **Drapeaux — passage à la page suivante quand le dernier lu est en bas de page** ([#638](https://github.com/ForumHFR/redface2/issues/638), retours **thony94** et **MisterDams**) : le tap sur une ligne ouvrait `flag.lastReadPage`, donc quand le dernier message lu était le dernier de sa page et qu'une page suivante existait, l'app rouvrait la page déjà lue avec le message en bas. `lastReadPage + 1` n'était pas le correctif : un arrêt en milieu de page aurait fait sauter les non-lus restants. Le discriminant est REST `last_position` (index global 1-based du dernier message lu) — **déjà désérialisé, mais dont seule la nullité était lue**, la valeur étant jetée. Nouveau `Flag.pageToOpen()` : n'avance que si `last_position % postsPerPage == 0` ET que la page déduite égale `lastReadPage`. Conservative par construction — toute incertitude (pas de non-lu, dernière page, `last_position` absent/`0`/incohérent, dernier lu supprimé [#394](https://github.com/ForumHFR/redface2/issues/394)) retombe sur le comportement précédent : on peut ne pas avancer, on ne saute jamais un message. Décision prise avant navigation, pour ne pas rejouer le flash de [#477](https://github.com/ForumHFR/redface2/issues/477). Aucune bannière à construire : HFR ouvre la page N+1 sur un rappel « Reprise du message précédent ».
+- **Drapeaux — « 1er non-lu » sautait un message** (trouvé en corrigeant #638) : le raccourci d'appui long rendait `lastReadPage + 1` dès qu'il y avait du non-lu. Sur la fixture `rest_cat23_participated.json` (`last_position` 479, page 12, 541 messages) il envoyait en page 13 alors que le message 480 n'était pas lu. Les deux chemins partagent désormais la même règle.
+
+### Ajouté
+
+- **Couche protocole pour poser un favori depuis l'app** ([#986](https://github.com/ForumHFR/redface2/issues/986), demande **thibw**) : `HfrClient.addFlag`, `FlagAddContext`, `FlagAddResult`, `FlagAddResponseParser` et `FlagRepository.addFlag`. Contrat `addflag.php` relevé en live : `ref` est le rang 1-based du message dans sa page, `owntopic` est ignoré par HFR (addflag ne pose que des favoris, cyan/red étant automatiques). **Pas encore d'entrée UI** — le point d'entrée et le choix du message d'ancrage restent à cadrer.
+
+### Interne
+
+- Migration Room 15 → 16 : `flag_topics.lastPosition` (nullable) et `flag_topics.postsPerPage` (`DEFAULT 40`, issu de `results_per_page` par sujet — pas un 40 en dur, le serveur normalise et l'option de profil `topicpp` existe).
+- KDoc de `TopicSummary.lastReadPage` corrigé : `last_position` est un index global, pas un offset dans la page.
+- Relectures croisées : cadrage et review par **GPT-5 Codex**, gate final par **Claude Fable 5**. Trois bloquants trouvés avant merge — trois fakes non compilables (`addFlag` abstraite), les 14 tests de migration cassés par le bump en v16 (`addMigrations` s'arrêtait à 14→15) et le recoupement `lastPosition`/`lastReadPage` manquant.
+- 1495 tests verts sur `core:model`, `core:database`, `core:data`, `core:network`, `core:parser`, `feature:flags`, `feature:topic`, `app`.
+
+---
+
+## `0.37.0` — `open` (beta) — 2026-08-01
 
 **Promotion bêta** — première version proposée aux testeurs du canal ouvert depuis la 0.18.0.
 Cette entrée synthétise la série dev 0.19.0 → 0.36.1 ; les entrées détaillées ci-dessous restent
@@ -43,7 +140,7 @@ la source des changements et correctifs intermédiaires.
 
 ---
 
-## `0.36.1` — `local` — 2026-08-01
+## `0.36.1` — `internal` (dev) — 2026-08-01
 
 Correctif **N1**, trouvé pendant la review de promotion bêta (coupe 9/10, review GPT-5.6 Codex →
 gate Claude Fable 5). Classé bloquant pré-bêta au même titre que F2/F3/F5 de #953 : fonctionnel et
@@ -91,7 +188,7 @@ gate Claude Fable 5). Classé bloquant pré-bêta au même titre que F2/F3/F5 de
 
 ---
 
-## `0.36.0` — `local` — 2026-07-30
+## `0.36.0` — `internal` (dev) — 2026-07-30
 
 ### Ajouté
 
@@ -135,7 +232,7 @@ gate Claude Fable 5). Classé bloquant pré-bêta au même titre que F2/F3/F5 de
 - Gouvernance : amendement rédigé par Sol (GPT-5.6 Codex xhigh) et gaté par Claude Fable 5 ; code par
   Claude Fable 5 et gaté par Sol — 3 tours de gate, 2 NO-GO réels levés.
 
-## `0.35.1` — `local` — 2026-07-26
+## `0.35.1` — `internal` (dev) — 2026-07-26
 
 Correctif du mode « Posts en pleine largeur » (#983, rapporté par styx42) : espacements
 irréguliers et lignes horizontales parasites autour des marqueurs. Le trait de pied d'un post
@@ -146,7 +243,7 @@ marqueur porte désormais son propre rythme vertical, symétrique (il héritait 
 et de rien en dessous) ; il reste traversant, à la largeur des posts qu'il sépare. Le mode encart
 est inchangé à l'identique.
 
-## `0.35.0` — `local` — 2026-07-26
+## `0.35.0` — `internal` (dev) — 2026-07-26
 
 Agrandissement des GIF (#973, [AMENDEMENT-v1.5-2] au contrat images, arbitrage XaTriX) :
 nouveau réglage « Agrandissement des GIF » (Réglages → Affichage) — S (×1, net) / M (×1,5) /
@@ -156,7 +253,7 @@ GIF inline ne changent pas ; les caps de largeur/hauteur continuent de borner le
 le décodage reste au natif (agrandissement au dessin, net à ×1). Répond aux retours de
 l'appel à tests tailles (GIF trop petits depuis le no-upscale strict).
 
-## `0.34.6` — `local` — 2026-07-26
+## `0.34.6` — `internal` (dev) — 2026-07-26
 
 Fixes pré-promotion (#953, bloquants F2/F3/F5/F6 de la review beta) : la réponse rapide
 survit à une rotation pendant l'envoi (l'état est restauré, plus de rejet fantôme du
@@ -166,7 +263,7 @@ en base — un compte ne peut plus lire ni effacer le brouillon d'un autre) ; la
 topic n'est plus soumise pendant un upload d'image en vol ; la spec navigation reflète le
 défaut plein écran de l'éditeur.
 
-## `0.34.5` — `local` — 2026-07-26
+## `0.34.5` — `internal` (dev) — 2026-07-26
 
 Réglage « Posts en pleine largeur » — Lot 5 (#884) de la passe images (#876), arbitrage
 XaTriX : optionnel, 2 états, défaut inchangé. Nouveau réglage dans Réglages → Topic :
@@ -180,7 +277,7 @@ encart par défaut est strictement inchangé (rendu byte-identique).
 
 ---
 
-## `0.34.4` — `local` — 2026-07-22
+## `0.34.4` — `internal` (dev) — 2026-07-22
 
 Les états d'erreur & retry — Lot 4 (#960) de la passe images (#876, contrat v1.5 §6,
 la mort de #813/B5) : registre d'essais par URL (UNE tentative probe + UNE tentative
@@ -195,7 +292,7 @@ embarqué, AVIF selon décodeur device avec état d'erreur propre + retry sinon.
 Sol P1..P4 + gate final (2 NO-GO fermés en TDD : générations qui gelaient un axe en
 vol, éviction du cache de géométrie). 513 tests :core:ui.
 
-## `0.34.3` — `local` — 2026-07-21
+## `0.34.3` — `internal` (dev) — 2026-07-21
 
 Le sizing & décodage density-aware — Lot 3 (#959) de la passe images (#876, contrat
 v1.5 §3/§7/§9) : équation unique en PIXELS PHYSIQUES (no-upscale réel : 1 px source ≤

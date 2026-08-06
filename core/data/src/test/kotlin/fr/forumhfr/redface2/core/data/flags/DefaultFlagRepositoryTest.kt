@@ -13,9 +13,11 @@ import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
+import fr.forumhfr.redface2.core.model.write.FlagAddContext
 import fr.forumhfr.redface2.core.network.HfrApiClient
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.network.HfrRestFlagBucket
+import fr.forumhfr.redface2.core.parser.write.FlagAddResponseParser
 import fr.forumhfr.redface2.core.parser.write.FlagDeleteResponseParser
 import io.mockk.every
 import io.mockk.coEvery
@@ -27,6 +29,7 @@ import java.time.Instant
 import java.time.ZoneOffset
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
@@ -1099,6 +1102,566 @@ class DefaultFlagRepositoryTest {
     }
 
     @Test
+    fun `addFlag success marks existing cached topic as favorite and Room`() = runTest {
+        val (apiClient, forumRepository) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+        }
+        val flagDao = stubFlagDao()
+        val hfrClient = mockk<HfrClient>()
+        val context = sampleFlagAddContext()
+        coEvery { hfrClient.addFlag(context) } returns ADD_SUCCESS_HTML
+        val repo = buildRepository(apiClient, forumRepository, flagDao = flagDao, hfrClient = hfrClient)
+
+        repo.observe(FlagType.CYAN).test {
+            assertEquals(FlagsResult.Loading, awaitItem())
+            val seeded = awaitItem() as FlagsResult.Success
+            assertEquals(false, seeded.flags.single { it.topicId == 35395 }.isFavorite)
+
+            val result = repo.addFlag(context)
+            assertTrue("expected success, got $result", result.isSuccess)
+
+            val updated = awaitItem() as FlagsResult.Success
+            assertEquals(true, updated.flags.single { it.topicId == 35395 }.isFavorite)
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify { hfrClient.addFlag(context) }
+        coVerify {
+            flagDao.replaceForType(
+                userId = "xat",
+                type = FlagType.CYAN,
+                rows = match { rows -> rows.singleOrNull { it.topicId == 35395 }?.isFavorite == true },
+            )
+        }
+        coVerify(exactly = 1) {
+            flagDao.deleteForType(userId = "xat", type = FlagType.FAVORITE)
+        }
+    }
+
+    @Test
+    fun `resolveFavorite finds an ordinary favorite in the fresh category bucket - 986`() = runTest {
+        val (apiClient, forumRepository) = wireDeps {
+            stubFlagsCall(23, HfrRestFlagBucket.FAVORITES, capturedParticipatedFixture)
+        }
+        val repo = buildRepository(apiClient, forumRepository)
+
+        val result = repo.resolveFavorite(cat = 23, topicId = 35395)
+
+        assertTrue("the topic is present in the fresh favorites bucket", result.getOrThrow())
+        coVerify(exactly = 0) {
+            apiClient.getTopicList(
+                cat = any(), subcat = any(), page = any(), resultsPerPage = any(), useAuth = any(),
+            )
+        }
+    }
+
+    @Test
+    fun `resolveFavorite recovers a favorite sticky omitted by the bucket - 986`() = runTest {
+        val catalogue = listOf(
+            Category(id = 13, name = "Discussions", forceSubcat = true, subcategoryCount = 15),
+        )
+        val apiClient = mockk<HfrApiClient>()
+        coEvery {
+            apiClient.getCategoryFlagTopics(
+                cat = 13, bucket = HfrRestFlagBucket.FAVORITES,
+                page = any(), resultsPerPage = any(), useAuth = true,
+            )
+        } returns fixture("rest_cat13_favorites_empty_despite_sticky.json")
+        coEvery {
+            apiClient.getTopicList(
+                cat = 13, subcat = null, page = 1, resultsPerPage = 50, useAuth = true,
+            )
+        } returns fixture("rest_cat13_topics_last_sticky_favorite.json")
+        val repo = buildRepository(apiClient, stubForumRepository(catalogue))
+
+        val result = repo.resolveFavorite(cat = 13, topicId = 100_217)
+
+        assertTrue("the topics-last fallback carries the omitted sticky", result.getOrThrow())
+    }
+
+    @Test
+    fun `resolveFavorite fails closed when the sticky fallback cannot complete - 986`() = runTest {
+        val catalogue = listOf(
+            Category(id = 13, name = "Discussions", forceSubcat = true, subcategoryCount = 15),
+        )
+        val apiClient = mockk<HfrApiClient>()
+        coEvery {
+            apiClient.getCategoryFlagTopics(
+                cat = 13, bucket = HfrRestFlagBucket.FAVORITES,
+                page = any(), resultsPerPage = any(), useAuth = true,
+            )
+        } returns EMPTY_PAGE
+        coEvery {
+            apiClient.getTopicList(
+                cat = 13, subcat = null, page = 1, resultsPerPage = 50, useAuth = true,
+            )
+        } throws IOException("offline")
+        val repo = buildRepository(apiClient, stubForumRepository(catalogue))
+
+        val result = repo.resolveFavorite(cat = 13, topicId = 999_999)
+
+        assertTrue("a fallback failure must not be reported as not-favorite", result.isFailure)
+    }
+
+    @Test
+    fun `resolveFavorite fails closed when the favorites pagination is incomplete - 986`() = runTest {
+        val pageOne = capturedParticipatedFixture.replace(
+            oldValue = "\"results_count\": 1",
+            newValue = "\"results_count\": 2",
+        )
+        val incompletePageTwo = EMPTY_PAGE
+            .replace(oldValue = "\"page\": 1", newValue = "\"page\": 2")
+            .replace(oldValue = "\"results_count\": 0", newValue = "\"results_count\": 2")
+        val apiClient = mockk<HfrApiClient>()
+        coEvery {
+            apiClient.getCategoryFlagTopics(
+                cat = 23, bucket = HfrRestFlagBucket.FAVORITES,
+                page = 1, resultsPerPage = 50, useAuth = true,
+            )
+        } returns pageOne
+        coEvery {
+            apiClient.getCategoryFlagTopics(
+                cat = 23, bucket = HfrRestFlagBucket.FAVORITES,
+                page = 2, resultsPerPage = 50, useAuth = true,
+            )
+        } returns incompletePageTwo
+        val repo = buildRepository(
+            apiClient = apiClient,
+            forumRepository = stubForumRepository(sampleCategories),
+        )
+
+        val result = repo.resolveFavorite(cat = 23, topicId = 999_999)
+
+        assertTrue("a truncated bucket must not become a destructive false", result.isFailure)
+        coVerify(exactly = 0) {
+            apiClient.getTopicList(
+                cat = any(), subcat = any(), page = any(), resultsPerPage = any(), useAuth = any(),
+            )
+        }
+    }
+
+    @Test
+    fun `resolveFavorite memoizes success for 30 seconds then refreshes - 986`() = runTest {
+        var now = Instant.parse("2026-05-03T12:00:00Z")
+        val clock = mockk<Clock>()
+        every { clock.instant() } answers { now }
+        val apiClient = mockk<HfrApiClient>()
+        coEvery {
+            apiClient.getCategoryFlagTopics(
+                cat = 23, bucket = HfrRestFlagBucket.FAVORITES,
+                page = 1, resultsPerPage = 50, useAuth = true,
+            )
+        } returns EMPTY_PAGE
+        coEvery {
+            apiClient.getTopicList(
+                cat = 23, subcat = null, page = 1, resultsPerPage = 50, useAuth = true,
+            )
+        } returns EMPTY_PAGE
+        val repo = buildRepository(
+            apiClient = apiClient,
+            forumRepository = stubForumRepository(sampleCategories),
+            clock = clock,
+        )
+
+        assertEquals(false, repo.resolveFavorite(cat = 23, topicId = 999_999).getOrThrow())
+        assertEquals(false, repo.resolveFavorite(cat = 23, topicId = 999_999).getOrThrow())
+        coVerify(exactly = 1) {
+            apiClient.getCategoryFlagTopics(
+                cat = 23, bucket = HfrRestFlagBucket.FAVORITES,
+                page = 1, resultsPerPage = 50, useAuth = true,
+            )
+        }
+
+        now = now.plusSeconds(31)
+        assertEquals(false, repo.resolveFavorite(cat = 23, topicId = 999_999).getOrThrow())
+        coVerify(exactly = 2) {
+            apiClient.getCategoryFlagTopics(
+                cat = 23, bucket = HfrRestFlagBucket.FAVORITES,
+                page = 1, resultsPerPage = 50, useAuth = true,
+            )
+        }
+        coVerify(exactly = 2) {
+            apiClient.getTopicList(
+                cat = 23, subcat = null, page = 1, resultsPerPage = 50, useAuth = true,
+            )
+        }
+    }
+
+    @Test
+    fun `resolveFavorite shares an in-flight lookup when one caller is cancelled - 986`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val apiClient = mockk<HfrApiClient>()
+        coEvery {
+            apiClient.getCategoryFlagTopics(
+                cat = 23, bucket = HfrRestFlagBucket.FAVORITES,
+                page = 1, resultsPerPage = 50, useAuth = true,
+            )
+        } coAnswers {
+            gate.await()
+            EMPTY_PAGE
+        }
+        coEvery {
+            apiClient.getTopicList(
+                cat = 23, subcat = null, page = 1, resultsPerPage = 50, useAuth = true,
+            )
+        } returns EMPTY_PAGE
+        val repo = buildRepository(apiClient, stubForumRepository(sampleCategories))
+
+        val firstCaller = launch { repo.resolveFavorite(cat = 23, topicId = 999_999) }
+        runCurrent()
+        val replacementCaller = async { repo.resolveFavorite(cat = 23, topicId = 999_999) }
+        runCurrent()
+        firstCaller.cancel()
+        firstCaller.join()
+        gate.complete(Unit)
+
+        assertEquals(false, replacementCaller.await().getOrThrow())
+        coVerify(exactly = 1) {
+            apiClient.getCategoryFlagTopics(
+                cat = 23, bucket = HfrRestFlagBucket.FAVORITES,
+                page = 1, resultsPerPage = 50, useAuth = true,
+            )
+        }
+        coVerify(exactly = 1) {
+            apiClient.getTopicList(
+                cat = 23, subcat = null, page = 1, resultsPerPage = 50, useAuth = true,
+            )
+        }
+    }
+
+    @Test
+    fun `resolveFavorite finishes and memoizes after its only caller is cancelled - 986`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val apiClient = mockk<HfrApiClient>()
+        coEvery {
+            apiClient.getCategoryFlagTopics(
+                cat = 23, bucket = HfrRestFlagBucket.FAVORITES,
+                page = 1, resultsPerPage = 50, useAuth = true,
+            )
+        } coAnswers {
+            gate.await()
+            EMPTY_PAGE
+        }
+        coEvery {
+            apiClient.getTopicList(
+                cat = 23, subcat = null, page = 1, resultsPerPage = 50, useAuth = true,
+            )
+        } returns EMPTY_PAGE
+        val repo = buildRepository(apiClient, stubForumRepository(sampleCategories))
+
+        val closedMenuCaller = launch { repo.resolveFavorite(cat = 23, topicId = 999_999) }
+        runCurrent()
+        closedMenuCaller.cancel()
+        closedMenuCaller.join()
+        gate.complete(Unit)
+        runCurrent()
+
+        assertEquals(false, repo.resolveFavorite(cat = 23, topicId = 999_999).getOrThrow())
+        coVerify(exactly = 1) {
+            apiClient.getCategoryFlagTopics(
+                cat = 23, bucket = HfrRestFlagBucket.FAVORITES,
+                page = 1, resultsPerPage = 50, useAuth = true,
+            )
+        }
+    }
+
+    @Test
+    fun `addFlag invalidates the favorite resolution memo - 986`() = runTest {
+        var favoriteCalls = 0
+        val apiClient = mockk<HfrApiClient>()
+        coEvery {
+            apiClient.getCategoryFlagTopics(
+                cat = 23, bucket = HfrRestFlagBucket.FAVORITES,
+                page = 1, resultsPerPage = 50, useAuth = true,
+            )
+        } coAnswers {
+            favoriteCalls++
+            if (favoriteCalls == 1) EMPTY_PAGE else capturedParticipatedFixture
+        }
+        coEvery {
+            apiClient.getTopicList(
+                cat = 23, subcat = null, page = 1, resultsPerPage = 50, useAuth = true,
+            )
+        } returns EMPTY_PAGE
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.addFlag(any()) } returns ADD_SUCCESS_HTML
+        val repo = buildRepository(
+            apiClient = apiClient,
+            forumRepository = stubForumRepository(sampleCategories),
+            hfrClient = hfrClient,
+        )
+
+        assertEquals(false, repo.resolveFavorite(cat = 23, topicId = 35395).getOrThrow())
+        assertTrue(repo.addFlag(sampleFlagAddContext()).isSuccess)
+        assertTrue(repo.resolveFavorite(cat = 23, topicId = 35395).getOrThrow())
+
+        assertEquals(2, favoriteCalls)
+    }
+
+    @Test
+    fun `addFlag invalidates an empty favorite snapshot so the next observe refetches - 986`() = runTest {
+        val (apiClient, forumRepository) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.FAVORITES, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.FAVORITES, EMPTY_PAGE)
+        }
+        sampleCategories.forEach { category ->
+            coEvery {
+                apiClient.getTopicList(
+                    cat = category.id, subcat = null, page = 1, resultsPerPage = 50, useAuth = true,
+                )
+            } returns EMPTY_PAGE
+        }
+        val flagDao = stubFlagDao()
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.addFlag(any()) } returns ADD_SUCCESS_HTML
+        val repo = buildRepository(apiClient, forumRepository, flagDao = flagDao, hfrClient = hfrClient)
+
+        repo.observe(FlagType.FAVORITE).test {
+            assertEquals(FlagsResult.Loading, awaitItem())
+            assertTrue((awaitItem() as FlagsResult.Success).flags.isEmpty())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertTrue(repo.addFlag(sampleFlagAddContext()).isSuccess)
+        repo.observe(FlagType.FAVORITE).test {
+            assertEquals(
+                "the invalidated memory and Room snapshot must not satisfy the next read",
+                FlagsResult.Loading,
+                awaitItem(),
+            )
+            assertTrue((awaitItem() as FlagsResult.Success).flags.isEmpty())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify(exactly = 1) {
+            flagDao.deleteForType(userId = "xat", type = FlagType.FAVORITE)
+        }
+        coVerify(exactly = 2) {
+            apiClient.getCategoryFlagTopics(
+                cat = 23, bucket = HfrRestFlagBucket.FAVORITES,
+                page = 1, resultsPerPage = 50, useAuth = true,
+            )
+        }
+    }
+
+    @Test
+    fun `addFlag prevents an older favorite fetch from restoring or exposing stale data - 986`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        var favoriteCalls = 0
+        val apiClient = mockk<HfrApiClient>()
+        coEvery {
+            apiClient.getCategoryFlagTopics(
+                cat = 23, bucket = HfrRestFlagBucket.FAVORITES,
+                page = 1, resultsPerPage = 50, useAuth = true,
+            )
+        } coAnswers {
+            favoriteCalls++
+            if (favoriteCalls == 1) {
+                gate.await()
+                EMPTY_PAGE
+            } else {
+                capturedParticipatedFixture
+            }
+        }
+        coEvery {
+            apiClient.getTopicList(
+                cat = 23, subcat = null, page = 1, resultsPerPage = 50, useAuth = true,
+            )
+        } returns EMPTY_PAGE
+        val flagDao = stubFlagDao()
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.addFlag(any()) } returns ADD_SUCCESS_HTML
+        val repo = buildRepository(
+            apiClient = apiClient,
+            forumRepository = stubForumRepository(
+                listOf(Category(id = 23, name = "Technologies Mobiles", forceSubcat = true, subcategoryCount = 10)),
+            ),
+            flagDao = flagDao,
+            hfrClient = hfrClient,
+        )
+
+        var observed: FlagsResult.Success? = null
+        val observeJob = launch {
+            observed = repo.observe(FlagType.FAVORITE).first { it is FlagsResult.Success } as FlagsResult.Success
+        }
+        runCurrent()
+        assertTrue(repo.addFlag(sampleFlagAddContext()).isSuccess)
+        gate.complete(Unit)
+        observeJob.join()
+
+        assertEquals(listOf(35395), observed?.flags?.map { it.topicId })
+        assertEquals("the invalidated generation must run a second REST fetch", 2, favoriteCalls)
+        coVerify(exactly = 1) {
+            flagDao.replaceForType(
+                userId = "xat",
+                type = FlagType.FAVORITE,
+                rows = match { rows -> rows.singleOrNull()?.topicId == 35395 },
+            )
+        }
+    }
+
+    @Test
+    fun `a Room load started during favorite purge waits and sees the purged snapshot - 986`() = runTest {
+        val purgeGate = CompletableDeferred<Unit>()
+        val restGate = CompletableDeferred<Unit>()
+        var roomPurged = false
+        val flagDao = stubFlagDao()
+        coEvery { flagDao.deleteForType(userId = "xat", type = FlagType.FAVORITE) } coAnswers {
+            purgeGate.await()
+            roomPurged = true
+        }
+        coEvery { flagDao.getFlags(userId = "xat", type = FlagType.FAVORITE) } coAnswers {
+            if (roomPurged) {
+                emptyList()
+            } else {
+                listOf(
+                    flagEntity(
+                        type = FlagType.FAVORITE,
+                        topicId = 999_999,
+                        title = "Stale Room favorite",
+                        fetchedAt = Instant.parse("2026-05-03T12:00:00Z"),
+                    ),
+                )
+            }
+        }
+        val apiClient = mockk<HfrApiClient>()
+        coEvery {
+            apiClient.getCategoryFlagTopics(
+                cat = 23, bucket = HfrRestFlagBucket.FAVORITES,
+                page = 1, resultsPerPage = 50, useAuth = true,
+            )
+        } coAnswers {
+            restGate.await()
+            capturedParticipatedFixture
+        }
+        coEvery {
+            apiClient.getTopicList(
+                cat = 23, subcat = null, page = 1, resultsPerPage = 50, useAuth = true,
+            )
+        } returns EMPTY_PAGE
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.addFlag(any()) } returns ADD_SUCCESS_HTML
+        val repo = buildRepository(
+            apiClient = apiClient,
+            forumRepository = stubForumRepository(
+                listOf(Category(id = 23, name = "Technologies Mobiles", forceSubcat = true, subcategoryCount = 10)),
+            ),
+            flagDao = flagDao,
+            hfrClient = hfrClient,
+        )
+
+        val addJob = launch { assertTrue(repo.addFlag(sampleFlagAddContext()).isSuccess) }
+        runCurrent() // addflag succeeded; reconcile holds the FAVORITE lock inside the gated purge.
+
+        var observed: FlagsResult.Success? = null
+        val observeJob = launch {
+            observed = repo.observe(FlagType.FAVORITE).first { it is FlagsResult.Success } as FlagsResult.Success
+        }
+        runCurrent() // observe is waiting for the same lock and cannot read the pre-purge Room rows.
+        purgeGate.complete(Unit)
+        addJob.join()
+        runCurrent() // Room read now sees roomPurged=true; both refresh paths share the gated REST fetch.
+        coVerify(exactly = 1) {
+            flagDao.getFlags(userId = "xat", type = FlagType.FAVORITE)
+        }
+        restGate.complete(Unit)
+        observeJob.join()
+
+        assertEquals(listOf(35395), observed?.flags?.map { it.topicId })
+        coVerify(exactly = 1) {
+            apiClient.getCategoryFlagTopics(
+                cat = 23, bucket = HfrRestFlagBucket.FAVORITES,
+                page = 1, resultsPerPage = 50, useAuth = true,
+            )
+        }
+    }
+
+    @Test
+    fun `addFlag failure touches no cache and returns failure`() = runTest {
+        val (apiClient, forumRepository) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+        }
+        val flagDao = stubFlagDao()
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.addFlag(any()) } returns ADD_FAILURE_HTML
+        val repo = buildRepository(apiClient, forumRepository, flagDao = flagDao, hfrClient = hfrClient)
+
+        repo.observe(FlagType.CYAN).test {
+            assertEquals(FlagsResult.Loading, awaitItem())
+            awaitItem() as FlagsResult.Success
+
+            val result = repo.addFlag(sampleFlagAddContext())
+            assertTrue("expected failure, got $result", result.isFailure)
+            assertTrue(result.exceptionOrNull() is FlagAddFailedException)
+
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify(exactly = 0) {
+            flagDao.replaceForType(
+                userId = "xat",
+                type = FlagType.CYAN,
+                rows = match { rows -> rows.any { it.topicId == 35395 && it.isFavorite } },
+            )
+        }
+    }
+
+    @Test
+    fun `addFlag session expiry touches no cache and returns failure`() = runTest {
+        val (apiClient, forumRepository) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+        }
+        val flagDao = stubFlagDao()
+        val hfrClient = mockk<HfrClient>()
+        val expired = SessionExpiredException("https://forum.hardware.fr/login.php")
+        coEvery { hfrClient.addFlag(any()) } throws expired
+        val repo = buildRepository(apiClient, forumRepository, flagDao = flagDao, hfrClient = hfrClient)
+
+        repo.observe(FlagType.CYAN).test {
+            assertEquals(FlagsResult.Loading, awaitItem())
+            awaitItem() as FlagsResult.Success
+
+            val result = repo.addFlag(sampleFlagAddContext())
+            assertTrue("expected failure, got $result", result.isFailure)
+            assertTrue(result.exceptionOrNull() is SessionExpiredException)
+
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify(exactly = 0) {
+            flagDao.replaceForType(
+                userId = "xat",
+                type = FlagType.CYAN,
+                rows = match { rows -> rows.any { it.topicId == 35395 && it.isFavorite } },
+            )
+        }
+    }
+
+    @Test
+    fun `addFlag fails fast when anonymous without hitting the network`() = runTest {
+        val apiClient = mockk<HfrApiClient>(relaxed = true)
+        val hfrClient = mockk<HfrClient>(relaxed = true)
+        val anonymousAuth = mockk<AuthRepository>()
+        every { anonymousAuth.observeAuthState() } returns flowOf(AuthState.Anonymous)
+        val repo = buildRepository(
+            apiClient = apiClient,
+            forumRepository = stubForumRepository(sampleCategories),
+            authRepository = anonymousAuth,
+            hfrClient = hfrClient,
+        )
+
+        val result = repo.addFlag(sampleFlagAddContext())
+        assertTrue("anonymous addFlag must fail", result.isFailure)
+        coVerify(exactly = 0) {
+            hfrClient.addFlag(any())
+        }
+    }
+
+    @Test
     fun `removeFlag success drops the item from the exposed cache and Room`() = runTest {
         // Seed the in-memory cache with the captured cat23 participated flag (topic 35395).
         val (apiClient, forumRepository) = wireDeps {
@@ -1437,6 +2000,7 @@ class DefaultFlagRepositoryTest {
     ): DefaultFlagRepository = DefaultFlagRepository(
         apiClient = apiClient,
         hfrClient = hfrClient,
+        flagAddResponseParser = FlagAddResponseParser(),
         flagDeleteResponseParser = FlagDeleteResponseParser(),
         forumRepository = forumRepository,
         authRepository = authRepository,
@@ -1447,6 +2011,7 @@ class DefaultFlagRepositoryTest {
         ),
         json = json,
         ioDispatcher = UnconfinedTestDispatcher(),
+        clock = clock,
     )
 
     private fun stubAuthRepository(pseudo: String = "XaT"): AuthRepository {
@@ -1461,6 +2026,15 @@ class DefaultFlagRepositoryTest {
         coEvery { dao.getLastFetchedAt(any(), any()) } returns null
         return dao
     }
+
+    private fun sampleFlagAddContext(): FlagAddContext = FlagAddContext(
+        cat = 23,
+        subcat = 550,
+        topicId = 35395,
+        page = 12,
+        numreponse = 2786758,
+        ref = 4,
+    )
 
     private fun flagEntity(
         type: FlagType,
@@ -1536,5 +2110,20 @@ class DefaultFlagRepositoryTest {
             """<html><body><div class="hop">Drapeau effacé avec succès</div></body></html>"""
         const val DELETE_FAILURE_HTML =
             """<html><body><div class="hop">Aucun favori n'est repertorié</div></body></html>"""
+
+        // Minimal addflag.php response bodies for repository branch tests. They are NOT captured
+        // fixtures: the success shape mirrors the `.hop` wrapper used by the delflag fixture, and
+        // the marker sentence is the live-verified #986 contract.
+        const val ADD_SUCCESS_HTML =
+            """<html><body><div class="hop">Favori positionné</div></body></html>"""
+        /**
+         * Page d'échec : volontairement une page QUELCONQUE sans le marqueur de succès, et non une
+         * phrase HFR — le vrai libellé d'échec de `addflag.php` n'a jamais été capturé. Le parser est
+         * fail-closed (il ne cherche que « favori positionné » et traite tout le reste comme un
+         * échec), donc le contenu exact n'a aucune incidence ; inventer une phrase française
+         * laisserait croire à un contrat attesté, ce que la charte fixtures interdit.
+         */
+        const val ADD_FAILURE_HTML =
+            """<html><body><div class="hop">page non reconnue</div></body></html>"""
     }
 }

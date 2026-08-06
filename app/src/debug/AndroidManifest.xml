@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  #989 — debug-only manifest additions. Merged into debug variants ONLY (`src/debug`), so no
+  release / beta / dev-release artifact can ever expose the spike bench.
+
+  `android:exported="true"` is what lets `adb shell am start` drive a capture run; it is acceptable
+  here precisely because the component only exists in a debug build. No intent-filter, so it never
+  appears in the launcher and nothing but an explicit component name can reach it.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <!--
+          `singleTop` is load-bearing for the capture runs: with the default `standard` launch mode,
+          an `am start` on the already-foregrounded instance neither re-creates it nor calls
+          `onNewIntent`, so the preset extras were silently ignored and every screenshot showed
+          preset A. `singleTop` routes the new intent to the live instance — which keeps the
+          in-memory intrinsic size cache warm, unlike `am start -S`.
+        -->
+        <activity
+            android:name="fr.forumhfr.redface2.spike.SmileyPickerSpikeActivity"
+            android:exported="true"
+            android:label="RF2 spike smileys"
+            android:launchMode="singleTop" />
+    </application>
+
+</manifest>

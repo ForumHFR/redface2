@@ -5,6 +5,7 @@ import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrap
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
@@ -71,6 +72,8 @@ class AppThemeViewModelTest {
             every { observeAccentColor() } returns MutableStateFlow(AccentColor.ROSE)
             // #973 — eagerly collected by the VM constructor; default M is enough here.
             every { observeMediaDisplayProfile() } returns MutableStateFlow(MediaDisplayProfile.M)
+            // #989 — nouveau flow de l'interface : à stubber sinon MockK échoue au premier collect.
+            every { observeSmileyPickerDecoration() } returns MutableStateFlow(SmileyPickerDecoration.NONE)
         }
 
         val vm = AppThemeViewModel(
@@ -106,6 +109,8 @@ class AppThemeViewModelTest {
             every { observeAccentColor() } returns MutableStateFlow(AccentColor.ROSE)
             // #973 — eagerly collected by the VM constructor; default M is enough here.
             every { observeMediaDisplayProfile() } returns MutableStateFlow(MediaDisplayProfile.M)
+            // #989 — nouveau flow de l'interface : à stubber sinon MockK échoue au premier collect.
+            every { observeSmileyPickerDecoration() } returns MutableStateFlow(SmileyPickerDecoration.NONE)
         }
 
         val vm = AppThemeViewModel(
@@ -136,6 +141,8 @@ class AppThemeViewModelTest {
             every { observeImmersiveNavBarReveal() } returns MutableStateFlow(ImmersiveNavBarReveal.MANUAL)
             every { observeAccentColor() } returns MutableStateFlow(AccentColor.ROSE)
             every { observeMediaDisplayProfile() } returns MutableStateFlow(MediaDisplayProfile.L)
+            // #989 — nouveau flow de l'interface : à stubber sinon MockK échoue au premier collect.
+            every { observeSmileyPickerDecoration() } returns MutableStateFlow(SmileyPickerDecoration.NONE)
         }
 
         val vm = AppThemeViewModel(

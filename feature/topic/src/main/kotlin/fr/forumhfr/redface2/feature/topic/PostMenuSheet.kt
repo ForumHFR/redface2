@@ -105,6 +105,10 @@ internal fun PostMenuSheet(
      * composer never opens under a still-visible menu sheet.
      */
     onSendPrivateMessage: (() -> Unit)? = null,
+    /** #986 — visible state of the server-side HFR favourite action. */
+    favoriteAction: PostFavoriteAction = PostFavoriteAction.HIDDEN,
+    /** Invoked only for [PostFavoriteAction.ADD] / [PostFavoriteAction.MOVE]. */
+    onFavoriteClick: () -> Unit = {},
     /**
      * #291 — whether this post already sits in the multi-quote basket; flips the entry's
      * label between « Ajouter à » and « Retirer de » la citation multiple.
@@ -209,6 +213,14 @@ internal fun PostMenuSheet(
             ) {
                 Text(stringResource(R.string.topic_post_menu_open_in_browser))
             }
+
+            PostFavoriteButton(
+                favoriteAction = favoriteAction,
+                onClick = {
+                    onFavoriteClick()
+                    hideThenDismiss(coroutineScope, sheetState, onDismiss)
+                },
+            )
 
             if (onEditFirstPost != null) {
                 Spacer(Modifier.height(8.dp))
@@ -324,6 +336,31 @@ internal fun PostMenuSheet(
 
             Spacer(Modifier.height(8.dp))
         }
+    }
+}
+
+/** Render state for the post-menu favourite row (#986); pure mapping is in TopicScreen. */
+internal enum class PostFavoriteAction { HIDDEN, CHECKING, ADD, MOVE, ADDING, UNAVAILABLE }
+
+@Composable
+private fun PostFavoriteButton(favoriteAction: PostFavoriteAction, onClick: () -> Unit) {
+    if (favoriteAction == PostFavoriteAction.HIDDEN) return
+
+    Spacer(Modifier.height(8.dp))
+    val label = when (favoriteAction) {
+        PostFavoriteAction.HIDDEN -> error("hidden action is not rendered")
+        PostFavoriteAction.CHECKING -> R.string.topic_post_menu_favorite_checking
+        PostFavoriteAction.ADD -> R.string.topic_post_menu_add_favorite
+        PostFavoriteAction.MOVE -> R.string.topic_post_menu_move_favorite
+        PostFavoriteAction.ADDING -> R.string.topic_post_menu_favorite_adding
+        PostFavoriteAction.UNAVAILABLE -> R.string.topic_post_menu_favorite_unavailable
+    }
+    OutlinedButton(
+        onClick = onClick,
+        enabled = favoriteAction == PostFavoriteAction.ADD || favoriteAction == PostFavoriteAction.MOVE,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(stringResource(label))
     }
 }
 

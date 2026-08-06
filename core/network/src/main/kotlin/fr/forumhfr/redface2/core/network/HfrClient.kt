@@ -6,6 +6,7 @@ import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.search.SearchTextScope
+import fr.forumhfr.redface2.core.model.write.FlagAddContext
 import fr.forumhfr.redface2.core.network.qualifiers.AnonymousClient
 import fr.forumhfr.redface2.core.network.qualifiers.AuthenticatedClient
 import fr.forumhfr.redface2.core.network.qualifiers.HfrBaseUrl
@@ -588,6 +589,55 @@ class HfrClient @Inject constructor(
     }
 
     /**
+     * Phase 4 (#986) — GET `/user/addflag.php` to place a favourite on a precise topic
+     * position.
+     *
+     * Per ADR-003 the drapeau mutations stay HTML : the REST flag resources are read-only
+     * for Redface 2 and answer `501` payloads to write attempts. `addflag.php` is also
+     * **favourite-only** : the `owntopic` query parameter is ignored by HFR, so callers do
+     * not pass a [FlagType] and this method never maps `owntopic` to a drapeau type. Cyan
+     * / red side-effects are created by HFR itself.
+     *
+     * Wire shape (captured from topic-page links and live-verified for #986) :
+     *
+     * `/user/addflag.php?config=hfr.inc&cat={cat}&post={topicId}&numreponse={numreponse}
+     * &page={page}&ref={ref}&p=1&sondage=0&owntopic={ignored}&subcat={subcat}`
+     *
+     * - [context.ref][FlagAddContext.ref] is the 1-based rank of the post inside its page,
+     *   not a `numreponse` and not a global counter. The app forwards the parsed value
+     *   verbatim because the `(numreponse, page, ref)` trio anchors the favourite on a
+     *   specific position.
+     * - [FlagAddContext.subcat] is nullable. As with [removeFlag], a missing sub-category
+     *   is serialised as an empty `subcat=`.
+     *
+     * Returns the response HTML for [fr.forumhfr.redface2.core.parser.write] to classify :
+     * success carries « Favori positionné », anything else does not. HFR returns HTTP 200
+     * in both cases, so the body text is the only signal.
+     *
+     * Always uses the authenticated client : adding a favourite is a user-private mutation,
+     * and a freshly expired session must raise [SessionExpiredException] rather than
+     * silently hitting the anonymous page.
+     */
+    suspend fun addFlag(context: FlagAddContext): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("user")
+            .addPathSegment("addflag.php")
+            .addQueryParameter("config", "hfr.inc")
+            .addQueryParameter("cat", context.cat.toString())
+            .addQueryParameter("post", context.topicId.toString())
+            .addQueryParameter("numreponse", context.numreponse.toString())
+            .addQueryParameter("page", context.page.toString())
+            .addQueryParameter("ref", context.ref.toString())
+            .addQueryParameter("p", "1")
+            .addQueryParameter("sondage", "0")
+            .addQueryParameter("owntopic", ADD_FLAG_IGNORED_OWNTOPIC)
+            .addQueryParameter("subcat", context.subcat?.toString().orEmpty())
+            .build()
+        val request = Request.Builder().url(url).get().build()
+        return authenticated.newCall(request).executeAuthenticatedHtml()
+    }
+
+    /**
      * Phase 2 finish (#99) — GET `/user/delflag.php` to remove a single drapeau the user
      * owns. Per ADR-003 the drapeau mutations stay HTML (the REST `PUT topics/{id}/`
      * semantics for downgrade/no-op are opaque), so this is a GET on the legacy endpoint.
@@ -809,6 +859,7 @@ class HfrClient @Inject constructor(
         private const val TOPIC_TRACE_PREFIX = "rf2.topic"
         private const val ORDER_BY_MATCHED_MESSAGE_DATE = "0"
         private const val ORDER_BY_LAST_TOPIC_REPLY = "1"
+        private const val ADD_FLAG_IGNORED_OWNTOPIC = "0"
 
         // 3xx — any redirect status whose Location header points at the resolved pretty URL
         // (HFR serves 301 in practice, cf. resolveTopicPageUrl ; the range is defensive).

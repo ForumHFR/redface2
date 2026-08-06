@@ -4,6 +4,7 @@ import fr.forumhfr.redface2.core.domain.cache.ImageCacheMaintenance
 import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
@@ -2007,6 +2008,15 @@ class SettingsViewModelTest {
             check(!failOnMediaDisplayProfileSet) { "boom" }
             lastMediaDisplayProfileSet = profile
             mediaDisplayProfile.value = profile
+        }
+
+        // #989 — délimiteur du picker de smileys, même forme que le profil GIF.
+        val smileyPickerDecoration = MutableStateFlow(SmileyPickerDecoration.NONE)
+
+        override fun observeSmileyPickerDecoration(): Flow<SmileyPickerDecoration> = smileyPickerDecoration
+
+        override suspend fun setSmileyPickerDecoration(decoration: SmileyPickerDecoration) {
+            smileyPickerDecoration.value = decoration
         }
 
         fun emitMediaDisplayProfile(value: MediaDisplayProfile) {

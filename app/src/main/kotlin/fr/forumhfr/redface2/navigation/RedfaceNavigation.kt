@@ -851,6 +851,8 @@ fun RedfaceApp(intent: Intent?) {
     val showScrollbar by themeViewModel.showScrollbar.collectAsStateWithLifecycle()
     // #973 — block-GIF display profile (S/M/L), provided to the post renderer via RedfaceTheme.
     val mediaDisplayProfile by themeViewModel.mediaDisplayProfile.collectAsStateWithLifecycle()
+    // #989 — cell delimiter of the smiley picker, seeded into the theme below.
+    val smileyPickerDecoration by themeViewModel.smileyPickerDecoration.collectAsStateWithLifecycle()
     // #666 — show/hide the labels under the bottom-nav icons (resolved at the shell for the suite below).
     val navBarLabels by themeViewModel.navBarLabels.collectAsStateWithLifecycle()
     // #445 — debug bounds overlay preference (the dev-channel gate + render live in
@@ -917,6 +919,7 @@ fun RedfaceApp(intent: Intent?) {
             foldLongQuotes = foldLongQuotes,
             showScrollbar = showScrollbar,
             mediaDisplayProfile = mediaDisplayProfile,
+            smileyPickerDecoration = smileyPickerDecoration,
         ),
     ) {
         // #458 — cold-start screen, read synchronously from the bootstrap mirror and frozen for

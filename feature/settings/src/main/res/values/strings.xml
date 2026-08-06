@@ -300,6 +300,15 @@
     <string name="settings_display_media_profile_small">S (×1, net)</string>
     <string name="settings_display_media_profile_medium">M (×1,5)</string>
     <string name="settings_display_media_profile_large">L (×2,5)</string>
+    <!-- #989 — délimiteur des cellules du picker de smileys. « Aucun » par défaut : le délimiteur
+         aide à repérer chaque vignette sur un corpus très hétérogène, il ne change PAS la taille des
+         smileys (le preset qui agrandissait les petits a été rejeté, cf. #1022). -->
+    <string name="settings_display_smiley_decoration_title">Délimiteur du sélecteur de smileys</string>
+    <string name="settings_display_smiley_decoration_intro">Séparez visuellement les smileys dans le sélecteur. N\'affecte pas leur taille.</string>
+    <string name="settings_display_smiley_decoration_none">Aucun</string>
+    <string name="settings_display_smiley_decoration_outline">Contour</string>
+    <string name="settings_display_smiley_decoration_separators">Quadrillage</string>
+    <string name="settings_display_smiley_decoration_persist_failed">Impossible de mémoriser le délimiteur. Réessayez.</string>
     <string name="settings_display_media_profile_persist_failed">Impossible de mémoriser l\'agrandissement des GIF. Réessayez.</string>
     <!-- #518 — plein écran immersif : masquer la barre de navigation système Android (boutons ou barre gestuelle). -->
     <!-- #666 — afficher/masquer les libellés sous les icônes de la barre de navigation du bas. -->

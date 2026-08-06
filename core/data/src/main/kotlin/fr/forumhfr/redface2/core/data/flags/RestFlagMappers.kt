@@ -156,6 +156,11 @@ internal object RestFlagMappers {
             hasUnread = dto.isRead?.let { !it } ?: true,
             lastReadPage = lastReadPage,
             lastPostReadId = dto.lastPostReadId,
+            // #638 — both are needed to tell « stopped at the bottom of the page » from « stopped
+            // mid-page » (cf. Flag.pageToOpen). `last_position` was already deserialised but its
+            // value was thrown away; only its nullity was read, as an authenticated-row probe.
+            lastPosition = dto.lastPosition,
+            postsPerPage = postsResultsPerPage,
             firstPostAuthor = dto.links.author?.title.orEmpty(),
             lastReplyAuthor = dto.links.lastAuthor?.title.orEmpty(),
             lastReplyAt = dto.lastPostDate,

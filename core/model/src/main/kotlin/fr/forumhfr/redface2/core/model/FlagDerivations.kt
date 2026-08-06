@@ -28,3 +28,53 @@ fun effectiveFlagColor(type: FlagType, isFavorite: Boolean): FlagType =
 
 /** [Flag] convenience over [effectiveFlagColor]. */
 fun Flag.effectiveFlagColor(): FlagType = effectiveFlagColor(type, isFavorite)
+
+/**
+ * HFR's default posts-per-page, used when REST omits `results_per_page` on the `posts` href.
+ * See [Flag.postsPerPage] for why the real value is carried per flag instead of assumed.
+ */
+const val DEFAULT_POSTS_PER_PAGE = 40
+
+/**
+ * #638 — the page a flag row must OPEN on (thony94 / MisterDams, dev v178-179).
+ *
+ * The bug: tapping a row opened [Flag.lastReadPage], the page where the read marker sits. When the
+ * last-read post is the LAST post of that page and a further page exists, that reopens an
+ * already-read page with the read post at the bottom, instead of moving on. RF1 went to the next
+ * page. But `lastReadPage + 1` is not the fix either: when the user stopped MID-page, unread posts
+ * remain on the current page and skipping it loses them.
+ *
+ * The discriminator is [Flag.lastPosition] (REST `last_position`, 1-based global index): the
+ * last-read post is exactly at a page boundary iff `lastPosition % postsPerPage == 0`. So this
+ * advances by one page ONLY in that case, and stays put otherwise. Because the decision is made
+ * from data already in hand, it happens BEFORE navigation — deciding after the page is displayed
+ * would reproduce the « flash before jump » of #477.
+ *
+ * Conservative by construction: every uncertainty (no unread, already on the last page, absent or
+ * `0` [Flag.lastPosition] — including the « dernier lu supprimé » case of #394 — non-positive
+ * [Flag.postsPerPage]) degrades to [Flag.lastReadPage], i.e. today's behaviour. We may fail to
+ * advance, we never skip unread posts.
+ *
+ * When it advances, no client-side « last read » banner is needed: HFR itself opens page N+1 with a
+ * « Reprise du message précédent » recap of the last post of page N (verified live 2026-08-04),
+ * which IS the marker the issue asks for.
+ */
+fun Flag.pageToOpen(): Int {
+    // The upper clamp is NOT decoration: a stale cache row can carry a `lastReadPage` past a shrunk
+    // `totalPages` (moderated posts, purged topic — the same staleness `pagesToRead` guards against),
+    // and the pre-#638 `flagFirstUnreadPage` bounded its result with `coerceIn(1, totalPages)`.
+    // Without it, that row would open a page beyond the last one (code review #1026).
+    val lastPage = totalPages.coerceAtLeast(1)
+    val current = lastReadPage.coerceIn(1, lastPage)
+    val position = lastPosition ?: 0
+    val divides = position > 0 && postsPerPage > 0 && position % postsPerPage == 0
+    // A 1-based global index lands on a page boundary exactly when it divides the page size — but
+    // only trust it when it also lands on the page the marker claims. Cross-checking the two REST
+    // fields against each other guards a stale or inconsistent pair (cross-review Sol: a row
+    // carrying lastReadPage = 12 with lastPosition = 40 would otherwise advance on the strength of
+    // a position belonging to page 1).
+    val positionPage = if (divides) position / postsPerPage else 0
+    val stoppedAtPageEnd = divides && positionPage == current
+    val advances = hasUnread && lastReadPage < totalPages && stoppedAtPageEnd
+    return if (advances) (current + 1).coerceAtMost(lastPage) else current
+}

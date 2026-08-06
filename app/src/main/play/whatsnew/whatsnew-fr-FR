@@ -1,6 +1,5 @@
-Redface 2 v0.37.0 — bêta.
+Redface 2 v0.40.0 — bêta.
 
-- La vue des sujets a été entièrement revue : navigation entre pages sans flash, retour précis aux citations, repères de lecture et mode pleine largeur.
-- Pincez la page pour zoomer jusqu'à 3×.
-- Les images respectent mieux leur taille et l'écran ; miniatures et GIF sont plus lisibles, avec actions, erreurs claires et réessai.
-- Répondre et citer est plus fluide — en plein écran (avec envoi d'images) ou via la réponse rapide expérimentale.
+- Sélecteur de smileys : 5 colonnes sur tous les téléphones et smileys perso nettement plus grands, avec un délimiteur de cellule réglable.
+- Drapeaux : un sujet dont le dernier message lu terminait une page s'ouvre maintenant sur la page suivante, là où se trouve vraiment le premier non-lu.
+- Nouveau : « Mettre un favori HFR ici » dans le menu d'un message, avec confirmation quand le sujet a déjà un favori ailleurs.

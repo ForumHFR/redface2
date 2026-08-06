@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.domain.flags
 
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
+import fr.forumhfr.redface2.core.model.write.FlagAddContext
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -58,6 +59,37 @@ interface FlagRepository {
      * otherwise — including transport / session-expiry errors.
      */
     suspend fun removeFlag(flag: Flag): Result<Unit>
+
+    /**
+     * Add a favourite on one exact topic position (#986). Per ADR-003 the mutation stays
+     * HTML : a GET on `/user/addflag.php` keyed on [context]'s
+     * `(cat, subcat, topicId, page, numreponse, ref)` tuple, classified by the
+     * « Favori positionné » response sentence. `addflag.php` is favourite-only :
+     * `owntopic` is ignored by HFR, so callers do not choose a [FlagType].
+     *
+     * On **success** the implementation may mark already cached rows for the same topic as
+     * favourite, but it must not fabricate a full [Flag] row for the favourites bucket :
+     * `addflag.php` does not return title, counters, authors or activity metadata. A fresh
+     * REST refresh remains the authoritative way to populate the favourites list. On
+     * **failure** (refused or unexpected page) no cache is touched and the [Result] carries
+     * the cause. A session-expired GET surfaces as a failed [Result], like [removeFlag].
+     *
+     * Returns [Result.success] with [Unit] on a confirmed add, [Result.failure] otherwise
+     * — including transport / session-expiry errors.
+     */
+    suspend fun addFlag(context: FlagAddContext): Result<Unit>
+
+    /**
+     * Resolve whether one topic already has a server-side HFR favourite (#986). This is a
+     * topic-level answer only: HFR's REST payload exposes `flag_owntopic == 3`, but never the
+     * post position currently carrying the favourite.
+     *
+     * The implementation performs a fresh, category-scoped lookup instead of trusting the
+     * process/Room cache: a stale `false` would let the UI replace an existing position without
+     * confirmation. A failed or incomplete lookup is a failed [Result], never `false`, so callers
+     * can fail closed.
+     */
+    suspend fun resolveFavorite(cat: Int, topicId: Int): Result<Boolean>
 
     /**
      * Resolve the full [Flag] for a `(cat, topicId)` pair (#809), for surfaces OUTSIDE the Drapeaux

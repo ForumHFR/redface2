@@ -203,7 +203,7 @@ Le PostRenderer sera développé de manière incrémentale : texte brut d'abord,
 
 Mandat de refonte des écrans chauds avant la 1.0 (post HFR XaTriX 2788560) :
 - [x] **Refonte de la vue Drapeaux** — #603 (livrée, bêta 0.18.0 — [ADR-017]({{ site.baseurl }}/adr/017-refonte-vue-drapeaux))
-- [ ] **Refonte de la vue Topic** — #604 (en cours : vagues Chargement / Navigation / Lecture / Postage livrées en dev 0.19.x→0.24.x)
+- [x] **Refonte de la vue Topic** — #604 (livrée, bêta 0.37.0 : cinq vagues, moteur de pagination in-VM #895, loupe #182, passe images #876 ; reliquats en Vue · Topic 2)
 - [x] **Hygiène repo / audit des dérives** — exécutée (2026-06) ; #605 requalifiée en ombrelle de suivi Phase 4
 
 **Livrable :** les features communautaires les plus demandées + une UI refondue prête pour la 1.0.

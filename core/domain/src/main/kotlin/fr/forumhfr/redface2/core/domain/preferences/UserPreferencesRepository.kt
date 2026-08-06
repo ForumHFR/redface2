@@ -472,6 +472,17 @@ interface UserPreferencesRepository {
     suspend fun setMediaDisplayProfile(profile: MediaDisplayProfile)
 
     /**
+     * Smiley picker cell delimiter (#989): [SmileyPickerDecoration.NONE] (default) keeps the
+     * current undelimited picker; [SmileyPickerDecoration.OUTLINE] and
+     * [SmileyPickerDecoration.SEPARATORS] add visual cell boundaries without changing thumbnail size
+     * or the final smiley rendering. A corrupt / unknown stored value degrades to the NONE default.
+     */
+    fun observeSmileyPickerDecoration(): Flow<SmileyPickerDecoration>
+
+    /** Persists [observeSmileyPickerDecoration]. Default [SmileyPickerDecoration.NONE] until the first call. */
+    suspend fun setSmileyPickerDecoration(decoration: SmileyPickerDecoration)
+
+    /**
      * Reading font-size preset (#287): [FontScalePreference.M] (default) is the M3 reference size;
      * [FontScalePreference.S] / [FontScalePreference.L] scale the reading typography by the preset
      * [FontScalePreference.factor], applied ON TOP of the OS font zoom (never replacing it).

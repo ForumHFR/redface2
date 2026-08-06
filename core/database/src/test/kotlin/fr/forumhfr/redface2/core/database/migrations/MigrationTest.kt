@@ -128,6 +128,7 @@ class MigrationTest {
                 MIGRATION_12_13,
                 MIGRATION_13_14,
                 MIGRATION_14_15,
+                MIGRATION_15_16,
             )
             .build()
 
@@ -273,6 +274,7 @@ class MigrationTest {
                 MIGRATION_12_13,
                 MIGRATION_13_14,
                 MIGRATION_14_15,
+                MIGRATION_15_16,
             )
             .build()
 
@@ -378,6 +380,7 @@ class MigrationTest {
                 MIGRATION_12_13,
                 MIGRATION_13_14,
                 MIGRATION_14_15,
+                MIGRATION_15_16,
             )
             .build()
 
@@ -455,6 +458,7 @@ class MigrationTest {
                 MIGRATION_12_13,
                 MIGRATION_13_14,
                 MIGRATION_14_15,
+                MIGRATION_15_16,
             )
             .build()
 
@@ -528,6 +532,7 @@ class MigrationTest {
                 MIGRATION_12_13,
                 MIGRATION_13_14,
                 MIGRATION_14_15,
+                MIGRATION_15_16,
             )
             .build()
 
@@ -592,6 +597,7 @@ class MigrationTest {
                 MIGRATION_12_13,
                 MIGRATION_13_14,
                 MIGRATION_14_15,
+                MIGRATION_15_16,
             )
             .build()
 
@@ -670,6 +676,7 @@ class MigrationTest {
                 MIGRATION_12_13,
                 MIGRATION_13_14,
                 MIGRATION_14_15,
+                MIGRATION_15_16,
             )
             .build()
 
@@ -735,6 +742,7 @@ class MigrationTest {
                 MIGRATION_12_13,
                 MIGRATION_13_14,
                 MIGRATION_14_15,
+                MIGRATION_15_16,
             )
             .build()
 
@@ -790,6 +798,7 @@ class MigrationTest {
                 MIGRATION_12_13,
                 MIGRATION_13_14,
                 MIGRATION_14_15,
+                MIGRATION_15_16,
             )
             .build()
 
@@ -849,6 +858,7 @@ class MigrationTest {
                 MIGRATION_12_13,
                 MIGRATION_13_14,
                 MIGRATION_14_15,
+                MIGRATION_15_16,
             )
             .build()
 
@@ -913,6 +923,7 @@ class MigrationTest {
                 MIGRATION_12_13,
                 MIGRATION_13_14,
                 MIGRATION_14_15,
+                MIGRATION_15_16,
             )
             .build()
 
@@ -977,6 +988,7 @@ class MigrationTest {
                 MIGRATION_12_13,
                 MIGRATION_13_14,
                 MIGRATION_14_15,
+                MIGRATION_15_16,
             )
             .build()
 
@@ -1051,6 +1063,7 @@ class MigrationTest {
                 MIGRATION_12_13,
                 MIGRATION_13_14,
                 MIGRATION_14_15,
+                MIGRATION_15_16,
             )
             .build()
 
@@ -1122,6 +1135,7 @@ class MigrationTest {
                 MIGRATION_12_13,
                 MIGRATION_13_14,
                 MIGRATION_14_15,
+                MIGRATION_15_16,
             )
             .build()
 
@@ -1131,6 +1145,74 @@ class MigrationTest {
             ).use { cursor ->
                 assertTrue("pre-v15 post row must survive MIGRATION_14_15", cursor.moveToFirst())
                 assertTrue("citedCount must be NULL for pre-v15 rows", cursor.isNull(0))
+            }
+        } finally {
+            migrated.close()
+        }
+    }
+
+    /**
+     * v15 → v16 (#638) — `flag_topics.lastPosition` + `flag_topics.postsPerPage`.
+     *
+     * Verifies:
+     * 1. The migration runs cleanly against the v15 fixture and matches the exported v16 schema.
+     * 2. A pre-existing flag row survives.
+     * 3. `lastPosition` defaults to NULL on old rows — which `Flag.pageToOpen()` treats as
+     *    « unknown » and degrades to the pre-#638 behaviour rather than guessing a page.
+     * 4. `postsPerPage` backfills to HFR's 40, so a migrated row stays usable until the next fetch.
+     */
+    @Test
+    fun migrate_15_to_16_adds_lastPosition_and_postsPerPage_to_flag_topics() {
+        val dbName = "migration_15_16_test"
+
+        // 1. Create a v15 database and insert a flag row that pre-dates both columns.
+        helper.createDatabase(dbName, 15).apply {
+            execSQL(
+                """INSERT INTO flag_topics (userId, type, cat, subcat, topicId, title, totalPages,
+                   replyCount, isFavorite, hasUnread, lastReadPage, lastPostReadId, firstPostAuthor,
+                   lastReplyAuthor, lastReplyAt, fetchedAt, authMode)
+                   VALUES ('54596', 'CYAN', 23, 550, 35395, 'v15 cached flag', 14, 540, 0, 1, 12,
+                   2783256, 'XaTriX', 'qwazer', '2026-05-01 17:07', 1000, 'AUTHENTICATED')""",
+            )
+            close()
+        }
+
+        // 2. Run MIGRATION_15_16 and validate against the v16 schema.
+        helper.runMigrationsAndValidate(dbName, 16, true, MIGRATION_15_16).close()
+
+        // 3. Re-open through Room to prove the migrated file matches the compiled schema.
+        val migrated = Room.databaseBuilder(
+            ApplicationProvider.getApplicationContext(),
+            RedfaceDatabase::class.java,
+            dbName,
+        )
+            .allowMainThreadQueries()
+            .addMigrations(
+                MIGRATION_1_2,
+                MIGRATION_2_3,
+                MIGRATION_3_4,
+                MIGRATION_4_5,
+                MIGRATION_5_6,
+                MIGRATION_6_7,
+                MIGRATION_7_8,
+                MIGRATION_8_9,
+                MIGRATION_9_10,
+                MIGRATION_10_11,
+                MIGRATION_11_12,
+                MIGRATION_12_13,
+                MIGRATION_13_14,
+                MIGRATION_14_15,
+                MIGRATION_15_16,
+            )
+            .build()
+
+        try {
+            migrated.openHelper.readableDatabase.query(
+                "SELECT lastPosition, postsPerPage FROM flag_topics WHERE topicId = 35395",
+            ).use { cursor ->
+                assertTrue("pre-v16 flag row must survive MIGRATION_15_16", cursor.moveToFirst())
+                assertTrue("lastPosition must be NULL for pre-v16 rows", cursor.isNull(0))
+                assertEquals("postsPerPage must backfill to HFR's 40", 40, cursor.getInt(1))
             }
         } finally {
             migrated.close()

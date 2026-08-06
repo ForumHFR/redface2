@@ -1,6 +1,5 @@
-Redface 2 v0.37.0 — beta.
+Redface 2 v0.40.0 — beta.
 
-- The topic view has been redesigned: page changes no longer flash, quote jumps return precisely, reading markers are clearer, and posts can use the full width.
-- Pinch the page to zoom up to 3×.
-- Images fit their content and screen better; thumbnails and GIFs are easier to read, with actions, clear errors, and retry.
-- Replying and quoting are smoother — full screen (with image upload) or the experimental quick reply.
+- Smiley picker: 5 columns on every phone and much larger custom smileys, plus an optional cell delimiter.
+- Flags: a topic whose last read post ended a page now opens on the next page, where the first unread post actually is.
+- New: "Set an HFR bookmark here" in a post's menu, with a confirmation when the topic already has one elsewhere.

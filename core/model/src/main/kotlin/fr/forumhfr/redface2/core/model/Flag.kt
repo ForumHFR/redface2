@@ -57,6 +57,30 @@ data class Flag(
      * legacy `numreponse` size — current production values fit in `Int` (~10M).
      */
     val lastPostReadId: Long?,
+    /**
+     * #638 — REST `last_position`: the **1-based global index** of the last post the user read
+     * within the whole topic (NOT a position inside its page, and NOT a page number). Combined with
+     * [postsPerPage] it is the only way to know whether the last-read post sits at the very END of
+     * its page, which is what [pageToOpen] needs: `lastReadPage` alone cannot distinguish « stopped
+     * mid-page » from « stopped at the bottom of the page », and those need opposite behaviours.
+     *
+     * The 1-based convention is pinned by the fixtures: `last_position = 40` comes with
+     * `page = 1` (0-based would put index 40 on page 2), `last_position = 600000` with
+     * `page = 15000` (600000 / 40 exactly), and a fully-read topic carries
+     * `last_position == links.posts.count` (595908 / 595908). HFR's « Reprise du message
+     * précédent » recap at the top of page N+1 does NOT consume a position.
+     *
+     * `0` is HFR's « never read anything » sentinel, and the field is absent on anonymous rows —
+     * both land as a value [pageToOpen] refuses to act on.
+     */
+    val lastPosition: Int? = null,
+    /**
+     * #638 — posts per page for THIS topic, from `results_per_page` on the REST `posts` href
+     * (40 in practice). Carried per flag rather than hardcoded: the server normalises the value and
+     * the user's own `topicpp` profile option exists, so a constant would silently break
+     * [pageToOpen] the day either changes.
+     */
+    val postsPerPage: Int = DEFAULT_POSTS_PER_PAGE,
     val firstPostAuthor: String,
     val lastReplyAuthor: String,
     /**

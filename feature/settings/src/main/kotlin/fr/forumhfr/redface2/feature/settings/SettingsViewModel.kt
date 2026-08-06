@@ -10,6 +10,7 @@ import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
@@ -202,6 +203,12 @@ class SettingsViewModel @Inject constructor(
             isLocked = { it.isUpdatingMediaDisplayProfile },
             apply = { state, value -> state.copy(mediaDisplayProfile = value) },
         )
+        // #989 — délimiteur du picker de smileys (enum), même forme de collecte.
+        observePreference(
+            flow = userPreferencesRepository.observeSmileyPickerDecoration(),
+            isLocked = { it.isUpdatingSmileyPickerDecoration },
+            apply = { state, value -> state.copy(smileyPickerDecoration = value) },
+        )
         // #459 — Hébergeur d'images : provider (enum) + imgur Client-ID (text).
         observePreference(
             flow = userPreferencesRepository.observeUploadProvider(),
@@ -315,6 +322,8 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.DisplayDensityChanged -> updateDisplayDensity(intent.density)
             is SettingsIntent.FontScaleChanged -> updateFontScale(intent.scale)
             is SettingsIntent.MediaDisplayProfileChanged -> updateMediaDisplayProfile(intent.profile)
+            is SettingsIntent.SmileyPickerDecorationChanged ->
+                updateSmileyPickerDecoration(intent.decoration)
             is SettingsIntent.SetUploadProvider -> updateUploadProvider(intent.provider)
             is SettingsIntent.SetImgurClientId -> updateImgurClientId(intent.text)
             is SettingsIntent.SetEditorImageInsert -> updateEditorImageInsert(intent.mode)
@@ -661,6 +670,39 @@ class SettingsViewModel @Inject constructor(
 
     // #973 — block-GIF display profile is an enum too; same bespoke optimistic-flip shape as
     // updateDisplayDensity. previous is captured for revert.
+    /** #989 — délimiteur du picker : même forme optimiste + rollback que le profil GIF (#973). */
+    private fun updateSmileyPickerDecoration(desired: SmileyPickerDecoration) {
+        val previous = _state.value.smileyPickerDecoration
+        _state.update {
+            it.copy(
+                smileyPickerDecoration = desired,
+                isUpdatingSmileyPickerDecoration = true,
+                smileyPickerDecorationError = false,
+                smileyPickerDecorationTouchedLocally = true,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { userPreferencesRepository.setSmileyPickerDecoration(desired) }
+                .onSuccess {
+                    _state.update {
+                        it.copy(
+                            smileyPickerDecoration = desired,
+                            isUpdatingSmileyPickerDecoration = false,
+                        )
+                    }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            smileyPickerDecoration = previous,
+                            isUpdatingSmileyPickerDecoration = false,
+                            smileyPickerDecorationError = true,
+                        )
+                    }
+                }
+        }
+    }
+
     private fun updateMediaDisplayProfile(desired: MediaDisplayProfile) {
         val previous = _state.value.mediaDisplayProfile
         _state.update {
