@@ -9,17 +9,27 @@ import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.model.EditorSmileySource
 import kotlin.math.roundToInt
 
+/** The dominant perso format of the HFR corpus (31 % of the measured top 100) drives the target cell width. */
+private val DOMINANT_PERSO_WIDTH = 70.dp
+
+/** Companion of [DOMINANT_PERSO_WIDTH]: the height of that same dominant 70×50 format. */
+private val DOMINANT_PERSO_HEIGHT = 50.dp
+
+/** Below this AVAILABLE width the five-column floor would degrade the dominant perso too far: floor at four. */
+private val FIVE_COLUMN_MIN_AVAILABLE_WIDTH = 324.dp
+
 /**
  * #989 — the smiley picker's geometry and scaling knobs, extracted from [SmileyPickerSheet] so a
  * device spike can drive the REAL grid instead of a copy of it (cadrage Sol : `SmileyGrid` and
  * `SmileyCell` were private with their constants inlined, so a debug-only Activity could only ever
  * have duplicated them — and then compared a copy against itself).
  *
- * [Current] IS the shipped geometry. Since #989 that is preset « E »: `Adaptive(56.dp)`-equivalent
- * columns, 8 dp of sheet padding, 4 dp of spacing, a cell at the corpus' own 7:5 ratio (floored at
- * the 48 dp touch minimum) and the no-upscale ceiling inherited from #871. On a 360 dp phone it
- * solves to 5 cells of 65,33×48 dp with a 61,33×44 cap — the dominant 70×50 perso then saturates
- * BOTH axes at once, where the previous square 48 dp cell left it at 44×31.
+ * [Current] IS the shipped geometry. Since the #989 follow-up it solves toward the smallest cell
+ * that can render the dominant 70×50 perso at native size on both axes, then applies a 5-column
+ * phone floor (4 below the available-width threshold) and keeps the historical `Adaptive(56.dp)`
+ * rule as the tactile upper bound. On a 360 dp phone the floor deliberately preserves the shipped
+ * #989 result: 5 cells of 65,33×48 dp with a 61,33×44 cap. On wider portrait phones the 7:5 ratio
+ * starts doing real work and the dominant perso reaches native size once the cap allows it.
  *
  * IMPORTANT — this is the PICKER's policy, deliberately DISTINCT from the posts' one
  * ([fr.forumhfr.redface2.core.ui.post.intrinsicSmileyDisplaySize], which §9 of the images contract
@@ -30,10 +40,10 @@ import kotlin.math.roundToInt
  * seam is what lets the picker relax the no-upscale rule without re-opening the contract.
  */
 data class SmileyPickerLayoutSpec(
-    /** Minimum column width — the same role as `GridCells.Adaptive(minSize)`. */
+    /** Minimum tactile column width, used as the upper bound on column count. */
     val minCellWidth: Dp = 56.dp,
-    /** Cell width / height. `1f` is the shipped square cell; `70f / 50f` is the dominant perso format. */
-    val cellAspectRatio: Float = 70f / 50f,
+    /** Cell width / height. The default follows the dominant HFR perso format. */
+    val cellAspectRatio: Float = DOMINANT_PERSO_WIDTH.value / DOMINANT_PERSO_HEIGHT.value,
     /** Horizontal padding of the sheet content around the grid. */
     val gridPadding: Dp = 8.dp,
     /** Gap between cells, on both axes. */
@@ -70,17 +80,42 @@ data class SmileyGridGeometry(
     val columns: Int,
     val cellWidth: Dp,
     val cellHeight: Dp,
+    /**
+     * The rendered gap between cells: 0 dp for continuous separators,
+     * [SmileyPickerLayoutSpec.cellSpacing] otherwise.
+     */
+    val cellSpacing: Dp,
     val capWidth: Dp,
     val capHeight: Dp,
 )
 
 /**
- * Column solver replicating `GridCells.Adaptive`'s own rule, so that the cell width becomes KNOWN
- * and the image cap can follow the cell instead of being a hardcoded 44 dp.
+ * Column solver for the picker. It does NOT pick "as many columns as fit" anymore: it targets the
+ * smallest cell that can render the dominant 70×50 perso at native size on both axes, then applies
+ * the density-first column policy chosen by the maintainer.
  *
  * Why not keep `Adaptive` and be done: it never tells the cell its own resolved size. Why not
  * `Fixed(5)` either: it is right on an S10e in portrait and wrong everywhere else — in landscape or
  * on a tablet it stretches five cells across the whole width (cadrage Sol).
+ *
+ * The target cell width is derived from the passed [spec], not from literals: [SmileyPickerLayoutSpec.imageInset],
+ * [SmileyPickerLayoutSpec.cellAspectRatio], [SmileyPickerLayoutSpec.minCellWidth] and
+ * [SmileyPickerLayoutSpec.cellSpacing] are all spike and separator knobs. Hardcoding the defaults
+ * here would silently make those modes lie about the geometry they are comparing.
+ *
+ * The nominal count uses `round`, not `floor`: this is the "density first" trade-off. Combined with
+ * the floor below it guarantees five columns on current phones, but it can shrink the dominant
+ * 70×50 perso by roughly 10 % below native (roughly 12 % on 360 dp, where the floor forces a fifth
+ * column over a nominal four). `floor` would protect native rendering more often, at the cost of
+ * four columns on a 360 dp phone. The maintainer chose the five-column density.
+ *
+ * The floor is based on the AVAILABLE width, in pixels: five columns once that width reaches the
+ * threshold, four below it. It intentionally does not read `screenWidthDp`, because the bottom
+ * sheet width cap and its padding decouple screen width from grid width.
+ *
+ * The historical `Adaptive(minCellWidth)` rule is still present, but only as a tactile upper bound:
+ * it prevents the floor from forcing cells under [SmileyPickerLayoutSpec.minCellWidth] in narrow
+ * multi-window layouts.
  *
  * **The arithmetic is in PHYSICAL PIXELS, and that is load-bearing** (gate Sol r2, bloquant).
  * `Adaptive` computes `max((availableSize + spacing) / (minSize.roundToPx() + spacing), 1)` with
@@ -93,6 +128,8 @@ data class SmileyGridGeometry(
  *
  * The cell height derives from [SmileyPickerLayoutSpec.cellAspectRatio] and is floored at
  * [SmileyPickerLayoutSpec.minCellHeight] — a landscape cell must not drop under the touch minimum.
+ * Separators keep the NOMINAL spacing while solving columns, then drop only the RENDER spacing to
+ * 0 dp so the rules become continuous without changing the column count.
  *
  * Note on the returned [SmileyGridGeometry.cellWidth]: `Adaptive` distributes the leftover pixels by
  * giving one extra pixel to the first columns, so real cells can differ by 1 px. This returns the
@@ -106,14 +143,25 @@ fun smileyGridGeometry(
     val availablePx = availableWidth.roundToPx()
     val spacingPx = spec.cellSpacing.roundToPx()
     val minCellPx = spec.minCellWidth.roundToPx()
-    val columns = ((availablePx + spacingPx) / (minCellPx + spacingPx)).coerceAtLeast(1)
-    val cellWidthPx = (availablePx - spacingPx * (columns - 1)) / columns
+    val targetCellWidth = maxOf(
+        DOMINANT_PERSO_WIDTH + spec.imageInset,
+        (DOMINANT_PERSO_HEIGHT + spec.imageInset) * spec.cellAspectRatio,
+    )
+    val targetPx = targetCellWidth.roundToPx()
+    val nominal = ((availablePx + spacingPx).toFloat() / (targetPx + spacingPx)).roundToInt()
+    val minColumns = if (availablePx >= FIVE_COLUMN_MIN_AVAILABLE_WIDTH.roundToPx()) 5 else 4
+    val maxColumns = ((availablePx + spacingPx) / (minCellPx + spacingPx)).coerceAtLeast(1)
+    val columns = maxOf(nominal, minColumns).coerceAtMost(maxColumns).coerceAtLeast(1)
+    val renderSpacing = if (spec.cellDecoration == SmileyPickerDecoration.SEPARATORS) 0.dp else spec.cellSpacing
+    val renderSpacingPx = renderSpacing.roundToPx()
+    val cellWidthPx = (availablePx - renderSpacingPx * (columns - 1)) / columns
     val cellWidth = cellWidthPx.toDp()
     val cellHeight = maxOf(cellWidth / spec.cellAspectRatio, spec.minCellHeight)
     SmileyGridGeometry(
         columns = columns,
         cellWidth = cellWidth,
         cellHeight = cellHeight,
+        cellSpacing = renderSpacing,
         capWidth = (cellWidth - spec.imageInset).coerceAtLeast(MIN_IMAGE_EXTENT),
         capHeight = (cellHeight - spec.imageInset).coerceAtLeast(MIN_IMAGE_EXTENT),
     )

@@ -4,7 +4,13 @@ import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerLayoutSpec
 
 /**
- * #989 — the candidate geometries put in front of XaTriX, one per question to settle. Deliberately
+ * #989 — the candidate geometries put in front of XaTriX during the arbitration, one per question to
+ * settle. **This list is a HISTORICAL RECORD of that arbitration, not a description of the shipped
+ * picker.** The defaults moved twice since it was written (preset « E », then the target-cell policy
+ * of the follow-up), so the dp figures in each `rationale` below describe the state at the time the
+ * preset was proposed. The caption at the top of the bench always shows the geometry ACTUALLY
+ * resolved by the current solver — trust it, not these strings. Retained because the reasoning
+ * (what each candidate proved or refuted) is what makes the final choice auditable. Deliberately
  * NOT the cartesian product of the levers (cadrage Sol): the cell outline and the debug overlay are
  * capture toggles applied on top of any preset, not presets of their own.
  *
