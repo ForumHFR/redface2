@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -437,8 +438,12 @@ private fun SmileyCellDebugOverlay(smiley: EditorSmiley, measuredPx: IntSize?) {
         else -> DEBUG_UNMEASURED_COLOR
     }
     Box(
+        // fillMaxSize, PAS fillMaxWidth : sans contrainte de hauteur le Box épouse son label et
+        // dessine un bandeau au milieu de la cellule au lieu de la boîte de la cellule — ce que ce
+        // KDoc prétendait faire sans le faire (code review #1026). Le BottomCenter ci-dessous n'a
+        // d'effet que si la boîte occupe bien toute la hauteur.
         modifier = Modifier
-            .fillMaxWidth()
+            .fillMaxSize()
             .border(1.dp, stateColor)
             // The measurement label is a developer aid, not content: TalkBack must keep announcing
             // the cell's own contentDescription, not "70×50" (gate Sol r2).
