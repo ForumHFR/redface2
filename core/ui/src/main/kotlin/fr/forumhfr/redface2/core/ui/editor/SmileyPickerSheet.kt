@@ -97,6 +97,7 @@ fun SmileyPickerSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         modifier = modifier,
+        sheetMaxWidth = SMILEY_SHEET_MAX_WIDTH,
     ) {
         // Local-only tab selection : the picker's tab state is not worth piping all the
         // way into the ViewModel. `rememberSaveable` so a configuration change (rotation,
@@ -269,8 +270,8 @@ fun SmileyPickerGrid(
     // headroom for the sheet chrome (tabs + search field), which grows with fontScale on its own.
     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
     val gridHeightCap = maxOf(SMILEY_GRID_MIN_HEIGHT_CAP, screenHeight * SMILEY_GRID_SCREEN_FRACTION)
-    // #989 — the constraints give the grid its own width, which is what turns `Adaptive`'s implicit
-    // column count into a KNOWN cell width ([smileyGridGeometry]) — and therefore an image cap that
+    // #989 — the constraints give the grid its own width, so the target-cell solver can resolve a
+    // KNOWN column count and cell width ([smileyGridGeometry]) — and therefore an image cap that
     // follows the cell instead of the hardcoded 44 dp.
     // #989 — the delimiter comes from the user setting, not from the call site: the picker is opened
     // from four screens and none of them should have to know about it. The spec still wins when it
@@ -281,20 +282,10 @@ fun SmileyPickerGrid(
     } else {
         layout.cellDecoration
     }
-    val layout = when (resolved) {
-        // #989 gate Fable (BLOQUANT) — continuous rules only exist when cells are ADJACENT: with a
-        // gap, per-cell edges read as disjoint dashes, not as a table. The bench neutralised the
-        // spacing itself, so shipping the option without porting that compensation would have given
-        // users dashes instead of the grid the setting promises. Dropping the spacing frees width, so
-        // `minCellWidth` absorbs it to keep the SAME column count: the solver's step
-        // (minCellWidth + cellSpacing) is unchanged by construction.
-        SmileyPickerDecoration.SEPARATORS -> layout.copy(
-            cellDecoration = resolved,
-            minCellWidth = layout.minCellWidth + layout.cellSpacing,
-            cellSpacing = 0.dp,
-        )
-        else -> layout.copy(cellDecoration = resolved)
-    }
+    // #989 follow-up — the solver always resolves columns with the NOMINAL spacing, then the
+    // geometry exposes the RENDER spacing. SEPARATORS therefore keep the same column count but pass
+    // 0 dp to the grid arrangement, making the per-cell right/bottom rules join continuously.
+    val layout = layout.copy(cellDecoration = resolved)
     BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
         val geometry = smileyGridGeometry(
             availableWidth = maxWidth,
@@ -303,11 +294,11 @@ fun SmileyPickerGrid(
         )
         LazyVerticalGrid(
             // #236 — denser grid: smaller min cell (was 64.dp) packs more smileys per row. #989 —
-            // `Fixed` over the SOLVED count, not a hardcoded 5: same responsive result as
-            // `Adaptive(minCellWidth)`, but the cell knows its size.
+            // `Fixed` over the SOLVED count, not a hardcoded 5: portrait stays dense, landscape
+            // stays responsive, and the cell knows its size.
             columns = GridCells.Fixed(geometry.columns),
-            horizontalArrangement = Arrangement.spacedBy(layout.cellSpacing),
-            verticalArrangement = Arrangement.spacedBy(layout.cellSpacing),
+            horizontalArrangement = Arrangement.spacedBy(geometry.cellSpacing),
+            verticalArrangement = Arrangement.spacedBy(geometry.cellSpacing),
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(max = gridHeightCap),
@@ -369,8 +360,9 @@ private fun SmileyCell(
                     SmileyPickerDecoration.OUTLINE ->
                         Modifier.border(1.dp, outlineColor, RoundedCornerShape(CELL_OUTLINE_RADIUS))
                     // #989 — right + bottom edges only: adjacent cells share their rules, so the
-                    // grid reads as a continuous table instead of a set of boxes. Requires the spec
-                    // to drop the spacing to 0, otherwise the edges never meet.
+                    // grid reads as a continuous table instead of a set of boxes. The geometry
+                    // drops only the render spacing to 0 dp for this mode, so the edges meet while
+                    // the nominal spacing still drives the column count.
                     SmileyPickerDecoration.SEPARATORS -> Modifier.drawBehind {
                         val stroke = 1.dp.toPx()
                         drawLine(
@@ -461,6 +453,14 @@ private fun SmileyCellDebugOverlay(smiley: EditorSmiley, measuredPx: IntSize?) {
         )
     }
 }
+
+/**
+ * #989 follow-up — 840 dp, not `Dp.Unspecified`: on a 1280 dp tablet, lifting the cap entirely
+ * would create roughly 15-16 thumbnails per row and push the centre out of the thumb zone. 840 dp
+ * keeps the picker capped around 10 columns while still freeing phone landscape from M3's 640 dp
+ * default.
+ */
+private val SMILEY_SHEET_MAX_WIDTH = 840.dp
 
 /**
  * #900 volet 2 — the grid's height budget : [SMILEY_GRID_SCREEN_FRACTION] of the screen height,

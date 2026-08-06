@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.ui.editor
 
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -21,23 +22,25 @@ import org.junit.Test
  *
  * #989 — the sizing moved behind a [SmileyPickerLayoutSpec] so the device spike can drive the real
  * grid. The first group is the REGRESSION GUARD of that extraction: with the shipped spec on an
- * S10e-width grid the numbers must be identical to the pre-#989 `smileyCellImageSize`.
+ * S10e-width grid the numbers must be identical to the pre-follow-up #989 picker.
  *
- * Everything is asserted at an explicit [Density] because the solver works in physical pixels, like
- * `GridCells.Adaptive` itself — see `borderline width under density 2 stays at five columns`, the
- * case a dp-space solver got wrong (gate Sol).
+ * The solver now targets the dominant 70×50 perso format, floors common phones at five columns,
+ * floors tiny widths at four, and keeps the former `GridCells.Adaptive(minCellWidth)` arithmetic as
+ * the tactile upper bound. Everything is asserted at an explicit [Density] because those thresholds
+ * are resolved in physical pixels — see `borderline width under density 2 stays at five columns`,
+ * the case a dp-space solver got wrong (gate Sol).
  */
 class SmileyCellImageSizeTest {
 
     /** The S10e is exactly xxhdpi. */
     private val s10e = Density(3f)
 
-    /** S10e portrait with the SHIPPED spec (preset « E » since #989): 360 dp − 2 × 8 dp of padding. */
+    /** S10e portrait with the SHIPPED spec: 360 dp − 2 × 8 dp of padding. */
     private val shippedGeometry = smileyGridGeometry(344.dp, s10e)
 
     /**
-     * The pre-#989 geometry, kept explicit so the historical numbers stay documented and the switch
-     * to « E » is provably a deliberate change of DEFAULTS and not a change of the sizing rule.
+     * The pre-#989 geometry, kept explicit so the historical spec stays documented while the
+     * follow-up deliberately changes the RULE used to solve it.
      */
     private val preE = SmileyPickerLayoutSpec(
         minCellWidth = 48.dp,
@@ -63,22 +66,23 @@ class SmileyCellImageSizeTest {
     /** 360 − 2 × 8 dp of trimmed padding. */
     private val compactWidth = 344.dp
 
-    // --- Iso-behaviour with the shipped spec (pre-#989 values, unchanged) ---
+    // --- Iso-behaviour with the shipped spec (pre-follow-up #989 values, unchanged) ---
 
     @Test
-    fun `shipped spec solves to five landscape cells — preset E (#989)`() {
+    fun `shipped spec solves to five portrait cells — preset E (#989)`() {
         assertEquals(5, shippedGeometry.columns)
-        assertEquals(65.33f, shippedGeometry.cellWidth.value, 0.02f)
-        // Floored at the Material touch minimum: 65.33 / 1.4 = 46.7 dp would be under it.
+        assertDpClose("cell width", 65.33f, shippedGeometry.cellWidth)
+        // The 360 dp calibration stays unchanged: the floor replaces the old minimum-driven result.
         assertEquals(48.dp, shippedGeometry.cellHeight)
-        assertEquals(61.33f, shippedGeometry.capWidth.value, 0.02f)
+        assertEquals(4.dp, shippedGeometry.cellSpacing)
+        assertDpClose("cap width", 61.33f, shippedGeometry.capWidth)
         assertEquals(44.dp, shippedGeometry.capHeight)
     }
 
     @Test
     fun `the shipped cap saturates both axes on the dominant 70x50 perso (#989)`() {
-        // The whole point of the landscape cell: at this ratio the dominant format is limited by
-        // BOTH axes at once, so no room is wasted. 44×31 before, 61×44 now — surface doubled.
+        // The whole point of the landscape-ratio cell: the dominant format is limited by BOTH axes
+        // at once, so no room is wasted. 44×31 before #989, 61×44 under the shipped S10e geometry.
         assertEquals(
             DpSize(61.dp, 44.dp),
             pickerSmileyImageSize(EditorSmileySource.WIKI, IntSize(70, 50), shippedGeometry),
@@ -102,38 +106,128 @@ class SmileyCellImageSizeTest {
     }
 
     @Test
-    fun `the pre-#989 geometry is unchanged when its spec is requested explicitly`() {
-        // Guards the extraction itself: the SIZING RULE did not change, only the defaults did.
+    fun `the legacy spec now solves under the target policy — the follow-up changed the rule`() {
+        // The extraction once guaranteed iso-behaviour when the old spec was requested explicitly.
+        // That guarantee is intentionally over: the follow-up changes the solver, not just defaults.
         val geometry = smileyGridGeometry(328.dp, s10e, preE)
-        assertEquals(6, geometry.columns)
-        assertEquals(48.dp, geometry.cellWidth)
-        assertEquals(48.dp, geometry.cellHeight)
-        assertEquals(44.dp, geometry.capWidth)
-        assertEquals(44.dp, geometry.capHeight)
-        // The historical numbers of the dominant perso, for the record.
+        assertEquals(5, geometry.columns)
+        assertEquals(59.dp, geometry.cellWidth)
+        assertEquals(59.dp, geometry.cellHeight)
+        assertEquals(8.dp, geometry.cellSpacing)
+        assertEquals(55.dp, geometry.capWidth)
+        assertEquals(55.dp, geometry.capHeight)
         assertEquals(
-            DpSize(44.dp, 31.dp),
+            DpSize(55.dp, 39.dp),
             pickerSmileyImageSize(EditorSmileySource.WIKI, IntSize(70, 50), geometry, preE),
         )
     }
 
     @Test
-    fun `the separators mode keeps the column count while dropping the spacing (#989)`() {
-        // Gate Fable (BLOQUANT): continuous rules only exist when cells are adjacent, so the grid
-        // neutralises the spacing in that mode — and must absorb it into minCellWidth, otherwise the
-        // freed width silently adds a column and the option changes the geometry it decorates.
-        val e = SmileyPickerLayoutSpec.Current
-        val separators = e.copy(
-            cellDecoration = SmileyPickerDecoration.SEPARATORS,
-            minCellWidth = e.minCellWidth + e.cellSpacing,
-            cellSpacing = 0.dp,
+    fun `target-cell matrix keeps phone portrait dense and lets wider phones reach native`() {
+        data class MatrixCase(
+            val label: String,
+            val availableWidth: Dp,
+            val density: Float,
+            val columns: Int,
+            val cellWidth: Float,
+            val cellHeight: Float,
+            val capWidth: Float,
+            val capHeight: Float,
+            val dominantRendered: DpSize,
         )
-        val plain = smileyGridGeometry(344.dp, s10e, e)
-        val ruled = smileyGridGeometry(344.dp, s10e, separators)
+
+        listOf(
+            MatrixCase("320 dp screen", 304.dp, 2f, 4, 73f, 52.14f, 69f, 48.14f, DpSize(67.dp, 48.dp)),
+            MatrixCase("360 dp S10e", 344.dp, 3f, 5, 65.33f, 48f, 61.33f, 44f, DpSize(61.dp, 44.dp)),
+            MatrixCase("384 dp screen", 368.dp, 2.8125f, 5, 70.40f, 50.29f, 66.40f, 46.29f, DpSize(65.dp, 46.dp)),
+            MatrixCase("393 dp Pixel", 377.dp, 2.75f, 5, 72f, 51.43f, 68f, 47.43f, DpSize(66.dp, 47.dp)),
+            MatrixCase("411 dp screen", 395.dp, 2.625f, 5, 75.43f, 53.88f, 71.43f, 49.88f, DpSize(70.dp, 50.dp)),
+            MatrixCase("412 dp screen", 396.dp, 3.5f, 5, 76f, 54.29f, 72f, 50.29f, DpSize(70.dp, 50.dp)),
+            MatrixCase("430 dp screen", 414.dp, 3.5f, 5, 79.43f, 56.73f, 75.43f, 52.73f, DpSize(70.dp, 50.dp)),
+            MatrixCase("760 dp S10e landscape", 744.dp, 3f, 9, 79f, 56.43f, 75f, 52.43f, DpSize(70.dp, 50.dp)),
+        ).forEach { case ->
+            val geometry = smileyGridGeometry(case.availableWidth, Density(case.density))
+            val rendered = pickerSmileyImageSize(EditorSmileySource.WIKI, IntSize(70, 50), geometry)
+            assertEquals("${case.label}: columns", case.columns, geometry.columns)
+            assertDpClose("${case.label}: cell width", case.cellWidth, geometry.cellWidth)
+            assertDpClose("${case.label}: cell height", case.cellHeight, geometry.cellHeight)
+            assertDpClose("${case.label}: cap width", case.capWidth, geometry.capWidth)
+            assertDpClose("${case.label}: cap height", case.capHeight, geometry.capHeight)
+            assertEquals("${case.label}: dominant 70x50 rendering", case.dominantRendered, rendered)
+        }
+    }
+
+    @Test
+    fun `sheet cap width reaches ten columns without going unbounded`() {
+        // Tablet windows wider than 856 dp hit the 840 dp sheet cap, leaving 824 dp for the grid.
+        val geometry = smileyGridGeometry(824.dp, s10e)
+        assertEquals(10, geometry.columns)
+        assertDpClose("cell width", 78.67f, geometry.cellWidth)
+        assertDpClose("cell height", 56.19f, geometry.cellHeight)
+        assertEquals(
+            DpSize(70.dp, 50.dp),
+            pickerSmileyImageSize(EditorSmileySource.WIKI, IntSize(70, 50), geometry),
+        )
+    }
+
+    @Test
+    fun `five-column floor switches on at the available-width threshold in pixels`() {
+        // The threshold is the AVAILABLE grid width, not screenWidthDp: 323 dp at density 2 is
+        // 646 px and stays at four columns; 324 dp is 648 px and enables the five-column floor.
+        val below = smileyGridGeometry(323.dp, Density(2f))
+        val at = smileyGridGeometry(324.dp, Density(2f))
+        assertEquals(4, below.columns)
+        assertEquals(77.5f, below.cellWidth.value, 0.02f)
+        assertEquals(5, at.columns)
+        assertEquals(61.5f, at.cellWidth.value, 0.02f)
+    }
+
+    @Test
+    fun `tactile ceiling wins over the floor in a narrow multi-window grid`() {
+        val geometry = smileyGridGeometry(200.dp, Density(2f))
+        assertEquals(3, geometry.columns)
+        assertEquals(64.dp, geometry.cellWidth)
+        assertTrue("cell width stays at or above the tactile minimum", geometry.cellWidth.value >= 56f)
+    }
+
+    @Test
+    fun `the separators mode keeps the column count while dropping only render spacing (#989)`() {
+        val plain = smileyGridGeometry(344.dp, s10e, SmileyPickerLayoutSpec.Current)
+        val ruled = smileyGridGeometry(
+            344.dp,
+            s10e,
+            SmileyPickerLayoutSpec.Current.copy(cellDecoration = SmileyPickerDecoration.SEPARATORS),
+        )
+        assertEquals(5, plain.columns)
         assertEquals("same column count in both modes", plain.columns, ruled.columns)
-        // Without the spacing the cells are slightly wider — they now touch, which is the point.
-        // 1032 px / 5 = 206 px (integer division, like Adaptive) → 68,67 dp.
-        assertEquals(68.67f, ruled.cellWidth.value, 0.05f)
+        assertEquals(4.dp, plain.cellSpacing)
+        assertEquals(0.dp, ruled.cellSpacing)
+        assertDpClose("plain cell width", 65.33f, plain.cellWidth)
+        assertDpClose("ruled cell width", 68.67f, ruled.cellWidth, tolerance = 0.05f)
+
+        val narrowPlain = smileyGridGeometry(304.dp, Density(2f), SmileyPickerLayoutSpec.Current)
+        val narrowRuled = smileyGridGeometry(
+            304.dp,
+            Density(2f),
+            SmileyPickerLayoutSpec.Current.copy(cellDecoration = SmileyPickerDecoration.SEPARATORS),
+        )
+        assertEquals("same narrow column count in both modes", narrowPlain.columns, narrowRuled.columns)
+        assertEquals(4, narrowRuled.columns)
+        assertEquals(73.dp, narrowPlain.cellWidth)
+        assertEquals(76.dp, narrowRuled.cellWidth)
+    }
+
+    @Test
+    fun `target cell width is derived from the requested spec`() {
+        assertEquals(9, smileyGridGeometry(744.dp, s10e, SmileyPickerLayoutSpec.Current).columns)
+        assertEquals(
+            10,
+            smileyGridGeometry(744.dp, s10e, SmileyPickerLayoutSpec.Current.copy(cellAspectRatio = 1f)).columns,
+        )
+        assertEquals(
+            8,
+            smileyGridGeometry(744.dp, s10e, SmileyPickerLayoutSpec.Current.copy(imageInset = 12.dp)).columns,
+        )
     }
 
     @Test
@@ -143,7 +237,7 @@ class SmileyCellImageSizeTest {
 
     @Test
     fun `unmeasured perso falls back to filling most of the cell`() {
-        assertEquals(DpSize(44.dp, 44.dp), size(EditorSmileySource.WIKI, measuredPx = null))
+        assertEquals(DpSize(55.dp, 55.dp), size(EditorSmileySource.WIKI, measuredPx = null))
     }
 
     @Test
@@ -154,18 +248,18 @@ class SmileyCellImageSizeTest {
 
     @Test
     fun `perso exactly at the cap passes through untouched`() {
-        assertEquals(DpSize(44.dp, 44.dp), size(EditorSmileySource.WIKI, IntSize(44, 44)))
+        assertEquals(DpSize(55.dp, 55.dp), size(EditorSmileySource.WIKI, IntSize(55, 55)))
     }
 
     @Test
     fun `oversized perso is capped down to the cell, aspect ratio preserved`() {
-        // Dominant 70×50 corpus size : scale 44/70 ≈ 0.629 → 44×31.
-        assertEquals(DpSize(44.dp, 31.dp), size(EditorSmileySource.WIKI, IntSize(70, 50)))
+        // Dominant 70×50 corpus size under the legacy spec: scale 55/70 ≈ 0.786 → 55×39.
+        assertEquals(DpSize(55.dp, 39.dp), size(EditorSmileySource.WIKI, IntSize(70, 50)))
     }
 
     @Test
     fun `degenerate measurement falls back to the cell-filling square`() {
-        assertEquals(DpSize(44.dp, 44.dp), size(EditorSmileySource.WIKI, IntSize(0, 50)))
+        assertEquals(DpSize(55.dp, 55.dp), size(EditorSmileySource.WIKI, IntSize(0, 50)))
     }
 
     @Test
@@ -173,13 +267,12 @@ class SmileyCellImageSizeTest {
         assertEquals(DpSize(20.dp, 20.dp), size(EditorSmileySource.BUILTIN, IntSize(70, 50)))
     }
 
-    // --- The solver matches GridCells.Adaptive, in physical pixels ---
+    // --- Target solver: pixel arithmetic, floor, and tactile ceiling ---
 
     @Test
     fun `borderline width under density 2 stays at five columns`() {
-        // Gate Sol, bloquant : a dp-space solver (335.5 / 56 = 5.99, nudged over by an epsilon)
-        // answered 6 columns of 47.92 dp here — under the touch minimum — where Adaptive, which
-        // divides Ints in px, answers 5. (655 + 16) / (96 + 16) = 5 in integer arithmetic.
+        // Gate Sol, bloquant: the tactile ceiling is still computed in physical pixels, so the
+        // borderline case that a dp-space Adaptive clone got wrong remains protected.
         val geometry = smileyGridGeometry(327.5.dp, Density(2f))
         assertEquals(5, geometry.columns)
         assertTrue(
@@ -196,7 +289,7 @@ class SmileyCellImageSizeTest {
                 val geometry = smileyGridGeometry(widthDp.dp, Density(densityValue), spec)
                 assertTrue(
                     "density $densityValue, width $widthDp: cell ${geometry.cellWidth} < 48.dp",
-                    // one pixel of slack: the cell width is the px division converted back to dp
+                    // One pixel of slack: the cell width is the px division converted back to dp.
                     geometry.cellWidth.value >= spec.minCellWidth.value - 1f / densityValue,
                 )
             }
@@ -206,22 +299,22 @@ class SmileyCellImageSizeTest {
     // --- #989 levers ---
 
     @Test
-    fun `compact margins alone keep six columns and widen the cell`() {
+    fun `trimmed margins now land on the five-column target too`() {
         // Preset « C » of the spike: trimmed margins on the pre-#989 48 dp minimum.
         val spec = preE.copy(gridPadding = 8.dp, cellSpacing = 4.dp)
         val geometry = smileyGridGeometry(compactWidth, s10e, spec)
-        assertEquals(6, geometry.columns)
-        assertEquals(54.dp, geometry.cellWidth)
-        assertEquals(50.dp, geometry.capWidth)
+        assertEquals(5, geometry.columns)
+        assertDpClose("cell width", 65.33f, geometry.cellWidth)
+        assertDpClose("cap width", 61.33f, geometry.capWidth)
     }
 
     @Test
-    fun `a 56 dp minimum solves to five columns — responsive, unlike a hardcoded Fixed(5)`() {
+    fun `the target policy stays responsive in landscape without chasing every possible column`() {
         assertEquals(5, smileyGridGeometry(compactWidth, s10e, compact).columns)
-        // Landscape must NOT stay at five stretched cells. 744 dp is the naive S10e landscape width;
-        // on the real device the system insets bring it down to ~690 dp, which solves to 11.
-        assertEquals(12, smileyGridGeometry(744.dp, s10e, compact).columns)
-        assertEquals(11, smileyGridGeometry(690.dp, s10e, compact).columns)
+        // Landscape remains responsive (more than five columns) but is now governed by the 70×50
+        // target cell, not by the old minimum-cell race toward 11-12 columns.
+        assertEquals(9, smileyGridGeometry(744.dp, s10e, compact).columns)
+        assertEquals(9, smileyGridGeometry(690.dp, s10e, compact).columns)
     }
 
     @Test
@@ -229,7 +322,7 @@ class SmileyCellImageSizeTest {
         val spec = compact.copy(cellAspectRatio = 70f / 50f)
         val geometry = smileyGridGeometry(compactWidth, s10e, spec)
         assertEquals(5, geometry.columns)
-        assertEquals(65.33f, geometry.cellWidth.value, 0.02f)
+        assertDpClose("cell width", 65.33f, geometry.cellWidth)
         // 65.33 / 1.4 = 46.7 dp, floored back up to the 48 dp minimum.
         assertEquals(48.dp, geometry.cellHeight)
     }
@@ -238,7 +331,7 @@ class SmileyCellImageSizeTest {
     fun `the dominant 70x50 perso saturates both axes in a landscape cell`() {
         val spec = compact.copy(cellAspectRatio = 70f / 50f)
         val geometry = smileyGridGeometry(compactWidth, s10e, spec)
-        // cap 61.33 × 44 : scale = min(61.33/70, 44/50) = 0.876 — both axes within a pixel of full.
+        // Cap 61.33 × 44: scale = min(61.33/70, 44/50) = 0.876 — both axes within a pixel of full.
         val displayed = pickerSmileyImageSize(EditorSmileySource.WIKI, IntSize(70, 50), geometry, spec)
         assertEquals(DpSize(61.dp, 44.dp), displayed)
     }
@@ -262,8 +355,8 @@ class SmileyCellImageSizeTest {
     @Test
     fun `the ceiling never lets a perso overflow its cap`() {
         val spec = preE.copy(persoScaleCeiling = 4f)
-        // Cap 44 wins over a ×4 ceiling: 15 × 4 = 60 would overflow the 48 dp cell.
-        assertEquals(DpSize(44.dp, 44.dp), size(EditorSmileySource.WIKI, IntSize(15, 15), spec))
+        // Cap 55 wins over a ×4 ceiling: 15 × 4 = 60 would overflow the solved cell.
+        assertEquals(DpSize(55.dp, 55.dp), size(EditorSmileySource.WIKI, IntSize(15, 15), spec))
     }
 
     @Test
@@ -277,5 +370,9 @@ class SmileyCellImageSizeTest {
             DpSize(70.dp, 50.dp),
             pickerSmileyImageSize(EditorSmileySource.WIKI, IntSize(70, 50), geometry, spec),
         )
+    }
+
+    private fun assertDpClose(message: String, expected: Float, actual: Dp, tolerance: Float = 0.02f) {
+        assertEquals(message, expected, actual.value, tolerance)
     }
 }

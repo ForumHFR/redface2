@@ -119,15 +119,12 @@ private fun SmileyPickerSpikeScreen(state: SpikeUiState, onState: (SpikeUiState)
     val decoration = SmileyPickerDecoration.entries[
         state.decoration.coerceIn(0, SmileyPickerDecoration.entries.lastIndex),
     ]
+    // Separator geometry is now handled by smileyGridGeometry itself: columns are solved with the
+    // nominal spacing, then render spacing drops to 0. Local compensation here would double-shift
+    // the preset and make the bench lie about the shipping grid.
     val spec = state.preset.spec.copy(
         cellDecoration = decoration,
         debugOverlay = state.debug,
-        // Les séparateurs continus n'ont de sens qu'accolés : sans quoi ce sont des tirets. Mais
-        // supprimer l'écart libère de la place et le solveur trouve alors 6 colonnes au lieu de 5 :
-        // on relève donc minCellWidth pour comparer à géométrie ÉGALE, sinon on comparerait deux
-        // grilles différentes et pas deux styles de délimitation.
-        cellSpacing = if (decoration == SmileyPickerDecoration.SEPARATORS) 0.dp else state.preset.spec.cellSpacing,
-        minCellWidth = if (decoration == SmileyPickerDecoration.SEPARATORS) 64.dp else state.preset.spec.minCellWidth,
     )
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -140,32 +137,32 @@ private fun SmileyPickerSpikeScreen(state: SpikeUiState, onState: (SpikeUiState)
                 .fillMaxWidth()
                 .padding(horizontal = spec.gridPadding, vertical = 8.dp),
         ) {
-        val geometry = smileyGridGeometry(maxWidth, LocalDensity.current, spec)
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(
-                text = "${state.preset.id} · ${state.preset.label}",
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            Text(
-                text = "%d col · cellule %.1f×%.1f · cap %.1f×%.1f · ×%.2f%s".format(
-                    geometry.columns,
-                    geometry.cellWidth.value,
-                    geometry.cellHeight.value,
-                    geometry.capWidth.value,
-                    geometry.capHeight.value,
-                    spec.persoScaleCeiling,
-                    " · " + decoration.name.lowercase(),
-                ) + if (state.builtin) " · onglet Standard" else "",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            SmileyPickerGrid(
-                items = if (state.builtin) BUILTIN_HFR_SMILEYS else SPIKE_PERSO_CORPUS,
-                onSmileyClicked = {},
-                layout = spec,
-            )
-        }
+            val geometry = smileyGridGeometry(maxWidth, LocalDensity.current, spec)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "${state.preset.id} · ${state.preset.label}",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    text = "%d col · cellule %.1f×%.1f · cap %.1f×%.1f · ×%.2f%s".format(
+                        geometry.columns,
+                        geometry.cellWidth.value,
+                        geometry.cellHeight.value,
+                        geometry.capWidth.value,
+                        geometry.capHeight.value,
+                        spec.persoScaleCeiling,
+                        " · " + decoration.name.lowercase(),
+                    ) + if (state.builtin) " · onglet Standard" else "",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                SmileyPickerGrid(
+                    items = if (state.builtin) BUILTIN_HFR_SMILEYS else SPIKE_PERSO_CORPUS,
+                    onSmileyClicked = {},
+                    layout = spec,
+                )
+            }
         }
 
         // --- controls: below the divider, outside every capture crop ------------------------------
