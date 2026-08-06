@@ -16,6 +16,30 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.39.1` — `internal` (dev) — 2026-08-06
+
+### Corrigé
+
+- **Le sélecteur de smileys affichait 6 colonnes chez la majorité des utilisateurs** ([#989](https://github.com/ForumHFR/redface2/issues/989), signalé par **XaTriX**). Le preset livré en 0.39.0 annonçait 5 colonnes : il ne les donnait que sur **360 dp**, la largeur du seul appareil sur lequel le spike avait été mesuré — et un écran étroit. La politique de « minimum de cellule » (`Adaptive(56.dp)`) prenait une 6ᵉ colonne dès ~372 dp, donc sur 384–430 dp.
+- **Le ratio 7:5 du corpus était inopérant sur TOUS les téléphones**, défaut trouvé au gate et invisible à l'usage : `cellHeight = max(cellWidth / 1.4, 48.dp)` ne dépasse le plancher tactile qu'au-delà d'une cellule de 67,2 dp, jamais atteinte en portrait avec l'ancienne politique — pas même sur un S10e (65,33 / 1,4 = 46,7). `capHeight` restait donc à 44 dp, **identique à avant #989**, le format dominant `70×50` était inatteignable et le paramètre `cellAspectRatio` ne faisait rien. Tout le gain de 0.39.0 venait du seul déblocage du cap en largeur.
+
+Le « minimum de cellule » est remplacé par une **largeur cible dérivée du format dominant** (`max(70 + inset, (50 + inset) × ratio)`), résolue en pixels entiers, encadrée par un plancher de colonnes (5 dès 324 dp de largeur **disponible**, 4 en dessous) et un plafond au minimum tactile. Toutes les valeurs sont lues depuis le spec, jamais en dur — le mode séparateurs et les presets du banc de test mutent ces champs et casseraient en silence sinon. Résultat : **5 colonnes de 360 à 430 dp**, dominant à sa taille **native dès 411 dp**, S10e inchangé, et paysage à 9 colonnes.
+
+- **Plafond de largeur du sélecteur porté de 640 à 840 dp** : la valeur par défaut de Material 3 convient à une feuille de texte, pas à une grille visuelle — elle bridait le paysage à 624 dp. Pas de levée totale : sur une tablette de 1280 dp, cela donnerait des rangées de ~15 vignettes, centre hors zone de pouce.
+- **Compensation du mode « quadrillage » rendue structurelle** : les colonnes se résolvent avec l'écart nominal et l'écart de rendu n'entre que dans la largeur de cellule. L'ancienne forme mutait le spec et portait un biais de numérateur masqué par la division entière.
+
+### Rectification du changelog 0.39.0
+
+L'entrée précédente annonçait « 5 colonnes » et « surface doublée » comme résultats généraux. Les deux ne valaient qu'à 360 dp : le facteur de surface tombait à ×1,57 sur un Pixel 7. Corrigé par la présente version.
+
+### Interne
+
+- `round` plutôt que `floor` dans le solveur est un arbitrage **assumé et documenté** : il garantit les 5 colonnes mais peut rétrécir le dominant jusqu'à ~10 % sous son natif sur écran étroit ; `floor` garantirait le natif au prix de 4 colonnes sur un 360 dp. Tranché par XaTriX en faveur de la densité.
+- **Le garde-fou qui manquait** : une matrice de 8 écrans réels est désormais pinnée. Un balayage de 7 densités × 115 largeurs existait déjà… pour le minimum tactile, mais aucun test ne vérifiait le nombre de colonnes — le garde-fou visait la mauvaise propriété. `SmileyCellImageSizeTest` passe de 21 à 27 cas.
+- Chaîne de production : cahier des charges rédigé par **Claude Fable 5** (matrice recalculée par script), implémentation par **GPT-5 Codex** en worktree isolé, relecture par **Claude Opus 5**, gate final par **Claude Fable 5** — conformité vérifiée valeur par valeur contre un solveur de référence, plus un balayage de ~10 000 largeurs × 7 densités sans violation du minimum tactile.
+
+---
+
 ## `0.39.0` — `internal` (dev) — 2026-08-04
 
 ### Modifié

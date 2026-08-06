@@ -1,4 +1,3 @@
-Redface 2 v0.39.0 — dev.
+Redface 2 v0.39.1 — dev.
 
-- Les smileys perso sont bien plus grands dans le sélecteur : la cellule suit enfin leur format, et le plus courant d'entre eux double de surface.
-- Nouveau réglage (Affichage) : séparer visuellement les smileys du sélecteur, par contour ou par quadrillage. Désactivé par défaut.
+- Correctif : le sélecteur de smileys affiche enfin 5 colonnes sur tous les téléphones, et non sur les seuls écrans étroits. Les smileys perso les plus courants y atteignent leur taille d'origine.

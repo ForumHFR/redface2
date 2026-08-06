@@ -1,4 +1,3 @@
-Redface 2 v0.39.0 — dev.
+Redface 2 v0.39.1 — dev.
 
-- Custom smileys are much bigger in the picker: the cell now follows their own shape, and the most common one doubles in area.
-- New setting (Display): visually separate the smileys in the picker, with outlines or a grid. Off by default.
+- Fix: the smiley picker now shows 5 columns on every phone, not just on narrow screens. The most common custom smileys reach their original size.
