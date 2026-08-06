@@ -1,3 +1,5 @@
-Redface 2 v0.39.1 — dev.
+Redface 2 v0.40.0 — beta.
 
-- Fix: the smiley picker now shows 5 columns on every phone, not just on narrow screens. The most common custom smileys reach their original size.
+- Smiley picker: 5 columns on every phone and much larger custom smileys, plus an optional cell delimiter.
+- Flags: a topic whose last read post ended a page now opens on the next page, where the first unread post actually is.
+- New: "Set an HFR bookmark here" in a post's menu, with a confirmation when the topic already has one elsewhere.

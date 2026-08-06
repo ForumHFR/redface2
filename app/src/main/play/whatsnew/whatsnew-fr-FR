@@ -1,3 +1,5 @@
-Redface 2 v0.39.1 — dev.
+Redface 2 v0.40.0 — bêta.
 
-- Correctif : le sélecteur de smileys affiche enfin 5 colonnes sur tous les téléphones, et non sur les seuls écrans étroits. Les smileys perso les plus courants y atteignent leur taille d'origine.
+- Sélecteur de smileys : 5 colonnes sur tous les téléphones et smileys perso nettement plus grands, avec un délimiteur de cellule réglable.
+- Drapeaux : un sujet dont le dernier message lu terminait une page s'ouvre maintenant sur la page suivante, là où se trouve vraiment le premier non-lu.
+- Nouveau : « Mettre un favori HFR ici » dans le menu d'un message, avec confirmation quand le sujet a déjà un favori ailleurs.

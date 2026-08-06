@@ -16,6 +16,23 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.40.0` — `open` (beta) — 2026-08-06
+
+Promotion en bêta du lot dev 0.38.0 → 0.39.1 : sélecteur de smileys (#989), correctifs
+de drapeaux (#638) et favori posé sur un message (#986).
+
+### Ajouté
+
+- **Le sélecteur de smileys affiche 5 colonnes sur tous les téléphones**, et les smileys perso du format dominant (`70×50`) atteignent enfin leur taille d'origine — 61×44 dp contre 44×31 avant ([#989](https://github.com/ForumHFR/redface2/issues/989), demandé par **XaTriX**). La politique de colonnes a basculé d'un « minimum de cellule » vers une **largeur de cellule cible**, seule forme qui tienne la promesse indépendamment de la densité.
+- **Délimiteur de cellule réglable** dans Réglages → Affichage : aucun (défaut), liseré par cellule, ou séparateurs continus. Il aide à repérer une vignette dans un corpus très hétérogène et ne change **pas** la taille des smileys — le preset qui agrandissait les petits a été écarté parce qu'il faisait promettre au picker une taille que le message ne respecte pas.
+- **« Mettre un favori HFR ici »** dans le menu contextuel d'un message ([#986](https://github.com/ForumHFR/redface2/issues/986), demandé par **thibw**). L'action est au niveau du message et non du sujet parce que le favori HFR s'ancre sur une position. Le libellé devient **« Déplacer le favori HFR ici »**, avec confirmation, quand le sujet porte déjà un favori : HFR n'en conserve qu'un par sujet et n'offre pas d'undo, donc poser ailleurs remplace le repère existant.
+
+### Corrigé
+
+- **Un sujet dont le dernier message lu terminait une page s'ouvrait sur cette page, pas sur la suivante** ([#638](https://github.com/ForumHFR/redface2/issues/638), signalé par **XaTriX**). Le champ `last_position` de l'API était bien désérialisé mais sa valeur jetée : impossible de savoir que la lecture s'était arrêtée en bas de page. Le raccourci « 1er non-lu » de l'appui long souffrait du même défaut ; les deux chemins partagent désormais une règle unique.
+- **L'onglet Favoris pouvait ignorer un favori tout juste posé** pendant 30 secondes : la réconciliation de cache ne marquait que les lignes déjà présentes, donc un premier favori sur un sujet sans drapeau ne mettait rien à jour.
+- Régression de la promotion elle-même, trouvée en code review : la borne haute de la page à ouvrir avait disparu, et une ligne de cache périmée pouvait viser une page au-delà de la dernière.
+
 ## `0.39.1` — `internal` (dev) — 2026-08-06
 
 ### Corrigé
