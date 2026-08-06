@@ -1674,7 +1674,14 @@ class DefaultFlagRepositoryTest {
         // the marker sentence is the live-verified #986 contract.
         const val ADD_SUCCESS_HTML =
             """<html><body><div class="hop">Favori positionné</div></body></html>"""
+        /**
+         * Page d'échec : volontairement une page QUELCONQUE sans le marqueur de succès, et non une
+         * phrase HFR — le vrai libellé d'échec de `addflag.php` n'a jamais été capturé. Le parser est
+         * fail-closed (il ne cherche que « favori positionné » et traite tout le reste comme un
+         * échec), donc le contenu exact n'a aucune incidence ; inventer une phrase française
+         * laisserait croire à un contrat attesté, ce que la charte fixtures interdit.
+         */
         const val ADD_FAILURE_HTML =
-            """<html><body><div class="hop">Favori non positionné</div></body></html>"""
+            """<html><body><div class="hop">page non reconnue</div></body></html>"""
     }
 }

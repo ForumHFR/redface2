@@ -60,7 +60,12 @@ const val DEFAULT_POSTS_PER_PAGE = 40
  * which IS the marker the issue asks for.
  */
 fun Flag.pageToOpen(): Int {
-    val current = lastReadPage.coerceAtLeast(1)
+    // The upper clamp is NOT decoration: a stale cache row can carry a `lastReadPage` past a shrunk
+    // `totalPages` (moderated posts, purged topic — the same staleness `pagesToRead` guards against),
+    // and the pre-#638 `flagFirstUnreadPage` bounded its result with `coerceIn(1, totalPages)`.
+    // Without it, that row would open a page beyond the last one (code review #1026).
+    val lastPage = totalPages.coerceAtLeast(1)
+    val current = lastReadPage.coerceIn(1, lastPage)
     val position = lastPosition ?: 0
     val divides = position > 0 && postsPerPage > 0 && position % postsPerPage == 0
     // A 1-based global index lands on a page boundary exactly when it divides the page size — but
@@ -71,5 +76,5 @@ fun Flag.pageToOpen(): Int {
     val positionPage = if (divides) position / postsPerPage else 0
     val stoppedAtPageEnd = divides && positionPage == current
     val advances = hasUnread && lastReadPage < totalPages && stoppedAtPageEnd
-    return if (advances) (current + 1).coerceAtMost(totalPages) else current
+    return if (advances) (current + 1).coerceAtMost(lastPage) else current
 }

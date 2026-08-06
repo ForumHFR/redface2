@@ -61,7 +61,7 @@ internal data class SpikeUiState(
  * Driving it from adb:
  * ```
  * adb shell am start -n <appId>/fr.forumhfr.redface2.spike.SmileyPickerSpikeActivity \
- *   --es preset E --ez outline true --ez debug false
+ *   --es preset E --ei deco 1 --ez debug false --ez builtin false
  * ```
  * The state is held HERE and refreshed from [onNewIntent], which is load-bearing: `am start` on an
  * Activity already in the foreground brings the existing instance to front WITHOUT calling

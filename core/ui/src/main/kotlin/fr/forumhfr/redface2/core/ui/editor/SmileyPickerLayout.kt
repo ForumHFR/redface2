@@ -178,8 +178,10 @@ fun smileyGridGeometry(
  * dead URL) keeps the cap-filling rectangle as a provisional size, which minimises reflow when the
  * probe lands.
  *
- * Rounded to whole dp like the posts' policy, so the shipped defaults keep producing the exact
- * same numbers as `smileyCellImageSize` did before the extraction (pinned by test).
+ * Rounded to whole dp like the posts' policy. NB : l'iso-comportement avec le `smileyCellImageSize`
+ * d'avant l'extraction a été ABANDONNÉ au follow-up #989 — c'était l'objet même du chantier. Le
+ * format dominant 70×50 rend désormais 61×44 là où l'ancien calcul donnait 44×31. Ce que le test
+ * pinne, c'est le picker post-follow-up (`SmileyCellImageSizeTest`), plus l'égalité avec le legacy.
  */
 internal fun pickerSmileyImageSize(
     source: EditorSmileySource,

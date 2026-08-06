@@ -10,18 +10,21 @@ class FlagAddResponseParserTest {
 
     @Test
     fun `success response carries the favori positionné sentence`() {
-        // No committed addflag.php fixture yet: this minimal body mirrors the `.hop`
-        // wrapper shape of `flag_delete_success.html` and uses the live-verified #986
-        // success marker.
+        // Pas de fixture `addflag.php` capturée : ces corps sont MINIMAUX et écrits à la main, ce
+        // que la charte fixtures n'autorise que parce qu'ils ne servent PAS de contrat — seul le
+        // marqueur de succès « Favori positionné » est attesté (vérifié en live, #986, et consigné
+        // dans `docs/guides/protocol-hfr.md`). Le reste du corps est une enveloppe `.hop` calquée
+        // sur `flag_delete_success.html`. À remplacer par une capture réelle dès qu'un ajout de
+        // favori pourra être fait sur un compte de test sans polluer les drapeaux d'un vrai compte.
         val html = """<html><body><div class="hop">Favori positionné</div></body></html>"""
         assertEquals(FlagAddResult.Success, parser.parse(html))
     }
 
     @Test
     fun `success response also accepts the longer HFR wording`() {
-        // The specs historically recorded « Favori positionné avec succès » ; matching
-        // the shorter marker keeps that variant in the success branch without inventing
-        // a second contract.
+        // Le marqueur court suffit : s'il existe une variante plus longue côté HFR, elle contient
+        // la phrase courte, donc la branche succès la couvre sans qu'on ait à postuler un second
+        // libellé. Ce test verrouille cette propriété, il n'atteste pas d'un libellé HFR.
         val html = """<html><body><div class="hop">Favori positionné avec succès</div></body></html>"""
         assertEquals(FlagAddResult.Success, parser.parse(html))
     }

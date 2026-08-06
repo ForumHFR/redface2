@@ -308,13 +308,6 @@ private fun DisplayToggleRow(
 }
 
 /**
- * #973 ([AMENDEMENT-v1.5-2], exigence XaTriX) — block-GIF display profile setting. The S/M/L
- * labels carry the NUMERIC factors visibly (« S (×1, net) », « M (×1,5) », « L (×2,5) »).
- * Extracted from [SettingsDisplayScreen] so the host stays under detekt's cyclomatic-complexity
- * budget (same rationale as [AccentColorSetting]); emits a section title, the intro text, the
- * three-choice group and the persist-error line into the caller's Column.
- */
-/**
  * #989 — délimiteur des cellules du picker de smileys. Extrait comme ses voisins pour garder l'écran
  * hôte sous le budget de complexité de detekt. « Aucun » est le défaut : le délimiteur aide à
  * repérer une vignette sur un corpus très hétérogène, il ne change PAS la taille des smileys — le
@@ -363,6 +356,13 @@ private fun SmileyPickerDecorationSetting(
     }
 }
 
+/**
+ * #973 ([AMENDEMENT-v1.5-2], exigence XaTriX) — block-GIF display profile setting. The S/M/L
+ * labels carry the NUMERIC factors visibly (« S (×1, net) », « M (×1,5) », « L (×2,5) »).
+ * Extracted from [SettingsDisplayScreen] so the host stays under detekt's cyclomatic-complexity
+ * budget (same rationale as [AccentColorSetting]); emits a section title, the intro text, the
+ * three-choice group and the persist-error line into the caller's Column.
+ */
 @Composable
 private fun MediaDisplayProfileSetting(
     selected: MediaDisplayProfile,

@@ -220,8 +220,10 @@ internal fun PostMenuSheet(
 
             if (onAddFavorite != null) {
                 Spacer(Modifier.height(8.dp))
-                // #986 — hide first, then act: same order as the other real actions, so the
-                // resulting Toast never fires under a still-visible sheet.
+                // #986 — act THEN hide, comme les actions non navigantes (copie du lien, #291) : la
+                // mutation part tout de suite et la feuille se replie derrière, son Toast arrivant
+                // après l'animation. L'ordre inverse (masquer d'abord) est réservé aux actions qui
+                // NAVIGUENT, pour qu'un écran ne s'ouvre pas sous une feuille encore visible.
                 OutlinedButton(
                     onClick = {
                         onAddFavorite()

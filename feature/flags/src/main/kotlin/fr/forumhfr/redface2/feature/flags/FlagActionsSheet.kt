@@ -220,7 +220,11 @@ private fun quickActions(
             label = stringResource(R.string.flags_sheet_quick_first_unread),
             onClick = { actions.onOpen(flagFirstUnreadPage(flag)) },
             iconTint = variant,
-            // Codex: disabled when there is nothing unread, so it never duplicates « Ouvrir ».
+            // Codex (#676) : désactivé quand il n'y a rien de non lu. NB depuis #638 : l'action peut
+            // désormais rendre la MÊME page que « Ouvrir » — c'est le cas quand la lecture s'est
+            // arrêtée en milieu de page, où le premier non-lu est bien sur la page du repère. La
+            // garantie « ne duplique jamais Ouvrir » de #676 ne tient donc plus, et c'est voulu :
+            // les deux chemins partagent une règle unique (`pageToOpen`).
             enabled = flag.hasUnread,
         ),
         SheetActionItem(
