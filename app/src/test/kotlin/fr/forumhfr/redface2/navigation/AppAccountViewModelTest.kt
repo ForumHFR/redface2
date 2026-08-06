@@ -206,6 +206,9 @@ class AppAccountViewModelTest {
             return Result.success(Unit)
         }
 
+        override suspend fun resolveFavorite(cat: Int, topicId: Int): Result<Boolean> =
+            error("AppAccountViewModel must not resolve a topic favourite")
+
         override suspend fun removeFlag(flag: fr.forumhfr.redface2.core.model.Flag): Result<Unit> {
             // Not exercised in these tests — included to satisfy the interface (#99).
             return Result.success(Unit)

@@ -105,14 +105,10 @@ internal fun PostMenuSheet(
      * composer never opens under a still-visible menu sheet.
      */
     onSendPrivateMessage: (() -> Unit)? = null,
-    /**
-     * #986 — « Mettre un favori ici » (demande thibw). Post-level and not topic-level because
-     * `addflag.php` anchors the favourite on a POSITION: HFR's own button says « Mettre un favori
-     * sur cette position pour y revenir plus tard ». Null hides the entry — the caller gates on an
-     * authenticated session AND a parseable `Post.quoteRef` (HFR's own 1-based rank of the post in
-     * its page), because without that rank we cannot name the position and will not guess it.
-     */
-    onAddFavorite: (() -> Unit)? = null,
+    /** #986 — visible state of the server-side HFR favourite action. */
+    favoriteAction: PostFavoriteAction = PostFavoriteAction.HIDDEN,
+    /** Invoked only for [PostFavoriteAction.ADD] / [PostFavoriteAction.MOVE]. */
+    onFavoriteClick: () -> Unit = {},
     /**
      * #291 — whether this post already sits in the multi-quote basket; flips the entry's
      * label between « Ajouter à » and « Retirer de » la citation multiple.
@@ -218,22 +214,13 @@ internal fun PostMenuSheet(
                 Text(stringResource(R.string.topic_post_menu_open_in_browser))
             }
 
-            if (onAddFavorite != null) {
-                Spacer(Modifier.height(8.dp))
-                // #986 — act THEN hide, comme les actions non navigantes (copie du lien, #291) : la
-                // mutation part tout de suite et la feuille se replie derrière, son Toast arrivant
-                // après l'animation. L'ordre inverse (masquer d'abord) est réservé aux actions qui
-                // NAVIGUENT, pour qu'un écran ne s'ouvre pas sous une feuille encore visible.
-                OutlinedButton(
-                    onClick = {
-                        onAddFavorite()
-                        hideThenDismiss(coroutineScope, sheetState, onDismiss)
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(stringResource(R.string.topic_post_menu_add_favorite))
-                }
-            }
+            PostFavoriteButton(
+                favoriteAction = favoriteAction,
+                onClick = {
+                    onFavoriteClick()
+                    hideThenDismiss(coroutineScope, sheetState, onDismiss)
+                },
+            )
 
             if (onEditFirstPost != null) {
                 Spacer(Modifier.height(8.dp))
@@ -349,6 +336,31 @@ internal fun PostMenuSheet(
 
             Spacer(Modifier.height(8.dp))
         }
+    }
+}
+
+/** Render state for the post-menu favourite row (#986); pure mapping is in TopicScreen. */
+internal enum class PostFavoriteAction { HIDDEN, CHECKING, ADD, MOVE, ADDING, UNAVAILABLE }
+
+@Composable
+private fun PostFavoriteButton(favoriteAction: PostFavoriteAction, onClick: () -> Unit) {
+    if (favoriteAction == PostFavoriteAction.HIDDEN) return
+
+    Spacer(Modifier.height(8.dp))
+    val label = when (favoriteAction) {
+        PostFavoriteAction.HIDDEN -> error("hidden action is not rendered")
+        PostFavoriteAction.CHECKING -> R.string.topic_post_menu_favorite_checking
+        PostFavoriteAction.ADD -> R.string.topic_post_menu_add_favorite
+        PostFavoriteAction.MOVE -> R.string.topic_post_menu_move_favorite
+        PostFavoriteAction.ADDING -> R.string.topic_post_menu_favorite_adding
+        PostFavoriteAction.UNAVAILABLE -> R.string.topic_post_menu_favorite_unavailable
+    }
+    OutlinedButton(
+        onClick = onClick,
+        enabled = favoriteAction == PostFavoriteAction.ADD || favoriteAction == PostFavoriteAction.MOVE,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(stringResource(label))
     }
 }
 

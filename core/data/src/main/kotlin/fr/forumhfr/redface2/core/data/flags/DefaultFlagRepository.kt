@@ -21,12 +21,15 @@ import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.network.HfrRestFlagBucket
 import fr.forumhfr.redface2.core.parser.write.FlagAddResponseParser
 import fr.forumhfr.redface2.core.parser.write.FlagDeleteResponseParser
+import java.time.Clock
+import java.time.Instant
 import java.util.EnumMap
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
@@ -38,9 +41,12 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 
@@ -73,9 +79,10 @@ import kotlinx.serialization.json.Json
  * clears the process cache immediately on logout / account switch.
  */
 // #99/#986 added the HTML mutation collaborators (HfrClient + add/delflag parsers) on top of the
-// existing REST read deps ; all 9 are distinct Hilt-injected singletons, a parameter object
-// would only hide the dependency surface from DI.
-@Suppress("LongParameterList")
+// existing REST read deps ; all 10 are distinct Hilt-injected singletons, a parameter object
+// would only hide the dependency surface from DI. LargeClass: cache generations, mutation
+// invalidation and their read coordinators deliberately share one singleton consistency owner.
+@Suppress("LongParameterList", "LargeClass")
 @Singleton
 class DefaultFlagRepository @Inject constructor(
     private val apiClient: HfrApiClient,
@@ -87,9 +94,21 @@ class DefaultFlagRepository @Inject constructor(
     private val flagCacheStore: FlagCacheStore,
     @param:FlagsJson private val json: Json,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
+    private val clock: Clock,
 ) : FlagRepository {
 
     private val cachedSuccesses: MutableMap<FlagType, FlagsResult.Success> = EnumMap(FlagType::class.java)
+
+    /**
+     * Per-bucket generation + write lock. A successful mutation can invalidate one bucket while an
+     * older REST fetch is still running; the generation rejects that stale result, and the mutex
+     * serializes its Room write with the purge (#986).
+     */
+    private val cacheGenerations: MutableMap<FlagType, Int> =
+        EnumMap<FlagType, Int>(FlagType::class.java).apply {
+            FlagType.entries.forEach { put(it, 0) }
+        }
+    private val cacheWriteMutexes: Map<FlagType, Mutex> = FlagType.entries.associateWith { Mutex() }
 
     // Bumped by [clearSessionCache] on logout / account switch, read+written under the cachedSuccesses
     // lock. A fetch that began before a switch must not write its result into the (type-keyed)
@@ -122,30 +141,87 @@ class DefaultFlagRepository @Inject constructor(
      */
     private val fetchScope = CoroutineScope(SupervisorJob() + ioDispatcher)
 
-    /** Identifies an in-flight fetch by BOTH type and user — never share a fetch across accounts. */
-    private data class FetchKey(val type: FlagType, val userId: String)
+    /**
+     * Identifies an in-flight fetch by type, user AND cache generation. A post-mutation refresh must
+     * never join a FAVORITE fetch that began before the mutation (#986).
+     */
+    private data class FetchKey(
+        val type: FlagType,
+        val userId: String,
+        val cacheGeneration: Int,
+    )
 
     // Keyed by (type, userId), NOT type alone: a fetch started for one account must never be awaited
     // by another after a logout / account switch, and [clearSessionCache] cancels stragglers so they
     // cannot repopulate the singleton success cache with the previous account's data (#501 Codex P1).
     private val inFlightFetches: MutableMap<FetchKey, Deferred<FlagsResult>> = mutableMapOf()
 
-    override fun observe(type: FlagType): Flow<FlagsResult> = flow {
+    /**
+     * Short topic-level memo for the menu gate (#986). A cached `true` can only cause one extra
+     * confirmation if HFR changed elsewhere; the safety-sensitive `false` expires after 30 seconds.
+     * Successful local mutations and account changes clear this memo explicitly.
+     */
+    private data class FavoriteResolutionKey(
+        val userId: String,
+        val cat: Int,
+        val topicId: Int,
+    )
+
+    private data class FavoriteResolutionMemo(
+        val isFavorite: Boolean,
+        val expiresAt: Instant,
+        val cacheGeneration: Int,
+    )
+
+    private data class FavoriteResolutionFetchKey(
+        val resolution: FavoriteResolutionKey,
+        val cacheGeneration: Int,
+    )
+
+    private val favoriteResolutionMemos: MutableMap<FavoriteResolutionKey, FavoriteResolutionMemo> = mutableMapOf()
+    private val inFlightFavoriteResolutions: MutableMap<FavoriteResolutionFetchKey, Deferred<Result<Boolean>>> =
+        mutableMapOf()
+
+    override fun observe(type: FlagType): Flow<FlagsResult> = channelFlow {
+        // Subscribe before any memory/Room work. A mutation that lands while this initial snapshot
+        // is loading must see an active observer and publish its authoritative refresh (#986).
+        val refreshJob = launch(start = CoroutineStart.UNDISPATCHED) {
+            refreshes.getValue(type).asSharedFlow().collect { send(it) }
+        }
         val cached = synchronized(cachedSuccesses) { cachedSuccesses[type] }
         if (cached != null) {
-            emit(cached)
+            send(cached)
         } else {
             val userId = currentUserId()
             if (userId == null) {
-                emit(notAuthenticatedFailure())
+                send(notAuthenticatedFailure())
             } else {
-                val diskCached = flagCacheStore.load(type = type, userId = userId)
-                if (diskCached != null) {
-                    synchronized(cachedSuccesses) { cachedSuccesses[type] = diskCached.result }
-                    emit(diskCached.result)
+                val (diskCached, diskSnapshotStillOwned) = cacheWriteMutexes.getValue(type).withLock {
+                    val (diskSessionGeneration, diskCacheGeneration) = synchronized(cachedSuccesses) {
+                        sessionGeneration to cacheGenerations.getValue(type)
+                    }
+                    // The read itself shares the mutation's lock. A load that starts after the
+                    // generation bump cannot slip in before the matching Room purge completes.
+                    val loaded = flagCacheStore.load(type = type, userId = userId)
+                    val sameUser = currentUserId() == userId
+                    val ownsSnapshot = sameUser && synchronized(cachedSuccesses) {
+                        val ownsSnapshot = sessionGeneration == diskSessionGeneration &&
+                            cacheGenerations.getValue(type) == diskCacheGeneration
+                        if (ownsSnapshot && loaded != null) cachedSuccesses[type] = loaded.result
+                        ownsSnapshot
+                    }
+                    loaded to ownsSnapshot
+                }
+                if (!diskSnapshotStillOwned) {
+                    // A successful mutation or account switch completed while Room was loading.
+                    // Discard that now-stale snapshot and resolve the current generation from REST.
+                    send(FlagsResult.Loading)
+                    send(fetchDeduplicated(type = type, userId = userId))
+                } else if (diskCached != null) {
+                    send(diskCached.result)
                     if (!diskCached.isFresh) {
                         when (val refreshed = fetchDeduplicated(type = type, userId = userId)) {
-                            is FlagsResult.Success -> emit(refreshed)
+                            is FlagsResult.Success -> send(refreshed)
                             is FlagsResult.Failure -> Log.w(
                                 LOG_TAG,
                                 "Keeping stale flags cache for $type after refresh failure",
@@ -155,12 +231,12 @@ class DefaultFlagRepository @Inject constructor(
                         }
                     }
                 } else {
-                    emit(FlagsResult.Loading)
-                    emit(fetchDeduplicated(type = type, userId = userId))
+                    send(FlagsResult.Loading)
+                    send(fetchDeduplicated(type = type, userId = userId))
                 }
             }
         }
-        emitAll(refreshes.getValue(type).asSharedFlow())
+        refreshJob.join()
     }
 
     override suspend fun refresh(type: FlagType) {
@@ -193,12 +269,18 @@ class DefaultFlagRepository @Inject constructor(
         synchronized(cachedSuccesses) {
             cachedSuccesses.clear()
             sessionGeneration++
+            FlagType.entries.forEach { type -> bumpCacheGeneration(type) }
+            synchronized(favoriteResolutionMemos) { favoriteResolutionMemos.clear() }
         }
         // Cancel any fetch still in flight from the previous session so it stops early instead of
         // running the full fan-out for an account that just logged out / switched.
         synchronized(inFlightFetches) {
             inFlightFetches.values.forEach { it.cancel() }
             inFlightFetches.clear()
+        }
+        synchronized(inFlightFavoriteResolutions) {
+            inFlightFavoriteResolutions.values.forEach { it.cancel() }
+            inFlightFavoriteResolutions.clear()
         }
         // #862 — same rule for the shared topics/last sweep : never reused across accounts.
         synchronized(stickySweeps) {
@@ -252,8 +334,8 @@ class DefaultFlagRepository @Inject constructor(
     }
 
     /**
-     * Adds a favourite via `addflag.php` (#986) and reconciles only the cache rows we can
-     * prove from the existing state.
+     * Adds a favourite via `addflag.php` (#986), updates cache rows whose metadata is already known,
+     * and invalidates the complete FAVORITE snapshot.
      *
      * Flow :
      * 1. Resolve the authenticated user ; abort with a failed [Result] if anonymous (the
@@ -261,11 +343,10 @@ class DefaultFlagRepository @Inject constructor(
      * 2. GET `/user/addflag.php` through [HfrClient] (HTML mutation per ADR-003) and
      *    classify the body with [FlagAddResponseParser]. Network + Jsoup parse are both
      *    on [ioDispatcher], matching [removeFlag]'s dispatcher boundary.
-     * 3. **Success** → mark any already cached row for the same `(cat, topicId)` as
-     *    [Flag.isFavorite], persist those warmed lists back to Room, and re-broadcast
-     *    only the updated warm tabs. We deliberately do **not** fabricate a new
-     *    [FlagType.FAVORITE] row : `addflag.php` returns no title / counters / authors,
-     *    so the favourite bucket is authoritatively populated by the next REST refresh.
+     * 3. **Success** → mark already cached CYAN/RED rows for the same `(cat, topicId)` as
+     *    [Flag.isFavorite], purge the complete FAVORITE snapshot from memory + Room, and refresh
+     *    an active Favorites tab. We deliberately do **not** fabricate a new FAVORITE row:
+     *    `addflag.php` returns no title / counters / authors.
      * 4. **Failure / unexpected page** → touch no cache, return [Result.failure].
      *
      * A [SessionExpiredException] (or any transport error) raised by [HfrClient] propagates
@@ -285,8 +366,179 @@ class DefaultFlagRepository @Inject constructor(
                 FlagAddResult.Failure -> throw FlagAddFailedException(context.topicId)
             }
         }.onSuccess {
-            markFavoriteInCaches(userId = userId, context = context)
+            // A session change while addflag.php was in flight must not reconcile the previous
+            // account's mutation into the current account's caches. The UI independently guards its
+            // own state token; this is the repository-side ownership fence.
+            if (currentUserId() == userId) {
+                reconcileFavoriteCaches(userId = userId, context = context)
+            }
         }
+    }
+
+    /**
+     * #986 — bounded-fresh topic-level favourite lookup used before offering the add/move action.
+     *
+     * The favourites bucket is authoritative for ordinary topics, but HFR omits sticky topics from
+     * it (#251/#862). A miss therefore performs the same category-level `topics/last` supplement as
+     * the list fetch, except failures are NOT best-effort here: returning a false negative would let
+     * the UI move an existing favourite without confirmation. Both calls stay scoped to [cat], so
+     * opening one post menu does not fan out over the whole forum. Successful answers are memoized
+     * for 30 seconds and concurrent callers share one app-scoped request, so closing/reopening a menu
+     * cannot cancel and restart the same HTTP lookup. Failures are never cached.
+     */
+    override suspend fun resolveFavorite(cat: Int, topicId: Int): Result<Boolean> {
+        val userId = currentUserId()
+        return if (userId == null) {
+            Result.failure(IllegalStateException("Resolving a favourite requires authentication"))
+        } else {
+            resolveFavoriteDeduplicated(
+                resolutionKey = FavoriteResolutionKey(userId = userId, cat = cat, topicId = topicId),
+            )
+        }
+    }
+
+    private suspend fun resolveFavoriteDeduplicated(
+        resolutionKey: FavoriteResolutionKey,
+    ): Result<Boolean> {
+        var resolved: Result<Boolean>? = null
+        while (resolved == null) {
+            val cacheGeneration = synchronized(cachedSuccesses) {
+                cacheGenerations.getValue(FlagType.FAVORITE)
+            }
+            val memoized = readFavoriteResolutionMemo(
+                resolutionKey = resolutionKey,
+                cacheGeneration = cacheGeneration,
+            )
+            if (memoized != null) {
+                resolved = Result.success(memoized)
+            } else {
+                val result = awaitFavoriteResolution(
+                    resolutionKey = resolutionKey,
+                    cacheGeneration = cacheGeneration,
+                )
+                resolved = when {
+                    currentUserId() != resolutionKey.userId -> Result.failure(
+                        IllegalStateException("HFR account changed while resolving the favourite"),
+                    )
+                    isFavoriteResolutionGenerationCurrent(cacheGeneration) -> result
+                    // A successful add invalidated FAVORITE while this lookup was in flight. Never
+                    // expose its pre-mutation false; retry under the generation opened by the purge.
+                    else -> null
+                }
+            }
+        }
+        return resolved
+    }
+
+    private fun readFavoriteResolutionMemo(
+        resolutionKey: FavoriteResolutionKey,
+        cacheGeneration: Int,
+    ): Boolean? {
+        val now = clock.instant()
+        return synchronized(favoriteResolutionMemos) {
+            favoriteResolutionMemos[resolutionKey]?.takeIf { memo ->
+                memo.cacheGeneration == cacheGeneration && now.isBefore(memo.expiresAt)
+            }?.isFavorite
+        }
+    }
+
+    private suspend fun awaitFavoriteResolution(
+        resolutionKey: FavoriteResolutionKey,
+        cacheGeneration: Int,
+    ): Result<Boolean> {
+        val fetchKey = FavoriteResolutionFetchKey(
+            resolution = resolutionKey,
+            cacheGeneration = cacheGeneration,
+        )
+        val deferred = synchronized(inFlightFavoriteResolutions) {
+            inFlightFavoriteResolutions[fetchKey]?.takeIf { it.isActive }
+                ?: fetchScope.async {
+                    val result = resolveFavoriteFromNetwork(
+                        cat = resolutionKey.cat,
+                        topicId = resolutionKey.topicId,
+                        userId = resolutionKey.userId,
+                    )
+                    storeFavoriteResolutionIfCurrent(
+                        resolutionKey = resolutionKey,
+                        cacheGeneration = cacheGeneration,
+                        result = result,
+                    )
+                    result
+                }.also { started ->
+                    inFlightFavoriteResolutions[fetchKey] = started
+                    started.invokeOnCompletion {
+                        synchronized(inFlightFavoriteResolutions) {
+                            if (inFlightFavoriteResolutions[fetchKey] === started) {
+                                inFlightFavoriteResolutions.remove(fetchKey)
+                            }
+                        }
+                    }
+                }
+        }
+        return deferred.await()
+    }
+
+    private fun isFavoriteResolutionGenerationCurrent(cacheGeneration: Int): Boolean =
+        synchronized(cachedSuccesses) {
+            cacheGenerations.getValue(FlagType.FAVORITE) == cacheGeneration
+        }
+
+    private fun storeFavoriteResolutionIfCurrent(
+        resolutionKey: FavoriteResolutionKey,
+        cacheGeneration: Int,
+        result: Result<Boolean>,
+    ) {
+        synchronized(cachedSuccesses) {
+            if (cacheGenerations.getValue(FlagType.FAVORITE) == cacheGeneration) {
+                result.getOrNull()?.let { isFavorite ->
+                    synchronized(favoriteResolutionMemos) {
+                        favoriteResolutionMemos[resolutionKey] = FavoriteResolutionMemo(
+                            isFavorite = isFavorite,
+                            expiresAt = clock.instant().plusSeconds(FAVORITE_RESOLUTION_TTL_SECONDS),
+                            cacheGeneration = cacheGeneration,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun resolveFavoriteFromNetwork(
+        cat: Int,
+        topicId: Int,
+        userId: String,
+    ): Result<Boolean> = try {
+        val isFavorite = withContext(ioDispatcher) {
+            val bucketMatch = fetchAllPages(
+                cat = cat,
+                bucket = HfrRestFlagBucket.FAVORITES,
+                type = FlagType.FAVORITE,
+                failOnTruncation = true,
+            ).any { it.topicId == topicId }
+            if (bucketMatch) {
+                true
+            } else {
+                val body = apiClient.getTopicList(
+                    cat = cat,
+                    subcat = null,
+                    page = 1,
+                    resultsPerPage = DEFAULT_RESULTS_PER_PAGE,
+                    useAuth = true,
+                )
+                val envelope = json.decodeFromString<RestListEnvelope<RestTopic>>(body)
+                RestFlagMappers.toStickyFlags(
+                    envelope = envelope,
+                    type = FlagType.FAVORITE,
+                    fallbackCat = cat,
+                ).any { it.topicId == topicId }
+            }
+        }
+        check(currentUserId() == userId) { "HFR account changed while resolving the favourite" }
+        Result.success(isFavorite)
+    } catch (cancellation: CancellationException) {
+        throw cancellation
+    } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+        Result.failure(error)
     }
 
     /**
@@ -377,43 +629,77 @@ class DefaultFlagRepository @Inject constructor(
     }
 
     /**
-     * Marks existing cached rows for [context]'s topic as favourites after a confirmed
-     * `addflag.php` success. The mutation endpoint returns only a confirmation page, so
-     * this method updates rows it already owns but never invents a full favourite-bucket row.
+     * Reconciles every cache after a confirmed `addflag.php` success (#986).
+     *
+     * CYAN/RED rows already owned by the cache can safely gain `isFavorite=true`. The FAVORITE
+     * bucket cannot safely gain a fabricated row because the mutation response carries none of the
+     * listing metadata, so its complete memory + Room snapshot is invalidated. Per-type generations
+     * prevent an older in-flight fetch from restoring the stale snapshot after this purge.
      */
-    private suspend fun markFavoriteInCaches(userId: String, context: FlagAddContext) {
-        val updated: List<Pair<FlagType, FlagsResult.Success>> = synchronized(cachedSuccesses) {
-            cachedSuccesses.entries.mapNotNull { (type, current) ->
-                var changed = false
-                val flags = current.flags.map { flag ->
-                    if (flag.cat == context.cat && flag.topicId == context.topicId && !flag.isFavorite) {
-                        changed = true
-                        flag.copy(isFavorite = true)
-                    } else {
-                        flag
+    private suspend fun reconcileFavoriteCaches(userId: String, context: FlagAddContext) {
+        val updated = mutableListOf<Pair<FlagType, FlagsResult.Success>>()
+
+        listOf(FlagType.CYAN, FlagType.RED).forEach { type ->
+            cacheWriteMutexes.getValue(type).withLock {
+                val success = synchronized(cachedSuccesses) {
+                    bumpCacheGeneration(type)
+                    val current = cachedSuccesses[type] ?: return@synchronized null
+                    var changed = false
+                    val flags = current.flags.map { flag ->
+                        if (flag.cat == context.cat && flag.topicId == context.topicId && !flag.isFavorite) {
+                            changed = true
+                            flag.copy(isFavorite = true)
+                        } else {
+                            flag
+                        }
                     }
+                    if (changed) FlagsResult.Success(flags).also { cachedSuccesses[type] = it } else null
                 }
-                if (changed) {
-                    val success = FlagsResult.Success(flags)
-                    cachedSuccesses[type] = success
-                    type to success
-                } else {
-                    null
+                if (success != null) {
+                    runCatching {
+                        flagCacheStore.replace(userId = userId, type = type, flags = success.flags)
+                    }.onFailure { throwable ->
+                        Log.w(LOG_TAG, "Could not persist added favourite marker for $type", throwable)
+                    }
+                    updated += type to success
                 }
             }
         }
 
-        updated.forEach { (type, success) ->
+        cacheWriteMutexes.getValue(FlagType.FAVORITE).withLock {
+            synchronized(cachedSuccesses) {
+                bumpCacheGeneration(FlagType.FAVORITE)
+                cachedSuccesses.remove(FlagType.FAVORITE)
+                synchronized(favoriteResolutionMemos) { favoriteResolutionMemos.clear() }
+            }
+            // A mutation opens a new sticky-sweep generation too: a post-mutation fetch must not
+            // join a topics/last sweep captured before addflag.php succeeded.
+            synchronized(stickySweeps) { sweepGeneration++ }
             runCatching {
-                flagCacheStore.replace(userId = userId, type = type, flags = success.flags)
+                flagCacheStore.invalidate(userId = userId, type = FlagType.FAVORITE)
             }.onFailure { throwable ->
-                Log.w(LOG_TAG, "Could not persist added favourite marker for $type", throwable)
+                Log.w(LOG_TAG, "Could not invalidate the favourite Room cache", throwable)
             }
         }
 
-        updated.forEach { (type, success) ->
-            refreshes.getValue(type).emit(success)
+        updated.forEach { (type, success) -> refreshes.getValue(type).emit(success) }
+
+        // A destination kept STARTED under another navigation pane may still be collecting the old
+        // list. Refresh it authoritatively; with no active collector, the purge above is sufficient
+        // and the next observe() performs the fetch without paying the 30-second Room TTL.
+        val favoriteRefresh = refreshes.getValue(FlagType.FAVORITE)
+        if (favoriteRefresh.subscriptionCount.value > 0) {
+            fetchScope.launch {
+                favoriteRefresh.emit(FlagsResult.Loading)
+                val refreshed = fetchDeduplicated(type = FlagType.FAVORITE, userId = userId)
+                if (currentUserId() == userId) favoriteRefresh.emit(refreshed)
+            }
         }
+    }
+
+    /** Must be called under [cachedSuccesses]' monitor. */
+    private fun bumpCacheGeneration(type: FlagType) {
+        cacheGenerations[type] = cacheGenerations.getValue(type) + 1
     }
 
     /**
@@ -423,22 +709,44 @@ class DefaultFlagRepository @Inject constructor(
      * so the shared [Deferred] always completes with a result (no exception to propagate on await).
      */
     private suspend fun fetchDeduplicated(type: FlagType, userId: String): FlagsResult {
-        val key = FetchKey(type = type, userId = userId)
-        val deferred = synchronized(inFlightFetches) {
-            inFlightFetches[key]?.takeIf { it.isActive }
-                ?: fetchScope.async { fetch(type = type, userId = userId) }.also { started ->
-                    inFlightFetches[key] = started
-                    started.invokeOnCompletion {
-                        synchronized(inFlightFetches) {
-                            if (inFlightFetches[key] === started) inFlightFetches.remove(key)
+        while (true) {
+            val cacheGeneration = synchronized(cachedSuccesses) { cacheGenerations.getValue(type) }
+            val key = FetchKey(type = type, userId = userId, cacheGeneration = cacheGeneration)
+            val deferred = synchronized(inFlightFetches) {
+                inFlightFetches[key]?.takeIf { it.isActive }
+                    ?: fetchScope.async {
+                        fetch(type = type, userId = userId, startCacheGeneration = cacheGeneration)
+                    }.also { started ->
+                        inFlightFetches[key] = started
+                        started.invokeOnCompletion {
+                            synchronized(inFlightFetches) {
+                                if (inFlightFetches[key] === started) inFlightFetches.remove(key)
+                            }
                         }
                     }
+            }
+            val result = deferred.await()
+            val ownedResult = if (currentUserId() != userId) {
+                FlagsResult.Failure(
+                    IllegalStateException("HFR account changed while fetching flags"),
+                )
+            } else {
+                synchronized(cachedSuccesses) {
+                    if (cacheGenerations.getValue(type) == cacheGeneration) result else cachedSuccesses[type]
                 }
+            }
+            // A mutation invalidated this bucket while the request was running. Do not expose its
+            // pre-mutation snapshot even transiently. Reuse a replacement that a concurrent
+            // post-mutation refresh already committed; otherwise retry under the new generation.
+            if (ownedResult != null) return ownedResult
         }
-        return deferred.await()
     }
 
-    private suspend fun fetch(type: FlagType, userId: String): FlagsResult = withContext(ioDispatcher) {
+    private suspend fun fetch(
+        type: FlagType,
+        userId: String,
+        startCacheGeneration: Int,
+    ): FlagsResult = withContext(ioDispatcher) {
         val startGeneration = synchronized(cachedSuccesses) { sessionGeneration }
         // #862 (gate Sol r3) — capture the SWEEP generation too : a fetch that started under an
         // older burst must never join a newer burst's sweep (it would publish a mix of old bucket
@@ -484,10 +792,7 @@ class DefaultFlagRepository @Inject constructor(
                     .sortedByDescending { it.lastReplyAt }
             }
         }.fold(
-            onSuccess = { flags ->
-                persistFlags(userId = userId, type = type, flags = flags)
-                FlagsResult.Success(flags)
-            },
+            onSuccess = { flags -> FlagsResult.Success(flags) },
             onFailure = { throwable ->
                 Log.w(LOG_TAG, "Flags REST fetch failed for $type", throwable)
                 FlagsResult.Failure(throwable)
@@ -500,12 +805,48 @@ class DefaultFlagRepository @Inject constructor(
         // fetch launched for a now-stale account, racing the switch, is dropped), AND no
         // clearSessionCache must have bumped the generation since this fetch began (a switch DURING the
         // fetch). The disk cache (persistFlags) is already userId-scoped, so it keeps each account's data.
-        if (result is FlagsResult.Success && currentUserId() == userId) {
-            synchronized(cachedSuccesses) {
-                if (sessionGeneration == startGeneration) cachedSuccesses[type] = result
-            }
+        if (result is FlagsResult.Success) {
+            commitFetchedSuccess(
+                userId = userId,
+                type = type,
+                result = result,
+                startSessionGeneration = startGeneration,
+                startCacheGeneration = startCacheGeneration,
+            )
         }
         result
+    }
+
+    /**
+     * Commits one REST result only while both its auth session and per-type cache generation still
+     * own the write. The per-type mutex makes the check + Room replace + memory write atomic with
+     * mutation invalidation (#986), so an older fetch can never repopulate a purged FAVORITE bucket.
+     */
+    @Suppress("LongParameterList") // the two generations are distinct ownership fences.
+    private suspend fun commitFetchedSuccess(
+        userId: String,
+        type: FlagType,
+        result: FlagsResult.Success,
+        startSessionGeneration: Int,
+        startCacheGeneration: Int,
+    ) {
+        cacheWriteMutexes.getValue(type).withLock {
+            val ownsWrite = currentUserId() == userId && synchronized(cachedSuccesses) {
+                sessionGeneration == startSessionGeneration &&
+                    cacheGenerations.getValue(type) == startCacheGeneration
+            }
+            if (!ownsWrite) return@withLock
+
+            persistFlags(userId = userId, type = type, flags = result.flags)
+            synchronized(cachedSuccesses) {
+                if (
+                    sessionGeneration == startSessionGeneration &&
+                    cacheGenerations.getValue(type) == startCacheGeneration
+                ) {
+                    cachedSuccesses[type] = result
+                }
+            }
+        }
     }
 
     private suspend fun persistFlags(userId: String, type: FlagType, flags: List<Flag>) {
@@ -568,6 +909,7 @@ class DefaultFlagRepository @Inject constructor(
         cat: Int,
         bucket: HfrRestFlagBucket,
         type: FlagType,
+        failOnTruncation: Boolean = false,
     ): List<Flag> {
         val accumulated = mutableListOf<Flag>()
         var page = 1
@@ -588,7 +930,15 @@ class DefaultFlagRepository @Inject constructor(
             )
             accumulated += mapped
             lastResultsCount = envelope.resource.resultsCount
-            if (mapped.isEmpty() || accumulated.size >= lastResultsCount) return accumulated
+            if (mapped.isEmpty() || accumulated.size >= lastResultsCount) {
+                if (failOnTruncation && accumulated.size < lastResultsCount) {
+                    error(
+                        "Incomplete REST flags pagination for cat=$cat bucket=$bucket: " +
+                            "${accumulated.size}/$lastResultsCount rows",
+                    )
+                }
+                return accumulated
+            }
             page += 1
         }
         // Loop exited via the MAX_PAGES cap. Surface the silent truncation in adb logs
@@ -599,8 +949,14 @@ class DefaultFlagRepository @Inject constructor(
             Log.w(
                 LOG_TAG,
                 "REST flags pagination hit MAX_PAGES=$MAX_PAGES for cat=$cat bucket=$bucket " +
-                    "with ${accumulated.size}/$lastResultsCount rows; list may be truncated",
+                "with ${accumulated.size}/$lastResultsCount rows; list may be truncated",
             )
+            if (failOnTruncation) {
+                error(
+                    "REST flags pagination hit MAX_PAGES=$MAX_PAGES for cat=$cat bucket=$bucket: " +
+                        "${accumulated.size}/$lastResultsCount rows",
+                )
+            }
         }
         return accumulated
     }
@@ -749,6 +1105,7 @@ class DefaultFlagRepository @Inject constructor(
         const val LOG_TAG = "FlagRepository"
         const val DEFAULT_RESULTS_PER_PAGE = 50
         const val MAX_PAGES = 100
+        const val FAVORITE_RESOLUTION_TTL_SECONDS = 30L
     }
 }
 

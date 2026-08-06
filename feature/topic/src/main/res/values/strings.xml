@@ -158,12 +158,19 @@
     <string name="topic_remove_flag_dialog_message">Retirer le drapeau de « %1$s » ? Cette action est définitive depuis l\'app.</string>
     <string name="topic_remove_flag_dialog_confirm">Retirer</string>
     <string name="topic_remove_flag_dialog_cancel">Annuler</string>
-    <!-- #986 — l'action est au niveau du POST : addflag.php ancre le favori sur une position
-         (numreponse/page/ref), pas sur le sujet. HFR n'offre aucun undo, le message ne doit donc
-         rien promettre de tel. -->
-    <string name="topic_post_menu_add_favorite">Mettre un favori ici</string>
-    <string name="topic_post_favorite_added">Favori posé sur ce message</string>
-    <string name="topic_post_favorite_failed">Impossible de poser le favori</string>
+    <!-- #986 — le serveur expose l'état favori du SUJET, jamais sa position. « HFR » distingue
+         explicitement ce repère serveur du super-favori local d'ADR-017. -->
+    <string name="topic_post_menu_favorite_checking">Vérification du favori HFR…</string>
+    <string name="topic_post_menu_add_favorite">Mettre un favori HFR ici</string>
+    <string name="topic_post_menu_move_favorite">Déplacer le favori HFR ici</string>
+    <string name="topic_post_menu_favorite_adding">Mise à jour du favori HFR…</string>
+    <string name="topic_post_menu_favorite_unavailable">État du favori HFR indisponible</string>
+    <string name="topic_post_favorite_move_dialog_title">Déplacer le favori HFR ?</string>
+    <string name="topic_post_favorite_move_dialog_message">HFR ne conserve qu’un favori par sujet, et Redface ne connaît pas sa position actuelle. Le placer ici remplacera le repère existant, sans possibilité d’annuler ce déplacement depuis l’app.</string>
+    <string name="topic_post_favorite_move_dialog_confirm">Déplacer</string>
+    <string name="topic_post_favorite_move_dialog_cancel">Annuler</string>
+    <string name="topic_post_favorite_added">Favori HFR posé sur ce message</string>
+    <string name="topic_post_favorite_failed">Impossible de poser le favori HFR</string>
     <string name="topic_remove_flag_success">Drapeau retiré</string>
     <string name="topic_remove_flag_failure">Impossible de retirer le drapeau</string>
     <string name="topic_remove_flag_not_found">Aucun drapeau trouvé pour ce sujet</string>

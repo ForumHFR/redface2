@@ -80,6 +80,18 @@ interface FlagRepository {
     suspend fun addFlag(context: FlagAddContext): Result<Unit>
 
     /**
+     * Resolve whether one topic already has a server-side HFR favourite (#986). This is a
+     * topic-level answer only: HFR's REST payload exposes `flag_owntopic == 3`, but never the
+     * post position currently carrying the favourite.
+     *
+     * The implementation performs a fresh, category-scoped lookup instead of trusting the
+     * process/Room cache: a stale `false` would let the UI replace an existing position without
+     * confirmation. A failed or incomplete lookup is a failed [Result], never `false`, so callers
+     * can fail closed.
+     */
+    suspend fun resolveFavorite(cat: Int, topicId: Int): Result<Boolean>
+
+    /**
      * Resolve the full [Flag] for a `(cat, topicId)` pair (#809), for surfaces OUTSIDE the Drapeaux
      * view that hold a topic identity but not the loaded [Flag] — e.g. the topic screen's long-press
      * « Retirer le drapeau ». [removeFlag] needs the complete object (its `subcat` / `type` /

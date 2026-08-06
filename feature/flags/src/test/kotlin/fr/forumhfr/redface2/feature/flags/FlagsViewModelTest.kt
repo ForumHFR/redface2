@@ -2394,6 +2394,9 @@ class FlagsViewModelTest {
             return Result.success(Unit)
         }
 
+        override suspend fun resolveFavorite(cat: Int, topicId: Int): Result<Boolean> =
+            error("FlagsViewModel must not resolve a topic favourite")
+
         override suspend fun removeFlag(flag: Flag): Result<Unit> {
             removeFlagCalls = removeFlagCalls + flag
             return removeFlagResult.await()
