@@ -54,6 +54,17 @@ class FlagCacheStore @Inject constructor(
         }
     }
 
+    /**
+     * Invalidates a complete cached bucket after a mutation whose response cannot provide a full
+     * replacement row (#986). The next observation must fetch REST instead of serving a fresh but
+     * incomplete Room snapshot.
+     */
+    suspend fun invalidate(userId: String, type: FlagType) {
+        withContext(ioDispatcher) {
+            flagDao.deleteForType(userId = userId, type = type)
+        }
+    }
+
     data class CachedFlags(
         val result: FlagsResult.Success,
         val isFresh: Boolean,

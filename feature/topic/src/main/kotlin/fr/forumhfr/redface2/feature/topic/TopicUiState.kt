@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.feature.topic
 
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.model.Flag
+import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 
@@ -510,3 +511,20 @@ sealed interface RemoveTopicFlagState {
     data class Removing(val flag: Flag) : RemoveTopicFlagState
 }
 
+/**
+ * #986 — state of the post-menu HFR favourite action. HFR exposes only whether THIS TOPIC has a
+ * favourite, never which post position carries it; [Ready.topicHasFavorite] deliberately models
+ * that topic-level fact and nothing more.
+ *
+ * [ConfirmingMove] is reachable only from `Ready(true)`, so `addflag.php` cannot replace an existing
+ * position without the explicit confirmation used by the #809/#887 removal precedent. A failed
+ * lookup becomes [Unavailable], not `Ready(false)`: the UI fails closed instead of guessing.
+ */
+sealed interface FavoriteAtPostState {
+    data object Unknown : FavoriteAtPostState
+    data object Resolving : FavoriteAtPostState
+    data class Ready(val topicHasFavorite: Boolean) : FavoriteAtPostState
+    data class ConfirmingMove(val post: Post) : FavoriteAtPostState
+    data class Adding(val topicHadFavorite: Boolean) : FavoriteAtPostState
+    data object Unavailable : FavoriteAtPostState
+}

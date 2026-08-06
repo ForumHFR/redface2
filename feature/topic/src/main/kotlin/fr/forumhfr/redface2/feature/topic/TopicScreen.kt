@@ -322,6 +322,7 @@ fun TopicScreen(
         creationCallback = { factory -> factory.create(request) },
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val favoriteAtPostState by viewModel.favoriteAtPostState.collectAsStateWithLifecycle()
     val lazyListState = rememberLazyListState()
     // #518 follow-up — report scroll facts up so `:app` can reveal the hidden system nav bar per the
     // chosen mode. No-op (and clears stale facts) when the feature is inactive.
@@ -671,9 +672,11 @@ fun TopicScreen(
         onOpenProfile = onOpenProfile,
         onSendPrivateMessage = onSendPrivateMessage,
         onDeleteRequest = { numreponse -> deleteCandidate = numreponse },
+        favoriteAtPostState = favoriteAtPostState,
+        onFavoriteMenuOpened = viewModel::resolveFavoriteAtPostState,
         // #986 — le ViewModel construit le FlagAddContext depuis la page courante et le `ref`
         // que HFR a émis pour ce post ; l'écran ne calcule aucune position.
-        onAddFavorite = viewModel::addFavoriteAtPost,
+        onFavoriteAction = viewModel::requestAddFavoriteAtPost,
         multiQuoteSelections = multiQuoteSelections,
         onToggleMultiQuote = onToggleMultiQuote,
         onMultiQuote = onMultiQuote,
@@ -703,6 +706,13 @@ fun TopicScreen(
             onDismiss = viewModel::cancelRemoveTopicFlag,
         )
     }
+
+    if (favoriteAtPostState is FavoriteAtPostState.ConfirmingMove) {
+        MoveFavoriteConfirmDialog(
+            onConfirm = viewModel::confirmMoveFavorite,
+            onDismiss = viewModel::cancelMoveFavorite,
+        )
+    }
 }
 
 /**
@@ -728,6 +738,29 @@ private fun RemoveTopicFlagConfirmDialog(
         dismissButton = {
             TextButton(onClick = onDismiss) {
                 Text(stringResource(R.string.topic_remove_flag_dialog_cancel))
+            }
+        },
+    )
+}
+
+/** #986 — confirmation before replacing the topic's single, position-unknown HFR favourite. */
+@Composable
+private fun MoveFavoriteConfirmDialog(
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.topic_post_favorite_move_dialog_title)) },
+        text = { Text(stringResource(R.string.topic_post_favorite_move_dialog_message)) },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(stringResource(R.string.topic_post_favorite_move_dialog_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.topic_post_favorite_move_dialog_cancel))
             }
         },
     )
@@ -971,8 +1004,10 @@ internal fun TopicContent(
     // #292 — a per-post « Supprimer » tap; the screen owns the confirmation dialog, so this only
     // requests it (carrying the post's numreponse). Never invoked for the first post (excluded).
     onDeleteRequest: (numreponse: Int) -> Unit = {},
-    /** #986 — « Mettre un favori ici » : le post porte la position que HFR attend (`quoteRef`). */
-    onAddFavorite: (Post) -> Unit = {},
+    favoriteAtPostState: FavoriteAtPostState = FavoriteAtPostState.Unknown,
+    onFavoriteMenuOpened: () -> Unit = {},
+    /** #986 — action already gated by the resolved topic-level HFR favourite state. */
+    onFavoriteAction: (Post) -> Unit = {},
     // #291 / #604 lot 3 — multi-quote selection (owned by :app, full previews) + its actions :
     // toggle on the post menu, « Citer N » on the floating cluster (threshold-routed below),
     // and the basket clear once the sheet consumed the cards.
@@ -1243,7 +1278,9 @@ internal fun TopicContent(
                                 onOpenProfile = onOpenProfile,
                                 onSendPrivateMessage = onSendPrivateMessage,
                                 onDeleteRequest = onDeleteRequest,
-                                onAddFavorite = onAddFavorite,
+                                favoriteAtPostState = favoriteAtPostState,
+                                onFavoriteMenuOpened = onFavoriteMenuOpened,
+                                onFavoriteAction = onFavoriteAction,
                                 onDoubleTapRefresh = refreshWithMediaRetry,
                                 onSearchNextResults = { onIntent(TopicIntent.SearchNextResultsPage) },
                                 listState = listState,
@@ -1773,8 +1810,9 @@ private fun TopicLoadedContent(
     // #792 — « Envoyer un MP » entry of the post menu (gated at the mount below).
     onSendPrivateMessage: (author: String) -> Unit = {},
     onDeleteRequest: (numreponse: Int) -> Unit = {},
-    /** #986 — « Mettre un favori ici » : le post porte la position que HFR attend (`quoteRef`). */
-    onAddFavorite: (Post) -> Unit = {},
+    favoriteAtPostState: FavoriteAtPostState = FavoriteAtPostState.Unknown,
+    onFavoriteMenuOpened: () -> Unit = {},
+    onFavoriteAction: (Post) -> Unit = {},
     /** #382 — double-tap anywhere on the list refreshes the current page (RF1 parity). */
     onDoubleTapRefresh: () -> Unit = {},
     /** #879 — filtered search : « résultats suivants » footer tap. */
@@ -2125,7 +2163,12 @@ private fun TopicLoadedContent(
                         onQuoteLongPress = quoteLongPressAction,
                         onEdit = editAction,
                         onOpenProfile = profileAction,
-                        onOpenMenu = { menuPost = post },
+                        onOpenMenu = {
+                            menuPost = post
+                            if (state.isAuthenticated && (post.quoteRef ?: 0) >= 1) {
+                                onFavoriteMenuOpened()
+                            }
+                        },
                         // #436 — same membership source as the menu entry (PostMenuSheet).
                         multiQuoteSelected = post.numreponse in multiQuoteSelection,
                         // #436 — per-post add/remove affordance (RF1 quote+/quote- parity), reachable
@@ -2237,15 +2280,12 @@ private fun TopicLoadedContent(
             onDismiss = { menuPost = null },
             onDelete = menuDeleteAction,
             onEditFirstPost = menuEditFirstPostAction,
-            // #986 — « Mettre un favori ici » : session authentifiée + un `ref` HFR exploitable.
-            // `Post.quoteRef` porte le rang que HFR a lui-même émis pour ce post dans sa page ; sans
-            // lui (toolbar obfusquée en cryptlink, lecture anonyme) on ne peut pas nommer la
-            // position, donc l'entrée disparaît plutôt que de deviner.
-            onAddFavorite = if (state.isAuthenticated && (post.quoteRef ?: 0) >= 1) {
-                { onAddFavorite(post) }
-            } else {
-                null
-            },
+            favoriteAction = favoriteActionFor(
+                isAuthenticated = state.isAuthenticated,
+                quoteRef = post.quoteRef,
+                state = favoriteAtPostState,
+            ),
+            onFavoriteClick = { onFavoriteAction(post) },
             // #395 — same profileId gate as the post card (#208): Publicité rows and
             // anonymous reads expose no profile link, the hero stays inert.
             onOpenProfile = post.profileId?.let { profileId ->
@@ -3834,6 +3874,29 @@ internal fun effectiveMultiQuoteCount(topic: Topic, isAuthenticated: Boolean, se
 
 internal fun shouldShowQuoteAction(topic: Topic, isAuthenticated: Boolean): Boolean =
     topic.canReply && isAuthenticated
+
+/**
+ * #986 — maps the resolved topic-level favourite state to the post-menu row. Authentication and
+ * HFR's own 1-based `ref` remain hard gates; unknown/failed state stays visible but disabled so the
+ * action is never blind.
+ */
+internal fun favoriteActionFor(
+    isAuthenticated: Boolean,
+    quoteRef: Int?,
+    state: FavoriteAtPostState,
+): PostFavoriteAction {
+    if (!isAuthenticated || (quoteRef ?: 0) < 1) return PostFavoriteAction.HIDDEN
+    return when (state) {
+        FavoriteAtPostState.Unknown,
+        FavoriteAtPostState.Resolving,
+        is FavoriteAtPostState.ConfirmingMove
+        -> PostFavoriteAction.CHECKING
+        is FavoriteAtPostState.Ready ->
+            if (state.topicHasFavorite) PostFavoriteAction.MOVE else PostFavoriteAction.ADD
+        is FavoriteAtPostState.Adding -> PostFavoriteAction.ADDING
+        FavoriteAtPostState.Unavailable -> PostFavoriteAction.UNAVAILABLE
+    }
+}
 
 // #792 — « Envoyer un MP » from the post's contextual menu. Auth-only (the MP composer is a
 // logged-in surface), never on the user's own posts, and only for authors with a real HFR
