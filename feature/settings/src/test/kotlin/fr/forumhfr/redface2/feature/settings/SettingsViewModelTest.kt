@@ -1225,6 +1225,87 @@ class SettingsViewModelTest {
         assertTrue(viewModel.state.value.fullWidthPostsError)
     }
 
+    // ──────────────────────────────────────────────────────────────────────
+    // Ego highlights (#874)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `init hydrates the two Ego switches from persisted opt-outs`() = runTest {
+        repository.emitEgoQuoteEnabled(false)
+        repository.emitEgoPostEnabled(false)
+
+        val state = newViewModel().state.value
+
+        assertFalse(state.egoQuoteEnabled)
+        assertFalse(state.egoQuoteError)
+        assertFalse(state.egoPostEnabled)
+        assertFalse(state.egoPostError)
+    }
+
+    @Test
+    fun `EgoQuoteChanged exposes an independent optimistic flip while persisting`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        repository.blockEgoQuoteSetUntil = gate
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.EgoQuoteChanged(false))
+
+        val midFlight = viewModel.state.value
+        assertFalse(midFlight.egoQuoteEnabled)
+        assertTrue(midFlight.isUpdatingEgoQuote)
+        assertFalse(midFlight.canToggleEgoQuote)
+        assertTrue("EgoPost must remain independent", midFlight.egoPostEnabled)
+
+        gate.complete(Unit)
+        assertFalse(viewModel.state.value.isUpdatingEgoQuote)
+        assertEquals(1, repository.egoQuoteSetCalls)
+    }
+
+    @Test
+    fun `EgoPostChanged exposes an independent optimistic flip while persisting`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        repository.blockEgoPostSetUntil = gate
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.EgoPostChanged(false))
+
+        val midFlight = viewModel.state.value
+        assertFalse(midFlight.egoPostEnabled)
+        assertTrue(midFlight.isUpdatingEgoPost)
+        assertFalse(midFlight.canToggleEgoPost)
+        assertTrue("EgoQuote must remain independent", midFlight.egoQuoteEnabled)
+
+        gate.complete(Unit)
+        assertFalse(viewModel.state.value.isUpdatingEgoPost)
+        assertEquals(1, repository.egoPostSetCalls)
+    }
+
+    @Test
+    fun `EgoQuoteChanged reverts and raises its error on persist failure`() = runTest {
+        repository.failOnEgoQuoteSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.EgoQuoteChanged(false))
+
+        assertTrue(viewModel.state.value.egoQuoteEnabled)
+        assertFalse(viewModel.state.value.isUpdatingEgoQuote)
+        assertTrue(viewModel.state.value.egoQuoteError)
+        assertFalse(viewModel.state.value.egoPostError)
+    }
+
+    @Test
+    fun `EgoPostChanged reverts and raises its error on persist failure`() = runTest {
+        repository.failOnEgoPostSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.EgoPostChanged(false))
+
+        assertTrue(viewModel.state.value.egoPostEnabled)
+        assertFalse(viewModel.state.value.isUpdatingEgoPost)
+        assertTrue(viewModel.state.value.egoPostError)
+        assertFalse(viewModel.state.value.egoQuoteError)
+    }
+
     @Test
     fun `init hydrates showScrollbar from a persisted false`() = runTest {
         // #105 — default is true; only a persisted opt-OUT exercises the hydration path.
@@ -2143,6 +2224,44 @@ class SettingsViewModelTest {
 
         fun emitFullWidthPosts(value: Boolean) {
             fullWidthPosts.value = value
+        }
+
+        private val egoQuoteEnabled = MutableStateFlow(true)
+        var egoQuoteSetCalls: Int = 0
+            private set
+        var failOnEgoQuoteSet: Boolean = false
+        var blockEgoQuoteSetUntil: CompletableDeferred<Unit>? = null
+
+        override fun observeTopicEgoQuoteEnabled(): Flow<Boolean> = egoQuoteEnabled
+
+        override suspend fun setTopicEgoQuoteEnabled(enabled: Boolean) {
+            egoQuoteSetCalls += 1
+            blockEgoQuoteSetUntil?.await()
+            check(!failOnEgoQuoteSet) { "boom" }
+            egoQuoteEnabled.value = enabled
+        }
+
+        fun emitEgoQuoteEnabled(value: Boolean) {
+            egoQuoteEnabled.value = value
+        }
+
+        private val egoPostEnabled = MutableStateFlow(true)
+        var egoPostSetCalls: Int = 0
+            private set
+        var failOnEgoPostSet: Boolean = false
+        var blockEgoPostSetUntil: CompletableDeferred<Unit>? = null
+
+        override fun observeTopicEgoPostEnabled(): Flow<Boolean> = egoPostEnabled
+
+        override suspend fun setTopicEgoPostEnabled(enabled: Boolean) {
+            egoPostSetCalls += 1
+            blockEgoPostSetUntil?.await()
+            check(!failOnEgoPostSet) { "boom" }
+            egoPostEnabled.value = enabled
+        }
+
+        fun emitEgoPostEnabled(value: Boolean) {
+            egoPostEnabled.value = value
         }
 
         // #105 — afficher l'ascenseur. Même seam optimistic-flip ; default TRUE (ascenseur affiché).

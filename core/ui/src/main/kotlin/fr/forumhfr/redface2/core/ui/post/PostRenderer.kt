@@ -31,7 +31,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -63,9 +62,11 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.Placeholder
@@ -104,9 +105,11 @@ import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.ui.motion.rememberAnimationsEnabled
 import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
+import fr.forumhfr.redface2.core.ui.theme.LocalEgoQuotePseudo
 import fr.forumhfr.redface2.core.ui.theme.LocalFoldLongQuotes
 import fr.forumhfr.redface2.core.ui.theme.LocalIgnoreInlineColors
 import fr.forumhfr.redface2.core.ui.theme.LocalMediaDisplayProfile
+import fr.forumhfr.redface2.core.ui.theme.egoHighlightColors
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
@@ -273,6 +276,18 @@ internal fun isBareQuote(quote: PostBlock.Quote): Boolean =
 internal fun isBlockedQuoteAuthor(author: String?, blockedCanonicals: Set<String>): Boolean {
     if (author == null || blockedCanonicals.isEmpty()) return false
     return canonicalizePseudo(author) in blockedCanonicals
+}
+
+/**
+ * Returns whether a top-level sourced quote belongs to the authenticated topic reader.
+ *
+ * Both nullable inputs are rejected before canonicalization: a bare `[quote]` on a surface using
+ * [LocalEgoQuotePseudo]'s `null` default must never become an EgoQuote through `null == null`.
+ * Nested quotes are excluded so only the direct citation that the current post answers is marked.
+ */
+internal fun isEgoQuote(author: String?, quoteDepth: Int, egoCanonical: String?): Boolean {
+    if (egoCanonical == null || author == null || quoteDepth != 0) return false
+    return canonicalizePseudo(author) == egoCanonical
 }
 
 @Composable
@@ -562,7 +577,7 @@ private fun QuoteBlock(
         FoldableQuoteBlock(block, quoteDepth, onGoToCitedPost)
         return
     }
-    QuoteFrame(quoteDepth = quoteDepth, isBareQuote = isBareQuote(block)) {
+    QuoteFrame(author = block.author, quoteDepth = quoteDepth, isBareQuote = isBareQuote(block)) {
         QuoteHeader(block, onGoToCitedPost)
         PostBlocksRenderer(
             blocks = block.content.blocks,
@@ -634,6 +649,7 @@ private fun FoldableQuoteBlock(
 ) {
     var expanded by rememberSaveable(block) { mutableStateOf(false) }
     QuoteFrame(
+        author = block.author,
         quoteDepth = quoteDepth,
         isBareQuote = isBareQuote(block),
         modifier = Modifier.clickable(
@@ -641,7 +657,7 @@ private fun FoldableQuoteBlock(
                 if (expanded) R.string.post_quote_collapse_label else R.string.post_quote_expand_label,
             ),
         ) { expanded = !expanded },
-    ) {
+    ) { containerColor ->
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -666,7 +682,12 @@ private fun FoldableQuoteBlock(
                 onGoToCitedPost = onGoToCitedPost,
             )
         } else {
-            LongQuotePreview(block, quoteDepth, onGoToCitedPost)
+            LongQuotePreview(
+                block = block,
+                quoteDepth = quoteDepth,
+                onGoToCitedPost = onGoToCitedPost,
+                fadeColor = containerColor,
+            )
         }
     }
 }
@@ -691,6 +712,7 @@ private fun LongQuotePreview(
     block: PostBlock.Quote,
     quoteDepth: Int,
     onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)?,
+    fadeColor: Color,
 ) {
     val bodyLineHeight = MaterialTheme.typography.bodyMedium.lineHeight
     val density = LocalDensity.current
@@ -701,13 +723,13 @@ private fun LongQuotePreview(
         ).sp.toDp()
     }
     val maxHeightPx = with(density) { maxHeight.toPx() }
-    // The fade dissolves the clipped last line into the quote card's own surface colour.
-    val fadeColor = MaterialTheme.colorScheme.surfaceContainerHighest
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(max = maxHeight)
             .clipToBounds()
+            .testTag(LONG_QUOTE_PREVIEW_TAG)
+            .semantics { this[LongQuotePreviewFadeColorKey] = fadeColor }
             .drawWithContent {
                 drawContent()
                 if (isLongQuotePreviewClipped(contentHeightPx = size.height, maxHeightPx = maxHeightPx)) {
@@ -746,20 +768,38 @@ private fun LongQuotePreview(
  */
 @Composable
 private fun QuoteFrame(
+    author: String?,
     quoteDepth: Int,
     isBareQuote: Boolean,
     modifier: Modifier = Modifier,
-    content: @Composable ColumnScope.() -> Unit,
+    content: @Composable ColumnScope.(containerColor: Color) -> Unit,
 ) {
     val accent = when (quoteAccentRole(quoteDepth, isBareQuote)) {
         QuoteAccentRole.BARE -> MaterialTheme.colorScheme.outline
         QuoteAccentRole.SOURCED_EVEN -> MaterialTheme.colorScheme.primary
         QuoteAccentRole.SOURCED_ODD -> MaterialTheme.colorScheme.tertiary
     }
+    val egoQuote = isEgoQuote(author, quoteDepth, LocalEgoQuotePseudo.current)
+    val containerColor = if (egoQuote) {
+        egoHighlightColors().quoteContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHighest
+    }
+    val egoStateDescription = if (egoQuote) {
+        stringResource(R.string.post_quote_ego_state_description)
+    } else {
+        null
+    }
     Card(
-        modifier = modifier,
+        modifier = modifier.then(
+            if (egoStateDescription != null) {
+                Modifier.semantics { stateDescription = egoStateDescription }
+            } else {
+                Modifier
+            },
+        ),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+            containerColor = containerColor,
         ),
     ) {
         // Quote accent bar (4dp): outline for a bare [quote] (#252), else primary/tertiary
@@ -795,12 +835,17 @@ private fun QuoteFrame(
                 }
                 .padding(start = QUOTE_ACCENT_WIDTH + 12.dp, top = 12.dp, end = 12.dp, bottom = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
-            content = content,
+            content = { content(containerColor) },
         )
     }
 }
 
 private val QUOTE_ACCENT_WIDTH: Dp = 4.dp
+
+internal const val LONG_QUOTE_PREVIEW_TAG = "LongQuotePreview"
+
+/** Internal Compose-test diagnostic; custom semantics keys are ignored by accessibility services. */
+internal val LongQuotePreviewFadeColorKey = SemanticsPropertyKey<Color>("LongQuotePreviewFadeColor")
 
 @Composable
 private fun CollapsedQuoteBlock(
@@ -814,6 +859,7 @@ private fun CollapsedQuoteBlock(
     // unbounded recursion that would defeat the depth guard entirely.
     var revealed by rememberSaveable(block) { mutableStateOf(false) }
     QuoteFrame(
+        author = block.author,
         quoteDepth = quoteDepth,
         isBareQuote = isBareQuote(block),
         modifier = Modifier.clickable { revealed = !revealed },
@@ -844,11 +890,13 @@ private fun CollapsedQuoteBlock(
         if (revealed) {
             // #252 — same "Citation"/"Citation de X" header rule as the expanded QuoteBlock.
             QuoteHeader(block, onGoToCitedPost)
-            PostBlocksRenderer(
-                blocks = block.content.blocks,
-                quoteDepth = 0,
-                onGoToCitedPost = onGoToCitedPost,
-            )
+            CompositionLocalProvider(LocalEgoQuotePseudo provides null) {
+                PostBlocksRenderer(
+                    blocks = block.content.blocks,
+                    quoteDepth = 0,
+                    onGoToCitedPost = onGoToCitedPost,
+                )
+            }
         }
     }
 }
@@ -870,6 +918,7 @@ private fun BlockedQuoteBlock(
 ) {
     var revealed by rememberSaveable(block) { mutableStateOf(false) }
     QuoteFrame(
+        author = block.author,
         quoteDepth = quoteDepth,
         isBareQuote = isBareQuote(block),
         modifier = Modifier.clickable { revealed = !revealed },

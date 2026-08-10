@@ -355,6 +355,18 @@ class TopicViewModel @AssistedInject constructor(
                 _state.update { it.copy(fullWidthPosts = fullWidth) }
             }
             .launchIn(viewModelScope)
+        // #874 Q4/P1 — render-only Ego switches. They remain independent so an own post can keep
+        // its blue container while an auto-citation inside it independently keeps the purple one.
+        userPreferencesRepository.observeTopicEgoQuoteEnabled()
+            .onEach { enabled ->
+                _state.update { it.copy(egoQuoteEnabled = enabled) }
+            }
+            .launchIn(viewModelScope)
+        userPreferencesRepository.observeTopicEgoPostEnabled()
+            .onEach { enabled ->
+                _state.update { it.copy(egoPostEnabled = enabled) }
+            }
+            .launchIn(viewModelScope)
         // #806 — mirror the writing-surface preset so the screen can route each write tap
         // (reply FAB / « Citer » / « Citer N ») to the sheet or the full-screen editor.
         userPreferencesRepository.observeWritingSurfacePreset()

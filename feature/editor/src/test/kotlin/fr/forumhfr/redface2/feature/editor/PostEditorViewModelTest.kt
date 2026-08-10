@@ -2296,6 +2296,14 @@ class PostEditorViewModelTest {
 
         override suspend fun setTopicFullWidthPosts(enabled: Boolean) = Unit
 
+        override fun observeTopicEgoQuoteEnabled(): Flow<Boolean> = MutableStateFlow(true)
+
+        override suspend fun setTopicEgoQuoteEnabled(enabled: Boolean) = Unit
+
+        override fun observeTopicEgoPostEnabled(): Flow<Boolean> = MutableStateFlow(true)
+
+        override suspend fun setTopicEgoPostEnabled(enabled: Boolean) = Unit
+
         override fun observeShowScrollbar(): Flow<Boolean> = MutableStateFlow(true)
 
         override suspend fun setShowScrollbar(enabled: Boolean) = Unit
