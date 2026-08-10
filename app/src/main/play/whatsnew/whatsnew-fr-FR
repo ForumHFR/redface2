@@ -1,5 +1,6 @@
-Redface 2 v0.40.0 — bêta.
+Redface 2 v0.41.0 — dev.
 
-- Sélecteur de smileys : 5 colonnes sur tous les téléphones et smileys perso nettement plus grands, avec un délimiteur de cellule réglable.
-- Drapeaux : un sujet dont le dernier message lu terminait une page s'ouvre maintenant sur la page suivante, là où se trouve vraiment le premier non-lu.
-- Nouveau : « Mettre un favori HFR ici » dans le menu d'un message, avec confirmation quand le sujet a déjà un favori ailleurs.
+- Les citations de vos messages sont désormais mises en évidence.
+- Vos propres messages disposent aussi d'un fond distinct.
+- Les deux options sont activées par défaut et peuvent être réglées séparément dans « Sujet et lecture ».
+- Les couleurs s'adaptent aux thèmes clair, sombre et AMOLED, y compris avec les posts en pleine largeur.
