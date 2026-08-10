@@ -528,6 +528,34 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeTopicEgoQuoteEnabled(): Flow<Boolean> =
+        dataStore.data
+            .map { prefs -> prefs[KEY_TOPIC_EGO_QUOTE_ENABLED] ?: true }
+            .distinctUntilChanged()
+            .catch { emit(true) }
+
+    override suspend fun setTopicEgoQuoteEnabled(enabled: Boolean) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_TOPIC_EGO_QUOTE_ENABLED] = enabled
+            }
+        }
+    }
+
+    override fun observeTopicEgoPostEnabled(): Flow<Boolean> =
+        dataStore.data
+            .map { prefs -> prefs[KEY_TOPIC_EGO_POST_ENABLED] ?: true }
+            .distinctUntilChanged()
+            .catch { emit(true) }
+
+    override suspend fun setTopicEgoPostEnabled(enabled: Boolean) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_TOPIC_EGO_POST_ENABLED] = enabled
+            }
+        }
+    }
+
     override fun observeShowScrollbar(): Flow<Boolean> =
         dataStore.data
             // Default `true` (#105): the reading scrollbar is the historical behaviour; hiding it is
@@ -1100,6 +1128,10 @@ class DataStoreUserPreferencesRepository @Inject constructor(
 
         // #884 — render topic posts full-width / edge-to-edge (default false = historical card inset).
         val KEY_TOPIC_FULL_WIDTH_POSTS = booleanPreferencesKey("topic_full_width_posts")
+
+        // #874 — independent EgoQuote / EgoPost switches; named separately from future style keys.
+        val KEY_TOPIC_EGO_QUOTE_ENABLED = booleanPreferencesKey("topic_ego_quote_enabled")
+        val KEY_TOPIC_EGO_POST_ENABLED = booleanPreferencesKey("topic_ego_post_enabled")
 
         // #105 — show the intra-page reading scrollbar (default true = historical; opt-out).
         val KEY_SHOW_SCROLLBAR = booleanPreferencesKey("show_scrollbar")

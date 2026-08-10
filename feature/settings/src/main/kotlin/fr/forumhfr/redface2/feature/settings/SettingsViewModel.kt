@@ -128,6 +128,16 @@ class SettingsViewModel @Inject constructor(
             apply = { state, value -> state.copy(fullWidthPosts = value) },
         )
         observePreference(
+            flow = userPreferencesRepository.observeTopicEgoQuoteEnabled(),
+            isLocked = { it.isUpdatingEgoQuote },
+            apply = { state, value -> state.copy(egoQuoteEnabled = value) },
+        )
+        observePreference(
+            flow = userPreferencesRepository.observeTopicEgoPostEnabled(),
+            isLocked = { it.isUpdatingEgoPost },
+            apply = { state, value -> state.copy(egoPostEnabled = value) },
+        )
+        observePreference(
             flow = userPreferencesRepository.observeShowScrollbar(),
             isLocked = { it.isUpdatingShowScrollbar },
             apply = { state, value -> state.copy(showScrollbar = value) },
@@ -307,6 +317,8 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.TopicSignaturesChanged -> updateTopicSignatures(intent.enabled)
             is SettingsIntent.FoldLongQuotesChanged -> updateFoldLongQuotes(intent.enabled)
             is SettingsIntent.FullWidthPostsChanged -> updateFullWidthPosts(intent.enabled)
+            is SettingsIntent.EgoQuoteChanged -> updateEgoQuote(intent.enabled)
+            is SettingsIntent.EgoPostChanged -> updateEgoPost(intent.enabled)
             is SettingsIntent.ShowScrollbarChanged -> updateShowScrollbar(intent.enabled)
             is SettingsIntent.NavBarLabelsChanged -> updateNavBarLabels(intent.enabled)
             is SettingsIntent.FunnyEmptyStateChanged -> updateFunnyEmptyState(intent.enabled)
@@ -1029,6 +1041,58 @@ class SettingsViewModel @Inject constructor(
                 }
             },
             persist = userPreferencesRepository::setTopicFullWidthPosts,
+        )
+    }
+
+    private fun updateEgoQuote(desired: Boolean) {
+        val previous = _state.value.egoQuoteEnabled
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    egoQuoteEnabled = desired,
+                    isUpdatingEgoQuote = true,
+                    egoQuoteError = false,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(egoQuoteEnabled = desired, isUpdatingEgoQuote = false)
+                } else {
+                    state.copy(
+                        egoQuoteEnabled = previous,
+                        isUpdatingEgoQuote = false,
+                        egoQuoteError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setTopicEgoQuoteEnabled,
+        )
+    }
+
+    private fun updateEgoPost(desired: Boolean) {
+        val previous = _state.value.egoPostEnabled
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    egoPostEnabled = desired,
+                    isUpdatingEgoPost = true,
+                    egoPostError = false,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(egoPostEnabled = desired, isUpdatingEgoPost = false)
+                } else {
+                    state.copy(
+                        egoPostEnabled = previous,
+                        isUpdatingEgoPost = false,
+                        egoPostError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setTopicEgoPostEnabled,
         )
     }
 

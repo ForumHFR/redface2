@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.ui.post
 
+import androidx.annotation.VisibleForTesting
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -13,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.semantics
 
@@ -57,39 +59,51 @@ import androidx.compose.ui.semantics.semantics
  *    because the sequence ends here (#983). The shell cannot know either fact; it renders the
  *    decision.
  *
- * The default (`flat = false`) rendering is byte-identical to the pre-#884 card; existing call-sites
- * pass nothing.
+ * The default (`flat = false`) composition structure and visual/layout rendering stay unchanged
+ * from the pre-#884 card; existing call-sites pass nothing. The semantics tree additionally exposes
+ * diagnostic colour keys, ignored by accessibility services, for regression tests.
+ *
+ * [containerColorOverride] replaces only the card container for feature-owned highlights. It does
+ * not change [flat]'s rectangular shape or closing hairline, and its `null` default preserves the
+ * historical card and transparent full-width branches exactly.
  *
  * A11y (#884) : the card is one TalkBack traversal group in BOTH modes ([isTraversalGroup] composed
  * onto the caller's [modifier]) — M3's `Surface` only sets the deprecated `IsContainer` key, so the
  * shell owns the real one.
  */
 @Composable
-@Suppress("LongParameterList") // Slot shell: 2 mandatory slots + modifier/flat/border/edge + 2 optional slots.
+@Suppress("LongParameterList")
+// Slot shell: 2 mandatory slots + modifier/flat/container override/border/edge + 2 optional slots.
 fun PostCardShell(
     header: @Composable () -> Unit,
     body: @Composable () -> Unit,
     modifier: Modifier = Modifier,
     flat: Boolean = false,
+    containerColorOverride: Color? = null,
     border: BorderStroke? = null,
     badges: (@Composable () -> Unit)? = null,
     footer: (@Composable () -> Unit)? = null,
     flatBottomEdge: PostCardShellFlatBottomEdge = PostCardShellFlatBottomEdge.HAIRLINE,
 ) {
+    val effectiveContainerColor = containerColorOverride ?: if (flat) {
+        Color.Transparent
+    } else {
+        MaterialTheme.colorScheme.surfaceContainer
+    }
     Card(
-        modifier = modifier.semantics { isTraversalGroup = true },
+        modifier = modifier.semantics {
+            isTraversalGroup = true
+            this[PostCardShellContainerColorKey] = effectiveContainerColor
+        },
         border = border,
         shape = if (flat) RectangleShape else CardDefaults.shape,
-        colors = if (flat) {
-            CardDefaults.cardColors(
-                containerColor = Color.Transparent,
-                contentColor = MaterialTheme.colorScheme.onSurface,
-            )
-        } else {
-            CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainer,
-            )
-        },
+        // One `cardColors` call for every colour state, rather than branching on `flat`: the
+        // resolved colour is already decided above, so a single expression keeps this call site
+        // readable. Changing it in place recomposes the card — it never replaces the subtree.
+        colors = CardDefaults.cardColors(
+            containerColor = effectiveContainerColor,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+        ),
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             header()
@@ -114,6 +128,15 @@ fun PostCardShell(
 const val POST_CARD_SHELL_DIVIDER_TAG = "PostCardShellDivider"
 
 /**
+ * Compose-test diagnostic ignored by accessibility services.
+ *
+ * Public only so tests in consumer modules can inspect the rendered shell; feature production code
+ * must not use it as a behavioural or styling contract.
+ */
+@VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)
+val PostCardShellContainerColorKey = SemanticsPropertyKey<Color>("PostCardShellContainerColor")
+
+/**
  * #351/#104 — a tinted identity strip: a full-width [Surface] across the top of the card that hosts
  * the [content] (a [PostIdentityHeader]). Extracted as its own primitive (per the Codex framing)
  * instead of a flag on [PostCardShell], so the band-less private-message card never inherits a strip
@@ -133,9 +156,20 @@ fun PostIdentityBand(
     content: @Composable () -> Unit,
 ) {
     Surface(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .semantics { this[PostIdentityBandContainerColorKey] = containerColor },
         color = containerColor,
     ) {
         content()
     }
 }
+
+/**
+ * Compose-test diagnostic ignored by accessibility services.
+ *
+ * Public only so tests in consumer modules can inspect the rendered band; feature production code
+ * must not use it as a behavioural or styling contract.
+ */
+@VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)
+val PostIdentityBandContainerColorKey = SemanticsPropertyKey<Color>("PostIdentityBandContainerColor")

@@ -363,6 +363,26 @@ interface UserPreferencesRepository {
     suspend fun setTopicFullWidthPosts(enabled: Boolean)
 
     /**
+     * #874 — whether top-level quotes authored by the connected user receive the EgoQuote
+     * highlight in topic posts. Default `true`; users can disable this independently from
+     * [observeTopicEgoPostEnabled]. Pure render-time switch (no refetch).
+     */
+    fun observeTopicEgoQuoteEnabled(): Flow<Boolean>
+
+    /** Persists [observeTopicEgoQuoteEnabled]. Default `true` until the first call. */
+    suspend fun setTopicEgoQuoteEnabled(enabled: Boolean)
+
+    /**
+     * #874 — whether topic posts authored by the connected user receive the EgoPost highlight.
+     * Default `true`; users can disable this independently from [observeTopicEgoQuoteEnabled].
+     * Pure render-time switch (no refetch).
+     */
+    fun observeTopicEgoPostEnabled(): Flow<Boolean>
+
+    /** Persists [observeTopicEgoPostEnabled]. Default `true` until the first call. */
+    suspend fun setTopicEgoPostEnabled(enabled: Boolean)
+
+    /**
      * #105 — whether the intra-page reading scrollbar ([LazyListScrollbar], the thin auto-hiding
      * fast-scroll thumb on the right edge of a topic page / private-message thread) is shown. Default
      * `true` (the historical behaviour); `false` hides it entirely (sujets AND MP) — the beta feedback

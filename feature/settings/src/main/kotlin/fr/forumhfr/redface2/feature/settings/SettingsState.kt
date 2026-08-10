@@ -140,6 +140,14 @@ data class SettingsState(
     val isUpdatingFullWidthPosts: Boolean = false,
     val fullWidthPostsError: Boolean = false,
     val fullWidthPostsTouchedLocally: Boolean = false,
+    // #874 — independent EgoQuote / EgoPost topic highlights. Both default TRUE; each follows the
+    // same optimistic-flip and in-flight hydration guard as the neighbouring reading preferences.
+    val egoQuoteEnabled: Boolean = true,
+    val isUpdatingEgoQuote: Boolean = false,
+    val egoQuoteError: Boolean = false,
+    val egoPostEnabled: Boolean = true,
+    val isUpdatingEgoPost: Boolean = false,
+    val egoPostError: Boolean = false,
     // #105 — afficher l'ascenseur de lecture. Même machinerie optimistic-flip + garde de course au
     // démarrage. Default TRUE (ascenseur historique) : le toggle est l'opt-out (retour bêta styx42).
     val showScrollbar: Boolean = true,
@@ -330,6 +338,12 @@ data class SettingsState(
     val canToggleFullWidthPosts: Boolean
         get() = !isUpdatingFullWidthPosts
 
+    val canToggleEgoQuote: Boolean
+        get() = !isUpdatingEgoQuote
+
+    val canToggleEgoPost: Boolean
+        get() = !isUpdatingEgoPost
+
     // #105 — the show-scrollbar toggle is gated only by its own write.
     val canToggleShowScrollbar: Boolean
         get() = !isUpdatingShowScrollbar
@@ -490,6 +504,12 @@ sealed interface SettingsIntent {
 
     /** #884 — afficher les posts en pleine largeur (bord à bord, sans encart). */
     data class FullWidthPostsChanged(val enabled: Boolean) : SettingsIntent
+
+    /** #874 — highlight quotes that reproduce a post authored by the connected user. */
+    data class EgoQuoteChanged(val enabled: Boolean) : SettingsIntent
+
+    /** #874 — highlight posts authored by the connected user. */
+    data class EgoPostChanged(val enabled: Boolean) : SettingsIntent
 
     /** #105 — afficher l'ascenseur de lecture (sujets et MP). */
     data class ShowScrollbarChanged(val enabled: Boolean) : SettingsIntent
