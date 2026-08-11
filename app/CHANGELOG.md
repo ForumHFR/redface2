@@ -16,7 +16,11 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
-## `0.41.0` — `internal` (dev) — 2026-08-10
+## `0.41.0` — `open` (beta) — 2026-08-11
+
+Promue en bêta le 11/08 sans changement de `versionName` : le lot dev 0.41.0 du 10/08 part tel quel
+sur le canal public. La garde de ship compare le `versionName` à la **précédente bêta** (0.40.0), pas
+au plus haut tag, précisément pour permettre cette promotion à l'identique.
 
 ### Ajouté
 
