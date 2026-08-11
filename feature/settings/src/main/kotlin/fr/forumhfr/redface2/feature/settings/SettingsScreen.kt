@@ -561,6 +561,24 @@ internal fun buildSettingsCatalogue(
                     .takeIf { state.fullWidthPostsError },
                 onCheckedChange = { onIntent(SettingsIntent.FullWidthPostsChanged(it)) },
             ),
+            toggleRow(
+                id = "ego_quote",
+                title = stringResource(R.string.settings_ego_quote_title),
+                description = stringResource(R.string.settings_ego_quote_description),
+                checked = state.egoQuoteEnabled,
+                enabled = state.canToggleEgoQuote,
+                errorRes = R.string.settings_ego_quote_persist_failed.takeIf { state.egoQuoteError },
+                onCheckedChange = { onIntent(SettingsIntent.EgoQuoteChanged(it)) },
+            ),
+            toggleRow(
+                id = "ego_post",
+                title = stringResource(R.string.settings_ego_post_title),
+                description = stringResource(R.string.settings_ego_post_description),
+                checked = state.egoPostEnabled,
+                enabled = state.canToggleEgoPost,
+                errorRes = R.string.settings_ego_post_persist_failed.takeIf { state.egoPostError },
+                onCheckedChange = { onIntent(SettingsIntent.EgoPostChanged(it)) },
+            ),
             // #105 — afficher l'ascenseur de lecture (sujets et MP), retour bêta styx42.
             toggleRow(
                 id = "show_scrollbar",

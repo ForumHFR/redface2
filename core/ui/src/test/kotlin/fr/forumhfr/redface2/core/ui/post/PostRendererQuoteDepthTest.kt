@@ -289,4 +289,23 @@ class PostRendererQuoteDepthTest {
         assertFalse(isBlockedQuoteAuthor("Alice", emptySet()))
         assertFalse(isBlockedQuoteAuthor(null, emptySet()))
     }
+
+    @Test
+    fun `isEgoQuote matches a canonical top-level author`() {
+        assertTrue(isEgoQuote(author = "  XaaT\u00A0 ", quoteDepth = 0, egoCanonical = "xaat"))
+        assertFalse(isEgoQuote(author = "SomeoneElse", quoteDepth = 0, egoCanonical = "xaat"))
+    }
+
+    @Test
+    fun `isEgoQuote excludes every nested depth`() {
+        assertFalse(isEgoQuote(author = "XaTriX", quoteDepth = 1, egoCanonical = "xatrix"))
+        assertFalse(isEgoQuote(author = "XaTriX", quoteDepth = 3, egoCanonical = "xatrix"))
+    }
+
+    @Test
+    fun `isEgoQuote never matches a bare quote against an absent provider`() {
+        assertFalse(isEgoQuote(author = null, quoteDepth = 0, egoCanonical = null))
+        assertFalse(isEgoQuote(author = null, quoteDepth = 0, egoCanonical = "xaat"))
+        assertFalse(isEgoQuote(author = "XaTriX", quoteDepth = 0, egoCanonical = null))
+    }
 }

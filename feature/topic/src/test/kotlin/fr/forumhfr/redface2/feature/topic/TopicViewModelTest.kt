@@ -689,6 +689,33 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `state keeps the two Ego preferences independent (#874)`() = runTest {
+        val quoteOnly = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            userPreferencesRepository = FakeUserPreferencesRepository(
+                topicEgoQuoteEnabled = true,
+                topicEgoPostEnabled = false,
+            ),
+        )
+        assertEquals(true, quoteOnly.state.value.egoQuoteEnabled)
+        assertEquals(false, quoteOnly.state.value.egoPostEnabled)
+
+        val postOnly = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            userPreferencesRepository = FakeUserPreferencesRepository(
+                topicEgoQuoteEnabled = false,
+                topicEgoPostEnabled = true,
+            ),
+        )
+        assertEquals(false, postOnly.state.value.egoQuoteEnabled)
+        assertEquals(true, postOnly.state.value.egoPostEnabled)
+    }
+
+    @Test
     fun `state writingSurfacePreset reflects the user preference (#806)`() = runTest {
         val fullEditor = topicViewModel(
             request = topicRequest(page = 1),
@@ -4137,6 +4164,7 @@ private class FakeStreamingEmissionTopicRepository(
  * No-op preferences fake for the topic ViewModel tests. Only [observeTopicTopBarAutoHide]
  * (build 89 follow-up), [observeTopicPageFabs] (#383), [observeTopicPollsExpanded] (#456),
  * [observeTopicSignatures] (#330), [observeTopicFullWidthPosts] (#884) and
+ * [observeTopicEgoQuoteEnabled]/[observeTopicEgoPostEnabled] (#874), plus
  * [observeWritingSurfacePreset] (#806) are read by [TopicViewModel] — everything else returns
  * the DataStore default so the fake stays a thin stand-in. The relevant values are
  * constructor-injectable so tests can assert they reach state.
@@ -4150,6 +4178,8 @@ internal class FakeUserPreferencesRepository(
     private val topicSignatures: Boolean = false,
     // #884 — full-width posts; false mirrors the production default (historical card inset).
     private val topicFullWidthPosts: Boolean = false,
+    private val topicEgoQuoteEnabled: Boolean = true,
+    private val topicEgoPostEnabled: Boolean = true,
     private val confirmBeforePosting: Boolean = false,
     // #805 — quote rendering in the composer; false mirrors the production default (inline BBCode).
     private val quoteCardsEnabled: Boolean = false,
@@ -4258,6 +4288,14 @@ internal class FakeUserPreferencesRepository(
     override fun observeTopicFullWidthPosts(): Flow<Boolean> = MutableStateFlow(topicFullWidthPosts)
 
     override suspend fun setTopicFullWidthPosts(enabled: Boolean) = Unit
+
+    override fun observeTopicEgoQuoteEnabled(): Flow<Boolean> = MutableStateFlow(topicEgoQuoteEnabled)
+
+    override suspend fun setTopicEgoQuoteEnabled(enabled: Boolean) = Unit
+
+    override fun observeTopicEgoPostEnabled(): Flow<Boolean> = MutableStateFlow(topicEgoPostEnabled)
+
+    override suspend fun setTopicEgoPostEnabled(enabled: Boolean) = Unit
 
     override fun observeShowScrollbar(): Flow<Boolean> = MutableStateFlow(true)
 

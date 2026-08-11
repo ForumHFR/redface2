@@ -855,6 +855,34 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `EgoQuote defaults to true and persists independently from EgoPost`() = runTest(dispatcher) {
+        assertTrue(repository.observeTopicEgoQuoteEnabled().first())
+        assertTrue(repository.observeTopicEgoPostEnabled().first())
+
+        repository.setTopicEgoQuoteEnabled(false)
+        assertFalse(repository.observeTopicEgoQuoteEnabled().first())
+        assertTrue(repository.observeTopicEgoPostEnabled().first())
+
+        repository.setTopicEgoQuoteEnabled(true)
+        assertTrue(repository.observeTopicEgoQuoteEnabled().first())
+        assertTrue(repository.observeTopicEgoPostEnabled().first())
+    }
+
+    @Test
+    fun `EgoPost defaults to true and persists independently from EgoQuote`() = runTest(dispatcher) {
+        assertTrue(repository.observeTopicEgoQuoteEnabled().first())
+        assertTrue(repository.observeTopicEgoPostEnabled().first())
+
+        repository.setTopicEgoPostEnabled(false)
+        assertTrue(repository.observeTopicEgoQuoteEnabled().first())
+        assertFalse(repository.observeTopicEgoPostEnabled().first())
+
+        repository.setTopicEgoPostEnabled(true)
+        assertTrue(repository.observeTopicEgoQuoteEnabled().first())
+        assertTrue(repository.observeTopicEgoPostEnabled().first())
+    }
+
+    @Test
     fun `observeShowScrollbar defaults to true then persists false and true`() = runTest(dispatcher) {
         // #105 — the reading scrollbar is the historical behaviour; disabling it is the opt-out.
         repository.observeShowScrollbar().test {

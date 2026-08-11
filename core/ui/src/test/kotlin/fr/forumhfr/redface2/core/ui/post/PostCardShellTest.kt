@@ -1,13 +1,19 @@
 package fr.forumhfr.redface2.core.ui.post
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -104,6 +110,51 @@ class PostCardShellTest {
         // semantics-asserted property — a Roborazzi golden would cover the pixels).
         composeTestRule.onNodeWithText("header").assertIsDisplayed()
         composeTestRule.onNodeWithText("body").assertIsDisplayed()
+    }
+
+    @Test
+    fun `container override replaces the inset card colour without dropping slots`() {
+        composeTestRule.setContent {
+            RedfaceTheme {
+                PostCardShell(
+                    header = { Box(Modifier.fillMaxWidth().height(24.dp)) },
+                    body = { Box(Modifier.fillMaxWidth().height(24.dp)) },
+                    badges = { Text("override badges") },
+                    footer = { Text("override footer") },
+                    modifier = Modifier.testTag(OVERRIDE_CARD_TAG),
+                    containerColorOverride = OVERRIDE_COLOR,
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag(OVERRIDE_CARD_TAG, useUnmergedTree = true)
+            .assert(SemanticsMatcher.expectValue(PostCardShellContainerColorKey, OVERRIDE_COLOR))
+        composeTestRule.onNodeWithText("override badges").assertIsDisplayed()
+        composeTestRule.onNodeWithText("override footer").assertIsDisplayed()
+        composeTestRule.onNodeWithTag(POST_CARD_SHELL_DIVIDER_TAG, useUnmergedTree = true)
+            .assertDoesNotExist()
+    }
+
+    @Test
+    fun `container override replaces the flat colour without dropping slots or hairline`() {
+        composeTestRule.setContent {
+            RedfaceTheme {
+                PostCardShell(
+                    header = { Box(Modifier.fillMaxWidth().height(24.dp)) },
+                    body = { Box(Modifier.fillMaxWidth().height(24.dp)) },
+                    footer = { Text("flat override footer") },
+                    modifier = Modifier.testTag(OVERRIDE_FLAT_TAG),
+                    flat = true,
+                    containerColorOverride = OVERRIDE_COLOR,
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag(OVERRIDE_FLAT_TAG, useUnmergedTree = true)
+            .assert(SemanticsMatcher.expectValue(PostCardShellContainerColorKey, OVERRIDE_COLOR))
+        composeTestRule.onNodeWithText("flat override footer").assertIsDisplayed()
+        composeTestRule.onNodeWithTag(POST_CARD_SHELL_DIVIDER_TAG, useUnmergedTree = true)
+            .assertExists()
     }
 
     @Test
@@ -241,5 +292,11 @@ class PostCardShellTest {
 
         composeTestRule.onNodeWithText("anchor band").assertIsDisplayed()
         composeTestRule.onNodeWithText("normal band").assertIsDisplayed()
+    }
+
+    private companion object {
+        const val OVERRIDE_CARD_TAG = "override-card"
+        const val OVERRIDE_FLAT_TAG = "override-flat"
+        val OVERRIDE_COLOR = Color(0xFF123456)
     }
 }

@@ -29,6 +29,18 @@ data class TopicUiState(
      */
     val connectedPseudo: String? = null,
     /**
+     * #874 Q4 — mirrors `UserPreferencesRepository.observeTopicEgoQuoteEnabled()`. When enabled,
+     * direct citations of the authenticated reader receive the EgoQuote container. Default `true`
+     * matches the persisted preference contract; anonymous sessions remain inert independently.
+     */
+    val egoQuoteEnabled: Boolean = true,
+    /**
+     * #874 P1 — mirrors `UserPreferencesRepository.observeTopicEgoPostEnabled()`. When enabled,
+     * posts authored by the authenticated reader receive the EgoPost container. Default `true`
+     * matches the persisted preference contract; ownership is still resolved from the live session.
+     */
+    val egoPostEnabled: Boolean = true,
+    /**
      * #292 — `numreponse` of the post whose deletion is currently in flight, or `null` when no
      * delete is running. Drives the per-post « Supprimer » affordance (disabled / busy) and guards
      * against a double-submit. Cleared when the delete settles (success or failure).

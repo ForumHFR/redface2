@@ -362,6 +362,15 @@
     <string name="settings_full_width_posts_title">Posts en pleine largeur</string>
     <string name="settings_full_width_posts_description">Affiche les messages bord à bord, sans encart.</string>
     <string name="settings_full_width_posts_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
+
+    <!-- #874 — EgoQuote et EgoPost sont actifs par défaut et restent indépendants. -->
+    <string name="settings_ego_quote_title">EgoQuote</string>
+    <string name="settings_ego_quote_description">Teinte le fond des citations qui reprennent l’un de vos messages.</string>
+    <string name="settings_ego_quote_persist_failed">Impossible de mémoriser le réglage EgoQuote. Réessayez.</string>
+    <string name="settings_ego_post_title">EgoPost</string>
+    <string name="settings_ego_post_description">Teinte vos propres messages sans modifier leur bande d’identité.</string>
+    <string name="settings_ego_post_persist_failed">Impossible de mémoriser le réglage EgoPost. Réessayez.</string>
+
     <string name="settings_show_scrollbar_title">Afficher l\'ascenseur</string>
     <string name="settings_show_scrollbar_description">Affiche l\'ascenseur de défilement sur le bord droit lors de la lecture d\'un sujet ou d\'un message privé.</string>
     <string name="settings_show_scrollbar_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>

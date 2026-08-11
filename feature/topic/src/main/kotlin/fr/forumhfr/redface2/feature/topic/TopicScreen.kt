@@ -83,6 +83,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
@@ -136,7 +137,9 @@ import fr.forumhfr.redface2.core.ui.post.collectPostMediaUrls
 import fr.forumhfr.redface2.core.ui.post.retryFailedPostMedia
 import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
+import fr.forumhfr.redface2.core.ui.theme.LocalEgoQuotePseudo
 import fr.forumhfr.redface2.core.ui.theme.LocalIgnoreInlineColors
+import fr.forumhfr.redface2.core.ui.theme.egoHighlightColors
 import fr.forumhfr.redface2.core.ui.theme.rememberCreatorPseudoBrush
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -1835,6 +1838,37 @@ private fun TopicLoadedContent(
     // Marked by tinting ONLY its identity band with tertiaryContainer (XaTriX: the left-rail attempt was
     // ugly; the old card+band double tint stays removed) — one subtle band, no layout shift.
     val highlight = state.request.scrollTo
+    // #874 — canonicalize the live session pseudo ONCE for the loaded list, then match the current
+    // page's post authors once while building the set below. Lazy cards only consume the resulting
+    // pseudo/set and never repeat either operation on recomposition. Both settings off and anonymous
+    // sessions collapse to the safe null/empty values.
+    val egoCanonicalPseudo = remember(
+        state.egoQuoteEnabled,
+        state.egoPostEnabled,
+        state.isAuthenticated,
+        state.connectedPseudo,
+    ) {
+        deriveEgoCanonicalPseudo(
+            enabled = state.egoQuoteEnabled || state.egoPostEnabled,
+            isAuthenticated = state.isAuthenticated,
+            connectedPseudo = state.connectedPseudo,
+        )
+    }
+    val egoQuoteCanonicalPseudo = egoCanonicalPseudo.takeIf { state.egoQuoteEnabled }
+    val egoPostNumreponses = remember(
+        state.egoPostEnabled,
+        egoCanonicalPseudo,
+        topic.posts,
+    ) {
+        if (!state.egoPostEnabled || egoCanonicalPseudo == null) {
+            emptySet()
+        } else {
+            topic.posts
+                .asSequence()
+                .filter { post -> isEgoPost(post, egoCanonicalPseudo) }
+                .mapTo(mutableSetOf()) { post -> post.numreponse }
+        }
+    }
     // #362 — post whose contextual menu is open (null = closed). Plain local UI state at the
     // Loaded level: the menu carries no async data, so no ViewModel/hoisting is needed — the
     // sheet lives in :feature:topic (unlike ProfilePreviewSheet, hoisted in :app only because
@@ -2181,6 +2215,10 @@ private fun TopicLoadedContent(
                         flat = state.fullWidthPosts,
                         // #983 — who closes this post's bottom edge (derived above).
                         flatBottomEdge = flatBottomEdge,
+                        // #874 — Q4 and P1 are independent: an own post carrying an auto-citation
+                        // receives both nested containers. Hidden posts never enter this branch.
+                        egoQuoteCanonicalPseudo = egoQuoteCanonicalPseudo,
+                        egoPostHighlighted = post.numreponse in egoPostNumreponses,
                     )
                 }
                 if (showLastReadMarker) {
@@ -2703,7 +2741,7 @@ private fun TopicPollCard(
  * quote/edit/menu action (decision #1): the reader reveals first, then acts on the full card.
  */
 @Composable
-private fun HiddenPostCard(
+internal fun HiddenPostCard(
     author: String,
     onReveal: () -> Unit,
     modifier: Modifier = Modifier,
@@ -2795,6 +2833,17 @@ internal fun TopicPostCard(
      * a lone card.
      */
     flatBottomEdge: PostCardShellFlatBottomEdge = PostCardShellFlatBottomEdge.HAIRLINE,
+    /**
+     * #874 Q4 — canonical session pseudo provided to the BODY renderer only. `null` disables the
+     * quote marker (setting off / anonymous / previews). Default keeps direct test mounts and every
+     * non-topic host neutral.
+     */
+    egoQuoteCanonicalPseudo: String? = null,
+    /**
+     * #874 P1 — whether this card belongs to the live authenticated session and the setting is on.
+     * Resolved by the list from [isEgoPost]; default `false` preserves preview/test call sites.
+     */
+    egoPostHighlighted: Boolean = false,
     onQuote: (() -> Unit)?,
     /**
      * #823 — LONG press on « Citer » : opens the full-screen editor directly, a one-shot override
@@ -2854,9 +2903,20 @@ internal fun TopicPostCard(
     // #882 P1 — only the STABLE citation-count pill gates the badges strip now: the dynamic
     // « Ajouté à la citation » pill is gone, so multi-quote selection never grows the card.
     val hasBadges = citedCount > 0
+    val egoColors = egoHighlightColors()
+    val postContainerColor = when {
+        egoPostHighlighted -> egoColors.postContainer
+        flat -> Color.Transparent
+        else -> MaterialTheme.colorScheme.surfaceContainer
+    }
+    val egoPostStateDescription = stringResource(R.string.topic_post_ego_state_description)
     PostCardShell(
         // #884 — full-width mode: same node structure, boundary-less rendering (vague 2 contract).
         flat = flat,
+        // #874 P1 — the colour is resolved here (EgoPost aplat, historical inset, or historical
+        // flat transparency) and always passed non-null, so the shell has a single colour path to
+        // honour. Shape and bottom-edge decisions still come from `flat`, never from this colour.
+        containerColorOverride = postContainerColor,
         // #983 — the sequence owner decides who closes this post's bottom edge.
         flatBottomEdge = flatBottomEdge,
         // #436 — multi-quote selection outline (lot 1), unchanged.
@@ -2874,6 +2934,15 @@ internal fun TopicPostCard(
         // stays the topic's decision, passed in as containerColor.
         header = {
             PostIdentityBand(
+                // #874 P1 — the EgoPost a11y marker sits on the identity node, which is present in
+                // both display modes and is what TalkBack traverses first on a post.
+                modifier = Modifier
+                    .testTag(TOPIC_POST_IDENTITY_BAND_TAG)
+                    .semantics {
+                        if (egoPostHighlighted) {
+                            stateDescription = egoPostStateDescription
+                        }
+                    },
                 containerColor = if (highlighted) {
                     MaterialTheme.colorScheme.tertiaryContainer
                 } else {
@@ -2927,7 +2996,12 @@ internal fun TopicPostCard(
                 val imageActions = remember(onImageLongPress) {
                     onImageLongPress?.let { PostImageActions(onLongPress = it) }
                 }
-                CompositionLocalProvider(LocalPostImageActions provides imageActions) {
+                CompositionLocalProvider(
+                    LocalPostImageActions provides imageActions,
+                    // #874 Q4 — body only. Signatures below, MP threads and editor previews keep
+                    // LocalEgoQuotePseudo's null default. Own-post P1 never suppresses this provider.
+                    LocalEgoQuotePseudo provides egoQuoteCanonicalPseudo,
+                ) {
                     PostRenderer(
                         content = post.content,
                         // #946 — `selectable` must NOT depend on the zoom: flipping it swaps the
@@ -2983,6 +3057,8 @@ internal fun TopicPostCard(
         },
     )
 }
+
+internal const val TOPIC_POST_IDENTITY_BAND_TAG = "TopicPostIdentityBand"
 
 /**
  * #351/#201/#208/#221/#362/#476/#483 — the topic post card's identity line, on the shared

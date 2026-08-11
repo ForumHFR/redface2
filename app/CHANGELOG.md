@@ -16,6 +16,23 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.41.0` — `open` (beta) — 2026-08-11
+
+Promue en bêta le 11/08 sans changement de `versionName` : le lot dev 0.41.0 du 10/08 part tel quel
+sur le canal public. La garde de ship compare le `versionName` à la **précédente bêta** (0.40.0), pas
+au plus haut tag, précisément pour permettre cette promotion à l'identique.
+
+### Ajouté
+
+- **EgoQuote met en évidence les citations qui reprennent directement un de vos messages** et **EgoPost applique un fond distinct à vos propres messages** ([#874](https://github.com/ForumHFR/redface2/issues/874)). Les deux réglages sont activés par défaut, indépendants, et leur cumul reste visible quand un de vos messages contient une auto-citation.
+
+### Interne
+
+- La détection EgoPost se fie au pseudo de la session authentifiée et ignore le bit `isOwnPost` persisté, qui peut survivre à un changement de compte. EgoQuote ne marque que le premier niveau de citation : les citations imbriquées restent neutres.
+- La palette fournit des aplats opaques dédiés aux thèmes clair, sombre et AMOLED. Une surcharge du conteneur de carte conserve l'EgoPost en mode pleine largeur sans réintroduire les limites visuelles du mode cartes.
+
+---
+
 ## `0.40.0` — `open` (beta) — 2026-08-06
 
 Promotion en bêta du lot dev 0.38.0 → 0.39.1 : sélecteur de smileys (#989), correctifs
