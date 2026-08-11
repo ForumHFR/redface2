@@ -1,6 +1,6 @@
 Redface 2 v0.41.0 — beta.
 
-- Quotes of your messages are now highlighted.
+- Direct quotes of your messages are now highlighted.
 - Your own posts also get a distinct background.
 - Both options are enabled by default and can be adjusted separately in the topic reading settings.
 - Colors adapt to light, dark, and AMOLED themes, including full-width posts.
