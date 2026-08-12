@@ -38,10 +38,32 @@ Trois verdicts possibles :
 
 Contexte d'architecture : le partage se fait au niveau de la **carte d'un message** (cible
 `ReadingPostCard` dans `:core:ui`, lot 1 de #1040), pas des écrans ni des ViewModels — cf. #1040 et
-[ADR-013]({{ site.baseurl }}/adr/013-mp-lecture-cache-prefetch) (amendée 2026-08-12). Trois contrats
-de test **gèlent volontairement** certaines lignes « oui mais absent » ; les flipper commence par
-réarbitrer le contrat (issue + modification assumée du test), jamais par un flip silencieux — ils
-sont signalés dans la colonne Détail.
+[ADR-013]({{ site.baseurl }}/adr/013-mp-lecture-cache-prefetch) (amendée 2026-08-12).
+
+Trois contrats de test décrivaient l'écart comme un design et **gelaient** autant de lignes « oui
+mais absent ». Leur **réarbitrage a été rendu le 2026-08-12** (#1041) — propositions rédigées par
+Fable, décision prise par Sol contre le code, le producteur ne pouvant pas être son propre juge :
+
+- `MessageCardShellSmokeTest` (#884) — **amendé maintenant** (lot 0). Les deux assertions sont
+  conservées : elles caractérisent le chemin par défaut (encarté) de `PostCardShell`. Seul le KDoc
+  change, parce qu'il présentait la hairline du mode plat comme une affordance « topic-owned » que
+  le MP « never opts into » — une caractérisation du défaut y était écrite en interdiction
+  permanente. La parité pleine largeur reste un chemin opt-in du lot 2, qui devra apporter sa propre
+  couverture (toggle à chaud, survie d'un repli déplié).
+- `PostRendererHostMatrixTest` de `:feature:messages` (#958) — **amendé au lot 3**, dans la même PR
+  que le provider `LocalPostImageActions` côté MP. Assertions **retournées** (tap et appui long
+  définis, cible `PostImageTarget` vérifiée) et harnais conservé, plus un cas « callback absent ⇒
+  image inerte » : la capacité vient de la présence du callback, pas de la surface hôte. Tant que le
+  MP ne fournit rien, l'inertie que ce test épingle est **réelle**, pas décorative.
+- le KDoc de `MessageCard` (#351c) — **amendé au lot 1, PR 2**, avec le comportement : l'amender
+  avant ferait mentir le code (la carte MP code encore ses paddings et laisse `PostRenderer` à son
+  défaut non sélectionnable). Tout le discours négatif tombe alors, pas seulement les phrases
+  densité et sélection — « no footer » et « no multi-quote border » gèleraient les lots citation.
+  Les contrats de prose collatéraux (KDoc de `PostCardShell`, commentaire du paramètre `selectable`
+  de `PostRenderer`, commentaire de densité de `ThreadMessages`) sont corrigés dans cette même PR.
+
+Un contrat ne se flippe **jamais** en silence : le test change dans la même PR que le comportement,
+sinon la CI dit — à raison — que le comportement promis a changé.
 
 ## Matrice
 
@@ -58,22 +80,22 @@ des numéros de ligne.
 | Pull-to-refresh | #335/#351a, `PullToRefreshBox` | **oui, livré** | Keep-content (la page reste affichée pendant le rechargement). |
 | Swipe de page horizontal | #282/#351b, `threadPageSwipe` | **oui, livré** (écart de durcissement) | Géométrie et seuils partagés (`core.ui.pager.PageSwipe`). Le MP n'a ni slide-out (assumé sans cache, ADR-013), ni l'annulation multi-touch #936, ni la dead-zone des bandes système #752 — gagnées par le topic après #351b. |
 | Reprise de la page de lecture | #430, `mp_read_positions` (ADR-013 étage 1) | **oui, livré** (contrat propre) | Position **locale** (page par conversation, par compte, purgée au logout) : il n'existe **aucune position de lecture serveur** pour les MP (#361 Q3, dot binaire par conversation) — le contrat diffère du dernier-lu topic par nature, ce n'est pas une lacune. |
-| Densité structurelle | #287, `LocalDisplayMetrics` | **oui mais absent** | Le CompositionLocal est fourni globalement par `RedfaceTheme` mais le MP ne le lit pas : paddings en dur (`PaddingValues(16.dp)` / `spacedBy(12.dp)` dans `ThreadMessages`, densité « feature-owned » de `MessageCard`). Lot 1 de #1040. |
-| Mode pleine largeur | #884, `PostCardShell(flat)` | **oui mais absent** | Le shell partagé porte le mode ; `MessageCard` ne passe rien. **Gelé** par `MessageCardShellSmokeTest` (« a `flat`-only, topic-owned affordance the MP never opts into ») — réarbitrage requis (lot 2). |
-| Sélection / copie du texte | #281, `PostRenderer(selectable)` | **oui mais absent** | Le topic force `selectable = true` ; défaut OFF côté MP, documenté comme choix dans le KDoc de `MessageCard`. Attention #946 : flipper `selectable` remplace structurellement le `SelectionContainer` (perte d'état des replis). |
+| Densité structurelle | #287, `LocalDisplayMetrics` | **oui mais absent** | Le CompositionLocal est fourni globalement par `RedfaceTheme` mais le MP ne le lit pas : paddings en dur (`PaddingValues(16.dp)` / `spacedBy(12.dp)` dans `ThreadMessages`, densité « feature-owned » de `MessageCard`). **Lot 1, PR 2** — la densité peut recomposer des valeurs, jamais remplacer la carte, ses slots ou la branche `SelectionContainer`. |
+| Mode pleine largeur | #884, `PostCardShell(flat)` | **oui mais absent** | Le shell partagé porte le mode ; `MessageCard` ne passe rien. `MessageCardShellSmokeTest` **caractérise le chemin par défaut** (KDoc réarbitré le 2026-08-12, assertions conservées) : il n'interdit plus la parité MP, qui reste un opt-in du **lot 2** avec sa propre couverture. |
+| Sélection / copie du texte | #281, `PostRenderer(selectable)` | **oui mais absent** | Le topic force `selectable = true` ; défaut OFF côté MP, documenté comme choix dans le KDoc de `MessageCard`. **Lot 1, PR 2** (réarbitrage du 2026-08-12) : le corps MP devient sélectionnable, et cette capacité doit rester **structurellement constante** sur la durée de vie de la carte — #946, flipper `selectable` insère/retire le `SelectionContainer` à l'entrée de `PostRenderer`, ce qui recrée le sous-arbre du corps et jette l'état `rememberSaveable` des replis de citation. |
 | Signatures | #330, `Post.signature` | **oui mais absent** | Parsées par le `PostsParser` partagé, rendues côté topic (préférence + `LocalIgnoreInlineColors` #553), jamais rendues en MP. Présence sur page MP réelle à prouver (la fixture actuelle n'a pas de signature — caractérisation #1041). |
 | Marqueur EgoQuote | #874 Q4 / #1028, `LocalEgoQuotePseudo` | **oui mais absent** | Le MP reste au défaut `null` (documenté dans `TopicPostCard`). Sens surtout en DT (plusieurs participants qui se citent). |
 | Marqueur EgoPost | #874 P1 / #1028, `egoPostHighlighted` | **oui mais absent** | Résolu par la liste topic uniquement ; jamais résolu côté MP. |
 | Pinceau doré des créateurs | #221, `isRf2Creator` + `rememberCreatorPseudoBrush` | **oui mais absent** | Appliqué par le header d'identité topic ; `MessageCard` utilise le pseudo fallback de `PostIdentityHeader`. Un auteur de MP est un pseudo HFR comme un autre. |
 | Menu contextuel de message | #362, `PostMenuSheet` | **oui mais absent** | Feature/topic (~463 l.). Sous-ensemble MP à définir : copier le texte, citer, profil — pas de drapeau/favori ; « copier le permalien » expose une URL de conversation privée (#316) → à arbitrer. Lot 3. |
-| Actions d'image (viewer, menu appui long) | #831/#958, `LocalPostImageActions` | **oui mais absent** | Jamais fourni côté MP. **Gelé** par `PostRendererHostMatrixTest` de `:feature:messages` (images MP « TOTALLY inert ») — réarbitrage requis (lot 3). |
+| Actions d'image (viewer, menu appui long) | #831/#958, `LocalPostImageActions` | **oui mais absent** | Jamais fourni côté MP : dans `PostRenderer`, `OnClick`/`OnLongClick` dépendent directement de `LocalPostImageActions.current != null`, donc l'inertie qu'épingle `PostRendererHostMatrixTest` (`:feature:messages`) est réelle. **Lot 3** (réarbitrage du 2026-08-12) : assertions retournées et cible `PostImageTarget` vérifiée, dans la même PR que le provider. |
 | Citation simple | #146 (topic), « Citer » par message | **oui mais absent** | Aucun bouton par message côté app. Le serveur, lui, expose le lien « citer » par message sur les pages `cat=prive` (`message.php?cat=prive&numrep={numreponse}&ref=…`, présent dans la fixture `private_message_thread.html`) ; l'inconnu restant est le **formulaire renvoyé** en le suivant — spike #1041, prérequis du lot 4. Le `numrep` prérempli du flux « Répondre » actuel est le dernier message de la page, pas une référence de citation (`DefaultPrivateMessageWriteRepository`). |
 | Citation multiple | #291, panier multi-quote | **oui mais absent** | Dépend de la citation simple (lot 4). Le web HFR expose ses boutons quote+/quote- sur les pages MP (même fixture) — la fonction s'applique. Le panier vit dans `:app`, clé `(cat, post)` — un scope MP typé serait requis (`cat=prive` est une `String`). |
 | Saut vers le message cité | #699/#782, `onGoToCitedPost` | **oui mais absent** | Jamais passé au `PostRenderer` côté MP (headers de citation inertes). Caveat partagé : la forme dynamique authentifiée n'est déjà pas reconnue côté topic (#625). |
 | Index du message | `Post.postIndex` | **oui mais absent** | Affiché via le menu contextuel côté topic (#362) ; pas de menu en MP. Présence de l'index sur les pages `cat=prive` à caractériser (#1041). |
 | Marqueur d'édition | `Post.editedAt` | **oui mais absent** | Ligne « Édité le … » du menu topic. Présence du trailer sur les pages MP à caractériser (#1041). |
 | Compteur de citations | #239/#863, `Post.citedCount` | **oui mais absent** | Pill « cité N fois » (badges) + ligne du menu côté topic. Présence de « Message cité N fois » sur les pages MP à caractériser (#1041 — la fixture actuelle n'en contient pas). |
-| Profil au tap (avatar/pseudo) | #208, `onOpenProfile` | **oui mais absent** | Jamais câblé côté MP ; `Post.profileId` sur fixture MP à épingler (#1041). Les participants d'un MP/DT ont des profils publics — la fonction s'applique. |
+| Profil au tap (avatar/pseudo) | #208, `onOpenProfile` | **oui mais absent** | Jamais câblé côté MP ; `Post.profileId` épinglé sur fixture MP (#1041). Les participants d'un MP/DT ont des profils publics — la fonction s'applique. Contrainte d'API : `PostIdentityHeader` pose `heading()` sur son pseudo **de repli** mais n'en ajoute aucun quand un slot pseudo est fourni (chemin du topic) — un slot d'identité MP doit donc porter son propre `heading()`, jamais zéro ni deux. |
 | Double-tap pour rafraîchir | #382 | **oui mais absent** | Geste topic (RF1 parity) ; le MP n'a que le pull-to-refresh. |
 | Zoom pincé | #182, `TopicZoom` + `TopicZoomMath` | **oui mais absent** | ~767 l. feature/topic (magnifier, scroll contrôlé, suspension des gestes). Lot 6. |
 | Liste noire | #509, `BlacklistRepository` | **oui mais absent** | Filtre vivant dans `TopicViewModel` uniquement. **Décision produit requise** : sens en DT (participants non choisis), discutable en 1:1 (on choisit ses conversations) — lot 2. |
