@@ -17,11 +17,13 @@ import kotlin.math.tanh
  * These pure functions carry the entire *feel* of the swipe — commit thresholds (distance + fling),
  * drag-follow shaping (1:1 then bounded overpull, damped wall at a blocked edge) and the edge-hint
  * opacity ramp — so both consumers share the exact same thresholds and feedback. What is NOT shared
- * (ADR-013): the gesture *machinery*. The topic gesture is route-driven (its re-entrance latch is
- * reset by the route change destroying the composition — `topicPageSwipe` in `:feature:topic`);
- * the private-message thread paginates in place (same composition, latch re-armed locally).
- * Generalising one pointer-input pipeline over both lifecycles was rejected as speculative
- * complexity for two consumers.
+ * (ADR-013): the gesture *machinery*. Both hosts paginate in place since #895 étape 4 (pre-#895 the
+ * topic was route-driven), but the couplings differ: the topic gesture rides the in-ViewModel page
+ * engine (its re-entrance latch is reset by the `pointerInput(currentPage)` re-key, plus a commit
+ * slide-out — `topicPageSwipe` in `:feature:topic`), while the private-message thread's gesture is
+ * gated by its load state (`isRefreshing`, no slide-out — `threadPageSwipe` in `:feature:messages`).
+ * Generalising one pointer-input pipeline over both was rejected as speculative complexity for two
+ * consumers.
  */
 
 /**

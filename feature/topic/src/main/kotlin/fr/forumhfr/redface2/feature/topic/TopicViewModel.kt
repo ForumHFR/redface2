@@ -58,8 +58,8 @@ import kotlinx.coroutines.withTimeoutOrNull
  * owner generation bumped (latest-wins), in-flight work cancelled, LRU memory snapshot activated
  * atomically when available (no Loading flash), landing resolved by priority (explicit post >
  * post-submit bottom > saved anchor > `page - 1` bottom step (#412) > top) and dispatched on the
- * first matching Loaded. Until the navigation switch-over lands (PR 2), `RedfaceNavigation` still
- * replaces the `TopicRoute` in place — the engine is exercised by tests only.
+ * first matching Loaded. Since PR 2 (`4248c22d`), `RedfaceNavigation` routes every in-topic page
+ * change through this engine — the `TopicRoute` is frozen at entry (single nav entry).
  */
 @HiltViewModel(assistedFactory = TopicViewModel.Factory::class)
 // LongParameterList: the ViewModel aggregates its injected repositories, one per concern.
@@ -549,7 +549,8 @@ class TopicViewModel @AssistedInject constructor(
      * the page becomes the real target everywhere (loads, retry, page indicator, highlight) — not a
      * presentational patch. On timeout / failure the untrusted page loads as-is: the pre-#750
      * behaviour, never worse. Runs at most once (init-only branch); a config change keeps the
-     * ViewModel, a route replace builds a fresh one without the flag.
+     * ViewModel, a new topic nav entry builds a fresh one without the flag (in-topic page changes
+     * keep this ViewModel — #895 étape 4).
      */
     private fun resolveScrollToPageThenLoad(
         entryLanding: PendingLanding?,

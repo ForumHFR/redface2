@@ -28,10 +28,12 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
 /**
- * Horizontal swipe → change conversation page (#351b): the **in-place** counterpart of the topic's
- * route-driven `topicPageSwipe` (#282). The *feel* is identical by construction — thresholds,
- * drag-follow shaping and edge hint all come from the shared pure geometry in
- * `:core:ui` (`core.ui.pager.PageSwipe`) — but the machinery differs on purpose (ADR-013):
+ * Horizontal swipe → change conversation page (#351b): the minimal counterpart of the topic's
+ * `topicPageSwipe` (#282 — itself in-place too since #895 étape 4, riding the in-VM page engine).
+ * The *geometry* is shared — thresholds, drag-follow shaping and edge hint all come from the pure
+ * functions in `:core:ui` (`core.ui.pager.PageSwipe`) — but the machinery differs on purpose
+ * (ADR-013), and the topic gesture has since gained hardening this one does not reproduce (the
+ * #936 multi-touch cancellation and the #752 system-gesture start dead-zone):
  *
  * - **Commit → [ThreadSwipeHandlers.onSelectPage]**, the same in-place reload the pager buttons
  *   use: the ViewModel keeps the displayed page on screen behind `isRefreshing` (keep-content load,
@@ -39,9 +41,10 @@ import kotlinx.coroutines.launch
  *   is **no slide-out**: a committed page springs back to rest and stays readable while the network
  *   round-trip runs. The "network feel" is assumed — `cat=prive` is auth-only, so there is no
  *   anonymous prefetch and (per ADR-013) no persisted cache to make the landing instant.
- * - **No per-composition re-entrance latch**: the topic latch exists because its composition is
- *   torn down by the route change; here the gesture is instead gated by
- *   [ThreadSwipeHandlers.enabled] (wired to `!isRefreshing` at the call site), which re-arms
+ * - **No per-composition re-entrance latch**: the topic latch is reset by its
+ *   `pointerInput(currentPage)` re-key when the engine renders the target page (#895 étape 4 —
+ *   historically by the route change tearing the composition down); here the gesture is instead
+ *   gated by [ThreadSwipeHandlers.enabled] (wired to `!isRefreshing` at the call site), which re-arms
  *   naturally when the load settles. The gate is read at `down`, so a swipe during an in-flight
  *   load is inert (same UX as the disabled pager buttons would be). A commit that races the
  *   `isRefreshing` state propagation can at worst re-issue `onSelectPage` for the same target
@@ -79,8 +82,8 @@ internal fun Modifier.threadPageSwipe(
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
                 // Gate at `down`: while a page load is in flight (isRefreshing) the swipe is inert,
-                // and it re-arms when the load settles — the in-place equivalent of the topic's
-                // "ignore until the route change tears this down".
+                // and it re-arms when the load settles — the equivalent of the topic's "ignore
+                // until the page change re-keys the pointerInput" (#895 étape 4).
                 if (!handlers.enabled()) return@awaitEachGesture
                 val velocityTracker = VelocityTracker()
                 velocityTracker.addPosition(down.uptimeMillis, down.position)

@@ -48,6 +48,7 @@ docs/
     mvi.md           # Pattern MVI, exemples ViewModel/Screen/State
     protocol-hfr.md  # Contrats externes, endpoints, edge cases
     roadmap.md       # Phases de developpement
+    reading-parity.md # Parite de lecture Topic <-> MP (matrice par fonction)
     extensions.md    # Extensions communautaires et architecture d'extensions
   adr/               # Architecture Decision Records (depuis v0.5.1)
   guides/            # Pages d'accompagnement (liste non exhaustive)

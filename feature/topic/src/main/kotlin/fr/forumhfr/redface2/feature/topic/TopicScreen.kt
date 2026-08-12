@@ -269,9 +269,10 @@ fun TopicScreen(
     onSubmitResultConsumed: () -> Unit = {},
     /**
      * #291 / #604 lot 3 — the multi-quote selection of THIS topic as FULL previews, in selection
-     * order. Owned by `:app` (the basket must survive the per-page entry swap, like the title
-     * cache); the screen renders the count and the per-post toggle state, and under the
-     * full-screen threshold pre-arms the quick-reply sheet's cards from them.
+     * order. Owned by `:app` (the basket must survive the editor round-trip and re-entering the
+     * topic — and, historically, the pre-#895 per-page entry swap, like the title cache); the
+     * screen renders the count and the per-post toggle state, and under the full-screen threshold
+     * pre-arms the quick-reply sheet's cards from them.
      */
     multiQuoteSelections: List<QuotedPostPreview> = emptyList(),
     /**
@@ -296,8 +297,9 @@ fun TopicScreen(
     onClearMultiQuote: () -> Unit = {},
     /**
      * #465 — the user's MANUAL poll-expansion choice for THIS topic, owned by `:app` so it survives
-     * the per-page TopicRoute swap (like the multi-quote basket / scroll anchors). `null` means « no
-     * manual choice yet — follow the [TopicUiState.pollsExpandedDefault] setting »; `true` / `false`
+     * leaving and reopening the topic (like the multi-quote basket / scroll anchors ; hoisted when
+     * page changes still swapped the `TopicRoute`, pre-#895 étape 4). `null` means « no manual
+     * choice yet — follow the [TopicUiState.pollsExpandedDefault] setting »; `true` / `false`
      * mean the user explicitly expanded / collapsed the poll. The screen only renders it.
      */
     pollManualExpanded: Boolean? = null,
@@ -1023,8 +1025,10 @@ internal fun TopicContent(
     // the callback recording a tap on the poll card. Threaded to the header card's poll.
     pollManualExpanded: Boolean? = null,
     onPollExpansionChanged: (Boolean) -> Unit = {},
-    // Vague 4 (#604) lot 1 — HFR accepted a quick-reply POST: `:app` refreshes the topic route the
-    // same way the full editor's onSubmitSucceeded does (bumped submitSignal, #200), minus the pop.
+    // Vague 4 (#604) lot 1 — HFR accepted a quick-reply POST. Since #895 étape 4 this feeds
+    // `TopicViewModel.applySubmitResult` directly (wired at the stateful entry point): the retained
+    // engine force-refreshes and lands the submit — no route refresh (historically `:app` bumped a
+    // submitSignal on the route, the same path as the full editor's onSubmitSucceeded, #200).
     onQuickReplySubmitted: (targetPage: Int?, scrollTo: Int?) -> Unit = { _, _ -> },
 ) {
     // #285 — the topic title and #284 — the page counter live in a persistent top app bar so they
@@ -1491,9 +1495,10 @@ internal fun TopicTopBar(
     var pagePickerOpen by remember { mutableStateOf(false) }
     val pagePickerLabel = stringResource(R.string.topic_page_picker_open)
     // #772 — tap on the title reveals it in full (2 lines max), tap again folds it back. Transient
-    // by design (arbitrage XaTriX) : a page change (route replace → fresh composition, the very
-    // loss the hoisted poll expansion #465 works around) or leaving the screen resets it. The
-    // post/page key is a safety net should a refactor ever reuse the composition across pages.
+    // by design (arbitrage XaTriX) : a page change or leaving the screen resets it. Since #895
+    // étape 4 the composition SURVIVES a page change (in-VM engine, frozen route), so the post/page
+    // remember key — a mere safety net when page changes replaced the route — is now the mechanism
+    // that actually resets the fold on every page.
     var titleExpanded by remember(state.request.post, state.request.page) { mutableStateOf(false) }
     val titleToggleLabel = stringResource(
         if (titleExpanded) R.string.topic_title_collapse else R.string.topic_title_expand,
@@ -1930,8 +1935,9 @@ private fun TopicLoadedContent(
     }
     // #282 — shared offset between the gesture (drives translationX) and the edge glow. A plain
     // MutableFloatState: the gesture writes it synchronously per frame (no coroutine/alloc), the draw
-    // phase reads it; an Animatable inside the gesture handles only release transitions. Lives in the
-    // Loaded composition only, so a committed swipe (which recreates the screen) starts back at rest.
+    // phase reads it; an Animatable inside the gesture handles only release transitions. The
+    // composition survives a committed swipe (#895 étape 4 — in-VM page switch): the reset back to
+    // rest is the `LaunchedEffect(topic.page)` below, when the target page renders.
     val dragOffset = remember { mutableFloatStateOf(0f) }
     // #282 — hoisted so the gesture can tick on arming and confirm on commit.
     val haptics = LocalHapticFeedback.current
@@ -1941,10 +1947,11 @@ private fun TopicLoadedContent(
     // State identity stable while its value tracks `topic.totalPages` across recompositions.
     val currentTotalPages by rememberUpdatedState(topic.totalPages)
     // #282 — the swipe must be INERT while this nav entry is not yet settled (mid NavDisplay
-    // transition, lifecycle < RESUMED). During the transition the incoming (cached) page is a fresh
-    // composition that would otherwise accept a swipe and commit a second onOpenPage mid-flight,
-    // interrupting the transition → frozen screen. The lambda reads `lifecycle.currentState` live, so
-    // the gesture (whose pointerInput does not re-key on this) always sees the current state.
+    // transition INTO the topic, lifecycle < RESUMED — since #895 étape 4 page changes stay in the
+    // retained entry, so only entry/exit transitions remain). A cached page would otherwise accept
+    // a swipe during the transition and commit an onOpenPage mid-flight, interrupting the
+    // transition → frozen screen. The lambda reads `lifecycle.currentState` live, so the gesture
+    // (whose pointerInput does not re-key on this) always sees the current state.
     val entryLifecycle = LocalLifecycleOwner.current.lifecycle
     // POC #182 — the page swipe (and its edge hint) are suspended while zoomed. Gesture-time read
     // through the lambda: no recomposition per pinch frame.
@@ -1994,7 +2001,8 @@ private fun TopicLoadedContent(
             // #285 — system-bar insets (status + navigation) are now consumed by the Scaffold/TopAppBar
             // in TopicContent and applied via the content Surface's padding(innerPadding); the list no
             // longer adds statusBarsPadding()/navigationBarsPadding() here to avoid double-insetting.
-            // #282 — horizontal swipe changes page via the existing route-driven onOpenPage, with
+            // #282 — horizontal swipe changes page via the same onOpenPage as the pager (in-VM
+            // switchToPage since #895 étape 4), with
             // drag-follow feedback: the page tracks the finger (graphicsLayer inside topicPageSwipe)
             // and pageSwipeEdgeHint (shared, :core:ui) paints an edge glow as the swipe arms. It must
             // precede topicPageSwipe so the glow draws in untranslated (screen) space.
@@ -2451,8 +2459,8 @@ private fun EndOfTopicCard(modifier: Modifier = Modifier) {
  * #110 → vague 3 (#604) — actionable page-boundary card on an INTERMEDIATE page
  * (`topic.page < topic.totalPages`, condition at the call site): « Page N terminée » plus a
  * « continue » affordance, the whole card tappable (mockup « Lecture A », arbitré fil DEV).
- * [onNextPage] delegates to the caller's onOpenPage — the same in-place route replace as the
- * › FAB and the horizontal swipe (#282), so scroll restoration semantics stay uniform.
+ * [onNextPage] delegates to the caller's onOpenPage — the same in-VM page switch (#895 étape 4)
+ * as the › FAB and the horizontal swipe (#282), so scroll restoration semantics stay uniform.
  */
 @Composable
 // `internal` (#884): TopicListFullWidthAnchorTest mounts the real boundary card as the list's
@@ -2652,8 +2660,9 @@ private fun TopicPageJumpField(
 private fun TopicPollCard(
     poll: Poll,
     expandedDefault: Boolean,
-    // #465 — the user's manual choice for this topic's poll, hoisted to :app so it survives the
-    // per-page TopicRoute swap. `null` = no manual choice yet → follow [expandedDefault] (#456).
+    // #465 — the user's manual choice for this topic's poll, hoisted to :app so it survives leaving
+    // and reopening the topic (pre-#895: the per-page TopicRoute swap). `null` = no manual choice
+    // yet → follow [expandedDefault] (#456).
     manualExpanded: Boolean?,
     onExpansionChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier,

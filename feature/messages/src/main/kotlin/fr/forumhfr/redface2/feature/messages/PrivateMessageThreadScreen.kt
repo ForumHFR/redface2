@@ -347,8 +347,10 @@ private fun rememberThreadSwipeModifier(
     val currentTotal = rememberUpdatedState(totalPages)
     val swipeEnabled = rememberUpdatedState(!isRefreshing)
     val currentOnSelectPage = rememberUpdatedState(onSelectPage)
-    // Codex review — dragOffset SURVIVES the in-place page change (no composition teardown, unlike
-    // the topic's route-driven model where the offset state dies with the screen). Drop any residual
+    // Codex review — dragOffset SURVIVES the in-place page change (no composition teardown; the
+    // topic's offset survives too since #895 étape 4 and is reset the same way, by a
+    // LaunchedEffect keyed on the rendered page — pre-#895 it died with the route-replaced
+    // screen). Drop any residual
     // translation when a new page lands so the incoming content never inherits the old offset. An
     // in-flight spring-back may stream a few frames after this reset; it converges to 0 by
     // construction, so the transient is negligible. A drag still under the finger keeps following it
