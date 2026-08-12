@@ -7,7 +7,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -81,9 +80,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
@@ -124,22 +121,18 @@ import fr.forumhfr.redface2.core.ui.RedfacePlaceholderScreen
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
-import fr.forumhfr.redface2.core.ui.post.LocalPostImageActions
-import fr.forumhfr.redface2.core.ui.post.PostCardShell
 import fr.forumhfr.redface2.core.ui.post.PostCardShellFlatBottomEdge
 import fr.forumhfr.redface2.core.ui.post.PostIdentityBand
 import fr.forumhfr.redface2.core.ui.post.PostIdentityHeader
 import fr.forumhfr.redface2.core.ui.post.PostImageActions
 import fr.forumhfr.redface2.core.ui.post.PostImageTarget
 import fr.forumhfr.redface2.core.ui.post.PostListScaffold
-import fr.forumhfr.redface2.core.ui.post.PostRenderer
+import fr.forumhfr.redface2.core.ui.post.ReadingPostCard
+import fr.forumhfr.redface2.core.ui.post.ReadingPostCardPresentation
 import fr.forumhfr.redface2.core.ui.post.collectPostMediaUrls
 import fr.forumhfr.redface2.core.ui.post.retryFailedPostMedia
 import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
-import fr.forumhfr.redface2.core.ui.theme.LocalEgoQuotePseudo
-import fr.forumhfr.redface2.core.ui.theme.LocalIgnoreInlineColors
-import fr.forumhfr.redface2.core.ui.theme.egoHighlightColors
 import fr.forumhfr.redface2.core.ui.theme.rememberCreatorPseudoBrush
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -2790,12 +2783,9 @@ private fun CreatorPseudoText(author: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-// Rich post card : each optional affordance (multi-quote border + « + »
-// toggle, citation badge, profile tap, contextual menu, edit, quote) is its own guarded branch, so
-// the cyclomatic count is inherently high — same call as PostRenderer. Splitting it would scatter a
-// single visual unit across helpers. LongParameterList : state-hoisted, each param has a distinct
-// call-site.
-@Suppress("LongParameterList", "CyclomaticComplexMethod")
+// LongParameterList: compatibility wrapper for direct feature tests/previews; every parameter maps
+// one existing topic decision onto the shared ReadingPostCard presentation, callbacks or slots.
+@Suppress("LongParameterList")
 // `internal` (#436): TopicPostCardMultiQuoteTest mounts the card directly to assert the per-post
 // « + » affordance (gating, label flip, tap). Same visibility relaxation as other tested internals.
 internal fun TopicPostCard(
@@ -2817,7 +2807,7 @@ internal fun TopicPostCard(
      */
     showSignature: Boolean = false,
     /**
-     * #884 — « posts en pleine largeur » (vague 3): forwarded to [PostCardShell]. `true` renders
+     * #884 — « posts en pleine largeur » (vague 3): forwarded to [ReadingPostCard]. `true` renders
      * this card boundary-less (transparent, rectangular, closed by the shell hairline) so it can
      * bleed edge to edge in the list; the INTERNAL paddings below (header 12.dp, body 12/10.dp,
      * footer) are deliberately UNTOUCHED — the validated flat look keeps the text gutters.
@@ -2825,7 +2815,7 @@ internal fun TopicPostCard(
      */
     flat: Boolean = false,
     /**
-     * #983 — forwarded to [PostCardShell]: whether this flat post draws its own closing hairline, or
+     * #983 — forwarded to [ReadingPostCard]: whether this flat post draws its own closing hairline, or
      * draws none — because what follows brings its own boundary (separator rule, island border), or
      * because it is the last post of the page. Derived by the list builder, the only place that knows
      * the rendered sequence. Ignored when [flat] is false. Default
@@ -2881,50 +2871,39 @@ internal fun TopicPostCard(
      */
     onToggleMultiQuote: (() -> Unit)? = null,
     /**
-     * #699 — forwarded to [PostRenderer] so a sourced quote's header can jump to the cited post.
+     * #699 — forwarded to [ReadingPostCard] so a sourced quote's header can jump to the cited post.
      * Null keeps the headers inert (previews/tests that render a card without navigation).
      */
     onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
     /**
-     * #831 — provided as [LocalPostImageActions] around the BODY renderer only, so a long-press
-     * on a post image (inline `[img]`, block, promoted) opens the image contextual menu. The
-     * signature render below stays OUTSIDE the provider on purpose — signatures keep their
-     * historical inert images, same stance as MP threads and the editor preview (default null).
-     * Null (previews/tests) leaves every image inert.
+     * #831 — provided to [ReadingPostCard] for the BODY renderer only, so a long-press on a post
+     * image (inline `[img]`, block, promoted) opens the image contextual menu. Signatures stay
+     * outside that capability and keep their historical inert images. Null leaves every image inert.
      */
     onImageLongPress: ((PostImageTarget) -> Unit)? = null,
 ) {
     // #287 — structural spacing from the active density preset (Comfort = the historical rhythm).
     val m = LocalDisplayMetrics.current
     // #436 — the per-post actions row (Citer / Modifier / multi-quote) is gated as a unit. Computed
-    // once so the body slot knows whether the footer slot will render (it owns the card's bottom
-    // padding when there is no footer, so the body↔card bottom gap stays exactly m.cardBodyBottom).
+    // once so the shared card receives either the whole footer or null; its body then owns the card's
+    // bottom padding only in the null branch, keeping the body↔card gap at m.cardBodyBottom.
     val hasFooter = onQuote != null || onEdit != null || onToggleMultiQuote != null
     // #882 P1 — only the STABLE citation-count pill gates the badges strip now: the dynamic
     // « Ajouté à la citation » pill is gone, so multi-quote selection never grows the card.
     val hasBadges = citedCount > 0
-    val egoColors = egoHighlightColors()
-    val postContainerColor = when {
-        egoPostHighlighted -> egoColors.postContainer
-        flat -> Color.Transparent
-        else -> MaterialTheme.colorScheme.surfaceContainer
-    }
     val egoPostStateDescription = stringResource(R.string.topic_post_ego_state_description)
-    PostCardShell(
-        // #884 — full-width mode: same node structure, boundary-less rendering (vague 2 contract).
-        flat = flat,
-        // #874 P1 — the colour is resolved here (EgoPost aplat, historical inset, or historical
-        // flat transparency) and always passed non-null, so the shell has a single colour path to
-        // honour. Shape and bottom-edge decisions still come from `flat`, never from this colour.
-        containerColorOverride = postContainerColor,
-        // #983 — the sequence owner decides who closes this post's bottom edge.
-        flatBottomEdge = flatBottomEdge,
-        // #436 — multi-quote selection outline (lot 1), unchanged.
-        border = if (multiQuoteSelected) {
-            BorderStroke(width = 2.dp, color = MaterialTheme.colorScheme.primary)
-        } else {
-            null
-        },
+    ReadingPostCard(
+        post = post,
+        presentation = ReadingPostCardPresentation(
+            showSignature = showSignature,
+            flat = flat,
+            flatBottomEdge = flatBottomEdge,
+            egoQuoteCanonicalPseudo = egoQuoteCanonicalPseudo,
+            egoPostHighlighted = egoPostHighlighted,
+            selected = multiQuoteSelected,
+        ),
+        onGoToCitedPost = onGoToCitedPost,
+        onImageLongPress = onImageLongPress,
         // Identity band — the avatar/pseudo/date header gets its own tinted strip across the full card
         // width (forum idiom, dogfooding v109): secondaryContainer over the neutral card. #104 follow-up
         // (XaTriX): the scroll-anchor post tints ONLY this band with tertiaryContainer (the left rail was
@@ -2932,7 +2911,7 @@ internal fun TopicPostCard(
         // PostIdentityBand (#351) sets LocalContentColor from its containerColor for the pseudo; the
         // enclosing Card clips the strip to its rounded corners. The #104 tint logic is UNCHANGED — it
         // stays the topic's decision, passed in as containerColor.
-        header = {
+        identity = {
             PostIdentityBand(
                 // #874 P1 — the EgoPost a11y marker sits on the identity node, which is present in
                 // both display modes and is what TalkBack traverses first on a post.
@@ -2972,68 +2951,6 @@ internal fun TopicPostCard(
             }
         } else {
             null
-        },
-        body = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    // #287 — post-body inner gutters from the density preset. Comfort = the lot A
-                    // values (12/10/12/8) that buy the body ~24 dp of extra reading width per line;
-                    // Compact tightens them for a denser feed. When there is NO footer slot, this body
-                    // also owns the card's bottom padding so the gap to the card edge stays identical.
-                    .padding(
-                        start = m.cardBodyHorizontal,
-                        top = m.cardBodyTop,
-                        end = m.cardBodyHorizontal,
-                        bottom = if (hasFooter) 0.dp else m.cardBodyBottom,
-                    ),
-                verticalArrangement = Arrangement.spacedBy(m.postSpacing),
-            ) {
-                // #281 — topic posts are selectable/copyable (opt-in; default is OFF in PostRenderer).
-                // #831 — the image-actions handler rides a CompositionLocal read inside the two image
-                // render paths of PostRenderer, so neither the frozen content models nor the invariant
-                // AnnotatedString (#175) change. Wrapped around the BODY only (cf. onImageLongPress KDoc).
-                val imageActions = remember(onImageLongPress) {
-                    onImageLongPress?.let { PostImageActions(onLongPress = it) }
-                }
-                CompositionLocalProvider(
-                    LocalPostImageActions provides imageActions,
-                    // #874 Q4 — body only. Signatures below, MP threads and editor previews keep
-                    // LocalEgoQuotePseudo's null default. Own-post P1 never suppresses this provider.
-                    LocalEgoQuotePseudo provides egoQuoteCanonicalPseudo,
-                ) {
-                    PostRenderer(
-                        content = post.content,
-                        // #946 — `selectable` must NOT depend on the zoom: flipping it swaps the
-                        // SelectionContainer in/out of the tree, which STRUCTURALLY recreates the
-                        // whole post subtree and throws away every rememberSaveable below it (the
-                        // expanded long quotes collapsed on pinch, proven by the field logs and
-                        // TopicZoomQuoteFoldTest). Selection stays inert at >1× anyway: the
-                        // magnifier consumes the down (replied mode), no selection can start.
-                        selectable = true,
-                        onGoToCitedPost = onGoToCitedPost,
-                    )
-                }
-                // #330 — the author signature (web parity), gated by the reading preference. Rendered
-                // with the shared PostRenderer (the signature is BBCode/HTML like the body) but in a
-                // subdued style: a divider separates it from the body and a reduced alpha makes it
-                // subordinate to the post content. No-op when the post carries no signature.
-                post.signature?.let { signature ->
-                    if (showSignature) {
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                        // #553 — drop the author's web-tuned `[color]` in the signature: on the app theme
-                        // (especially dark) those colours read as garish/illegible. The signature then
-                        // renders in the neutral subdued body colour (the reduced alpha keeps it
-                        // subordinate). Post bodies are unaffected (they don't provide this local).
-                        CompositionLocalProvider(LocalIgnoreInlineColors provides true) {
-                            PostRenderer(
-                                content = signature,
-                                modifier = Modifier.alpha(SIGNATURE_ALPHA),
-                            )
-                        }
-                    }
-                }
-            }
         },
         footer = if (hasFooter) {
             {
@@ -3184,7 +3101,7 @@ private fun TopicPostIdentityHeader(
 }
 
 /**
- * #239/#476 — the citation-count pill strip rendered (via [PostCardShell]'s badges slot) on the
+ * #239/#476 — the citation-count pill strip rendered (via [ReadingPostCard]'s badges slot) on the
  * neutral card surface just below the identity band. The call site renders this only when the pill
  * is present (`null` badges slot otherwise), so the strip is never an empty row.
  *
@@ -3231,7 +3148,7 @@ const val TOPIC_POST_ACTIONS_ROW_TAG = "topic_post_actions_row"
 
 /**
  * #146/#147/#436 — the topic post card's footer actions (Modifier / multi-quote « + » / Citer),
- * rendered (via [PostCardShell]'s footer slot) right-aligned and as sober TextButtons so they stay
+ * rendered (via [ReadingPostCard]'s footer slot) right-aligned and as sober TextButtons so they stay
  * subordinate to the post content. Horizontal gutters ride on [modifier] (reinjected by the call
  * site). « Supprimer » (#292) moved to the contextual menu (#418).
  *
@@ -3354,11 +3271,6 @@ private fun QuoteTextButton(onQuote: () -> Unit, onQuoteLongPress: (() -> Unit)?
         )
     }
 }
-
-// #330 — the author signature renders subordinate to the post body: a reduced opacity keeps it
-// visually secondary (it shares the body's typography, so colour-only dimming via alpha is the
-// least invasive subdued treatment without recolouring PostRenderer's internals).
-private const val SIGNATURE_ALPHA = 0.7f
 
 private val topicDateFormatter = DateTimeFormatter
     .ofPattern("dd/MM/yyyy HH:mm:ss", Locale.FRANCE)
