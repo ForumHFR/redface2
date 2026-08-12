@@ -84,17 +84,18 @@ L'invariant général « les requêtes de prefetch ne sont jamais authentifiées
 
 Conséquence d'implémentation : la garde Konsist actuelle (`ArchitectureKonsistTest`, test « prefetch call sites use the prefetch entry points only ») ne couvre que le domaine topic — elle interdit aux contextes prefetch d'appeler `refreshTopicPage`/`refreshTopicList`, avec le marqueur d'exemption `konsist:bypass-prefetch-guard` déjà en place. Un prefetch MP authentifié ne la déclencherait donc pas du tout : le travail réel de la PR qui introduira ce prefetch est d'**étendre la garde au domaine MP** (nommage dédié du point d'entrée + règle qui le reconnaît), pas d'exempter un call-site — à faire explicitement, pas silencieusement.
 
-> **Contradiction documentaire relevée le 2026-08-12 ([#1041](https://github.com/ForumHFR/redface2/issues/1041), non tranchée)** —
+> **Contradiction documentaire relevée et TRANCHÉE le 2026-08-12 ([#1041](https://github.com/ForumHFR/redface2/issues/1041))** —
 > `AGENTS.md` § « Règles spécifiques au projet » énonce la règle prefetch sous sa forme absolue
 > (« utiliser des requêtes non authentifiées pour éviter de marquer les drapeaux comme lus »), sans
 > mentionner l'exception MP bornée que la présente décision définit et que
 > [protocol-hfr.md]({{ site.baseurl }}/specs/protocol-hfr#règle-critique--prefetch-non-authentifié) et
 > [architecture.md]({{ site.baseurl }}/specs/architecture) actent depuis le 2026-06-12. Le lot 5 de
 > [#1040](https://github.com/ForumHFR/redface2/issues/1040) (prefetch MP borné) est incadrable tant que
-> les deux textes se contredisent. **Proposition portée par #1041** (arbitrage mainteneur requis,
-> `AGENTS.md` ne se modifie pas unilatéralement) : appliquer à `AGENTS.md` sa propre règle « un sujet =
-> une source canonique » — remplacer la ligne absolue par un renvoi vers `protocol-hfr.md` § « Règle
-> critique : prefetch non-authentifié », qui porte la règle générale **et** son unique exception bornée.
+> les deux textes se contredisent. **Arbitrage rendu par XaTriX le 2026-08-12** : c'est `AGENTS.md` qui
+> avait tort, par violation de sa propre règle « un sujet = une source canonique ». Sa ligne absolue est
+> remplacée par un renvoi vers `protocol-hfr.md` § « Règle critique : prefetch non-authentifié », qui
+> porte la règle générale **et** son unique exception bornée. Le lot 5 de
+> [#1040](https://github.com/ForumHFR/redface2/issues/1040) est donc cadrable.
 
 ### 4. Critère de convergence route-driven topic↔MP
 

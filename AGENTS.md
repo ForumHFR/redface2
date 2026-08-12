@@ -197,7 +197,7 @@ Dans `AGENTS.md`, on ne garde que les conséquences opérationnelles pour les ag
 - **Langue** : docs en francais avec accents. Code, noms de variables, noms de classes en anglais.
 - **`numreponse`** : est unique par **categorie**, pas globalement sur le forum. Le mentionner quand pertinent.
 - **Deep links** : Compose Navigation 3 (comme 2.x) ne gere pas les fragments URI (`#t{id}`) nativement — parser l'URI dans `RedfaceApp` (et non `MainActivity`, qui ne fait que passer l'`Intent`), identifier l'onglet cible, puis **reinitialiser** le back stack de cet onglet via `resetStack(root, route)` pour que le bouton retour ramene a la racine de l'onglet et non a un etat anterieur arbitraire. Voir `docs/specs/navigation.md` § Cas particulier : lien vers un post specifique.
-- **Prefetch** : utiliser des requetes non authentifiees pour eviter de marquer les drapeaux comme lus.
+- **Prefetch** : jamais de requete authentifiee pour du prefetch — HFR marque les drapeaux comme lus sur toute requete authentifiee. La regle canonique et son **unique exception bornee** (MP : pages adjacentes de la conversation ouverte, actee par ADR-013) vivent dans `docs/specs/protocol-hfr.md` § « Regle critique : prefetch non-authentifie ». Ne pas dupliquer la regle ici : un sujet = une source canonique.
 - **OkHttp** : version 5 (5.3+) verrouillee. Stable depuis 07/2025.
 - **Deprecations** : ne jamais utiliser de composants deprecies (Accompanist SwipeRefresh, EncryptedSharedPreferences, etc.) dans les exemples. Utiliser les alternatives 2026 : PullToRefreshBox, DataStore non chiffré + FBE plateforme (Option A credentials, cf. ADR-002), Compose Navigation 3.
 
