@@ -69,8 +69,10 @@ sinon la CI dit — à raison — que le comportement promis a changé.
 
 ## Matrice
 
-État vérifié dans le code le 2026-08-14 (`dev` @ `d2ad6820`). Les références sont des symboles, pas
-des numéros de ligne.
+Dernière vérification substantielle : 2026-08-14, commit `d2ad6820`. « Substantielle » = un
+réaudit complet de la matrice contre le code ; c'est le seul événement qui met à jour cette ligne —
+une PR qui corrige ou bascule des lignes au fil de l'eau ne bumpe ni la date ni le SHA. Les
+références sont des symboles, pas des numéros de ligne.
 
 | Fonction | Réf. | MP/DT ? | Détail |
 |---|---|---|---|
@@ -85,7 +87,7 @@ des numéros de ligne.
 | Densité structurelle | #287, `LocalDisplayMetrics` | **oui, livré** (lot 1, PR 2) | La carte MP lit le preset par `ReadingPostCard` : gouttières et inset haut réinjectés depuis `LocalDisplayMetrics`, mesurés sur device à 12 dp en Comfort contre 16 dp en dur avant. Le **chrome de liste** (`contentPadding`, espacement) reste **feature-owned des deux côtés** : le topic le code en dur dans `TopicListLayout` et le KDoc de `DisplayMetrics` exclut explicitement du preset les dimensions de chrome — aligner le MP dessus aurait été *plus* que la parité. La densité peut recomposer des valeurs, jamais remplacer la carte, ses slots ou la branche `SelectionContainer`. |
 | Mode pleine largeur | #884, `PostCardShell(flat)` | **oui mais absent** | Le shell partagé porte le mode ; `MessageCard` ne passe rien. `MessageCardShellSmokeTest` **caractérise le chemin par défaut** (KDoc réarbitré le 2026-08-12, assertions conservées) : il n'interdit plus la parité MP, qui reste un opt-in du **lot 2** avec sa propre couverture. |
 | Sélection / copie du texte | #281, `PostRenderer(selectable)` | **oui, livré** (lot 1, PR 2) | Les deux surfaces montent leur corps par `ReadingPostCard`, qui code `selectable = true` **en dur** : la capacité n'est ni un paramètre ni dérivable, donc structurellement constante sur la durée de vie de la carte. C'est l'exigence de #946 — flipper `selectable` insère/retire le `SelectionContainer` à l'entrée de `PostRenderer`, ce qui recrée le sous-arbre du corps et jette l'état `rememberSaveable` des replis de citation. Épinglé par un test sur deux axes séparés (densité seule, présence de callback seule) et vérifié sur device (poignées + barre « Copier / Tout sélectionner »). |
-| Signatures | #330, `Post.signature` | **oui mais absent** | Parsées par le `PostsParser` partagé, rendues côté topic (préférence + `LocalIgnoreInlineColors` #553), jamais rendues en MP. Présence sur page MP réelle à prouver (la fixture actuelle n'a pas de signature — caractérisation #1041). |
+| Signatures | #330, `Post.signature` | **oui mais absent** | Parsées par le `PostsParser` partagé, rendues côté topic (préférence + `LocalIgnoreInlineColors` #553), jamais rendues en MP. Présence sur page MP réelle non caractérisée par la fixture de #1041 (elle n'a pas de signature). |
 | Marqueur EgoQuote | #874 Q4 / #1028, `LocalEgoQuotePseudo` | **oui mais absent** | Le MP reste au défaut `null` (documenté dans `TopicPostCard`). Sens surtout en DT (plusieurs participants qui se citent). |
 | Marqueur EgoPost | #874 P1 / #1028, `egoPostHighlighted` | **oui mais absent** | Résolu par la liste topic uniquement ; jamais résolu côté MP. |
 | Pinceau doré des créateurs | #221, `isRf2Creator` + `rememberCreatorPseudoBrush` | **oui mais absent** | Appliqué par le header d'identité topic ; `MessageCard` utilise le pseudo fallback de `PostIdentityHeader`. Un auteur de MP est un pseudo HFR comme un autre. |
@@ -94,9 +96,8 @@ des numéros de ligne.
 | Citation simple | #146 (topic), « Citer » par message | **oui mais absent** (contrat serveur **mesuré**) | Aucun bouton par message côté app. Le serveur, lui, expose le lien « citer » par message sur les pages `cat=prive`, et le spike #1041 a capturé le formulaire renvoyé (2026-08-12, fixtures `private_message_quote_form.html` + témoin `private_message_reply_form.html`) : `numrep` = **le message cité** (4ᵉ d'une page de 5), `content_form` prérempli `[quotemsg=numrep,ref,userId]`, aucun champ caché `ref`, même endpoint `bddpost.php`. `ReplyFormParser` le parse **sans modification** — le lot 4 n'a plus d'inconnu serveur. Détail dans [protocol-hfr.md]({{ site.baseurl }}/specs/protocol-hfr) § « MP — citer un message ». |
 | Citation multiple | #291, panier multi-quote | **oui mais absent** | Dépend de la citation simple (lot 4). Le web HFR expose ses boutons quote+/quote- sur les pages MP (même fixture) — la fonction s'applique. Le panier vit dans `:app`, clé `(cat, post)` — un scope MP typé serait requis (`cat=prive` est une `String`). |
 | Saut vers le message cité | #699/#782, `onGoToCitedPost` | **oui mais absent** | Jamais passé au `PostRenderer` côté MP (headers de citation inertes). Caveat partagé : la forme dynamique authentifiée n'est déjà pas reconnue côté topic (#625). |
-| Index du message | `Post.postIndex` | **oui mais absent** | Affiché via le menu contextuel côté topic (#362) ; pas de menu en MP. Présence de l'index sur les pages `cat=prive` à caractériser (#1041). |
-| Marqueur d'édition | `Post.editedAt` | **oui mais absent** | Ligne « Édité le … » du menu topic. Présence du trailer sur les pages MP à caractériser (#1041). |
-| Compteur de citations | #239/#863, `Post.citedCount` | **oui mais absent** | Pill « cité N fois » (badges) + ligne du menu côté topic. Présence de « Message cité N fois » sur les pages MP à caractériser (#1041 — la fixture actuelle n'en contient pas). |
+| Marqueur d'édition | `Post.editedAt` | **oui mais absent** | Ligne « Édité le … » du menu topic. Présence du trailer sur les pages MP non caractérisée par la fixture de #1041 (aucun trailer d'édition dedans). |
+| Compteur de citations | #239/#863, `Post.citedCount` | **oui mais absent** | Pill « cité N fois » (badges) + ligne du menu côté topic. Présence de « Message cité N fois » sur les pages MP non caractérisée par la fixture de #1041 (elle n'en contient pas). |
 | Profil au tap (avatar/pseudo) | #208, `onOpenProfile` | **oui, livré** (lot 1, PR 2) | Câblé côté MP sur le `ProfilePreviewSheet` déjà existant, gaté par `Post.profileId` (épinglé sur fixture MP, #1041). Vérifié sur device depuis le pseudo **et** depuis l'avatar, cible tactile de 48 dp et rôle `Button` exposé. Contrainte d'API toujours valable pour la suite : `PostIdentityHeader` pose `heading()` sur son pseudo **de repli** mais n'en ajoute aucun quand un slot pseudo est fourni (chemin du topic) — le MP n'en fournit pas, donc son pseudo de repli reste l'unique heading ; un futur slot d'identité MP devrait porter le sien, jamais zéro ni deux. |
 | Double-tap pour rafraîchir | #382 | **oui mais absent** | Geste topic (RF1 parity) ; le MP n'a que le pull-to-refresh. |
 | Zoom pincé | #182, `TopicZoom` + `TopicZoomMath` | **oui mais absent** | Vit dans `:feature:topic` (magnifier, scroll contrôlé, suspension des gestes). Lot 6. |
@@ -107,6 +108,23 @@ des numéros de ligne.
 | Prefetch **authentifié borné** (N±1, conversation ouverte) | ADR-013 décision 3 | **oui mais absent** | Autorisé et borné par l'ADR-013 (jamais depuis la liste — read receipt MultiMP) ; non implémenté. Préalable lot 5 : **étendre la garde Konsist au domaine MP**, exigence de l'ADR elle-même — la garde actuelle ne surveille que les appels topic, donc un prefetch MP ne la déclencherait pas. La contradiction `AGENTS.md` ↔ ADR-013 sur la règle du prefetch est **tranchée** (2026-08-12) : `AGENTS.md` renvoie désormais à [protocol-hfr.md]({{ site.baseurl }}/specs/protocol-hfr), qui porte la règle générale et son unique exception. |
 | Cache RAM de session (retours de page instantanés) | ADR-013 décision 2 étage 2 | **oui mais absent** | Décidé, non implémenté (lot 5). Clé par compte/thread/page, purge logout **et** bascule de compte ; `CacheInvalidator` à étendre au contenu. |
 | Cache Room du contenu | ADR-013 décision 2 étage 3 | **oui mais absent** (opt-in OFF par décision) | Décidé opt-in explicite, défaut OFF, purge au logout — non implémenté (lot 7). Le risque confidentialité le plus élevé du chantier. |
+
+## Anomalies Topic révélées par l'audit
+
+Cette section ne reçoit **que** d'anciennes lignes de la matrice dont l'audit a réfuté
+l'effectivité côté topic — jamais des fonctions projetées. Les trois verdicts présupposent une
+fonction effective côté topic ; quand cette prémisse tombe, la ligne sort de la table : il n'y a
+rien à porter en MP, l'écart relève du backlog topic, pas de celui de #1040. L'entrée reste ici
+pour que la fonction ne redevienne pas un écart non tracé ; le jour où le topic livre la fonction,
+sa ligne retourne dans la matrice.
+
+**Index du message** (`Post.postIndex`) — retirée de la matrice le 2026-08-14. La ligne affirmait
+« affiché via le menu contextuel côté topic » : réfuté. Le champ existe mais n'est jamais peuplé —
+son unique producteur, `PostsParser`, le fixe à `null` (épinglé par `TopicPageParserTest`) ;
+mappers (`TopicMappers`) et Room (`PostEntity`) ne font que le transporter. Le rendu topic existe
+(`topic_post_index_prefix`, dans `TopicPostIdentityHeader`) mais est inatteignable : code mort. Le
+menu contextuel (#362) affiche `numreponse` (`topic_post_menu_number`), pas l'index. Présence de
+l'index sur les pages `cat=prive` non caractérisée par la fixture de #1041.
 
 ## Ce qui reste hors matrice, par surface
 
