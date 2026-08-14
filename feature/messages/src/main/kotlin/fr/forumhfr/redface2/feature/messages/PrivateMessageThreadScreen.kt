@@ -3,7 +3,6 @@ package fr.forumhfr.redface2.feature.messages
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -299,7 +298,7 @@ internal fun PrivateMessageThreadContent(
                         // #300/#351c — the list overlay (LazyColumn + auto-hiding scrollbar) is now the
                         // shared PostListScaffold; the swipe chain rides the inner list via listModifier
                         // (so the scrollbar stays fixed while the page follows the finger) and the MP
-                        // list chrome (16.dp padding, 12.dp gap) is passed unchanged.
+                        // list chrome is the feature-owned ThreadListLayout.kt geometry (#1046).
                         ThreadMessages(
                             messages = mode.thread.messages,
                             page = state.page,
@@ -465,17 +464,17 @@ private fun ThreadMessages(
 ) {
     // #351c/#1042 — the shared list overlay (LazyColumn + auto-hiding scrollbar). Card-INTERNAL
     // density now follows the reader's display-metrics preset through [ReadingPostCard] (#1042);
-    // the LIST chrome below (16.dp contentPadding, 12.dp gap) stays feature-owned and fixed — the
-    // same stance as the topic, whose list gutters/insets are hard-coded in TopicListLayout.kt:
-    // the density preset deliberately scopes out absolute chrome dimensions (DisplayMetrics KDoc).
+    // the LIST chrome below stays feature-owned and fixed, in ThreadListLayout.kt since #1046 —
+    // the same stance as the topic, whose list gutters/insets live in TopicListLayout.kt: the
+    // density preset deliberately scopes out absolute chrome dimensions (DisplayMetrics KDoc).
     // The swipe chain (edge glow + gesture + graphicsLayer follow) goes on the inner LazyColumn via
     // [PostListScaffold.listModifier], like the topic's LazyColumn: the scrollbar overlay outside
     // stays fixed on screen. [LocalShowScrollbar] (#105) is honoured by the scaffold's scrollbar,
     // so the call leaves showScrollbar at its default.
     PostListScaffold(
         listState = listState,
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = threadListContentPadding(),
+        verticalArrangement = threadListArrangement(),
         listModifier = swipeModifier,
     ) {
         items(messages, key = { it.numreponse }) { message ->
