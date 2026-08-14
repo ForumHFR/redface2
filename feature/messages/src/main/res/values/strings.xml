@@ -89,4 +89,11 @@
 
     <!-- #1042 — tap avatar/pseudo d'un message privé : ouvre le profil (parité topic #208). -->
     <string name="messages_open_profile_action">Voir le profil</string>
+
+    <!-- #831/#1051 — retours d'effet de sauvegarde possédés par l'hôte MP. Le sheet et ses
+         libellés synchrones restent partagés dans :core:ui. -->
+    <string name="messages_image_menu_saved">Image enregistrée dans Pictures/Redface2</string>
+    <string name="messages_image_menu_save_failed_fetch">Téléchargement de l\'image impossible</string>
+    <string name="messages_image_menu_save_failed_storage">Enregistrement de l\'image impossible</string>
+    <string name="messages_image_menu_save_failed_too_large">Image trop volumineuse pour être enregistrée</string>
 </resources>

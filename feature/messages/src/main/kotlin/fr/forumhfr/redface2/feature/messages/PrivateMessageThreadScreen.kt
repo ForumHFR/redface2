@@ -25,8 +25,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.lerp
@@ -45,6 +47,9 @@ import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.list.ScrollToTopOnPageChange
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
 import fr.forumhfr.redface2.core.ui.post.PostIdentityHeader
+import fr.forumhfr.redface2.core.ui.post.PostImageActions
+import fr.forumhfr.redface2.core.ui.post.PostImageMenuSheet
+import fr.forumhfr.redface2.core.ui.post.PostImageTarget
 import fr.forumhfr.redface2.core.ui.post.PostListScaffold
 import fr.forumhfr.redface2.core.ui.post.ReadingPostCard
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
@@ -105,6 +110,34 @@ fun PrivateMessageThreadScreen(
                         android.widget.Toast.LENGTH_LONG,
                     ).show()
                 }
+                PrivateMessageThreadEffect.ImageSaved -> {
+                    android.widget.Toast.makeText(
+                        context,
+                        R.string.messages_image_menu_saved,
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+                PrivateMessageThreadEffect.ImageSaveFailedFetch -> {
+                    android.widget.Toast.makeText(
+                        context,
+                        R.string.messages_image_menu_save_failed_fetch,
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+                PrivateMessageThreadEffect.ImageSaveFailedStorage -> {
+                    android.widget.Toast.makeText(
+                        context,
+                        R.string.messages_image_menu_save_failed_storage,
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+                PrivateMessageThreadEffect.ImageSaveFailedTooLarge -> {
+                    android.widget.Toast.makeText(
+                        context,
+                        R.string.messages_image_menu_save_failed_too_large,
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
             }
         }
     }
@@ -126,6 +159,7 @@ fun PrivateMessageThreadScreen(
                 onManageRecipients(request.threadId, state.page)
             },
             onOpenProfile = onOpenProfile,
+            onSaveImage = viewModel::saveImage,
         ),
         topBarActions = topBarActions,
     )
@@ -150,6 +184,8 @@ internal data class PrivateMessageThreadCallbacks(
     // #1042 — defaulted (unlike its siblings) so the pre-#1042 characterization mounts compile
     // unchanged; a host that does not navigate keeps the tap a no-op, like the topic screen default.
     val onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
+    // #831/#1051 — the ViewModel-owned save survives dismissal of the local image sheet.
+    val onSaveImage: (url: String) -> Unit = {},
 )
 
 /**
@@ -167,6 +203,12 @@ internal fun PrivateMessageThreadContent(
 ) {
     val mode = state.mode
     val listState = rememberLazyListState()
+    // #831/#1051 — post image whose contextual menu is open (null = closed). Deliberately not
+    // rememberSaveable: losing an ephemeral menu across process death is acceptable.
+    var imageMenuTarget by remember { mutableStateOf<PostImageTarget?>(null) }
+    // One stable handler instance is threaded through MessageCard to LocalPostImageActions;
+    // remembered so providing it never invalidates the cards.
+    val postImageActions = remember { PostImageActions(onLongPress = { imageMenuTarget = it }) }
 
     Scaffold(
         topBar = {
@@ -305,6 +347,7 @@ internal fun PrivateMessageThreadContent(
                             totalPages = state.totalPages,
                             onSelectPage = callbacks.onSelectPage,
                             onOpenProfile = callbacks.onOpenProfile,
+                            onImageLongPress = postImageActions.onLongPress,
                             // Codex review — gate the pager buttons with the same condition as
                             // the swipe: re-tapping during a keep-content load would only cancel
                             // and restart the round-trip (supersede), never advance faster.
@@ -335,6 +378,43 @@ internal fun PrivateMessageThreadContent(
         // the composer pops back, then open the composer with the recipient manager auto-opened.
         onManageRecipients = callbacks.onManageRecipients,
     )
+
+    ThreadImageMenuHost(
+        mode = mode,
+        target = imageMenuTarget,
+        onSave = callbacks.onSaveImage,
+        onClear = { imageMenuTarget = null },
+    )
+}
+
+/**
+ * #831/#1051 — per-image contextual menu, opened from either renderer image path. The thread screen
+ * remains mounted across auth modes, so a private target is cleared as soon as content leaves the
+ * current frame. Extracted to keep [PrivateMessageThreadContent] under detekt's complexity threshold.
+ */
+@Composable
+private fun ThreadImageMenuHost(
+    mode: PrivateMessageThreadUiState.Mode,
+    target: PostImageTarget?,
+    onSave: (String) -> Unit,
+    onClear: () -> Unit,
+) {
+    // Unlike TopicLoadedContent, this host must explicitly forget the private target when its content
+    // branch disappears. This also prevents the sheet from reopening when the user logs back in.
+    LaunchedEffect(mode) {
+        if (mode !is PrivateMessageThreadUiState.Mode.Content) onClear()
+    }
+
+    // The mode gate closes the sheet in the current frame; the effect above then purges its target.
+    if (mode is PrivateMessageThreadUiState.Mode.Content) {
+        target?.let { imageTarget ->
+            PostImageMenuSheet(
+                target = imageTarget,
+                onSave = onSave,
+                onDismiss = onClear,
+            )
+        }
+    }
 }
 
 /**
@@ -458,6 +538,7 @@ private fun ThreadMessages(
     totalPages: Int,
     onSelectPage: (Int) -> Unit,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit,
+    onImageLongPress: (PostImageTarget) -> Unit,
     pagerEnabled: Boolean = true,
     listState: LazyListState,
     swipeModifier: Modifier = Modifier,
@@ -485,6 +566,7 @@ private fun ThreadMessages(
                 onOpenProfile = message.profileId?.let { profileId ->
                     { onOpenProfile(profileId, message.author, message.avatarUrl) }
                 },
+                onImageLongPress = onImageLongPress,
             )
         }
         if (totalPages > 1) {
@@ -535,9 +617,15 @@ private fun ThreadMessages(
  * [onOpenProfile] — tapping the avatar or the author pseudo opens the profile surface (parity with
  * the topic card, #208); the MP page proves [Post.profileId] for its messages (#1042 fixture).
  * `null` (no profile link on the row) keeps the identity line inert.
+ * [onImageLongPress] is likewise a capability by presence: the MP screen supplies it, while direct
+ * hosts that omit it keep every content image inert (editor previews and signatures stay unchanged).
  */
 @Composable
-internal fun MessageCard(message: Post, onOpenProfile: (() -> Unit)? = null) {
+internal fun MessageCard(
+    message: Post,
+    onOpenProfile: (() -> Unit)? = null,
+    onImageLongPress: ((PostImageTarget) -> Unit)? = null,
+) {
     // #287/#1042 — structural spacing from the active density preset, like the shared card's body.
     val m = LocalDisplayMetrics.current
     val openProfileLabel = if (onOpenProfile != null) {
@@ -547,6 +635,7 @@ internal fun MessageCard(message: Post, onOpenProfile: (() -> Unit)? = null) {
     }
     ReadingPostCard(
         post = message,
+        onImageLongPress = onImageLongPress,
         identity = {
             // Band-less identity (an MP has no anchor/category tint): the plain shared header, its
             // padding reinjected here (densities stay slot-owned, #351) from the SAME preset values

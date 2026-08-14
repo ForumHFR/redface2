@@ -115,4 +115,16 @@ sealed interface PrivateMessageThreadEffect {
      * attempt. Initial loads (nothing on screen yet) keep going through [Mode.Error] + Retry instead.
      */
     data object RefreshFailed : PrivateMessageThreadEffect
+
+    /** #831/#1051 — the image was written to the shared Pictures collection. */
+    data object ImageSaved : PrivateMessageThreadEffect
+
+    /** The image could not be fetched from its remote URL. */
+    data object ImageSaveFailedFetch : PrivateMessageThreadEffect
+
+    /** The fetched image could not be written to shared storage. */
+    data object ImageSaveFailedStorage : PrivateMessageThreadEffect
+
+    /** The image exceeded the saver's bounded download size. */
+    data object ImageSaveFailedTooLarge : PrivateMessageThreadEffect
 }
