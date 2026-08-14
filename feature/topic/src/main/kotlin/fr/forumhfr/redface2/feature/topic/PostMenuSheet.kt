@@ -23,7 +23,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.SheetState
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -39,8 +38,8 @@ import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.launch
+import fr.forumhfr.redface2.core.ui.post.hideThenDismiss
+import fr.forumhfr.redface2.core.ui.R as CoreUiR
 
 /**
  * #362 — per-post contextual menu, opened from the `⋯` trigger in the post header
@@ -135,7 +134,7 @@ internal fun PostMenuSheet(
     val context = LocalContext.current
     // Resolved at composition time — the action callbacks run outside composition.
     val copiedFeedback = stringResource(R.string.topic_post_menu_link_copied)
-    val browserFailedFeedback = stringResource(R.string.topic_post_menu_no_browser)
+    val browserFailedFeedback = stringResource(CoreUiR.string.browser_no_handler)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -211,7 +210,7 @@ internal fun PostMenuSheet(
                 },
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text(stringResource(R.string.topic_post_menu_open_in_browser))
+                Text(stringResource(CoreUiR.string.browser_open_action))
             }
 
             PostFavoriteButton(
@@ -441,23 +440,4 @@ private fun openPermalinkInBrowser(context: Context, permalink: String, failureF
     } catch (ignored: ActivityNotFoundException) {
         Toast.makeText(context, failureFeedback, Toast.LENGTH_SHORT).show()
     }
-}
-
-/**
- * Plays the sheet's hide animation, then invokes [onDismiss] once the sheet is actually
- * off-screen — same Material 3 « animated dismiss » idiom as ProfilePreviewSheet's
- * `hideThenNavigate`. `internal` (#831): shared with [PostImageMenuSheet].
- */
-@OptIn(ExperimentalMaterial3Api::class)
-internal fun hideThenDismiss(
-    coroutineScope: CoroutineScope,
-    sheetState: SheetState,
-    onDismiss: () -> Unit,
-) {
-    coroutineScope.launch { sheetState.hide() }
-        .invokeOnCompletion {
-            if (!sheetState.isVisible) {
-                onDismiss()
-            }
-        }
 }

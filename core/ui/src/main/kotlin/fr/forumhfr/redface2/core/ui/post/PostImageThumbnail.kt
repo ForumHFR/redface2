@@ -15,16 +15,13 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 
 /**
- * #831 — small square thumbnail of a post image, the hero of the image contextual menu
- * (`PostImageMenuSheet`, `:feature:topic`).
+ * #831 — small square thumbnail of a post image, the hero of [PostImageMenuSheet].
  *
- * Lives in `:core:ui` for the same reason as [fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar]:
- * Coil is already wired here (`coil-compose` is an `implementation` dependency of this module),
- * so `:feature:topic` does not need to grow a Coil dependency for one image. The neutral
- * `surfaceContainerHighest` square doubles as the loading and error placeholder — the sheet
- * remains fully usable when the image host is down (the actions operate on the URL, not the
- * bitmap). The bitmap is served from Coil's caches (same URL key as the post render), so no
- * second network fetch in the common case.
+ * Coil is already wired in `:core:ui` (`coil-compose` is an `implementation` dependency of this
+ * module). The neutral `surfaceContainerHighest` square doubles as the loading and error
+ * placeholder — the sheet remains fully usable when the image host is down (the actions operate
+ * on the URL, not the bitmap). The bitmap is served from Coil's caches (same URL key as the post
+ * render), so no second network fetch in the common case.
  */
 @Composable
 fun PostImageThumbnail(
