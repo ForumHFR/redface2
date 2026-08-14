@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+<title>FORUM HardWare.fr - Repondre / editer un message</title>
+</head>
+<body>
+<!-- Fixture REDUITE : sous-arbre du seul form[name=hop] d'une capture live authentifiee.
+     Chrome de page, toolbar, cryptlinks et recapitulatifs de messages RETIRES a la capture.
+     Provenance et sanitisation : voir le .source.txt frere. -->
+<form name="hop" id="hop" action="/bddpost.php?config=hfr.inc" method="post" onsubmit="
+	return verif_join_form();
+	document.hop.submit.style.visibility='hidden';"><input type="hidden" name="hash_check" value="TESTHASH" />	<input type="hidden" name="subcat" value="0" />
+<input type="hidden" name="parents" value="" />
+<input type="hidden" name="post" value="3000001" />
+<input type="hidden" name="stickold" value="" />
+<input type="hidden" name="new" value="0" />
+<input type="hidden" name="cat" id="catid" value="prive" />
+<input type="hidden" name="numreponse" value="" />
+<input type="hidden" name="numrep" value="" />
+<input type="hidden" name="page" value="1" />
+<input type="hidden" name="verifrequet" value="1100" />
+<input type="hidden" name="p" value="1" />
+<input type="hidden" name="sondage" value="0" />
+<input type="hidden" name="sond" value="0" />
+<input type="hidden" name="cache" value="" />
+<input type="hidden" name="owntopic" value="0" />
+<input type="hidden" name="config" id="configid" value="hfr.inc" />
+<input type="hidden" name="sujet" value="Sujet prive de test" /><table class="main" cellspacing="0" cellpadding="4" width="100%">
+	<tr class="cBackHeader">
+		<th colspan="2" style="text-align:center">Votre réponse</th>
+	</tr>
+	<tr class="reponse pseudoform" id="pseudoform">
+		<th class="repCase1">Nom d'utilisateur</th>
+		<td class="repCase2">
+			<input maxlength="25" accesskey="p" size="25" name="pseudo" value="TestUser" onfocus="passfocus()" />		&nbsp;&nbsp; <a href="/inscription.php?config=hfr.inc" class="Topic">Pour poster, vous devez être inscrit sur ce forum .... si ce n'est pas le cas, cliquez ici !</a>	</td>
+	</tr><tr class="reponse">
+			<th class="repCase1">Destinataire</th>
+			<td class="repCase2"><span style="font-size:12px;">Correspondant</span>	</td>
+		</tr><tr class="reponse" style="display:none; display:none; " id="passf">
+		<th class="repCase1">Mot de passe</th>
+		<td class="repCase2">			<input type="password" maxlength="40" size="25" name="password" value="" />
+			&nbsp;&nbsp; <a href="/password.php?config=hfr.inc" class="Topic">Vous avez perdu votre mot de passe ? Cliquez ici !</a>
+		</td>
+	</tr><tr class="reponse">
+				<th class="repCase1">Le ton de votre message</th>
+					<td class="repCase2"><input id="icone1" type="radio" value="1" name="MsgIcon" checked="checked" />
+					&nbsp;<label for="icone1"><img src="https://forum-images.hardware.fr/icones/message/icon1.gif" alt="" /></label>&nbsp;<input id="icone2" type="radio" value="2" name="MsgIcon" />
+					&nbsp;<label for="icone2"><img src="https://forum-images.hardware.fr/icones/message/icon2.gif" alt="" /></label>&nbsp;<input id="icone3" type="radio" value="3" name="MsgIcon" />
+					&nbsp;<label for="icone3"><img src="https://forum-images.hardware.fr/icones/message/icon3.gif" alt="" /></label>&nbsp;<input id="icone4" type="radio" value="4" name="MsgIcon" />
+					&nbsp;<label for="icone4"><img src="https://forum-images.hardware.fr/icones/message/icon4.gif" alt="" /></label>&nbsp;<input id="icone5" type="radio" value="5" name="MsgIcon" />
+					&nbsp;<label for="icone5"><img src="https://forum-images.hardware.fr/icones/message/icon5.gif" alt="" /></label>&nbsp;<input id="icone6" type="radio" value="6" name="MsgIcon" />
+					&nbsp;<label for="icone6"><img src="https://forum-images.hardware.fr/icones/message/icon6.gif" alt="" /></label>&nbsp;<input id="icone7" type="radio" value="7" name="MsgIcon" />
+					&nbsp;<label for="icone7"><img src="https://forum-images.hardware.fr/icones/message/icon7.gif" alt="" /></label>&nbsp;<input id="icone8" type="radio" value="8" name="MsgIcon" />
+					&nbsp;<label for="icone8"><img src="https://forum-images.hardware.fr/icones/message/icon8.gif" alt="" /></label>&nbsp;<br /><input id="icone9" type="radio" value="9" name="MsgIcon" />
+					&nbsp;<label for="icone9"><img src="https://forum-images.hardware.fr/icones/message/icon9.gif" alt="" /></label>&nbsp;<input id="icone10" type="radio" value="10" name="MsgIcon" />
+					&nbsp;<label for="icone10"><img src="https://forum-images.hardware.fr/icones/message/icon10.gif" alt="" /></label>&nbsp;<input id="icone11" type="radio" value="11" name="MsgIcon" />
+					&nbsp;<label for="icone11"><img src="https://forum-images.hardware.fr/icones/message/icon11.gif" alt="" /></label>&nbsp;<input id="icone12" type="radio" value="12" name="MsgIcon" />
+					&nbsp;<label for="icone12"><img src="https://forum-images.hardware.fr/icones/message/icon12.gif" alt="" /></label>&nbsp;<input id="icone13" type="radio" value="13" name="MsgIcon" />
+					&nbsp;<label for="icone13"><img src="https://forum-images.hardware.fr/icones/message/icon13.gif" alt="" /></label>&nbsp;<input id="icone14" type="radio" value="14" name="MsgIcon" />
+					&nbsp;<label for="icone14"><img src="https://forum-images.hardware.fr/icones/message/icon14.gif" alt="" /></label>&nbsp;<input id="icone15" type="radio" value="15" name="MsgIcon" />
+					&nbsp;<label for="icone15"><img src="https://forum-images.hardware.fr/icones/message/icon15.gif" alt="" /></label>&nbsp;<input id="icone16" type="radio" value="16" name="MsgIcon" />
+					&nbsp;<label for="icone16"><img src="https://forum-images.hardware.fr/icones/message/icon16.gif" alt="" /></label>&nbsp;</td>
+			</tr><tr class="reponse">
+		<th class="repCase1">Votre réponse<br /><br /><br />
+			<div><div class="center">	<a target="_blank" href="/smilies.php?config=hfr.inc" class="s1Topic">Smilies</a>
+				<br />&nbsp;
+				<div class="smiley">
+					<div>
+						<img src="https://forum-images.hardware.fr/icones/smilies/pfff.gif" alt=":pfff:" title=":pfff:" onclick="putSmiley(this.alt,this.src)" /><br />
+						<img src="https://forum-images.hardware.fr/icones/smilies/ange.gif" alt=":ange:" title=":ange:" onclick="putSmiley(this.alt,this.src)" /><br />
+						<img src="https://forum-images.hardware.fr/icones/smilies/non.gif" alt=":non:" title=":non:" onclick="putSmiley(this.alt,this.src)" /><br />
+						<img src="https://forum-images.hardware.fr/icones/smilies/bounce.gif" alt=":bounce:" title=":bounce:" onclick="putSmiley(this.alt,this.src)" />
+					</div>
+					<div>
+						<img src="https://forum-images.hardware.fr/icones/smile.gif" alt=":)" title=":)" onclick="putSmiley(this.alt,this.src)" /><br />
+						<img src="https://forum-images.hardware.fr/icones/frown.gif" alt=":(" title=":(" onclick="putSmiley(this.alt,this.src)" /><br />
+						<img src="https://forum-images.hardware.fr/icones/biggrin.gif" alt=":D" title=":D" onclick="putSmiley(this.alt,this.src)" /><br />
+						<img src="https://forum-images.hardware.fr/icones/wink.gif" alt=";)" title=";)" onclick="putSmiley(this.alt,this.src)" /><br />
+						<img src="https://forum-images.hardware.fr/icones/smilies/ouch.gif" alt=":ouch:" title=":ouch:" onclick="putSmiley(this.alt,this.src)" />
+					</div>
+					<div>
+						<img src="https://forum-images.hardware.fr/icones/redface.gif" alt=":o" title=":o" onclick="putSmiley(this.alt,this.src)" /><br />
+						<img src="https://forum-images.hardware.fr/icones/confused.gif" alt=":??:" title=":??:" onclick="putSmiley(this.alt,this.src)" /><br />
+						<img src="https://forum-images.hardware.fr/icones/tongue.gif" alt=":p" title=":p" onclick="putSmiley(this.alt,this.src)" /><br />
+						<img src="https://forum-images.hardware.fr/icones/smilies/na.gif" alt=":na:" title=":na:" onclick="putSmiley(this.alt,this.src)" /><br />
+						<img src="https://forum-images.hardware.fr/icones/smilies/sarcastic.gif" alt=":sarcastic:" title=":sarcastic:" onclick="putSmiley(this.alt,this.src)" />
+					</div>
+					<div>
+						<img src="https://forum-images.hardware.fr/icones/smilies/fou.gif" alt=":fou:" title=":fou:" onclick="putSmiley(this.alt,this.src)" /><br />
+						<img src="https://forum-images.hardware.fr/icones/smilies/jap.gif" alt=":jap:" title=":jap:" onclick="putSmiley(this.alt,this.src)" /><br />
+						<img src="https://forum-images.hardware.fr/icones/smilies/lol.gif" alt=":lol:" title=":lol:" onclick="putSmiley(this.alt,this.src)" /><br />
+						<img src="https://forum-images.hardware.fr/icones/smilies/wahoo.gif" alt=":wahoo:" title=":wahoo:" onclick="putSmiley(this.alt,this.src)" /><br />
+						<img src="https://forum-images.hardware.fr/icones/smilies/kaola.gif" alt=":kaola:" title=":kaola:" onclick="putSmiley(this.alt,this.src)" />
+					</div>
+					<div>
+						<img src="https://forum-images.hardware.fr/icones/smilies/love.gif" alt=":love:" title=":love:" onclick="putSmiley(this.alt,this.src)" /><br />
+						<img src="https://forum-images.hardware.fr/icones/smilies/heink.gif" alt=":heink:" title=":heink:" onclick="putSmiley(this.alt,this.src)" /><br />
+						<img src="https://forum-images.hardware.fr/icones/smilies/cry.gif" alt=":cry:" title=":cry:" onclick="putSmiley(this.alt,this.src)" /><br />
+						<img src="https://forum-images.hardware.fr/icones/smilies/whistle.gif" alt=":whistle:" title=":whistle:" onclick="putSmiley(this.alt,this.src)" /><br />
+						<img src="https://forum-images.hardware.fr/icones/smilies/sol.gif" alt=":sol:" title=":sol:" onclick="putSmiley(this.alt,this.src)" />
+					</div>
+					<div>
+						<img src="https://forum-images.hardware.fr/icones/smilies/pt1cable.gif" alt=":pt1cable:" title=":pt1cable:" onclick="putSmiley(this.alt,this.src)" /><br />
+						<img src="https://forum-images.hardware.fr/icones/smilies/sleep.gif" alt=":sleep:" title=":sleep:" onclick="putSmiley(this.alt,this.src)" /><br />
+						<img src="https://forum-images.hardware.fr/icones/smilies/sweat.gif" alt=":sweat:" title=":sweat:" onclick="putSmiley(this.alt,this.src)" /><br />
+						<img src="https://forum-images.hardware.fr/icones/smilies/hello.gif" alt=":hello:" title=":hello:" onclick="putSmiley(this.alt,this.src)" />
+					</div>
+				</div>
+				<div class="spacer">&nbsp;</div>
+				<br /><a href="/wikismilies.php?config=hfr.inc&amp;threecol=1" target="_blank" class="s1Topic">Liste des smilies perso</a><br /><a target="_blank" href="/wikismilies.php?config=hfr.inc" class="s1Topic">Wiki smilies</a><br /><span class="small">Chercher un smiley<br /><input type="text" value="" name="search_smilies" id="search_smilies" size="10" onkeyup="find_smilies_timer('hfr.inc',990002)"/></span><br /><div id="dynamic_smilies"><img src="https://forum-images.hardware.fr/images/perso/testsmiley.gif" alt="[:testsmiley]" title="[:testsmiley]" onclick="putSmiley(this.alt,this.src)" /><img src="https://forum-images.hardware.fr/images/perso/testsmiley2.gif" alt="[:testsmiley2]" title="[:testsmiley2]" onclick="putSmiley(this.alt,this.src)" /><img src="https://forum-images.hardware.fr/images/perso/testsmiley3.gif" alt="[:testsmiley3]" title="[:testsmiley3]" onclick="putSmiley(this.alt,this.src)" /><br /><a href="/user/supprperso.php?config=hfr.inc" target="_blank" class="s1Topic">Supprimer des smilies favoris</a></div></div></div></th><td class="repCase2" valign="top">		<div class="left">
+				<img style="cursor:pointer" class="text_bold" onclick="TAinsert('[b]','[/b]');" title="Mettre en gras le texte. Syntaxe : [b]texte[/b]" alt="[b]" src="https://forum-images.hardware.fr/icones/message/bold.gif" width="27" height="28" /><img
+				style="cursor:pointer" class="text_ita" onclick="TAinsert('[i]','[/i]');" title="Mettre en italique le texte. Syntaxe : [i]texte[/i]" alt="[i]" src="https://forum-images.hardware.fr/icones/message/italic.gif" width="25" height="28" /><img
+				style="cursor:pointer" class="text_under" onclick="TAinsert('[u]','[/u]');" title="Souligner le texte. Syntaxe : [u]texte[/u]" alt="[u]" src="https://forum-images.hardware.fr/icones/message/underline.gif" width="26" height="28" /><img
+				style="cursor:pointer" class="text_strike" onclick="TAinsert('[strike]','[/strike]');" title="Barrer le texte. Syntaxe : [strike]texte[/strike]" alt="[strike]" src="https://forum-images.hardware.fr/icones/message/strike.gif" width="26" height="28" /><img
+				style="cursor:pointer" class="text_spoiler" onclick="TAinsert('[spoiler]','[/spoiler]');" title="Masquer le texte. Syntaxe : [spoiler]texte[/spoiler]" alt="[spoiler]" src="https://forum-images.hardware.fr/icones/message/spoiler.gif" width="26" height="28" /><img
+				style="cursor:pointer" class="text_fixed" onclick="TAinsert('[fixed]','[/fixed]');" title="Ecrire avec une police de taille fixe. Syntaxe : [fixed]texte[/fixed]" alt="[fixed]" src="https://forum-images.hardware.fr/icones/message/fixe.gif" width="26" height="28" /><img
+				style="cursor:pointer" class="cpp" onclick="TAinsert('[cpp]','[/cpp]');" title="Insérer du code C/C++. Syntaxe : [cpp]texte[/cpp]" alt="[cpp]" src="https://forum-images.hardware.fr/icones/message/c.gif" width="26" height="28" /><img
+				style="cursor:pointer" class="text_url" onclick="TAinsert('[url]','[/url]');" title="Insérer une URL. Syntaxe : [url]texte[/url]" alt="[url]" src="https://forum-images.hardware.fr/icones/message/url.gif" width="26" height="28" /><img
+				style="cursor:pointer" class="text_email" onclick="TAinsert('[email]','[/email]');" title="Insérer une adresse email. Syntaxe : [email]email@hostname.com[/email]" alt="[email]" src="https://forum-images.hardware.fr/icones/message/email.gif" width="26" height="28" /><img
+				style="cursor:pointer" class="image" onclick="TAinsert('[img]','[/img]');" title="Insérer une image. Syntaxe : [img]http://www.exemple.com/exemple.jpg[/img]" alt="[img]" src="https://forum-images.hardware.fr/icones/message/image.gif" width="26" height="28" /><img
+				style="cursor:pointer" class="text_puce" onclick="TAinsert('[*]','');" title="Insérer une puce. Syntaxe : [*]texte" alt="[*]" src="https://forum-images.hardware.fr/icones/message/puce.gif" width="23" height="28" />
+				&nbsp;&nbsp;
+			</div>
+			<div class="left" style="width:270px;">
+				<table class="none" style="margin-top:6px; border:0px" id="ColorPanel" cellspacing="0" cellpadding="0">
+					<tr>
+						<td style="margin:0; padding:0; line-height:10px; cursor:pointer; width:15px; border:1px solid #000000" id="ColorUsed" title="Dernière couleur sélectionnée"><img src="https://forum-images.hardware.fr/icones/trans.gif" alt="" width="15" height="17" onclick="TAinsert('['+document.getElementById('ColorUsed').bgColor+']','[/'+document.getElementById('ColorUsed').bgColor+']');" style="padding:0; margin:0" /><input type="hidden" value="" name="ColorUsedMem" id="ColorUsedMem" /></td>
+						<td width="5" style="margin:0; padding:0">&nbsp;
+							<script language="JavaScript" type="text/javascript">
+								rgb(0,col0,0,'https://forum-images.hardware.fr/icones/trans.gif','Mettre du texte en couleur');
+								rgb(18,col1,50,'https://forum-images.hardware.fr/icones/trans.gif','Mettre du texte en couleur');
+								rgb(36,col2,100,'https://forum-images.hardware.fr/icones/trans.gif','Mettre du texte en couleur');
+								rgb(0,col3,150,'https://forum-images.hardware.fr/icones/trans.gif','Mettre du texte en couleur');
+							</script>
+						</td>
+					</tr>
+				</table>
+			</div>
+			<div class="left">
+				&nbsp;&nbsp;
+				<img style="cursor:pointer" onclick="TAinsert('[quote]','[/quote]');" title="Insérer une citation. Syntaxe : [quote]texte[/quote]" alt="[quote]" src="https://forum-images.hardware.fr/icones/message/citation.gif" width="69" height="28" />
+			</div>
+			<div class="spacer">&nbsp;</div>
+	<br /><textarea cols="75" rows="14" class="contenu" name="content_form" id="content_form" accesskey="c"></textarea><input type="hidden" name="wysiwyg" value="0" />
+<input onclick=" return verif_not_empty()" type="submit" accesskey="s" value="Valider votre message" name="submit" /><input type="button" accesskey="a" value="Aperçu" onclick="apercevoir();" />		<div id="addCommentMessage"></div>
+		</td>
+	</tr>
+	<tr class="reponse">
+		<th class="repCase1">Options</th>
+		<td class="repCase2" style="font-weight:bold">	<input class="checkbox opt" type="checkbox" value="1" name="signature" checked="checked" id="signature" /><label for="signature">Activer votre signature</label>
+	<br /><input class="checkbox opt" type="checkbox" value="1" name="smiley" id="smiley" /><label for="smiley">Désactiver les smilies</label>
+	<br /><input class="checkbox opt" type="checkbox" value="1" name="emaill" id="emaill" /><label for="emaill">Activer la notification par email du sujet</label>
+	&nbsp;</td></tr></table></form>
+</body>
+</html>

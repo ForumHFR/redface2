@@ -343,6 +343,8 @@ core/parser/src/test/resources/fixtures/
 | `modo_not_flagged.html` | modo.php — formulaire d'alerte | logué uniquement | Redflag : post pas encore alerté | `modo.php?numreponse=X` |
 | `modo_flagged.html` | modo.php — déjà alerté | logué uniquement | Redflag : post alerté | `modo.php?numreponse=X` (déjà alerté) |
 | `modo_join.html` | modo.php — rejoindre une alerte | logué uniquement | Redflag : alerte en cours | `modo.php?numreponse=X` (alerte ouverte) |
+| `private_message_quote_form.html` | `message.php` — citation MP | logué uniquement | Contrat de la citation MP : `numrep` = message cité, `[quotemsg=…]` prérempli (#1041) | lien « citer » d'une page `cat=prive` — **fixture réduite au `form[name=hop]`**, cf. [recette]({{ site.baseurl }}/guides/capture-fixture-citation-mp) |
+| `private_message_reply_form.html` | `message.php` — réponse simple MP | logué uniquement | Témoin de la précédente : `numrep` **vide**, textarea vide — leur delta EST le contrat (#1041) | `form#repondre_form` de la même conversation, même session — **fixture réduite** |
 
 **Profil et paramètres** (pages `editprofil.php`, loguées uniquement) :
 
@@ -358,7 +360,11 @@ core/parser/src/test/resources/fixtures/
 | `contact_list.html` | `contactlist.php` | Liste de contacts : ajout/suppression, statut en ligne, liens MP | idem |
 | `modo_history.html` | `modo/historique.php` | Historique des sanctions : modérateur, catégorie, date, raison | modérateur test |
 
-**Total : ~61 fixtures** (13 reprises testées de v1 + 39 nouvelles + 9 profil/paramètres).
+**Ces tableaux sont un plan de capture, pas un inventaire.** Le décompte fait foi côté disque, pas ici :
+au 2026-08-14, `core/parser/src/test/resources/fixtures/` porte **70 fixtures HTML** et l'arbre entier
+en compte 106 (plus 11 fixtures REST JSON dans `:core:data`). Le plan initial en annonçait ~61
+(13 reprises de v1 + 39 nouvelles + 9 profil/paramètres) : ne pas propager ce chiffre comme un état
+courant — un décompte recopié pourrit (constat #1041). `ls` sur le dossier répond mieux que cette page.
 
 ### Fixtures REST JSON (Phase 1C-A)
 

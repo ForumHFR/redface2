@@ -626,6 +626,47 @@ Gestion des destinataires d'une conversation MultiMP / DT par son **owner** (#60
 - La mutation produit un **message système « Modération »** dans le fil (trace serveur de l'ajout/retrait).
 - Un non-owner ne voit pas `newdest` préempli : pour lui le POST de réponse ne touche pas la composition de la conversation.
 
+### MP — citer un message (vérifié live 2026-08-12, #1041)
+
+Seul inconnu serveur du chantier [#1040](https://github.com/ForumHFR/redface2/issues/1040) (partage
+de la surface de lecture Topic → MP), tranché par deux captures authentifiées de la **même**
+conversation `cat=prive` dans la **même** session : `private_message_quote_form.html` et son témoin
+`private_message_reply_form.html`. Aucun POST n'a été émis.
+
+Chaque message d'une page `cat=prive` porte son lien « citer » :
+
+```text
+GET /message.php?config=hfr.inc&cat=prive&post={threadId}&numrep={numreponse cité}&ref={rang dans la page}&page={N}&p=1&subcat=0&sondage=0&owntopic=0&new=0#formulaire
+```
+
+Le formulaire renvoyé est un `form[name=hop]` vers `bddpost.php?config=hfr.inc` — **le même endpoint
+et la même forme qu'une citation de topic**. Ce qui le distingue :
+
+- `numrep` = le **message cité**. Capture faite sur le 4ᵉ message d'une page qui en comptait 5 : ce
+  n'est donc pas un préremplissage « dernier message ».
+- `content_form` est prérempli par HFR avec `[quotemsg={numrep},{ref},{userId de l'auteur cité}]…[/quotemsg]`
+  — même forme que le topic, à réutiliser verbatim (jamais reconstruire le tag localement, cf.
+  § Quote ci-dessus).
+- **aucun champ caché `ref`** n'est servi : le rang ne voyage que dans l'URL et dans le tag BBCode.
+  (Le formulaire de réponse d'un DT owner, lui, en porte un — `ref=0`.)
+- `numreponse` reste vide : la citation ne détourne pas le champ de l'édition.
+- options en vraies cases à cocher (`signature` cochée par défaut) et `MsgIcon=1` pré-coché, comme
+  tout formulaire `message.php`.
+
+**`numrep` a trois sens selon le formulaire servi** — ne jamais en déduire une sémantique unique :
+
+| Formulaire | Origine | `numrep` | `content_form` |
+|---|---|---|---|
+| Réponse rapide embarquée | `forum2.php?cat=prive` | **dernier message de la page** (préremplissage) | vide |
+| Réponse simple | `message.php` suivi depuis `form#repondre_form` | **vide** | vide |
+| Citation | `message.php` suivi depuis le lien « citer » | **message cité** | `[quotemsg=…]` |
+
+Conséquence pour le lot 4 de #1040 : la citation MP ne demande **aucun** nouveau parser ni champ
+supplémentaire — `ReplyFormParser` transporte déjà tous les champs cachés verbatim et le
+`content_form` prérempli. Ce qui reste à écrire est l'affordance « citer » par message côté app et le
+scope typé de la clé du panier multi-quote (`cat=prive` est une chaîne, `numreponse` n'est unique que
+par catégorie).
+
 ### Écriture MPStorage — read-modify-write `bdd.php cat=prive` (#593/#597)
 
 Écriture dans le document MPStorage (premier post du MP de stockage, cf. [models.md]({{ site.baseurl }}/specs/models#mpstorage) et [ADR-014]({{ site.baseurl }}/adr/014-mpstorage-v01-de-facto)). Câblée par `DefaultMpStorageRepository` / `MpStorageEnvelopeWriter`. **Le contrat `bdd.php cat=prive` en écriture n'a pas été observé live** — l'implémentation est *fail-closed* et restée **opt-in OFF par défaut**.
@@ -745,6 +786,8 @@ Les fixtures de test du parser vivent dans `core/parser/src/test/resources/fixtu
 Catalogue complet : voir [`contributing.md#fixtures-html-pour-le-parser`](contributing.md#fixtures-html-pour-le-parser).
 
 Pour capturer une fixture : utiliser le MCP `hfr-mcp` avec `hfr_read output=path/to/fixture.html` (écrit le HTML brut), puis appliquer le skill [`/parse-fixture`](https://github.com/ForumHFR/redface2/blob/main/.agents/skills/parse-fixture/SKILL.md) pour générer l'analyse structurée.
+
+**Exception `cat=prive`** : `hfr_read` et `hfr_quote` exigent une catégorie **entière**, donc `hfr-mcp` ne peut pas capturer une page de MP. Le chemin HTTP authentifié, la sanitisation exigée et le sidecar de provenance sont décrits dans [`capture-fixture-citation-mp.md`]({{ site.baseurl }}/guides/capture-fixture-citation-mp).
 
 ## Fixtures REST
 
