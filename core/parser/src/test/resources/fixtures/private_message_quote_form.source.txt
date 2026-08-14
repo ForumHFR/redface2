@@ -61,8 +61,7 @@ SANITISATION (mapping fictif stable, relations preservees) :
 - sujet reel -> « Sujet prive de test » ;
 - corps du message cite, a l'interieur du [quotemsg] -> « Message prive de test (contenu remplace). » ;
   les delimiteurs BBCode produits par HFR sont conserves intacts ;
-- hash_check -> TESTHASH sur les trois champs caches du formulaire (la variable JavaScript
-  `var hash_check` de l'en-tete de page ne survit pas a la reduction) ;
+- `hash_check -> TESTHASH` dans l'unique champ caché `hash_check` du formulaire ;
 - identifiant de conversation 7 chiffres -> post=3000001 ; numreponse du message cite -> 1980000004
   (le 4 final rappelle ref=4) ;
 - smileys perso -> trois noms fictifs (testsmiley, testsmiley2, testsmiley3) ;

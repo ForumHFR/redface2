@@ -197,11 +197,16 @@ l'autre.
 `<td class="messCase1bis">…</td><td>…</td>` a laissé passer un corps de message réel parce que la ligne
 suivante avait une forme légèrement différente. La vérification qui marche est **l'énumération** :
 lister *tous* les nœuds de texte et *toutes* les valeurs d'attribut de la fixture finale, et les
-regarder un par un — sur une fixture réduite, il y en a quelques dizaines.
+regarder un par un ; la réduction rend cette revue praticable sans prétendre la rendre courte.
 
-Ce script énumère, **sans troncature et sans rien exclure** : chaque nœud de texte (y compris à
-l'intérieur des `<script>`, où un jeton se cache très bien), chaque commentaire, et chaque couple
+Ce script énumère, sans troncature, ce qu'`HTMLParser` expose : chaque nom de balise ouvrante, chaque
+fragment de texte, espaces compris (y compris à l'intérieur des `<script>`, où un jeton se cache très
+bien), chaque commentaire, déclaration (`DOCTYPE`), instruction de traitement, déclaration inconnue
+(`CDATA` notamment), référence d'entité ou référence numérique présente dans le texte, et chaque couple
 attribut/valeur — `href`, `src`, `class`, `onclick` compris, pas seulement `value`/`alt`/`title`.
+`HTMLParser` décode toujours les références de caractères présentes dans les valeurs d'attribut et
+normalise la syntaxe des balises : pour contrôler leur graphie brute, les guillemets et la casse
+d'origine, il faut aussi relire le fichier.
 
 ```bash
 for fixture in core/parser/src/test/resources/fixtures/private_message_quote_form.html \
@@ -213,24 +218,35 @@ from html.parser import HTMLParser
 
 class Dump(HTMLParser):
     def handle_starttag(self, tag, attrs):
+        print(f"  tag   <{tag}>")
         for name, value in attrs:
             print(f"  attr  {tag}@{name} = {value!r}")
     handle_startendtag = handle_starttag
     def handle_data(self, data):
-        if data.strip():
-            print(f"  texte {data.strip()!r}")
+        print(f"  texte {data!r}")
     def handle_comment(self, data):
-        print(f"  comm  {data.strip()!r}")
+        print(f"  comm  {data!r}")
+    def handle_decl(self, data):
+        print(f"  decl  {data!r}")
+    def handle_pi(self, data):
+        print(f"  pi    {data!r}")
+    def unknown_decl(self, data):
+        print(f"  udecl {data!r}")
+    def handle_entityref(self, name):
+        print(f"  ent   &{name};")
+    def handle_charref(self, name):
+        print(f"  char  &#{name};")
 
-p = Dump(convert_charrefs=True)
+p = Dump(convert_charrefs=False)
 p.feed(open(sys.argv[1], encoding='utf-8').read())
+p.close()
 EOF
 done
 ```
 
-Relis **toute** la sortie. Sur une fixture réduite elle tient en quelques dizaines de lignes de texte et
-quelques centaines d'attributs : chaque ligne doit être soit du chrome HFR, soit une valeur fictive.
-Tout le reste est une fuite.
+Relis **toute** la sortie. L'énumération des fragments blancs l'allonge volontairement : la paire de
+fixtures actuelle produit près de 2 000 lignes. Chaque entrée doit être soit du chrome HFR, soit une
+valeur fictive. Tout le reste est une fuite.
 
 Conserver la structure du formulaire, les noms de champs, les valeurs non sensibles, le rang `ref`
 et la forme du BBCode prérempli. Le corps privé peut être remplacé par un placeholder à l'intérieur

@@ -25,8 +25,10 @@ import org.junit.Test
  * IS the quote contract: `numrep` plus the prefilled textarea, nothing else.
  *
  * Both are **reduced** captures — the `form[name=hop]` subtree only, with the page chrome, toolbar,
- * cryptlinks and message recaps stripped at capture time. That is exactly what this parser reads, and
- * it keeps a real private conversation from riding along in the repository (see their `.source.txt`).
+ * cryptlinks and message recaps stripped at capture time. #1041 — the reduction keeps the subtree
+ * selected by [ReplyFormParser] plus the in-form `find_smilies_timer(…)` marker:
+ * [SmileyUserIdExtractor] still receives the whole fixture and takes its first marker. This keeps a
+ * real private conversation from riding along in the repository (see their `.source.txt`).
  */
 class PrivateMessageReplyFormParserTest {
 
