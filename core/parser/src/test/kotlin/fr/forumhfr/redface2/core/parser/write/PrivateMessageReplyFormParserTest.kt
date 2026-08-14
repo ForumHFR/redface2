@@ -143,8 +143,9 @@ class PrivateMessageReplyFormParserTest {
             "[quotemsg=1980000004,4,990001]Message prive de test (contenu remplace).[/quotemsg]\n",
             form.initialContent,
         )
-        // The scrubbed ids are consistent with private_message_thread.html (#298): the current user is
-        // 990002, the correspondent — here the cited author — is 990001.
+        // Sanitisation lock, NOT a server contract: the scrubbed ids must stay consistent with
+        // private_message_thread.html (#298) — current user 990002, correspondent (here the cited
+        // author) 990001 — so the two fixtures never describe the same person with two identities.
         assertEquals(990002, form.userId)
         // `ref` travels in the GET href and inside the BBCode tag, but HFR serves NO hidden ref field
         // on this form — a quote POST must not invent one.
@@ -197,7 +198,13 @@ class PrivateMessageReplyFormParserTest {
         val reply = parser.parse(fixture("private_message_reply_form.html")).getOrThrow()
         val quote = parser.parse(fixture("private_message_quote_form.html")).getOrThrow()
 
-        assertEquals(reply.hiddenFields - "numrep", quote.hiddenFields - "numrep")
+        // Compare the WHOLE parsed form, not just the hidden map: hashCheck, sujet, isAnonymous,
+        // options, msgIcon, userId and the roster fields must be identical too. Only `numrep` and the
+        // prefill are normalised away — anything else that differed would fail here.
+        assertEquals(
+            reply.copy(hiddenFields = reply.hiddenFields - "numrep", initialContent = ""),
+            quote.copy(hiddenFields = quote.hiddenFields - "numrep", initialContent = ""),
+        )
         assertEquals("", reply.hiddenFields["numrep"])
         assertEquals("1980000004", quote.hiddenFields["numrep"])
         assertEquals("", reply.initialContent)

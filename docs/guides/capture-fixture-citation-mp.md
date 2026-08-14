@@ -155,12 +155,20 @@ Aucune commande `POST /bddpost.php` ne fait partie de cette recette.
 ## 4. Assainir avant toute copie dans le dépôt
 
 > **Étape 0, non négociable : RÉDUIRE la capture avant de l'assainir.** Ne copie dans le dépôt que le
-> **sous-arbre `form[name=hop]`**, enveloppé dans un squelette HTML minimal. C'est tout ce que
-> `ReplyFormParser` lit, et ça supprime d'un coup les trois familles de fuites qui vivent **hors** du
-> formulaire : la toolbar et ses liens obfusqués, le récapitulatif du message cité, et la « Vue Rapide
-> de la discussion » avec tous les corps de message. Une capture brute assainie « à la main » a déjà
-> laissé passer les trois (incident du 2026-08-12, § Historique en fin de page). Le sidecar doit dire
-> ce qui a été retiré.
+> **sous-arbre `form[name=hop]`**, enveloppé dans un squelette HTML minimal. Ça supprime d'un coup les
+> trois familles de fuites qui vivent **hors** du formulaire : la toolbar **par message** et ses liens
+> obfusqués, le récapitulatif du message cité, et la « Vue Rapide de la discussion » avec tous les corps
+> de message. Une capture brute assainie « à la main » a déjà laissé passer les trois (incident du
+> 2026-08-12, § Historique en fin de page). Le sidecar doit dire ce qui a été retiré.
+>
+> **Ce que la réduction ne garantit pas toute seule** : tous les sélecteurs DOM de `ReplyFormParser`
+> visent bien le formulaire (`form[action*=bddpost.php]`, ses `input[name]`, son `textarea`, la ligne
+> « Destinataires » via `th.repCase1`), **mais `SmileyUserIdExtractor` travaille sur la chaîne entière
+> et prend le premier `find_smilies_timer(…)` rencontré**. Il se trouve que ce marqueur est à
+> l'intérieur du panneau de smileys du composer, donc du formulaire — vérifie-le sur ta capture plutôt
+> que de le supposer, et si HFR l'a déplacé, garde-le explicitement ou documente que l'userId n'est plus
+> extractible de cette fixture. La barre d'outils BBCode du composer, elle, est dans le formulaire :
+> elle reste, avec ses textes d'aide, qui ne sont pas des données personnelles.
 
 Sur ce sous-arbre, remplacer ensuite de façon **cohérente** toutes les occurrences des données
 privées, sans reformater le DOM :
@@ -191,18 +199,38 @@ suivante avait une forme légèrement différente. La vérification qui marche e
 lister *tous* les nœuds de texte et *toutes* les valeurs d'attribut de la fixture finale, et les
 regarder un par un — sur une fixture réduite, il y en a quelques dizaines.
 
+Ce script énumère, **sans troncature et sans rien exclure** : chaque nœud de texte (y compris à
+l'intérieur des `<script>`, où un jeton se cache très bien), chaque commentaire, et chaque couple
+attribut/valeur — `href`, `src`, `class`, `onclick` compris, pas seulement `value`/`alt`/`title`.
+
 ```bash
-python3 - "$fixture" <<'EOF'
-import re,sys,io
-raw=io.open(sys.argv[1],encoding='utf-8').read()
-body=re.sub(r'<script.*?</script>','',raw,flags=re.S)
-body=re.sub(r'<!--.*?-->','',body,flags=re.S)
-for t in sorted({t.strip() for t in re.split(r'<[^>]+>',body) if t.strip()}):
-    print(' texte :',t[:110])
-for v in sorted(set(re.findall(r'(?:value|alt|title)="([^"]{3,})"',raw))):
-    print(' attr  :',v[:110])
+for fixture in core/parser/src/test/resources/fixtures/private_message_quote_form.html \
+               core/parser/src/test/resources/fixtures/private_message_reply_form.html; do
+  printf '\n########## %s\n' "$fixture"
+  python3 - "$fixture" <<'EOF'
+import sys
+from html.parser import HTMLParser
+
+class Dump(HTMLParser):
+    def handle_starttag(self, tag, attrs):
+        for name, value in attrs:
+            print(f"  attr  {tag}@{name} = {value!r}")
+    handle_startendtag = handle_starttag
+    def handle_data(self, data):
+        if data.strip():
+            print(f"  texte {data.strip()!r}")
+    def handle_comment(self, data):
+        print(f"  comm  {data.strip()!r}")
+
+p = Dump(convert_charrefs=True)
+p.feed(open(sys.argv[1], encoding='utf-8').read())
 EOF
+done
 ```
+
+Relis **toute** la sortie. Sur une fixture réduite elle tient en quelques dizaines de lignes de texte et
+quelques centaines d'attributs : chaque ligne doit être soit du chrome HFR, soit une valeur fictive.
+Tout le reste est une fuite.
 
 Conserver la structure du formulaire, les noms de champs, les valeurs non sensibles, le rang `ref`
 et la forme du BBCode prérempli. Le corps privé peut être remplacé par un placeholder à l'intérieur
@@ -223,9 +251,12 @@ Avant commit, contrôler au minimum :
 
 ```bash
 ./scripts/check-fixtures-provenance.sh
+git diff --check
 rg -n 'hash_check|md_user|md_pass|password|codehex|cryptlink|@|profil-[0-9]+|mesdiscussions-[0-9]+|images/perso/' \
   core/parser/src/test/resources/fixtures/private_message_quote_form.html \
-  core/parser/src/test/resources/fixtures/private_message_quote_form.source.txt
+  core/parser/src/test/resources/fixtures/private_message_quote_form.source.txt \
+  core/parser/src/test/resources/fixtures/private_message_reply_form.html \
+  core/parser/src/test/resources/fixtures/private_message_reply_form.source.txt
 ```
 
 Chaque résultat du scan doit être soit neutralisé, soit explicitement justifié comme valeur fictive

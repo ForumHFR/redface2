@@ -22,7 +22,8 @@ REDUCTION (c'est la difference majeure avec une capture brute) : seul le sous-ar
 `form[name=hop]` est conserve, enveloppe dans un squelette HTML minimal. Ont ete RETIRES a la capture,
 parce qu'ils ne servent pas au parser et concentraient tout le risque de fuite :
 - le chrome de page, la barre d'onglets, le formulaire de recherche rapide et le pied de page ;
-- la toolbar par message et ses liens obfusques `md_*cryptlink` — l'un d'eux se decodait, avec
+  (la barre d'outils BBCode du composer, elle, est DANS le formulaire et est conservee) ;
+- la toolbar PAR MESSAGE et ses liens obfusques `md_*cryptlink` — l'un d'eux se decodait, avec
   l'algorithme du depot (CryptlinkDecoder, #227), en URL de deconnexion portant un `codehex` lie a la
   session ;
 - le recapitulatif du message cite et la « Vue Rapide de la discussion », donc tous les corps de
@@ -43,8 +44,9 @@ CE QUE LA FIXTURE PROUVE (contrat serveur, mesure) :
   ... [/quotemsg] — meme forme que la citation de topic, le parametre du milieu est le rang servi ;
 - AUCUN champ cache `ref` : le rang ne voyage que dans l'URL et dans le tag BBCode. (A comparer avec
   private_message_dt_owner_reply_form.html, capture DT owner de #612, qui porte ref=0.) ;
-- champs caches servis : hash_check, cat=prive, subcat=0, post, numreponse, numrep, page, p,
-  verifrequet, sondage, sond, cache, parents, stickold, owntopic, config, sujet, wysiwyg ;
+- champs caches servis, liste exhaustive : hash_check, subcat=0, parents, post, stickold, new=0,
+  cat=prive, numreponse, numrep, page, verifrequet, p, sondage, sond, cache, owntopic, config, sujet,
+  ColorUsedMem, wysiwyg ;
 - options rendues en vraies cases a cocher (signature cochee par defaut, smiley et emaill decochees)
   et MsgIcon=1 pre-coche — comme le formulaire message.php d'un DT, pas comme la reponse rapide ;
 - la ligne du destinataire est au SINGULIER (« Destinataire ») dans un MP 1:1 : le parser cherche
@@ -59,7 +61,8 @@ SANITISATION (mapping fictif stable, relations preservees) :
 - sujet reel -> « Sujet prive de test » ;
 - corps du message cite, a l'interieur du [quotemsg] -> « Message prive de test (contenu remplace). » ;
   les delimiteurs BBCode produits par HFR sont conserves intacts ;
-- hash_check -> TESTHASH partout, y compris la variable JavaScript `var hash_check` ;
+- hash_check -> TESTHASH sur les trois champs caches du formulaire (la variable JavaScript
+  `var hash_check` de l'en-tete de page ne survit pas a la reduction) ;
 - identifiant de conversation 7 chiffres -> post=3000001 ; numreponse du message cite -> 1980000004
   (le 4 final rappelle ref=4) ;
 - smileys perso -> trois noms fictifs (testsmiley, testsmiley2, testsmiley3) ;
@@ -70,3 +73,6 @@ SANITISATION (mapping fictif stable, relations preservees) :
 Le <title> conserve est le titre generique servi par HFR (« Repondre / editer un message ») : il ne
 portait pas le sujet, contrairement a la page de conversation. Le brut de la capture n'est PAS
 conserve dans le depot.
+
+NORMALISATION NON SEMANTIQUE : un espace de fin de ligne interne a l'attribut `onsubmit` du
+formulaire a ete retire (git diff --check). Aucun autre octet de la capture n'a ete reformate.
