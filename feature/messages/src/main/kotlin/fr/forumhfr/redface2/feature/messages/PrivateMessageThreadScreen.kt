@@ -45,10 +45,10 @@ import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.list.ScrollToTopOnPageChange
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
-import fr.forumhfr.redface2.core.ui.post.PostCardShell
 import fr.forumhfr.redface2.core.ui.post.PostIdentityHeader
 import fr.forumhfr.redface2.core.ui.post.PostListScaffold
-import fr.forumhfr.redface2.core.ui.post.PostRenderer
+import fr.forumhfr.redface2.core.ui.post.ReadingPostCard
+import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -56,7 +56,7 @@ import java.util.Locale
 
 /**
  * One private-message conversation (#298): renders the messages of a `cat=prive` thread,
- * reusing the shared [PostRenderer]. Read-only for the MVP — replying is a follow-up. The
+ * reusing the shared [ReadingPostCard]; replying rides the [ThreadReplyFab] (#301). The
  * ViewModel receives its arguments via Hilt assisted injection ([PrivateMessageThreadRequest]).
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -74,6 +74,10 @@ fun PrivateMessageThreadScreen(
     // #618 — owner-only entry to the recipient editor, from the « Participants » sheet. Navigates to
     // the reply composer with the recipient-manager sheet auto-opened (member changes ship as a reply).
     onManageRecipients: (threadId: Int, page: Int) -> Unit = { _, _ -> },
+    // #1042 — tapping a message's avatar or pseudo opens the profile surface. Same contract as the
+    // topic's onOpenProfile: the host owns the navigation (the app-level profile sheet), the screen
+    // only supplies the identity of the tapped author. Default no-op mirrors the topic screen.
+    onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
     topBarActions: @Composable (() -> Unit)? = null,
 ) {
     val viewModel = hiltViewModel<PrivateMessageThreadViewModel, PrivateMessageThreadViewModel.Factory>(
@@ -122,6 +126,7 @@ fun PrivateMessageThreadScreen(
                 viewModel.dismissRoster()
                 onManageRecipients(request.threadId, state.page)
             },
+            onOpenProfile = onOpenProfile,
         ),
         topBarActions = topBarActions,
     )
@@ -143,6 +148,9 @@ internal data class PrivateMessageThreadCallbacks(
     val onDismissRoster: () -> Unit,
     val onRetryRoster: () -> Unit,
     val onManageRecipients: () -> Unit,
+    // #1042 — defaulted (unlike its siblings) so the pre-#1042 characterization mounts compile
+    // unchanged; a host that does not navigate keeps the tap a no-op, like the topic screen default.
+    val onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
 )
 
 /**
@@ -291,12 +299,13 @@ internal fun PrivateMessageThreadContent(
                         // #300/#351c — the list overlay (LazyColumn + auto-hiding scrollbar) is now the
                         // shared PostListScaffold; the swipe chain rides the inner list via listModifier
                         // (so the scrollbar stays fixed while the page follows the finger) and the MP
-                        // density (16.dp padding, 12.dp gap) is passed unchanged.
+                        // list chrome (16.dp padding, 12.dp gap) is passed unchanged.
                         ThreadMessages(
                             messages = mode.thread.messages,
                             page = state.page,
                             totalPages = state.totalPages,
                             onSelectPage = callbacks.onSelectPage,
+                            onOpenProfile = callbacks.onOpenProfile,
                             // Codex review — gate the pager buttons with the same condition as
                             // the swipe: re-tapping during a keep-content load would only cancel
                             // and restart the round-trip (supersede), never advance faster.
@@ -449,16 +458,20 @@ private fun ThreadMessages(
     page: Int,
     totalPages: Int,
     onSelectPage: (Int) -> Unit,
+    onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit,
     pagerEnabled: Boolean = true,
     listState: LazyListState,
     swipeModifier: Modifier = Modifier,
 ) {
-    // #351c — the shared list overlay (LazyColumn + auto-hiding scrollbar). The MP density stays
-    // feature-owned (16.dp padding, 12.dp gap, distinct from the topic's display-metrics preset) so
-    // it is passed explicitly. The swipe chain (edge glow + gesture + graphicsLayer follow) goes on
-    // the inner LazyColumn via [PostListScaffold.listModifier], like the topic's LazyColumn: the
-    // scrollbar overlay outside stays fixed on screen. [LocalShowScrollbar] (#105) is honoured by the
-    // scaffold's scrollbar, so the call leaves showScrollbar at its default.
+    // #351c/#1042 — the shared list overlay (LazyColumn + auto-hiding scrollbar). Card-INTERNAL
+    // density now follows the reader's display-metrics preset through [ReadingPostCard] (#1042);
+    // the LIST chrome below (16.dp contentPadding, 12.dp gap) stays feature-owned and fixed — the
+    // same stance as the topic, whose list gutters/insets are hard-coded in TopicListLayout.kt:
+    // the density preset deliberately scopes out absolute chrome dimensions (DisplayMetrics KDoc).
+    // The swipe chain (edge glow + gesture + graphicsLayer follow) goes on the inner LazyColumn via
+    // [PostListScaffold.listModifier], like the topic's LazyColumn: the scrollbar overlay outside
+    // stays fixed on screen. [LocalShowScrollbar] (#105) is honoured by the scaffold's scrollbar,
+    // so the call leaves showScrollbar at its default.
     PostListScaffold(
         listState = listState,
         contentPadding = PaddingValues(16.dp),
@@ -466,7 +479,14 @@ private fun ThreadMessages(
         listModifier = swipeModifier,
     ) {
         items(messages, key = { it.numreponse }) { message ->
-            MessageCard(message = message)
+            MessageCard(
+                message = message,
+                // #1042 — same gate as the topic card (#208): a message whose page row carried no
+                // profile link ([Post.profileId] null) keeps its identity line inert.
+                onOpenProfile = message.profileId?.let { profileId ->
+                    { onOpenProfile(profileId, message.author, message.avatarUrl) }
+                },
+            )
         }
         if (totalPages > 1) {
             item {
@@ -500,32 +520,55 @@ private fun ThreadMessages(
 }
 
 /**
- * #351c — one private-message rendered onto the shared [PostCardShell]. Unlike the topic card it has
- * no tinted [PostIdentityBand] (MP has no anchor/category tint), no badges, no footer (the « Répondre »
- * affordance is the screen FAB #301, not a per-card action) and no multi-quote border. The MP density
- * (16.dp around the card content, 8.dp between the identity header and the body) is feature-owned and
- * reinjected via the slots' own padding — the shell adds none. The body stays NON-selectable (#281
- * is a topic affordance; PostRenderer defaults selection OFF, the MP keeps it).
+ * #1042 — the MP thread's thin feature adapter over the shared [ReadingPostCard], the same pattern
+ * as the topic's `TopicPostCard`: it maps one private [message] onto the card's data and supplies
+ * the MP identity header, its labels and its callbacks. Capabilities are modelled by presence — a
+ * callback or slot this adapter does not pass simply leaves the corresponding affordance out of
+ * the composition, never a surface flag on the shared card.
+ *
+ * Through the shared card the MP inherits the stable reading body: structural spacing read from
+ * [LocalDisplayMetrics] (the conversation follows the reader's density preset, like the topic) and
+ * a selectable body (#1041 réarbitrage). Per #946 that selection capability is structurally
+ * CONSTANT for the whole life of the card — the shared card never swaps its SelectionContainer at
+ * runtime, so `rememberSaveable` state nested in the body (an unfolded long quote, a revealed
+ * spoiler) survives recomposition, density-preset flips included.
+ *
+ * [onOpenProfile] — tapping the avatar or the author pseudo opens the profile surface (parity with
+ * the topic card, #208); the MP page proves [Post.profileId] for its messages (#1042 fixture).
+ * `null` (no profile link on the row) keeps the identity line inert.
  */
 @Composable
-internal fun MessageCard(message: Post) {
-    PostCardShell(
-        header = {
+internal fun MessageCard(message: Post, onOpenProfile: (() -> Unit)? = null) {
+    // #287/#1042 — structural spacing from the active density preset, like the shared card's body.
+    val m = LocalDisplayMetrics.current
+    val openProfileLabel = if (onOpenProfile != null) {
+        stringResource(R.string.messages_open_profile_action)
+    } else {
+        null
+    }
+    ReadingPostCard(
+        post = message,
+        identity = {
+            // Band-less identity (an MP has no anchor/category tint): the plain shared header, its
+            // padding reinjected here (densities stay slot-owned, #351) from the SAME preset values
+            // as the body so the whole card breathes to one rhythm — gutters at cardBodyHorizontal,
+            // card-top inset at cardBodyTop; the header↔body gap is the body slot's own cardBodyTop.
+            // No pseudo slot is supplied, so the header's fallback pseudo text carries the card's
+            // exactly-one TalkBack heading (#884 contract, pinned by MessageCardShellSmokeTest) and
+            // its author tap rides onAuthorClick.
             PostIdentityHeader(
                 author = message.author,
                 avatarUrl = message.avatarUrl,
                 dateText = message.date.asMessageDate(),
-                // MP density (#351c): 16.dp around the card content; the 8.dp gap to the body rides on
-                // the body slot's top padding so the header↔body spacing matches the pre-shell layout.
-                modifier = Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp),
-            )
-        },
-        body = {
-            // Body slot owns the side + bottom gutters (16.dp) and the 8.dp gap below the header, so the
-            // overall card padding/spacing is byte-identical to the pre-shell MessageCard.
-            PostRenderer(
-                content = message.content,
-                modifier = Modifier.padding(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 16.dp),
+                modifier = Modifier.padding(
+                    start = m.cardBodyHorizontal,
+                    top = m.cardBodyTop,
+                    end = m.cardBodyHorizontal,
+                ),
+                onAvatarClick = onOpenProfile,
+                onAvatarClickLabel = openProfileLabel,
+                onAuthorClick = onOpenProfile,
+                onAuthorClickLabel = openProfileLabel,
             )
         },
     )

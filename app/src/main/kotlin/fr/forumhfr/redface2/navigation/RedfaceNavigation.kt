@@ -2247,6 +2247,9 @@ private fun RedfaceNavHost(
                             ),
                         )
                     },
+                    // #1042 — same app-level profile sheet as the topic (#208): tapping a message's
+                    // avatar/pseudo opens ProfilePreviewSheet as an overlay on the current tab.
+                    onOpenProfile = onOpenProfile,
                     topBarActions = accountMenu,
                 )
             }
