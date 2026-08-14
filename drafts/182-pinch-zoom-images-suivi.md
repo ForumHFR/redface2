@@ -94,8 +94,9 @@ Deux natures de faits, à ne pas confondre :
   SavedStateHandle) → tout reflow invalide l'offset ; ré-ancrage sémantique requis
   (item-sous-centroïde + fraction de hauteur ; `numreponse` seul = bon post, mauvaise ligne).
 - **Viewer image : n'existe pas**, anticipé par le code : bouton « Afficher en taille réelle
-  (à venir) » désactivé (`feature/topic/.../PostImageMenuSheet.kt`), `PostImageTarget(url,
-  description, linkUrl)` + `PostImageActionsViewModel` (save/copie/navigateur) hoistés.
+  (à venir) » désactivé (`core/ui/.../post/PostImageMenuSheet.kt`) et
+  `PostImageTarget(url, description, linkUrl)` partagés ; `PostImageActionsViewModel` reste dans
+  `:feature:topic` pour la sauvegarde, tandis que le sheet gère copie et navigateur.
 - **Sémantique tap actuelle** (délibérée, testée) : bloc LIÉE → navigateur ; bloc non liée et
   inline → tap inerte (protection sélection), long-press → menu.
 - **Décodage** : images inline cappées 1024 px (`INLINE_IMAGE_DECODE_CAP_PX`,

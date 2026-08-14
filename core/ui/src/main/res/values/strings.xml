@@ -29,6 +29,15 @@
     <string name="post_image_retry_action">Réessayer</string>
     <!-- #831 : libellé a11y de l'appui long sur une image de post (menu contextuel image). -->
     <string name="post_image_options_action">Options de l\'image</string>
+    <!-- #831/#1040 : menu image partagé entre les surfaces de lecture. Les valeurs restent celles
+         livrées côté topic ; les noms neutres permettent leur réemploi côté MP sans host flag. -->
+    <string name="post_image_menu_save">Enregistrer l\'image</string>
+    <string name="post_image_menu_copy_url">Copier l\'URL de l\'image</string>
+    <string name="post_image_menu_url_copied">URL copiée</string>
+    <string name="post_image_menu_full_size_soon">Afficher en taille réelle (à venir)</string>
+    <!-- Action navigateur neutre, partagée par le menu image et les menus propres aux features. -->
+    <string name="browser_open_action">Ouvrir dans le navigateur</string>
+    <string name="browser_no_handler">Aucun navigateur disponible</string>
     <string name="bbcode_action_bold">Gras</string>
     <string name="bbcode_action_italic">Italique</string>
     <string name="bbcode_action_underline">Souligné</string>

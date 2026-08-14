@@ -1,4 +1,4 @@
-package fr.forumhfr.redface2.feature.topic
+package fr.forumhfr.redface2.core.ui.post
 
 import android.app.Application
 import android.content.ClipboardManager
@@ -11,7 +11,6 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
-import fr.forumhfr.redface2.core.ui.post.PostImageTarget
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -22,11 +21,10 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * #831 — pins the four entries of the image contextual menu: « Enregistrer » routes to the save
- * callback, « Copier l'URL » writes the clipboard, « Ouvrir dans le navigateur » fires an
- * ACTION_VIEW on the DIRECT image URL, and « Afficher en taille réelle » stays a DISABLED
- * placeholder until the PR2 viewer (#182). Same Robolectric compose harness as
- * [MultiQuoteFabClearTest].
+ * #831/#1040 — pins the four entries of the shared image contextual menu: « Enregistrer » routes
+ * to the save callback, « Copier l'URL » writes the clipboard, « Ouvrir dans le navigateur » fires
+ * an ACTION_VIEW on the DIRECT image URL, and « Afficher en taille réelle » stays a DISABLED
+ * placeholder until the fullscreen viewer (#182).
  *
  * The target URL uses the reserved `.invalid` TLD so the hero thumbnail's Coil request fails
  * fast without touching the network — the sheet never blocks on the bitmap by design.
@@ -89,7 +87,7 @@ class PostImageMenuSheetTest {
     }
 
     @Test
-    fun `the full-size entry is a disabled PR2 placeholder`() {
+    fun `the full-size entry is a disabled placeholder`() {
         mount()
 
         composeTestRule.onNodeWithText("Afficher en taille réelle (à venir)")

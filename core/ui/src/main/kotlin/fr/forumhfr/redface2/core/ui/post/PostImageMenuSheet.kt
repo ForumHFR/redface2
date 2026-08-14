@@ -1,4 +1,4 @@
-package fr.forumhfr.redface2.feature.topic
+package fr.forumhfr.redface2.core.ui.post
 
 import android.content.ActivityNotFoundException
 import android.content.ClipData
@@ -20,6 +20,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SheetState
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -32,32 +33,30 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
-import fr.forumhfr.redface2.core.ui.post.PostImageTarget
-import fr.forumhfr.redface2.core.ui.post.PostImageThumbnail
+import fr.forumhfr.redface2.core.ui.R
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 
 /**
- * #831 — contextual menu of a post image, opened by a long-press on the image (inline `[img]`,
- * block image or promoted gallery image — cf. `LocalPostImageActions` in `:core:ui`). Layout
- * clones [PostMenuSheet] (#362): a hero row identifying the target, then stacked full-width
- * actions:
+ * #831/#1040 — shared contextual menu of a post image, opened by a long-press on the image
+ * (inline `[img]`, block image or promoted gallery image). The sheet owns its neutral labels and
+ * delegates the host-specific save operation through [onSave]. Its layout is a hero row identifying
+ * the target followed by stacked full-width actions:
  *
- * - « Enregistrer l'image » (filled, primary action) — delegates to [onSave]
- *   ([PostImageActionsViewModel] → `PostImageSaver`); feedback arrives as a Toast from the
- *   ViewModel's effects, after the sheet has closed;
+ * - « Enregistrer l'image » (filled, primary action) — delegates to [onSave];
  * - « Copier l'URL de l'image » — clipboard write, Diagnostics feedback pattern (system overlay
  *   on Android 13+, Toast below);
  * - « Ouvrir dans le navigateur » — `ACTION_VIEW` on the image URL (the DIRECT image, not the
  *   `[url=…]` link, which the block tap already covers);
  * - « Afficher en taille réelle (à venir) » — DISABLED placeholder (#288 « menu vitrine »
- *   pattern, same as PostMenuSheet's « Alerter »): the affordance shows the roadmap, the PR2
- *   fullscreen viewer (#182) will enable it.
+ *   pattern). The affordance remains visible until the fullscreen viewer (#182) enables it.
  *
- * The hero shows the image thumbnail (Coil caches, `:core:ui`) + the host and full URL so the
- * user can tell WHICH image the menu targets when a post carries several.
+ * The hero shows the image thumbnail (Coil caches) + the host and full URL so the user can tell
+ * WHICH image the menu targets when a post carries several.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun PostImageMenuSheet(
+fun PostImageMenuSheet(
     target: PostImageTarget,
     onSave: (url: String) -> Unit,
     onDismiss: () -> Unit,
@@ -66,8 +65,8 @@ internal fun PostImageMenuSheet(
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
     // Resolved at composition time — the action callbacks run outside composition.
-    val copiedFeedback = stringResource(R.string.topic_image_menu_url_copied)
-    val browserFailedFeedback = stringResource(R.string.topic_post_menu_no_browser)
+    val copiedFeedback = stringResource(R.string.post_image_menu_url_copied)
+    val browserFailedFeedback = stringResource(R.string.browser_no_handler)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -90,7 +89,7 @@ internal fun PostImageMenuSheet(
                 },
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text(stringResource(R.string.topic_image_menu_save))
+                Text(stringResource(R.string.post_image_menu_save))
             }
 
             Spacer(Modifier.height(8.dp))
@@ -102,7 +101,7 @@ internal fun PostImageMenuSheet(
                 },
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text(stringResource(R.string.topic_image_menu_copy_url))
+                Text(stringResource(R.string.post_image_menu_copy_url))
             }
 
             Spacer(Modifier.height(8.dp))
@@ -114,19 +113,19 @@ internal fun PostImageMenuSheet(
                 },
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text(stringResource(R.string.topic_post_menu_open_in_browser))
+                Text(stringResource(R.string.browser_open_action))
             }
 
             Spacer(Modifier.height(8.dp))
 
-            // PR2 (#182) — fullscreen viewer placeholder, greyed « menu vitrine » (#288 pattern):
+            // #182 — fullscreen viewer placeholder, greyed « menu vitrine » (#288 pattern):
             // the affordance is visible, the « (à venir) » suffix explains why it is disabled.
             OutlinedButton(
                 onClick = {},
                 enabled = false,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text(stringResource(R.string.topic_image_menu_full_size_soon))
+                Text(stringResource(R.string.post_image_menu_full_size_soon))
             }
 
             Spacer(Modifier.height(8.dp))
@@ -135,9 +134,8 @@ internal fun PostImageMenuSheet(
 }
 
 /**
- * Hero row of the sheet — thumbnail + host + full URL, mirroring [PostMenuHero]'s
- * avatar + identity layout. The host alone is the human-readable line (« rehost.diberie.com »),
- * the full URL underneath disambiguates several images from the same host.
+ * Hero row of the sheet — thumbnail + host + full URL. The host alone is the human-readable line
+ * (« rehost.diberie.com »); the full URL underneath disambiguates several images from the same host.
  */
 @Composable
 private fun PostImageMenuHero(target: PostImageTarget) {
@@ -170,9 +168,8 @@ private fun PostImageMenuHero(target: PostImageTarget) {
 }
 
 /**
- * Clipboard write + feedback for the image URL — same Diagnostics pattern as
- * [copyPermalinkToClipboard]: Android 13+ (T) shows the system « copié » overlay on its own,
- * older API levels get a Toast.
+ * Clipboard write + feedback for the image URL. Android 13+ (T) shows the system « copié » overlay
+ * on its own; older API levels get a Toast.
  */
 private fun copyImageUrlToClipboard(context: Context, url: String, feedback: String) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -182,14 +179,29 @@ private fun copyImageUrlToClipboard(context: Context, url: String, feedback: Str
     }
 }
 
-/**
- * Fires an `ACTION_VIEW` on the direct image URL — same survive-no-handler contract as
- * [openPermalinkInBrowser] (a Toast instead of a crash).
- */
+/** Fires an `ACTION_VIEW` on the direct image URL, surfacing a Toast when no handler exists. */
 private fun openImageUrlInBrowser(context: Context, url: String, failureFeedback: String) {
     try {
         context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))
     } catch (ignored: ActivityNotFoundException) {
         Toast.makeText(context, failureFeedback, Toast.LENGTH_SHORT).show()
     }
+}
+
+/**
+ * Plays a sheet's hide animation, then invokes [onDismiss] once the sheet is actually off-screen.
+ * Public so feature-owned sheets can share the exact same Material 3 dismissal sequencing.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+fun hideThenDismiss(
+    coroutineScope: CoroutineScope,
+    sheetState: SheetState,
+    onDismiss: () -> Unit,
+) {
+    coroutineScope.launch { sheetState.hide() }
+        .invokeOnCompletion {
+            if (!sheetState.isVisible) {
+                onDismiss()
+            }
+        }
 }
