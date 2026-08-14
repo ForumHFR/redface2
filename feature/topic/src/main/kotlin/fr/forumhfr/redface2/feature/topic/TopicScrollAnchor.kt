@@ -1,11 +1,13 @@
 package fr.forumhfr.redface2.feature.topic
 
 /**
- * #307 — raw scroll anchor of the topic page's `LazyColumn`, captured when the screen leaves the
- * composition and replayed when the user returns to the same `(cat, post, page)` (swipe back/forward,
- * FAB, header pager…). The route-driven page model destroys the nav entry — and with it the
- * `rememberSaveable` `LazyListState` — on every page change, so `:app` keeps these anchors in a
- * session-scoped cache hoisted above `NavDisplay` (twin of the per-topic title cache, PR #338).
+ * #307 — raw scroll anchor of the topic page's `LazyColumn`. Since #895 étape 4 the nav entry — and
+ * its `LazyListState` — survives in-topic page changes: intra-topic revisits (swipe back/forward,
+ * FAB, header pager…) are landed by the retained `TopicViewModel`'s own per-page anchor map (F3).
+ * The `:app` session cache hoisted above `NavDisplay` (twin of the per-topic title cache, PR #338)
+ * now serves CROSS-ENTRY restores only — reopening the same `(cat, post, page)` later in the session.
+ * (Pre-#895 the route-driven page model destroyed the entry on every page change, which is why the
+ * cache lives in `:app`.)
  *
  * **Header-aware by construction**: [index]/[offset] are the raw
  * `LazyListState.firstVisibleItemIndex` / `firstVisibleItemScrollOffset`, where item 0 is the topic

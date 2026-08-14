@@ -178,6 +178,8 @@ La méthode canonique du projet est documentée dans [Méthodologie]({{ site.bas
 
 Cette page décrit **comment** contribuer ; elle ne redéfinit pas la méthode du projet. Pour une contribution structurante, lire `docs/specs/methodology.md` puis `AGENTS.md`.
 
+Cas particulier : toute contribution qui ajoute ou modifie une fonction de la **surface de lecture** (rendu d'un post, gestes de page, préférences de lecture) met à jour sa ligne dans la [matrice de parité Topic ↔ MP]({{ site.baseurl }}/specs/reading-parity) — la règle d'entretien et les verdicts possibles vivent sur cette page.
+
 ### Style de code
 
 - **Kotlin** : suivre les [conventions officielles](https://kotlinlang.org/docs/coding-conventions.html)

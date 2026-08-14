@@ -1,11 +1,26 @@
 package fr.forumhfr.redface2.core.parser.messages
 
+import fr.forumhfr.redface2.core.model.postContentExcerpt
 import java.time.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+/**
+ * Characterizes the private-thread parser against one sanitized, authenticated HFR capture.
+ *
+ * Positive coverage is deliberately limited to what `private_message_thread.html` contains: four
+ * genuine message rows with anchors, authors, dates, avatars, profile links, quote-action `ref`
+ * values, edit-link ownership and placeholder bodies, plus the thread metadata asserted below.
+ *
+ * The fixture contains NO `span.signature`, `quote_only=1` citation counter, `div.edited` trailer,
+ * `table.citation` or `table.oldcitation`. Its two `quote_only=0` URLs are page-level filter/print
+ * navigation, not citation counters. Therefore this class intentionally does not assert `null` or
+ * empty values for `signature`, `citedCount`, `editedAt` or quoted content: such assertions would
+ * only pin the fixture's absence and could be mistaken for positive parser support. A separate real,
+ * sanitized fixture containing each construct is required to characterize those capabilities.
+ */
 class PrivateMessageThreadParserTest {
 
     private val parser = PrivateMessageThreadParser()
@@ -40,17 +55,49 @@ class PrivateMessageThreadParserTest {
     }
 
     @Test
-    fun `reuses the shared post extractor so own vs correspondent messages keep their edit flag`() {
+    fun `reuses the shared post extractor for the fixture's proven message fields`() {
         val messages = parser.parse(html).messages
 
-        assertEquals(listOf("TestUser", "TestUser", "TestUser", "Correspondant"), messages.map { it.author })
+        assertEquals(
+            listOf(1980664234, 1980664235, 1980677218, 1980677227),
+            messages.map { it.numreponse },
+        )
+        assertEquals(
+            listOf("TestUser", "TestUser", "TestUser", "Correspondant"),
+            messages.map { it.author },
+        )
+        assertEquals(
+            listOf(
+                Instant.parse("2026-05-24T12:29:15Z"),
+                Instant.parse("2026-05-24T12:29:58Z"),
+                Instant.parse("2026-06-03T16:55:48Z"),
+                Instant.parse("2026-06-03T17:01:40Z"),
+            ),
+            messages.map { it.date },
+        )
+        assertEquals(
+            listOf(
+                "https://forum-images.hardware.fr/images/mesdiscussions-990002.png",
+                "https://forum-images.hardware.fr/images/mesdiscussions-990002.png",
+                "https://forum-images.hardware.fr/images/mesdiscussions-990002.png",
+                "https://forum-images.hardware.fr/images/mesdiscussions-990001.jpg",
+            ),
+            messages.map { it.avatarUrl },
+        )
+        // The ids were consistently remapped while scrubbing the private capture; their presence
+        // and per-author stability, rather than the fictitious values themselves, are the contract.
+        assertEquals(listOf(990002, 990002, 990002, 990001), messages.map { it.profileId })
+        // The clear quote-action hrefs carry the real page-local ranks even though the adjacent
+        // single-quote icons are cryptlink-obfuscated.
+        assertEquals(listOf(1, 2, 3, 4), messages.map { it.quoteRef })
         // Own messages expose the toolbar edit link (recovered from its cryptlink span);
         // the correspondent's does not.
-        assertTrue(messages[0].isOwnPost)
-        assertFalse(messages[3].isOwnPost)
-        // Post dates parse with the shared topic toolbar format ("Posté le …").
-        // 24-05-2026 14:29:15 Europe/Paris (CEST, UTC+2) == 12:29:15 UTC.
-        assertEquals(Instant.parse("2026-05-24T12:29:15Z"), messages[0].date)
+        assertEquals(listOf(true, true, true, false), messages.map { it.isEditable })
+        assertEquals(listOf(true, true, true, false), messages.map { it.isOwnPost })
+        assertEquals(
+            List(4) { "Message prive de test (contenu remplace)." },
+            messages.map { postContentExcerpt(it.content) },
+        )
     }
 
     @Test

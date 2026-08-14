@@ -23,8 +23,10 @@ import fr.forumhfr.redface2.core.ui.list.LazyListScrollbar
  *    densities (the topic reads 8/16/8/88-style insets from its display-metrics preset, the MP a flat
  *    16.dp with a 12.dp gap), so forcing every call-site to pass them keeps c1 from silently changing
  *    either screen's spacing.
- *  - the page-swipe machinery stays in the feature (it differs by lifecycle: the topic is route-driven,
- *    the MP paginates in place — see `PageSwipe.kt`/ADR-013) and is injected through [listModifier],
+ *  - the page-swipe machinery stays in the feature (both hosts paginate in place since #895 étape 4,
+ *    but the couplings differ: the topic gesture is tied to its in-ViewModel engine — per-page
+ *    re-key, slide-out — while the MP gesture is gated by `isRefreshing`; see `PageSwipe.kt` /
+ *    ADR-013 amendée) and is injected through [listModifier],
  *    applied to the **`LazyColumn`** (so the list follows the finger) and never to the outer [Box] (so
  *    the scrollbar overlay stays fixed). `PullToRefreshBox` is NOT absorbed here — it stays the
  *    feature's wrapper, since its refresh state belongs to the screen's ViewModel.

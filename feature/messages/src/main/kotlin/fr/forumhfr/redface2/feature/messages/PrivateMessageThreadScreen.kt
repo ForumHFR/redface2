@@ -81,7 +81,6 @@ fun PrivateMessageThreadScreen(
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
     val mode = state.mode
-    val listState = rememberLazyListState()
 
     LaunchedEffect(mode) {
         if (mode is PrivateMessageThreadUiState.Mode.Content) {
@@ -106,6 +105,61 @@ fun PrivateMessageThreadScreen(
             }
         }
     }
+
+    PrivateMessageThreadContent(
+        state = state,
+        isMultiRecipientHint = isMultiRecipientHint,
+        callbacks = PrivateMessageThreadCallbacks(
+            onBack = onBack,
+            onReply = { onReply(request.threadId, state.page) },
+            onRetry = viewModel::retry,
+            onRefresh = viewModel::refresh,
+            onSelectPage = viewModel::selectPage,
+            onOpenRoster = viewModel::openRoster,
+            onDismissRoster = viewModel::dismissRoster,
+            onRetryRoster = viewModel::retryRoster,
+            onManageRecipients = {
+                viewModel.dismissRoster()
+                onManageRecipients(request.threadId, state.page)
+            },
+        ),
+        topBarActions = topBarActions,
+    )
+}
+
+/**
+ * State-hoisted callbacks for [PrivateMessageThreadContent]. Keeping this seam free of Hilt makes
+ * the complete thread surface characterizable in JVM Compose tests while the public screen remains
+ * the sole owner of the ViewModel and route arguments.
+ */
+@Suppress("LongParameterList") // One state-hoisted action per independent control on the complete surface.
+internal data class PrivateMessageThreadCallbacks(
+    val onBack: () -> Unit,
+    val onReply: () -> Unit,
+    val onRetry: () -> Unit,
+    val onRefresh: () -> Unit,
+    val onSelectPage: (Int) -> Unit,
+    val onOpenRoster: () -> Unit,
+    val onDismissRoster: () -> Unit,
+    val onRetryRoster: () -> Unit,
+    val onManageRecipients: () -> Unit,
+)
+
+/**
+ * Complete private-thread surface driven by immutable UI state. This is the MP counterpart of the
+ * topic feature's state-hoisted `TopicContent`: screen chrome, message list, pager, auth/error modes
+ * and participant sheet stay in one composition; only ViewModel collection/effects live outside.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun PrivateMessageThreadContent(
+    state: PrivateMessageThreadUiState,
+    isMultiRecipientHint: Boolean,
+    callbacks: PrivateMessageThreadCallbacks,
+    topBarActions: @Composable (() -> Unit)? = null,
+) {
+    val mode = state.mode
+    val listState = rememberLazyListState()
 
     Scaffold(
         topBar = {
@@ -143,7 +197,7 @@ fun PrivateMessageThreadScreen(
                 navigationIcon = {
                     val backLabel = stringResource(R.string.messages_back)
                     IconButton(
-                        onClick = onBack,
+                        onClick = callbacks.onBack,
                         modifier = Modifier.semantics { contentDescription = backLabel },
                     ) {
                         // #360 / ADR-015 — vector stroke unifié, dimensionné en dp (indépendant de la
@@ -160,7 +214,7 @@ fun PrivateMessageThreadScreen(
                     ThreadTopBarActions(
                         isMultiRecipient = (mode as? PrivateMessageThreadUiState.Mode.Content)
                             ?.thread?.isMultiRecipient == true || isMultiRecipientHint,
-                        onOpenRoster = viewModel::openRoster,
+                        onOpenRoster = callbacks.onOpenRoster,
                         topBarActions = topBarActions,
                     )
                 },
@@ -170,7 +224,7 @@ fun PrivateMessageThreadScreen(
             ThreadReplyFab(
                 // #301 — reply affordance, shown only once the page proved a reply form is available.
                 canReply = (mode as? PrivateMessageThreadUiState.Mode.Content)?.thread?.canReply == true,
-                onReply = { onReply(request.threadId, state.page) },
+                onReply = callbacks.onReply,
             )
         },
     ) { innerPadding ->
@@ -217,7 +271,7 @@ fun PrivateMessageThreadScreen(
                     )
                     // No raw error detail on screen (#316): it can embed the private conversation
                     // URL. Kind-resolved message + retry only.
-                    Button(onClick = viewModel::retry) {
+                    Button(onClick = callbacks.onRetry) {
                         Text(text = stringResource(R.string.messages_retry))
                     }
                 }
@@ -231,7 +285,7 @@ fun PrivateMessageThreadScreen(
                     // covers the keep-content page changes (same isRefreshing flag).
                     PullToRefreshBox(
                         isRefreshing = state.isRefreshing,
-                        onRefresh = viewModel::refresh,
+                        onRefresh = callbacks.onRefresh,
                         modifier = Modifier.fillMaxSize(),
                     ) {
                         // #300/#351c — the list overlay (LazyColumn + auto-hiding scrollbar) is now the
@@ -242,7 +296,7 @@ fun PrivateMessageThreadScreen(
                             messages = mode.thread.messages,
                             page = state.page,
                             totalPages = state.totalPages,
-                            onSelectPage = viewModel::selectPage,
+                            onSelectPage = callbacks.onSelectPage,
                             // Codex review — gate the pager buttons with the same condition as
                             // the swipe: re-tapping during a keep-content load would only cancel
                             // and restart the round-trip (supersede), never advance faster.
@@ -254,7 +308,7 @@ fun PrivateMessageThreadScreen(
                                 renderedPage = mode.thread.page,
                                 totalPages = state.totalPages,
                                 isRefreshing = state.isRefreshing,
-                                onSelectPage = viewModel::selectPage,
+                                onSelectPage = callbacks.onSelectPage,
                             ),
                         )
                     }
@@ -267,14 +321,11 @@ fun PrivateMessageThreadScreen(
     // open / loading / loaded / unavailable / error states (lazy fetch + memory cache).
     ParticipantRosterSheet(
         roster = state.roster,
-        onDismiss = viewModel::dismissRoster,
-        onRetry = viewModel::retryRoster,
+        onDismiss = callbacks.onDismissRoster,
+        onRetry = callbacks.onRetryRoster,
         // #618 — close the roster sheet BEFORE navigating (Codex framing) so it does not reappear when
         // the composer pops back, then open the composer with the recipient manager auto-opened.
-        onManageRecipients = {
-            viewModel.dismissRoster()
-            onManageRecipients(request.threadId, state.page)
-        },
+        onManageRecipients = callbacks.onManageRecipients,
     )
 }
 
@@ -335,7 +386,7 @@ private fun ThreadReplyFab(canReply: Boolean, onReply: () -> Unit) {
  * off while a load is in flight ([isRefreshing]) and re-arms when it settles.
  */
 @Composable
-private fun rememberThreadSwipeModifier(
+internal fun rememberThreadSwipeModifier(
     renderedPage: Int,
     totalPages: Int,
     isRefreshing: Boolean,
@@ -347,8 +398,10 @@ private fun rememberThreadSwipeModifier(
     val currentTotal = rememberUpdatedState(totalPages)
     val swipeEnabled = rememberUpdatedState(!isRefreshing)
     val currentOnSelectPage = rememberUpdatedState(onSelectPage)
-    // Codex review — dragOffset SURVIVES the in-place page change (no composition teardown, unlike
-    // the topic's route-driven model where the offset state dies with the screen). Drop any residual
+    // Codex review — dragOffset SURVIVES the in-place page change (no composition teardown; the
+    // topic's offset survives too since #895 étape 4 and is reset the same way, by a
+    // LaunchedEffect keyed on the rendered page — pre-#895 it died with the route-replaced
+    // screen). Drop any residual
     // translation when a new page lands so the incoming content never inherits the old offset. An
     // in-flight spring-back may stream a few frames after this reset; it converges to 0 by
     // construction, so the transient is negligible. A drag still under the finger keeps following it

@@ -1084,11 +1084,13 @@ fun RedfaceApp(intent: Intent?) {
         // is not topic-shaped). In-memory only, like the other private-message hints above.
         var privateMessageSentSignal by remember { mutableStateOf<Long?>(null) }
 
-        // Bug fix (build 89) — per-topic title cache keyed by (cat, post). A page change replaces the
-        // TopicRoute (new nav entry → new ViewModel → Loading with no topic), which used to flash the
-        // generic « Sujet » title in the top bar. The topic screen reports its loaded title here; the
-        // next page reads it back via TopicRequest.titleHint. Hoisted above NavDisplay so it survives
-        // the entry recreation; keyed by (cat, post) so titles never bleed across categories.
+        // Bug fix (build 89) — per-topic title cache keyed by (cat, post). Historical trigger: a page
+        // change used to replace the TopicRoute (new nav entry → new ViewModel → Loading with no
+        // topic), flashing the generic « Sujet » title in the top bar. Since #895 étape 4 in-topic
+        // page changes keep the entry; the cache still serves FRESH entries on an already-visited
+        // topic (TopicRequest.titleHint — reopening from a list, a deep link, back navigation).
+        // Hoisted above NavDisplay so it survives the entry recreation; keyed by (cat, post) so
+        // titles never bleed across categories.
         var topicTitleCache by remember { mutableStateOf(emptyMap<TopicTitleKey, String>()) }
 
         // #307 — per-page scroll anchors keyed by (cat, post, page), twin of topicTitleCache. The
@@ -1106,10 +1108,11 @@ fun RedfaceApp(intent: Intent?) {
         var topicPendingSubmit by remember { mutableStateOf<TopicPendingSubmit?>(null) }
         var topicSubmitEventId by remember { mutableStateOf(0L) }
         // #291 — multi-quote basket: numreponses selected for quoting, in tap order, keyed by
-        // (cat, post) so a page change (which destroys the topic nav entry, cf. titles above)
-        // keeps the cross-page selection while a different topic never sees it. One basket at a
-        // time (selecting in another topic resets it — quoting is a single-topic act). Plain
-        // remember: losing it on process death just means re-selecting, like the markers above.
+        // (cat, post) so the selection survives the editor round-trip and re-entering the topic
+        // (and, pre-#895 étape 4, the per-page entry swap — the original trigger for hoisting it
+        // here) while a different topic never sees it. One basket at a time (selecting in another
+        // topic resets it — quoting is a single-topic act). Plain remember: losing it on process
+        // death just means re-selecting, like the markers above.
         var multiQuoteBasket by remember { mutableStateOf<MultiQuoteBasket?>(null) }
         // #604 lot 3 — quote cards handed to the NEXT full-screen editor (mockup P3) : set right
         // before pushing a PostEditorRoute (« Citer N » or a sheet escalation), consumed ONCE by
@@ -1119,11 +1122,12 @@ fun RedfaceApp(intent: Intent?) {
         // #868-#870 — carries `consumesBasket` too (cf. EditorQuotesHandoff).
         var pendingEditorQuotes by remember { mutableStateOf<EditorQuotesHandoff?>(null) }
         // #465 — per-topic MANUAL poll-expansion choice, keyed by (cat, post) (one poll per topic),
-        // twin of topicTitleCache / topicScrollAnchorCache: a page change replaces the TopicRoute
-        // (new nav entry → new ViewModel), so a `rememberSaveable` toggle inside the poll card was
-        // re-seeded to the global default on every page. Hoisted above NavDisplay so collapsing /
-        // expanding a poll survives navigation between the topic's pages. Absence of a key = follow
-        // the `topicPollsExpanded` default; the toggle records the manual choice here. RAM/session
+        // twin of topicTitleCache / topicScrollAnchorCache. Historical trigger: a page change
+        // replaced the TopicRoute (new nav entry → new ViewModel), re-seeding a `rememberSaveable`
+        // toggle inside the poll card to the global default on every page. Since #895 étape 4 the
+        // entry survives page changes; hoisting still makes the choice survive leaving and
+        // reopening the topic within the session. Absence of a key = follow the
+        // `topicPollsExpanded` default; the toggle records the manual choice here. RAM/session
         // only, never serialized into a route.
         var topicPollExpansionCache by remember { mutableStateOf(emptyMap<TopicPollKey, Boolean>()) }
 
@@ -1697,13 +1701,15 @@ internal fun Map<Int, Instant>.withReadMark(
     this + (threadId to (openDates[threadId] ?: this[threadId] ?: NO_RECONCILE_BASELINE))
 
 /**
- * Bug fix (build 89) — per-topic title cache plumbed into [RedfaceNavHost]. A topic page change
- * replaces the TopicRoute (new nav entry → new ViewModel → Loading with no topic yet), which used to
- * flash the generic « Sujet » title in the top app bar. The `var` backing [titles] lives in
- * [RedfaceApp] so it survives the entry recreation; [onTitleLoaded] writes the freshly-loaded title
- * back and the next page reads it via TopicRequest.titleHint. Keyed by `(cat, post)` ([TopicTitleKey])
- * — a topic id is unique only per HFR category — so titles never bleed across categories. Same
- * read-map + onLoaded-callback shape as [PrivateMessageNavState].
+ * Bug fix (build 89) — per-topic title cache plumbed into [RedfaceNavHost]. Historical trigger: a
+ * topic page change replaced the TopicRoute (new nav entry → new ViewModel → Loading with no topic
+ * yet), flashing the generic « Sujet » title in the top app bar. Since #895 étape 4 in-topic page
+ * changes keep the entry — the cache serves fresh ENTRIES on an already-visited topic. The `var`
+ * backing [titles] lives in [RedfaceApp] so it survives the entry recreation; [onTitleLoaded]
+ * writes the freshly-loaded title back and the next entry reads it via TopicRequest.titleHint.
+ * Keyed by `(cat, post)` ([TopicTitleKey]) — a topic id is unique only per HFR category — so titles
+ * never bleed across categories. Same read-map + onLoaded-callback shape as
+ * [PrivateMessageNavState].
  *
  * @property titles last known title per topic, fed into TopicRequest.titleHint.
  * @property onTitleLoaded records a topic's title once its page has loaded.
@@ -1811,9 +1817,11 @@ internal data class EditorQuotesHandoff(
 
 /**
  * #465 — per-topic poll-expansion bundle threaded into [RedfaceNavHost], same shape and survival
- * rationale as the other hoisted-state bundles ([TopicScrollNavState], [TopicTitleNavState]): a page
- * change replaces the TopicRoute entry, so any expansion state owned by the topic screen would die
- * with it. The `var` backing [expansions] lives in [RedfaceApp]. A `null` lookup (no entry for the
+ * rationale as the other hoisted-state bundles ([TopicScrollNavState], [TopicTitleNavState]):
+ * state owned by the topic screen dies when its entry leaves the back stack, so hoisting makes the
+ * choice survive leaving and reopening the topic (and survived the per-page entry swap back when
+ * page changes replaced the route, pre-#895 étape 4 — the original trigger). The `var` backing
+ * [expansions] lives in [RedfaceApp]. A `null` lookup (no entry for the
  * topic) means « follow the global default »; [onExpansionChanged] records the user's manual toggle.
  *
  * @property expansions the manual collapse/expand choice per topic the user has toggled.
@@ -1881,8 +1889,9 @@ private fun ResetNavBarScrollOffTopic(topRoute: NavKey?, onReset: () -> Unit) {
 
 /**
  * #291 — multi-quote selection, hoisted to RedfaceApp (same survival rationale as
- * [TopicScrollNavState]: a page change replaces the TopicRoute entry, so any state owned by the
- * topic screen dies with it). [selections] keeps SELECTION ORDER — the quotes are concatenated
+ * [TopicScrollNavState]: state owned by the topic screen dies when its entry leaves the back stack
+ * — the editor round-trip, reopening the topic ; and, pre-#895 étape 4, every page change swapped
+ * the entry). [selections] keeps SELECTION ORDER — the quotes are concatenated
  * in the order the user tapped them, not post order. #604 lot 2 enriched the entries from bare
  * numreponses to [QuotedPostPreview]s (author + excerpt captured at selection time) so the quote
  * cards never re-parse a post ; uniqueness stays keyed on the numreponse alone.
@@ -1968,16 +1977,18 @@ private fun RedfaceNavHost(
     // report-email flow as the account menu (which owns `context` + the report strings).
     onReportContent: () -> Unit,
     privateMessageNavState: PrivateMessageNavState,
-    // Bug fix (build 89) — per-topic title cache threaded down from RedfaceApp (where the `var` lives
-    // so it survives entry recreation across page changes). Bundled to keep the param count in check.
+    // Bug fix (build 89) — per-topic title cache threaded down from RedfaceApp (where the `var`
+    // lives so it survives entry recreation — reopening a topic; in-topic page changes stopped
+    // recreating the entry with #895 étape 4). Bundled to keep the param count in check.
     topicTitleNavState: TopicTitleNavState,
     // #307 — per-page scroll-anchor cache, same hoisting rationale as topicTitleNavState.
     topicScrollNavState: TopicScrollNavState,
     // #895 étape 4 (PR 2) — post-submit handoff (editor → retained topic ViewModel), same rationale.
     topicSubmitNavState: TopicSubmitNavState,
-    // #291 — multi-quote basket, same hoisting rationale (survives the per-page entry swap).
+    // #291 — multi-quote basket, same hoisting rationale (survives the editor round-trip and
+    // topic re-entry).
     multiQuoteNavState: MultiQuoteNavState,
-    // #465 — per-topic poll-expansion cache, same hoisting rationale (survives the per-page swap).
+    // #465 — per-topic poll-expansion cache, same hoisting rationale (survives topic re-entry).
     topicPollNavState: TopicPollNavState,
     // #518 follow-up — immersive nav-bar reveal: the topic reports scroll facts up through this bundle.
     immersiveNavBarNavState: ImmersiveNavBarNavState,
@@ -2569,7 +2580,8 @@ private fun RedfaceNavHost(
                     onClearMultiQuote = multiQuoteNavState.onClear,
                     // #465 — the topic's saved manual poll choice (null = follow the global
                     // default), and the callback recording a tap on the poll card. Hoisted to
-                    // :app so it survives the per-page TopicRoute swap, keyed by (cat, post).
+                    // :app so it survives leaving and reopening the topic (pre-#895 étape 4:
+                    // the per-page TopicRoute swap), keyed by (cat, post).
                     pollManualExpanded = topicPollNavState.expansions[
                         TopicPollKey(route.cat, route.post),
                     ],

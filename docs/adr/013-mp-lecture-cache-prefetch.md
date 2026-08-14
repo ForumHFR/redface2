@@ -10,7 +10,7 @@ permalink: /adr/013-mp-lecture-cache-prefetch
 
 ## Statut
 
-Accepté — 2026-06-12 (proposé 2026-06-10 ; révisé le 2026-06-12 après audit adversarial : descriptions actualisées au code livré, bornes du prefetch précisées — le fond des décisions est inchangé)
+Accepté — 2026-06-12 (proposé 2026-06-10 ; révisé le 2026-06-12 après audit adversarial : descriptions actualisées au code livré, bornes du prefetch précisées — le fond des décisions est inchangé) · **amendé 2026-08-12** ([#1041](https://github.com/ForumHFR/redface2/issues/1041), lot 0 de [#1040](https://github.com/ForumHFR/redface2/issues/1040) : la prémisse « topic = route-driven » du Contexte est périmée depuis le 12 juillet 2026 (#895 étape 4) — la décision 4 est réécrite par amendement, les décisions 1 à 3 sont inchangées sur le fond)
 
 Cette ADR formalise les arbitrages rendus dans [#351](https://github.com/ForumHFR/redface2/issues/351) ([analyse code](https://github.com/ForumHFR/redface2/issues/351#issuecomment-4662808989) + [addendum cache](https://github.com/ForumHFR/redface2/issues/351#issuecomment-4663229671)) et [#361](https://github.com/ForumHFR/redface2/issues/361) ([investigation live du contrat serveur lu/non-lu](https://github.com/ForumHFR/redface2/issues/361#issuecomment-4663312132), 2026-06-09). Elle n'invente aucun verdict : chaque assertion factuelle sur HFR renvoie au commentaire d'issue qui l'a vérifiée.
 
@@ -32,6 +32,17 @@ L'[analyse code sur `dev`](https://github.com/ForumHFR/redface2/issues/351#issue
 - **MP = in-place** : `PrivateMessageThreadViewModel.selectPage(page)` recharge la page dans le **même** ViewModel, même composition, même entrée nav.
 
 Porter `Modifier.topicPageSwipe` tel quel sur les MP produirait donc un écran gelé après le premier swipe (latch jamais détruit). Par ailleurs, le ressenti instantané du swipe topic repose sur le cache Room et le prefetch anonyme — tous deux absents côté MP : `cat=prive` exige l'authentification (403 anonyme, [#351](https://github.com/ForumHFR/redface2/issues/351#issuecomment-4662808989)), et la décision vie privée d'origine ([#316](https://github.com/ForumHFR/redface2/issues/316) : routes opaques, pas de persistance) excluait tout cache MP. Cette décision « pas de cache MP » a été **explicitement rouverte** par XaaT le 2026-06-09 ([addendum #351](https://github.com/ForumHFR/redface2/issues/351#issuecomment-4663229671)).
+
+> **Amendement 2026-08-12 ([#1041](https://github.com/ForumHFR/redface2/issues/1041))** — la divergence
+> des modèles de pagination décrite ci-dessus, exacte à l'acceptation, **n'existe plus** : depuis
+> `1cf2a7be` puis `4248c22d` (#895 étape 4, PR [#905](https://github.com/ForumHFR/redface2/pull/905)/[#907](https://github.com/ForumHFR/redface2/pull/907),
+> 2026-07-12), le topic pagine **in-ViewModel** (`TopicViewModel.switchToPage()`, snapshots RAM LRU,
+> ancres par page, génération anti-réponse-tardive) et la `TopicRoute` est **figée à l'entrée**
+> (entrée nav unique — le commit du swipe ne remplace plus la route, le latch est réarmé par le re-key
+> `pointerInput(currentPage)`). Les deux surfaces paginent donc in-place ; ce qui les sépare encore
+> n'est plus le modèle mais les **garanties** (cache RAM, prefetch, ancres, stale-while-switching).
+> Les descriptions route-driven de cette section restent le contexte exact dans lequel les décisions
+> de juin ont été prises — elles ne décrivent plus le code courant.
 
 ### Le contrat serveur mesuré (#361)
 
@@ -73,6 +84,19 @@ L'invariant général « les requêtes de prefetch ne sont jamais authentifiées
 
 Conséquence d'implémentation : la garde Konsist actuelle (`ArchitectureKonsistTest`, test « prefetch call sites use the prefetch entry points only ») ne couvre que le domaine topic — elle interdit aux contextes prefetch d'appeler `refreshTopicPage`/`refreshTopicList`, avec le marqueur d'exemption `konsist:bypass-prefetch-guard` déjà en place. Un prefetch MP authentifié ne la déclencherait donc pas du tout : le travail réel de la PR qui introduira ce prefetch est d'**étendre la garde au domaine MP** (nommage dédié du point d'entrée + règle qui le reconnaît), pas d'exempter un call-site — à faire explicitement, pas silencieusement.
 
+> **Contradiction documentaire relevée et TRANCHÉE le 2026-08-12 ([#1041](https://github.com/ForumHFR/redface2/issues/1041))** —
+> `AGENTS.md` § « Règles spécifiques au projet » énonce la règle prefetch sous sa forme absolue
+> (« utiliser des requêtes non authentifiées pour éviter de marquer les drapeaux comme lus »), sans
+> mentionner l'exception MP bornée que la présente décision définit et que
+> [protocol-hfr.md]({{ site.baseurl }}/specs/protocol-hfr#règle-critique--prefetch-non-authentifié) et
+> [architecture.md]({{ site.baseurl }}/specs/architecture) actent depuis le 2026-06-12. Le lot 5 de
+> [#1040](https://github.com/ForumHFR/redface2/issues/1040) (prefetch MP borné) est incadrable tant que
+> les deux textes se contredisent. **Arbitrage rendu par XaTriX le 2026-08-12** : c'est `AGENTS.md` qui
+> avait tort, par violation de sa propre règle « un sujet = une source canonique ». Sa ligne absolue est
+> remplacée par un renvoi vers `protocol-hfr.md` § « Règle critique : prefetch non-authentifié », qui
+> porte la règle générale **et** son unique exception bornée. Le lot 5 de
+> [#1040](https://github.com/ForumHFR/redface2/issues/1040) est donc cadrable.
+
 ### 4. Critère de convergence route-driven topic↔MP
 
 Le passage des écrans MP au modèle route-driven du topic (qui permettrait de porter la machinerie `topicPageSwipe` telle quelle et de fusionner les deux modèles de pagination) est **conditionné à la réunion des deux prérequis** :
@@ -81,6 +105,18 @@ Le passage des écrans MP au modèle route-driven du topic (qui permettrait de p
 2. prefetch intra-conversation borné en place.
 
 Tant qu'ils ne sont pas réunis, les MP restent in-place avec le swipe minimal (décision 1). Une fois réunis, la parité de ressenti avec le topic devient possible et la convergence peut être engagée — le swipe minimal in-place se remplace alors à coût nul, les fonctions pures partagées restant la base dans les deux cas ([addendum #351](https://github.com/ForumHFR/redface2/issues/351#issuecomment-4663229671), [verdict #361](https://github.com/ForumHFR/redface2/issues/361#issuecomment-4663312132)).
+
+> **Amendement 2026-08-12 ([#1041](https://github.com/ForumHFR/redface2/issues/1041))** — cette décision
+> est **caduque dans sa formulation** : il n'existe plus de « modèle route-driven du topic » vers lequel
+> faire converger les MP. Depuis #895 étape 4 (cf. amendement du Contexte), le topic a rejoint la
+> pagination in-place — le critère de convergence est donc **inversé** : les deux surfaces partagent
+> déjà le modèle, ce qui reste à converger, ce sont les garanties. Ce qui survit de la décision :
+> les deux prérequis (cache MP a minima RAM + prefetch intra-conversation borné) restent la condition
+> de la **parité de ressenti** de la pagination MP (slide-out, stale-while-switching, atterrissages
+> instantanés) — ils gardent leur rôle de gate, portés par les lots 5 et 6 de
+> [#1040](https://github.com/ForumHFR/redface2/issues/1040). Le partage de la surface de lecture
+> elle-même (la carte d'un message, prolongement de la décision 1) est arbitré par #1040 et n'attend
+> pas ces prérequis.
 
 ## Conséquences
 

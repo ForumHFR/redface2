@@ -23,13 +23,15 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * #884 — control smoke for [MessageCard] now that the shared
- * [fr.forumhfr.redface2.core.ui.post.PostCardShell] has a `flat` mode: the MP card passes nothing
- * new, so its default card rendering must stay exactly what it was — identity header (author +
- * date) and body slots present, and NO flat closing hairline (the divider is a `flat`-only,
- * topic-owned affordance the MP never opts into). Also guards the MP side of the
- * `PostIdentityHeader` heading contract (review Sol r4): the fallback pseudo is the message's
- * exactly-one TalkBack heading — the topic-side twin is `TopicPostCardFullWidthTest`.
+ * #884/#1040 — control smoke for [MessageCard] on the default inset path of the shared
+ * [fr.forumhfr.redface2.core.ui.post.PostCardShell]: the identity header (author + date) and body
+ * slots render, and no flat closing hairline is emitted. MP full-width parity is a separate opt-in
+ * path owned by #1040 Lot 2; that path must keep the card subtree stable and receive its own
+ * runtime-toggle coverage when wired.
+ *
+ * Also guards the MP side of the `PostIdentityHeader` heading contract: the real author pseudo is
+ * the card's exactly-one TalkBack heading, whether [MessageCard] uses the fallback text or a
+ * feature-owned pseudo slot. The topic-side twin is `TopicPostCardFullWidthTest`.
  */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -58,16 +60,16 @@ class MessageCardShellSmokeTest {
     }
 
     @Test
-    fun `MessageCard exposes exactly one heading - the author pseudo (fallback variant)`() {
+    fun `MessageCard exposes exactly one heading on the author pseudo`() {
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 MessageCard(message = sampleMessage())
             }
         }
 
-        // #884 a11y (review Sol r4) — the MP card uses PostIdentityHeader's FALLBACK pseudo (no
-        // slot), whose Text carries heading() itself: TalkBack heading navigation jumps message to
-        // message. The heading rides on the pseudo text node…
+        // #884 a11y — the real author pseudo is the card's single heading. PostIdentityHeader marks
+        // its fallback text; if MessageCard supplies a pseudo slot, that slot must mark its own text.
+        // The heading rides on the pseudo text node…
         val heading = SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading)
         composeTestRule
             .onNode(heading.and(hasText("XaTriX")), useUnmergedTree = true)

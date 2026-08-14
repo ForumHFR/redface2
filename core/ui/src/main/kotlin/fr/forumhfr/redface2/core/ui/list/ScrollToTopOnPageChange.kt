@@ -8,8 +8,9 @@ import androidx.compose.runtime.remember
 
 /**
  * #351 — land at the top when a NEW page replaces the kept-on-screen previous one (in-place
- * pagination: the composition survives the page change, unlike the topic's route-driven model where
- * a fresh screen starts at the top for free). Keyed on the RENDERED page: a same-page refresh keeps
+ * pagination: the composition survives the page change — as it now does in the topic too, #895
+ * étape 4, where the in-VM engine owns richer landings instead). Keyed on the RENDERED page: a
+ * same-page refresh keeps
  * the read position. Only fires when a previous page was rendered in THIS composition and differs
  * (Codex review on the first cut): on the first Content render the guard is still null, so a
  * rotation / recreation with content already loaded keeps the position `rememberLazyListState` just
@@ -17,8 +18,10 @@ import androidx.compose.runtime.remember
  *
  * Moved verbatim from `PrivateMessageThreadScreen` to `:core:ui` (#351): a generic
  * [LazyListState] behaviour the private-message thread will call in c3. NOT invoked by
- * [fr.forumhfr.redface2.core.ui.post.PostListScaffold] — the topic is route-driven and does not want
- * it, so it stays an opt-in the call-site applies, not part of the scaffold.
+ * [fr.forumhfr.redface2.core.ui.post.PostListScaffold] — the topic does not want it (its in-VM
+ * engine resolves each landing by priority: anchor, bottom step, top — #895 étape 4; historically,
+ * route-driven page changes started at the top for free), so it stays an opt-in the call-site
+ * applies, not part of the scaffold.
  */
 @Composable
 fun ScrollToTopOnPageChange(listState: LazyListState, renderedPage: Int) {
