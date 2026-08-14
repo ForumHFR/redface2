@@ -295,8 +295,10 @@ fun PostRenderer(
     content: PostContent,
     modifier: Modifier = Modifier,
     // #281 — opt-in, default OFF so callers make the choice explicitly and we never silently change
-    // surfaces outside scope (the editor BBCode preview and private-message thread keep their prior
-    // non-selectable behaviour). Topic posts pass `selectable = true`.
+    // surfaces outside scope (the editor BBCode preview and signatures keep their non-selectable
+    // rendering). Both reading surfaces — topic AND private messages since #1042 — pass
+    // `selectable = true` through ReadingPostCard, which keeps the capability structurally
+    // constant over the card's lifetime (#946).
     selectable: Boolean = false,
     // #699 — invoked with the cited post's `(page, numreponse)` when the reader taps a sourced
     // quote's header. Null (default) keeps the header inert — only the topic reading surface wires

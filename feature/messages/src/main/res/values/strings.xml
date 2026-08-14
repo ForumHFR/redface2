@@ -86,4 +86,7 @@
     <!-- #618 — bouton compact « Destinataires : N — Gérer » au-dessus du corps du composer (créateur). -->
     <string name="messages_recipients_summary">Destinataires : %1$d</string>
     <string name="messages_recipients_manage">Gérer</string>
+
+    <!-- #1042 — tap avatar/pseudo d'un message privé : ouvre le profil (parité topic #208). -->
+    <string name="messages_open_profile_action">Voir le profil</string>
 </resources>

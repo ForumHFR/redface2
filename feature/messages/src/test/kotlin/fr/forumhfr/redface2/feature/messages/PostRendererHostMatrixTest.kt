@@ -28,11 +28,11 @@ import org.robolectric.annotation.GraphicsMode
 
 /**
  * #958 (Lot 2, §5 matrice hôtes) — the MP host, exercised through the REAL production card
- * ([MessageCard]) in its own module: a private-message thread never provides
- * [fr.forumhfr.redface2.core.ui.post.LocalPostImageActions], so every content image — inline in
- * a mixed paragraph or promoted to a linked block — is TOTALLY inert (no tap even when linked,
- * no long-press, no interactive role). Topic body/signature and editor-preview hosts have their
- * own PostRendererHostMatrixTest inside their modules.
+ * ([MessageCard]) in its own module: a private-message thread passes no `onImageLongPress`, so the
+ * shared card provides [fr.forumhfr.redface2.core.ui.post.LocalPostImageActions] `= null` (#1042)
+ * and every content image — inline in a mixed paragraph or promoted to a linked block — is TOTALLY
+ * inert (no tap even when linked, no long-press, no interactive role). Topic body/signature and
+ * editor-preview hosts have their own PostRendererHostMatrixTest inside their modules.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w360dp-h780dp-xxhdpi")

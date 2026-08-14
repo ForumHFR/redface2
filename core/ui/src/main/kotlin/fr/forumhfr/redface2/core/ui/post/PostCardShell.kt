@@ -35,15 +35,15 @@ import androidx.compose.ui.semantics.semantics
  *    The shell does NOT draw the band itself: a band is a topic affordance, and baking it here would
  *    force the band-less MP into a tinted-strip model it does not want.
  *  - [badges] (optional) — citation/multi-quote pills on the topic (#239/#436); `null` on the MP.
- *  - [body] (mandatory) — the rendered post (the call-site supplies its own [PostRenderer], choosing
- *    `selectable` itself — selection is a topic affordance #281, off for the MP, so it is NOT decided
- *    here).
+ *  - [body] (mandatory) — the rendered post (the call-site supplies its own [PostRenderer] and owns
+ *    its `selectable` choice — the shell decides nothing here; since #1042 both reading surfaces
+ *    mount their body through `ReadingPostCard`, whose selection is constant by construction #946).
  *  - [footer] (optional) — the actions row (Citer/Modifier/multi-quote) on the topic; `null` on the MP.
  *
  * [border] is the topic's multi-quote outline (#436), `null` for the MP. Body/header padding is the
- * slot's own job (the densities differ: the topic reads its gutters from the display-metrics preset,
- * the MP uses a fixed 16.dp) so the shell adds no padding of its own — it is purely the vertical
- * stack inside a `Card`. `selectable`/highlight tinting are deliberately NOT handled here.
+ * slot's own job (both reading hosts read their gutters from the display-metrics preset since #1042,
+ * each reinjecting them on its own slots) so the shell adds no padding of its own — it is purely the
+ * vertical stack inside a `Card`. `selectable`/highlight tinting are deliberately NOT handled here.
  *
  * [flat] is the full-width mode (#884 — « posts en pleine largeur ») : the SAME `Card` (the node
  * structure never changes, so slot memoization stays positional — the #946 guarantee) rendered
