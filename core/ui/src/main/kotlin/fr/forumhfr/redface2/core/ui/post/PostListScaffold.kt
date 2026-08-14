@@ -20,9 +20,9 @@ import fr.forumhfr.redface2.core.ui.list.LazyListScrollbar
  *
  * Deliberately thin (ADR-013 — share the components, not the screens):
  *  - [contentPadding] and [verticalArrangement] have **no defaults**: the two screens use different
- *    densities (the topic reads 8/16/8/88-style insets from its display-metrics preset, the MP a flat
- *    16.dp with a 12.dp gap), so forcing every call-site to pass them keeps c1 from silently changing
- *    either screen's spacing.
+ *    feature-owned geometries (the topic's mode-switched insets from `TopicListLayout.kt`, the MP's
+ *    16/16/16/88 frame with a 12.dp gap from `ThreadListLayout.kt` since #1046), so forcing every
+ *    call-site to pass them keeps c1 from silently changing either screen's spacing.
  *  - the page-swipe machinery stays in the feature (both hosts paginate in place since #895 étape 4,
  *    but the couplings differ: the topic gesture is tied to its in-ViewModel engine — per-page
  *    re-key, slide-out — while the MP gesture is gated by `isRefreshing`; see `PageSwipe.kt` /
