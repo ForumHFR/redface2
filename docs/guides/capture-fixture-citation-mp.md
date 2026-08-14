@@ -14,6 +14,12 @@ l'action « Répondre à ce message » d'une conversation privée.
 
 ---
 
+> **Exécutée le 2026-08-12** ([#1041](https://github.com/ForumHFR/redface2/issues/1041)) — la recette
+> a produit `private_message_quote_form.html` et son témoin `private_message_reply_form.html`. Ce
+> qu'elle a mesuré, et les deux écarts constatés par rapport à ce qu'elle anticipait, sont consignés
+> au § « Résultat de la première exécution » en fin de page ; le contrat lui-même vit dans
+> [protocol-hfr.md]({{ site.baseurl }}/specs/protocol-hfr) § « MP — citer un message ».
+
 ## Pourquoi cette recette vit dans `docs/guides/`
 
 La forme du formulaire de citation MP reste un contrat serveur **à mesurer**. Elle ne doit donc pas
@@ -148,16 +154,55 @@ Aucune commande `POST /bddpost.php` ne fait partie de cette recette.
 
 ## 4. Assainir avant toute copie dans le dépôt
 
-Créer la version nettoyée sous `/tmp` et remplacer de façon **cohérente** toutes les occurrences des
-données privées, sans reformater le DOM :
+> **Étape 0, non négociable : RÉDUIRE la capture avant de l'assainir.** Ne copie dans le dépôt que le
+> **sous-arbre `form[name=hop]`**, enveloppé dans un squelette HTML minimal. C'est tout ce que
+> `ReplyFormParser` lit, et ça supprime d'un coup les trois familles de fuites qui vivent **hors** du
+> formulaire : la toolbar et ses liens obfusqués, le récapitulatif du message cité, et la « Vue Rapide
+> de la discussion » avec tous les corps de message. Une capture brute assainie « à la main » a déjà
+> laissé passer les trois (incident du 2026-08-12, § Historique en fin de page). Le sidecar doit dire
+> ce qui a été retiré.
+
+Sur ce sous-arbre, remplacer ensuite de façon **cohérente** toutes les occurrences des données
+privées, sans reformater le DOM :
 
 - tous les `hash_check`, cookies, en-têtes de session, mots de passe et tokens ;
+- **tout `md_*cryptlink` : le décoder, regarder ce qu'il contient, puis le neutraliser ou le retirer.**
+  Ces classes CSS ne sont pas opaques — `CryptlinkDecoder` (#227) les décode en trois lignes, et l'une
+  d'elles est l'URL `/unlog.php?…&codehex=…` qui porte un **jeton de déconnexion lié au compte**. Un
+  cryptlink laissé tel quel est un secret publié, pas une chaîne décorative ;
 - pseudos, destinataires, e-mails, sujet, corps du message cité, autres corps visibles et éventuel
   récapitulatif du message source ;
+- **la signature du compte** et **la liste de ses smileys favoris** (`images/perso/<nom>.gif`) : les
+  deux sont des données personnelles et le nom d'un smiley perso peut être le pseudo lui-même. Garder
+  la structure du panneau, remplacer les noms par des noms fictifs ;
 - identifiants de profil, noms de fichiers avatar et autres identifiants personnels ;
 - identifiant de conversation, `numreponse`, `numrep`, ancres `t…`, tableaux JavaScript et URL qui
   les répètent, avec un mapping fictif stable qui préserve leurs relations ;
 - dates ou métadonnées d'activité si elles permettent de rattacher la capture à une personne.
+
+**Le mapping fictif doit être le même que celui des fixtures existantes de la même conversation.**
+`private_message_thread.html` (#298) fixe `TestUser` / compte courant = `990002` et `Correspondant` =
+`990001` : inverser ces ids donne deux identités contradictoires pour la même personne d'une fixture à
+l'autre.
+
+**Ne jamais vérifier un remplacement par une seule regex de structure.** Une regex ancrée sur
+`<td class="messCase1bis">…</td><td>…</td>` a laissé passer un corps de message réel parce que la ligne
+suivante avait une forme légèrement différente. La vérification qui marche est **l'énumération** :
+lister *tous* les nœuds de texte et *toutes* les valeurs d'attribut de la fixture finale, et les
+regarder un par un — sur une fixture réduite, il y en a quelques dizaines.
+
+```bash
+python3 - "$fixture" <<'EOF'
+import re,sys,io
+raw=io.open(sys.argv[1],encoding='utf-8').read()
+body=re.sub(r'<script.*?</script>','',raw,flags=re.S)
+body=re.sub(r'<!--.*?-->','',body,flags=re.S)
+for t in sorted({t.strip() for t in re.split(r'<[^>]+>',body) if t.strip()}):
+    print(' texte :',t[:110])
+for v in sorted(set(re.findall(r'(?:value|alt|title)="([^"]{3,})"',raw))):
+    print(' attr  :',v[:110])
+EOF
+```
 
 Conserver la structure du formulaire, les noms de champs, les valeurs non sensibles, le rang `ref`
 et la forme du BBCode prérempli. Le corps privé peut être remplacé par un placeholder à l'intérieur
@@ -178,7 +223,7 @@ Avant commit, contrôler au minimum :
 
 ```bash
 ./scripts/check-fixtures-provenance.sh
-rg -n 'hash_check|md_user|md_pass|password|@|profil-[0-9]+|mesdiscussions-[0-9]+' \
+rg -n 'hash_check|md_user|md_pass|password|codehex|cryptlink|@|profil-[0-9]+|mesdiscussions-[0-9]+|images/perso/' \
   core/parser/src/test/resources/fixtures/private_message_quote_form.html \
   core/parser/src/test/resources/fixtures/private_message_quote_form.source.txt
 ```
@@ -193,3 +238,45 @@ case "$capture_dir" in
 esac
 unset capture_dir cookie_jar login_headers login_body thread_html quote_html
 ```
+
+## Résultat de la première exécution (2026-08-12)
+
+La recette a été suivie telle quelle et a livré les deux fixtures. Ce qui a été **vérifié** et non
+présupposé : `form[name=hop]` en `method=post` vers `/bddpost.php?config=hfr.inc`,
+`textarea[name=content_form]` préremplie d'un bloc `[quotemsg=…]`, et surtout la sémantique de
+`numrep` — **le message cité**, pas le dernier message de la page. Le contrat complet, avec le tableau
+des trois sens de `numrep`, est dans [protocol-hfr.md]({{ site.baseurl }}/specs/protocol-hfr) § « MP —
+citer un message ».
+
+Deux écarts par rapport à ce que la recette anticipait, à garder pour la prochaine exécution :
+
+- **`ref` n'est pas servi comme champ caché** sur cette capture 1:1, alors que le § 3 le listait parmi
+  les champs à vérifier « si HFR les émet ». Le rang ne voyage que dans l'URL et dans le second
+  paramètre du `[quotemsg]`. Le formulaire de réponse d'un DT owner (`private_message_dt_owner_reply_form.html`),
+  lui, porte bien `ref=0` — donc à vérifier par shape, jamais à supposer.
+- **Un témoin est nécessaire.** Le seul formulaire de citation ne prouve pas ce que la citation
+  change : il a fallu capturer aussi le formulaire de réponse simple du même `message.php`, même
+  conversation, même session. Leur delta (deux champs) est ce qui fait le contrat. Toute réexécution
+  devrait capturer la paire.
+
+Deux conditions préalables du § « Conditions préalables » n'ont **pas** pu être tenues et sont
+assumées, tracées dans les sidecars : la conversation n'était pas jetable (aucune n'est disponible —
+écrire sous le compte du mainteneur est interdit) et son contenu réel était sensible, donc
+intégralement remplacé.
+
+## Historique — l'incident qui a durci cette recette (2026-08-12)
+
+La première exécution a produit des fixtures **non réduites**, assainies par substitution ciblée. Elles
+ont été committées et poussées sur une branche publique, où le gate final a trouvé **trois fuites** :
+
+1. un **fragment de message privé réel** — la regex de substitution, ancrée sur la forme
+   `<td class="messCase1bis">…</td><td>…</td>`, avait sauté une ligne de la « Vue Rapide » ;
+2. un **`md_noclass_cryptlink` décodable** en `/unlog.php?…&codehex=<réel>`, soit un jeton de
+   déconnexion lié au compte, dans un dépôt public ;
+3. la **liste des smileys favoris** du compte, dont un smiley portant le pseudo.
+
+Le sidecar affirmait pourtant « le brut n'est PAS conservé ». La branche a été réécrite et
+force-pushée, les fixtures reprises en version **réduite**. Les trois règles qui en sortent sont
+maintenant en tête du § 4 : réduire au `form[name=hop]` avant d'assainir, décoder tout cryptlink, et
+vérifier par **énumération** des nœuds de texte plutôt que par une regex de structure. Elles ne sont
+pas des précautions théoriques : chacune correspond à une fuite réellement publiée.

@@ -1,0 +1,72 @@
+Provenance — private_message_quote_form.html (#1041, spike citation MP du lot 0 de #1040)
+
+FIXTURE REDUITE. Capture authentifiee live du 2026-08-12, compte du mainteneur en LECTURE SEULE, sur
+une conversation privee 1:1 reelle (la meme que private_message_thread.html de #298), avec son
+autorisation explicite. Recette : docs/guides/capture-fixture-citation-mp.md.
+
+Sequence : POST login_validation.php (cookie jar sous /tmp, jamais -L), GET authentifie de la page de
+conversation pour relever le href de citation REELLEMENT servi, puis GET authentifie de ce href.
+AUCUN POST bddpost.php : le formulaire n'a jamais ete soumis, aucun message n'a ete envoye.
+
+URL capturee (identifiants deja remplaces par leurs valeurs fictives) :
+  /message.php?config=hfr.inc&cat=prive&post=3000001&numrep=1980000004&ref=4&page=1&p=1&subcat=0
+  &sondage=0&owntopic=0&new=0
+Le fragment #formulaire du href servi a ete retire (jamais envoye au serveur). Le message cite est le
+4e de la page (ref=4) d'une conversation qui en comptait 5 : choisi expres pour qu'il ne soit PAS le
+dernier message de la page.
+
+Pourquoi HTTP et pas hfr-mcp : hfr_read et hfr_quote exigent une categorie ENTIERE, or les MP utilisent
+cat=prive (une chaine) ; hfr_mp ne sait que creer un nouveau MP.
+
+REDUCTION (c'est la difference majeure avec une capture brute) : seul le sous-arbre du
+`form[name=hop]` est conserve, enveloppe dans un squelette HTML minimal. Ont ete RETIRES a la capture,
+parce qu'ils ne servent pas au parser et concentraient tout le risque de fuite :
+- le chrome de page, la barre d'onglets, le formulaire de recherche rapide et le pied de page ;
+- la toolbar par message et ses liens obfusques `md_*cryptlink` — l'un d'eux se decodait, avec
+  l'algorithme du depot (CryptlinkDecoder, #227), en URL de deconnexion portant un `codehex` lie a la
+  session ;
+- le recapitulatif du message cite et la « Vue Rapide de la discussion », donc tous les corps de
+  message et leurs dates ;
+- la signature et la liste de smileys favoris personnels du compte (le panneau de smileys garde sa
+  structure, avec trois smileys perso FICTIFS).
+Une premiere version non reduite de cette fixture avait laisse passer un fragment de message prive, le
+cryptlink de deconnexion et les favoris personnels ; elle a ete retiree du depot et sa branche
+reecrite. La reduction est la reponse structurelle a cet incident.
+
+CE QUE LA FIXTURE PROUVE (contrat serveur, mesure) :
+- form[name=hop] method=post action=/bddpost.php?config=hfr.inc — le meme endpoint qu'une reponse de
+  topic ;
+- numrep = l'identifiant du MESSAGE CITE, PAS le dernier message de la page. C'etait l'inconnu du
+  dossier (#1040 piege 2) ;
+- numreponse = "" (vide) : ce champ reste celui de l'edition, la citation ne le detourne pas ;
+- textarea[name=content_form] prerempli par HFR avec [quotemsg=<numrep>,<ref>,<userId auteur cite>]
+  ... [/quotemsg] — meme forme que la citation de topic, le parametre du milieu est le rang servi ;
+- AUCUN champ cache `ref` : le rang ne voyage que dans l'URL et dans le tag BBCode. (A comparer avec
+  private_message_dt_owner_reply_form.html, capture DT owner de #612, qui porte ref=0.) ;
+- champs caches servis : hash_check, cat=prive, subcat=0, post, numreponse, numrep, page, p,
+  verifrequet, sondage, sond, cache, parents, stickold, owntopic, config, sujet, wysiwyg ;
+- options rendues en vraies cases a cocher (signature cochee par defaut, smiley et emaill decochees)
+  et MsgIcon=1 pre-coche — comme le formulaire message.php d'un DT, pas comme la reponse rapide ;
+- la ligne du destinataire est au SINGULIER (« Destinataire ») dans un MP 1:1 : le parser cherche
+  « Destinataires », donc recipientsRoster reste null, ce qui est le contrat attendu hors DT ;
+- l'userId du compte courant reste lisible via find_smilies_timer (SmileyUserIdExtractor).
+
+SANITISATION (mapping fictif stable, relations preservees) :
+- pseudo du compte courant -> TestUser, correspondant -> Correspondant, et userIds
+  **TestUser/compte courant = 990002**, **Correspondant/auteur cite = 990001** — exactement le mapping
+  de private_message_thread.html, pour qu'un lecteur qui croise les deux fixtures ne trouve pas deux
+  identites contradictoires ;
+- sujet reel -> « Sujet prive de test » ;
+- corps du message cite, a l'interieur du [quotemsg] -> « Message prive de test (contenu remplace). » ;
+  les delimiteurs BBCode produits par HFR sont conserves intacts ;
+- hash_check -> TESTHASH partout, y compris la variable JavaScript `var hash_check` ;
+- identifiant de conversation 7 chiffres -> post=3000001 ; numreponse du message cite -> 1980000004
+  (le 4 final rappelle ref=4) ;
+- smileys perso -> trois noms fictifs (testsmiley, testsmiley2, testsmiley3) ;
+- conserves car non sensibles : structure du formulaire, noms et ordre des champs, verifrequet=1100,
+  MsgIcon, cases d'options, smileys BUILTIN de HFR, textes d'aide de la barre BBCode (dont le
+  placeholder « email@hostname.com », qui est du texte d'aide du forum et non une adresse reelle),
+  URLs forum-images.hardware.fr.
+Le <title> conserve est le titre generique servi par HFR (« Repondre / editer un message ») : il ne
+portait pas le sujet, contrairement a la page de conversation. Le brut de la capture n'est PAS
+conserve dans le depot.

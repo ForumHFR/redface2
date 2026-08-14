@@ -26,10 +26,10 @@ import okhttp3.FormBody
  * conversation reuse the topic-reply machinery:
  *
  * 1. GET the conversation page (`forum2.php?cat=prive&post={threadId}&page={page}`) and read the
- *    REAL « Ajouter une réponse » link it embeds — a `message.php?cat=prive…` href whose
- *    `numrep` / `ref` / `page` HFR has already filled in (we never invent them). Follow that link
- *    to the dedicated `message.php` reply form and parse it with the shared [ReplyFormParser] to
- *    grab a fresh `hash_check` + every hidden field.
+ *    REAL « Ajouter une réponse » link it embeds — a `message.php?cat=prive…` href carrying whatever
+ *    params HFR filled in (we never invent them; which ones appear varies by shape, see
+ *    [PrivateMessageReplyLinkParser]). Follow that link to the dedicated `message.php` reply form and
+ *    parse it with the shared [ReplyFormParser] to grab a fresh `hash_check` + every hidden field.
  * 2. POST `bddpost.php` (the same endpoint a topic reply uses) and classify the response with the
  *    shared [ReplySubmitResponseParser].
  *
@@ -38,16 +38,22 @@ import okhttp3.FormBody
  * list of a DT / MultiMP) **only** on the standalone `message.php` form. Sourcing from message.php
  * is therefore what makes [ReplyForm.canManageRecipients] / [ReplyForm.manageableRecipients] true
  * for an owner — the prerequisite for #606's member editor and #612's participant roster. When the
- * page exposes no such link (a one-to-one MP, or a shape HFR reshaped), we fall back to parsing the
- * embedded quick-reply form — the pre-#612 behaviour, which never carries `newdest` anyway.
+ * page exposes no such link (a shape HFR reshaped, or a session that lost the writable form), we fall
+ * back to parsing the embedded quick-reply form — the pre-#612 behaviour, which never carries
+ * `newdest` anyway. A one-to-one MP is not such a case (#1041 live capture: it serves the link too).
  *
  * The crucial difference from [DefaultReplyRepository] is the POST body: a private conversation
- * carries `cat=prive` (a String), `post={threadId}`, `subcat=0` and a server-prefilled `numrep`
- * (the last post of the current page — **not** a quote reference) inside the form's hidden fields.
+ * carries `cat=prive` (a String), `post={threadId}`, `subcat=0` and a server-controlled `numrep`
+ * inside the form's hidden fields. `numrep` is **never** a quote reference on a reply flow, and its
+ * value depends on which form HFR served (#1041 live captures): the `forum2.php` quick-reply prefills
+ * the page's LAST post id, while the `message.php` reply form of a one-to-one MP leaves it EMPTY —
+ * the shipped flow forwards either one as-is. Only the dedicated quote href (lot 4 of #1040) puts a
+ * cited message id there.
+ *
  * [buildFormBody] therefore overrides only the three fields HFR validates (`hash_check`,
  * `verifrequet`, `content_form`) plus the opt-in option toggles, and forwards everything else
  * verbatim — it must never re-assert `cat`/`subcat`/`post`/`numrep` from a typed context, or it would
- * turn `cat=prive` into a number and blank the conversation's `numrep`.
+ * turn `cat=prive` into a number and rewrite the conversation's `numrep`.
  */
 @Singleton
 class DefaultPrivateMessageWriteRepository @Inject constructor(
@@ -128,9 +134,10 @@ class DefaultPrivateMessageWriteRepository @Inject constructor(
      * link off the conversation page ([threadHtml]) and follows it to the dedicated `message.php`
      * form (the only one carrying the owner-only `newdest`). Falls back to the conversation page
      * itself — its embedded `bddpost.php` quick-reply form is what [ReplyFormParser] parsed before
-     * #612 — when no link is present (a one-to-one MP, or a shape HFR reshaped) or the follow GET
-     * fails. The fallback never carries `newdest`, so an owner whose link disappeared simply loses
-     * the member editor / roster until a refetch, never a broken reply.
+     * #612 — when no link is present (a shape HFR reshaped, or a session that lost the writable form;
+     * a one-to-one MP does expose it, #1041 live capture) or the follow GET fails. The fallback never
+     * carries `newdest`, so an owner whose link disappeared simply loses the member editor / roster
+     * until a refetch, never a broken reply.
      *
      * The follow GET's `host` / path / `cat=prive` guard lives in
      * [HfrClient.getPrivateMessageReplyPage]; a [SessionExpiredException] is rethrown (the session
@@ -142,9 +149,9 @@ class DefaultPrivateMessageWriteRepository @Inject constructor(
     // roster path — all legitimate, splitting the function would not help.
     @Suppress("ThrowsCount")
     private suspend fun fetchReplyFormHtml(threadHtml: String, allowEmbeddedFallback: Boolean): String {
-        // No « Ajouter une réponse » link (1-to-1 MP, reshaped page) → the embedded quick-reply IS the
-        // only form ; that is not a failure, so we return it in BOTH modes (it simply carries no
-        // `newdest`, which the roster maps to « Unavailable », not « Error »).
+        // No « Ajouter une réponse » link (reshaped page, session that lost the writable form) → the
+        // embedded quick-reply IS the only form ; that is not a failure, so we return it in BOTH modes
+        // (it simply carries no `newdest`, which the roster maps to « Unavailable », not « Error »).
         val replyLink = replyLinkParser.parse(threadHtml) ?: return threadHtml
         return try {
             hfrClient.getPrivateMessageReplyPage(replyLink)
@@ -356,10 +363,12 @@ class DefaultPrivateMessageWriteRepository @Inject constructor(
      * Assembles the private-message POST payload. Only [hash_check][HfrConstants], `verifrequet` and
      * `content_form` are overridden, plus the three opt-in option fields (`signature` / `smiley` /
      * `emaill`). **Everything else is forwarded verbatim from [ReplyForm.hiddenFields]** — chiefly
-     * `cat=prive`, `post` (=threadId), `numrep` (the conversation's last-post id HFR prefilled, kept
-     * as-is — it is NOT a quote reference), `subcat=0`, `page`, `sujet`, `pseudo`. `password` is never
-     * relayed. This deliberately does not reuse [DefaultReplyRepository.buildFormBody], whose typed
-     * `cat`/`numrep` overrides would corrupt the private-message contract.
+     * `cat=prive`, `post` (=threadId), `numrep` (whatever HFR served — a last-post prefill, an empty
+     * string, never a quote reference on this flow; #1041), `subcat=0`, `page`, `sujet`, `pseudo`.
+     * An empty `numrep` is forwarded as an empty field, exactly as the web composer does, and
+     * `password` is never relayed. This deliberately does not reuse
+     * [DefaultReplyRepository.buildFormBody], whose typed `cat`/`numrep` overrides would corrupt the
+     * private-message contract.
      *
      * #606 — [recipientsOverride] mutates the DT/MultiMP member list **only when the form already
      * carries a `newdest` key** (HFR serves it to the conversation's owner alone). The override

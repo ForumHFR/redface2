@@ -1,0 +1,33 @@
+Provenance — private_message_reply_form.html (#1041, temoin du spike citation MP)
+
+FIXTURE REDUITE, meme regime que private_message_quote_form.html : capture authentifiee live du
+2026-08-12, compte du mainteneur en LECTURE SEULE, meme conversation privee 1:1 et meme session, avec
+son autorisation explicite. Seul le sous-arbre du `form[name=hop]` est conserve — chrome de page,
+toolbar, cryptlinks (dont celui de deconnexion, porteur d'un `codehex` de session), recapitulatifs de
+messages, signature et smileys favoris personnels ont ete retires. AUCUN POST bddpost.php.
+
+Pourquoi ce temoin : sans lui, la fixture de citation ne prouve pas ce qui change QUAND on cite. Les
+deux formulaires sortent du meme message.php, de la meme conversation, a la meme minute — leur delta
+EST le contrat de citation. Et comme les deux fixtures sont reduites au meme sous-arbre, la comparaison
+de leurs champs caches est exacte, sans bruit de page.
+
+URL capturee (identifiants deja fictifs) — le href exact que HFR sert dans le form#repondre_form / le
+bouton « Ajouter une reponse » de la page de conversation :
+  /message.php?config=hfr.inc&cat=prive&post=3000001&page=1&p=1&subcat=0&sondage=0&owntopic=0&new=0
+
+CE QUE LA FIXTURE PROUVE (contrat serveur, mesure) :
+- c'est bien le formulaire que la production suit : PrivateMessageReplyLinkParser lit
+  form#repondre_form[action*=message.php], et ce MP 1:1 en expose un ;
+- numrep = "" (VIDE) et numreponse = "" sur le formulaire message.php d'une reponse simple. Le
+  « numrep = dernier message de la page » ne vaut que pour le formulaire de reponse rapide embarque
+  dans forum2.php (cf. private_message_thread.html) ;
+- textarea[name=content_form] VIDE : aucun preremplissage hors citation ;
+- aucun champ cache ref, aucun newdest (MP 1:1, pas un DT) ;
+- ligne destinataire au singulier (« Destinataire ») -> recipientsRoster null ;
+- memes champs caches et memes options que le formulaire de citation, aux deux valeurs pres (numrep,
+  content_form) : le delta de la citation se limite a ces deux champs.
+
+SANITISATION : identique a private_message_quote_form.source.txt — TestUser / Correspondant avec
+**userIds 990002 (compte courant) et 990001 (correspondant)**, alignes sur private_message_thread.html,
+« Sujet prive de test », hash_check -> TESTHASH, post -> 3000001, smileys perso remplaces par des noms
+fictifs. Le brut de la capture n'est PAS conserve dans le depot.
