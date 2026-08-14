@@ -69,7 +69,7 @@ sinon la CI dit — à raison — que le comportement promis a changé.
 
 ## Matrice
 
-État vérifié dans le code le 2026-08-12 (`dev` @ `767407c3`). Les références sont des symboles, pas
+État vérifié dans le code le 2026-08-14 (`dev` @ `d2ad6820`). Les références sont des symboles, pas
 des numéros de ligne.
 
 | Fonction | Réf. | MP/DT ? | Détail |
@@ -90,7 +90,7 @@ des numéros de ligne.
 | Marqueur EgoPost | #874 P1 / #1028, `egoPostHighlighted` | **oui mais absent** | Résolu par la liste topic uniquement ; jamais résolu côté MP. |
 | Pinceau doré des créateurs | #221, `isRf2Creator` + `rememberCreatorPseudoBrush` | **oui mais absent** | Appliqué par le header d'identité topic ; `MessageCard` utilise le pseudo fallback de `PostIdentityHeader`. Un auteur de MP est un pseudo HFR comme un autre. |
 | Menu contextuel de message | #362, `PostMenuSheet` | **oui mais absent** | Vit dans `:feature:topic`. Sous-ensemble MP à définir : copier le texte, citer, profil — pas de drapeau/favori ; « copier le permalien » expose une URL de conversation privée (#316) → à arbitrer. Lot 3. |
-| Actions d'image (viewer, menu appui long) | #831/#958, `LocalPostImageActions` | **oui mais absent** | Jamais fourni côté MP : dans `PostRenderer`, `OnClick`/`OnLongClick` dépendent directement de `LocalPostImageActions.current != null`, donc l'inertie qu'épingle `PostRendererHostMatrixTest` (`:feature:messages`) est réelle. **Lot 3** (réarbitrage du 2026-08-12) : assertions retournées et cible `PostImageTarget` vérifiée, dans la même PR que le provider. |
+| Actions d'image (viewer, menu appui long) | #831/#958, `LocalPostImageActions` | **oui mais absent** | Aucun callback fourni côté MP : dans `PostRenderer`, `OnClick`/`OnLongClick` dépendent directement de `LocalPostImageActions.current != null`, donc l'inertie qu'épingle `PostRendererHostMatrixTest` (`:feature:messages`) est réelle. **Lot 3** (réarbitrage du 2026-08-12) : assertions retournées et cible `PostImageTarget` vérifiée, dans la même PR que le provider. |
 | Citation simple | #146 (topic), « Citer » par message | **oui mais absent** (contrat serveur **mesuré**) | Aucun bouton par message côté app. Le serveur, lui, expose le lien « citer » par message sur les pages `cat=prive`, et le spike #1041 a capturé le formulaire renvoyé (2026-08-12, fixtures `private_message_quote_form.html` + témoin `private_message_reply_form.html`) : `numrep` = **le message cité** (4ᵉ d'une page de 5), `content_form` prérempli `[quotemsg=numrep,ref,userId]`, aucun champ caché `ref`, même endpoint `bddpost.php`. `ReplyFormParser` le parse **sans modification** — le lot 4 n'a plus d'inconnu serveur. Détail dans [protocol-hfr.md]({{ site.baseurl }}/specs/protocol-hfr) § « MP — citer un message ». |
 | Citation multiple | #291, panier multi-quote | **oui mais absent** | Dépend de la citation simple (lot 4). Le web HFR expose ses boutons quote+/quote- sur les pages MP (même fixture) — la fonction s'applique. Le panier vit dans `:app`, clé `(cat, post)` — un scope MP typé serait requis (`cat=prive` est une `String`). |
 | Saut vers le message cité | #699/#782, `onGoToCitedPost` | **oui mais absent** | Jamais passé au `PostRenderer` côté MP (headers de citation inertes). Caveat partagé : la forme dynamique authentifiée n'est déjà pas reconnue côté topic (#625). |
