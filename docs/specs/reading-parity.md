@@ -22,10 +22,32 @@ chaque fonction de lecture était conçue, livrée et testée côté topic, et s
 écrite nulle part. Cette page est la réponse structurelle : **pour chaque fonction de la surface de
 lecture, elle dit si la fonction s'applique aux MP/DT, et dans quel état elle s'y trouve.**
 
-**Règle d'entretien** `[advisory]` : toute PR qui ajoute ou modifie une fonction de la surface de
+**Règle d'entretien** `[enforced]` : toute PR qui ajoute ou modifie une fonction de la surface de
 lecture (rendu d'un `Post`, gestes de page, préférences de lecture) **ajoute ou met à jour sa ligne
 ici**. Une fonction absente de cette matrice est un écart non tracé — précisément ce que cette page
-existe pour empêcher.
+existe pour empêcher. Deux gardes machine portent la règle depuis
+[#1045](https://github.com/ForumHFR/redface2/issues/1045) :
+
+- **garde A (chemins)** — job `repo-guards` de la CI (`scripts/check-reading-parity-touch.sh`) :
+  une PR qui touche `feature/topic` ou `feature/messages` (`src/main`), ou `core/ui`
+  (`post`/`list`/`pager`), sans toucher cette page, est bloquée — sauf ligne
+  `Parity-Impact: none — <raison>` dans le corps de la PR (échappatoire documentée dans le template
+  de PR ; le corps est relu en direct, relancer le job suffit après édition) ;
+- **garde B (symboles)** — cas de `DocsConsistencyTest` (tourne aussi en local via `/validate`) :
+  chaque symbole cité entre backticks par la colonne *Réf.* de la matrice et par la section
+  « Anomalies Topic » doit encore être **défini** dans l'arbre source — déclaration Kotlin/Java,
+  nom typé (`x:`), import, littéral de chaîne du code (hors arguments d'annotation), ressource
+  `name="…"`, ou fichier source du même nom. Les commentaires ne comptent jamais (une citation ne
+  peut pas s'auto-valider contre de la prose), un fichier de test ne peut attester que d'un
+  symbole se terminant lui-même par `Test`, et le membre d'un symbole qualifié
+  (`Post.postIndex`) exige une déclaration ou un nom typé dans le même fichier que son porteur.
+  Dans « Anomalies Topic », tout token entre backticks est volontairement une référence couplée à
+  l'arbre source ; les noms d'API externes ou les détails d'assertion qui n'ont pas à survivre comme
+  référence restent en prose. Aucun compteur de lignes : la matrice est faite pour grandir.
+
+Les gardes vérifient le **geste** (A) et la **référence** (B), pas la véracité d'une ligne : une
+ligne fausse qui cite un symbole vivant leur échappe — c'est le rôle du réaudit substantiel (ligne
+« Dernière vérification » sous § Matrice).
 
 Trois verdicts possibles :
 
@@ -125,8 +147,9 @@ mappers (`TopicMappers`) et Room (`PostEntity`) ne font que le transporter. #105
 nettoyage sans migration : le rendu mort de `TopicPostIdentityHeader` et sa ressource ont été
 supprimés, tandis que le champ et la colonne Room v1 restent réservés pour compatibilité de schéma.
 Le menu contextuel (#362) continue d'afficher `numreponse` (`topic_post_menu_number`), pas l'index.
-L'`assertNull` reste la garde du contrat parser ; le champ ne doit pas être peuplé ou réaffiché sans
-caractériser son sens entre pages, préférences HFR et cache à partir de fixtures réelles.
+Le test qui épingle ce `null` reste la garde du contrat parser ; le champ ne doit pas être peuplé ou
+réaffiché sans caractériser son sens entre pages, préférences HFR et cache à partir de fixtures
+réelles.
 
 ## Ce qui reste hors matrice, par surface
 
