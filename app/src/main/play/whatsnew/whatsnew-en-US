@@ -1,6 +1,5 @@
-Redface 2 v0.42.0 — dev.
+Redface 2 v0.42.1 — dev.
 
-- In private messages, long-press an image to save it, copy its URL, or open it in your browser.
-- Private conversations now follow your reading density preset.
-- You can select and copy their text; tap an avatar or username to open the profile when available.
-- The last message and pagination no longer hide behind the Reply button.
+- Full-width mode also applies to private conversations when you enable it.
+- EgoPost distinguishes your own private messages, and EgoQuote highlights quotes of your messages. Both settings remain enabled by default.
+- Authors you have already blocked are also hidden in private messages, even when quoted by someone else. To block an author, you still need to use a topic.

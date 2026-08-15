@@ -1,6 +1,5 @@
-Redface 2 v0.42.0 — dev.
+Redface 2 v0.42.1 — dev.
 
-- Dans les messages privés, un appui long sur une image permet de l'enregistrer, de copier son URL ou de l'ouvrir dans le navigateur.
-- Les conversations privées suivent désormais votre préréglage de densité.
-- Leur texte peut être sélectionné et copié ; touchez un avatar ou un pseudo pour ouvrir le profil lorsqu'il est disponible.
-- Le dernier message et la pagination ne passent plus sous le bouton « Répondre ».
+- Le mode pleine largeur s'applique aussi aux conversations privées lorsque vous l'activez.
+- EgoPost distingue vos messages privés et EgoQuote met en évidence les citations qui vous reprennent. Ces réglages restent activés par défaut.
+- Les auteurs déjà masqués le sont aussi en MP, même lorsqu'un tiers les cite. Pour bloquer un auteur, passez encore par un sujet.
