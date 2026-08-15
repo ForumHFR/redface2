@@ -1,21 +1,28 @@
 package fr.forumhfr.redface2.feature.messages
 
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performSemanticsAction
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.core.ui.post.POST_CARD_SHELL_DIVIDER_TAG
 import java.time.Instant
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -27,7 +34,8 @@ import org.robolectric.annotation.Config
  * #1041 — characterization of the complete, state-hoisted private-thread surface before the shared
  * reading-card refactor. These assertions pin the CURRENT MP composition: subject/correspondent
  * chrome, one ordered card per message, a trailing pager on multi-page threads, and the anonymous
- * placeholder. They deliberately do not ask the MP host for topic-only affordances.
+ * placeholder. #1050 adds the mounted full-width sequence, hot signature presentation and internal
+ * LazyListState anchor proofs without weakening those default-path assertions.
  */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -102,10 +110,124 @@ class PrivateMessageThreadContentTest {
         compose.onNodeWithText("Répondre").assertDoesNotExist()
     }
 
+    @Test
+    fun `full width keeps one heading per message and no hairline before the pager`() {
+        setContent(
+            mode = PrivateMessageThreadUiState.Mode.Content(
+                PrivateMessageThread(
+                    threadId = THREAD_ID,
+                    subject = "Pleine largeur",
+                    correspondent = "Correspondant",
+                    messages = listOf(
+                        message(101, "Alpha", "Premier message"),
+                        message(102, "Beta", "Deuxieme message"),
+                        message(103, "Gamma", "Troisieme message"),
+                    ),
+                    page = 2,
+                    totalPages = 4,
+                    canReply = false,
+                ),
+            ),
+            page = 2,
+            totalPages = 4,
+            fullWidthPosts = true,
+        )
+
+        // Three messages produce exactly two message→message boundaries. The third message is
+        // followed by the pager island and must not leave a second/dangling boundary before it.
+        compose.onAllNodesWithTag(POST_CARD_SHELL_DIVIDER_TAG, useUnmergedTree = true)
+            .assertCountEquals(2)
+        val heading = SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading)
+        compose.onAllNodes(heading, useUnmergedTree = true).assertCountEquals(3)
+    }
+
+    @Test
+    fun `signature preference renders parsed signature without replacing the message`() {
+        val state = mutableStateOf(
+            contentState(
+                messages = listOf(
+                    message(
+                        numreponse = 101,
+                        author = "Alpha",
+                        body = "Corps stable",
+                        signature = PostContent(
+                            blocks = listOf(
+                                PostBlock.Paragraph(
+                                    inlines = listOf(PostInline.Text("Signature MP simulée")),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                PrivateMessageThreadContent(
+                    state = state.value,
+                    isMultiRecipientHint = false,
+                    callbacks = NO_OP_CALLBACKS,
+                )
+            }
+        }
+
+        compose.onNodeWithText("Signature MP simulée").assertDoesNotExist()
+        compose.runOnIdle { state.value = state.value.copy(showSignatures = true) }
+
+        compose.onNodeWithText("Corps stable").assertIsDisplayed()
+        compose.onNodeWithText("Signature MP simulée").assertIsDisplayed()
+    }
+
+    @Test
+    fun `full width toggle keeps the internal lazy list reading anchor`() {
+        val state = mutableStateOf(
+            contentState(
+                messages = (1..20).map { index ->
+                    message(index, "Auteur $index", "Message $index")
+                },
+            ),
+        )
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                PrivateMessageThreadContent(
+                    state = state.value,
+                    isMultiRecipientHint = false,
+                    callbacks = NO_OP_CALLBACKS,
+                )
+            }
+        }
+
+        compose.onNode(hasScrollAction())
+            .performSemanticsAction(SemanticsActions.ScrollToIndex) { scroll -> scroll(TARGET_INDEX) }
+        compose.waitForIdle()
+        val anchor = compose.onNodeWithText(TARGET_AUTHOR)
+        anchor.assertIsDisplayed()
+        val topBefore = anchor.fetchSemanticsNode().boundsInRoot.top
+
+        compose.runOnIdle { state.value = state.value.copy(fullWidthPosts = true) }
+        compose.waitForIdle()
+
+        // At least one flat divider proves the new geometry reached the visible list. If the
+        // internal rememberLazyListState had been recreated, TARGET_AUTHOR would no longer be the
+        // displayed anchor: the first message would replace it at the top.
+        assertTrue(
+            compose.onAllNodesWithTag(POST_CARD_SHELL_DIVIDER_TAG, useUnmergedTree = true)
+                .fetchSemanticsNodes().isNotEmpty(),
+        )
+        anchor.assertIsDisplayed()
+        assertEquals(
+            "the same keyed message must stay pinned after the render-only preference flip",
+            topBefore,
+            anchor.fetchSemanticsNode().boundsInRoot.top,
+            ANCHOR_TOLERANCE_PX,
+        )
+    }
+
     private fun setContent(
         mode: PrivateMessageThreadUiState.Mode,
         page: Int,
         totalPages: Int,
+        fullWidthPosts: Boolean = false,
     ) {
         val request = PrivateMessageThreadRequest(threadId = THREAD_ID, page = page)
         val state = PrivateMessageThreadUiState(
@@ -113,6 +235,7 @@ class PrivateMessageThreadContentTest {
             mode = mode,
             page = page,
             totalPages = totalPages,
+            fullWidthPosts = fullWidthPosts,
         )
         compose.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
@@ -125,7 +248,32 @@ class PrivateMessageThreadContentTest {
         }
     }
 
-    private fun message(numreponse: Int, author: String, body: String): Post = Post(
+    private fun contentState(messages: List<Post>): PrivateMessageThreadUiState {
+        val request = PrivateMessageThreadRequest(threadId = THREAD_ID, page = 1)
+        return PrivateMessageThreadUiState(
+            request = request,
+            mode = PrivateMessageThreadUiState.Mode.Content(
+                PrivateMessageThread(
+                    threadId = THREAD_ID,
+                    subject = "Sujet",
+                    correspondent = "Correspondant",
+                    messages = messages,
+                    page = 1,
+                    totalPages = 1,
+                    canReply = false,
+                ),
+            ),
+            page = 1,
+            totalPages = 1,
+        )
+    }
+
+    private fun message(
+        numreponse: Int,
+        author: String,
+        body: String,
+        signature: PostContent? = null,
+    ): Post = Post(
         numreponse = numreponse,
         author = author,
         date = Instant.EPOCH.plusSeconds(numreponse.toLong()),
@@ -139,10 +287,14 @@ class PrivateMessageThreadContentTest {
         isOwnPost = false,
         quotedAuthors = emptyList(),
         postIndex = null,
+        signature = signature,
     )
 
     private companion object {
         const val THREAD_ID = 42
+        const val TARGET_INDEX = 10
+        const val TARGET_AUTHOR = "Auteur 11"
+        const val ANCHOR_TOLERANCE_PX = 0.5f
 
         val NO_OP_CALLBACKS = PrivateMessageThreadCallbacks(
             onBack = {},

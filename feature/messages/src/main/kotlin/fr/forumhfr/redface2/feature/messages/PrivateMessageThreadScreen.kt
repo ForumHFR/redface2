@@ -8,7 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -46,12 +46,14 @@ import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.list.ScrollToTopOnPageChange
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
+import fr.forumhfr.redface2.core.ui.post.PostCardShellFlatBottomEdge
 import fr.forumhfr.redface2.core.ui.post.PostIdentityHeader
 import fr.forumhfr.redface2.core.ui.post.PostImageActions
 import fr.forumhfr.redface2.core.ui.post.PostImageMenuSheet
 import fr.forumhfr.redface2.core.ui.post.PostImageTarget
 import fr.forumhfr.redface2.core.ui.post.PostListScaffold
 import fr.forumhfr.redface2.core.ui.post.ReadingPostCard
+import fr.forumhfr.redface2.core.ui.post.ReadingPostCardPresentation
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 import java.time.Instant
 import java.time.ZoneId
@@ -345,6 +347,8 @@ internal fun PrivateMessageThreadContent(
                             messages = mode.thread.messages,
                             page = state.page,
                             totalPages = state.totalPages,
+                            fullWidthPosts = state.fullWidthPosts,
+                            showSignatures = state.showSignatures,
                             onSelectPage = callbacks.onSelectPage,
                             onOpenProfile = callbacks.onOpenProfile,
                             onImageLongPress = postImageActions.onLongPress,
@@ -536,6 +540,8 @@ private fun ThreadMessages(
     messages: List<Post>,
     page: Int,
     totalPages: Int,
+    fullWidthPosts: Boolean,
+    showSignatures: Boolean,
     onSelectPage: (Int) -> Unit,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit,
     onImageLongPress: (PostImageTarget) -> Unit,
@@ -545,22 +551,34 @@ private fun ThreadMessages(
 ) {
     // #351c/#1042 — the shared list overlay (LazyColumn + auto-hiding scrollbar). Card-INTERNAL
     // density now follows the reader's display-metrics preset through [ReadingPostCard] (#1042);
-    // the LIST chrome below stays feature-owned and fixed, in ThreadListLayout.kt since #1046 —
-    // the same stance as the topic, whose list gutters/insets live in TopicListLayout.kt: the
-    // density preset deliberately scopes out absolute chrome dimensions (DisplayMetrics KDoc).
+    // the LIST chrome below stays feature-owned in ThreadListLayout.kt: #1050 switches it only on
+    // the global full-width preference, independently of the density preset. This is the same stance
+    // as the topic, whose list gutters/insets live in TopicListLayout.kt; DisplayMetrics deliberately
+    // scopes out absolute chrome dimensions.
     // The swipe chain (edge glow + gesture + graphicsLayer follow) goes on the inner LazyColumn via
     // [PostListScaffold.listModifier], like the topic's LazyColumn: the scrollbar overlay outside
     // stays fixed on screen. [LocalShowScrollbar] (#105) is honoured by the scaffold's scrollbar,
     // so the call leaves showScrollbar at its default.
     PostListScaffold(
         listState = listState,
-        contentPadding = threadListContentPadding(),
-        verticalArrangement = threadListArrangement(),
+        contentPadding = threadListContentPadding(fullWidthPosts),
+        verticalArrangement = threadListArrangement(fullWidthPosts),
         listModifier = swipeModifier,
     ) {
-        items(messages, key = { it.numreponse }) { message ->
+        itemsIndexed(
+            items = messages,
+            key = { _, message -> message.numreponse },
+        ) { index, message ->
             MessageCard(
                 message = message,
+                presentation = ReadingPostCardPresentation(
+                    showSignature = showSignatures,
+                    flat = fullWidthPosts,
+                    flatBottomEdge = threadMessageFlatBottomEdge(
+                        fullWidthPosts = fullWidthPosts,
+                        hasFollowingMessage = index < messages.lastIndex,
+                    ),
+                ),
                 // #1042 — same gate as the topic card (#208): a message whose page row carried no
                 // profile link ([Post.profileId] null) keeps its identity line inert.
                 onOpenProfile = message.profileId?.let { profileId ->
@@ -619,10 +637,14 @@ private fun ThreadMessages(
  * `null` (no profile link on the row) keeps the identity line inert.
  * [onImageLongPress] is likewise a capability by presence: the MP screen supplies it, while direct
  * hosts that omit it keep every content image inert (editor previews and signatures stay unchanged).
+ * [presentation] is the shared render-only state bundle. The list derives its values from reader
+ * preferences and message position, while this adapter forwards the bundle unchanged. Its neutral
+ * defaults also cover presentation details that the MP surface does not resolve yet.
  */
 @Composable
 internal fun MessageCard(
     message: Post,
+    presentation: ReadingPostCardPresentation = ReadingPostCardPresentation(),
     onOpenProfile: (() -> Unit)? = null,
     onImageLongPress: ((PostImageTarget) -> Unit)? = null,
 ) {
@@ -635,6 +657,7 @@ internal fun MessageCard(
     }
     ReadingPostCard(
         post = message,
+        presentation = presentation,
         onImageLongPress = onImageLongPress,
         identity = {
             // Band-less identity (an MP has no anchor/category tint): the plain shared header, its

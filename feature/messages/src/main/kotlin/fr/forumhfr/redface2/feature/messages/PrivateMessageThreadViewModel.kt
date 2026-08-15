@@ -13,6 +13,7 @@ import fr.forumhfr.redface2.core.domain.media.PostImageSaver
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageReadPositionStore
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
+import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.mpstorage.MpStorageFlagEntry
@@ -26,6 +27,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -44,6 +47,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     @Assisted private val request: PrivateMessageThreadRequest,
     private val repository: MessagesRepository,
     private val authRepository: AuthRepository,
+    private val userPreferencesRepository: UserPreferencesRepository,
     private val readPositionStore: PrivateMessageReadPositionStore,
     private val mpStorageRepository: MpStorageRepository,
     private val writeRepository: PrivateMessageWriteRepository,
@@ -83,6 +87,14 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
                     }
                 }
         }
+        // #1050 — the two global reading preferences are render-only flows. Keeping them separate
+        // from page loading guarantees a hot toggle cannot trigger a private network request.
+        userPreferencesRepository.observeTopicFullWidthPosts()
+            .onEach { fullWidth -> _state.update { it.copy(fullWidthPosts = fullWidth) } }
+            .launchIn(viewModelScope)
+        userPreferencesRepository.observeTopicSignatures()
+            .onEach { show -> _state.update { it.copy(showSignatures = show) } }
+            .launchIn(viewModelScope)
     }
 
     fun selectPage(page: Int) {
@@ -225,13 +237,19 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     }
 
     private fun clearPrivateState() {
+        val fullWidthPosts = _state.value.fullWidthPosts
+        val showSignatures = _state.value.showSignatures
         authenticatedPseudo = null
         loadJob?.cancel()
         saveJob?.cancel()
         rosterJob?.cancel()
         cachedRosterForm = null
         _state.value = PrivateMessageThreadUiState.initial(request)
-            .copy(mode = PrivateMessageThreadUiState.Mode.RequiresLogin)
+            .copy(
+                mode = PrivateMessageThreadUiState.Mode.RequiresLogin,
+                fullWidthPosts = fullWidthPosts,
+                showSignatures = showSignatures,
+            )
     }
 
     /**
