@@ -37,10 +37,13 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.domain.ego.deriveEgoCanonicalPseudo
+import fr.forumhfr.redface2.core.domain.ego.isEgoPost
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
@@ -349,6 +352,9 @@ internal fun PrivateMessageThreadContent(
                             totalPages = state.totalPages,
                             fullWidthPosts = state.fullWidthPosts,
                             showSignatures = state.showSignatures,
+                            egoQuoteEnabled = state.egoQuoteEnabled,
+                            egoPostEnabled = state.egoPostEnabled,
+                            connectedPseudo = state.connectedPseudo,
                             onSelectPage = callbacks.onSelectPage,
                             onOpenProfile = callbacks.onOpenProfile,
                             onImageLongPress = postImageActions.onLongPress,
@@ -542,6 +548,9 @@ private fun ThreadMessages(
     totalPages: Int,
     fullWidthPosts: Boolean,
     showSignatures: Boolean,
+    egoQuoteEnabled: Boolean,
+    egoPostEnabled: Boolean,
+    connectedPseudo: String?,
     onSelectPage: (Int) -> Unit,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit,
     onImageLongPress: (PostImageTarget) -> Unit,
@@ -549,6 +558,31 @@ private fun ThreadMessages(
     listState: LazyListState,
     swipeModifier: Modifier = Modifier,
 ) {
+    // #1050 — the MP mirror of the topic list's #874 derivation: canonicalize the live session
+    // pseudo ONCE for the rendered page, then match the page's message authors once while building
+    // the set below. Lazy cards only consume the resulting pseudo/set. `Post.isOwnPost` is
+    // deliberately not consulted (see core.domain.ego.isEgoPost): the session-bound author
+    // comparison is the source of truth, in a 1:1 conversation as in a DT — the MP list renders
+    // uniform cards with no positional alignment, so EgoPost is what tells your messages apart.
+    // Both settings off and anonymous sessions collapse to the safe null/empty values.
+    val egoCanonicalPseudo = remember(egoQuoteEnabled, egoPostEnabled, connectedPseudo) {
+        deriveEgoCanonicalPseudo(
+            enabled = egoQuoteEnabled || egoPostEnabled,
+            isAuthenticated = connectedPseudo != null,
+            connectedPseudo = connectedPseudo,
+        )
+    }
+    val egoQuoteCanonicalPseudo = egoCanonicalPseudo.takeIf { egoQuoteEnabled }
+    val egoPostNumreponses = remember(egoPostEnabled, egoCanonicalPseudo, messages) {
+        if (!egoPostEnabled || egoCanonicalPseudo == null) {
+            emptySet()
+        } else {
+            messages
+                .asSequence()
+                .filter { message -> isEgoPost(message, egoCanonicalPseudo) }
+                .mapTo(mutableSetOf()) { message -> message.numreponse }
+        }
+    }
     // #351c/#1042 — the shared list overlay (LazyColumn + auto-hiding scrollbar). Card-INTERNAL
     // density now follows the reader's display-metrics preset through [ReadingPostCard] (#1042);
     // the LIST chrome below stays feature-owned in ThreadListLayout.kt: #1050 switches it only on
@@ -578,6 +612,8 @@ private fun ThreadMessages(
                         fullWidthPosts = fullWidthPosts,
                         hasFollowingMessage = index < messages.lastIndex,
                     ),
+                    egoQuoteCanonicalPseudo = egoQuoteCanonicalPseudo,
+                    egoPostHighlighted = message.numreponse in egoPostNumreponses,
                 ),
                 // #1042 — same gate as the topic card (#208): a message whose page row carried no
                 // profile link ([Post.profileId] null) keeps its identity line inert.
@@ -638,8 +674,9 @@ private fun ThreadMessages(
  * [onImageLongPress] is likewise a capability by presence: the MP screen supplies it, while direct
  * hosts that omit it keep every content image inert (editor previews and signatures stay unchanged).
  * [presentation] is the shared render-only state bundle. The list derives its values from reader
- * preferences and message position, while this adapter forwards the bundle unchanged. Its neutral
- * defaults also cover presentation details that the MP surface does not resolve yet.
+ * preferences, the session pseudo (#1050 Ego markers) and message position, while this adapter
+ * forwards the bundle unchanged — its only addition is the EgoPost StateDescription on the
+ * identity node (#874 P1 parity). Neutral defaults keep direct test/preview mounts unmarked.
  */
 @Composable
 internal fun MessageCard(
@@ -655,6 +692,10 @@ internal fun MessageCard(
     } else {
         null
     }
+    // #1050 — same #874 P1 gesture as the topic card: the EgoPost a11y marker is a StateDescription
+    // on the identity node (TalkBack traverses it first), never a heading — the fallback pseudo
+    // stays the card's exactly-one heading (#884 contract, pinned by MessageCardShellSmokeTest).
+    val egoPostStateDescription = stringResource(R.string.messages_post_ego_state_description)
     ReadingPostCard(
         post = message,
         presentation = presentation,
@@ -671,11 +712,17 @@ internal fun MessageCard(
                 author = message.author,
                 avatarUrl = message.avatarUrl,
                 dateText = message.date.asMessageDate(),
-                modifier = Modifier.padding(
-                    start = m.cardBodyHorizontal,
-                    top = m.cardBodyTop,
-                    end = m.cardBodyHorizontal,
-                ),
+                modifier = Modifier
+                    .padding(
+                        start = m.cardBodyHorizontal,
+                        top = m.cardBodyTop,
+                        end = m.cardBodyHorizontal,
+                    )
+                    .semantics {
+                        if (presentation.egoPostHighlighted) {
+                            stateDescription = egoPostStateDescription
+                        }
+                    },
                 onAvatarClick = onOpenProfile,
                 onAvatarClickLabel = openProfileLabel,
                 onAuthorClick = onOpenProfile,

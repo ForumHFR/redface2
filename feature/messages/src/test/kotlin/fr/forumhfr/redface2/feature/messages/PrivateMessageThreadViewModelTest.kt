@@ -86,9 +86,13 @@ class PrivateMessageThreadViewModelTest {
     private fun userPreferences(
         fullWidthPosts: Flow<Boolean> = MutableStateFlow(false),
         showSignatures: Flow<Boolean> = MutableStateFlow(false),
+        egoQuoteEnabled: Flow<Boolean> = MutableStateFlow(true),
+        egoPostEnabled: Flow<Boolean> = MutableStateFlow(true),
     ): UserPreferencesRepository = mockk {
         every { observeTopicFullWidthPosts() } returns fullWidthPosts
         every { observeTopicSignatures() } returns showSignatures
+        every { observeTopicEgoQuoteEnabled() } returns egoQuoteEnabled
+        every { observeTopicEgoPostEnabled() } returns egoPostEnabled
     }
 
     @Test
@@ -154,6 +158,133 @@ class PrivateMessageThreadViewModelTest {
         coVerify(exactly = 1) {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
         }
+    }
+
+    @Test
+    fun `ego preferences are independent render-only flows that never refetch the thread`() = runTest {
+        // #1050 — the two #874 Ego markers are deliberately independent: flipping one leaves the
+        // other untouched, and neither flip triggers a private network request (render-only).
+        val repository = loadedRepository()
+        val egoQuote = MutableStateFlow(true)
+        val egoPost = MutableStateFlow(true)
+        val viewModel = threadViewModel(
+            repository = repository,
+            userPreferencesRepository = userPreferences(egoQuoteEnabled = egoQuote, egoPostEnabled = egoPost),
+        )
+
+        assertTrue(viewModel.state.value.egoQuoteEnabled)
+        assertTrue(viewModel.state.value.egoPostEnabled)
+
+        egoQuote.value = false
+        advanceUntilIdle()
+        assertFalse(viewModel.state.value.egoQuoteEnabled)
+        assertTrue("EgoPost must not follow the EgoQuote toggle", viewModel.state.value.egoPostEnabled)
+
+        egoPost.value = false
+        advanceUntilIdle()
+        assertFalse(viewModel.state.value.egoPostEnabled)
+
+        coVerify(exactly = 1) {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        }
+    }
+
+    @Test
+    fun `the session pseudo is exposed for the Ego markers and follows an account switch`() = runTest {
+        // #1050 — the Ego markers derive from the session pseudo in the STATE, never from the
+        // cached Post.isOwnPost bit; an A → B switch must therefore re-expose B's pseudo. This
+        // test only covers the happy path (B's page lands immediately); the purge of A's private
+        // state across the switch is pinned by the dedicated test below (gate Sol).
+        val repository = loadedRepository()
+        val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
+
+        val viewModel = threadViewModel(repository, authRepository)
+        assertEquals("alice", viewModel.state.value.connectedPseudo)
+
+        authRepository.emit(AuthState.Authenticated("bob"))
+        advanceUntilIdle()
+        assertEquals("bob", viewModel.state.value.connectedPseudo)
+    }
+
+    @Test
+    fun `logout purges the session pseudo while the render-only preferences survive`() = runTest {
+        // #1050 — the session pseudo is identity data: clearPrivateState drops it (both Ego
+        // markers go dark on the logged-out screen), while the four render-only preferences are
+        // carried across the reset like in #1050 PR 1 (they are not session data).
+        val repository = loadedRepository()
+        val authRepository = FakeAuthRepository()
+        val egoQuote = MutableStateFlow(false)
+        val viewModel = threadViewModel(
+            repository = repository,
+            authRepository = authRepository,
+            userPreferencesRepository = userPreferences(egoQuoteEnabled = egoQuote),
+        )
+        assertEquals("xaat", viewModel.state.value.connectedPseudo)
+        assertFalse(viewModel.state.value.egoQuoteEnabled)
+
+        authRepository.emit(AuthState.Anonymous)
+        advanceUntilIdle()
+
+        val state = viewModel.state.value
+        assertEquals(PrivateMessageThreadUiState.Mode.RequiresLogin, state.mode)
+        assertEquals(null, state.connectedPseudo)
+        assertFalse("the disabled EgoQuote preference must survive the logout reset", state.egoQuoteEnabled)
+        assertTrue("the enabled EgoPost preference must survive the logout reset", state.egoPostEnabled)
+    }
+
+    @Test
+    fun `a direct account switch purges A's content and roster even when B's fetch never lands`() = runTest {
+        // Gate Sol (#1050 PR 2) — architecture.md requires the private state to be purged on a
+        // SESSION CHANGE, not only at logout. Without the purge, the keep-content reload keeps A's
+        // conversation on screen while B's fetch is in flight — indefinitely if it fails — with
+        // the roster cache still serving A's member list, and (since this PR) the Ego markers
+        // resolving against B's pseudo over A's messages. B's fetch is therefore parked on a gate:
+        // every assertion below must hold BEFORE any page of B's session ever lands.
+        val repository = mockk<MessagesRepository>()
+        val pageForA = thread(page = 1, totalPages = 1, messages = listOf(post(7)))
+        val gate = CompletableDeferred<PrivateMessageThread>()
+        var calls = 0
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } coAnswers { if (calls++ == 0) pageForA else gate.await() }
+        val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
+        val write = mockk<PrivateMessageWriteRepository>()
+        coEvery { write.fetchReplyForm(any(), any()) } returns replyForm(newdest = "bob, carol")
+        val egoQuote = MutableStateFlow(false)
+        val viewModel = threadViewModel(
+            repository = repository,
+            authRepository = authRepository,
+            userPreferencesRepository = userPreferences(egoQuoteEnabled = egoQuote),
+            writeRepository = write,
+        )
+        // A's session: content on screen AND the roster sheet loaded (its form is now cached).
+        viewModel.openRoster()
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value.mode is PrivateMessageThreadUiState.Mode.Content)
+        assertTrue(viewModel.state.value.roster is PrivateMessageThreadUiState.Roster.Loaded)
+
+        authRepository.emit(AuthState.Authenticated("bob"))
+        advanceUntilIdle()
+
+        // B's page has NOT landed: nothing of A's session may still be visible — the switch reset
+        // through the logout path, landing on Loading (never the login placeholder mid-switch).
+        val switched = viewModel.state.value
+        assertEquals(PrivateMessageThreadUiState.Mode.Loading, switched.mode)
+        assertEquals(PrivateMessageThreadUiState.Roster.Hidden, switched.roster)
+        assertEquals("bob", switched.connectedPseudo)
+        assertFalse("the disabled EgoQuote preference must survive the switch", switched.egoQuoteEnabled)
+        assertTrue("the enabled EgoPost preference must survive the switch", switched.egoPostEnabled)
+
+        // B's fetch then FAILS: the screen shows an Error — A's conversation never resurfaces.
+        gate.completeExceptionally(IOException("bob's fetch failed"))
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value.mode is PrivateMessageThreadUiState.Mode.Error)
+        assertEquals(PrivateMessageThreadUiState.Roster.Hidden, viewModel.state.value.roster)
+
+        // A's cached roster form was purged too: re-opening fetches B's form instead of serving A's.
+        viewModel.openRoster()
+        advanceUntilIdle()
+        coVerify(exactly = 2) { write.fetchReplyForm(any(), any()) }
     }
 
     @Test

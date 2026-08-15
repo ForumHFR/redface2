@@ -23,6 +23,20 @@ data class PrivateMessageThreadUiState(
     val fullWidthPosts: Boolean = false,
     /** #1050 — shared topic/MP signature preference; inert when HFR supplied no signature. */
     val showSignatures: Boolean = false,
+    /** #1050 — shared #874 EgoQuote preference, independent from [egoPostEnabled]; render-only. */
+    val egoQuoteEnabled: Boolean = true,
+    /** #1050 — shared #874 EgoPost preference, independent from [egoQuoteEnabled]; render-only. */
+    val egoPostEnabled: Boolean = true,
+    /**
+     * #1050 — pseudo of the authenticated session, the session-bound input of the Ego markers
+     * (the list derives both from it; `Post.isOwnPost` is deliberately not trusted, see
+     * `core.domain.ego.isEgoPost`). This is NOT private conversation metadata (the #316/#298
+     * exclusions cover subject/correspondent — data about the OTHER party): it is the reader's own
+     * identity, which the account menu already displays. It stays session-bound nonetheless:
+     * `null` while anonymous, and clearPrivateState drops it at logout instead of carrying it
+     * over like the render-only preferences above.
+     */
+    val connectedPseudo: String? = null,
     /**
      * #612 — participant roster sheet state. Lazily loaded (only when the user opens the sheet, never
      * on screen entry) and cached for the life of the screen. See [Roster].
