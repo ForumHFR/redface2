@@ -110,6 +110,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.domain.author.isRf2Creator
+import fr.forumhfr.redface2.core.domain.ego.deriveEgoCanonicalPseudo
+import fr.forumhfr.redface2.core.domain.ego.isEgoPost
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.Poll
 import fr.forumhfr.redface2.core.model.Post

@@ -81,7 +81,21 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
                     when (authState) {
                         AuthState.Anonymous -> clearPrivateState()
                         is AuthState.Authenticated -> {
+                            // Architecture contract (architecture.md): private state is purged on
+                            // anonymous, logout AND session change. A DIRECT A → B switch must
+                            // therefore reset through the same path as the logout — A's kept-on-
+                            // screen conversation, roster job and cached roster form must never
+                            // survive into B's session (with B's fetch free to fail without
+                            // resurfacing them). Only the landing mode differs: B's load is known
+                            // to follow, so the screen shows Loading, not the login placeholder.
+                            if (authenticatedPseudo != null && authenticatedPseudo != authState.pseudo) {
+                                clearPrivateState(nextMode = PrivateMessageThreadUiState.Mode.Loading)
+                            }
                             authenticatedPseudo = authState.pseudo
+                            // #1050 — expose the session pseudo for the Ego markers. The list
+                            // derives both markers from this session-bound value (never from the
+                            // cached Post.isOwnPost bit), so an A → B switch re-resolves them.
+                            _state.update { it.copy(connectedPseudo = authState.pseudo) }
                             loadInitial()
                         }
                     }
@@ -94,6 +108,14 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
             .launchIn(viewModelScope)
         userPreferencesRepository.observeTopicSignatures()
             .onEach { show -> _state.update { it.copy(showSignatures = show) } }
+            .launchIn(viewModelScope)
+        // #1050 — the two #874 Ego preferences are deliberately independent flows (a message can
+        // keep its EgoPost background while an auto-quote inside keeps its own EgoQuote marker).
+        userPreferencesRepository.observeTopicEgoQuoteEnabled()
+            .onEach { enabled -> _state.update { it.copy(egoQuoteEnabled = enabled) } }
+            .launchIn(viewModelScope)
+        userPreferencesRepository.observeTopicEgoPostEnabled()
+            .onEach { enabled -> _state.update { it.copy(egoPostEnabled = enabled) } }
             .launchIn(viewModelScope)
     }
 
@@ -236,19 +258,38 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
         )
     }
 
-    private fun clearPrivateState() {
+    /**
+     * Purges everything owned by the previous session: the in-flight jobs, the cached roster form
+     * and the whole UI state — only the four render-only preferences survive the reset (they are
+     * not session data). This is the single purge path for the three session exits of the
+     * architecture contract (anonymous, logout, session change): the anonymous/logout callers keep
+     * the default [nextMode] (the login placeholder), while a direct A → B account switch passes
+     * [PrivateMessageThreadUiState.Mode.Loading] because B's load is already known to follow — the
+     * reader must see neither A's conversation nor a spurious login screen in between.
+     */
+    private fun clearPrivateState(
+        nextMode: PrivateMessageThreadUiState.Mode = PrivateMessageThreadUiState.Mode.RequiresLogin,
+    ) {
         val fullWidthPosts = _state.value.fullWidthPosts
         val showSignatures = _state.value.showSignatures
+        val egoQuoteEnabled = _state.value.egoQuoteEnabled
+        val egoPostEnabled = _state.value.egoPostEnabled
         authenticatedPseudo = null
         loadJob?.cancel()
         saveJob?.cancel()
         rosterJob?.cancel()
         cachedRosterForm = null
+        // The render-only preferences survive the reset (they are not session data); the session
+        // pseudo does NOT — falling back to initial()'s null connectedPseudo purges it on every
+        // session exit (logout AND account switch), so no former identity leaks past this line
+        // and both Ego markers go dark until the next session re-exposes its own pseudo.
         _state.value = PrivateMessageThreadUiState.initial(request)
             .copy(
-                mode = PrivateMessageThreadUiState.Mode.RequiresLogin,
+                mode = nextMode,
                 fullWidthPosts = fullWidthPosts,
                 showSignatures = showSignatures,
+                egoQuoteEnabled = egoQuoteEnabled,
+                egoPostEnabled = egoPostEnabled,
             )
     }
 
