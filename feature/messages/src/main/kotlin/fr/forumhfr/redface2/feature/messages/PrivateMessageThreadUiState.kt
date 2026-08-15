@@ -19,6 +19,10 @@ data class PrivateMessageThreadUiState(
     val page: Int,
     val totalPages: Int,
     val isRefreshing: Boolean = false,
+    /** #1050 — global reading preference, render-only: no page reload when it changes. */
+    val fullWidthPosts: Boolean = false,
+    /** #1050 — shared topic/MP signature preference; inert when HFR supplied no signature. */
+    val showSignatures: Boolean = false,
     /**
      * #612 — participant roster sheet state. Lazily loaded (only when the user opens the sheet, never
      * on screen entry) and cached for the life of the screen. See [Roster].

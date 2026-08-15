@@ -11,6 +11,7 @@ import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageReadPositionStore
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageWritePreview
+import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.AuthState
@@ -21,6 +22,7 @@ import fr.forumhfr.redface2.core.model.mpstorage.MpStorageFlagEntry
 import fr.forumhfr.redface2.core.model.mpstorage.MpStorageWriteResult
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
 import java.io.IOException
 import java.time.Instant
@@ -65,6 +67,7 @@ class PrivateMessageThreadViewModelTest {
     private fun threadViewModel(
         repository: MessagesRepository,
         authRepository: AuthRepository = FakeAuthRepository(),
+        userPreferencesRepository: UserPreferencesRepository = userPreferences(),
         readPositionStore: PrivateMessageReadPositionStore = FakeReadPositionStore(),
         mpStorageRepository: MpStorageRepository = FakeMpStorageRepository(),
         writeRepository: PrivateMessageWriteRepository = mockk(relaxed = true),
@@ -73,11 +76,20 @@ class PrivateMessageThreadViewModelTest {
         request = request,
         repository = repository,
         authRepository = authRepository,
+        userPreferencesRepository = userPreferencesRepository,
         readPositionStore = readPositionStore,
         mpStorageRepository = mpStorageRepository,
         writeRepository = writeRepository,
         postImageSaver = postImageSaver,
     )
+
+    private fun userPreferences(
+        fullWidthPosts: Flow<Boolean> = MutableStateFlow(false),
+        showSignatures: Flow<Boolean> = MutableStateFlow(false),
+    ): UserPreferencesRepository = mockk {
+        every { observeTopicFullWidthPosts() } returns fullWidthPosts
+        every { observeTopicSignatures() } returns showSignatures
+    }
 
     @Test
     fun `loads the thread on init without private route metadata fallback`() = runTest {
@@ -107,6 +119,7 @@ class PrivateMessageThreadViewModelTest {
             request = request,
             repository = repository,
             authRepository = FakeAuthRepository(AuthState.Anonymous),
+            userPreferencesRepository = userPreferences(),
             readPositionStore = FakeReadPositionStore(),
             mpStorageRepository = FakeMpStorageRepository(),
             writeRepository = mockk(relaxed = true),
@@ -116,6 +129,30 @@ class PrivateMessageThreadViewModelTest {
         assertEquals(PrivateMessageThreadUiState.Mode.RequiresLogin, viewModel.state.value.mode)
         coVerify(exactly = 0) {
             repository.getPrivateMessageThread(any(), any(), any())
+        }
+    }
+
+    @Test
+    fun `reading preferences update presentation without refetching the thread`() = runTest {
+        val repository = loadedRepository()
+        val fullWidthPosts = MutableStateFlow(false)
+        val showSignatures = MutableStateFlow(false)
+        val viewModel = threadViewModel(
+            repository = repository,
+            userPreferencesRepository = userPreferences(fullWidthPosts, showSignatures),
+        )
+
+        assertFalse(viewModel.state.value.fullWidthPosts)
+        assertFalse(viewModel.state.value.showSignatures)
+
+        fullWidthPosts.value = true
+        showSignatures.value = true
+        advanceUntilIdle()
+
+        assertTrue(viewModel.state.value.fullWidthPosts)
+        assertTrue(viewModel.state.value.showSignatures)
+        coVerify(exactly = 1) {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
         }
     }
 
@@ -350,6 +387,7 @@ class PrivateMessageThreadViewModelTest {
             request = request,
             repository = repository,
             authRepository = FakeAuthRepository(),
+            userPreferencesRepository = userPreferences(),
             readPositionStore = FakeReadPositionStore(initial = mapOf(42 to 7)),
             mpStorageRepository = FakeMpStorageRepository(),
             writeRepository = mockk(relaxed = true),
@@ -374,6 +412,7 @@ class PrivateMessageThreadViewModelTest {
             request = PrivateMessageThreadRequest(threadId = 42, page = 9),
             repository = repository,
             authRepository = FakeAuthRepository(),
+            userPreferencesRepository = userPreferences(),
             readPositionStore = FakeReadPositionStore(initial = mapOf(42 to 3)),
             mpStorageRepository = FakeMpStorageRepository(),
             writeRepository = mockk(relaxed = true),
@@ -401,6 +440,7 @@ class PrivateMessageThreadViewModelTest {
                 request = request,
                 repository = repository,
                 authRepository = FakeAuthRepository(),
+                userPreferencesRepository = userPreferences(),
                 readPositionStore = store,
                 mpStorageRepository = FakeMpStorageRepository(),
                 writeRepository = mockk(relaxed = true),
@@ -430,7 +470,11 @@ class PrivateMessageThreadViewModelTest {
         val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
         val store = FakeReadPositionStore()
 
-        threadViewModel(repository, authRepository, store)
+        threadViewModel(
+            repository = repository,
+            authRepository = authRepository,
+            readPositionStore = store,
+        )
         // alice's fetch is parked on the gate; switch the account.
         authRepository.emit(AuthState.Authenticated("bob"))
         advanceUntilIdle()

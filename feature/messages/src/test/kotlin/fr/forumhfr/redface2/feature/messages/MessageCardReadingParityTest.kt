@@ -26,6 +26,8 @@ import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.core.ui.post.POST_CARD_SHELL_DIVIDER_TAG
+import fr.forumhfr.redface2.core.ui.post.ReadingPostCardPresentation
 import fr.forumhfr.redface2.core.ui.theme.DisplayMetrics
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 import fr.forumhfr.redface2.core.ui.theme.LocalFoldLongQuotes
@@ -49,8 +51,9 @@ import org.robolectric.annotation.Implements
  *    the MP density is no longer feature-fixed;
  *  - body state nested in `rememberSaveable` (an unfolded long quote) SURVIVES a density flip:
  *    the #946 guarantee that no capability change recreates the body subtree;
+ *  - the same body state (quote + spoiler) survives the #1050 full-width flip;
  *  - the body is selectable, and that capability derives from NEITHER the density preset NOR the
- *    presence of a callback — it is structurally constant (#946);
+ *    presence of a callback or full-width presentation — it is structurally constant (#946);
  *  - the profile tap reaches [MessageCard.onOpenProfile] from both the avatar and the pseudo,
  *    without adding a second TalkBack heading (the #884 exactly-one-heading contract, whose
  *    default-card side lives in [MessageCardShellSmokeTest]).
@@ -165,6 +168,67 @@ class MessageCardReadingParityTest {
         // …and the quote is STILL expanded: the #946 guarantee that a density change recomposes
         // the body in place instead of recreating it (which would drop rememberSaveable state).
         compose.onNodeWithText("Replier", substring = true).assertExists()
+    }
+
+    @Test
+    fun `expanded quote and revealed spoiler survive a full width toggle`() {
+        val fullWidth = mutableStateOf(false)
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(LocalFoldLongQuotes provides true) {
+                    MessageCard(
+                        message = sampleMessage(content = statefulBodyContent()),
+                        presentation = ReadingPostCardPresentation(flat = fullWidth.value),
+                    )
+                }
+            }
+        }
+
+        compose.onNodeWithText("(afficher)").performClick()
+        compose.onNodeWithText(SPOILER_TEXT).assertExists()
+        compose.onNodeWithText("Déplier", substring = true).performClick()
+        compose.onNodeWithText("Replier", substring = true).assertExists()
+
+        compose.runOnIdle { fullWidth.value = true }
+        compose.waitForIdle()
+
+        // The divider proves the mode flip reached the shell; the two controls staying open prove
+        // its stable Card/Column structure kept the body subtree and its rememberSaveable state.
+        compose.onNodeWithTag(POST_CARD_SHELL_DIVIDER_TAG, useUnmergedTree = true).assertExists()
+        compose.onNodeWithText("(masquer)").assertExists()
+        compose.onNodeWithText(SPOILER_TEXT).assertExists()
+        compose.onNodeWithText("Replier", substring = true).assertExists()
+    }
+
+    @Test
+    fun `body stays selectable after a full width toggle`() {
+        val toolbar = RecordingTextContextMenuProvider()
+        val fullWidth = mutableStateOf(false)
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(LocalTextContextMenuToolbarProvider provides toolbar) {
+                    MessageCard(
+                        message = sampleMessage(),
+                        presentation = ReadingPostCardPresentation(flat = fullWidth.value),
+                    )
+                }
+            }
+        }
+
+        compose.onNodeWithText(BODY_TEXT).performTouchInput { longClick() }
+        compose.waitForIdle()
+        assertTrue("the default MP card body must be selectable", toolbar.shownCount > 0)
+
+        compose.onNodeWithText(BODY_TEXT).performClick()
+        compose.runOnIdle {
+            toolbar.reset()
+            fullWidth.value = true
+        }
+        compose.waitForIdle()
+        compose.onNodeWithTag(POST_CARD_SHELL_DIVIDER_TAG, useUnmergedTree = true).assertExists()
+        compose.onNodeWithText(BODY_TEXT).performTouchInput { longClick() }
+        compose.waitForIdle()
+        assertTrue("the flat MP card body must stay selectable", toolbar.shownCount > 0)
     }
 
     @Test
@@ -299,10 +363,22 @@ class MessageCardReadingParityTest {
         )
     }
 
+    private fun statefulBodyContent(): PostContent = PostContent(
+        blocks = listOf(
+            PostBlock.Paragraph(inlines = listOf(PostInline.Text(MARKER_TEXT))),
+            PostBlock.Spoiler(
+                label = "Secret",
+                content = paragraph(SPOILER_TEXT),
+            ),
+            longQuoteContent().blocks.last(),
+        ),
+    )
+
     private companion object {
         const val AUTHOR = "XaTriX"
         const val BODY_TEXT = "corps du message"
         const val MARKER_TEXT = "repère hors citation"
+        const val SPOILER_TEXT = "contenu secret révélé"
         const val CARD_TAG = "MessageCardUnderTest"
         const val DP_TOLERANCE = 0.01f
         val NO_OP: () -> Unit = {}
