@@ -16,6 +16,20 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.42.1` — `internal` (dev) — 2026-08-15
+
+### Ajouté
+
+- **Les conversations privées suivent désormais le mode pleine largeur quand il est activé** ([#1050](https://github.com/ForumHFR/redface2/issues/1050)). Ce réglage reste désactivé par défaut : la présentation ne change donc pas tant que vous ne l'activez pas.
+- **EgoPost donne désormais un fond distinct à vos propres messages privés, et EgoQuote met en évidence les citations qui vous reprennent** ([#1050](https://github.com/ForumHFR/redface2/issues/1050)). Ces deux réglages, indépendants et déjà activés par défaut, s'appliquent maintenant aussi aux MP.
+- **Les auteurs inscrits dans votre liste noire sont désormais masqués dans les conversations privées, y compris lorsqu'un tiers les cite** ([#1050](https://github.com/ForumHFR/redface2/issues/1050)). Pour bloquer un auteur depuis un message, il faut encore passer par un sujet : le menu de message n'existe pas encore côté MP.
+
+### Interne
+
+- Une bascule directe de compte purge désormais l'état privé de la conversation avant de charger le nouveau compte. Auparavant, si ce chargement échouait, le contenu du compte précédent pouvait rester affiché.
+- Le rendu des signatures est câblé dans la carte MP, mais les pages HFR observées ne fournissent aucune signature : aucun affichage en conditions réelles n'est donc revendiqué.
+- La matrice de parité [#1040](https://github.com/ForumHFR/redface2/issues/1040) rattache quatre lignes jusque-là orphelines aux composants qui les portent réellement.
+
 ## `0.42.0` — `internal` (dev) — 2026-08-15
 
 ### Ajouté
