@@ -2,6 +2,8 @@ package fr.forumhfr.redface2.feature.messages
 
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.blacklist.BlacklistRepository
+import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.media.ImageSaveException
@@ -17,6 +19,7 @@ import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostContent
+import fr.forumhfr.redface2.core.model.blacklist.BlacklistEntry
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
 import fr.forumhfr.redface2.core.model.mpstorage.MpStorageFlagEntry
 import fr.forumhfr.redface2.core.model.mpstorage.MpStorageWriteResult
@@ -33,6 +36,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -68,6 +72,7 @@ class PrivateMessageThreadViewModelTest {
         repository: MessagesRepository,
         authRepository: AuthRepository = FakeAuthRepository(),
         userPreferencesRepository: UserPreferencesRepository = userPreferences(),
+        blacklistRepository: BlacklistRepository = FakeBlacklistRepository(),
         readPositionStore: PrivateMessageReadPositionStore = FakeReadPositionStore(),
         mpStorageRepository: MpStorageRepository = FakeMpStorageRepository(),
         writeRepository: PrivateMessageWriteRepository = mockk(relaxed = true),
@@ -77,6 +82,7 @@ class PrivateMessageThreadViewModelTest {
         repository = repository,
         authRepository = authRepository,
         userPreferencesRepository = userPreferencesRepository,
+        blacklistRepository = blacklistRepository,
         readPositionStore = readPositionStore,
         mpStorageRepository = mpStorageRepository,
         writeRepository = writeRepository,
@@ -124,6 +130,7 @@ class PrivateMessageThreadViewModelTest {
             repository = repository,
             authRepository = FakeAuthRepository(AuthState.Anonymous),
             userPreferencesRepository = userPreferences(),
+            blacklistRepository = FakeBlacklistRepository(),
             readPositionStore = FakeReadPositionStore(),
             mpStorageRepository = FakeMpStorageRepository(),
             writeRepository = mockk(relaxed = true),
@@ -190,6 +197,46 @@ class PrivateMessageThreadViewModelTest {
     }
 
     @Test
+    fun `blacklist updates both message and quote masks live without refetching`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns thread(
+            page = 1,
+            totalPages = 1,
+            messages = listOf(post(7, author = "Alice"), post(8, author = "Bob")),
+        )
+        val blacklist = FakeBlacklistRepository()
+        val viewModel = threadViewModel(repository, blacklistRepository = blacklist)
+
+        val initial = viewModel.state.value.mode as PrivateMessageThreadUiState.Mode.Content
+        assertEquals(emptySet<Int>(), initial.hiddenNumreponses)
+        assertEquals(emptySet<String>(), initial.blockedQuoteAuthors)
+
+        blacklist.emit(setOf(canonicalizePseudo(" Alice ")))
+        advanceUntilIdle()
+
+        val blocked = viewModel.state.value.mode as PrivateMessageThreadUiState.Mode.Content
+        assertEquals(setOf(7), blocked.hiddenNumreponses)
+        assertEquals(setOf("alice"), blocked.blockedQuoteAuthors)
+        assertEquals(
+            "filtering must not remove or reorder messages",
+            listOf(7, 8),
+            blocked.thread.messages.map { it.numreponse },
+        )
+
+        blacklist.emit(emptySet())
+        advanceUntilIdle()
+
+        val unblocked = viewModel.state.value.mode as PrivateMessageThreadUiState.Mode.Content
+        assertEquals(emptySet<Int>(), unblocked.hiddenNumreponses)
+        assertEquals(emptySet<String>(), unblocked.blockedQuoteAuthors)
+        coVerify(exactly = 1) {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        }
+    }
+
+    @Test
     fun `the session pseudo is exposed for the Ego markers and follows an account switch`() = runTest {
         // #1050 — the Ego markers derive from the session pseudo in the STATE, never from the
         // cached Post.isOwnPost bit; an A → B switch must therefore re-expose B's pseudo. This
@@ -241,7 +288,11 @@ class PrivateMessageThreadViewModelTest {
         // resolving against B's pseudo over A's messages. B's fetch is therefore parked on a gate:
         // every assertion below must hold BEFORE any page of B's session ever lands.
         val repository = mockk<MessagesRepository>()
-        val pageForA = thread(page = 1, totalPages = 1, messages = listOf(post(7)))
+        val pageForA = thread(
+            page = 1,
+            totalPages = 1,
+            messages = listOf(post(7, author = "Alice")),
+        )
         val gate = CompletableDeferred<PrivateMessageThread>()
         var calls = 0
         coEvery {
@@ -251,10 +302,12 @@ class PrivateMessageThreadViewModelTest {
         val write = mockk<PrivateMessageWriteRepository>()
         coEvery { write.fetchReplyForm(any(), any()) } returns replyForm(newdest = "bob, carol")
         val egoQuote = MutableStateFlow(false)
+        val blacklist = FakeBlacklistRepository(setOf("alice"))
         val viewModel = threadViewModel(
             repository = repository,
             authRepository = authRepository,
             userPreferencesRepository = userPreferences(egoQuoteEnabled = egoQuote),
+            blacklistRepository = blacklist,
             writeRepository = write,
         )
         // A's session: content on screen AND the roster sheet loaded (its form is now cached).
@@ -262,6 +315,9 @@ class PrivateMessageThreadViewModelTest {
         advanceUntilIdle()
         assertTrue(viewModel.state.value.mode is PrivateMessageThreadUiState.Mode.Content)
         assertTrue(viewModel.state.value.roster is PrivateMessageThreadUiState.Roster.Loaded)
+        val contentForA = viewModel.state.value.mode as PrivateMessageThreadUiState.Mode.Content
+        assertEquals(setOf(7), contentForA.hiddenNumreponses)
+        assertEquals(1, blacklist.subscriptions)
 
         authRepository.emit(AuthState.Authenticated("bob"))
         advanceUntilIdle()
@@ -272,6 +328,7 @@ class PrivateMessageThreadViewModelTest {
         assertEquals(PrivateMessageThreadUiState.Mode.Loading, switched.mode)
         assertEquals(PrivateMessageThreadUiState.Roster.Hidden, switched.roster)
         assertEquals("bob", switched.connectedPseudo)
+        assertEquals("the account switch must resubscribe the account-owned blacklist", 2, blacklist.subscriptions)
         assertFalse("the disabled EgoQuote preference must survive the switch", switched.egoQuoteEnabled)
         assertTrue("the enabled EgoPost preference must survive the switch", switched.egoPostEnabled)
 
@@ -519,6 +576,7 @@ class PrivateMessageThreadViewModelTest {
             repository = repository,
             authRepository = FakeAuthRepository(),
             userPreferencesRepository = userPreferences(),
+            blacklistRepository = FakeBlacklistRepository(),
             readPositionStore = FakeReadPositionStore(initial = mapOf(42 to 7)),
             mpStorageRepository = FakeMpStorageRepository(),
             writeRepository = mockk(relaxed = true),
@@ -544,6 +602,7 @@ class PrivateMessageThreadViewModelTest {
             repository = repository,
             authRepository = FakeAuthRepository(),
             userPreferencesRepository = userPreferences(),
+            blacklistRepository = FakeBlacklistRepository(),
             readPositionStore = FakeReadPositionStore(initial = mapOf(42 to 3)),
             mpStorageRepository = FakeMpStorageRepository(),
             writeRepository = mockk(relaxed = true),
@@ -572,6 +631,7 @@ class PrivateMessageThreadViewModelTest {
                 repository = repository,
                 authRepository = FakeAuthRepository(),
                 userPreferencesRepository = userPreferences(),
+                blacklistRepository = FakeBlacklistRepository(),
                 readPositionStore = store,
                 mpStorageRepository = FakeMpStorageRepository(),
                 writeRepository = mockk(relaxed = true),
@@ -918,9 +978,9 @@ class PrivateMessageThreadViewModelTest {
         canReply = true,
     )
 
-    private fun post(numreponse: Int) = Post(
+    private fun post(numreponse: Int, author: String = "auteur") = Post(
         numreponse = numreponse,
-        author = "auteur",
+        author = author,
         date = Instant.EPOCH,
         content = PostContent(blocks = emptyList()),
         avatarUrl = null,
@@ -963,6 +1023,35 @@ class PrivateMessageThreadViewModelTest {
 
         suspend fun emit(authState: AuthState) {
             state.emit(authState)
+        }
+    }
+
+    private class FakeBlacklistRepository(
+        initial: Set<String> = emptySet(),
+    ) : BlacklistRepository {
+        private val canonicals = MutableStateFlow(initial)
+        var subscriptions: Int = 0
+            private set
+
+        override fun observeEntries(): Flow<List<BlacklistEntry>> =
+            error("entry management is not used by the thread VM")
+
+        override fun observeBlockedCanonicals(): Flow<Set<String>> = canonicals
+            .onStart { subscriptions += 1 }
+
+        override suspend fun isBlocked(pseudo: String): Boolean =
+            canonicalizePseudo(pseudo) in canonicals.value
+
+        override suspend fun block(pseudo: String) {
+            canonicals.value = canonicals.value + canonicalizePseudo(pseudo)
+        }
+
+        override suspend fun unblock(pseudo: String) {
+            canonicals.value = canonicals.value - canonicalizePseudo(pseudo)
+        }
+
+        suspend fun emit(blocked: Set<String>) {
+            canonicals.emit(blocked)
         }
     }
 

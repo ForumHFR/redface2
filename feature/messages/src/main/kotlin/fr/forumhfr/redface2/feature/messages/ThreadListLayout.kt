@@ -2,6 +2,8 @@ package fr.forumhfr.redface2.feature.messages
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.post.PostCardShellFlatBottomEdge
@@ -36,6 +38,16 @@ internal fun threadListArrangement(fullWidthPosts: Boolean): Arrangement.Vertica
     if (fullWidthPosts) Arrangement.Top else Arrangement.spacedBy(LIST_ITEM_GAP)
 
 /**
+ * #509/#1050 — a hidden-message placeholder remains an inset card when ordinary messages go flat.
+ * Card mode is an identity because the list already owns its 16.dp gutter and 12.dp rhythm.
+ */
+internal fun Modifier.threadIslandPadding(fullWidthPosts: Boolean): Modifier = if (fullWidthPosts) {
+    padding(horizontal = LIST_SIDE_GUTTER, vertical = ISLAND_VERTICAL_INSET)
+} else {
+    this
+}
+
+/**
  * #983/#1050 — closes a flat message only when another ordinary message follows. The last message
  * never draws a dangling rule, including when the pager island follows it. Card mode returns the
  * shell default; [PostCardShellFlatBottomEdge] is ignored there.
@@ -65,3 +77,6 @@ private val LIST_BOTTOM_INSET: Dp = 88.dp
 
 /** #298 — the 12.dp vertical rhythm of the message feed. Card mode only since #1050. */
 private val LIST_ITEM_GAP: Dp = 12.dp
+
+/** Half of the card-mode inter-message rhythm, owned locally by a full-width island. */
+private val ISLAND_VERTICAL_INSET: Dp = 6.dp

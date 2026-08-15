@@ -93,7 +93,21 @@ data class PrivateMessageThreadUiState(
     sealed interface Mode {
         data object RequiresLogin : Mode
         data object Loading : Mode
-        data class Content(val thread: PrivateMessageThread) : Mode
+        data class Content(
+            val thread: PrivateMessageThread,
+            /**
+             * #509/#1050 — `numreponse` of this page's messages whose canonical author is blocked.
+             * The full [PrivateMessageThread.messages] list stays intact; the screen replaces only
+             * these cards with a collapsed placeholder, preserving pagination, keys and anchors.
+             */
+            val hiddenNumreponses: Set<Int> = emptySet(),
+            /**
+             * The canonical blacklist snapshot used to compute [hiddenNumreponses]. Supplied to
+             * `LocalBlockedQuoteAuthors` by the thread screen so quoted content cannot bypass the
+             * message-level mask. Both sets are built together by the ViewModel.
+             */
+            val blockedQuoteAuthors: Set<String> = emptySet(),
+        ) : Mode
 
         /**
          * A load failure. Carries NO raw throwable message on purpose (#316): a network or auth

@@ -13,6 +13,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostBlock
@@ -35,7 +36,8 @@ import org.robolectric.annotation.Config
  * reading-card refactor. These assertions pin the CURRENT MP composition: subject/correspondent
  * chrome, one ordered card per message, a trailing pager on multi-page threads, and the anonymous
  * placeholder. #1050 adds the mounted full-width sequence, hot signature presentation and internal
- * LazyListState anchor proofs without weakening those default-path assertions.
+ * LazyListState anchor proofs without weakening those default-path assertions. #509/#1050 adds the
+ * blacklist placeholder, page-local reveal and blocked-quote provider contracts.
  */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -179,6 +181,131 @@ class PrivateMessageThreadContentTest {
     }
 
     @Test
+    fun `blacklist keeps one placeholder per message in one-to-one and DT threads`() {
+        val messages = listOf(
+            message(101, "Alice", "Secret Alice"),
+            message(102, "Bob", "Message visible"),
+        )
+        val state = mutableStateOf(
+            contentState(
+                messages = messages,
+                hiddenNumreponses = setOf(101),
+                blockedQuoteAuthors = setOf("alice"),
+                isMultiRecipient = false,
+            ),
+        )
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                PrivateMessageThreadContent(
+                    state = state.value,
+                    // Deliberately false: masking must not depend on this ephemeral inbox hint.
+                    isMultiRecipientHint = false,
+                    callbacks = NO_OP_CALLBACKS,
+                )
+            }
+        }
+
+        compose.onNodeWithText("Post de Alice masqué").assertIsDisplayed()
+        compose.onNodeWithText("Secret Alice").assertDoesNotExist()
+        compose.onNodeWithText("Message visible").assertIsDisplayed()
+        val heading = SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading)
+        compose.onAllNodes(heading, useUnmergedTree = true).assertCountEquals(2)
+
+        compose.runOnIdle {
+            state.value = contentState(
+                messages = messages,
+                hiddenNumreponses = setOf(101),
+                blockedQuoteAuthors = setOf("alice"),
+                isMultiRecipient = true,
+            )
+        }
+
+        compose.onNodeWithText("Post de Alice masqué").assertIsDisplayed()
+        compose.onNodeWithText("Secret Alice").assertDoesNotExist()
+        compose.onAllNodes(heading, useUnmergedTree = true).assertCountEquals(2)
+    }
+
+    @Test
+    fun `revealing a hidden message lasts only until another page lands`() {
+        val state = mutableStateOf(
+            contentState(
+                messages = listOf(message(101, "Alice", "Secret page 1")),
+                hiddenNumreponses = setOf(101),
+                blockedQuoteAuthors = setOf("alice"),
+                page = 1,
+                totalPages = 2,
+            ),
+        )
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                PrivateMessageThreadContent(
+                    state = state.value,
+                    isMultiRecipientHint = false,
+                    callbacks = NO_OP_CALLBACKS,
+                )
+            }
+        }
+
+        compose.onNodeWithText("Secret page 1").assertDoesNotExist()
+        compose.onNodeWithText("Afficher").performClick()
+        compose.onNodeWithText("Secret page 1").assertIsDisplayed()
+
+        compose.runOnIdle {
+            state.value = contentState(
+                messages = listOf(message(201, "Alice", "Secret page 2")),
+                hiddenNumreponses = setOf(201),
+                blockedQuoteAuthors = setOf("alice"),
+                page = 2,
+                totalPages = 2,
+            )
+        }
+
+        compose.onNodeWithText("Post de Alice masqué").assertIsDisplayed()
+        compose.onNodeWithText("Secret page 2").assertDoesNotExist()
+    }
+
+    @Test
+    fun `blocked quote authors are masked inside a visible MP message`() {
+        val quotedBody = "Fuite par citation"
+        val quotingMessage = message(102, "Bob", "Introduction").copy(
+            content = PostContent(
+                blocks = listOf(
+                    PostBlock.Paragraph(inlines = listOf(PostInline.Text("Introduction"))),
+                    PostBlock.Quote(
+                        author = "Alice",
+                        numreponse = 101,
+                        page = 1,
+                        content = PostContent(
+                            blocks = listOf(
+                                PostBlock.Paragraph(inlines = listOf(PostInline.Text(quotedBody))),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        val state = contentState(
+            messages = listOf(quotingMessage),
+            hiddenNumreponses = emptySet(),
+            blockedQuoteAuthors = setOf("alice"),
+        )
+
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                PrivateMessageThreadContent(
+                    state = state,
+                    isMultiRecipientHint = false,
+                    callbacks = NO_OP_CALLBACKS,
+                )
+            }
+        }
+
+        compose.onNodeWithText("Introduction").assertIsDisplayed()
+        compose.onNodeWithText("Citation de Alice masquée").assertIsDisplayed()
+        compose.onNodeWithText(quotedBody).assertDoesNotExist()
+    }
+
+    @Test
     fun `full width toggle keeps the internal lazy list reading anchor`() {
         val state = mutableStateOf(
             contentState(
@@ -248,23 +375,34 @@ class PrivateMessageThreadContentTest {
         }
     }
 
-    private fun contentState(messages: List<Post>): PrivateMessageThreadUiState {
-        val request = PrivateMessageThreadRequest(threadId = THREAD_ID, page = 1)
+    @Suppress("LongParameterList") // Test state factory: every argument controls one independent contract.
+    private fun contentState(
+        messages: List<Post>,
+        hiddenNumreponses: Set<Int> = emptySet(),
+        blockedQuoteAuthors: Set<String> = emptySet(),
+        page: Int = 1,
+        totalPages: Int = 1,
+        isMultiRecipient: Boolean = false,
+    ): PrivateMessageThreadUiState {
+        val request = PrivateMessageThreadRequest(threadId = THREAD_ID, page = page)
         return PrivateMessageThreadUiState(
             request = request,
             mode = PrivateMessageThreadUiState.Mode.Content(
-                PrivateMessageThread(
+                thread = PrivateMessageThread(
                     threadId = THREAD_ID,
                     subject = "Sujet",
                     correspondent = "Correspondant",
                     messages = messages,
-                    page = 1,
-                    totalPages = 1,
+                    page = page,
+                    totalPages = totalPages,
                     canReply = false,
+                    isMultiRecipient = isMultiRecipient,
                 ),
+                hiddenNumreponses = hiddenNumreponses,
+                blockedQuoteAuthors = blockedQuoteAuthors,
             ),
-            page = 1,
-            totalPages = 1,
+            page = page,
+            totalPages = totalPages,
         )
     }
 
