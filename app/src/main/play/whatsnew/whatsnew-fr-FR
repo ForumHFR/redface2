@@ -1,6 +1,6 @@
-Redface 2 v0.41.0 — bêta.
+Redface 2 v0.42.0 — dev.
 
-- Les citations directes de vos messages sont désormais mises en évidence.
-- Vos propres messages disposent aussi d'un fond distinct.
-- Les deux options sont activées par défaut et peuvent être réglées séparément dans « Sujet et lecture ».
-- Les couleurs s'adaptent aux thèmes clair, sombre et AMOLED, y compris avec les posts en pleine largeur.
+- Dans les messages privés, un appui long sur une image permet de l'enregistrer, de copier son URL ou de l'ouvrir dans le navigateur.
+- Les conversations privées suivent désormais votre préréglage de densité.
+- Leur texte peut être sélectionné et copié ; touchez un avatar ou un pseudo pour ouvrir le profil lorsqu'il est disponible.
+- Le dernier message et la pagination ne passent plus sous le bouton « Répondre ».
