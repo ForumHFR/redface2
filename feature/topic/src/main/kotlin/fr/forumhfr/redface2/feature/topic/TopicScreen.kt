@@ -123,6 +123,7 @@ import fr.forumhfr.redface2.core.ui.RedfacePlaceholderScreen
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
+import fr.forumhfr.redface2.core.ui.post.HiddenPostCard
 import fr.forumhfr.redface2.core.ui.post.PostCardShellFlatBottomEdge
 import fr.forumhfr.redface2.core.ui.post.PostIdentityBand
 import fr.forumhfr.redface2.core.ui.post.PostIdentityHeader
@@ -2734,44 +2735,6 @@ private fun TopicPollCard(
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            }
-        }
-    }
-}
-
-/**
- * #509 — collapsed placeholder shown in place of a blacklisted author's post. The post is NOT removed
- * from the list (index/anchor/`numreponse` invariants stay intact); only its body is replaced by this
- * one-line card. « Afficher » reveals the real card for the current page only. By design it exposes no
- * quote/edit/menu action (decision #1): the reader reveals first, then acts on the full card.
- */
-@Composable
-internal fun HiddenPostCard(
-    author: String,
-    onReveal: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        ),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(
-                text = stringResource(R.string.topic_post_hidden_by_author, author),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f, fill = false),
-            )
-            TextButton(onClick = onReveal) {
-                Text(text = stringResource(R.string.topic_post_hidden_reveal))
             }
         }
     }

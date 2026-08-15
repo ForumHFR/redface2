@@ -5,8 +5,12 @@
     <string name="post_quote_ego_state_description">Citation de votre message</string>
     <!-- #699 : libellé a11y du tap sur l'en-tête d'une citation sourcée (aller au message cité). -->
     <string name="post_quote_go_to">Aller au message cité</string>
+    <!-- #509/#1050 : placeholder partagé d'un post/message dont l'auteur est black-listé. Noms
+         neutres : :core:ui ne dépend d'aucune ressource de feature. -->
+    <string name="post_hidden_by_author">Post de %1$s masqué</string>
+    <string name="post_hidden_reveal">Afficher</string>
     <!-- #785 : placeholder d'une citation dont l'auteur est black-listé. Le pseudo reste visible,
-         cohérent avec topic_post_hidden_by_author côté posts (le lecteur sait QUI est masqué). -->
+         cohérent avec post_hidden_by_author au niveau post/message (le lecteur sait QUI est masqué). -->
     <string name="post_quote_blocked_author">Citation de %1$s masquée</string>
     <string name="post_quote_collapsed">Citation imbriquée repliée</string>
     <string name="post_quote_collapsed_revealed">Citations imbriquées</string>

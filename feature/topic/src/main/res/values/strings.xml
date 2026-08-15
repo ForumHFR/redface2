@@ -17,9 +17,6 @@
     <!-- #291 — entrée du menu contextuel : ajoute/retire le post du panier de citation multiple. -->
     <string name="topic_post_menu_multi_quote_add">Ajouter à la citation multiple</string>
     <string name="topic_post_menu_multi_quote_remove">Retirer de la citation multiple</string>
-    <!-- #509 — placeholder replié à la place d'un post d'auteur masqué (blacklist). %1$s = pseudo. -->
-    <string name="topic_post_hidden_by_author">Post de %1$s masqué</string>
-    <string name="topic_post_hidden_reveal">Afficher</string>
     <string name="topic_loading">Chargement…</string>
     <!-- #604 — libellé du skeleton de chargement (mockup « Chargement A »), sous le loader centré. -->
     <string name="topic_loading_body">Chargement de la page demandée</string>
