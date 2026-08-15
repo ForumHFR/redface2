@@ -22,8 +22,9 @@ import org.robolectric.annotation.GraphicsMode
 /**
  * #785 — the blacklist applies INSIDE quotes: a citation whose author is black-listed renders as
  * the `BlockedQuoteBlock` placeholder (body hidden, « Afficher »/« Masquer » reveal), while every
- * surface that does not provide [LocalBlockedQuoteAuthors] (editor preview, MP threads, signatures)
- * keeps rendering quotes untouched through the empty default. The pure canonical-match decision
+ * surface that does not provide [LocalBlockedQuoteAuthors] (editor preview or a direct renderer host)
+ * keeps rendering quotes untouched through the empty default. Reading topics and MP threads provide
+ * the local around their lists. The pure canonical-match decision
  * (`isBlockedQuoteAuthor`) is pinned separately in [PostRendererQuoteDepthTest].
  */
 @RunWith(RobolectricTestRunner::class)
@@ -56,7 +57,7 @@ class PostRendererBlockedQuoteTest {
                             PostRenderer(content = content)
                         }
                     } else {
-                        // No provider — exercises the empty default every non-topic surface gets.
+                        // No provider — exercises the safe empty default of a direct renderer host.
                         PostRenderer(content = content)
                     }
                 }
@@ -114,7 +115,7 @@ class PostRendererBlockedQuoteTest {
 
     @Test
     fun `without a provider the default empty set leaves quotes alone`() {
-        // Editor preview / MP threads / signatures never provide the local: nothing may mask there.
+        // A direct renderer host without a reading-screen provider leaves the quote untouched.
         setPost(blocked = null, quoteFrom("Alice"))
 
         composeTestRule.onNodeWithText(quotedBody).assertExists()

@@ -905,8 +905,8 @@ private fun CollapsedQuoteBlock(
 
 /**
  * #785 — placeholder for a quote whose author is black-listed, mirroring the [CollapsedQuoteBlock]
- * interaction (one-line label + « Afficher »/« Masquer », the whole frame toggles) and the topic
- * screen's `HiddenPostCard` copy (the pseudo stays visible, consistent with the post-level mask).
+ * interaction (one-line label + « Afficher »/« Masquer », the whole frame toggles) and the shared
+ * [HiddenPostCard] (the pseudo stays visible, consistent with the post-level mask).
  * The reveal is per-quote and transient (`rememberSaveable`, same lifetime as the other folds).
  * Unlike [CollapsedQuoteBlock] the reveal keeps the REAL depth (`quoteDepth + 1`, like the expanded
  * render): revealing a blocked quote must not grant extra nesting levels, and a blocked citation

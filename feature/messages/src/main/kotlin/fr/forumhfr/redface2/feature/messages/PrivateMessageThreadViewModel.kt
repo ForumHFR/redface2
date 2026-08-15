@@ -7,6 +7,8 @@ import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.blacklist.BlacklistRepository
+import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.media.ImageSaveException
 import fr.forumhfr.redface2.core.domain.media.PostImageSaver
@@ -16,6 +18,8 @@ import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.Post
+import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
 import fr.forumhfr.redface2.core.model.mpstorage.MpStorageFlagEntry
 import fr.forumhfr.redface2.core.model.write.PrivateMessageReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyForm
@@ -26,6 +30,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
@@ -48,6 +53,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     private val repository: MessagesRepository,
     private val authRepository: AuthRepository,
     private val userPreferencesRepository: UserPreferencesRepository,
+    private val blacklistRepository: BlacklistRepository,
     private val readPositionStore: PrivateMessageReadPositionStore,
     private val mpStorageRepository: MpStorageRepository,
     private val writeRepository: PrivateMessageWriteRepository,
@@ -66,6 +72,11 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     // #430 — single in-flight position write, latest-wins (cf. savePosition).
     private var saveJob: Job? = null
     private var authenticatedPseudo: String? = null
+    // #509/#1050 — unlike the global render preferences, the blacklist snapshot is session-owned.
+    // Its collector is restarted after login/account switch so the new session obtains a fresh
+    // repository snapshot instead of reusing the previous session's last in-memory set.
+    private var blacklistJob: Job? = null
+    private var blockedCanonicals: Set<String> = emptySet()
 
     // #612 — participant roster. Single in-flight fetch (dedup on rapid taps / recomposition) and a
     // memory cache for the life of the screen: re-opening the sheet reuses the parsed list without a
@@ -96,6 +107,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
                             // derives both markers from this session-bound value (never from the
                             // cached Post.isOwnPost bit), so an A → B switch re-resolves them.
                             _state.update { it.copy(connectedPseudo = authState.pseudo) }
+                            observeBlockedCanonicals()
                             loadInitial()
                         }
                     }
@@ -261,8 +273,9 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     /**
      * Purges everything owned by the previous session: the in-flight jobs, the cached roster form
      * and the whole UI state — only the four render-only preferences survive the reset (they are
-     * not session data). This is the single purge path for the three session exits of the
-     * architecture contract (anonymous, logout, session change): the anonymous/logout callers keep
+     * not session data); the blacklist collector and its cached snapshot do not. This is the single
+     * purge path for the three session exits of the architecture contract (anonymous, logout,
+     * session change): the anonymous/logout callers keep
      * the default [nextMode] (the login placeholder), while a direct A → B account switch passes
      * [PrivateMessageThreadUiState.Mode.Loading] because B's load is already known to follow — the
      * reader must see neither A's conversation nor a spurious login screen in between.
@@ -278,6 +291,9 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
         loadJob?.cancel()
         saveJob?.cancel()
         rosterJob?.cancel()
+        blacklistJob?.cancel()
+        blacklistJob = null
+        blockedCanonicals = emptySet()
         cachedRosterForm = null
         // The render-only preferences survive the reset (they are not session data); the session
         // pseudo does NOT — falling back to initial()'s null connectedPseudo purges it on every
@@ -337,6 +353,48 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
         }
     }
 
+    /**
+     * #509/#1050 — session-bound, load-independent blacklist collector. It is never a child of
+     * [loadJob], so block/unblock updates the page already on screen without a refetch. Every
+     * authenticated session gets a fresh subscription (the repository contract emits its current
+     * set immediately); [clearPrivateState] cancels it and drops the cached snapshot on logout or a
+     * direct account switch.
+     */
+    private fun observeBlockedCanonicals() {
+        blacklistJob?.cancel()
+        blacklistJob = blacklistRepository.observeBlockedCanonicals()
+            .onEach { blocked ->
+                blockedCanonicals = blocked
+                _state.update { current ->
+                    val content = current.mode as? PrivateMessageThreadUiState.Mode.Content
+                        ?: return@update current
+                    current.copy(mode = contentMode(content.thread))
+                }
+            }
+            .catch { error ->
+                android.util.Log.w("PrivateMessageThreadVM", "Blacklist observe failed", error)
+            }
+            .launchIn(viewModelScope)
+    }
+
+    /**
+     * Single construction seam for a loaded page: post-level and quote-level masking always use the
+     * same blacklist snapshot, on initial load, page change and live blacklist re-filter alike.
+     */
+    private fun contentMode(thread: PrivateMessageThread) =
+        PrivateMessageThreadUiState.Mode.Content(
+            thread = thread,
+            hiddenNumreponses = computeHiddenNumreponses(thread.messages),
+            blockedQuoteAuthors = blockedCanonicals,
+        )
+
+    private fun computeHiddenNumreponses(messages: List<Post>): Set<Int> {
+        if (blockedCanonicals.isEmpty()) return emptySet()
+        return messages.asSequence()
+            .filter { message -> canonicalizePseudo(message.author) in blockedCanonicals }
+            .mapTo(mutableSetOf()) { message -> message.numreponse }
+    }
+
     private suspend fun fetchPage(page: Int) {
         // Snapshot of the session that issued this fetch — savePosition is sealed to it (#462).
         val owner = authenticatedPseudo ?: return
@@ -361,7 +419,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
             )
             _state.update {
                 it.copy(
-                    mode = PrivateMessageThreadUiState.Mode.Content(thread),
+                    mode = contentMode(thread),
                     page = thread.page,
                     totalPages = thread.totalPages,
                     isRefreshing = false,

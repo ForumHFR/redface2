@@ -22,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -49,6 +50,7 @@ import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.list.ScrollToTopOnPageChange
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
+import fr.forumhfr.redface2.core.ui.post.HiddenPostCard
 import fr.forumhfr.redface2.core.ui.post.PostCardShellFlatBottomEdge
 import fr.forumhfr.redface2.core.ui.post.PostIdentityHeader
 import fr.forumhfr.redface2.core.ui.post.PostImageActions
@@ -57,6 +59,7 @@ import fr.forumhfr.redface2.core.ui.post.PostImageTarget
 import fr.forumhfr.redface2.core.ui.post.PostListScaffold
 import fr.forumhfr.redface2.core.ui.post.ReadingPostCard
 import fr.forumhfr.redface2.core.ui.post.ReadingPostCardPresentation
+import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 import java.time.Instant
 import java.time.ZoneId
@@ -346,32 +349,40 @@ internal fun PrivateMessageThreadContent(
                         // shared PostListScaffold; the swipe chain rides the inner list via listModifier
                         // (so the scrollbar stays fixed while the page follows the finger) and the MP
                         // list chrome is the feature-owned ThreadListLayout.kt geometry (#1046).
-                        ThreadMessages(
-                            messages = mode.thread.messages,
-                            page = state.page,
-                            totalPages = state.totalPages,
-                            fullWidthPosts = state.fullWidthPosts,
-                            showSignatures = state.showSignatures,
-                            egoQuoteEnabled = state.egoQuoteEnabled,
-                            egoPostEnabled = state.egoPostEnabled,
-                            connectedPseudo = state.connectedPseudo,
-                            onSelectPage = callbacks.onSelectPage,
-                            onOpenProfile = callbacks.onOpenProfile,
-                            onImageLongPress = postImageActions.onLongPress,
-                            // Codex review — gate the pager buttons with the same condition as
-                            // the swipe: re-tapping during a keep-content load would only cancel
-                            // and restart the round-trip (supersede), never advance faster.
-                            pagerEnabled = !state.isRefreshing,
-                            listState = listState,
-                            // #351b — horizontal swipe changes page in place (same thresholds
-                            // and feel as the topic via the shared :core:ui geometry).
-                            swipeModifier = rememberThreadSwipeModifier(
-                                renderedPage = mode.thread.page,
+                        // #785/#1050 — the same snapshot that selects hidden message placeholders
+                        // also reaches PostRenderer, so a third party quoting a blocked author cannot
+                        // leak that author's body. Scoped to the reading list only.
+                        CompositionLocalProvider(
+                            LocalBlockedQuoteAuthors provides mode.blockedQuoteAuthors,
+                        ) {
+                            ThreadMessages(
+                                messages = mode.thread.messages,
+                                hiddenNumreponses = mode.hiddenNumreponses,
+                                page = state.page,
                                 totalPages = state.totalPages,
-                                isRefreshing = state.isRefreshing,
+                                fullWidthPosts = state.fullWidthPosts,
+                                showSignatures = state.showSignatures,
+                                egoQuoteEnabled = state.egoQuoteEnabled,
+                                egoPostEnabled = state.egoPostEnabled,
+                                connectedPseudo = state.connectedPseudo,
                                 onSelectPage = callbacks.onSelectPage,
-                            ),
-                        )
+                                onOpenProfile = callbacks.onOpenProfile,
+                                onImageLongPress = postImageActions.onLongPress,
+                                // Codex review — gate the pager buttons with the same condition as
+                                // the swipe: re-tapping during a keep-content load would only cancel
+                                // and restart the round-trip (supersede), never advance faster.
+                                pagerEnabled = !state.isRefreshing,
+                                listState = listState,
+                                // #351b — horizontal swipe changes page in place (same thresholds
+                                // and feel as the topic via the shared :core:ui geometry).
+                                swipeModifier = rememberThreadSwipeModifier(
+                                    renderedPage = mode.thread.page,
+                                    totalPages = state.totalPages,
+                                    isRefreshing = state.isRefreshing,
+                                    onSelectPage = callbacks.onSelectPage,
+                                ),
+                            )
+                        }
                     }
                 }
             }
@@ -544,6 +555,7 @@ internal fun rememberThreadSwipeModifier(
 @Suppress("LongParameterList") // List host: pager state + hoisted list state + swipe chain, all distinct.
 private fun ThreadMessages(
     messages: List<Post>,
+    hiddenNumreponses: Set<Int>,
     page: Int,
     totalPages: Int,
     fullWidthPosts: Boolean,
@@ -558,6 +570,9 @@ private fun ThreadMessages(
     listState: LazyListState,
     swipeModifier: Modifier = Modifier,
 ) {
+    // #509/#1050 — reveal is deliberately page-local and non-saveable. In-place pagination keeps
+    // this composition alive, so keying on the landed page is what re-collapses every placeholder.
+    var revealedHiddenMessages by remember(page) { mutableStateOf(emptySet<Int>()) }
     // #1050 — the MP mirror of the topic list's #874 derivation: canonicalize the live session
     // pseudo ONCE for the rendered page, then match the page's message authors once while building
     // the set below. Lazy cards only consume the resulting pseudo/set. `Post.isOwnPost` is
@@ -603,25 +618,41 @@ private fun ThreadMessages(
             items = messages,
             key = { _, message -> message.numreponse },
         ) { index, message ->
-            MessageCard(
-                message = message,
-                presentation = ReadingPostCardPresentation(
-                    showSignature = showSignatures,
-                    flat = fullWidthPosts,
-                    flatBottomEdge = threadMessageFlatBottomEdge(
-                        fullWidthPosts = fullWidthPosts,
-                        hasFollowingMessage = index < messages.lastIndex,
+            if (isHiddenMessage(message, hiddenNumreponses, revealedHiddenMessages)) {
+                HiddenPostCard(
+                    author = message.author,
+                    onReveal = {
+                        revealedHiddenMessages = revealedHiddenMessages + message.numreponse
+                    },
+                    modifier = Modifier.threadIslandPadding(fullWidthPosts),
+                )
+            } else {
+                val nextMessage = messages.getOrNull(index + 1)
+                val hasFollowingVisibleMessage = nextMessage != null && !isHiddenMessage(
+                    nextMessage,
+                    hiddenNumreponses,
+                    revealedHiddenMessages,
+                )
+                MessageCard(
+                    message = message,
+                    presentation = ReadingPostCardPresentation(
+                        showSignature = showSignatures,
+                        flat = fullWidthPosts,
+                        flatBottomEdge = threadMessageFlatBottomEdge(
+                            fullWidthPosts = fullWidthPosts,
+                            hasFollowingMessage = hasFollowingVisibleMessage,
+                        ),
+                        egoQuoteCanonicalPseudo = egoQuoteCanonicalPseudo,
+                        egoPostHighlighted = message.numreponse in egoPostNumreponses,
                     ),
-                    egoQuoteCanonicalPseudo = egoQuoteCanonicalPseudo,
-                    egoPostHighlighted = message.numreponse in egoPostNumreponses,
-                ),
-                // #1042 — same gate as the topic card (#208): a message whose page row carried no
-                // profile link ([Post.profileId] null) keeps its identity line inert.
-                onOpenProfile = message.profileId?.let { profileId ->
-                    { onOpenProfile(profileId, message.author, message.avatarUrl) }
-                },
-                onImageLongPress = onImageLongPress,
-            )
+                    // #1042 — same gate as the topic card (#208): a message whose page row carried no
+                    // profile link ([Post.profileId] null) keeps its identity line inert.
+                    onOpenProfile = message.profileId?.let { profileId ->
+                        { onOpenProfile(profileId, message.author, message.avatarUrl) }
+                    },
+                    onImageLongPress = onImageLongPress,
+                )
+            }
         }
         if (totalPages > 1) {
             item {
@@ -653,6 +684,10 @@ private fun ThreadMessages(
         }
     }
 }
+
+/** The message stays in the keyed list; this helper selects only which card represents it. */
+internal fun isHiddenMessage(message: Post, hidden: Set<Int>, revealed: Set<Int>): Boolean =
+    message.numreponse in hidden && message.numreponse !in revealed
 
 /**
  * #1042 — the MP thread's thin feature adapter over the shared [ReadingPostCard], the same pattern
