@@ -16,6 +16,26 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.42.0` — `internal` (dev) — 2026-08-15
+
+### Ajouté
+
+- **Un appui long sur une image d'un message privé ouvre désormais le menu contextuel** ([#1051](https://github.com/ForumHFR/redface2/issues/1051)) : enregistrer l'image, copier son URL ou l'ouvrir dans le navigateur, alors qu'aucune action n'était proposée auparavant.
+- **Les conversations privées suivent désormais le préréglage de densité du lecteur** ([#1042](https://github.com/ForumHFR/redface2/issues/1042)) : leurs gouttières et leur inset haut ne restent plus figés à 16 dp ; la gouttière du corps mesure 12 dp avec le préréglage Comfort.
+- **Le texte d'un message privé est sélectionnable et copiable**, comme dans un sujet ([#1042](https://github.com/ForumHFR/redface2/issues/1042)).
+- **Un tap sur l'avatar ou le pseudo d'un message privé ouvre le profil**, quand la page expose le lien ([#1042](https://github.com/ForumHFR/redface2/issues/1042)).
+
+### Corrigé
+
+- **Le dernier message d'une conversation et sa rangée de pagination passaient sous le bouton flottant « Répondre »** ([#1046](https://github.com/ForumHFR/redface2/issues/1046)). La liste réserve désormais le dégagement nécessaire.
+
+### Interne
+
+- Le chantier de parité de lecture [#1040](https://github.com/ForumHFR/redface2/issues/1040) rend explicite une dette jusque-là invisible : entre le 20 juin et le 12 août, 74 commits ont touché la surface Topic contre 7 pour les MP, sans document pour tracer l'écart. Une matrice ancrée au code et à des fixtures réelles suit désormais chaque fonction.
+- La carte `ReadingPostCard` et le menu d'image ont été promus dans `:core:ui` pour servir Topic et MP ; les contrats de citation MP reposent sur des fixtures réduites, et le modèle expose une projection texte complète du contenu des posts.
+
+---
+
 ## `0.41.0` — `open` (beta) — 2026-08-11
 
 Promue en bêta le 11/08 sans changement de `versionName` : le lot dev 0.41.0 du 10/08 part tel quel
