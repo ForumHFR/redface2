@@ -1,8 +1,12 @@
 package fr.forumhfr.redface2.feature.messages
 
+import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
+import fr.forumhfr.redface2.core.domain.media.ImageSaveException
+import fr.forumhfr.redface2.core.domain.media.PostImageSaver
+import fr.forumhfr.redface2.core.domain.media.SavedPostImage
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageReadPositionStore
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
@@ -57,14 +61,22 @@ class PrivateMessageThreadViewModelTest {
         page = 1,
     )
 
+    @Suppress("LongParameterList") // Test factory : each dep has a default so call-sites stay terse.
     private fun threadViewModel(
         repository: MessagesRepository,
         authRepository: AuthRepository = FakeAuthRepository(),
         readPositionStore: PrivateMessageReadPositionStore = FakeReadPositionStore(),
         mpStorageRepository: MpStorageRepository = FakeMpStorageRepository(),
         writeRepository: PrivateMessageWriteRepository = mockk(relaxed = true),
+        postImageSaver: PostImageSaver = mockk(relaxed = true),
     ) = PrivateMessageThreadViewModel(
-        request, repository, authRepository, readPositionStore, mpStorageRepository, writeRepository,
+        request = request,
+        repository = repository,
+        authRepository = authRepository,
+        readPositionStore = readPositionStore,
+        mpStorageRepository = mpStorageRepository,
+        writeRepository = writeRepository,
+        postImageSaver = postImageSaver,
     )
 
     @Test
@@ -98,6 +110,7 @@ class PrivateMessageThreadViewModelTest {
             readPositionStore = FakeReadPositionStore(),
             mpStorageRepository = FakeMpStorageRepository(),
             writeRepository = mockk(relaxed = true),
+            postImageSaver = mockk(relaxed = true),
         )
 
         assertEquals(PrivateMessageThreadUiState.Mode.RequiresLogin, viewModel.state.value.mode)
@@ -231,6 +244,62 @@ class PrivateMessageThreadViewModelTest {
     }
 
     @Test
+    fun `a successful image save emits ImageSaved and forwards the URL to the saver`() = runTest {
+        val repository = loadedRepository()
+        val saver = FakePostImageSaver { SavedPostImage(displayName = "vacances.png") }
+        val viewModel = threadViewModel(repository, postImageSaver = saver)
+
+        // The save completes before a collector attaches: the buffered ViewModel effect survives
+        // the sheet's immediate dismissal and is still delivered to the screen collector.
+        viewModel.saveImage("https://images.example/vacances.png")
+        viewModel.effects.test {
+            assertEquals(PrivateMessageThreadEffect.ImageSaved, awaitItem())
+        }
+        assertEquals(listOf("https://images.example/vacances.png"), saver.requests)
+    }
+
+    @Test
+    fun `an image fetch failure emits ImageSaveFailedFetch`() = runTest {
+        val viewModel = threadViewModel(
+            loadedRepository(),
+            postImageSaver = FakePostImageSaver { throw ImageSaveException.Fetch() },
+        )
+
+        viewModel.effects.test {
+            viewModel.saveImage("https://images.example/gone.png")
+            assertEquals(PrivateMessageThreadEffect.ImageSaveFailedFetch, awaitItem())
+        }
+    }
+
+    @Test
+    fun `an image storage failure emits ImageSaveFailedStorage`() = runTest {
+        val viewModel = threadViewModel(
+            loadedRepository(),
+            postImageSaver = FakePostImageSaver { throw ImageSaveException.Storage() },
+        )
+
+        viewModel.effects.test {
+            viewModel.saveImage("https://images.example/full-disk.png")
+            assertEquals(PrivateMessageThreadEffect.ImageSaveFailedStorage, awaitItem())
+        }
+    }
+
+    @Test
+    fun `an oversized image emits ImageSaveFailedTooLarge`() = runTest {
+        val viewModel = threadViewModel(
+            loadedRepository(),
+            postImageSaver = FakePostImageSaver {
+                throw ImageSaveException.TooLarge(maxBytes = 1L)
+            },
+        )
+
+        viewModel.effects.test {
+            viewModel.saveImage("https://images.example/huge.png")
+            assertEquals(PrivateMessageThreadEffect.ImageSaveFailedTooLarge, awaitItem())
+        }
+    }
+
+    @Test
     fun `refresh is a no-op without loaded content`() = runTest {
         val repository = mockk<MessagesRepository>()
         coEvery {
@@ -284,6 +353,7 @@ class PrivateMessageThreadViewModelTest {
             readPositionStore = FakeReadPositionStore(initial = mapOf(42 to 7)),
             mpStorageRepository = FakeMpStorageRepository(),
             writeRepository = mockk(relaxed = true),
+            postImageSaver = mockk(relaxed = true),
         )
 
         coVerify(exactly = 1) {
@@ -307,6 +377,7 @@ class PrivateMessageThreadViewModelTest {
             readPositionStore = FakeReadPositionStore(initial = mapOf(42 to 3)),
             mpStorageRepository = FakeMpStorageRepository(),
             writeRepository = mockk(relaxed = true),
+            postImageSaver = mockk(relaxed = true),
         )
 
         coVerify(exactly = 1) {
@@ -327,8 +398,13 @@ class PrivateMessageThreadViewModelTest {
 
         val viewModel =
             PrivateMessageThreadViewModel(
-                request, repository, FakeAuthRepository(), store, FakeMpStorageRepository(),
-                mockk(relaxed = true),
+                request = request,
+                repository = repository,
+                authRepository = FakeAuthRepository(),
+                readPositionStore = store,
+                mpStorageRepository = FakeMpStorageRepository(),
+                writeRepository = mockk(relaxed = true),
+                postImageSaver = mockk(relaxed = true),
             )
         assertEquals(1, store.saved[42])
 
@@ -678,6 +754,23 @@ class PrivateMessageThreadViewModelTest {
         quotedAuthors = emptyList(),
         postIndex = null,
     )
+
+    private fun loadedRepository(): MessagesRepository = mockk<MessagesRepository>().also { repository ->
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns thread(page = 1, totalPages = 1)
+    }
+
+    private class FakePostImageSaver(
+        private val behaviour: (String) -> SavedPostImage,
+    ) : PostImageSaver {
+        val requests = mutableListOf<String>()
+
+        override suspend fun save(url: String): SavedPostImage {
+            requests += url
+            return behaviour(url)
+        }
+    }
 
     private class FakeAuthRepository(
         initial: AuthState = AuthState.Authenticated("xaat"),

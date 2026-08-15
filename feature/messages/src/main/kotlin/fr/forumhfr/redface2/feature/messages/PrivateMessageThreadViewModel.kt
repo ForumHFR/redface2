@@ -8,6 +8,8 @@ import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
+import fr.forumhfr.redface2.core.domain.media.ImageSaveException
+import fr.forumhfr.redface2.core.domain.media.PostImageSaver
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageReadPositionStore
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
@@ -35,6 +37,9 @@ import kotlinx.coroutines.launch
  * subject/correspondent so stale Navigation state cannot expose private metadata after logout.
  */
 @HiltViewModel(assistedFactory = PrivateMessageThreadViewModel.Factory::class)
+// Assisted route + one injected collaborator per independent thread concern; the image saver reuses
+// this existing lifecycle/effect owner instead of introducing the duplicate ViewModel rejected for #1051.
+@Suppress("LongParameterList")
 class PrivateMessageThreadViewModel @AssistedInject constructor(
     @Assisted private val request: PrivateMessageThreadRequest,
     private val repository: MessagesRepository,
@@ -42,6 +47,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     private val readPositionStore: PrivateMessageReadPositionStore,
     private val mpStorageRepository: MpStorageRepository,
     private val writeRepository: PrivateMessageWriteRepository,
+    private val postImageSaver: PostImageSaver,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(PrivateMessageThreadUiState.initial(request))
@@ -97,6 +103,27 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
         val current = _state.value
         if (current.mode !is PrivateMessageThreadUiState.Mode.Content || current.isRefreshing) return
         load(current.page)
+    }
+
+    /**
+     * #831/#1051 — saves a post image outside the sheet composition. The sheet closes immediately
+     * after routing the URL here; [viewModelScope] keeps the write alive and the typed effect is
+     * rendered by [PrivateMessageThreadScreen] when it completes.
+     */
+    fun saveImage(url: String) {
+        viewModelScope.launch {
+            val effect = try {
+                postImageSaver.save(url)
+                PrivateMessageThreadEffect.ImageSaved
+            } catch (e: ImageSaveException) {
+                when (e) {
+                    is ImageSaveException.Fetch -> PrivateMessageThreadEffect.ImageSaveFailedFetch
+                    is ImageSaveException.Storage -> PrivateMessageThreadEffect.ImageSaveFailedStorage
+                    is ImageSaveException.TooLarge -> PrivateMessageThreadEffect.ImageSaveFailedTooLarge
+                }
+            }
+            _effects.send(effect)
+        }
     }
 
     /**

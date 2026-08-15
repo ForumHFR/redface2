@@ -31,9 +31,10 @@ class PostImageActions(
  * surface swaps its handler, so scoped reads without fine-grained tracking are the right trade.
  *
  * Defaults to `null` = the surface offers NO image actions. Since #958 (Lot 2, §5) `null` makes
- * every content image TOTALLY inert — no tap even on a linked image, no long-press, no interactive
- * role — on private messages, the editor BBCode preview and signatures (text links stay live).
- * Only the topic reading surface provides a non-null value (TopicScreen).
+ * every content image TOTALLY inert: it installs neither `OnClick` nor `OnLongClick`, even when the
+ * image is linked. The image composable still exposes its content `Role.Image` from its non-null
+ * description on both active and inert hosts (text links stay live). Topic and private-message
+ * reading surfaces provide a non-null value.
  */
 val LocalPostImageActions = staticCompositionLocalOf<PostImageActions?> { null }
 

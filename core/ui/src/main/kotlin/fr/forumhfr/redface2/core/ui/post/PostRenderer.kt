@@ -1131,12 +1131,14 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
         // #831/#958 (Lot 2, §5) — contextual image menu on long-press + linked-image tap, BOTH gated
         // by the host capability below. A linked image (#257) gains its tap-through (opens linkUrl)
         // AND the long-press menu through ONE combinedClickable; an unlinked eligible image gets a
-        // long-press-ONLY handler. When the surface provides no actions (MP threads, editor preview,
-        // signatures: default null) the image is TOTALLY inert (no tap even if linked) — the Lot 2
-        // §5 target. data:/blob:/empty URLs are never menu-eligible.
+        // long-press-ONLY handler. When the surface provides no actions (editor preview, signatures
+        // and any host omitting the callback: default null) the image is TOTALLY inert — even when
+        // linked — the Lot 2 §5 target. data:/blob:/empty URLs are never menu-eligible.
         // #958 Lot 2 (§5) — the HOST capability (LocalPostImageActions != null) gates ALL image
-        // interaction. On the three null hosts (MP, editor preview, signature) the block image is
-        // TOTALLY inert — no tap (even linked), no long-press, no interactive role (matrice §5).
+        // interaction. On a null host (including editor preview and signature) the block image is
+        // TOTALLY inert — no tap (even linked), no long-press. Its image composable still exposes
+        // the content Role.Image from its non-null contentDescription on both active and inert
+        // hosts; only OnClick / OnLongClick discriminate the host's interactive capability.
         // Two independent gates (Sol reserve): the TAP-to-open-link depends on `linkUrl != null`
         // (NOT on the image URL's menu-eligibility) ; the long-press MENU depends on the image URL
         // being eligible. Role.Image + onClickLabel « Ouvrir l'image » ([AMENDEMENT-Lot2-2] : Role.Link
@@ -2048,10 +2050,12 @@ internal fun imageInlineContent(
         // #831/#958 (Lot 2, §5) — the lambda of an InlineTextContent is @Composable, so the
         // CompositionLocals are read HERE, without touching the invariant AnnotatedString (#175)
         // nor the remember keys of ParagraphBlock. The HOST capability (LocalPostImageActions
-        // != null) gates ALL interaction of a content image: on the three null hosts (MP, editor
-        // preview, signature) the image is TOTALLY inert — no tap even when [linkUrl] is set, no
-        // long-press, no interactive role. Two independent gates (Sol reserve): the TAP-to-open-
-        // link depends on `linkUrl != null` (threaded from the LinkAnnotation split), the
+        // != null) gates ALL interaction of a content image: on a null host (including editor
+        // preview and signature) the image is TOTALLY inert — no tap even when [linkUrl] is set, no
+        // long-press. Its image composable still exposes the content Role.Image from its non-null
+        // contentDescription on both active and inert hosts; only OnClick / OnLongClick
+        // discriminate the host's capability. Two independent gates (Sol reserve): the TAP-to-
+        // open-link depends on `linkUrl != null` (threaded from the LinkAnnotation split), the
         // long-press MENU on the image URL's eligibility; both live in ONE combinedClickable, so
         // tap and long-press are mutually exclusive by construction. Role.Image + onClickLabel
         // « Ouvrir l'image » ([AMENDEMENT-Lot2-2] : Role.Link does not exist in Compose 1.11.x).
