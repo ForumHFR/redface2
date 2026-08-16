@@ -117,15 +117,15 @@ class MessageCardReadingParityTest {
         compose.runOnIdle { metrics.value = TALL_RHYTHM_METRICS }
         val tallHeight = measuredCardHeightDp()
 
-        // MessageCard's vertical envelope from the preset: the zero-padding identity band leaves the
-        // header's historical cardBodyTop inset untouched, while the shared body adds cardBodyTop as
-        // the header↔body gap and cardBodyBottom below (footer-less card). The two presets share every
-        // other metric, so the height delta still isolates exactly those three MP-owned paddings.
+        // MessageCard's vertical envelope from the preset: the identity band uses
+        // cardHeaderVertical symmetrically, while the shared body adds cardBodyTop as the
+        // header↔body gap and cardBodyBottom below (footer-less card).
         val expectedDelta =
-            2 * (TALL_RHYTHM_METRICS.cardBodyTop - BASE_METRICS.cardBodyTop).value +
+            2 * (TALL_RHYTHM_METRICS.cardHeaderVertical - BASE_METRICS.cardHeaderVertical).value +
+                (TALL_RHYTHM_METRICS.cardBodyTop - BASE_METRICS.cardBodyTop).value +
                 (TALL_RHYTHM_METRICS.cardBodyBottom - BASE_METRICS.cardBodyBottom).value
         assertEquals(
-            "the card's vertical envelope must follow the preset's cardBodyTop/cardBodyBottom",
+            "the card's vertical envelope must follow the preset's header and body metrics",
             expectedDelta,
             tallHeight - baseHeight,
             DP_TOLERANCE,
@@ -397,9 +397,13 @@ class MessageCardReadingParityTest {
         // Differs from BASE in cardBodyHorizontal ONLY: horizontal measurements isolate the gutter.
         val WIDE_GUTTER_METRICS = BASE_METRICS.copy(cardBodyHorizontal = 24.dp)
 
-        // Differs from BASE in cardBodyTop/cardBodyBottom ONLY (same gutter, so no text re-wrap):
-        // vertical measurements isolate the card's vertical envelope.
-        val TALL_RHYTHM_METRICS = BASE_METRICS.copy(cardBodyTop = 22.dp, cardBodyBottom = 17.dp)
+        // Differs from BASE in vertical metrics ONLY (same gutter, so no text re-wrap): vertical
+        // measurements isolate the card's complete vertical envelope.
+        val TALL_RHYTHM_METRICS = BASE_METRICS.copy(
+            cardBodyTop = 22.dp,
+            cardBodyBottom = 17.dp,
+            cardHeaderVertical = 13.dp,
+        )
     }
 }
 

@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.feature.messages
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -28,6 +29,8 @@ import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.post.PostCardShellContainerColorKey
 import fr.forumhfr.redface2.core.ui.post.PostIdentityBandContainerColorKey
 import fr.forumhfr.redface2.core.ui.post.ReadingPostCardPresentation
+import fr.forumhfr.redface2.core.ui.theme.DisplayMetrics
+import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 import fr.forumhfr.redface2.core.ui.theme.RedfaceLightColorScheme
 import fr.forumhfr.redface2.core.ui.theme.egoHighlightColors
 import java.time.Instant
@@ -43,8 +46,8 @@ import org.robolectric.annotation.GraphicsMode
  * #1040 — MP identity-band contract on the real [MessageCard]:
  *  - the fixed `secondaryContainer` band spans the card in inset and full-width modes;
  *  - it remains inside the shell, whose Card clips it with the active rounded/rectangular shape;
- *  - the band adds no spacing: the historical MP 12.dp horizontal / 10.dp vertical gutters stay on
- *    the header and body slots in both modes;
+ *  - the band adds no spacing: horizontal gutters stay MP-owned while its header uses the same
+ *    symmetric `cardHeaderVertical` inset as the topic (6.dp Comfort / 4.dp Compact);
  *  - EgoPost colours only the card container and leaves the band fixed, while its state description
  *    and the pseudo's exactly-one heading keep their existing accessibility contract.
  */
@@ -68,7 +71,12 @@ class MessageCardIdentityBandTest {
             .assertLeftPositionInRootIsEqualTo(16.dp)
             .assertWidthIsEqualTo(328.dp)
             .assert(hasAnyAncestor(shellMatcher(RedfaceLightColorScheme.surfaceContainer)))
-        assertHistoricalMpGutters(cardLeft = 16.dp)
+        assertMpGutters(
+            cardLeft = 16.dp,
+            expectedHorizontal = 12.dp,
+            expectedBandVertical = 6.dp,
+            expectedBodyTop = 10.dp,
+        )
     }
 
     @Test
@@ -82,7 +90,24 @@ class MessageCardIdentityBandTest {
             .assertLeftPositionInRootIsEqualTo(0.dp)
             .assertWidthIsEqualTo(360.dp)
             .assert(hasAnyAncestor(shellMatcher(Color.Transparent)))
-        assertHistoricalMpGutters(cardLeft = 0.dp)
+        assertMpGutters(
+            cardLeft = 0.dp,
+            expectedHorizontal = 12.dp,
+            expectedBandVertical = 6.dp,
+            expectedBodyTop = 10.dp,
+        )
+    }
+
+    @Test
+    fun `compact band keeps symmetric header padding and compact body rhythm`() {
+        setCard(metrics = DisplayMetrics.Compact)
+
+        assertMpGutters(
+            cardLeft = 0.dp,
+            expectedHorizontal = 10.dp,
+            expectedBandVertical = 4.dp,
+            expectedBodyTop = 6.dp,
+        )
     }
 
     @Test
@@ -109,28 +134,39 @@ class MessageCardIdentityBandTest {
         assertEgoPostBandContract(expectedShellColor = expectedEgoPostColor)
     }
 
-    private fun setCard(flat: Boolean = false, horizontalInset: Dp = 0.dp) {
+    private fun setCard(
+        metrics: DisplayMetrics = DisplayMetrics.Comfort,
+        flat: Boolean = false,
+        horizontalInset: Dp = 0.dp,
+    ) {
         compose.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = horizontalInset),
-                ) {
-                    MessageCard(
-                        message = sampleMessage(),
-                        presentation = ReadingPostCardPresentation(flat = flat),
-                    )
+                CompositionLocalProvider(LocalDisplayMetrics provides metrics) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = horizontalInset),
+                    ) {
+                        MessageCard(
+                            message = sampleMessage(),
+                            presentation = ReadingPostCardPresentation(flat = flat),
+                        )
+                    }
                 }
             }
         }
     }
 
-    private fun assertHistoricalMpGutters(cardLeft: Dp) {
+    private fun assertMpGutters(
+        cardLeft: Dp,
+        expectedHorizontal: Dp,
+        expectedBandVertical: Dp,
+        expectedBodyTop: Dp,
+    ) {
         compose.onNodeWithContentDescription("Avatar de XaTriX")
-            .assertLeftPositionInRootIsEqualTo(cardLeft + 12.dp)
+            .assertLeftPositionInRootIsEqualTo(cardLeft + expectedHorizontal)
         compose.onNodeWithText(BODY_TEXT, useUnmergedTree = true)
-            .assertLeftPositionInRootIsEqualTo(cardLeft + 12.dp)
+            .assertLeftPositionInRootIsEqualTo(cardLeft + expectedHorizontal)
 
         val bandBounds = bandNode().fetchSemanticsNode().boundsInRoot
         val avatarBounds = compose.onNodeWithContentDescription("Avatar de XaTriX")
@@ -138,14 +174,20 @@ class MessageCardIdentityBandTest {
         val bodyBounds = compose.onNodeWithText(BODY_TEXT, useUnmergedTree = true)
             .fetchSemanticsNode().boundsInRoot
         assertEquals(
-            "the band must add no padding above the historical MP header inset",
-            10f,
+            "the band top inset must use cardHeaderVertical",
+            expectedBandVertical.value,
             with(compose.density) { (avatarBounds.top - bandBounds.top).toDp().value },
             DP_TOLERANCE,
         )
         assertEquals(
-            "the body must keep its historical gap below the identity band",
-            10f,
+            "the band bottom inset must match its top inset",
+            expectedBandVertical.value,
+            with(compose.density) { (bandBounds.bottom - avatarBounds.bottom).toDp().value },
+            DP_TOLERANCE,
+        )
+        assertEquals(
+            "the body gap must remain independently driven by cardBodyTop",
+            expectedBodyTop.value,
             with(compose.density) { (bodyBounds.top - bandBounds.bottom).toDp().value },
             DP_TOLERANCE,
         )
