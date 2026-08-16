@@ -14,6 +14,7 @@ import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import okhttp3.Call
 import okhttp3.FormBody
@@ -57,20 +58,16 @@ class HfrClient @Inject constructor(
             // pull from the response body. Splitting them lets a profiler tell a slow handshake
             // apart from a slow body download. The auth branch above wires the same prefix into
             // `executeAuthenticatedHtml`.
-            // `withContext(ioDispatcher)` ensures we never call OkHttp `.execute()` on the main
-            // thread, regardless of the caller's coroutine context (cf. PR #162 v43 — repository
-            // layer forgot the hop and triggered `NetworkOnMainThreadException`).
-            withContext(ioDispatcher) {
-                trace("$TOPIC_TRACE_PREFIX.network") {
-                    anonymous.newCall(request).execute()
-                }.use { response ->
-                    if (!response.isSuccessful) {
-                        // #324 — typed so the read screens can tell a 5xx outage from a
-                        // local network cut (cf. core.domain.error.classifyHfrError).
-                        throw HfrServerException(response.code, url.toString())
-                    }
-                    trace("$TOPIC_TRACE_PREFIX.body_read") { response.body.string() }
+            // `executeCancellable` owns both the IO hop and the coroutine -> Call.cancel bridge,
+            // regardless of the caller's context (cf. PR #162 v43 — repository layer forgot the
+            // hop and triggered `NetworkOnMainThreadException`).
+            anonymous.newCall(request).executeCancellable(tracePrefix = TOPIC_TRACE_PREFIX) { response ->
+                if (!response.isSuccessful) {
+                    // #324 — typed so the read screens can tell a 5xx outage from a
+                    // local network cut (cf. core.domain.error.classifyHfrError).
+                    throw HfrServerException(response.code, url.toString())
                 }
+                trace("$TOPIC_TRACE_PREFIX.body_read") { response.body.string() }
             }
         }
     }
@@ -747,15 +744,13 @@ class HfrClient @Inject constructor(
             .addPathSegment("profil-$userId.htm")
             .build()
         val request = Request.Builder().url(url).get().build()
-        return withContext(ioDispatcher) {
-            anonymous.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    // #324 — typed so the profile sheet/page can tell a 5xx outage from a
-                    // local network cut (cf. core.domain.error.classifyHfrError).
-                    throw HfrServerException(response.code, url.toString())
-                }
-                response.body.string()
+        return anonymous.newCall(request).executeCancellable { response ->
+            if (!response.isSuccessful) {
+                // #324 — typed so the profile sheet/page can tell a 5xx outage from a
+                // local network cut (cf. core.domain.error.classifyHfrError).
+                throw HfrServerException(response.code, url.toString())
             }
+            response.body.string()
         }
     }
 
@@ -797,18 +792,16 @@ class HfrClient @Inject constructor(
             .addQueryParameter("numreponse", numreponse.toString())
             .build()
         val request = Request.Builder().url(url).get().build()
-        return withContext(ioDispatcher) {
-            // The Location header is the only thing we want ; a network failure simply
-            // degrades to the caller's fallback (search-href page). Other exception
-            // kinds (cancellation, programming errors) keep propagating.
-            @Suppress("SwallowedException")
-            try {
-                anonymousNoRedirect.newCall(request).execute().use { response ->
-                    if (response.code in REDIRECT_CODE_RANGE) response.header("Location") else null
-                }
-            } catch (error: IOException) {
-                null
+        // The Location header is the only thing we want ; a network failure simply
+        // degrades to the caller's fallback (search-href page). Other exception
+        // kinds (cancellation, programming errors) keep propagating.
+        @Suppress("SwallowedException")
+        return try {
+            anonymousNoRedirect.newCall(request).executeCancellable { response ->
+                if (response.code in REDIRECT_CODE_RANGE) response.header("Location") else null
             }
+        } catch (error: IOException) {
+            null
         }
     }
 
@@ -817,10 +810,10 @@ class HfrClient @Inject constructor(
      * the `Location` header itself (cf. [resolveTopicPageUrl]). Derived once — sharing
      * the connection pool / dispatcher of [anonymous] — instead of being rebuilt per call.
      *
-     * The tight [HfrConstants.ProbeCallTimeout] (3 s vs the 30 s default) is the REAL
-     * timeout of the probe : the caller's `withTimeoutOrNull` cannot interrupt a blocking
-     * `execute()`, so without it a degraded network would freeze the search tap (and its
-     * in-flight guard) for the full default call timeout (promotion review finding).
+     * The tight [HfrConstants.ProbeCallTimeout] (3 s vs the 30 s default) remains the probe's
+     * intrinsic budget when its caller stays active. Coroutine cancellation can interrupt the call
+     * through [executeCancellable], but it is not a substitute for a bounded OkHttp timeout when no
+     * external cancellation occurs (promotion review finding).
      */
     private val anonymousNoRedirect: OkHttpClient by lazy {
         anonymous.newBuilder()
@@ -849,40 +842,58 @@ class HfrClient @Inject constructor(
      * `<prefix>.network` and the body pull in `<prefix>.body_read` (cf. `docs/guides/profiling.md`).
      * Callers that don't belong to the topic parcours pass `null` to stay out of `rf2.topic.*`.
      *
-     * Wraps the blocking OkHttp `.execute()` in `withContext(ioDispatcher)` so callers can safely
-     * invoke `HfrClient.*` from any coroutine context, including `viewModelScope.launch {}`'s
-     * default `Dispatchers.Main.immediate`. Repositories may keep their own `withContext` for
-     * defense in depth (notably to cover CPU-bound parsers in the same IO block), but they are
-     * not required to do so to avoid `NetworkOnMainThreadException`.
+     * Delegates to [executeCancellable], which owns the IO hop and keeps the cancellation bridge
+     * active through both `.execute()` and the body read. Repositories may keep their own
+     * `withContext` for defense in depth (notably to cover CPU-bound parsers in the same IO block),
+     * but they are not required to do so to avoid `NetworkOnMainThreadException`.
      */
     private suspend fun Call.executeAuthenticatedHtml(tracePrefix: String? = null): String =
-        withContext(ioDispatcher) {
-            val response: Response = if (tracePrefix != null) {
-                trace("$tracePrefix.network") { execute() }
+        executeCancellable(tracePrefix) { response ->
+            if (!response.isSuccessful) {
+                // #324 — typed so the read screens can tell a 5xx outage from a local
+                // network cut (cf. core.domain.error.classifyHfrError).
+                throw HfrServerException(response.code, response.request.url.toString())
+            }
+            val html = if (tracePrefix != null) {
+                // Session-expiry detection (login redirect / login form sniff) runs after the
+                // body is in memory, so its cost is negligible relative to body_read; not
+                // worth a third section.
+                trace("$tracePrefix.body_read") { response.body.string() }
             } else {
-                execute()
+                response.body.string()
             }
-            response.use {
-                if (!response.isSuccessful) {
-                    // #324 — typed so the read screens can tell a 5xx outage from a local
-                    // network cut (cf. core.domain.error.classifyHfrError).
-                    throw HfrServerException(response.code, response.request.url.toString())
-                }
-                val html = if (tracePrefix != null) {
-                    // Session-expiry detection (login redirect / login form sniff) runs after the
-                    // body is in memory, so its cost is negligible relative to body_read; not
-                    // worth a third section.
-                    trace("$tracePrefix.body_read") { response.body.string() }
-                } else {
-                    response.body.string()
-                }
-                val finalUrl = response.request.url
-                if (finalUrl.isLoginUrl() || html.looksLikeLoginPage()) {
-                    throw SessionExpiredException(finalUrl.toString())
-                }
-                html
+            val finalUrl = response.request.url
+            if (finalUrl.isLoginUrl() || html.looksLikeLoginPage()) {
+                throw SessionExpiredException(finalUrl.toString())
             }
+            html
         }
+
+    /**
+     * Runs this blocking call on [ioDispatcher] and consumes its response while the cancellable
+     * continuation stays active. Cancelling the coroutine invokes OkHttp [Call.cancel], which
+     * interrupts both a call waiting for headers and a body read already in progress. [Response]
+     * remains scoped to `use`, so every success, failure, and cancellation path closes it.
+     */
+    private suspend fun <T> Call.executeCancellable(
+        tracePrefix: String? = null,
+        readResponse: (Response) -> T,
+    ): T = withContext(ioDispatcher) {
+        val call = this@executeCancellable
+        suspendCancellableCoroutine { continuation ->
+            continuation.invokeOnCancellation { call.cancel() }
+            continuation.resumeWith(
+                runCatching {
+                    val response = if (tracePrefix != null) {
+                        trace("$tracePrefix.network") { call.execute() }
+                    } else {
+                        call.execute()
+                    }
+                    response.use(readResponse)
+                },
+            )
+        }
+    }
 
     private companion object {
         // Prefix consumed by `docs/guides/profiling.md` — keep in lockstep with the catalogue.

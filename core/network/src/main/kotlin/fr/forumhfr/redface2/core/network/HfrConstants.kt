@@ -38,10 +38,10 @@ object HfrConstants {
 
     /**
      * End-to-end budget of the search-result page probe (`resolveTopicPageUrl`, #277).
-     * MUST stay <= the ViewModel-side `RESOLVE_TIMEOUT_MS` (3 s) : coroutine cancellation
-     * cannot interrupt a blocking OkHttp `execute()`, so the enforcement lives HERE —
-     * OkHttp aborts the call itself and surfaces an IOException, which the probe already
-     * degrades to its page-1 fallback. The coroutine timeout is only a belt-and-braces.
+     * MUST stay <= the ViewModel-side `RESOLVE_TIMEOUT_MS` (3 s): this OkHttp timeout enforces the
+     * probe's intrinsic budget even when its caller remains active. Coroutine cancellation is an
+     * independent stop path that reaches `Call.cancel()` through `HfrClient`. On timeout, OkHttp
+     * surfaces an IOException, which the probe already degrades to its page-1 fallback.
      */
     val ProbeCallTimeout: Duration = Duration.ofSeconds(3)
 }
