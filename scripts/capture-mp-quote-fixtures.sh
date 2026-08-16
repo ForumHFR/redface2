@@ -65,9 +65,18 @@ Sécurité :
   - aucun formulaire de message n'est soumis ;
   - les HTML bruts et le rapport restent dans un mktemp privé sous /tmp.
 
-Le script CAPTURE et OBSERVE, mais n'assainit rien. Ne copiez jamais ses bruts dans
-le dépôt. Avant toute fixture : réduire à form[name=hop], décoder/neutraliser les
-cryptlinks, assainir et énumérer intégralement le DOM selon le guide normatif.
+Le script CAPTURE et OBSERVE, mais n'assainit rien. Le rapport observations.txt
+contient le contenu intégral de messages privés réels. Ne le collez jamais dans
+une issue, ne le joignez à aucun message et ne le copiez dans aucun dépôt : il
+sert à décider localement, puis doit être supprimé. Ne copiez pas non plus les
+HTML bruts dans le dépôt.
+
+Peut être rapportée publiquement : la structure observée (présence et noms des
+champs cachés, présence ou absence de ref, valeur de numreponse, nombre de blocs
+[quotemsg]). Ne peut pas l'être : le contenu des champs, notamment content_form
+et les blocs [quotemsg]. Avant toute fixture : réduire à form[name=hop],
+décoder/neutraliser les cryptlinks, assainir et énumérer intégralement le DOM
+selon le guide normatif.
 EOF
 }
 
@@ -512,6 +521,12 @@ create_private_capture_dir() {
   observations_file="$capture_dir/observations.txt"
   : > "$observations_file"
   chmod 600 "$observations_file"
+  printf '%s\n' \
+    'ATTENTION — CE RAPPORT CONTIENT DU CONTENU DE MESSAGE PRIVÉ RÉEL.' \
+    'Ne le collez dans aucune issue, ne le joignez à aucun message et ne le copiez dans aucun dépôt.' \
+    'Il sert uniquement à décider localement, puis doit être supprimé.' \
+    '' \
+    > "$observations_file"
 }
 
 authenticate_once() {
@@ -688,6 +703,10 @@ print_summary() {
   printf '  - Citation DT / MultiMP : %s\n' "${capture_status[dt_quote]}"
   printf '  - Conversation avec citation : %s\n' "${capture_status[quoted_thread]}"
   printf '\nRapport exhaustif : %s\n' "$observations_file"
+  printf '%s\n' \
+    'ATTENTION : ce rapport contient du contenu de message privé réel.' \
+    'Ne le collez dans aucune issue, ne le joignez à aucun message et ne le copiez dans aucun dépôt.' \
+    'Il sert uniquement à décider localement, puis doit être supprimé.'
   printf 'Bruts privés : %s\n' "$capture_dir"
   printf '%s\n' \
     'ATTENTION : captures non réduites et non assainies — ne rien copier dans le dépôt.' \
