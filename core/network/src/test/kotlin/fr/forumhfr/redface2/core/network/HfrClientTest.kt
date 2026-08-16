@@ -5,13 +5,23 @@ import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.search.SearchTextScope
 import fr.forumhfr.redface2.core.model.write.FlagAddContext
+import java.io.IOException
 import java.time.LocalDate
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
+import okhttp3.Call
+import okhttp3.EventListener
 import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.SocketPolicy
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -486,12 +496,11 @@ class HfrClientTest {
 
     @Test
     fun `resolveTopicPageUrl aborts a stalled probe after its dedicated call timeout`() = runTest {
-        // Promotion-review finding : coroutine cancellation cannot interrupt a blocking
-        // OkHttp execute(), so the 3 s probe budget MUST be enforced by OkHttp itself
-        // (ProbeCallTimeout on the derived no-redirect client). The server stalls the
-        // headers for 10 s ; without the dedicated timeout the call would only die at the
-        // 30 s default — and the late answer would then be a perfectly valid redirect,
-        // so the assertNull below would fail too (double signal).
+        // Coroutine cancellation now interrupts the Call, but this probe has no external
+        // cancellation in the nominal path. Its intrinsic 3 s budget therefore remains enforced
+        // by OkHttp (ProbeCallTimeout on the derived no-redirect client). The server stalls the
+        // headers for 10 s ; without the dedicated timeout the late answer would be a valid
+        // redirect, so the assertNull below would fail too (double signal).
         server.enqueue(
             MockResponse()
                 .setResponseCode(301)
@@ -508,6 +517,64 @@ class HfrClientTest {
             "probe must be cut by its own call timeout, not the 30 s default (took ${"$"}{elapsedMs}ms)",
             elapsedMs < 9_000,
         )
+    }
+
+    @Test
+    fun `cancelling authenticated call before response headers cancels the OkHttp call`() = runTest {
+        val listener = CallLifecycleListener()
+        val cancellableClient = cancellableClient(listener)
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setSocketPolicy(SocketPolicy.NO_RESPONSE),
+        )
+
+        val inFlight = async(Dispatchers.IO) {
+            cancellableClient.getPrivateMessageListPage(page = 1)
+        }
+        try {
+            assertTrue(
+                "the real call did not send its request headers before the test deadline",
+                listener.requestHeadersSent.await(CALL_EVENT_TIMEOUT_SECONDS, TimeUnit.SECONDS),
+            )
+            assertEquals(
+                "response headers must still be pending when cancellation starts",
+                1L,
+                listener.responseHeadersReceived.count,
+            )
+
+            inFlight.assertCancelledAtCallLevel(listener)
+        } finally {
+            listener.cancelCall()
+            inFlight.cancel()
+        }
+    }
+
+    @Test
+    fun `cancelling anonymous call during response body cancels the OkHttp call`() = runTest {
+        val listener = CallLifecycleListener()
+        val cancellableClient = cancellableClient(listener)
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody("ab")
+                .throttleBody(1, 30, TimeUnit.SECONDS),
+        )
+
+        val inFlight = async(Dispatchers.IO) {
+            cancellableClient.getTopicPage(cat = 23, post = 35395, page = 2, useAuth = false)
+        }
+        try {
+            assertTrue(
+                "the real call did not start consuming the response body before the test deadline",
+                listener.responseBodyStarted.await(CALL_EVENT_TIMEOUT_SECONDS, TimeUnit.SECONDS),
+            )
+
+            inFlight.assertCancelledAtCallLevel(listener)
+        } finally {
+            listener.cancelCall()
+            inFlight.cancel()
+        }
     }
 
     @Test
@@ -564,8 +631,38 @@ class HfrClientTest {
                 java.net.URLDecoder.decode(name, "UTF-8") to java.net.URLDecoder.decode(value, "UTF-8")
             }
 
-    private fun taggedClient(tag: String): OkHttpClient =
+    private fun cancellableClient(listener: EventListener): HfrClient = HfrClient(
+        authenticated = taggedClient("authenticated", listener),
+        anonymous = taggedClient("anonymous", listener),
+        baseUrl = server.url("/"),
+        ioDispatcher = Dispatchers.IO,
+    )
+
+    private suspend fun Deferred<String>.assertCancelledAtCallLevel(listener: CallLifecycleListener) {
+        val coroutineCompleted = CountDownLatch(1)
+        invokeOnCompletion { coroutineCompleted.countDown() }
+
+        cancel()
+
+        assertTrue(
+            "coroutine cancellation did not invoke Call.cancel() before the test deadline",
+            listener.canceled.await(CALL_EVENT_TIMEOUT_SECONDS, TimeUnit.SECONDS),
+        )
+        assertTrue(
+            "the canceled OkHttp call did not reach its terminal callFailed event",
+            listener.terminalFailure.await(CALL_EVENT_TIMEOUT_SECONDS, TimeUnit.SECONDS),
+        )
+        assertTrue(
+            "the coroutine did not complete promptly after the OkHttp call failed",
+            coroutineCompleted.await(CALL_EVENT_TIMEOUT_SECONDS, TimeUnit.SECONDS),
+        )
+        val error = runCatching { await() }.exceptionOrNull()
+        assertTrue("CancellationException must propagate, got ${error?.javaClass}", error is CancellationException)
+    }
+
+    private fun taggedClient(tag: String, listener: EventListener = EventListener.NONE): OkHttpClient =
         OkHttpClient.Builder()
+            .eventListener(listener)
             .addInterceptor { chain ->
                 val request = chain.request().newBuilder()
                     .header("X-RF2-Client", tag)
@@ -573,4 +670,47 @@ class HfrClientTest {
                 chain.proceed(request)
             }
             .build()
+
+    private class CallLifecycleListener : EventListener() {
+        @Volatile
+        private var activeCall: Call? = null
+
+        val requestHeadersSent = CountDownLatch(1)
+        val responseHeadersReceived = CountDownLatch(1)
+        val responseBodyStarted = CountDownLatch(1)
+        val canceled = CountDownLatch(1)
+        val terminalFailure = CountDownLatch(1)
+
+        override fun callStart(call: Call) {
+            activeCall = call
+        }
+
+        override fun requestHeadersEnd(call: Call, request: Request) {
+            requestHeadersSent.countDown()
+        }
+
+        override fun responseHeadersEnd(call: Call, response: Response) {
+            responseHeadersReceived.countDown()
+        }
+
+        override fun responseBodyStart(call: Call) {
+            responseBodyStarted.countDown()
+        }
+
+        override fun canceled(call: Call) {
+            canceled.countDown()
+        }
+
+        override fun callFailed(call: Call, ioe: IOException) {
+            terminalFailure.countDown()
+        }
+
+        fun cancelCall() {
+            activeCall?.cancel()
+        }
+    }
+
+    private companion object {
+        private const val CALL_EVENT_TIMEOUT_SECONDS = 5L
+    }
 }

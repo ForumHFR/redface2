@@ -381,9 +381,10 @@ class TopicViewModel @Inject constructor(
 | Smileys | Cache Coil, ne changent jamais | Infini |
 | Avatars | Cache Coil, ETag | 1 h |
 | MultiMP flags | Room, jamais expire (donnée locale) | Permanent |
+| Position de lecture MP (par compte/conversation) | Room (`mp_read_positions`), sauvegardée à chaque page affichée ; purge au logout / changement de compte par `CacheInvalidator` | Permanent jusqu'à déconnexion |
 | Préférences | DataStore | Permanent |
 
-> **Acté — [ADR-013]({{ site.baseurl }}/adr/013-mp-lecture-cache-prefetch) (accepté 2026-06-12)** : politique de cache des conversations MP à trois étages — position de lecture locale par conversation (survit au process death, purgée à la déconnexion), cache RAM de session, cache Room du contenu en opt-in explicite (défaut OFF, purge au logout). **Pas encore implémenté** (suivi [#430](https://github.com/ForumHFR/redface2/issues/430) pour l'étage 1) : le tableau ci-dessus reflète le réel — d'ici là, les MP restent sans cache (état #316/#298) ; les lignes MP seront ajoutées au tableau quand les étages seront livrés.
+> **Acté — [ADR-013]({{ site.baseurl }}/adr/013-mp-lecture-cache-prefetch) (accepté 2026-06-12)** : politique de cache des conversations MP à trois étages — position de lecture locale par conversation (survit au process death, purgée à la déconnexion), cache RAM de session, cache Room du contenu en opt-in explicite (défaut OFF, purge au logout). **État réel** : l'étage 1 est livré depuis la Phase 3 ([#430](https://github.com/ForumHFR/redface2/issues/430)) via `MpReadPositionEntity`, `RoomPrivateMessageReadPositionStore` et la table `mp_read_positions`, recensée dans le tableau ci-dessus. Les étages 2 (cache RAM de session) et 3 (cache Room du contenu) restent à implémenter ; le contenu des MP reste donc sans cache à ce jour.
 
 ### Sémantique fresh / stale
 
@@ -421,7 +422,7 @@ Utilisateur lit la page 3 d'un topic
 
 Implémentation Phase 1D PR 4 (#108) :
 
-- **Topic page** : `TopicViewModel` déclenche `topicRepository.prefetch(cat, post, page+1)` après chaque émission `Loaded`. Le job est rattaché à `viewModelScope` ; sortir de l'écran ou changer de page propage le `cancel()` jusqu'à OkHttp. **Le payload est persisté** comme row `ANONYMOUS` en Room — la prochaine `observeTopicPage` la lit immédiatement (paint snappy) puis re-fetch authentifié pour upgrader vers `AUTHENTICATED` (champs per-user).
+- **Topic page** : `TopicViewModel` déclenche `topicRepository.prefetch(cat, post, page+1)` après chaque émission `Loaded`. Le job est rattaché à `viewModelScope` ; sortir de l'écran ou changer de page annule le job. Le transport commun de `HfrClient` maintient un pont d'annulation pendant `Call.execute()` **et** la lecture du corps : l'annulation invoque `Call.cancel()`, termine l'I/O côté client et laisse remonter `CancellationException`. **Le payload est persisté** comme row `ANONYMOUS` en Room — la prochaine `observeTopicPage` la lit immédiatement (paint snappy) puis re-fetch authentifié pour upgrader vers `AUTHENTICATED` (champs per-user).
 - **Topic listing** : `CategoryViewModel` déclenche `forumRepository.prefetchTopicList(cat, subcat, page+1)` à chaque transition vers `Content`. Le job est annulé à chaque changement de `(subcat, page)` via le pattern `combine + onEach + cancel` standard. **Le payload est volontairement jeté** — pas de cache client peuplé. Un payload anonyme stripperait `is_read` et `last_post_read_id` qui sont nécessaires côté écran ; on ne fait que chauffer le CDN HFR pour la prochaine requête authentifiée.
 - **Une seule page d'avance** par déclencheur. Pas de chaîne `n+2, n+3` — le coût ne paie pas le bénéfice et grossirait la facture pour des comportements rares.
 - **Échecs swallowed** : un prefetch flaky ne doit jamais perturber l'affichage. Erreurs loguées en `Log.w`, puis avalées.
