@@ -61,6 +61,7 @@ import fr.forumhfr.redface2.core.ui.list.ScrollToTopOnPageChange
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
 import fr.forumhfr.redface2.core.ui.post.HiddenPostCard
 import fr.forumhfr.redface2.core.ui.post.PostCardShellFlatBottomEdge
+import fr.forumhfr.redface2.core.ui.post.PostIdentityBand
 import fr.forumhfr.redface2.core.ui.post.PostIdentityHeader
 import fr.forumhfr.redface2.core.ui.post.PostImageActions
 import fr.forumhfr.redface2.core.ui.post.PostImageMenuSheet
@@ -806,7 +807,8 @@ internal fun isHiddenMessage(message: Post, hidden: Set<Int>, revealed: Set<Int>
  * [presentation] is the shared render-only state bundle. The list derives its values from reader
  * preferences, the session pseudo (#1050 Ego markers) and message position, while this adapter
  * forwards the bundle unchanged — its only addition is the EgoPost StateDescription on the
- * identity node (#874 P1 parity). Neutral defaults keep direct test/preview mounts unmarked.
+ * identity band (#874 P1 parity). The band itself stays `secondaryContainer`: EgoPost colours the
+ * card below it, never the identity strip. Neutral defaults keep direct test/preview mounts unmarked.
  */
 @Composable
 internal fun MessageCard(
@@ -845,47 +847,52 @@ internal fun MessageCard(
         presentation = presentation,
         onImageLongPress = onImageLongPress,
         identity = {
-            // Band-less identity (an MP has no anchor/category tint): the plain shared header, its
-            // padding reinjected here (densities stay slot-owned, #351) from the SAME preset values
-            // as the body so the whole card breathes to one rhythm — gutters at cardBodyHorizontal,
-            // card-top inset at cardBodyTop; the header↔body gap is the body slot's own cardBodyTop.
-            // No pseudo slot is supplied, so the header's fallback pseudo text carries the card's
-            // exactly-one TalkBack heading (#884 contract, pinned by MessageCardShellSmokeTest) and
-            // its author tap rides onAuthorClick.
-            PostIdentityHeader(
-                author = message.author,
-                avatarUrl = message.avatarUrl,
-                dateText = message.date.asMessageDate(),
-                modifier = Modifier
-                    .padding(
+            // An MP has no anchor/category tint, but still carries the same full-width identity band
+            // as a normal topic post. Its secondaryContainer colour is therefore FIXED and independent
+            // from EgoPost: the highlight belongs to the enclosing card container below the band.
+            // PostIdentityBand adds no padding and the exact historical MP rhythm remains reinjected on
+            // the header — gutters at cardBodyHorizontal, card-top inset at cardBodyTop; the
+            // header↔body gap is the body slot's own cardBodyTop.
+            PostIdentityBand(
+                modifier = Modifier.semantics {
+                    if (presentation.egoPostHighlighted) {
+                        stateDescription = egoPostStateDescription
+                    }
+                },
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            ) {
+                // No pseudo slot is supplied, so the header's fallback pseudo text carries the card's
+                // exactly-one TalkBack heading (#884 contract, pinned by MessageCardShellSmokeTest)
+                // and its author tap rides onAuthorClick. The band adds no heading of its own.
+                PostIdentityHeader(
+                    author = message.author,
+                    avatarUrl = message.avatarUrl,
+                    dateText = message.date.asMessageDate(),
+                    modifier = Modifier.padding(
                         start = m.cardBodyHorizontal,
                         top = m.cardBodyTop,
                         end = m.cardBodyHorizontal,
-                    )
-                    .semantics {
-                        if (presentation.egoPostHighlighted) {
-                            stateDescription = egoPostStateDescription
+                    ),
+                    onAvatarClick = onOpenProfile,
+                    onAvatarClickLabel = openProfileLabel,
+                    onAuthorClick = onOpenProfile,
+                    onAuthorClickLabel = openProfileLabel,
+                    // #483/#1051 — same compact data-driven marker as the topic; null emits no slot.
+                    dateTrailing = if (message.editedAt != null) {
+                        {
+                            val editedLabel = stringResource(R.string.messages_message_edited_inline)
+                            Text(
+                                text = "· $editedLabel",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.semantics { contentDescription = editedLabel },
+                            )
                         }
+                    } else {
+                        null
                     },
-                onAvatarClick = onOpenProfile,
-                onAvatarClickLabel = openProfileLabel,
-                onAuthorClick = onOpenProfile,
-                onAuthorClickLabel = openProfileLabel,
-                // #483/#1051 — same compact data-driven marker as the topic; null emits no slot.
-                dateTrailing = if (message.editedAt != null) {
-                    {
-                        val editedLabel = stringResource(R.string.messages_message_edited_inline)
-                        Text(
-                            text = "· $editedLabel",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.semantics { contentDescription = editedLabel },
-                        )
-                    }
-                } else {
-                    null
-                },
-            )
+                )
+            }
         },
         // #239/#1051 — the server counter is optional; a null/zero value emits no badges strip.
         badges = if (citedCount > 0) {
