@@ -859,9 +859,9 @@ internal fun MessageCard(
             // An MP has no anchor/category tint, but still carries the same full-width identity band
             // as a normal topic post. Its secondaryContainer colour is therefore FIXED and independent
             // from EgoPost: the highlight belongs to the enclosing card container below the band.
-            // PostIdentityBand adds no padding and the exact historical MP rhythm remains reinjected on
-            // the header — gutters at cardBodyHorizontal, card-top inset at cardBodyTop; the
-            // header↔body gap is the body slot's own cardBodyTop.
+            // PostIdentityBand adds no padding, so the shared band rhythm is reinjected on the
+            // header — MP-owned gutters at cardBodyHorizontal, shared symmetric vertical inset at
+            // cardHeaderVertical; the header↔body gap remains the body slot's own cardBodyTop.
             PostIdentityBand(
                 modifier = Modifier.semantics {
                     if (presentation.egoPostHighlighted) {
@@ -878,9 +878,8 @@ internal fun MessageCard(
                     avatarUrl = message.avatarUrl,
                     dateText = message.date.asMessageDate(),
                     modifier = Modifier.padding(
-                        start = m.cardBodyHorizontal,
-                        top = m.cardBodyTop,
-                        end = m.cardBodyHorizontal,
+                        horizontal = m.cardBodyHorizontal,
+                        vertical = m.cardHeaderVertical,
                     ),
                     onAvatarClick = onOpenProfile,
                     onAvatarClickLabel = openProfileLabel,
