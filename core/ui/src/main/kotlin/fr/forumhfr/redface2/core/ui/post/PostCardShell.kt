@@ -34,7 +34,8 @@ import androidx.compose.ui.semantics.semantics
  *    (full-width identity strip, anchor tint for #104); the MP passes a plain [PostIdentityHeader].
  *    The shell does NOT draw the band itself: a band is a topic affordance, and baking it here would
  *    force the band-less MP into a tinted-strip model it does not want.
- *  - [badges] (optional) — citation/multi-quote pills on the topic (#239/#436); `null` on the MP.
+ *  - [badges] (optional) — citation/multi-quote pills on the topic (#239/#436), or the
+ *    data-driven citation-count pill on a private message (#1051).
  *  - [body] (mandatory) — the rendered post (the call-site supplies its own [PostRenderer] and owns
  *    its `selectable` choice — the shell decides nothing here; since #1042 both reading surfaces
  *    mount their body through `ReadingPostCard`, whose selection is constant by construction #946).

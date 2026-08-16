@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.messages
 
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +19,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -33,16 +35,23 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.hapticfeedback.HapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.ego.deriveEgoCanonicalPseudo
 import fr.forumhfr.redface2.core.domain.ego.isEgoPost
 import fr.forumhfr.redface2.core.model.Post
@@ -167,6 +176,7 @@ fun PrivateMessageThreadScreen(
                 onManageRecipients(request.threadId, state.page)
             },
             onOpenProfile = onOpenProfile,
+            onSetAuthorBlocked = viewModel::setAuthorBlocked,
             onSaveImage = viewModel::saveImage,
         ),
         topBarActions = topBarActions,
@@ -192,6 +202,8 @@ internal data class PrivateMessageThreadCallbacks(
     // #1042 — defaulted (unlike its siblings) so the pre-#1042 characterization mounts compile
     // unchanged; a host that does not navigate keeps the tap a no-op, like the topic screen default.
     val onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
+    // #1051 — block/unblock is repository-owned; the live blacklist collector re-renders locally.
+    val onSetAuthorBlocked: (author: String, blocked: Boolean) -> Unit = { _, _ -> },
     // #831/#1051 — the ViewModel-owned save survives dismissal of the local image sheet.
     val onSaveImage: (url: String) -> Unit = {},
 )
@@ -211,12 +223,28 @@ internal fun PrivateMessageThreadContent(
 ) {
     val mode = state.mode
     val listState = rememberLazyListState()
+    // #1051 — private message whose feature-owned menu is open. Kept local like the image menu:
+    // ephemeral UI state contains no route/private-data persistence across process death.
+    var messageMenuTarget by remember { mutableStateOf<Post?>(null) }
     // #831/#1051 — post image whose contextual menu is open (null = closed). Deliberately not
     // rememberSaveable: losing an ephemeral menu across process death is acceptable.
     var imageMenuTarget by remember { mutableStateOf<PostImageTarget?>(null) }
     // One stable handler instance is threaded through MessageCard to LocalPostImageActions;
-    // remembered so providing it never invalidates the cards.
-    val postImageActions = remember { PostImageActions(onLongPress = { imageMenuTarget = it }) }
+    // remembered so providing it never invalidates the cards. Opening either menu closes the other.
+    val postImageActions = remember {
+        PostImageActions(
+            onLongPress = {
+                messageMenuTarget = null
+                imageMenuTarget = it
+            },
+        )
+    }
+    val openMessageMenu = remember<(Post) -> Unit> {
+        { message ->
+            imageMenuTarget = null
+            messageMenuTarget = message
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -367,6 +395,7 @@ internal fun PrivateMessageThreadContent(
                                 connectedPseudo = state.connectedPseudo,
                                 onSelectPage = callbacks.onSelectPage,
                                 onOpenProfile = callbacks.onOpenProfile,
+                                onOpenMessageMenu = openMessageMenu,
                                 onImageLongPress = postImageActions.onLongPress,
                                 // Codex review — gate the pager buttons with the same condition as
                                 // the swipe: re-tapping during a keep-content load would only cancel
@@ -400,12 +429,73 @@ internal fun PrivateMessageThreadContent(
         onManageRecipients = callbacks.onManageRecipients,
     )
 
+    ThreadMessageMenuHost(
+        mode = mode,
+        connectedPseudo = state.connectedPseudo,
+        target = messageMenuTarget,
+        onOpenProfile = callbacks.onOpenProfile,
+        onSetAuthorBlocked = callbacks.onSetAuthorBlocked,
+        onClear = { messageMenuTarget = null },
+    )
+
     ThreadImageMenuHost(
         mode = mode,
         target = imageMenuTarget,
         onSave = callbacks.onSaveImage,
         onClear = { imageMenuTarget = null },
     )
+}
+
+/**
+ * #1051 — owns the feature-local message sheet and forgets private targets on logout/account switch
+ * or when a page landing replaces the target message. The current blacklist snapshot drives both
+ * the label and the desired write, so a revealed blocked message offers « Ne plus masquer » without
+ * asking the repository a second time.
+ */
+@Composable
+@Suppress("LongParameterList") // Host seam: mode/session/target plus three independent callbacks.
+private fun ThreadMessageMenuHost(
+    mode: PrivateMessageThreadUiState.Mode,
+    connectedPseudo: String?,
+    target: Post?,
+    onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit,
+    onSetAuthorBlocked: (author: String, blocked: Boolean) -> Unit,
+    onClear: () -> Unit,
+) {
+    val targetStillOnPage = mode is PrivateMessageThreadUiState.Mode.Content &&
+        target != null &&
+        mode.thread.messages.any { message -> message.numreponse == target.numreponse }
+
+    LaunchedEffect(mode, target) {
+        if (!targetStillOnPage) onClear()
+    }
+
+    if (mode is PrivateMessageThreadUiState.Mode.Content && targetStillOnPage) {
+        target?.let { message ->
+            val authorCanonical = remember(message.author) { canonicalizePseudo(message.author) }
+            val connectedCanonical = remember(connectedPseudo) {
+                connectedPseudo?.let(::canonicalizePseudo)
+            }
+            val authorBlocked = authorCanonical in mode.blockedQuoteAuthors
+            MessageMenuSheet(
+                message = message,
+                authorBlocked = authorBlocked,
+                onDismiss = onClear,
+                onOpenProfile = message.profileId?.let { profileId ->
+                    { onOpenProfile(profileId, message.author, message.avatarUrl) }
+                },
+                // Same self-block gate as the topic, based on the live session pseudo rather than
+                // Post.isOwnPost (HFR can omit ownership tools for affichoutils=0 profiles).
+                onToggleBlockAuthor = if (
+                    connectedCanonical != null && authorCanonical == connectedCanonical
+                ) {
+                    null
+                } else {
+                    { onSetAuthorBlocked(message.author, !authorBlocked) }
+                },
+            )
+        }
+    }
 }
 
 /**
@@ -565,6 +655,7 @@ private fun ThreadMessages(
     connectedPseudo: String?,
     onSelectPage: (Int) -> Unit,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit,
+    onOpenMessageMenu: (Post) -> Unit,
     onImageLongPress: (PostImageTarget) -> Unit,
     pagerEnabled: Boolean = true,
     listState: LazyListState,
@@ -650,6 +741,7 @@ private fun ThreadMessages(
                     onOpenProfile = message.profileId?.let { profileId ->
                         { onOpenProfile(profileId, message.author, message.avatarUrl) }
                     },
+                    onOpenMenu = { onOpenMessageMenu(message) },
                     onImageLongPress = onImageLongPress,
                 )
             }
@@ -706,6 +798,9 @@ internal fun isHiddenMessage(message: Post, hidden: Set<Int>, revealed: Set<Int>
  * [onOpenProfile] — tapping the avatar or the author pseudo opens the profile surface (parity with
  * the topic card, #208); the MP page proves [Post.profileId] for its messages (#1042 fixture).
  * `null` (no profile link on the row) keeps the identity line inert.
+ * [onOpenMenu] adds a long-press-only action to the card. Child gestures keep precedence: text
+ * selection, profile taps and image long presses retain their own contracts, while a long press on
+ * the remaining card surface opens the message menu.
  * [onImageLongPress] is likewise a capability by presence: the MP screen supplies it, while direct
  * hosts that omit it keep every content image inert (editor previews and signatures stay unchanged).
  * [presentation] is the shared render-only state bundle. The list derives its values from reader
@@ -718,6 +813,7 @@ internal fun MessageCard(
     message: Post,
     presentation: ReadingPostCardPresentation = ReadingPostCardPresentation(),
     onOpenProfile: (() -> Unit)? = null,
+    onOpenMenu: (() -> Unit)? = null,
     onImageLongPress: ((PostImageTarget) -> Unit)? = null,
 ) {
     // #287/#1042 — structural spacing from the active density preset, like the shared card's body.
@@ -731,8 +827,21 @@ internal fun MessageCard(
     // on the identity node (TalkBack traverses it first), never a heading — the fallback pseudo
     // stays the card's exactly-one heading (#884 contract, pinned by MessageCardShellSmokeTest).
     val egoPostStateDescription = stringResource(R.string.messages_post_ego_state_description)
+    val menuLabel = if (onOpenMenu != null) {
+        stringResource(R.string.messages_message_menu_action)
+    } else {
+        null
+    }
+    val haptics = LocalHapticFeedback.current
+    val menuModifier = if (onOpenMenu != null && menuLabel != null) {
+        Modifier.messageMenuLongPress(onOpenMenu, haptics, menuLabel)
+    } else {
+        Modifier
+    }
+    val citedCount = message.citedCount ?: 0
     ReadingPostCard(
         post = message,
+        modifier = menuModifier,
         presentation = presentation,
         onImageLongPress = onImageLongPress,
         identity = {
@@ -762,10 +871,88 @@ internal fun MessageCard(
                 onAvatarClickLabel = openProfileLabel,
                 onAuthorClick = onOpenProfile,
                 onAuthorClickLabel = openProfileLabel,
+                // #483/#1051 — same compact data-driven marker as the topic; null emits no slot.
+                dateTrailing = if (message.editedAt != null) {
+                    {
+                        val editedLabel = stringResource(R.string.messages_message_edited_inline)
+                        Text(
+                            text = "· $editedLabel",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.semantics { contentDescription = editedLabel },
+                        )
+                    }
+                } else {
+                    null
+                },
             )
+        },
+        // #239/#1051 — the server counter is optional; a null/zero value emits no badges strip.
+        badges = if (citedCount > 0) {
+            {
+                MessageCitedCountBadge(
+                    citedCount = citedCount,
+                    horizontalPadding = m.cardBodyHorizontal,
+                )
+            }
+        } else {
+            null
         },
     )
 }
+
+/** Citation-count pill for the MP card, supplied through [ReadingPostCard]'s badges slot. */
+@Composable
+private fun MessageCitedCountBadge(citedCount: Int, horizontalPadding: Dp) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = horizontalPadding, end = horizontalPadding, top = 6.dp, bottom = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+            shape = MaterialTheme.shapes.small,
+        ) {
+            Text(
+                text = pluralStringResource(
+                    R.plurals.messages_message_cited_count,
+                    citedCount,
+                    citedCount,
+                ),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+            )
+        }
+    }
+}
+
+/**
+ * Long-press-only card gesture. Child nodes consume their own gestures first, preserving profile
+ * taps, selectable post text and the dedicated image menu; otherwise this detector owns the long
+ * press. The explicit semantics action gives TalkBack the same labelled capability.
+ */
+private fun Modifier.messageMenuLongPress(
+    onOpenMenu: () -> Unit,
+    haptics: HapticFeedback,
+    label: String,
+): Modifier = this
+    .pointerInput(onOpenMenu) {
+        detectTapGestures(
+            onLongPress = {
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                onOpenMenu()
+            },
+        )
+    }
+    .semantics {
+        onLongClick(label = label) {
+            onOpenMenu()
+            true
+        }
+    }
 
 // #351b — same blend as the topic edge glow (#282): a full-primary glow read as an imposing panel.
 private const val ACCENT_PRIMARY_BLEND = 0.3f
@@ -774,4 +961,4 @@ private val messageDateFormatter = DateTimeFormatter
     .ofPattern("dd/MM/yyyy HH:mm:ss", Locale.FRANCE)
     .withZone(ZoneId.of("Europe/Paris"))
 
-private fun Instant.asMessageDate(): String = messageDateFormatter.format(this)
+internal fun Instant.asMessageDate(): String = messageDateFormatter.format(this)

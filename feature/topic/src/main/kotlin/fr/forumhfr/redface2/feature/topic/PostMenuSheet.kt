@@ -26,6 +26,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,6 +38,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import fr.forumhfr.redface2.core.model.Post
+import fr.forumhfr.redface2.core.model.postContentPlainText
 import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
 import fr.forumhfr.redface2.core.ui.post.hideThenDismiss
 import fr.forumhfr.redface2.core.ui.R as CoreUiR
@@ -52,8 +54,9 @@ import fr.forumhfr.redface2.core.ui.R as CoreUiR
  *   « Cité N fois dans le sujet » when [citedCount] > 0 (hidden at 0) — #863 : the SERVER
  *   counter, cross-page, same value as the card's badge;
  * - stacked full-width actions, profile-sheet style: a filled « Copier le lien de ce
- *   post » (primary), an outlined « Ouvrir dans le navigateur » (debug-friendly: the
- *   canonical permalink opens in the default browser), and a DISABLED « Alerter »
+ *   post » (primary), « Copier le texte » (disabled when an image-only post projects to
+ *   blank), an outlined « Ouvrir dans le navigateur » (debug-friendly: the canonical
+ *   permalink opens in the default browser), and a DISABLED « Alerter »
  *   placeholder — the report flow is not implemented yet, the greyed button shows the
  *   roadmap like the Settings « menu vitrine » (#288).
  *
@@ -132,8 +135,10 @@ internal fun PostMenuSheet(
     val sheetState = rememberModalBottomSheetState()
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
+    val plainText = remember(post.content) { postContentPlainText(post.content) }
     // Resolved at composition time — the action callbacks run outside composition.
     val copiedFeedback = stringResource(R.string.topic_post_menu_link_copied)
+    val copiedTextFeedback = stringResource(R.string.topic_post_menu_text_copied)
     val browserFailedFeedback = stringResource(CoreUiR.string.browser_no_handler)
 
     ModalBottomSheet(
@@ -199,6 +204,19 @@ internal fun PostMenuSheet(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(stringResource(R.string.topic_post_menu_copy_link))
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            OutlinedButton(
+                onClick = {
+                    copyPostTextToClipboard(context, plainText, copiedTextFeedback)
+                    hideThenDismiss(coroutineScope, sheetState, onDismiss)
+                },
+                enabled = plainText.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.topic_post_menu_copy_text))
             }
 
             Spacer(Modifier.height(8.dp))
@@ -424,6 +442,15 @@ private fun PostMenuHero(post: Post, onClick: (() -> Unit)?) {
 private fun copyPermalinkToClipboard(context: Context, permalink: String, feedback: String) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     clipboard.setPrimaryClip(ClipData.newPlainText("redface2 post link", permalink))
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+        Toast.makeText(context, feedback, Toast.LENGTH_SHORT).show()
+    }
+}
+
+/** Copies the complete locale-neutral [postContentPlainText] projection of the post. */
+private fun copyPostTextToClipboard(context: Context, text: String, feedback: String) {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    clipboard.setPrimaryClip(ClipData.newPlainText("redface2 post text", text))
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
         Toast.makeText(context, feedback, Toast.LENGTH_SHORT).show()
     }

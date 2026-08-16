@@ -80,6 +80,35 @@ class MessageCardShellSmokeTest {
             .assertCountEquals(1)
     }
 
+    @Test
+    fun `edited and cited metadata render in the two card slots when present`() {
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                MessageCard(
+                    message = sampleMessage().copy(
+                        editedAt = Instant.parse("2025-01-02T03:04:05Z"),
+                        citedCount = 2,
+                    ),
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("· édité").assertIsDisplayed()
+        composeTestRule.onNodeWithText("cité 2 fois").assertIsDisplayed()
+    }
+
+    @Test
+    fun `missing edited and cited metadata emits neither card slot`() {
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                MessageCard(message = sampleMessage())
+            }
+        }
+
+        composeTestRule.onNodeWithText("· édité").assertDoesNotExist()
+        composeTestRule.onNodeWithText("cité", substring = true).assertDoesNotExist()
+    }
+
     private fun sampleMessage(): Post = Post(
         numreponse = 1,
         author = "XaTriX",

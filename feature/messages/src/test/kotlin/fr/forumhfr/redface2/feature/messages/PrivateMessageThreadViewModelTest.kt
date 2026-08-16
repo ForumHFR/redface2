@@ -237,6 +237,37 @@ class PrivateMessageThreadViewModelTest {
     }
 
     @Test
+    fun `menu block and unblock update both masks immediately without refetching`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns thread(
+            page = 1,
+            totalPages = 1,
+            messages = listOf(post(7, author = "Alice"), post(8, author = "Bob")),
+        )
+        val blacklist = FakeBlacklistRepository()
+        val viewModel = threadViewModel(repository, blacklistRepository = blacklist)
+
+        viewModel.setAuthorBlocked(author = " Alice ", blocked = true)
+        advanceUntilIdle()
+
+        val blocked = viewModel.state.value.mode as PrivateMessageThreadUiState.Mode.Content
+        assertEquals(setOf(7), blocked.hiddenNumreponses)
+        assertEquals(setOf("alice"), blocked.blockedQuoteAuthors)
+
+        viewModel.setAuthorBlocked(author = "ALICE", blocked = false)
+        advanceUntilIdle()
+
+        val restored = viewModel.state.value.mode as PrivateMessageThreadUiState.Mode.Content
+        assertEquals(emptySet<Int>(), restored.hiddenNumreponses)
+        assertEquals(emptySet<String>(), restored.blockedQuoteAuthors)
+        coVerify(exactly = 1) {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        }
+    }
+
+    @Test
     fun `the session pseudo is exposed for the Ego markers and follows an account switch`() = runTest {
         // #1050 — the Ego markers derive from the session pseudo in the STATE, never from the
         // cached Post.isOwnPost bit; an A → B switch must therefore re-expose B's pseudo. This
