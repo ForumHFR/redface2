@@ -13,6 +13,7 @@ import fr.forumhfr.redface2.core.domain.forum.FlagFilterBucket
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
+import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
@@ -2824,18 +2825,24 @@ class FlagsViewModelTest {
             return inboxResult.getOrThrow()
         }
 
-        override suspend fun getPrivateMessageThread(
+        override fun getPrivateMessageThread(
             threadId: Int,
             page: Int,
             fallbackCorrespondent: String?,
-        ): PrivateMessageThread = PrivateMessageThread(
-            threadId = threadId,
-            subject = "",
-            correspondent = "",
-            messages = emptyList(),
-            page = page,
-            totalPages = 1,
-        )
+        ): Flow<PrivateMessageThreadPage> =
+            flowOf(
+                PrivateMessageThreadPage(
+                    thread = PrivateMessageThread(
+                        threadId = threadId,
+                        subject = "",
+                        correspondent = "",
+                        messages = emptyList(),
+                        page = page,
+                        totalPages = 1,
+                    ),
+                    source = PrivateMessageThreadPage.Source.NETWORK,
+                ),
+            )
     }
 
     /**

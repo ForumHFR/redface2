@@ -60,6 +60,7 @@ import fr.forumhfr.redface2.core.domain.author.isRf2Creator
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.ego.deriveEgoCanonicalPseudo
 import fr.forumhfr.redface2.core.domain.ego.isEgoPost
+import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.write.PrivateMessageQuote
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
@@ -118,11 +119,10 @@ fun PrivateMessageThreadScreen(
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
     val mode = state.mode
+    val networkLoadedThread = mode.networkLoadedThreadOrNull()
 
-    LaunchedEffect(mode) {
-        if (mode is PrivateMessageThreadUiState.Mode.Content) {
-            onLoaded()
-        }
+    LaunchedEffect(networkLoadedThread) {
+        if (networkLoadedThread != null) onLoaded()
     }
 
     // #351 — one-shot effects (same idiom as TopicScreen): a keep-content load failure keeps the
@@ -203,6 +203,12 @@ fun PrivateMessageThreadScreen(
         topBarActions = topBarActions,
     )
 }
+
+/** Cache content is display-only; navigation/badge callbacks belong to the network revalidation. */
+internal fun PrivateMessageThreadUiState.Mode.networkLoadedThreadOrNull() =
+    (this as? PrivateMessageThreadUiState.Mode.Content)
+        ?.takeIf { it.source == PrivateMessageThreadPage.Source.NETWORK }
+        ?.thread
 
 /**
  * State-hoisted callbacks for [PrivateMessageThreadContent]. Keeping this seam free of Hilt makes

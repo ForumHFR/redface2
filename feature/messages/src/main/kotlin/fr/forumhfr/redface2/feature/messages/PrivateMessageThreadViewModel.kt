@@ -14,6 +14,7 @@ import fr.forumhfr.redface2.core.domain.media.ImageSaveException
 import fr.forumhfr.redface2.core.domain.media.PostImageSaver
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageReadPositionStore
+import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
@@ -41,7 +42,7 @@ import kotlinx.coroutines.launch
 /**
  * ViewModel for one private-message conversation. Receives its route arguments via Hilt
  * assisted injection ([PrivateMessageThreadRequest]), mirroring [TopicViewModel]. Loads the
- * requested page once (no cache in the #298 MVP). Route arguments deliberately exclude
+ * requested page through the session-cache-then-network stream. Route arguments deliberately exclude
  * subject/correspondent so stale Navigation state cannot expose private metadata after logout.
  */
 @HiltViewModel(assistedFactory = PrivateMessageThreadViewModel.Factory::class)
@@ -380,7 +381,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
                 _state.update { current ->
                     val content = current.mode as? PrivateMessageThreadUiState.Mode.Content
                         ?: return@update current
-                    current.copy(mode = contentMode(content.thread))
+                    current.copy(mode = contentMode(content.thread, content.source))
                 }
             }
             .catch { error ->
@@ -393,9 +394,13 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
      * Single construction seam for a loaded page: post-level and quote-level masking always use the
      * same blacklist snapshot, on initial load, page change and live blacklist re-filter alike.
      */
-    private fun contentMode(thread: PrivateMessageThread) =
+    private fun contentMode(
+        thread: PrivateMessageThread,
+        source: PrivateMessageThreadPage.Source = PrivateMessageThreadPage.Source.NETWORK,
+    ) =
         PrivateMessageThreadUiState.Mode.Content(
             thread = thread,
+            source = source,
             hiddenNumreponses = computeHiddenNumreponses(thread.messages),
             blockedQuoteAuthors = blockedCanonicals,
         )
@@ -410,37 +415,43 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     private suspend fun fetchPage(page: Int) {
         // Snapshot of the session that issued this fetch — savePosition is sealed to it (#462).
         val owner = authenticatedPseudo ?: return
-        // #351 — keep the displayed conversation on screen while (re)loading. There is no MP
-        // cache (ADR-013: nothing persisted), so a page change or a pull-to-refresh from a
-        // loaded page is a full network round-trip; wiping to Mode.Loading would flash a
-        // full-screen spinner on every page turn. `page` is NOT advanced optimistically: the
-        // pager keeps describing the page on screen until the new one actually lands.
-        val keepContent = _state.value.mode is PrivateMessageThreadUiState.Mode.Content
+        // Keep the displayed conversation on screen while (re)loading. A hit for the target page
+        // replaces it immediately, still under the refresh indicator until mandatory network
+        // revalidation completes. `page` is never advanced before an actual cache/network emission.
+        var hasContent = _state.value.mode is PrivateMessageThreadUiState.Mode.Content
         _state.update {
-            if (keepContent) {
+            if (hasContent) {
                 it.copy(isRefreshing = true)
             } else {
                 it.copy(mode = PrivateMessageThreadUiState.Mode.Loading, page = page)
             }
         }
         try {
-            val thread = repository.getPrivateMessageThread(
+            repository.getPrivateMessageThread(
                 threadId = request.threadId,
                 page = page,
                 fallbackCorrespondent = null,
-            )
-            _state.update {
-                it.copy(
-                    mode = contentMode(thread),
-                    page = thread.page,
-                    totalPages = thread.totalPages,
-                    isRefreshing = false,
-                )
+            ).collect { loadedPage ->
+                val thread = loadedPage.thread
+                hasContent = true
+                _state.update {
+                    it.copy(
+                        mode = contentMode(thread, loadedPage.source),
+                        page = thread.page,
+                        totalPages = thread.totalPages,
+                        isRefreshing = loadedPage.source == PrivateMessageThreadPage.Source.SESSION_CACHE,
+                    )
+                }
+                if (loadedPage.source == PrivateMessageThreadPage.Source.NETWORK) {
+                    // Cache emissions are render-only: no badge callback (screen), no local position,
+                    // and no MPStorage write. Only the terminal revalidation owns those side effects.
+                    savePosition(
+                        thread.page,
+                        owner,
+                        lastPostNumreponse = thread.messages.lastOrNull()?.numreponse,
+                    )
+                }
             }
-            // The anchor of the LAST post on the landed page — the furthest the reader can have reached
-            // on it. Null when the page has no posts (defensive); the auto MPStorage update then keeps
-            // any existing anchor rather than nulling it.
-            savePosition(thread.page, owner, lastPostNumreponse = thread.messages.lastOrNull()?.numreponse)
         } catch (cancellation: CancellationException) {
             // Deliberately does NOT clear isRefreshing: a cancellation only comes from a
             // superseding load() (which owns the flag from its own start) or from
@@ -455,7 +466,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
             // (classifyHfrError) so the screen can tell an HFR 5xx outage from a network cut.
             @Suppress("TooGenericExceptionCaught") error: Exception,
         ) {
-            if (keepContent) {
+            if (hasContent) {
                 // #351 — the page on screen stays put (it is still valid); the screen surfaces
                 // a one-shot Toast instead of swapping a readable conversation for an Error
                 // placeholder. Initial loads (nothing on screen) keep the Error + Retry path.

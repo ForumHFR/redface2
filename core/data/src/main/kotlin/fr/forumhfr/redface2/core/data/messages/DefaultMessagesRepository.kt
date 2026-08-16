@@ -2,8 +2,11 @@ package fr.forumhfr.redface2.core.data.messages
 
 import android.util.Log
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
+import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
+import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageListPage
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
@@ -44,11 +47,12 @@ import kotlinx.coroutines.withContext
  * (newest-first ordering) — sufficient for "is there anything new?" UX.
  */
 @Singleton
-class DefaultMessagesRepository @Inject constructor(
+class DefaultMessagesRepository @Inject internal constructor(
     private val authRepository: AuthRepository,
     private val hfrClient: HfrClient,
     private val parser: PrivateMessageListParser,
     private val threadParser: PrivateMessageThreadParser,
+    private val threadSessionCache: PrivateMessageThreadSessionCache,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : MessagesRepository {
 
@@ -150,8 +154,8 @@ class DefaultMessagesRepository @Inject constructor(
     // Unlike observeUnreadMpCount (a best-effort footer signal that swallows failures into
     // null), the inbox list / thread reads PROPAGATE their errors: the Messages tab owns a real
     // error state with a retry, so a network or session failure must reach the ViewModel rather
-    // than being hidden behind an empty screen. withContext(ioDispatcher) wraps the HfrClient
-    // call per the repository contract (cf. NetworkOnMainThreadException regression, PR #162).
+    // than being hidden behind an empty screen. withContext/flowOn(ioDispatcher) wrap HfrClient
+    // calls per the repository contract (cf. NetworkOnMainThreadException regression, PR #162).
     override suspend fun getPrivateMessageList(page: Int): PrivateMessageListPage =
         withContext(ioDispatcher) {
             // Session snapshot at call-time, BEFORE the network call (same pattern as the flags
@@ -171,16 +175,40 @@ class DefaultMessagesRepository @Inject constructor(
     private suspend fun currentPseudo(): String? =
         (authRepository.observeAuthState().first() as? AuthState.Authenticated)?.pseudo
 
-    override suspend fun getPrivateMessageThread(
+    override fun getPrivateMessageThread(
         threadId: Int,
         page: Int,
         fallbackCorrespondent: String?,
-    ): PrivateMessageThread = withContext(ioDispatcher) {
-        threadParser.parse(
+    ): Flow<PrivateMessageThreadPage> = flow {
+        val owner = currentPseudo()
+            ?: throw SessionExpiredException(REDACTED_PRIVATE_MESSAGE_URL)
+        val stamp = threadSessionCache.capture(owner)
+        if (isCurrentSession(stamp)) {
+            threadSessionCache.read(stamp, threadId, page)?.let { cached ->
+                if (isCurrentSession(stamp)) {
+                    emit(PrivateMessageThreadPage(cached, PrivateMessageThreadPage.Source.SESSION_CACHE))
+                }
+            }
+        }
+
+        val parsed = threadParser.parse(
             html = hfrClient.getPrivateMessageThreadPage(threadId = threadId, page = page),
             fallbackCorrespondent = fallbackCorrespondent,
         )
-    }
+        if (parsed.matchesTarget(threadId, page) && isCurrentSession(stamp)) {
+            threadSessionCache.write(stamp, threadId, page, parsed)
+        }
+        if (isCurrentSession(stamp)) {
+            emit(PrivateMessageThreadPage(parsed, PrivateMessageThreadPage.Source.NETWORK))
+        }
+    }.flowOn(ioDispatcher)
+
+    private suspend fun isCurrentSession(stamp: PrivateMessageThreadSessionCache.Stamp): Boolean =
+        threadSessionCache.isCurrent(stamp) &&
+            currentPseudo()?.let(::canonicalizePseudo) == stamp.account
+
+    private fun PrivateMessageThread.matchesTarget(threadId: Int, page: Int): Boolean =
+        this.threadId == threadId && this.page == page
 
     /** #453 — events folded by the unread-count [scan]. */
     private sealed interface UnreadEvent
@@ -231,5 +259,6 @@ class DefaultMessagesRepository @Inject constructor(
     private companion object {
         const val LOG_TAG = "MessagesRepository"
         const val FIRST_PAGE = 1
+        const val REDACTED_PRIVATE_MESSAGE_URL = "private-message-session"
     }
 }

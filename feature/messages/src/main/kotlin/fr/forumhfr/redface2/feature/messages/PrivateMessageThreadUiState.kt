@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.messages
 
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
+import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
 
 /**
@@ -8,10 +9,9 @@ import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
  * Content / Error mode plus the pager bounds.
  *
  * [isRefreshing] (#351) — true while a load runs WITH content kept on screen (pull-to-refresh, or a
- * page change from a loaded conversation). There is no MP cache (ADR-013: nothing persisted), so
- * every page change is a network round-trip; keeping the previous page visible behind the refresh
- * indicator beats wiping to a full-screen spinner. [page]/[totalPages] only advance when the new
- * page actually lands, so the pager keeps describing what is on screen during the round-trip.
+ * page change from a loaded conversation). A session-cache hit replaces the page immediately while
+ * [isRefreshing] stays true until mandatory network revalidation. [page]/[totalPages] only advance
+ * when cache or network content lands, so the pager always describes what is on screen.
  */
 data class PrivateMessageThreadUiState(
     val request: PrivateMessageThreadRequest,
@@ -95,6 +95,8 @@ data class PrivateMessageThreadUiState(
         data object Loading : Mode
         data class Content(
             val thread: PrivateMessageThread,
+            /** Cache content is render-only; only a terminal network page may trigger side effects. */
+            val source: PrivateMessageThreadPage.Source = PrivateMessageThreadPage.Source.NETWORK,
             /**
              * #509/#1050 — `numreponse` of this page's messages whose canonical author is blocked.
              * The full [PrivateMessageThread.messages] list stays intact; the screen replaces only

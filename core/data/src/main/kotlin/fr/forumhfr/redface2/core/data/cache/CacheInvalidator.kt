@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.data.cache
 
 import android.util.Log
+import fr.forumhfr.redface2.core.data.messages.PrivateMessageThreadSessionCache
 import fr.forumhfr.redface2.core.database.dao.EditorDraftDao
 import fr.forumhfr.redface2.core.database.dao.FlagDao
 import fr.forumhfr.redface2.core.database.dao.MpReadPositionDao
@@ -55,7 +56,8 @@ import kotlinx.coroutines.plus
  * On a `Authenticated(A) → Authenticated(B)` switch (login, then logout, then
  * login as someone else), we wipe rows owned by A explicitly. The session
  * cache held in [FlagRepository.clearSessionCache] is also flushed so that the
- * new account does not inherit the previous in-memory results.
+ * new account does not inherit the previous in-memory results. The private-message page cache is
+ * cleared first and its generation advanced synchronously, before any suspending database purge.
  *
  * Topic page caches are *not* per-user — the HTML is the same for every
  * authenticated reader. We do **not** purge `topic_pages`/`posts` on logout to
@@ -66,7 +68,7 @@ import kotlinx.coroutines.plus
  */
 @Singleton
 @Suppress("LongParameterList") // All constructor args are injected per-user caches the invalidator aggregates.
-class CacheInvalidator @Inject constructor(
+class CacheInvalidator @Inject internal constructor(
     private val authRepository: AuthRepository,
     private val flagDao: FlagDao,
     private val mpReadPositionDao: MpReadPositionDao,
@@ -74,6 +76,7 @@ class CacheInvalidator @Inject constructor(
     private val uploadedImageDao: UploadedImageDao,
     private val mpStorageLocationDao: MpStorageLocationDao,
     private val flagRepository: FlagRepository,
+    private val privateMessageThreadSessionCache: PrivateMessageThreadSessionCache,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) {
 
@@ -96,6 +99,10 @@ class CacheInvalidator @Inject constructor(
             .onEach { state ->
                 val previousPseudo = state.previousPseudo ?: return@onEach
                 if (state.shouldPurge) {
+                    // Synchronous and deliberately first: DAO purges suspend. Any MP response that
+                    // lands while they run must already carry an obsolete generation and be unable
+                    // to refill the RAM cache or reach the UI under the next account (#1080).
+                    privateMessageThreadSessionCache.clearAndAdvanceGeneration()
                     runCatching { flagDao.deleteAllForUser(previousPseudo) }
                         .onFailure { Log.w(LOG_TAG, "Failed to purge flag cache for $previousPseudo", it) }
                     runCatching { mpReadPositionDao.deleteAllForUser(previousPseudo) }
