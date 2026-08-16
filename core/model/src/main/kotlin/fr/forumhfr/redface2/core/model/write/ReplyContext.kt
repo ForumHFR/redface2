@@ -24,11 +24,10 @@ data class ReplyContext(
      */
     val quotedNumreponse: Int? = null,
     /**
-     * `ref` query parameter HFR includes in the « quote+ » link of each post. Phase
-     * 2C (#146) ships it through as-is: the value is opaque (it correlates with
-     * post position on the topic page but the exact contract is undocumented), so
-     * the model carries whatever the topic page HTML gave us and forbids guessing
-     * a default. `null` is accepted for obfuscated toolbar rows: HFR identifies the
+     * `ref` query parameter HFR includes in the « quote+ » link of each post. It is
+     * the 1-based rank inside the page (`0` for the page-2+ recap row), so the model
+     * carries whatever the topic page HTML gave us and forbids recomputing it from
+     * a local list index. `null` is accepted for obfuscated toolbar rows: HFR identifies the
      * cited post by `numrep={quotedNumreponse}` alone, and the network layer simply
      * omits `&ref=` when this value is absent.
      */

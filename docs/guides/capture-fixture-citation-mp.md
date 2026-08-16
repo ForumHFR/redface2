@@ -22,9 +22,9 @@ l'action « Répondre à ce message » d'une conversation privée.
 
 ## Pourquoi cette recette vit dans `docs/guides/`
 
-La forme du formulaire de citation MP reste un contrat serveur **à mesurer**. Elle ne doit donc pas
-entrer dans la spécification canonique du protocole avant une capture réelle. Ce guide est une
-procédure opérationnelle durable, au même titre que les règles de fixtures de
+La forme du formulaire de citation MP a été mesurée le 2026-08-12. Le contrat canonique vit désormais
+dans `protocol-hfr.md` ; ce guide conserve la procédure de capture pour le reproduire et détecter une
+éventuelle dérive serveur, au même titre que les règles de fixtures de
 [`contributing.md`]({{ site.baseurl }}/guides/contributing#fixtures-html-pour-le-parser) ; il ne vit
 pas dans `drafts/`, qui n'est pas normatif.
 
@@ -143,10 +143,10 @@ La capture doit alors **vérifier**, et non présupposer, les points suivants :
   `/bddpost.php?config=hfr.inc` comme les formulaires reply/quote déjà capturés ;
 - un `textarea[name=content_form]` prérempli par HFR avec un bloc `[quotemsg=…]…[/quotemsg]` ;
 - les champs cachés réellement servis, notamment `hash_check`, `cat=prive`, `post`, `numrep`,
-  `page`, `p`, `subcat`, `new`, `verifrequet` et `sujet`, ainsi que `ref`, `sondage`, `owntopic` ou
-  les options si HFR les émet ;
-- la valeur et la sémantique de `numrep` dans ce formulaire : message cité ou autre valeur. C'est
-  l'inconnu que la fixture doit trancher ;
+  `page`, `p`, `subcat`, `new`, `verifrequet` et `sujet`, ainsi que `sondage`, `owntopic` ou les
+  options si HFR les émet ; la capture du 2026-08-12 ne sert aucun champ caché `ref` ;
+- la valeur de `numrep`, qui doit désigner le message cité selon le contrat mesuré ; tout écart est
+  une dérive à reporter dans `protocol-hfr.md`, pas une nouvelle sémantique à deviner côté client ;
 - en DT, la présence éventuelle de `newdest` pour le créateur ou de la ligne « Destinataires » en
   lecture seule pour un participant.
 
@@ -249,8 +249,8 @@ fixtures actuelle produit près de 2 000 lignes. Chaque entrée doit être soit 
 valeur fictive. Tout le reste est une fuite.
 
 Conserver la structure du formulaire, les noms de champs, les valeurs non sensibles, le rang `ref`
-et la forme du BBCode prérempli. Le corps privé peut être remplacé par un placeholder à l'intérieur
-du `[quotemsg]`, sans toucher aux délimiteurs produits par HFR.
+dans le BBCode prérempli et la forme de celui-ci. Le corps privé peut être remplacé par un placeholder
+à l'intérieur du `[quotemsg]`, sans toucher aux délimiteurs produits par HFR.
 
 La destination prévue est :
 

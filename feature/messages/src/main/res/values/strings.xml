@@ -19,6 +19,7 @@
 
     <!-- #301 — réponse à une conversation privée (écriture MP). -->
     <string name="messages_reply">Répondre</string>
+    <string name="messages_quote">Citer</string>
     <string name="messages_reply_title">Répondre</string>
     <string name="messages_compose_title">Nouveau message</string>
     <string name="messages_compose_new">Nouveau</string>
@@ -90,8 +91,8 @@
     <!-- #1042 — tap avatar/pseudo d'un message privé : ouvre le profil (parité topic #208). -->
     <string name="messages_open_profile_action">Voir le profil</string>
 
-    <!-- #1051 — menu contextuel propre aux messages privés. Le permalien et la citation sont
-         volontairement absents tant que leurs contrats MP ne sont pas implémentés/prouvés. -->
+    <!-- #1051/#1074 — menu contextuel propre aux messages privés. Le permalien reste absent ; la
+         citation simple est une action du pied de carte, comme côté topic, et non de ce menu. -->
     <string name="messages_message_menu_action">Options du message</string>
     <string name="messages_message_menu_number">Message n°%1$d</string>
     <string name="messages_message_menu_copy_text">Copier le texte</string>

@@ -39,7 +39,7 @@ import androidx.compose.ui.semantics.semantics
  *  - [body] (mandatory) — the rendered post (the call-site supplies its own [PostRenderer] and owns
  *    its `selectable` choice — the shell decides nothing here; since #1042 both reading surfaces
  *    mount their body through `ReadingPostCard`, whose selection is constant by construction #946).
- *  - [footer] (optional) — the actions row (Citer/Modifier/multi-quote) on the topic; `null` on the MP.
+ *  - [footer] (optional) — the feature-owned actions row: topic actions or MP « Citer » (#1074).
  *
  * [border] is the topic's multi-quote outline (#436), `null` for the MP. Body/header padding is the
  * slot's own job (both reading hosts read their gutters from the display-metrics preset since #1042,

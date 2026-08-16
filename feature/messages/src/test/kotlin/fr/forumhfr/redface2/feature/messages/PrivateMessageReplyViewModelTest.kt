@@ -11,6 +11,7 @@ import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.model.PostContent
+import fr.forumhfr.redface2.core.model.write.PrivateMessageQuote
 import fr.forumhfr.redface2.core.model.write.PrivateMessageReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
@@ -54,6 +55,12 @@ class PrivateMessageReplyViewModelTest {
     }
 
     private val request = PrivateMessageReplyRequest(threadId = 3195237, page = 1)
+    private val quote = PrivateMessageQuote(numreponse = 1_980_000_004, ref = 4)
+    private val quoteRequest = PrivateMessageReplyRequest(
+        threadId = 3_000_001,
+        page = 1,
+        quote = quote,
+    )
 
     private val previewParser = BbcodePreviewParser { PostContent(blocks = emptyList()) }
 
@@ -86,11 +93,15 @@ class PrivateMessageReplyViewModelTest {
             "signature" to "1",
         ),
         isAnonymous: Boolean = false,
+        initialContent: String = "",
+        options: ReplyFormOptions = ReplyFormOptions(),
     ): ReplyForm = ReplyForm(
         hashCheck = hashCheck,
         sujet = "Sujet prive de test",
         hiddenFields = hiddenFields,
         isAnonymous = isAnonymous,
+        initialContent = initialContent,
+        options = options,
     )
 
     /** #606 — owner DT/MultiMP form: HFR serves the `newdest` CSV (members minus the owner). */
@@ -147,6 +158,132 @@ class PrivateMessageReplyViewModelTest {
         assertFalse(state.formError)
         // The quick-reply form carries signature as a hidden `=1`, so the toggle defaults on.
         assertTrue("signature default should be hydrated from the hidden field", state.signatureEnabled)
+    }
+
+    @Test
+    fun `quote form hydrates verbatim and quote-only submit preserves options and newdest`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        val prefill = "[quotemsg=1980000004,4,990001]Citation serveur[/quotemsg]\n"
+        val quoteForm = form(
+            hiddenFields = mapOf(
+                "cat" to "prive",
+                "post" to "3000001",
+                "numrep" to "1980000004",
+                "numreponse" to "",
+                "newdest" to "alice, bob",
+            ),
+            initialContent = prefill,
+            options = ReplyFormOptions(signatureEnabled = true),
+        )
+        coEvery { repository.fetchReplyForm(any(), any()) } returns quoteForm
+        coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
+            ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+
+        val viewModel = PrivateMessageReplyViewModel(
+            quoteRequest, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
+        )
+
+        val state = viewModel.state.value
+        assertEquals("the server prefill must stay byte-for-byte in the editor", prefill, state.draft.text)
+        assertTrue("a quote with no added body is submit-ready", state.canSubmit)
+        assertTrue("checkbox defaults still hydrate on a quote", state.signatureEnabled)
+        assertEquals(listOf("alice", "bob"), state.recipients)
+
+        viewModel.onSubmit()
+
+        coVerify {
+            repository.submitReply(
+                context = match { it.quote == quote },
+                form = quoteForm,
+                bbcodeContent = prefill,
+                options = ReplyFormOptions(signatureEnabled = true),
+                // No member edit: the repository forwards the original `newdest` verbatim.
+                recipientsOverride = null,
+            )
+        }
+    }
+
+    @Test
+    fun `late quote form prefixes the prefill once without clobbering typed text`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        val formGate = CompletableDeferred<ReplyForm>()
+        val prefill = "[quotemsg=1980000004,4,990001]Citation serveur[/quotemsg]\n"
+        coEvery { repository.fetchReplyForm(any(), any()) } coAnswers { formGate.await() }
+        val viewModel = PrivateMessageReplyViewModel(
+            quoteRequest, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
+        )
+
+        viewModel.onContentChanged(TextFieldValue("Texte saisi pendant le GET"))
+        formGate.complete(
+            form(
+                hiddenFields = mapOf("numrep" to "1980000004", "numreponse" to ""),
+                initialContent = prefill,
+            ),
+        )
+        advanceUntilIdle()
+
+        val expected = prefill + "\nTexte saisi pendant le GET"
+        assertEquals(expected, viewModel.state.value.draft.text)
+
+        // A retry/re-subscription to the same server form refreshes the token only; it cannot append
+        // a second quote block because draftHydratedFromForm is already true.
+        viewModel.retryFormLoad()
+        advanceUntilIdle()
+        assertEquals(expected, viewModel.state.value.draft.text)
+        assertEquals(1, Regex("\\[quotemsg=").findAll(viewModel.state.value.draft.text).count())
+    }
+
+    @Test
+    fun `stored draft stays offered beside quote prefill and wins only on explicit restore`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        val prefill = "[quotemsg=1980000004,4,990001]Citation serveur[/quotemsg]\n"
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form(initialContent = prefill)
+        draftStore.preload(
+            EditorDraftKey.mpReply(quoteRequest.threadId),
+            EditorDraftStore.Draft(body = "Ancien brouillon", isPrivate = true),
+        )
+
+        val viewModel = PrivateMessageReplyViewModel(
+            quoteRequest, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
+        )
+        advanceUntilIdle()
+
+        assertEquals(prefill, viewModel.state.value.draft.text)
+        assertEquals("Ancien brouillon", viewModel.state.value.restorableDraft)
+
+        viewModel.onDraftRestoreRequested()
+        assertEquals("Ancien brouillon", viewModel.state.value.draft.text)
+        assertNull(viewModel.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `invalid hash refetch stays on the quote context and never duplicates its prefill`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        val prefill = "[quotemsg=1980000004,4,990001]Citation serveur[/quotemsg]\n"
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form(initialContent = prefill)
+        coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
+            ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
+        val viewModel = PrivateMessageReplyViewModel(
+            quoteRequest, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
+        )
+
+        viewModel.onSubmit()
+
+        assertEquals(prefill, viewModel.state.value.draft.text)
+        coVerify(exactly = 2) {
+            repository.fetchReplyForm(
+                match { it.quote == quote },
+                allowEmbeddedFallback = true,
+            )
+        }
     }
 
     @Test

@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -22,6 +23,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
@@ -59,6 +61,7 @@ import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.ego.deriveEgoCanonicalPseudo
 import fr.forumhfr.redface2.core.domain.ego.isEgoPost
 import fr.forumhfr.redface2.core.model.Post
+import fr.forumhfr.redface2.core.model.write.PrivateMessageQuote
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.list.ScrollToTopOnPageChange
@@ -88,7 +91,7 @@ import java.util.Locale
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-@Suppress("LongParameterList") // Screen host: route request + 3 nav callbacks + multi-recipient hint + actions slot.
+@Suppress("LongParameterList") // Screen host: request + nav callbacks + multi-recipient hint + actions slot.
 fun PrivateMessageThreadScreen(
     request: PrivateMessageThreadRequest,
     // Ephemeral UI hint from the inbox row (the route stays opaque, carrying only threadId/page).
@@ -98,6 +101,9 @@ fun PrivateMessageThreadScreen(
     onLoaded: () -> Unit,
     onBack: () -> Unit,
     onReply: (threadId: Int, page: Int) -> Unit,
+    // #1074 — per-message footer action. The quote target is typed before navigation; no private
+    // href or BBCode enters the route.
+    onQuote: (threadId: Int, page: Int, quote: PrivateMessageQuote) -> Unit,
     // #618 — owner-only entry to the recipient editor, from the « Participants » sheet. Navigates to
     // the reply composer with the recipient-manager sheet auto-opened (member changes ship as a reply).
     onManageRecipients: (threadId: Int, page: Int) -> Unit = { _, _ -> },
@@ -171,6 +177,15 @@ fun PrivateMessageThreadScreen(
         callbacks = PrivateMessageThreadCallbacks(
             onBack = onBack,
             onReply = { onReply(request.threadId, state.page) },
+            onQuote = { message ->
+                message.quoteRef?.let { ref ->
+                    onQuote(
+                        request.threadId,
+                        state.page,
+                        PrivateMessageQuote(numreponse = message.numreponse, ref = ref),
+                    )
+                }
+            },
             onRetry = viewModel::retry,
             onRefresh = viewModel::refresh,
             onSelectPage = viewModel::selectPage,
@@ -205,6 +220,8 @@ internal data class PrivateMessageThreadCallbacks(
     val onDismissRoster: () -> Unit,
     val onRetryRoster: () -> Unit,
     val onManageRecipients: () -> Unit,
+    /** Null only in isolated hosts; production supplies it and the list applies reply/ref gates. */
+    val onQuote: ((Post) -> Unit)? = null,
     // #1042 — defaulted (unlike its siblings) so the pre-#1042 characterization mounts compile
     // unchanged; a host that does not navigate keeps the tap a no-op, like the topic screen default.
     val onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
@@ -399,7 +416,9 @@ internal fun PrivateMessageThreadContent(
                                 egoQuoteEnabled = state.egoQuoteEnabled,
                                 egoPostEnabled = state.egoPostEnabled,
                                 connectedPseudo = state.connectedPseudo,
+                                canReply = mode.thread.canReply,
                                 onSelectPage = callbacks.onSelectPage,
+                                onQuote = callbacks.onQuote,
                                 onOpenProfile = callbacks.onOpenProfile,
                                 onOpenMessageMenu = openMessageMenu,
                                 onImageLongPress = postImageActions.onLongPress,
@@ -659,7 +678,9 @@ private fun ThreadMessages(
     egoQuoteEnabled: Boolean,
     egoPostEnabled: Boolean,
     connectedPseudo: String?,
+    canReply: Boolean,
     onSelectPage: (Int) -> Unit,
+    onQuote: ((Post) -> Unit)?,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit,
     onOpenMessageMenu: (Post) -> Unit,
     onImageLongPress: (PostImageTarget) -> Unit,
@@ -749,6 +770,10 @@ private fun ThreadMessages(
                     },
                     onOpenMenu = { onOpenMessageMenu(message) },
                     onImageLongPress = onImageLongPress,
+                    // #1074 — MP citation is fail-closed: unlike the topic fallback, the measured
+                    // contract requires the server-provided 1-based page rank. Missing/zero `ref`,
+                    // read-only thread, or absent host callback means no footer action.
+                    onQuote = messageQuoteAction(canReply, message, onQuote),
                 )
             }
         }
@@ -783,6 +808,20 @@ private fun ThreadMessages(
     }
 }
 
+/** Fail-closed MP quote gate, kept outside the hot list builder's complexity budget. */
+private fun messageQuoteAction(
+    canReply: Boolean,
+    message: Post,
+    onQuote: ((Post) -> Unit)?,
+): (() -> Unit)? {
+    val ref = message.quoteRef ?: return null
+    return if (!canReply || ref < 1 || onQuote == null) {
+        null
+    } else {
+        { onQuote(message) }
+    }
+}
+
 /** The message stays in the keyed list; this helper selects only which card represents it. */
 internal fun isHiddenMessage(message: Post, hidden: Set<Int>, revealed: Set<Int>): Boolean =
     message.numreponse in hidden && message.numreponse !in revealed
@@ -809,6 +848,8 @@ internal fun isHiddenMessage(message: Post, hidden: Set<Int>, revealed: Set<Int>
  * the remaining card surface opens the message menu.
  * [onImageLongPress] is likewise a capability by presence: the MP screen supplies it, while direct
  * hosts that omit it keep every content image inert (editor previews and signatures stay unchanged).
+ * [onQuote] supplies the footer « Citer » action. The list passes it only for a writable thread and
+ * a message carrying a positive server-provided `quoteRef`; hidden messages never mount this card.
  * [presentation] is the shared render-only state bundle. The list derives its values from reader
  * preferences, the session pseudo (#1050 Ego markers) and message position, while this adapter
  * forwards the bundle unchanged — its only addition is the EgoPost StateDescription on the
@@ -816,12 +857,14 @@ internal fun isHiddenMessage(message: Post, hidden: Set<Int>, revealed: Set<Int>
  * card below it, never the identity strip. Neutral defaults keep direct test/preview mounts unmarked.
  */
 @Composable
+@Suppress("LongParameterList") // Thin card adapter: render state plus independent host capabilities.
 internal fun MessageCard(
     message: Post,
     presentation: ReadingPostCardPresentation = ReadingPostCardPresentation(),
     onOpenProfile: (() -> Unit)? = null,
     onOpenMenu: (() -> Unit)? = null,
     onImageLongPress: ((PostImageTarget) -> Unit)? = null,
+    onQuote: (() -> Unit)? = null,
 ) {
     // #287/#1042 — structural spacing from the active density preset, like the shared card's body.
     val m = LocalDisplayMetrics.current
@@ -934,7 +977,31 @@ internal fun MessageCard(
         } else {
             null
         },
+        footer = onQuote?.let { quote ->
+            {
+                MessageQuoteAction(
+                    onQuote = quote,
+                    horizontalPadding = m.cardBodyHorizontal,
+                )
+            }
+        },
     )
+}
+
+/** #1074 — sober MP footer action, aligned with the topic card's per-message actions row. */
+@Composable
+private fun MessageQuoteAction(onQuote: () -> Unit, horizontalPadding: Dp) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .padding(horizontal = horizontalPadding),
+        horizontalArrangement = Arrangement.End,
+    ) {
+        TextButton(onClick = onQuote) {
+            Text(text = stringResource(R.string.messages_quote))
+        }
+    }
 }
 
 /** Citation-count pill for the MP card, supplied through [ReadingPostCard]'s badges slot. */

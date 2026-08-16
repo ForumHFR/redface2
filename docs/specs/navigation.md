@@ -211,8 +211,8 @@ Le badge est un carré à coins arrondis (8dp), **pas un cercle**, cohérent ave
 
 Depuis le MVP Phase 3 (#298), l'onglet `Messages` affiche l'inbox des MP (MP classiques et
 MultiMP confondus, cf. § Messages ci-dessous) et ouvre une conversation ; la lecture seule
-du MVP a depuis été étendue à la réponse (#301 — pas à la citation par message, jamais
-livrée : requalifiée par #1041, lot 4 de #1040), la composition de MP/MultiMP et la
+du MVP a depuis été étendue à la réponse (#301), à la citation simple par message (#1074),
+à la composition de MP/MultiMP et à la
 gestion des membres d'un MultiMP (#606/#612). L'écran observe l'état d'authentification : en
 anonyme ou après déconnexion, les données privées déjà chargées sont purgées et remplacées
 par un état « connexion requise ».
@@ -223,7 +223,8 @@ Inbox **mono-onglet** : `MessagesScreen` (`feature/messages/.../MessagesScreen.k
 
 - **Inbox** : liste des conversations triées par date (`forum1.php?cat=prive`). Chaque entrée affiche sujet, correspondant, date, indicateur lu/non-lu (dot binaire serveur, cf. [ADR-013]({{ site.baseurl }}/adr/013-mp-lecture-cache-prefetch)/#361 — **pas** d'état MPStorage/Room en lieu et place du drapeau serveur), et un marqueur « Interlocuteurs multiples » pour les MultiMP.
 - **Lecture d'une conversation** : `forum2.php?cat=prive&post={threadId}&page={page}`, même rendu `PostRenderer` que les posts de topic. Swipe de pages in-place + ascenseur + pull-to-refresh (#351 a/b, ADR-013).
-- **Réponse** (#301) : le FAB global « Répondre » ouvre le composer (formulaire sourcé depuis `message.php`, fallback formulaire embarqué — cf. `DefaultPrivateMessageWriteRepository`) ; gaté sur `thread.canReply`. **Pas de citation par message** : le flux « Répondre » ne porte aucune référence de citation — sur le formulaire `message.php` que la production suit, `numrep` est **vide**, et c'est seulement le formulaire de réponse rapide embarqué dans `forum2.php` qui préremplit le dernier message de la page. Les trois sens de `numrep`, mesurés en #1041, sont dans [protocol-hfr.md]({{ site.baseurl }}/specs/protocol-hfr) § « MP — citer un message » ; la citation MP est portée par le lot 4 de #1040.
+- **Réponse** (#301) : le FAB global « Répondre » ouvre le composer (formulaire sourcé depuis le lien réel de `message.php`, fallback formulaire embarqué — cf. `DefaultPrivateMessageWriteRepository`) ; gaté sur `thread.canReply`. Ce flux ne porte aucune référence de citation et conserve notamment le `newdest` servi par HFR.
+- **Citation simple** (#1074) : le bouton « Citer » du pied de carte ouvre le même composer avec une cible typée `(numreponse, ref)` ; l'action est masquée si le rang 1-based `ref` manque. L'app reconstruit le GET `message.php` documenté, puis consomme verbatim le `content_form` prérempli. Les trois sens de `numrep`, mesurés en #1041, sont dans [protocol-hfr.md]({{ site.baseurl }}/specs/protocol-hfr) § « MP — citer un message ». Le formulaire ne sert aucun champ caché `ref` et aucun POST live n'a été émis.
 - **Nouveau MP** : composition d'un MP 1-to-1 (destinataire + sujet + contenu).
 - **Nouveau MultiMP** : composition d'une conversation de groupe (2+ destinataires + sujet + contenu).
 - **Gérer les membres d'un MultiMP** (#606/#612) : l'owner peut ajouter/retirer des destinataires via le champ `newdest` au POST de réponse (cf. [protocol-hfr.md]({{ site.baseurl }}/specs/protocol-hfr#mpdt--ajoutretrait-de-membres-newdest)).
@@ -276,6 +277,13 @@ Implémentation via **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026).
     val threadId: Int,                     // id `post` HFR de la conversation `cat=prive`
     val page: Int = 1,
 ) : RedfaceNavKey                         // route opaque : pas de sujet/correspondant privé
+@Serializable data class PrivateMessageReplyRoute(
+    val threadId: Int,
+    val page: Int = 1,
+    val openRecipientManager: Boolean = false,
+    val quotedNumreponse: Int? = null,     // null avec quoteRef pour une réponse simple
+    val quoteRef: Int? = null,             // rang 1-based obligatoire avec quotedNumreponse (#1074)
+) : RedfaceNavKey                         // aucun BBCode ni href privé dans le back stack
 @Serializable data class CategoryRoute(
     val cat: Int,
     val subcat: Int? = null,
@@ -307,7 +315,7 @@ Implémentation via **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026).
     val page: Int? = null,                // page topic en cours, requis Reply (#145)
     val subcat: Int? = null,              // sous-cat HFR de POST, requis Reply (#145). subcat=0 valide (cat sans sous-cat, #213). TopicScreen ne pousse PostEditorRoute que si topic.canReply (présence du formulaire bddpost)
     val quotedNumreponse: Int? = null,    // Phase 2C (#146) : null = reply simple ; non-null = quote (numreponse du post cité)
-    val quoteRef: Int? = null,            // Phase 2C (#146/#227) : ref opaque parsé depuis le href quote quand disponible ; null accepté (HFR cite via `numrep`)
+    val quoteRef: Int? = null,            // Phase 2C (#146/#227/#986) : rang 1-based dans la page (`0` pour le récapitulatif), transmis sans recalcul ; null accepté côté topic (HFR cite via `numrep`)
 ) : RedfaceNavKey
 
 @Serializable data class TopicFormRoute(
@@ -594,7 +602,7 @@ Manifest requis : `android:enableOnBackInvokedCallback="true"` sur `<application
 > **Statut Phase 5+** — multi-pane n'est pas livré en Phase 1. Dans le snippet ci-dessous :
 >
 > - le **pattern de composition** (`NavDisplay` + `ListDetailPaneScaffold` sur le même back stack, switch `WindowSizeClass`) est **illustratif** — c'est ce qui sera implémenté Phase 5+ ;
-> - les **signatures de screens** appelées (`FlagsRoute(onOpenFlag, onLoginRequested, topBarActions)`, `MessagesScreen(onOpenThread: (threadId, isMultiRecipient) -> Unit, readThreadIds, topBarActions)`, `PrivateMessageThreadScreen(request, isMultiRecipientHint, onLoaded, onBack, topBarActions)`, `SearchScreen(onOpenTopic, topBarActions)`, `ForumScreen(onOpenCategory, topBarActions)`, `TopicScreen(request: TopicRequest, onReply: (subcat, page) -> Unit, onQuote: (subcat, page, quotedNumreponse, quoteRef) -> Unit, onEdit: (subcat, page, numreponse) -> Unit, onEditFirstPost: (subcat, page, numreponse) -> Unit, onOpenPage)`, `PostEditorScreen(request: PostEditorRequest, onSubmitSucceeded: (targetPage?, scrollTo?) -> Unit)`, `TopicFormScreen(request: TopicFormRequest, onSubmitSucceeded: (targetPage?, scrollTo?) -> Unit)`) sont les signatures réelles livrées dans le repo, **abrégées à leurs params structurants** — les slots additionnels (`onBack`, `onTitleLoaded`, `onOpenProfile`, `restoreScrollAnchor`/`onScrollAnchorSaved` #307…) vivent dans les fichiers cités (cf. `feature/topic/.../TopicScreen.kt`, `feature/flags/.../FlagsRoute.kt`, `feature/messages/.../MessagesScreen.kt`, `feature/search/.../SearchScreen.kt`, `feature/editor/.../PostEditorScreen.kt`, `feature/editor/.../TopicFormScreen.kt`). Le slot `topBarActions: @Composable (() -> Unit)? = null` carrie le menu compte global depuis #198 — cf. § « Menu compte global ».
+> - les **signatures de screens** appelées (`FlagsRoute(onOpenFlag, onLoginRequested, topBarActions)`, `MessagesScreen(onOpenThread: (threadId, isMultiRecipient) -> Unit, readThreadIds, topBarActions)`, `PrivateMessageThreadScreen(request, isMultiRecipientHint, onLoaded, onBack, onQuote: (threadId, page, quote) -> Unit, topBarActions)`, `SearchScreen(onOpenTopic, topBarActions)`, `ForumScreen(onOpenCategory, topBarActions)`, `TopicScreen(request: TopicRequest, onReply: (subcat, page) -> Unit, onQuote: (subcat, page, quotedNumreponse, quoteRef) -> Unit, onEdit: (subcat, page, numreponse) -> Unit, onEditFirstPost: (subcat, page, numreponse) -> Unit, onOpenPage)`, `PostEditorScreen(request: PostEditorRequest, onSubmitSucceeded: (targetPage?, scrollTo?) -> Unit)`, `TopicFormScreen(request: TopicFormRequest, onSubmitSucceeded: (targetPage?, scrollTo?) -> Unit)`) sont les signatures réelles livrées dans le repo, **abrégées à leurs params structurants** — les slots additionnels (`onBack`, `onTitleLoaded`, `onOpenProfile`, `restoreScrollAnchor`/`onScrollAnchorSaved` #307…) vivent dans les fichiers cités (cf. `feature/topic/.../TopicScreen.kt`, `feature/flags/.../FlagsRoute.kt`, `feature/messages/.../MessagesScreen.kt`, `feature/search/.../SearchScreen.kt`, `feature/editor/.../PostEditorScreen.kt`, `feature/editor/.../TopicFormScreen.kt`). Le slot `topBarActions: @Composable (() -> Unit)? = null` carrie le menu compte global depuis #198 — cf. § « Menu compte global ».
 >
 > Le call-site `onOpenFlag = { flag -> backStack.add(TopicRoute(flag.cat, flag.topicId, flag.lastReadPage, scrollTo = ...)) }` passe désormais le topic concerné — Phase 1B.4 a remplacé le placeholder mock par la liste réelle des drapeaux.
 

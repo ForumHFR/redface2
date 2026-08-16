@@ -49,9 +49,9 @@ import kotlinx.coroutines.launch
 
 /**
  * ViewModel for replying to a private-message conversation (#301). Receives its route arguments via
- * Hilt assisted injection ([PrivateMessageReplyRequest]). On creation it GETs the conversation page
- * to parse the embedded `bddpost.php` reply form (fresh `hash_check` + hidden fields), then lets the
- * user compose a BBCode reply with the shared toolbar/preview and submit it.
+ * Hilt assisted injection ([PrivateMessageReplyRequest]). On creation it GETs either the normal MP
+ * reply form or the typed per-message quote form (fresh `hash_check` + hidden fields), then lets the
+ * user edit the server-provided BBCode with the shared toolbar/preview and submit it.
  *
  * Two private-message specifics drive the design (cf. the #301 design notes / independent review):
  *  - The HFR POST success sentence for a private reply is not pinned by a live fixture, so an
@@ -85,6 +85,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     private val context = PrivateMessageReplyContext(
         threadId = request.threadId,
         page = request.page.coerceAtLeast(1),
+        quote = request.quote,
     )
 
     private var loadedForm: ReplyForm? = null
@@ -277,6 +278,11 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                 }
                 loadedForm = form
                 _state.update { current ->
+                    // #1074 — consume HFR's quote BBCode exactly once. If the user typed while the
+                    // GET was in flight, keep that text below the verbatim server prefill. A silent
+                    // InvalidHashCheck refetch sees draftHydratedFromForm=true and cannot duplicate
+                    // the block or clobber later edits.
+                    val hydrated = current.withFormInitialContent(form)
                     // HFR's private "quick reply" form carries the per-post options as plain hidden
                     // inputs (e.g. `signature=1`), not checkboxes — so `ReplyForm.options` (read from
                     // `checked` attributes) is all-false here. Hydrate from the hidden fields too,
@@ -285,25 +291,25 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                     // Hydrate ONLY on the first successful load: a silent refetch after an expired
                     // `hash_check` (InvalidHashCheck) must not reset a toggle the user changed in
                     // between — mirror the post editor's `optionsHydratedFromForm` guard.
-                    val hydrateOptions = !current.optionsHydratedFromForm
-                    current.copy(
+                    val hydrateOptions = !hydrated.optionsHydratedFromForm
+                    hydrated.copy(
                         isLoadingForm = false,
                         formAvailable = true,
                         formError = false,
                         signatureEnabled = if (hydrateOptions) {
                             form.options.signatureEnabled || form.hiddenFields["signature"] == "1"
                         } else {
-                            current.signatureEnabled
+                            hydrated.signatureEnabled
                         },
                         smileyDisabled = if (hydrateOptions) {
                             form.options.smileyDisabled || form.hiddenFields["smiley"] == "1"
                         } else {
-                            current.smileyDisabled
+                            hydrated.smileyDisabled
                         },
                         emailNotificationEnabled = if (hydrateOptions) {
                             form.options.emailNotificationEnabled || form.hiddenFields["emaill"] == "1"
                         } else {
-                            current.emailNotificationEnabled
+                            hydrated.emailNotificationEnabled
                         },
                         optionsHydratedFromForm = true,
                         // #606 — owner-only member editor. Hydrate the working list from HFR's
@@ -317,10 +323,10 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                         // non-dirty submit sends `recipientsOverride = null` — the original `newdest`
                         // is still forwarded verbatim. Only an in-progress edit (`recipientsDirty`)
                         // is preserved across the refetch.
-                        recipients = if (hydrateOptions || !current.recipientsDirty) {
+                        recipients = if (hydrateOptions || !hydrated.recipientsDirty) {
                             RecipientCsv.parse(form.manageableRecipients)
                         } else {
-                            current.recipients
+                            hydrated.recipients
                         },
                     )
                 }
@@ -580,6 +586,28 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             uploadError = if (updated.text != draft.text) null else uploadError,
         )
 
+    /**
+     * Applies a server prefill once without reconstructing it. A late form prefixes the untouched
+     * prefill to text already entered while loading; an explicit #405 restore may replace it later.
+     */
+    private fun PrivateMessageReplyUiState.withFormInitialContent(form: ReplyForm): PrivateMessageReplyUiState {
+        if (draftHydratedFromForm) return this
+        val initial = form.initialContent
+        return if (initial.isEmpty()) {
+            copy(draftHydratedFromForm = true)
+        } else {
+            val existing = draft.text
+            val combined = if (existing.isEmpty()) {
+                initial
+            } else {
+                val separator = if (initial.endsWith('\n')) "\n" else "\n\n"
+                initial + separator + existing
+            }
+            withDraftPreview(
+                TextFieldValue(text = combined, selection = TextRange(combined.length)),
+            ).copy(draftHydratedFromForm = true)
+        }
+    }
 
     /**
      * #459 — pick→read→upload→insert for this MP composer, same proven contract as

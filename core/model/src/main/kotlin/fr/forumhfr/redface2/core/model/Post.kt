@@ -36,7 +36,9 @@ data class Post(
      * `md_*cryptlink` toolbar, locked topic, anonymous read, future server-side
      * change). Forwarded as-is when non-null; when `null` the quote GET omits `&ref=`
      * (HFR identifies the cited post by `numrep={numreponse}` alone — #227, proven
-     * live). « Citer » visibility is driven by `Topic.canReply`, NOT by this field.
+     * live) **for a topic**. Topic « Citer » visibility is driven by `Topic.canReply`, not this
+     * field. The measured MP contract is stricter (#1074): a private message with `quoteRef=null`
+     * hides « Citer » because omission of `ref` has not been proven for `cat=prive`.
      *
      * Persisted in Room v5 (cf. `MIGRATION_4_5`) so cache hits preserve HFR's
      * positional `ref` when it was parseable. Pre-v5 rows backfill to `NULL` and

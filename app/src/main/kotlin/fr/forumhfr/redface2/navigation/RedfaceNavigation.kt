@@ -97,6 +97,7 @@ import fr.forumhfr.redface2.BuildConfig
 import fr.forumhfr.redface2.R
 import fr.forumhfr.redface2.core.ui.R as CoreUiR
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.write.PrivateMessageQuote
 import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageSummary
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
@@ -197,7 +198,22 @@ data class PrivateMessageReplyRoute(
      * no custom NavType.
      */
     val openRecipientManager: Boolean = false,
-) : RedfaceNavKey
+    /** #1074 — cited message id; null together with [quoteRef] for a simple reply. */
+    val quotedNumreponse: Int? = null,
+    /** #1074 — server-provided 1-based rank in the source page; never guessed or omitted. */
+    val quoteRef: Int? = null,
+) : RedfaceNavKey {
+    init {
+        require((quotedNumreponse == null) == (quoteRef == null)) {
+            "Private-message quote target and ref must be present together"
+        }
+        require(!openRecipientManager || quotedNumreponse == null) {
+            "Private-message quote cannot open the recipient manager"
+        }
+        quotedNumreponse?.let { require(it > 0) { "Private-message quote target must be positive" } }
+        quoteRef?.let { require(it >= 1) { "Private-message quote ref must be 1-based" } }
+    }
+}
 
 /**
  * #301 follow-up — standalone new-conversation composer, pushed from the MP list's « Nouveau »
@@ -2236,6 +2252,16 @@ private fun RedfaceNavHost(
                     onReply = { threadId, page ->
                         backStack.add(PrivateMessageReplyRoute(threadId = threadId, page = page))
                     },
+                    onQuote = { threadId, page, quote ->
+                        backStack.add(
+                            PrivateMessageReplyRoute(
+                                threadId = threadId,
+                                page = page,
+                                quotedNumreponse = quote.numreponse,
+                                quoteRef = quote.ref,
+                            ),
+                        )
+                    },
                     // #618 — owner-only « Gérer les destinataires » entry from the Participants sheet:
                     // open the reply composer with its recipient-manager sheet auto-opened.
                     onManageRecipients = { threadId, page ->
@@ -2259,6 +2285,12 @@ private fun RedfaceNavHost(
                         threadId = route.threadId,
                         page = route.page,
                         openRecipientManager = route.openRecipientManager,
+                        quote = route.quotedNumreponse?.let { numreponse ->
+                            PrivateMessageQuote(
+                                numreponse = numreponse,
+                                ref = requireNotNull(route.quoteRef),
+                            )
+                        },
                     ),
                     onSubmitSucceeded = { threadId, page ->
                         // Pop the editor, then replace the conversation entry with a fresh key
@@ -2993,4 +3025,3 @@ private fun navForwardTransform(from: Scene<NavKey>, to: Scene<NavKey>): Content
     from.isForwardDrillDownTo(to) -> navSharedAxisXForward()
     else -> navTabFadeThrough()
 }
-
