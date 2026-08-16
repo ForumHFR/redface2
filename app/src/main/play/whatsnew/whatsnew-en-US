@@ -1,5 +1,5 @@
-Redface 2 v0.42.4 — dev.
+Redface 2 v0.42.5 — dev.
 
-- New: "Quote" on every message in a private conversation. The editor opens with the quote already in place.
-- In MultiMP (DT) threads, quoting stays unavailable until the server contract has been measured there: the action is hidden rather than failing silently.
-- The private-message card now has an automated visual control, so spacing defects like the one in 0.42.2 no longer reach production.
+- Private conversations keep their pages in memory: returning to a page you already read is instant.
+- Adjacent pages are prefetched while you read, only for the conversation on screen — never from the list, so an unread you never saw is not cleared.
+- Nothing is written to disk: the cache is gone when the app closes and when you sign out.

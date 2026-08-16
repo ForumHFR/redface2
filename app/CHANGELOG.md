@@ -16,6 +16,24 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.42.5` — `internal` (dev) — 2026-08-16
+
+### Ajouté
+
+- **Les conversations privées gardent leurs pages en mémoire et préchargent les pages voisines** ([#1080](https://github.com/ForumHFR/redface2/issues/1080), chantier de parité [#1040](https://github.com/ForumHFR/redface2/issues/1040)). Revenir sur une page déjà lue l'affiche immédiatement au lieu de repartir en réseau, et la page suivante ou précédente est chargée d'avance pendant la lecture. Le cache vit uniquement en mémoire : rien sur disque, rien qui survive à la fermeture de l'app, et tout est purgé à la déconnexion comme au changement de compte.
+
+  Le préchargement est **borné** : uniquement les pages adjacentes de la conversation ouverte et affichée, jamais depuis la liste. Prélire une conversation non ouverte effacerait un non-lu que personne n'a vu, et retirerait l'utilisateur de la liste « pas lu par » des autres participants d'un MultiMP.
+
+### Corrigé
+
+- **Quitter un écran interrompt réellement ses requêtes réseau en cours** ([#1079](https://github.com/ForumHFR/redface2/issues/1079)). L'annulation s'arrêtait jusqu'ici à la coroutine sans atteindre la requête elle-même, qui continuait jusqu'à la réponse du serveur. Sans conséquence visible sur les sujets publics, mais c'est la condition qui borne le préchargement des conversations privées.
+
+### Interne
+
+- Outillage de capture des preuves serveur manquantes du lot 4 ([#1082](https://github.com/ForumHFR/redface2/issues/1082), [#1084](https://github.com/ForumHFR/redface2/issues/1084)).
+
+---
+
 ## `0.42.4` — `internal` (dev) — 2026-08-16
 
 ### Ajouté

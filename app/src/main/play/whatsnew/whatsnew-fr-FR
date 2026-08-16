@@ -1,5 +1,5 @@
-Redface 2 v0.42.4 — dev.
+Redface 2 v0.42.5 — dev.
 
-- Nouveau : « Citer » sur chaque message d'une conversation privée. L'éditeur s'ouvre avec la citation déjà en place.
-- En MultiMP (DT), la citation est indisponible tant que le contrat serveur n'y a pas été mesuré : l'action est masquée plutôt que de partir en erreur silencieuse.
-- La carte de message privé a maintenant un contrôle visuel automatisé, pour que les défauts d'espacement comme celui de la 0.42.2 ne repartent plus en production.
+- Les conversations privées gardent leurs pages en mémoire : revenir sur une page déjà lue est instantané.
+- Les pages voisines sont préchargées pendant la lecture, uniquement pour la conversation ouverte à l'écran — jamais depuis la liste, pour ne pas effacer un non-lu que vous n'avez pas vu.
+- Rien n'est écrit sur disque : le cache disparaît à la fermeture de l'app et à la déconnexion.
