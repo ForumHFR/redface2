@@ -291,7 +291,7 @@ data class Post(
     val isOwnPost: Boolean,              // Phase 2D : équivalent à `isEditable` faute de signal HFR distinct au niveau topic page. Les deux champs restent séparés pour un futur raffinement (modo-can-edit, locked-but-own-post). Persisté en Room depuis v1.
     val quotedAuthors: List<String>,     // dérivé de PostContent pour recherche, filtres et décorateurs
     val postIndex: Int?,                 // Champ historique réservé (#1055), toujours null en production : aucun index global stable n'est établi depuis les pages HFR réelles. Conservé pour compatibilité avec la colonne Room v1, sans consommateur UI. Ne pas peupler sans caractériser la pagination et le cache sur fixtures réelles.
-    val quoteRef: Int? = null,           // Phase 2C (#146/#227) : `ref` opaque parsé depuis le href du lien quote HFR (`message.php?…&numrep=…&ref=N`) quand il est en clair. Null = ref absent/obfusqué/locked/anonyme. Persisté en Room v5 (`MIGRATION_4_5`) pour préserver le `ref` best-effort ; le bouton « Citer » dépend de `Topic.canReply`, pas de ce champ.
+    val quoteRef: Int? = null,           // Phase 2C (#146/#227/#986) : rang 1-based du post dans sa page (`0` pour le récapitulatif de page 2+), parsé depuis le href quote et jamais recalculé depuis l'index local. Null = ref absent/obfusqué/verrouillé/anonyme. Persisté en Room v5. Topic peut citer sans ref (#227) ; MP masque « Citer » quand il manque (#1074).
     val profileId: Int? = null,          // Phase 2 finish (#208) : id numérique HFR du lien profil toolbar (cf. note en tête de page). Persisté en Room v6 (`MIGRATION_5_6`).
     val editedAt: Instant? = null,       // #362 : date de dernière édition parsée depuis le trailer `div.edited` (« Message édité par <auteur> le DD-MM-YYYY à HH:MM:SS »). Null = jamais édité — y compris un div.edited ne portant que le lien « Message cité N fois » (post cité jamais édité). Persisté en Room v8 (`MIGRATION_7_8`). Affiché dans le menu contextuel de post (« Édité le … »).
 )
@@ -464,10 +464,21 @@ data class ReplyContext(
     val topicId: Int,
     val page: Int,                   // page topic depuis laquelle l'utilisateur a cliqué "Répondre"
     val quotedNumreponse: Int? = null, // Phase 2C (#146) : numreponse cité ; null = reply simple, non-null = quote (HFR `numrep` query param + POST field)
-    val quoteRef: Int? = null,         // Phase 2C (#146/#227) : ref opaque parsé depuis le href quote HFR quand disponible ; null = reply simple ou quote sans ref (lien obfusqué), HFR cite via `numrep`
+    val quoteRef: Int? = null,         // Phase 2C (#146/#227/#986) : rang 1-based dans la page (`0` pour le récapitulatif), transmis sans recalcul ; null = réponse simple ou citation topic sans ref (lien obfusqué), HFR cite alors via `numrep`
 ) {
     val isQuote: Boolean get() = quotedNumreponse != null
 }
+
+data class PrivateMessageQuote(
+    val numreponse: Int,              // message privé cité, strictement positif
+    val ref: Int,                     // rang 1-based dans la page source, obligatoire en MP (#1074)
+)
+
+data class PrivateMessageReplyContext(
+    val threadId: Int,
+    val page: Int,
+    val quote: PrivateMessageQuote? = null, // null = réponse simple qui suit le lien réel ; non-null = GET citation typé
+)
 
 data class ReplyForm(
     val hashCheck: String,           // CSRF token HFR, jamais loggué
@@ -579,8 +590,8 @@ data class NewMultiMP(
 Le MVP Phase 3 #298 ne couvrait que la **lecture** des MPs classiques
 (`PrivateMessageSummary`, `PrivateMessageListPage`, `PrivateMessageThread`). La suite
 Phase 3 est **désormais livrée** (Phase 3 close) : `NewMP` et `NewMultiMP` (composition),
-reply MP (#301 — la citation par message, elle, n'a jamais été livrée : requalifiée le
-2026-08-12 par #1041, portée par le lot 4 de #1040), gestion des membres MultiMP via
+reply MP (#301), citation simple par message (#1074, contrat GET mesuré en #1041 mais aucun
+POST live), gestion des membres MultiMP via
 `newdest` (#606/#612), et
 MPStorage (lecture + seed des positions DT + écriture opt-in #593/#597, cf. § MPStorage
 ci-dessous). Le seul reste hors clôture est la synchronisation MPStorage bidirectionnelle

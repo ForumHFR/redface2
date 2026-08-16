@@ -213,6 +213,36 @@ class HfrClient @Inject constructor(
     }
 
     /**
+     * #1074 — GET one private-message citation form from the measured HFR URL. Unlike a simple MP
+     * reply this path never follows a page-provided href: [numreponse] is the cited message and [ref]
+     * is its 1-based rank inside [page], forwarded unchanged. Both are mandatory for MP; callers
+     * hide the affordance when `ref` was not parsed rather than using the topic-only omission fallback.
+     */
+    suspend fun getPrivateMessageQuoteForm(
+        threadId: Int,
+        page: Int,
+        numreponse: Int,
+        ref: Int,
+    ): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("message.php")
+            .addQueryParameter("config", "hfr.inc")
+            .addQueryParameter("cat", "prive")
+            .addQueryParameter("post", threadId.toString())
+            .addQueryParameter("numrep", numreponse.toString())
+            .addQueryParameter("ref", ref.toString())
+            .addQueryParameter("page", page.toString())
+            .addQueryParameter("p", "1")
+            .addQueryParameter("subcat", "0")
+            .addQueryParameter("sondage", "0")
+            .addQueryParameter("owntopic", "0")
+            .addQueryParameter("new", "0")
+            .build()
+        val request = Request.Builder().url(url).get().build()
+        return authenticated.newCall(request).executeAuthenticatedHtml()
+    }
+
+    /**
      * Phase 2C — GET the HFR reply or quote form. The shape is the same in both
      * cases (`/message.php?cat=…&post=…&page=…&p=1&subcat=…&sondage=0&owntopic=0
      * &new=0`); a quote carries `numrep={quotedNumreponse}` and may additionally
@@ -220,8 +250,8 @@ class HfrClient @Inject constructor(
      * prefills `<textarea name="content_form">` from `numrep` alone when `ref` is
      * absent (cf. `docs/specs/protocol-hfr.md` § Quote / md_*cryptlink).
      *
-     * [quotedNumreponse] and [quoteRef] are opaque — `numrep` is the cited post id
-     * and `ref` is HFR's per-page positional id (server-controlled). `quoteRef` is
+     * [quotedNumreponse] is the cited post id and [quoteRef] is its server-provided 1-based rank
+     * inside the page (with `0` reserved for the page-2+ recap row). `quoteRef` is
      * optional by design: obfuscated toolbar rows can still be quoted by sending
      * only `numrep`. Simple reply = both null ; quote fallback = `quotedNumreponse`
      * non-null and `quoteRef` null ; clear-link quote = both non-null. A lone

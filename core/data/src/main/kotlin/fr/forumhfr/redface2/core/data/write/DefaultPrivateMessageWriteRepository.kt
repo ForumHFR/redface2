@@ -4,6 +4,7 @@ import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
+import fr.forumhfr.redface2.core.model.write.PrivateMessageQuote
 import fr.forumhfr.redface2.core.model.write.PrivateMessageReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
@@ -25,11 +26,11 @@ import okhttp3.FormBody
  * Default [PrivateMessageWriteRepository] implementation (#301, #612). Replies to an HFR private
  * conversation reuse the topic-reply machinery:
  *
- * 1. GET the conversation page (`forum2.php?cat=prive&post={threadId}&page={page}`) and read the
- *    REAL « Ajouter une réponse » link it embeds — a `message.php?cat=prive…` href carrying whatever
- *    params HFR filled in (we never invent them; which ones appear varies by shape, see
- *    [PrivateMessageReplyLinkParser]). Follow that link to the dedicated `message.php` reply form and
- *    parse it with the shared [ReplyFormParser] to grab a fresh `hash_check` + every hidden field.
+ * 1. A simple reply GETs the conversation page and follows its REAL « Ajouter une réponse » link,
+ *    preserving server-owned fields such as `newdest` (#612). A quote (#1074) instead builds the
+ *    measured `message.php?cat=prive&numrep=…&ref=…` URL from
+ *    [PrivateMessageReplyContext.quote], never follows a private href, and has no reply fallback.
+ *    Both forms are parsed with the shared [ReplyFormParser].
  * 2. POST `bddpost.php` (the same endpoint a topic reply uses) and classify the response with the
  *    shared [ReplySubmitResponseParser].
  *
@@ -44,11 +45,11 @@ import okhttp3.FormBody
  *
  * The crucial difference from [DefaultReplyRepository] is the POST body: a private conversation
  * carries `cat=prive` (a String), `post={threadId}`, `subcat=0` and a server-controlled `numrep`
- * inside the form's hidden fields. `numrep` is **never** a quote reference on a reply flow, and its
- * value depends on which form HFR served (#1041 live captures): the `forum2.php` quick-reply prefills
+ * inside the form's hidden fields. `numrep` is **never** a quote reference on a simple-reply flow;
+ * its value depends on which form HFR served (#1041 live captures): the `forum2.php` quick-reply prefills
  * the page's LAST post id, while the `message.php` reply form of a one-to-one MP leaves it EMPTY —
- * the shipped flow forwards either one as-is. Only the dedicated quote href (lot 4 of #1040) puts a
- * cited message id there.
+ * the shipped flow forwards either one as-is. Only the dedicated quote URL puts a cited message id
+ * there; that form is validated against the typed target before it can reach the editor or POST.
  *
  * [buildFormBody] therefore overrides only the three fields HFR validates (`hash_check`,
  * `verifrequet`, `content_form`) plus the opt-in option toggles, and forwards everything else
@@ -72,31 +73,24 @@ class DefaultPrivateMessageWriteRepository @Inject constructor(
         diagnostics.record(
             DiagnosticsLog.Level.INFO,
             LOG_TAG,
-            // #316 (C3) — never log post=threadId / page : a private-conversation id reconstructs the
-            // private URL. Operation + the non-identifying fallback flag only.
-            "GET MP reply form fallback=$allowEmbeddedFallback",
+            // #316 (C3) — never log threadId / page / numreponse / ref: together they reconstruct
+            // the private URL. Operation kind + the non-identifying fallback flag only.
+            "GET MP write form kind=${if (context.quote == null) "reply" else "quote"} " +
+                "fallback=${allowEmbeddedFallback && context.quote == null}",
         )
         return try {
             withContext(ioDispatcher) {
-                // #612 — GET the conversation page, then follow its real « Ajouter une réponse »
-                // link to the dedicated message.php form (the only one carrying the owner-only
-                // `newdest`). When the page exposes no such link, fall back to the embedded
-                // quick-reply form (pre-#612 behaviour). There is no anonymous variant — a
-                // session-expired GET surfaces SessionExpiredException via the authenticated client.
-                val threadHtml = hfrClient.getPrivateMessageThreadPage(
-                    threadId = context.threadId,
-                    page = context.page,
-                )
-                val html = fetchReplyFormHtml(threadHtml, allowEmbeddedFallback)
+                val html = fetchWriteFormHtml(context, allowEmbeddedFallback)
                 replyFormParser.parse(html).fold(
                     onSuccess = { form ->
+                        context.quote?.let { quote -> validateQuoteForm(form, quote, context.threadId) }
                         // #612 — `canManageRecipients` (owner-only `newdest` presence) is a boolean
                         // derived from the field's existence, NOT its value: safe to log, never
                         // leaks a pseudo (#316). The member CSV itself is never recorded.
                         diagnostics.record(
                             DiagnosticsLog.Level.DEBUG,
                             LOG_TAG,
-                            "MP reply form parsed: hiddenFields=${form.hiddenFields.size} " +
+                            "MP write form parsed: hiddenFields=${form.hiddenFields.size} " +
                                 "anonymous=${form.isAnonymous} ownerManaged=${form.canManageRecipients}",
                         )
                         form
@@ -108,7 +102,7 @@ class DefaultPrivateMessageWriteRepository @Inject constructor(
                         diagnostics.record(
                             DiagnosticsLog.Level.WARN,
                             LOG_TAG,
-                            "MP reply form parse FAILED: ${error.message ?: error::class.simpleName}",
+                            "MP write form parse FAILED: ${error::class.simpleName}",
                         )
                         throw error
                     },
@@ -117,16 +111,41 @@ class DefaultPrivateMessageWriteRepository @Inject constructor(
         } catch (cancel: CancellationException) {
             throw cancel
         } catch (error: SessionExpiredException) {
-            diagnostics.record(DiagnosticsLog.Level.WARN, LOG_TAG, "GET MP reply form SessionExpired")
+            diagnostics.record(DiagnosticsLog.Level.WARN, LOG_TAG, "GET MP write form SessionExpired")
             throw error
         } catch (@Suppress("TooGenericExceptionCaught") error: Throwable) {
             diagnostics.record(
                 DiagnosticsLog.Level.WARN,
                 LOG_TAG,
-                "GET MP reply form FAILED: ${error::class.simpleName}",
+                "GET MP write form FAILED: ${error::class.simpleName}",
             )
             throw error
         }
+    }
+
+    /**
+     * Selects the two deliberately different GET paths. The quote branch is fully typed and never
+     * reads or follows a private href; the simple-reply branch retains #612's real-link behaviour so
+     * it can obtain `newdest`. An InvalidHashCheck refetch therefore repeats the original operation.
+     */
+    private suspend fun fetchWriteFormHtml(
+        context: PrivateMessageReplyContext,
+        allowEmbeddedFallback: Boolean,
+    ): String {
+        val quote = context.quote
+        if (quote != null) {
+            return hfrClient.getPrivateMessageQuoteForm(
+                threadId = context.threadId,
+                page = context.page,
+                numreponse = quote.numreponse,
+                ref = quote.ref,
+            )
+        }
+        val threadHtml = hfrClient.getPrivateMessageThreadPage(
+            threadId = context.threadId,
+            page = context.page,
+        )
+        return fetchReplyFormHtml(threadHtml, allowEmbeddedFallback)
     }
 
     /**
@@ -182,6 +201,7 @@ class DefaultPrivateMessageWriteRepository @Inject constructor(
         options: ReplyFormOptions,
         recipientsOverride: String?,
     ): ReplySubmitResult {
+        context.quote?.let { quote -> validateQuoteForm(form, quote, context.threadId) }
         guardAgainstInvalidSubmission(form, bbcodeContent)?.let { early ->
             diagnostics.record(
                 DiagnosticsLog.Level.WARN,
@@ -198,7 +218,13 @@ class DefaultPrivateMessageWriteRepository @Inject constructor(
             // the non-identifying content length only.
             "POST MP reply bbcode.length=${bbcodeContent.length}",
         )
-        val formBody = buildFormBody(form, bbcodeContent, options, recipientsOverride)
+        val formBody = buildFormBody(
+            form = form,
+            bbcodeContent = bbcodeContent,
+            options = options,
+            recipientsOverride = recipientsOverride,
+            isQuote = context.quote != null,
+        )
         return try {
             withContext(ioDispatcher) {
                 // Same endpoint as a topic reply: bddpost.php?config=hfr.inc. All MP routing
@@ -363,8 +389,8 @@ class DefaultPrivateMessageWriteRepository @Inject constructor(
      * Assembles the private-message POST payload. Only [hash_check][HfrConstants], `verifrequet` and
      * `content_form` are overridden, plus the three opt-in option fields (`signature` / `smiley` /
      * `emaill`). **Everything else is forwarded verbatim from [ReplyForm.hiddenFields]** — chiefly
-     * `cat=prive`, `post` (=threadId), `numrep` (whatever HFR served — a last-post prefill, an empty
-     * string, never a quote reference on this flow; #1041), `subcat=0`, `page`, `sujet`, `pseudo`.
+     * `cat=prive`, `post` (=threadId), `numrep` (whose three form-specific meanings are documented
+     * in `protocol-hfr.md`), `subcat=0`, `page`, `sujet`, `pseudo`.
      * An empty `numrep` is forwarded as an empty field, exactly as the web composer does, and
      * `password` is never relayed. This deliberately does not reuse
      * [DefaultReplyRepository.buildFormBody], whose typed `cat`/`numrep` overrides would corrupt the
@@ -376,12 +402,18 @@ class DefaultPrivateMessageWriteRepository @Inject constructor(
      * verbatim loop never appends a second `newdest`. Without that guard — a simple participant,
      * a one-to-one MP, a topic reply — no `newdest` exists, the override is ignored, and any
      * `newdest` HFR did send is forwarded verbatim (members unchanged).
+     *
+     * A quote additionally marks `ref` emitted without adding it: the measured citation form carries
+     * the rank only in the GET URL and BBCode, never in the POST body. Simple replies retain their
+     * server-provided `ref` field (the DT-owner reply form legitimately carries `ref=0`).
      */
+    @Suppress("LongParameterList") // Form plus four independent user/server submission choices.
     private fun buildFormBody(
         form: ReplyForm,
         bbcodeContent: String,
         options: ReplyFormOptions,
         recipientsOverride: String?,
+        isQuote: Boolean,
     ): FormBody {
         val builder = FormBody.Builder(Charsets.UTF_8)
         builder.add("hash_check", form.hashCheck)
@@ -395,6 +427,7 @@ class DefaultPrivateMessageWriteRepository @Inject constructor(
         if (options.smileyDisabled) builder.add("smiley", "1")
         if (options.emailNotificationEnabled) builder.add("emaill", "1")
         val emitted = mutableSetOf("hash_check", "verifrequet", "content_form", "signature", "smiley", "emaill")
+        if (isQuote) emitted += "ref"
         // #606 — owner-only member edit. The `newdest` key presence is the owner guard ; only then
         // does a non-null override win over the prefill. Mark it emitted so the verbatim loop below
         // can never duplicate it.
@@ -410,6 +443,28 @@ class DefaultPrivateMessageWriteRepository @Inject constructor(
             emitted += key
         }
         return builder.build()
+    }
+
+    /** Fail closed if HFR stops serving the measured MP quote shape; never log private ids/body. */
+    private fun validateQuoteForm(form: ReplyForm, quote: PrivateMessageQuote, threadId: Int) {
+        require(form.hiddenFields["cat"] == "prive") {
+            "MP quote form must keep cat=prive"
+        }
+        require(form.hiddenFields["post"] == threadId.toString()) {
+            "MP quote form post does not match the typed conversation"
+        }
+        require(form.hiddenFields["numrep"] == quote.numreponse.toString()) {
+            "MP quote form numrep does not match the typed target"
+        }
+        require(form.hiddenFields["numreponse"] == "") {
+            "MP quote form must keep numreponse empty"
+        }
+        require("ref" !in form.hiddenFields) {
+            "MP quote form must not carry a hidden ref"
+        }
+        require(form.initialContent.isNotBlank()) {
+            "MP quote form must carry a server-prefilled content_form"
+        }
     }
 
     /**

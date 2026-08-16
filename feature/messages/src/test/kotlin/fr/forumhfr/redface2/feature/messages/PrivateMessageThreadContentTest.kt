@@ -129,6 +129,55 @@ class PrivateMessageThreadContentTest {
     }
 
     @Test
+    fun `visible message with server ref exposes the footer quote action`() {
+        var quotedMessage: Post? = null
+        val state = contentState(
+            messages = listOf(message(101, "Alice", "Message citable").copy(quoteRef = 4)),
+            canReply = true,
+        )
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                PrivateMessageThreadContent(
+                    state = state,
+                    isMultiRecipientHint = false,
+                    callbacks = NO_OP_CALLBACKS.copy(onQuote = { quotedMessage = it }),
+                )
+            }
+        }
+
+        compose.onNodeWithText("Citer").assertIsDisplayed().performClick()
+
+        assertEquals(101, quotedMessage?.numreponse)
+        assertEquals(4, quotedMessage?.quoteRef)
+    }
+
+    @Test
+    fun `missing ref and hidden message expose no quote action`() {
+        val state = contentState(
+            messages = listOf(
+                message(101, "Alice", "Visible sans rang"),
+                message(102, "Bob", "Masqué avec rang").copy(quoteRef = 2),
+            ),
+            hiddenNumreponses = setOf(102),
+            blockedQuoteAuthors = setOf("bob"),
+            canReply = true,
+        )
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                PrivateMessageThreadContent(
+                    state = state,
+                    isMultiRecipientHint = false,
+                    callbacks = NO_OP_CALLBACKS.copy(onQuote = { _ -> }),
+                )
+            }
+        }
+
+        compose.onNodeWithText("Visible sans rang").assertIsDisplayed()
+        compose.onNodeWithText("Post de Bob masqué").assertIsDisplayed()
+        compose.onNodeWithText("Citer").assertDoesNotExist()
+    }
+
+    @Test
     fun `requires login keeps private content out of the composition`() {
         setContent(
             mode = PrivateMessageThreadUiState.Mode.RequiresLogin,
@@ -416,6 +465,7 @@ class PrivateMessageThreadContentTest {
         page: Int = 1,
         totalPages: Int = 1,
         isMultiRecipient: Boolean = false,
+        canReply: Boolean = false,
     ): PrivateMessageThreadUiState {
         val request = PrivateMessageThreadRequest(threadId = THREAD_ID, page = page)
         return PrivateMessageThreadUiState(
@@ -428,7 +478,7 @@ class PrivateMessageThreadContentTest {
                     messages = messages,
                     page = page,
                     totalPages = totalPages,
-                    canReply = false,
+                    canReply = canReply,
                     isMultiRecipient = isMultiRecipient,
                 ),
                 hiddenNumreponses = hiddenNumreponses,

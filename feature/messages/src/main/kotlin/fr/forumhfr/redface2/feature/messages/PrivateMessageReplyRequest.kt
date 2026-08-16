@@ -1,12 +1,14 @@
 package fr.forumhfr.redface2.feature.messages
 
+import fr.forumhfr.redface2.core.model.write.PrivateMessageQuote
+
 /**
  * Route arguments for [PrivateMessageReplyViewModel] (#301). Plain data class so route values pass
  * through Hilt assisted injection, mirroring [PrivateMessageThreadRequest].
  *
- * Only opaque route data is carried (thread id + the page the user is replying from). The form's
- * `hash_check`, hidden fields, subject and the user's pseudo are read from the freshly-fetched
- * `forum2.php?cat=prive` page so no private metadata is serialised into the back stack.
+ * Only routing identifiers are carried (thread/page and, for a citation, the server-provided target
+ * plus page rank). The form's `hash_check`, hidden fields, subject, quoted BBCode and user pseudo are
+ * always read from a fresh HFR form, so no private message content is serialised into the back stack.
  */
 data class PrivateMessageReplyRequest(
     val threadId: Int,
@@ -17,4 +19,12 @@ data class PrivateMessageReplyRequest(
      * `PrivateMessageReplyRoute.openRecipientManager`; `false` on the normal « Répondre » path.
      */
     val openRecipientManager: Boolean = false,
-)
+    /** Null for « Répondre »; non-null for the fail-closed citation path. */
+    val quote: PrivateMessageQuote? = null,
+) {
+    init {
+        require(!openRecipientManager || quote == null) {
+            "A private-message quote cannot open the recipient manager"
+        }
+    }
+}

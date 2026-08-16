@@ -44,8 +44,8 @@ import fr.forumhfr.redface2.core.ui.post.hideThenDismiss
  * This is deliberately not a specialization of the topic's `PostMenuSheet`: the MP surface has
  * only three author/message capabilities (copy the complete readable text, open the profile, and
  * block/unblock the author) plus the two data-driven information lines. It exposes neither a quote
- * placeholder nor a private permalink: quoting is not implemented, and no tested HFR contract can
- * currently build a precise private-message permalink.
+ * entry nor a private permalink: simple citation (#1074) lives in the message-card footer, matching
+ * the topic affordance, while no tested HFR contract can build a precise private-message permalink.
  *
  * The profile action rides on the hero row, like the topic menu. A null callback keeps that row
  * inert. The block action is likewise hidden by capability (the caller omits it for one's own
