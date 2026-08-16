@@ -1,7 +1,6 @@
 package fr.forumhfr.redface2.core.domain.messages
 
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageListPage
-import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -56,16 +55,19 @@ interface MessagesRepository {
     suspend fun getPrivateMessageList(page: Int = 1): PrivateMessageListPage
 
     /**
-     * Fetches one page of a private-message conversation (`forum2.php?cat=prive&post={threadId}`).
+     * Reads one page of a private-message conversation (`forum2.php?cat=prive&post={threadId}`).
+     * A session-cache hit is emitted first with [PrivateMessageThreadPage.Source.SESSION_CACHE],
+     * then the page is always revalidated and emitted from
+     * [PrivateMessageThreadPage.Source.NETWORK]. No TTL skips that network request.
      *
      * @param fallbackCorrespondent optional caller-provided correspondent label, used only when
      *   the page alone cannot reveal it (the user is the only sender so far). UI Navigation routes
      *   must not carry it because it is private metadata that can outlive the session.
      *   Throws on network / session errors, like [getPrivateMessageList].
      */
-    suspend fun getPrivateMessageThread(
+    fun getPrivateMessageThread(
         threadId: Int,
         page: Int = 1,
         fallbackCorrespondent: String? = null,
-    ): PrivateMessageThread
+    ): Flow<PrivateMessageThreadPage>
 }

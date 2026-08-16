@@ -116,6 +116,32 @@ class ArchitectureKonsistTest {
     }
 
     @Test
+    fun `private message session cache stays memory only and silent`() {
+        // #1080 / #316 — private conversation content may live in process memory only. This guard
+        // keeps persistence and diagnostics dependencies out of the dedicated cache component;
+        // adding one would turn an implementation detail into a private-data disk/log sink.
+        val cacheFiles = Konsist
+            .scopeFromProject()
+            .slice { file ->
+                file.path.endsWith("/PrivateMessageThreadSessionCache.kt") &&
+                    !file.path.contains("/src/test/") &&
+                    !file.path.contains("/build/")
+            }
+            .files
+
+        assertTrue("Konsist must scan the private-message session cache", cacheFiles.size == 1)
+
+        cacheFiles.assertFalse { file ->
+            file.imports.any { imported ->
+                val name = imported.name.orEmpty()
+                PRIVATE_CACHE_FORBIDDEN_IMPORT_PREFIXES.any(name::startsWith) ||
+                    name.endsWith("Dao") ||
+                    name.endsWith(".Log")
+            } || PRIVATE_CACHE_FORBIDDEN_TEXT.any(file.text::contains)
+        }
+    }
+
+    @Test
     fun `feature topic does not depend on feature profile`() {
         // Phase 2 finish (#208) — the « ouvrir le profil » affordance is hoisted to `:app`
         // as a callback `onOpenProfile(userId, pseudo, avatarUrl)` so `:feature:topic` can
@@ -205,5 +231,19 @@ class ArchitectureKonsistTest {
         const val FEATURE_PROFILE_PACKAGE =
             "fr.forumhfr.redface2.feature.profile."
         val AUTH_DIR_TOKENS = listOf("/auth/", "/messages/")
+        val PRIVATE_CACHE_FORBIDDEN_IMPORT_PREFIXES = listOf(
+            "android.util.Log",
+            "androidx.datastore.",
+            "androidx.room.",
+            "fr.forumhfr.redface2.core.database.",
+            "fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog",
+        )
+        val PRIVATE_CACHE_FORBIDDEN_TEXT = listOf(
+            "android.util.Log",
+            "androidx.datastore.",
+            "androidx.room.",
+            "Dao",
+            "DiagnosticsLog",
+        )
     }
 }

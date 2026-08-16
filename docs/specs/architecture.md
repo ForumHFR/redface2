@@ -231,16 +231,16 @@ interface MessagesRepository {
     /** Page inbox MP classique (`forum1.php?cat=prive`). */
     suspend fun getPrivateMessageList(page: Int = 1): PrivateMessageListPage
 
-    /** Page conversation MP classique (`forum2.php?cat=prive&post={threadId}`). */
-    suspend fun getPrivateMessageThread(
+    /** Cache RAM de session éventuel, puis revalidation réseau obligatoire. */
+    fun getPrivateMessageThread(
         threadId: Int,
         page: Int = 1,
         fallbackCorrespondent: String? = null,
-    ): PrivateMessageThread
+    ): Flow<PrivateMessageThreadPage>
 }
 ```
 
-`TopicRepository` est livré en Phase 1A (cf. [#88](https://github.com/ForumHFR/redface2/pull/88), [#89](https://github.com/ForumHFR/redface2/pull/89)). `prefetchNextPage` documenté dans la roadmap arrivera en Phase 1B sur `HfrClient` directement (avec `useAuth = false`), puis sera relayé par `TopicRepository.prefetchTopicPage(...)`. `MessagesRepository` est livré par étapes : Phase 1B.1 a ajouté `observeUnreadMpCount()` en bonus du login, puis le MVP Phase 3 #298 ajoute `getPrivateMessageList()` + `getPrivateMessageThread()` pour lire les MPs classiques. Les ViewModels de `:feature:messages` observent `AuthState` et purgent leur état privé en anonyme / logout / changement de session. Reply MP, nouveau MP, MultiMP et MPStorage restent à faire en Phase 3.
+`TopicRepository` est livré en Phase 1A (cf. [#88](https://github.com/ForumHFR/redface2/pull/88), [#89](https://github.com/ForumHFR/redface2/pull/89)). `prefetchNextPage` documenté dans la roadmap arrivera en Phase 1B sur `HfrClient` directement (avec `useAuth = false`), puis sera relayé par `TopicRepository.prefetchTopicPage(...)`. `MessagesRepository` est livré par étapes : Phase 1B.1 a ajouté `observeUnreadMpCount()` en bonus du login, puis le MVP Phase 3 #298 ajoute `getPrivateMessageList()` + `getPrivateMessageThread()` pour lire les MPs classiques. Depuis #1080, la lecture d'une conversation expose un flux de `PrivateMessageThreadPage` dont `Source` distingue `SESSION_CACHE` de `NETWORK` ; un hit RAM précède toujours une revalidation réseau. Les ViewModels de `:feature:messages` observent `AuthState` et purgent leur état privé en anonyme / logout / changement de session. L'écriture MP, le nouveau MP, les MultiMP et l'intégration MPStorage ont depuis été livrés en Phase 3 (cf. roadmap).
 
 `PrivateMessageThreadRoute` reste volontairement opaque (`threadId`, `page`) : le sujet et le correspondant sont relus depuis la page `cat=prive` chargée, jamais persistés dans le back stack Navigation. Le paramètre `fallbackCorrespondent` du repository/parser est une capacité bas niveau pour les cas où une page ne révèle pas l'autre participant ; il ne doit pas être alimenté depuis une route sauvegardée. Le caractère multi-destinataire (MultiMP / « DT ») est prouvé depuis la page elle-même (`PrivateMessageThread.isMultiRecipient` = au moins deux auteurs non-`isOwnPost` distincts) et complété par un **hint éphémère** détenu en mémoire par le nav host (jamais une route, jamais le `title`/la liste de participants de la liste), issu du flag `PrivateMessageSummary.isMultiRecipient` de la ligne d'inbox et purgé à chaque transition d'auth comme le marquage « lu ». Ainsi l'en-tête de conversation affiche « Interlocuteurs multiples » même quand la page courante ne montre qu'un seul autre auteur, sans jamais sauvegarder de métadonnée privée.
 
@@ -382,9 +382,10 @@ class TopicViewModel @Inject constructor(
 | Avatars | Cache Coil, ETag | 1 h |
 | MultiMP flags | Room, jamais expire (donnée locale) | Permanent |
 | Position de lecture MP (par compte/conversation) | Room (`mp_read_positions`), sauvegardée à chaque page affichée ; purge au logout / changement de compte par `CacheInvalidator` | Permanent jusqu'à déconnexion |
+| Contenu des conversations MP | `PrivateMessageThreadSessionCache`, LRU mémoire processus globale de cinq pages, clé par compte/conversation/page ; hit immédiat puis revalidation réseau obligatoire ; purge logout / changement de compte par `CacheInvalidator` | Session processus |
 | Préférences | DataStore | Permanent |
 
-> **Acté — [ADR-013]({{ site.baseurl }}/adr/013-mp-lecture-cache-prefetch) (accepté 2026-06-12)** : politique de cache des conversations MP à trois étages — position de lecture locale par conversation (survit au process death, purgée à la déconnexion), cache RAM de session, cache Room du contenu en opt-in explicite (défaut OFF, purge au logout). **État réel** : l'étage 1 est livré depuis la Phase 3 ([#430](https://github.com/ForumHFR/redface2/issues/430)) via `MpReadPositionEntity`, `RoomPrivateMessageReadPositionStore` et la table `mp_read_positions`, recensée dans le tableau ci-dessus. Les étages 2 (cache RAM de session) et 3 (cache Room du contenu) restent à implémenter ; le contenu des MP reste donc sans cache à ce jour.
+> **Acté — [ADR-013]({{ site.baseurl }}/adr/013-mp-lecture-cache-prefetch) (accepté 2026-06-12)** : politique de cache des conversations MP à trois étages — position de lecture locale par conversation (survit au process death, purgée à la déconnexion), cache RAM de session, cache Room du contenu en opt-in explicite (défaut OFF, purge au logout). **État réel** : les étages 1 et 2 sont livrés. La position locale existe depuis la Phase 3 ([#430](https://github.com/ForumHFR/redface2/issues/430)) via `MpReadPositionEntity`, `RoomPrivateMessageReadPositionStore` et la table `mp_read_positions`. Le contenu passe depuis #1080 par `PrivateMessageThreadSessionCache`, LRU de cinq pages sans écriture disque, avec génération avancée synchroniquement par `CacheInvalidator` avant les purges DAO. L'étage 3 (cache Room du contenu, opt-in OFF) reste à implémenter.
 
 ### Sémantique fresh / stale
 

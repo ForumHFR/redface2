@@ -11,6 +11,7 @@ import fr.forumhfr.redface2.core.domain.media.PostImageSaver
 import fr.forumhfr.redface2.core.domain.media.SavedPostImage
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageReadPositionStore
+import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageWritePreview
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
@@ -36,6 +37,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -45,6 +48,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -107,7 +111,7 @@ class PrivateMessageThreadViewModelTest {
         val thread = thread(page = 1, totalPages = 1)
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
-        } returns thread
+        } returns network(thread)
 
         val viewModel = threadViewModel(repository)
 
@@ -201,10 +205,12 @@ class PrivateMessageThreadViewModelTest {
         val repository = mockk<MessagesRepository>()
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
-        } returns thread(
-            page = 1,
-            totalPages = 1,
-            messages = listOf(post(7, author = "Alice"), post(8, author = "Bob")),
+        } returns network(
+            thread(
+                page = 1,
+                totalPages = 1,
+                messages = listOf(post(7, author = "Alice"), post(8, author = "Bob")),
+            ),
         )
         val blacklist = FakeBlacklistRepository()
         val viewModel = threadViewModel(repository, blacklistRepository = blacklist)
@@ -241,10 +247,12 @@ class PrivateMessageThreadViewModelTest {
         val repository = mockk<MessagesRepository>()
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
-        } returns thread(
-            page = 1,
-            totalPages = 1,
-            messages = listOf(post(7, author = "Alice"), post(8, author = "Bob")),
+        } returns network(
+            thread(
+                page = 1,
+                totalPages = 1,
+                messages = listOf(post(7, author = "Alice"), post(8, author = "Bob")),
+            ),
         )
         val blacklist = FakeBlacklistRepository()
         val viewModel = threadViewModel(repository, blacklistRepository = blacklist)
@@ -328,7 +336,11 @@ class PrivateMessageThreadViewModelTest {
         var calls = 0
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
-        } coAnswers { if (calls++ == 0) pageForA else gate.await() }
+        } answers {
+            flow {
+                emit(networkPage(if (calls++ == 0) pageForA else gate.await()))
+            }
+        }
         val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
         val write = mockk<PrivateMessageWriteRepository>()
         coEvery { write.fetchReplyForm(any(), any()) } returns replyForm(newdest = "bob, carol")
@@ -380,7 +392,7 @@ class PrivateMessageThreadViewModelTest {
         val repository = mockk<MessagesRepository>()
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
-        } throws IOException("offline")
+        } returns failure(IOException("offline"))
 
         val viewModel = threadViewModel(repository)
 
@@ -399,7 +411,7 @@ class PrivateMessageThreadViewModelTest {
         val repository = mockk<MessagesRepository>()
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
-        } throws HfrServerException(code = 500, url = "https://forum.hardware.fr/forum2.php")
+        } returns failure(HfrServerException(code = 500, url = "https://forum.hardware.fr/forum2.php"))
 
         val viewModel = threadViewModel(repository)
 
@@ -413,10 +425,10 @@ class PrivateMessageThreadViewModelTest {
         val repository = mockk<MessagesRepository>()
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
-        } returns thread(page = 1, totalPages = 2)
+        } returns network(thread(page = 1, totalPages = 2))
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 2, fallbackCorrespondent = null)
-        } returns thread(page = 2, totalPages = 2)
+        } returns network(thread(page = 2, totalPages = 2))
 
         val viewModel = threadViewModel(repository)
         viewModel.selectPage(2)
@@ -424,6 +436,50 @@ class PrivateMessageThreadViewModelTest {
         val state = viewModel.state.value
         assertEquals(2, state.page)
         assertTrue(state.canGoPrevious)
+    }
+
+    @Test
+    fun `cache content renders immediately but only network saves private read side effects`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        val cached = thread(page = 1, totalPages = 2, messages = listOf(post(7)))
+        val refreshed = thread(page = 1, totalPages = 2, messages = listOf(post(8)))
+        val networkGate = CompletableDeferred<Unit>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns flow {
+            emit(PrivateMessageThreadPage(cached, PrivateMessageThreadPage.Source.SESSION_CACHE))
+            networkGate.await()
+            emit(networkPage(refreshed))
+        }
+        val store = FakeReadPositionStore()
+        val mpStorage = FakeMpStorageRepository()
+
+        val viewModel = threadViewModel(
+            repository = repository,
+            readPositionStore = store,
+            mpStorageRepository = mpStorage,
+        )
+
+        val cachedState = viewModel.state.value
+        val cachedContent = cachedState.mode as PrivateMessageThreadUiState.Mode.Content
+        assertEquals(cached, cachedContent.thread)
+        assertEquals(PrivateMessageThreadPage.Source.SESSION_CACHE, cachedContent.source)
+        assertTrue(cachedState.isRefreshing)
+        assertEquals(emptyMap<Int, Int>(), store.saved)
+        assertEquals(emptyList<MpStorageFlagEntry>(), mpStorage.ifPresentCalls)
+        assertNull(cachedContent.networkLoadedThreadOrNull())
+
+        networkGate.complete(Unit)
+        advanceUntilIdle()
+
+        val networkState = viewModel.state.value
+        val networkContent = networkState.mode as PrivateMessageThreadUiState.Mode.Content
+        assertEquals(refreshed, networkContent.thread)
+        assertEquals(PrivateMessageThreadPage.Source.NETWORK, networkContent.source)
+        assertFalse(networkState.isRefreshing)
+        assertEquals(1, store.saved[42])
+        assertEquals(1, mpStorage.ifPresentCalls.size)
+        assertEquals(refreshed, networkContent.networkLoadedThreadOrNull())
     }
 
     @Test
@@ -437,10 +493,10 @@ class PrivateMessageThreadViewModelTest {
         val gate = CompletableDeferred<PrivateMessageThread>()
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
-        } returns pageOne
+        } returns network(pageOne)
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 2, fallbackCorrespondent = null)
-        } coAnswers { gate.await() }
+        } returns flow { emit(networkPage(gate.await())) }
 
         val viewModel = threadViewModel(repository)
         viewModel.selectPage(2)
@@ -466,7 +522,7 @@ class PrivateMessageThreadViewModelTest {
         val updated = thread(page = 1, totalPages = 2)
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
-        } returns first andThen updated
+        } returns network(first) andThen network(updated)
 
         val viewModel = threadViewModel(repository)
         viewModel.refresh()
@@ -488,7 +544,7 @@ class PrivateMessageThreadViewModelTest {
         val pageOne = thread(page = 1, totalPages = 1)
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
-        } returns pageOne andThenThrows IOException("offline")
+        } returns network(pageOne) andThen failure(IOException("offline"))
 
         val viewModel = threadViewModel(repository)
         viewModel.refresh()
@@ -560,7 +616,7 @@ class PrivateMessageThreadViewModelTest {
         val repository = mockk<MessagesRepository>()
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
-        } throws IOException("offline")
+        } returns failure(IOException("offline"))
 
         val viewModel = threadViewModel(repository)
         assertTrue(viewModel.state.value.mode is PrivateMessageThreadUiState.Mode.Error)
@@ -579,7 +635,7 @@ class PrivateMessageThreadViewModelTest {
         val authRepository = FakeAuthRepository()
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
-        } returns thread(page = 1, totalPages = 1)
+        } returns network(thread(page = 1, totalPages = 1))
 
         val viewModel = threadViewModel(repository, authRepository)
         assertTrue(viewModel.state.value.mode is PrivateMessageThreadUiState.Mode.Content)
@@ -600,7 +656,7 @@ class PrivateMessageThreadViewModelTest {
         val repository = mockk<MessagesRepository>()
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 7, fallbackCorrespondent = null)
-        } returns thread(page = 7, totalPages = 9)
+        } returns network(thread(page = 7, totalPages = 9))
 
         PrivateMessageThreadViewModel(
             request = request,
@@ -626,7 +682,7 @@ class PrivateMessageThreadViewModelTest {
         val repository = mockk<MessagesRepository>()
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 9, fallbackCorrespondent = null)
-        } returns thread(page = 9, totalPages = 9)
+        } returns network(thread(page = 9, totalPages = 9))
 
         PrivateMessageThreadViewModel(
             request = PrivateMessageThreadRequest(threadId = 42, page = 9),
@@ -650,10 +706,10 @@ class PrivateMessageThreadViewModelTest {
         val repository = mockk<MessagesRepository>()
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
-        } returns thread(page = 1, totalPages = 9)
+        } returns network(thread(page = 1, totalPages = 9))
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 5, fallbackCorrespondent = null)
-        } returns thread(page = 5, totalPages = 9)
+        } returns network(thread(page = 5, totalPages = 9))
         val store = FakeReadPositionStore()
 
         val viewModel =
@@ -688,7 +744,12 @@ class PrivateMessageThreadViewModelTest {
         var calls = 0
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
-        } coAnswers { if (calls++ == 0) gate.await() else thread(page = 1, totalPages = 1) }
+        } answers {
+            flow {
+                val loaded = if (calls++ == 0) gate.await() else thread(page = 1, totalPages = 1)
+                emit(networkPage(loaded))
+            }
+        }
         val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
         val store = FakeReadPositionStore()
 
@@ -714,10 +775,10 @@ class PrivateMessageThreadViewModelTest {
         val repository = mockk<MessagesRepository>()
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
-        } returns thread(page = 1, totalPages = 9)
+        } returns network(thread(page = 1, totalPages = 9))
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 5, fallbackCorrespondent = null)
-        } returns thread(page = 5, totalPages = 9)
+        } returns network(thread(page = 5, totalPages = 9))
         val store = FakeReadPositionStore()
         val saveGate = CompletableDeferred<Unit>()
         store.blockNextSave = saveGate
@@ -739,7 +800,9 @@ class PrivateMessageThreadViewModelTest {
         val repository = mockk<MessagesRepository>()
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
-        } returns thread(page = 1, totalPages = 3, messages = listOf(post(1000), post(2784595)))
+        } returns network(
+            thread(page = 1, totalPages = 3, messages = listOf(post(1000), post(2784595))),
+        )
         val mpStorage = FakeMpStorageRepository()
 
         threadViewModel(repository, mpStorageRepository = mpStorage)
@@ -765,7 +828,7 @@ class PrivateMessageThreadViewModelTest {
         val repository = mockk<MessagesRepository>()
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
-        } returns thread(page = 1, totalPages = 1, messages = emptyList())
+        } returns network(thread(page = 1, totalPages = 1, messages = emptyList()))
         val mpStorage = FakeMpStorageRepository()
 
         threadViewModel(repository, mpStorageRepository = mpStorage)
@@ -781,7 +844,7 @@ class PrivateMessageThreadViewModelTest {
         val repository = mockk<MessagesRepository>()
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
-        } returns thread(page = 1, totalPages = 1, messages = listOf(post(7)))
+        } returns network(thread(page = 1, totalPages = 1, messages = listOf(post(7))))
         val store = FakeReadPositionStore()
         val mpStorage = FakeMpStorageRepository(thrown = IOException("storage write down"))
 
@@ -803,7 +866,16 @@ class PrivateMessageThreadViewModelTest {
         var calls = 0
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
-        } coAnswers { if (calls++ == 0) gate.await() else thread(page = 1, totalPages = 1, messages = listOf(post(9))) }
+        } answers {
+            flow {
+                val loaded = if (calls++ == 0) {
+                    gate.await()
+                } else {
+                    thread(page = 1, totalPages = 1, messages = listOf(post(9)))
+                }
+                emit(networkPage(loaded))
+            }
+        }
         val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
         val mpStorage = FakeMpStorageRepository()
 
@@ -828,7 +900,7 @@ class PrivateMessageThreadViewModelTest {
         val repository = mockk<MessagesRepository>()
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
-        } returns thread(page = 1, totalPages = 1)
+        } returns network(thread(page = 1, totalPages = 1))
         val write = mockk<PrivateMessageWriteRepository>()
         coEvery { write.fetchReplyForm(any(), any()) } returns replyForm(newdest = "alice, bob, Bébé Yoda")
 
@@ -855,7 +927,7 @@ class PrivateMessageThreadViewModelTest {
         val repository = mockk<MessagesRepository>()
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
-        } returns thread(page = 1, totalPages = 1)
+        } returns network(thread(page = 1, totalPages = 1))
         val write = mockk<PrivateMessageWriteRepository>()
         // Never resolves within the test: the dismiss must cancel it before it can answer.
         coEvery { write.fetchReplyForm(any(), any()) } coAnswers { kotlinx.coroutines.awaitCancellation() }
@@ -875,7 +947,7 @@ class PrivateMessageThreadViewModelTest {
         val repository = mockk<MessagesRepository>()
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
-        } returns thread(page = 1, totalPages = 1)
+        } returns network(thread(page = 1, totalPages = 1))
         val write = mockk<PrivateMessageWriteRepository>()
         // Neither newdest nor a read-only roster → a one-to-one MP.
         coEvery { write.fetchReplyForm(any(), any()) } returns replyForm(newdest = null, roster = null)
@@ -894,7 +966,7 @@ class PrivateMessageThreadViewModelTest {
         val repository = mockk<MessagesRepository>()
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
-        } returns thread(page = 1, totalPages = 1)
+        } returns network(thread(page = 1, totalPages = 1))
         val write = mockk<PrivateMessageWriteRepository>()
         // No newdest (not the owner) but a read-only roster CSV (minus the viewer « xaat »).
         coEvery {
@@ -919,7 +991,7 @@ class PrivateMessageThreadViewModelTest {
         val repository = mockk<MessagesRepository>()
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
-        } returns thread(page = 1, totalPages = 1)
+        } returns network(thread(page = 1, totalPages = 1))
         val write = mockk<PrivateMessageWriteRepository>()
         coEvery { write.fetchReplyForm(any(), any()) } returns replyForm(newdest = "alice, bob")
 
@@ -937,7 +1009,7 @@ class PrivateMessageThreadViewModelTest {
         val repository = mockk<MessagesRepository>()
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
-        } returns thread(page = 1, totalPages = 1)
+        } returns network(thread(page = 1, totalPages = 1))
         val write = mockk<PrivateMessageWriteRepository>()
         coEvery { write.fetchReplyForm(any(), any()) } returns replyForm(newdest = "alice, bob")
 
@@ -960,7 +1032,7 @@ class PrivateMessageThreadViewModelTest {
         val repository = mockk<MessagesRepository>()
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
-        } returns thread(page = 1, totalPages = 1)
+        } returns network(thread(page = 1, totalPages = 1))
         val write = mockk<PrivateMessageWriteRepository>()
         coEvery { write.fetchReplyForm(any(), any()) } throws IOException("offline")
 
@@ -1009,6 +1081,16 @@ class PrivateMessageThreadViewModelTest {
         canReply = true,
     )
 
+    private fun network(thread: PrivateMessageThread): Flow<PrivateMessageThreadPage> =
+        flowOf(networkPage(thread))
+
+    private fun networkPage(thread: PrivateMessageThread) = PrivateMessageThreadPage(
+        thread = thread,
+        source = PrivateMessageThreadPage.Source.NETWORK,
+    )
+
+    private fun failure(error: Exception): Flow<PrivateMessageThreadPage> = flow { throw error }
+
     private fun post(numreponse: Int, author: String = "auteur") = Post(
         numreponse = numreponse,
         author = author,
@@ -1024,7 +1106,7 @@ class PrivateMessageThreadViewModelTest {
     private fun loadedRepository(): MessagesRepository = mockk<MessagesRepository>().also { repository ->
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
-        } returns thread(page = 1, totalPages = 1)
+        } returns network(thread(page = 1, totalPages = 1))
     }
 
     private class FakePostImageSaver(

@@ -5,11 +5,14 @@ import fr.forumhfr.redface2.core.database.dao.FlagDao
 import fr.forumhfr.redface2.core.database.dao.MpReadPositionDao
 import fr.forumhfr.redface2.core.database.dao.MpStorageLocationDao
 import fr.forumhfr.redface2.core.database.dao.UploadedImageDao
+import fr.forumhfr.redface2.core.data.messages.PrivateMessageThreadSessionCache
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.model.AuthState
+import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.coVerifyOrder
+import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -17,6 +20,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -35,6 +39,7 @@ class CacheInvalidatorTest {
         coVerify(exactly = 0) { fixture.editorDraftDao.deletePrivateForUser(any()) }
         coVerify(exactly = 0) { fixture.uploadedImageDao.deleteAllForUser(any()) }
         coVerify(exactly = 0) { fixture.mpStorageLocationDao.deleteAllForUser(any()) }
+        verify(exactly = 0) { fixture.threadSessionCache.clearAndAdvanceGeneration() }
         verify(exactly = 0) { fixture.flagRepository.clearSessionCache() }
     }
 
@@ -54,8 +59,28 @@ class CacheInvalidatorTest {
                 fixture.uploadedImageDao.deleteAllForUser("alice")
                 fixture.mpStorageLocationDao.deleteAllForUser("alice")
             }
+            verify { fixture.threadSessionCache.clearAndAdvanceGeneration() }
             verify { fixture.flagRepository.clearSessionCache() }
         }
+
+    @Test
+    fun `RAM generation advances synchronously before the first DAO purge`() = runTest {
+        val state = MutableStateFlow<AuthState>(AuthState.Authenticated("alice"))
+        val fixture = invalidator(state)
+        var generationAdvanced = false
+        every { fixture.threadSessionCache.clearAndAdvanceGeneration() } answers {
+            generationAdvanced = true
+        }
+        coEvery { fixture.flagDao.deleteAllForUser("alice") } answers {
+            assertTrue("the RAM generation must advance before any suspending DAO call", generationAdvanced)
+        }
+        fixture.invalidator.start()
+
+        state.value = AuthState.Anonymous
+
+        verify(exactly = 1) { fixture.threadSessionCache.clearAndAdvanceGeneration() }
+        coVerify(exactly = 1) { fixture.flagDao.deleteAllForUser("alice") }
+    }
 
     @Test
     fun `account switch purges the outgoing pseudo not the incoming one`() = runTest {
@@ -77,6 +102,7 @@ class CacheInvalidatorTest {
         coVerify(exactly = 0) { fixture.editorDraftDao.deletePrivateForUser("bob") }
         coVerify(exactly = 0) { fixture.uploadedImageDao.deleteAllForUser("bob") }
         coVerify(exactly = 0) { fixture.mpStorageLocationDao.deleteAllForUser("bob") }
+        verify { fixture.threadSessionCache.clearAndAdvanceGeneration() }
         verify { fixture.flagRepository.clearSessionCache() }
     }
 
@@ -95,6 +121,7 @@ class CacheInvalidatorTest {
         coVerify(exactly = 0) { fixture.editorDraftDao.deletePrivateForUser(any()) }
         coVerify(exactly = 0) { fixture.uploadedImageDao.deleteAllForUser(any()) }
         coVerify(exactly = 0) { fixture.mpStorageLocationDao.deleteAllForUser(any()) }
+        verify(exactly = 0) { fixture.threadSessionCache.clearAndAdvanceGeneration() }
         verify(exactly = 0) { fixture.flagRepository.clearSessionCache() }
     }
 
@@ -105,6 +132,7 @@ class CacheInvalidatorTest {
         val editorDraftDao: EditorDraftDao,
         val uploadedImageDao: UploadedImageDao,
         val mpStorageLocationDao: MpStorageLocationDao,
+        val threadSessionCache: PrivateMessageThreadSessionCache,
         val flagRepository: FlagRepository,
     )
 
@@ -117,6 +145,7 @@ class CacheInvalidatorTest {
         val editorDraftDao = mockk<EditorDraftDao>(relaxed = true)
         val uploadedImageDao = mockk<UploadedImageDao>(relaxed = true)
         val mpStorageLocationDao = mockk<MpStorageLocationDao>(relaxed = true)
+        val threadSessionCache = mockk<PrivateMessageThreadSessionCache>(relaxed = true)
         val flagRepository = mockk<FlagRepository>(relaxed = true)
         val invalidator = CacheInvalidator(
             authRepository = authRepository,
@@ -126,6 +155,7 @@ class CacheInvalidatorTest {
             uploadedImageDao = uploadedImageDao,
             mpStorageLocationDao = mpStorageLocationDao,
             flagRepository = flagRepository,
+            privateMessageThreadSessionCache = threadSessionCache,
             ioDispatcher = UnconfinedTestDispatcher(),
         )
         return Fixture(
@@ -135,6 +165,7 @@ class CacheInvalidatorTest {
             editorDraftDao,
             uploadedImageDao,
             mpStorageLocationDao,
+            threadSessionCache,
             flagRepository,
         )
     }

@@ -4,6 +4,7 @@ import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.LoginError
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
+import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageListPage
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageSummary
@@ -20,6 +21,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -390,7 +392,7 @@ class DefaultMessagesRepositoryTest {
     }
 
     @Test
-    fun `getPrivateMessageThread fetches the thread page and forwards the fallback correspondent`() = runTest {
+    fun `getPrivateMessageThread emits network and caches a matching terminal page`() = runTest {
         val hfrClient = mockk<HfrClient>()
         coEvery { hfrClient.getPrivateMessageThreadPage(threadId = 42, page = 1) } returns FAKE_HTML
         val threadParser = mockk<PrivateMessageThreadParser>()
@@ -405,16 +407,130 @@ class DefaultMessagesRepositoryTest {
         )
         coEvery { threadParser.parse(FAKE_HTML, "Correspondant") } returns parsed
 
-        val (repo, _) = buildRepository(hfrClient = hfrClient, threadParser = threadParser)
+        val cache = PrivateMessageThreadSessionCache()
+        val (repo, authStates) = buildRepository(
+            hfrClient = hfrClient,
+            threadParser = threadParser,
+            threadSessionCache = cache,
+        )
+        authStates.emit(AuthState.Authenticated(" XaaT "))
 
         val result = repo.getPrivateMessageThread(
             threadId = 42,
             page = 1,
             fallbackCorrespondent = "Correspondant",
-        )
+        ).toList()
 
-        assertEquals(parsed, result)
+        assertEquals(
+            listOf(PrivateMessageThreadPage(parsed, PrivateMessageThreadPage.Source.NETWORK)),
+            result,
+        )
+        val stamp = cache.capture("xaat")
+        assertEquals(parsed, cache.read(stamp, threadId = 42, page = 1))
         coVerify(exactly = 1) { threadParser.parse(FAKE_HTML, "Correspondant") }
+    }
+
+    @Test
+    fun `a session cache hit emits immediately then is always revalidated by network`() = runTest {
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.getPrivateMessageThreadPage(threadId = 42, page = 1) } returns FAKE_HTML
+        val cached = thread(subject = "cached")
+        val refreshed = thread(subject = "refreshed")
+        val threadParser = mockk<PrivateMessageThreadParser>()
+        coEvery { threadParser.parse(FAKE_HTML, null) } returns refreshed
+        val cache = PrivateMessageThreadSessionCache()
+        val stamp = cache.capture("xaat")
+        cache.write(stamp, threadId = 42, page = 1, thread = cached)
+        val (repo, authStates) = buildRepository(
+            hfrClient = hfrClient,
+            threadParser = threadParser,
+            threadSessionCache = cache,
+        )
+        authStates.emit(AuthState.Authenticated("XaaT"))
+
+        val result = repo.getPrivateMessageThread(threadId = 42, page = 1).toList()
+
+        assertEquals(
+            listOf(
+                PrivateMessageThreadPage(cached, PrivateMessageThreadPage.Source.SESSION_CACHE),
+                PrivateMessageThreadPage(refreshed, PrivateMessageThreadPage.Source.NETWORK),
+            ),
+            result,
+        )
+        coVerify(exactly = 1) { hfrClient.getPrivateMessageThreadPage(threadId = 42, page = 1) }
+    }
+
+    @Test
+    fun `a redirected or clamped response is emitted but never stored under the requested key`() = runTest {
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.getPrivateMessageThreadPage(threadId = 42, page = 9) } returns FAKE_HTML
+        val clamped = thread(threadId = 99, page = 7, totalPages = 7)
+        val threadParser = mockk<PrivateMessageThreadParser>()
+        coEvery { threadParser.parse(FAKE_HTML, null) } returns clamped
+        val cache = PrivateMessageThreadSessionCache()
+        val (repo, authStates) = buildRepository(
+            hfrClient = hfrClient,
+            threadParser = threadParser,
+            threadSessionCache = cache,
+        )
+        authStates.emit(AuthState.Authenticated("xaat"))
+
+        val result = repo.getPrivateMessageThread(threadId = 42, page = 9).toList()
+
+        assertEquals(
+            listOf(PrivateMessageThreadPage(clamped, PrivateMessageThreadPage.Source.NETWORK)),
+            result,
+        )
+        assertNull(cache.read(cache.capture("xaat"), threadId = 42, page = 9))
+    }
+
+    @Test
+    fun `a response landing after an account switch is neither cached nor emitted`() = runTest {
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.getPrivateMessageThreadPage(threadId = 42, page = 1) } returns FAKE_HTML
+        val threadParser = mockk<PrivateMessageThreadParser>()
+        lateinit var authStates: MutableSharedFlow<AuthState>
+        coEvery { threadParser.parse(FAKE_HTML, null) } coAnswers {
+            authStates.emit(AuthState.Authenticated("bob"))
+            thread()
+        }
+        val cache = PrivateMessageThreadSessionCache()
+        val (repo, states) = buildRepository(
+            hfrClient = hfrClient,
+            threadParser = threadParser,
+            threadSessionCache = cache,
+        )
+        authStates = states
+        authStates.emit(AuthState.Authenticated("alice"))
+
+        val result = repo.getPrivateMessageThread(threadId = 42, page = 1).toList()
+
+        assertEquals(emptyList<PrivateMessageThreadPage>(), result)
+        assertNull(cache.read(cache.capture("alice"), threadId = 42, page = 1))
+        assertNull(cache.read(cache.capture("bob"), threadId = 42, page = 1))
+    }
+
+    @Test
+    fun `a response landing after generation advance is neither cached nor emitted`() = runTest {
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.getPrivateMessageThreadPage(threadId = 42, page = 1) } returns FAKE_HTML
+        val cache = PrivateMessageThreadSessionCache()
+        val threadParser = mockk<PrivateMessageThreadParser>()
+        coEvery { threadParser.parse(FAKE_HTML, null) } answers {
+            cache.clearAndAdvanceGeneration()
+            thread()
+        }
+        val (repo, authStates) = buildRepository(
+            hfrClient = hfrClient,
+            threadParser = threadParser,
+            threadSessionCache = cache,
+        )
+        authStates.emit(AuthState.Authenticated("alice"))
+
+        val result = repo.getPrivateMessageThread(threadId = 42, page = 1).toList()
+
+        assertEquals(emptyList<PrivateMessageThreadPage>(), result)
+        assertNull(cache.read(cache.capture("alice"), threadId = 42, page = 1))
     }
 
     private fun summary(threadId: Int, hasUnread: Boolean) = PrivateMessageSummary(
@@ -429,6 +545,7 @@ class DefaultMessagesRepositoryTest {
         hfrClient: HfrClient = mockk(relaxed = true),
         parser: PrivateMessageListParser = mockk(relaxed = true),
         threadParser: PrivateMessageThreadParser = mockk(relaxed = true),
+        threadSessionCache: PrivateMessageThreadSessionCache = PrivateMessageThreadSessionCache(),
     ): Pair<DefaultMessagesRepository, MutableSharedFlow<AuthState>> {
         // replay=1 mirrors production (the current auth state is readable at any time) : the
         // repository snapshots the session pseudo via `first()` at fetch call-time (#439).
@@ -446,6 +563,7 @@ class DefaultMessagesRepositoryTest {
             hfrClient = hfrClient,
             parser = parser,
             threadParser = threadParser,
+            threadSessionCache = threadSessionCache,
             ioDispatcher = UnconfinedTestDispatcher(),
         )
         return repo to authStates
@@ -455,4 +573,19 @@ class DefaultMessagesRepositoryTest {
         const val FAKE_HTML = "<html><body><table></table></body></html>"
         const val FAKE_HTML_2 = "<html><body><table>v2</table></body></html>"
     }
+
+    private fun thread(
+        threadId: Int = 42,
+        subject: String = "Sujet",
+        page: Int = 1,
+        totalPages: Int = 1,
+    ) = PrivateMessageThread(
+        threadId = threadId,
+        subject = subject,
+        correspondent = "Correspondant",
+        messages = emptyList(),
+        page = page,
+        totalPages = totalPages,
+        canReply = true,
+    )
 }
