@@ -221,6 +221,59 @@ class ArchitectureKonsistTest {
                 )
             }
         }
+
+        // #1080 / ADR-013 decision 3 — authenticated MP prefetch is the unique exception to the
+        // anonymous rule. Its dedicated entry point is intentionally narrow: every production call
+        // site must live in the conversation ViewModel. In particular, MessagesViewModel (the inbox)
+        // may never call it because merely fetching a conversation clears both its unread dot and the
+        // MultiMP « pas lu par » receipt. Scan the full text of ALL production files so an init block,
+        // property initializer, call without an explicit receiver, or callable reference cannot move
+        // the forbidden usage outside a function and evade the path check.
+        val productionFiles = Konsist
+            .scopeFromProject()
+            .slice { file ->
+                file.path.contains("/src/main/") && !file.path.contains("/build/")
+            }
+            .files
+        var privateMessagePrefetchCallSites = 0
+        productionFiles.forEach { file ->
+            val usageCount = PRIVATE_MESSAGE_PREFETCH_USAGE.findAll(file.text).count()
+            if (usageCount == 0) return@forEach
+
+            assertTrue(
+                "${file.path} declares, calls, or references the authenticated private-message " +
+                    "prefetch entry point outside the explicit ADR-013 allowlist",
+                PRIVATE_MESSAGE_PREFETCH_ALLOWED_PATHS.any(file.path::endsWith),
+            )
+            if (file.path.endsWith(PRIVATE_MESSAGE_THREAD_VIEW_MODEL_PATH)) {
+                privateMessagePrefetchCallSites += usageCount
+            }
+        }
+        assertTrue(
+            "Konsist must find the authenticated private-message prefetch call site in " +
+                "PrivateMessageThreadViewModel",
+            privateMessagePrefetchCallSites > 0,
+        )
+    }
+
+    @Test
+    fun `private message prefetch guard recognizes all usage shapes`() {
+        val guardedUsages = mapOf(
+            "init block" to
+                "init { scope.launch { repository.prefetchPrivateMessageThread(1, 1) } }",
+            "property initializer" to
+                "private val warmup = scope.launch { repository.prefetchPrivateMessageThread(1, 1) }",
+            "call without receiver" to
+                "with(repository) { prefetchPrivateMessageThread(1, 1) }",
+            "callable reference" to "repository::prefetchPrivateMessageThread",
+        )
+
+        guardedUsages.forEach { (shape, source) ->
+            assertTrue(
+                "Private-message prefetch guard must recognize the $shape shape",
+                PRIVATE_MESSAGE_PREFETCH_USAGE.containsMatchIn(source),
+            )
+        }
     }
 
     private companion object {
@@ -230,6 +283,22 @@ class ArchitectureKonsistTest {
             "$ANONYMOUS_CLIENT_PACKAGE.AnonymousClient"
         const val FEATURE_PROFILE_PACKAGE =
             "fr.forumhfr.redface2.feature.profile."
+        const val MESSAGES_REPOSITORY_PATH =
+            "/core/domain/src/main/kotlin/fr/forumhfr/redface2/core/domain/messages/" +
+                "MessagesRepository.kt"
+        const val DEFAULT_MESSAGES_REPOSITORY_PATH =
+            "/core/data/src/main/kotlin/fr/forumhfr/redface2/core/data/messages/" +
+                "DefaultMessagesRepository.kt"
+        const val PRIVATE_MESSAGE_THREAD_VIEW_MODEL_PATH =
+            "/feature/messages/src/main/kotlin/fr/forumhfr/redface2/feature/messages/" +
+                "PrivateMessageThreadViewModel.kt"
+        val PRIVATE_MESSAGE_PREFETCH_ALLOWED_PATHS = setOf(
+            MESSAGES_REPOSITORY_PATH,
+            DEFAULT_MESSAGES_REPOSITORY_PATH,
+            PRIVATE_MESSAGE_THREAD_VIEW_MODEL_PATH,
+        )
+        val PRIVATE_MESSAGE_PREFETCH_USAGE =
+            Regex("""\bprefetchPrivateMessageThread\b""")
         val AUTH_DIR_TOKENS = listOf("/auth/", "/messages/")
         val PRIVATE_CACHE_FORBIDDEN_IMPORT_PREFIXES = listOf(
             "android.util.Log",

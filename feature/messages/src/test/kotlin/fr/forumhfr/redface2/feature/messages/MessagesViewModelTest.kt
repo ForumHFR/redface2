@@ -191,6 +191,30 @@ class MessagesViewModelTest {
     }
 
     @Test
+    fun `inbox never prefetches conversations during loads or authentication transitions`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery { repository.getPrivateMessageList(page = 1) } returns
+            PrivateMessageListPage(page = 1, totalPages = 2, items = listOf(summary(1)))
+        coEvery { repository.getPrivateMessageList(page = 2) } returns
+            PrivateMessageListPage(page = 2, totalPages = 2, items = listOf(summary(2)))
+        val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
+        val viewModel = viewModel(repository, authRepository)
+
+        viewModel.refresh()
+        advanceUntilIdle()
+        viewModel.selectPage(2)
+        advanceUntilIdle()
+        authRepository.emit(AuthState.Anonymous)
+        advanceUntilIdle()
+        authRepository.emit(AuthState.Authenticated("bob"))
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) {
+            repository.prefetchPrivateMessageThread(threadId = any(), page = any())
+        }
+    }
+
+    @Test
     fun `logout clears private inbox content and login reloads it`() = runTest {
         val repository = mockk<MessagesRepository>()
         val authRepository = FakeAuthRepository()

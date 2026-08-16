@@ -533,6 +533,89 @@ class DefaultMessagesRepositoryTest {
         assertNull(cache.read(cache.capture("alice"), threadId = 42, page = 1))
     }
 
+    @Test
+    fun `prefetch stores a matching terminal page in the session cache`() = runTest {
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.getPrivateMessageThreadPage(threadId = 42, page = 2) } returns FAKE_HTML
+        val parsed = thread(page = 2, totalPages = 3)
+        val threadParser = mockk<PrivateMessageThreadParser>()
+        coEvery { threadParser.parse(FAKE_HTML, null) } returns parsed
+        val cache = PrivateMessageThreadSessionCache()
+        val (repo, authStates) = buildRepository(
+            hfrClient = hfrClient,
+            threadParser = threadParser,
+            threadSessionCache = cache,
+        )
+        authStates.emit(AuthState.Authenticated(" XaaT "))
+
+        repo.prefetchPrivateMessageThread(threadId = 42, page = 2)
+
+        assertEquals(parsed, cache.read(cache.capture("xaat"), threadId = 42, page = 2))
+        coVerify(exactly = 1) { hfrClient.getPrivateMessageThreadPage(threadId = 42, page = 2) }
+    }
+
+    @Test
+    fun `prefetch skips a page already present in the session cache`() = runTest {
+        val hfrClient = mockk<HfrClient>()
+        val cache = PrivateMessageThreadSessionCache()
+        val cached = thread(page = 2, totalPages = 3)
+        cache.write(cache.capture("xaat"), threadId = 42, page = 2, thread = cached)
+        val (repo, authStates) = buildRepository(
+            hfrClient = hfrClient,
+            threadSessionCache = cache,
+        )
+        authStates.emit(AuthState.Authenticated("xaat"))
+
+        repo.prefetchPrivateMessageThread(threadId = 42, page = 2)
+
+        coVerify(exactly = 0) { hfrClient.getPrivateMessageThreadPage(any(), any()) }
+        assertEquals(cached, cache.read(cache.capture("xaat"), threadId = 42, page = 2))
+    }
+
+    @Test
+    fun `prefetch never stores a redirected or clamped response under the target key`() = runTest {
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.getPrivateMessageThreadPage(threadId = 42, page = 9) } returns FAKE_HTML
+        val threadParser = mockk<PrivateMessageThreadParser>()
+        coEvery { threadParser.parse(FAKE_HTML, null) } returns thread(threadId = 99, page = 7, totalPages = 7)
+        val cache = PrivateMessageThreadSessionCache()
+        val (repo, authStates) = buildRepository(
+            hfrClient = hfrClient,
+            threadParser = threadParser,
+            threadSessionCache = cache,
+        )
+        authStates.emit(AuthState.Authenticated("xaat"))
+
+        repo.prefetchPrivateMessageThread(threadId = 42, page = 9)
+
+        assertNull(cache.read(cache.capture("xaat"), threadId = 42, page = 9))
+    }
+
+    @Test
+    fun `prefetch response landing after an account switch cannot repopulate the cache`() = runTest {
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.getPrivateMessageThreadPage(threadId = 42, page = 2) } returns FAKE_HTML
+        lateinit var authStates: MutableSharedFlow<AuthState>
+        val threadParser = mockk<PrivateMessageThreadParser>()
+        coEvery { threadParser.parse(FAKE_HTML, null) } coAnswers {
+            authStates.emit(AuthState.Authenticated("bob"))
+            thread(page = 2, totalPages = 3)
+        }
+        val cache = PrivateMessageThreadSessionCache()
+        val (repo, states) = buildRepository(
+            hfrClient = hfrClient,
+            threadParser = threadParser,
+            threadSessionCache = cache,
+        )
+        authStates = states
+        authStates.emit(AuthState.Authenticated("alice"))
+
+        repo.prefetchPrivateMessageThread(threadId = 42, page = 2)
+
+        assertNull(cache.read(cache.capture("alice"), threadId = 42, page = 2))
+        assertNull(cache.read(cache.capture("bob"), threadId = 42, page = 2))
+    }
+
     private fun summary(threadId: Int, hasUnread: Boolean) = PrivateMessageSummary(
         threadId = threadId,
         correspondent = "Correspondant",
