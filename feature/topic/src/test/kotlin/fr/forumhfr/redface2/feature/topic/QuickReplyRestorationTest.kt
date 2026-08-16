@@ -15,9 +15,10 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.text.input.TextFieldValue
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
-import fr.forumhfr.redface2.core.domain.write.ReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
-import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
+import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
+import fr.forumhfr.redface2.core.model.write.QuoteLocator
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.write.ReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
@@ -127,8 +128,16 @@ class QuickReplyRestorationTest {
         val launch = QuickReplyLaunch(
             request = REQUEST,
             initialQuotes = listOf(
-                QuotedPostPreview(numreponse = 101, author = "alice", excerpt = "premier extrait"),
-                QuotedPostPreview(numreponse = 202, author = "bob", excerpt = "second extrait"),
+                QuoteSelection(
+                    locator = QuoteLocator(page = 3, numreponse = 101, ref = 7),
+                    author = "alice",
+                    excerpt = "premier extrait",
+                ),
+                QuoteSelection(
+                    locator = QuoteLocator(page = 4, numreponse = 202, ref = null),
+                    author = "bob",
+                    excerpt = "second extrait",
+                ),
             ),
             consumesBasket = true,
         )
@@ -157,7 +166,7 @@ class QuickReplyRestorationTest {
         QuickReplyViewModel(
             request = REQUEST,
             replyRepository = repository,
-            quoteMaterializer = ReplyQuoteMaterializer(repository),
+            quoteMaterializer = TopicReplyQuoteMaterializer(repository),
             draftStore = InMemoryDraftStore(),
             userPreferencesRepository = FakeUserPreferencesRepository(),
         )

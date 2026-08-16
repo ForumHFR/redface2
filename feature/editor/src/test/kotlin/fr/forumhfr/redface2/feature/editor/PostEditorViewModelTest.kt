@@ -37,14 +37,15 @@ import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadedImage
 import fr.forumhfr.redface2.core.domain.upload.UploadedImageRecord
-import fr.forumhfr.redface2.core.domain.write.ReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
+import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
-import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
+import fr.forumhfr.redface2.core.model.write.QuoteLocator
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.write.ReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
@@ -786,7 +787,7 @@ class PostEditorViewModelTest {
     @Suppress("LongParameterList") // test helper: every param is an optional, defaulted scenario knob.
     private fun newReplyViewModel(
         subcat: Int? = SAMPLE_SUBCAT,
-        initialQuotes: List<QuotedPostPreview> = emptyList(),
+        initialQuotes: List<QuoteSelection> = emptyList(),
         resumeSharedDraft: Boolean = false,
         diagnostics: DiagnosticsLog = DiagnosticsLog(),
         // Test default = cards ON so the #604 lot 3 card suites keep exercising their mode ;
@@ -817,7 +818,7 @@ class PostEditorViewModelTest {
             uploadRepository = uploadRepository,
             imageUploadReader = imageUploadReader,
             authRepository = authRepository,
-            quoteMaterializer = ReplyQuoteMaterializer(replyRepository),
+            quoteMaterializer = TopicReplyQuoteMaterializer(replyRepository),
         )
 
     // ----- Phase 2F-B (#11) / #441 : smiley picker ----------------------------------
@@ -1346,7 +1347,7 @@ class PostEditorViewModelTest {
             uploadRepository = uploadRepository,
             imageUploadReader = imageUploadReader,
             authRepository = authRepository,
-            quoteMaterializer = ReplyQuoteMaterializer(replyRepository),
+            quoteMaterializer = TopicReplyQuoteMaterializer(replyRepository),
         )
 
     // ----- #312 : confirmation avant publication ------------------------------
@@ -2003,8 +2004,12 @@ class PostEditorViewModelTest {
     }
 
     /** #604 lot 3 — quote-card snapshot, as the topic surface would build it at selection time. */
-    private fun card(numreponse: Int, author: String = "auteur$numreponse"): QuotedPostPreview =
-        QuotedPostPreview(numreponse = numreponse, author = author, excerpt = "extrait $numreponse")
+    private fun card(numreponse: Int, author: String = "auteur$numreponse"): QuoteSelection =
+        QuoteSelection(
+            locator = QuoteLocator(page = 3, numreponse = numreponse, ref = 1),
+            author = author,
+            excerpt = "extrait $numreponse",
+        )
 
     private fun authenticatedForm(initialContent: String = ""): ReplyForm = ReplyForm(
         hashCheck = "FAKE_HASH",

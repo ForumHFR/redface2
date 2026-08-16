@@ -58,7 +58,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
-import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitActions
 import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitButton
@@ -425,7 +425,7 @@ private fun EditorTopZone(
  */
 @Composable
 private fun EditorQuoteCards(
-    quotes: List<QuotedPostPreview>,
+    quotes: List<QuoteSelection>,
     enabled: Boolean,
     onIntent: (PostEditorIntent) -> Unit,
 ) {

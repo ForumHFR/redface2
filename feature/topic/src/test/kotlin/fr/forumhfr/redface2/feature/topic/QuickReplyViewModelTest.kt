@@ -3,13 +3,14 @@ package fr.forumhfr.redface2.feature.topic
 import androidx.compose.ui.text.input.TextFieldValue
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
-import fr.forumhfr.redface2.core.domain.write.ReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
+import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.model.write.ReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
-import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
+import fr.forumhfr.redface2.core.model.write.QuoteLocator
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
@@ -577,8 +578,11 @@ class QuickReplyViewModelTest {
         assertEquals(listOf(null, 101), repository.fetchedQuotedNumreponses)
     }
 
-    private fun preview(numreponse: Int, author: String): QuotedPostPreview =
-        QuotedPostPreview(numreponse = numreponse, author = author, excerpt = "extrait")
+    private fun preview(numreponse: Int, author: String): QuoteSelection = QuoteSelection(
+        locator = QuoteLocator(page = 3, numreponse = numreponse, ref = 1),
+        author = author,
+        excerpt = "extrait",
+    )
 
     private fun quickReplyViewModel(
         replyRepository: ReplyRepository = FakeQuickReplyRepository(),
@@ -590,7 +594,7 @@ class QuickReplyViewModelTest {
     ): QuickReplyViewModel = QuickReplyViewModel(
         request = QuickReplyRequest(cat = 23, subcat = 401, topicId = 35421, page = 3),
         replyRepository = replyRepository,
-        quoteMaterializer = ReplyQuoteMaterializer(replyRepository),
+        quoteMaterializer = TopicReplyQuoteMaterializer(replyRepository),
         draftStore = draftStore,
         userPreferencesRepository = FakeUserPreferencesRepository(
             confirmBeforePosting = confirmBeforePosting,

@@ -1,6 +1,6 @@
 package fr.forumhfr.redface2.feature.editor
 
-import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 
 /**
  * Plain request payload assisted-injected into [PostEditorViewModel]. Mirrors the
@@ -29,7 +29,7 @@ data class PostEditorRequest(
      * text). Handed over in memory by `:app` (never serialised into the route) : the cards are
      * deliberately transient, a process death keeps the text (#405 row) but drops the cards.
      */
-    val initialQuotes: List<QuotedPostPreview> = emptyList(),
+    val initialQuotes: List<QuoteSelection> = emptyList(),
     /**
      * #790 (#604 lot 2) — `true` ONLY when this editor is the ESCALATION of a quick-reply sheet. The
      * ViewModel then auto-applies the shared #405 draft row instead of surfacing the restore

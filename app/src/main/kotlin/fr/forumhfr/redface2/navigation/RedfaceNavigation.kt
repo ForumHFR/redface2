@@ -98,7 +98,8 @@ import fr.forumhfr.redface2.R
 import fr.forumhfr.redface2.core.ui.R as CoreUiR
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.write.PrivateMessageQuote
-import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
+import fr.forumhfr.redface2.core.model.write.QuoteScope
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageSummary
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.shouldRevealNavBar
@@ -1123,15 +1124,16 @@ fun RedfaceApp(intent: Intent?) {
         // shows the cached page until a manual refresh (same stance as the other transient slots).
         var topicPendingSubmit by remember { mutableStateOf<TopicPendingSubmit?>(null) }
         var topicSubmitEventId by remember { mutableStateOf(0L) }
-        // #291 — multi-quote basket: numreponses selected for quoting, in tap order, keyed by
-        // (cat, post) so the selection survives the editor round-trip and re-entering the topic
+        // #291/#1074 — multi-quote basket: selections retained in tap order, keyed by a typed
+        // scope so the selection survives the editor round-trip and re-entering the topic
         // (and, pre-#895 étape 4, the per-page entry swap — the original trigger for hoisting it
-        // here) while a different topic never sees it. One basket at a time (selecting in another
-        // topic resets it — quoting is a single-topic act). Plain remember: losing it on process
-        // death just means re-selecting, like the markers above.
+        // here) while another topic or private conversation never sees it. One basket at a time
+        // (selecting in another scope resets it — quoting is a single-target act). Plain remember:
+        // losing it on process death just means re-selecting, like the markers above.
         var multiQuoteBasket by remember { mutableStateOf<MultiQuoteBasket?>(null) }
-        // #604 lot 3 — quote cards handed to the NEXT full-screen editor (mockup P3) : set right
-        // before pushing a PostEditorRoute (« Citer N » or a sheet escalation), consumed ONCE by
+        // #604/#1074 — scoped quote selections handed to the NEXT full-screen editor (mockup P3):
+        // set immediately before pushing a PostEditorRoute (« Citer N » or a sheet escalation),
+        // consumed ONCE by
         // the editor entry (read into the request, then cleared) so a later editor can never
         // resurrect a stale citation set. In-memory on purpose — the cards are transient by
         // decision (lot 2) : a process death keeps the #405 draft text but drops the cards.
@@ -1372,8 +1374,8 @@ fun RedfaceApp(intent: Intent?) {
                         ),
                         multiQuoteNavState = MultiQuoteNavState(
                             basket = multiQuoteBasket,
-                            onToggle = { cat, post, preview ->
-                                multiQuoteBasket = multiQuoteBasket.toggled(cat, post, preview)
+                            onToggle = { scope, selection ->
+                                multiQuoteBasket = multiQuoteBasket.toggled(scope, selection)
                             },
                             onClear = { multiQuoteBasket = null },
                             pendingEditorQuotes = pendingEditorQuotes,
@@ -1814,22 +1816,30 @@ private data class TopicSubmitNavState(
  */
 private data class MultiQuoteNavState(
     val basket: MultiQuoteBasket?,
-    val onToggle: (cat: Int, post: Int, preview: QuotedPostPreview) -> Unit,
+    val onToggle: (scope: QuoteScope, selection: QuoteSelection) -> Unit,
     val onClear: () -> Unit,
     val pendingEditorQuotes: EditorQuotesHandoff? = null,
     val onEditorQuotesHandoff: (EditorQuotesHandoff?) -> Unit = {},
 )
 
 /**
- * #868-#870 — what a full-screen editor opening receives : the quote previews (cards), and whether
+ * #868-#870/#1074 — what a full-screen editor opening receives: its scoped quote selections, and
+ * whether
  * a successful submit of THAT session must empty the hoisted multi-quote basket. `consumesBasket`
  * is decided by the OPEN PATH (« Citer N » / escalation of a basket-armed sheet = true ; « Citer »
- * simple, #823 long-press and plain replies = false) — never inferred from the quote count.
+ * simple, #823 long-press and plain replies = false) — never inferred from the quote count. The
+ * [scope] is checked by the receiving editor before exposing the selections, so a handoff for one
+ * topic — or a future private conversation — cannot bleed into another writing target.
  */
 internal data class EditorQuotesHandoff(
-    val quotes: List<QuotedPostPreview>,
+    val scope: QuoteScope,
+    val quotes: List<QuoteSelection>,
     val consumesBasket: Boolean,
 )
+
+/** Returns this handoff only when it belongs to the editor's exact [scope]. */
+internal fun EditorQuotesHandoff?.forScope(scope: QuoteScope?): EditorQuotesHandoff? =
+    this?.takeIf { scope != null && it.scope == scope }
 
 /**
  * #465 — per-topic poll-expansion bundle threaded into [RedfaceNavHost], same shape and survival
@@ -1909,33 +1919,33 @@ private fun ResetNavBarScrollOffTopic(topRoute: NavKey?, onReset: () -> Unit) {
  * — the editor round-trip, reopening the topic ; and, pre-#895 étape 4, every page change swapped
  * the entry). [selections] keeps SELECTION ORDER — the quotes are concatenated
  * in the order the user tapped them, not post order. #604 lot 2 enriched the entries from bare
- * numreponses to [QuotedPostPreview]s (author + excerpt captured at selection time) so the quote
- * cards never re-parse a post ; uniqueness stays keyed on the numreponse alone.
+ * numreponses to card snapshots captured at selection time so the quote cards never re-parse a
+ * post. #1074 types both the owning [scope] and every selection's locator; uniqueness is the
+ * `(scope, numreponse)` pair because HFR only guarantees `numreponse` inside one category.
  */
 internal data class MultiQuoteBasket(
-    val cat: Int,
-    val post: Int,
-    val selections: List<QuotedPostPreview>,
+    val scope: QuoteScope,
+    val selections: List<QuoteSelection>,
 ) {
     val numreponses: List<Int> get() = selections.map { it.numreponse }
 
-    fun matches(cat: Int, post: Int): Boolean = this.cat == cat && this.post == post
+    fun matches(scope: QuoteScope): Boolean = this.scope == scope
 }
 
 /**
- * Toggles [preview] in the basket for topic ([cat], [post]) — presence is keyed on the
- * numreponse, so re-tapping a selected post removes it whatever snapshot the caller rebuilt.
- * Selecting in a DIFFERENT topic replaces the basket (one quoting act at a time); removing the
- * last entry clears it to null so the « Citer N » affordance disappears instead of advertising
- * an empty selection.
+ * Toggles [selection] in the basket for [scope] — presence is keyed on the numreponse inside that
+ * scope, so re-tapping a selected post removes it whatever snapshot/locator the caller rebuilt.
+ * Selecting in a DIFFERENT scope replaces the basket (one quoting act at a time); removing the last
+ * entry clears it to null so the « Citer N » affordance disappears instead of advertising an empty
+ * selection.
  */
-internal fun MultiQuoteBasket?.toggled(cat: Int, post: Int, preview: QuotedPostPreview): MultiQuoteBasket? {
-    val current = this?.takeIf { it.matches(cat, post) }
-        ?: return MultiQuoteBasket(cat, post, listOf(preview))
-    val next = if (current.selections.any { it.numreponse == preview.numreponse }) {
-        current.selections.filterNot { it.numreponse == preview.numreponse }
+internal fun MultiQuoteBasket?.toggled(scope: QuoteScope, selection: QuoteSelection): MultiQuoteBasket? {
+    val current = this?.takeIf { it.matches(scope) }
+        ?: return MultiQuoteBasket(scope, listOf(selection))
+    val next = if (current.selections.any { it.numreponse == selection.numreponse }) {
+        current.selections.filterNot { it.numreponse == selection.numreponse }
     } else {
-        current.selections + preview
+        current.selections + selection
     }
     return if (next.isEmpty()) null else current.copy(selections = next)
 }
@@ -2507,6 +2517,7 @@ private fun RedfaceNavHost(
                 )
             }
             entry<TopicRoute> { route ->
+                val topicQuoteScope = QuoteScope.Topic(cat = route.cat, topicId = route.post)
                 // #895 étape 4 (PR 2) — the route is FROZEN at entry : every in-topic page change,
                 // quote jump, jump return and post-submit landing now lives inside the retained
                 // TopicViewModel (single nav entry, single LazyListState — no more per-page entry
@@ -2561,8 +2572,13 @@ private fun RedfaceNavHost(
                         // #868-#870 — « Citer » simple / #823 long-press / plain reply : these
                         // quotes never came from the basket, a submit must not empty it.
                         multiQuoteNavState.onEditorQuotesHandoff(
-                            quotes.takeIf { it.isNotEmpty() }
-                                ?.let { EditorQuotesHandoff(it, consumesBasket = false) },
+                            quotes.takeIf { it.isNotEmpty() }?.let {
+                                EditorQuotesHandoff(
+                                    scope = topicQuoteScope,
+                                    quotes = it,
+                                    consumesBasket = false,
+                                )
+                            },
                         )
                         backStack.add(
                             PostEditorRoute(
@@ -2586,7 +2602,11 @@ private fun RedfaceNavHost(
                         // removed before escalating still consumes the basket — the flag follows
                         // the OPEN PATH, never the quote count.
                         multiQuoteNavState.onEditorQuotesHandoff(
-                            EditorQuotesHandoff(quotes, consumesBasket = consumesBasket),
+                            EditorQuotesHandoff(
+                                scope = topicQuoteScope,
+                                quotes = quotes,
+                                consumesBasket = consumesBasket,
+                            ),
                         )
                         backStack.add(
                             PostEditorRoute(
@@ -2604,11 +2624,11 @@ private fun RedfaceNavHost(
                     // the « Citer N » FAB) ; under the full-screen threshold the screen pre-arms
                     // the sheet's cards from them and consumes the basket via onClearMultiQuote.
                     multiQuoteSelections = multiQuoteNavState.basket
-                        ?.takeIf { it.matches(route.cat, route.post) }
+                        ?.takeIf { it.matches(topicQuoteScope) }
                         ?.selections
                         .orEmpty(),
-                    onToggleMultiQuote = { preview ->
-                        multiQuoteNavState.onToggle(route.cat, route.post, preview)
+                    onToggleMultiQuote = { selection ->
+                        multiQuoteNavState.onToggle(topicQuoteScope, selection)
                     },
                     // #436 — « Tout vider » : a long press on the « Citer N » FAB empties the
                     // whole hoisted basket (same reset path as the post-editor launch / logout).
@@ -2636,12 +2656,16 @@ private fun RedfaceNavHost(
                         // restore banner (cards are independent of it), instead of the silent append
                         // the escalation flag used to force here (pre-#843 Codex fork 4).
                         val selection = multiQuoteNavState.basket
-                            ?.takeIf { it.matches(route.cat, route.post) }
+                            ?.takeIf { it.matches(topicQuoteScope) }
                             ?.selections
                             .orEmpty()
                         if (selection.isNotEmpty()) {
                             multiQuoteNavState.onEditorQuotesHandoff(
-                                EditorQuotesHandoff(selection, consumesBasket = true),
+                                EditorQuotesHandoff(
+                                    scope = topicQuoteScope,
+                                    quotes = selection,
+                                    consumesBasket = true,
+                                ),
                             )
                             backStack.add(
                                 PostEditorRoute(
@@ -2706,7 +2730,8 @@ private fun RedfaceNavHost(
                 )
             }
             entry<PostEditorRoute> { route ->
-                // #604 lot 3 — consume the quote handoff ONCE : the previews reach the ViewModel
+                // #604/#1074 — consume the quote handoff ONCE: only selections whose typed scope
+                // matches this editor reach the ViewModel
                 // through the assisted request (used only at first creation — a recomposition or
                 // configuration change reuses the existing VM, so the cleared handoff is moot),
                 // and the LaunchedEffect clears the slot so a LATER editor can never resurrect a
@@ -2718,7 +2743,10 @@ private fun RedfaceNavHost(
                 // succeeding each other at the same Compose position can never share a capture.
                 // An activity recreation loses the capture together with the hoisted basket
                 // itself (both plain remember) — consistent, nothing to clear.
-                val editorQuotesHandoff = remember(route) { multiQuoteNavState.pendingEditorQuotes }
+                val editorQuoteScope = route.topicId?.let { QuoteScope.Topic(route.cat, it) }
+                val editorQuotesHandoff = remember(route) {
+                    multiQuoteNavState.pendingEditorQuotes.forScope(editorQuoteScope)
+                }
                 LaunchedEffect(Unit) { multiQuoteNavState.onEditorQuotesHandoff(null) }
                 PostEditorScreen(
                     request = PostEditorRequest(
@@ -2761,8 +2789,8 @@ private fun RedfaceNavHost(
                         // basket is keyed (cat, post), so if it was re-armed on another topic
                         // while this editor lived, the submit must not wipe that newer selection.
                         if (editorQuotesHandoff?.consumesBasket == true &&
-                            topicId != null &&
-                            multiQuoteNavState.basket?.matches(route.cat, topicId) == true
+                            editorQuoteScope != null &&
+                            multiQuoteNavState.basket?.matches(editorQuoteScope) == true
                         ) {
                             multiQuoteNavState.onClear()
                         }
