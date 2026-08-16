@@ -16,6 +16,19 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.42.2` — `internal` (dev) — 2026-08-16
+
+### Ajouté
+
+- **Un appui long sur un message privé ouvre désormais un menu** ([#1051](https://github.com/ForumHFR/redface2/issues/1051)) : copier le texte, ouvrir le profil de l'auteur, ou le bloquer et le débloquer. La réserve de la 0.42.1 est donc levée : il n'est plus nécessaire de passer par un sujet pour bloquer un auteur depuis une conversation privée.
+- **Les cartes de messages privés affichent désormais le même bandeau d'identité teinté que les posts de sujet**, en tête de carte.
+- **Le menu contextuel d'un message de sujet propose désormais « Copier le texte »** ([#1051](https://github.com/ForumHFR/redface2/issues/1051)).
+
+### Interne
+
+- Un audit slot par slot a confirmé que le bandeau d'identité était le seul écart visuel non tracé entre les cartes Topic et MP : la matrice de parité suit les capacités, pas la composition de la carte. Sa teinte reste fixe et indépendante d'EgoPost, comme côté sujet.
+- Le marqueur d'édition et le compteur de citations sont câblés dans la carte et le menu MP, mais restent invisibles : les pages MP observées ne fournissent pas ces données.
+
 ## `0.42.1` — `internal` (dev) — 2026-08-15
 
 ### Ajouté

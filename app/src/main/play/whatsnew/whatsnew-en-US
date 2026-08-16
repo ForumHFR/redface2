@@ -1,5 +1,6 @@
-Redface 2 v0.42.1 — dev.
+Redface 2 v0.42.2 — dev.
 
-- Full-width mode also applies to private conversations when you enable it.
-- EgoPost distinguishes your own private messages, and EgoQuote highlights quotes of your messages. Both settings remain enabled by default.
-- Authors you have already blocked are also hidden in private messages, even when quoted by someone else. To block an author, you still need to use a topic.
+- Long-pressing a private message now opens its menu: copy the text, open the profile, or block and unblock the author.
+- You can now block an author without leaving the private conversation.
+- Private message cards have the same tinted identity band as topic posts.
+- A topic message's menu now offers “Copy text”.
