@@ -23,13 +23,13 @@ import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
 import fr.forumhfr.redface2.core.domain.upload.UploadException
 import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import fr.forumhfr.redface2.core.domain.write.EditPostRepository
-import fr.forumhfr.redface2.core.domain.write.ReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
+import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.write.EditPostContext
-import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.write.ReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
@@ -87,7 +87,7 @@ class PostEditorViewModel @AssistedInject constructor(
     private val uploadRepository: UploadRepository,
     private val imageUploadReader: ImageUploadReader,
     private val authRepository: AuthRepository,
-    private val quoteMaterializer: ReplyQuoteMaterializer,
+    private val quoteMaterializer: TopicReplyQuoteMaterializer,
 ) : ViewModel() {
 
     private val _state: MutableStateFlow<PostEditorState> = MutableStateFlow(
@@ -209,7 +209,7 @@ class PostEditorViewModel @AssistedInject constructor(
      *   [PostEditorState.quotes] (deduplicated per numreponse, Reply-only), the open-time fetch
      *   stays PLAIN, `[quotemsg]` is materialised fresh at submit.
      * - **cards OFF (default)** — the pre-lot-3 flow : the open-time fetch IS the materialisation
-     *   ([ReplyQuoteMaterializer.fetchFormWithQuotes]), so [launchFormFetch] hydrates the field
+     *   ([TopicReplyQuoteMaterializer.fetchFormWithQuotes]), so [launchFormFetch] hydrates the field
      *   with the merged `[quotemsg]` prefills through the existing anti-clobber guards, and
      *   [restoreDraftIfAny]'s `resumeSharedDraft` append stays commutative with it (#790).
      *   `state.quotes` stays empty → submit takes the plain path (the content is the field).
@@ -240,7 +240,7 @@ class PostEditorViewModel @AssistedInject constructor(
      * (réserve Codex n°5), and typing started during the fetch survives. Options still hydrate
      * through [withFormHydration] (with a content-blanked form, so the text path stays inert).
      */
-    private fun loadReplyFormWithInlineQuotes(quotes: List<QuotedPostPreview>) {
+    private fun loadReplyFormWithInlineQuotes(quotes: List<QuoteSelection>) {
         val context = buildReplyContext() ?: run {
             _state.update { it.copy(submitError = SubmitError.MissingSubcat) }
             return

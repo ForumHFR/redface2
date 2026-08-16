@@ -40,7 +40,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.ui.editor.QuoteCardsCallbacks
 import fr.forumhfr.redface2.core.ui.editor.QuoteCardsColumn
@@ -61,11 +61,11 @@ internal fun QuickReplySheet(
     // #604 lot 3 — the escalation hands the armed cards over as full previews : the editor
     // renders the same cards (mockup P3) and needs author + excerpt, which only the topic
     // surface can snapshot. Riding the callback (→ the :app handoff), never the route.
-    onEscalate: (quotes: List<QuotedPostPreview>) -> Unit,
+    onEscalate: (quotes: List<QuoteSelection>) -> Unit,
     onSubmitted: (targetPage: Int?, scrollTo: Int?) -> Unit,
     // #604 lots 2-3 — the cards this opening pre-arms : one for « Citer », the whole basket
     // for « Citer N » under the full-screen threshold (empty from the reply FAB).
-    initialQuotes: List<QuotedPostPreview> = emptyList(),
+    initialQuotes: List<QuoteSelection> = emptyList(),
 ) {
     val viewModel = hiltViewModel<QuickReplyViewModel, QuickReplyViewModel.Factory>(
         creationCallback = { factory -> factory.create(request) },

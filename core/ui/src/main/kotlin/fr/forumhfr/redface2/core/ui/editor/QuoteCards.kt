@@ -28,7 +28,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.R
 
 /**
@@ -41,7 +41,7 @@ import fr.forumhfr.redface2.core.ui.R
  */
 @Composable
 fun QuoteCard(
-    quote: QuotedPostPreview,
+    quote: QuoteSelection,
     controls: QuoteCardControls,
     removeFocusRequester: FocusRequester? = null,
 ) {
@@ -125,7 +125,7 @@ data class QuoteCardsCallbacks(
  */
 @Composable
 fun QuoteCardsColumn(
-    quotes: List<QuotedPostPreview>,
+    quotes: List<QuoteSelection>,
     enabled: Boolean,
     callbacks: QuoteCardsCallbacks,
     modifier: Modifier = Modifier,

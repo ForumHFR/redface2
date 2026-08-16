@@ -20,7 +20,8 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.dp
-import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
+import fr.forumhfr.redface2.core.model.write.QuoteLocator
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.editor.QuoteCardsCallbacks
 import fr.forumhfr.redface2.core.ui.editor.QuoteCardsColumn
@@ -50,7 +51,11 @@ class QuickReplySendPinnedTest {
     @Test
     fun `send button stays visible on a short window despite five cards`() {
         val quotes = (1..5).map { n ->
-            QuotedPostPreview(numreponse = n, author = "author$n", excerpt = "excerpt $n")
+            QuoteSelection(
+                locator = QuoteLocator(page = 3, numreponse = n, ref = 1),
+                author = "author$n",
+                excerpt = "excerpt $n",
+            )
         }
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {

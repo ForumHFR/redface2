@@ -118,7 +118,8 @@ import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.postContentExcerpt
-import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
+import fr.forumhfr.redface2.core.model.write.QuoteLocator
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.RedfacePlaceholderScreen
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
@@ -166,7 +167,7 @@ fun TopicScreen(
      * SURFACED via the restore banner (Restaurer / Ignorer) instead of being silently re-applied:
      * these cold paths had lost that choice when #829/#833 reused the escalation flag.
      */
-    onReply: (subcat: Int, page: Int, quotes: List<QuotedPostPreview>) -> Unit,
+    onReply: (subcat: Int, page: Int, quotes: List<QuoteSelection>) -> Unit,
     /**
      * #843 — the quick-reply sheet's ESCALATION to the full editor (the only genuine « resume the
      * same composition » case). Same handoff as [onReply] but `:app` sets `resumeSharedDraft = true`
@@ -179,7 +180,7 @@ fun TopicScreen(
     onEscalateToFullEditor: (
         subcat: Int,
         page: Int,
-        quotes: List<QuotedPostPreview>,
+        quotes: List<QuoteSelection>,
         consumesBasket: Boolean,
     ) -> Unit = { _, _, _, _ -> },
     /**
@@ -271,12 +272,12 @@ fun TopicScreen(
      * screen renders the count and the per-post toggle state, and under the full-screen threshold
      * pre-arms the quick-reply sheet's cards from them.
      */
-    multiQuoteSelections: List<QuotedPostPreview> = emptyList(),
+    multiQuoteSelections: List<QuoteSelection> = emptyList(),
     /**
      * #291 — toggles a post in the multi-quote basket. Only invoked under the same gate as
      * « Citer » (`shouldShowQuoteAction`): a topic the user cannot reply to has nothing to quote.
      */
-    onToggleMultiQuote: (preview: QuotedPostPreview) -> Unit = {},
+    onToggleMultiQuote: (selection: QuoteSelection) -> Unit = {},
     /**
      * #291 / #604 lot 3 — « Citer N » AT OR ABOVE the full-screen threshold : opens the editor
      * with the basket's cards (`:app` hands the previews over in memory and clears the basket).
@@ -985,14 +986,14 @@ internal fun TopicContent(
     listState: LazyListState,
     onIntent: (TopicIntent) -> Unit,
     onBack: () -> Unit,
-    onReply: (subcat: Int, page: Int, quotes: List<QuotedPostPreview>) -> Unit,
+    onReply: (subcat: Int, page: Int, quotes: List<QuoteSelection>) -> Unit,
     // #843 — the quick-reply sheet's escalation (resumeSharedDraft = true, silent append) ; distinct
     // from [onReply] which is a COLD full-editor open (resumeSharedDraft = false → restore banner).
     // #868-#870 — carries the session's basket consumption (cf. TopicScreen KDoc).
     onEscalateToFullEditor: (
         subcat: Int,
         page: Int,
-        quotes: List<QuotedPostPreview>,
+        quotes: List<QuoteSelection>,
         consumesBasket: Boolean,
     ) -> Unit = { _, _, _, _ -> },
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
@@ -1013,8 +1014,8 @@ internal fun TopicContent(
     // #291 / #604 lot 3 — multi-quote selection (owned by :app, full previews) + its actions :
     // toggle on the post menu, « Citer N » on the floating cluster (threshold-routed below),
     // and the basket clear once the sheet consumed the cards.
-    multiQuoteSelections: List<QuotedPostPreview> = emptyList(),
-    onToggleMultiQuote: (preview: QuotedPostPreview) -> Unit = {},
+    multiQuoteSelections: List<QuoteSelection> = emptyList(),
+    onToggleMultiQuote: (selection: QuoteSelection) -> Unit = {},
     onMultiQuote: (subcat: Int, page: Int) -> Unit = { _, _ -> },
     // #436 — empties the whole basket (« Tout vider », long-press on the « Citer N » FAB).
     onClearMultiQuote: () -> Unit = {},
@@ -1801,11 +1802,11 @@ private fun TopicLoadedContent(
     hiddenNumreponses: Set<Int> = emptySet(),
     // Vague 3 (#604) — onReply dropped: the dissolved header card was its only consumer here
     // (the bottom FAB cluster replies from TopicContent's own callback).
-    onQuoteRequested: (preview: QuotedPostPreview) -> Unit,
+    onQuoteRequested: (selection: QuoteSelection) -> Unit,
     // #823 — LONG press on « Citer » : same preview payload as [onQuoteRequested], but routed
     // STRAIGHT to the full-screen editor by the caller (never through writingSurfaceFor — the
     // gesture IS the one-shot routing decision, overriding the #806 preset).
-    onQuoteFullEditorRequested: (preview: QuotedPostPreview) -> Unit,
+    onQuoteFullEditorRequested: (selection: QuoteSelection) -> Unit,
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
@@ -1828,7 +1829,7 @@ private fun TopicLoadedContent(
     zoomState: TopicZoomState,
     // #291 — selection state + toggle for the post menu's multi-quote entry.
     multiQuoteSelection: List<Int> = emptyList(),
-    onToggleMultiQuote: (preview: QuotedPostPreview) -> Unit = {},
+    onToggleMultiQuote: (selection: QuoteSelection) -> Unit = {},
     // #509 — block/unblock a post's author from the post menu (blacklist).
     onSetAuthorBlocked: (author: String, blocked: Boolean) -> Unit = { _, _ -> },
     // #465 — the topic's manual poll choice (owned by :app, null = follow the global default) + the
@@ -1925,8 +1926,12 @@ private fun TopicLoadedContent(
             // to rebuild a preview, or fall back to a tombstone if the page no longer carries it.
             val hidden = topic.posts.firstOrNull { it.numreponse == numreponse }
             onToggleMultiQuote(
-                hidden?.toQuotedPreview()
-                    ?: QuotedPostPreview(numreponse = numreponse, author = "", excerpt = ""),
+                hidden?.toQuoteSelection(topic.page)
+                    ?: QuoteSelection(
+                        locator = QuoteLocator(page = topic.page, numreponse = numreponse, ref = null),
+                        author = "",
+                        excerpt = "",
+                    ),
             )
         }
     }
@@ -2105,8 +2110,9 @@ private fun TopicLoadedContent(
             // `numrep={numreponse}` alone (proven via hfr-mcp FetchQuote, which omits
             // `ref` entirely), so an unparseable/obfuscated quote link (cat IA &
             // pinned topics ship them as `md_noclass_cryptlink`, cf. #227) no longer
-            // hides Citer. `quoteRef` is forwarded when known (positional, cosmetic)
-            // and may be null — the whole quote chain tolerates it.
+            // hides Citer. `quoteRef` is retained in the typed selection locator when known and
+            // may be null; the topic materialiser deliberately keeps its proven numrep-only
+            // network contract.
             // « Citer » and the « + » multi-quote affordance share ONE gate (multi-quote is a
             // flavour of quoting : a topic the user cannot reply to has nothing to quote). Deriving
             // both inside the same branch keeps them in lock-step — they can never drift apart — and
@@ -2118,9 +2124,9 @@ private fun TopicLoadedContent(
             val quoteLongPressAction: (() -> Unit)?
             val multiQuoteToggle: (() -> Unit)?
             if (shouldShowQuoteAction(topic, state.isAuthenticated)) {
-                quoteAction = { onQuoteRequested(post.toQuotedPreview()) }
-                quoteLongPressAction = { onQuoteFullEditorRequested(post.toQuotedPreview()) }
-                multiQuoteToggle = { onToggleMultiQuote(post.toQuotedPreview()) }
+                quoteAction = { onQuoteRequested(post.toQuoteSelection(topic.page)) }
+                quoteLongPressAction = { onQuoteFullEditorRequested(post.toQuoteSelection(topic.page)) }
+                multiQuoteToggle = { onToggleMultiQuote(post.toQuoteSelection(topic.page)) }
             } else {
                 quoteAction = null
                 quoteLongPressAction = null
@@ -2347,7 +2353,7 @@ private fun TopicLoadedContent(
             // replying; a locked topic or an anonymous session has nothing to quote).
             multiQuoteSelected = post.numreponse in multiQuoteSelection,
             onToggleMultiQuote = if (shouldShowQuoteAction(topic, state.isAuthenticated)) {
-                { onToggleMultiQuote(post.toQuotedPreview()) }
+                { onToggleMultiQuote(post.toQuoteSelection(topic.page)) }
             } else {
                 null
             },
@@ -3672,7 +3678,7 @@ private fun ReplyFab(onClick: () -> Unit) {
 // FAB) — whenever [writingSurfaceFor] routed the tap to the sheet rather than the editor.
 internal data class QuickReplyLaunch(
     val request: QuickReplyRequest,
-    val initialQuotes: List<QuotedPostPreview> = emptyList(),
+    val initialQuotes: List<QuoteSelection> = emptyList(),
     /**
      * #868-#870 — true only when this opening consumed the hoisted multi-quote basket
      * (« Citer N » under the sheet threshold) : a successful submit of THIS session (or of its
@@ -3705,7 +3711,7 @@ internal fun rememberQuickReplyLaunch(): MutableState<QuickReplyLaunch?> =
 
 /**
  * #953 (F3) — explicit [Saver] for the (non-Parcelable) [QuickReplyLaunch] : the flat list is
- * `[cat, subcat, topicId, page, consumesBasket, then numreponse/author/excerpt per quote]` —
+ * `[cat, subcat, topicId, page, consumesBasket, then page/numreponse/ref/author/excerpt per quote]` —
  * primitives only, all Bundle-safe. A null launch (sheet closed) is handled by [listSaver]
  * itself : the empty list it produces is stored as null, restored as null, and this saver's
  * `restore` only ever sees non-empty lists.
@@ -3722,7 +3728,9 @@ internal val QuickReplyLaunchSaver: Saver<QuickReplyLaunch?, Any> = listSaver<Qu
                 add(launch.request.page)
                 add(launch.consumesBasket)
                 launch.initialQuotes.forEach { quote ->
+                    add(quote.locator.page)
                     add(quote.numreponse)
+                    add(quote.locator.ref ?: QUICK_REPLY_SAVER_REF_ABSENT)
                     add(quote.author)
                     add(quote.excerpt)
                 }
@@ -3743,11 +3751,20 @@ internal val QuickReplyLaunchSaver: Saver<QuickReplyLaunch?, Any> = listSaver<Qu
                 initialQuotes = saved
                     .drop(QUICK_REPLY_SAVER_HEADER_SIZE)
                     .chunked(QUICK_REPLY_SAVER_QUOTE_FIELDS)
-                    .map { (numreponse, author, excerpt) ->
-                        QuotedPostPreview(
-                            numreponse = numreponse as Int,
-                            author = author as String,
-                            excerpt = excerpt as String,
+                    .map { fields ->
+                        val page = fields[0] as Int
+                        val numreponse = fields[1] as Int
+                        val ref = fields[2] as Int
+                        val author = fields[3] as String
+                        val excerpt = fields[4] as String
+                        QuoteSelection(
+                            locator = QuoteLocator(
+                                page = page,
+                                numreponse = numreponse,
+                                ref = ref.takeUnless { it == QUICK_REPLY_SAVER_REF_ABSENT },
+                            ),
+                            author = author,
+                            excerpt = excerpt,
                         )
                     },
                 consumesBasket = saved[4] as Boolean,
@@ -3756,11 +3773,14 @@ internal val QuickReplyLaunchSaver: Saver<QuickReplyLaunch?, Any> = listSaver<Qu
     },
 )
 
-/** [QuickReplyLaunchSaver] layout : request Ints + consumesBasket before the quote triplets. */
+/** [QuickReplyLaunchSaver] layout: request Ints + consumesBasket before the quote fields. */
 private const val QUICK_REPLY_SAVER_HEADER_SIZE = 5
 
-/** [QuickReplyLaunchSaver] layout : numreponse, author, excerpt per armed quote. */
-private const val QUICK_REPLY_SAVER_QUOTE_FIELDS = 3
+/** [QuickReplyLaunchSaver] layout : page, numreponse, ref, author, excerpt per armed quote. */
+private const val QUICK_REPLY_SAVER_QUOTE_FIELDS = 5
+
+/** Bundle-safe encoding of a nullable quote ref; real HFR refs are non-negative. */
+private const val QUICK_REPLY_SAVER_REF_ABSENT = -1
 
 /** #806 — the two composition surfaces a write tap can open. */
 internal enum class WritingSurface { SHEET, FULL_EDITOR }
@@ -3793,11 +3813,11 @@ internal fun writingSurfaceFor(preset: WritingSurfacePreset, quoteCount: Int): W
  */
 internal const val MULTI_QUOTE_FULL_EDITOR_THRESHOLD = 3
 
-// #604 lot 2 — the quote-card snapshot, built AT SELECTION TIME where the full Post is in scope
-// (cadrage Codex : the cards never re-parse a post ; the exact [quotemsg] is fetched at
-// materialisation). Uniqueness in the basket stays keyed on the numreponse.
-internal fun Post.toQuotedPreview(): QuotedPostPreview = QuotedPostPreview(
-    numreponse = numreponse,
+// #604/#1074 — typed locator + quote-card snapshot, built AT SELECTION TIME where the full Post and
+// its page are in scope (the cards never re-parse a post; the exact [quotemsg] is fetched at
+// materialisation). The app-level basket completes identity with QuoteScope.
+internal fun Post.toQuoteSelection(page: Int): QuoteSelection = QuoteSelection(
+    locator = QuoteLocator(page = page, numreponse = numreponse, ref = quoteRef),
     author = author,
     excerpt = postContentExcerpt(content),
 )

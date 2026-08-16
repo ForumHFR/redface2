@@ -10,17 +10,17 @@ import org.junit.Assert.assertThrows
 import org.junit.Test
 
 /**
- * #604 lot 2 — the shared multi-quote materialisation (promoted verbatim from
+ * #604 lot 2 / #1074 — the topic multi-quote materialisation (promoted verbatim from
  * PostEditorViewModel's #291 private path). Pinned contracts: selection order preserved, extras
  * fetched with quoteRef nulled, submit rides the FIRST form (hash/hidden fields), a blank prefill
  * fails the whole fetch, and a no-extra / non-quote context is a plain single fetch.
  */
-class ReplyQuoteMaterializerTest {
+class TopicReplyQuoteMaterializerTest {
 
     @Test
     fun `no extras - the first form is returned untouched`() = runBlocking {
         val repository = RecordingReplyRepository()
-        val materializer = ReplyQuoteMaterializer(repository)
+        val materializer = TopicReplyQuoteMaterializer(repository)
 
         val form = materializer.fetchFormWithQuotes(quoteContext(quotedNumreponse = 101), emptyList())
 
@@ -31,7 +31,7 @@ class ReplyQuoteMaterializerTest {
     @Test
     fun `extras are appended in selection order with quoteRef nulled`() = runBlocking {
         val repository = RecordingReplyRepository()
-        val materializer = ReplyQuoteMaterializer(repository)
+        val materializer = TopicReplyQuoteMaterializer(repository)
 
         val form = materializer.fetchFormWithQuotes(
             quoteContext(quotedNumreponse = 101, quoteRef = 7),
@@ -42,7 +42,7 @@ class ReplyQuoteMaterializerTest {
             "[quotemsg=101]un[/quotemsg]\n\n[quotemsg=303]un[/quotemsg]\n\n[quotemsg=202]un[/quotemsg]\n\n",
             form.initialContent,
         )
-        // First fetch keeps the caller's quoteRef ; every extra nulls it (positional, 1st post only).
+        // Topic-only rule: first fetch keeps quoteRef; every extra resolves by numrep alone.
         assertEquals(listOf(101 to 7, 303 to null, 202 to null), repository.fetchedNumreponses)
         // The merged form still rides the FIRST form's hash.
         assertEquals("hash-101", form.hashCheck)
@@ -51,7 +51,7 @@ class ReplyQuoteMaterializerTest {
     @Test
     fun `a blank extra prefill fails the whole fetch`() {
         val repository = RecordingReplyRepository(blankFor = setOf(202))
-        val materializer = ReplyQuoteMaterializer(repository)
+        val materializer = TopicReplyQuoteMaterializer(repository)
 
         assertThrows(IllegalStateException::class.java) {
             runBlocking {
@@ -70,7 +70,7 @@ class ReplyQuoteMaterializerTest {
         // prefill by numrep alone — page/p ignored, contract proven live 2026-07-12). It must fail
         // like the multi-quote path does, keeping the caller's retryable error.
         val repository = RecordingReplyRepository(blankFor = setOf(101))
-        val materializer = ReplyQuoteMaterializer(repository)
+        val materializer = TopicReplyQuoteMaterializer(repository)
 
         assertThrows(IllegalStateException::class.java) {
             runBlocking {
@@ -82,7 +82,7 @@ class ReplyQuoteMaterializerTest {
     @Test
     fun `a non-quote context ignores extras`() = runBlocking {
         val repository = RecordingReplyRepository()
-        val materializer = ReplyQuoteMaterializer(repository)
+        val materializer = TopicReplyQuoteMaterializer(repository)
 
         val form = materializer.fetchFormWithQuotes(
             ReplyContext(cat = 23, subcat = 401, topicId = 35421, page = 3),

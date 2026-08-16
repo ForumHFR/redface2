@@ -12,12 +12,12 @@ import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
-import fr.forumhfr.redface2.core.domain.write.ReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
+import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.model.write.ReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
-import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import java.io.IOException
 import kotlin.coroutines.cancellation.CancellationException
@@ -51,7 +51,7 @@ data class QuickReplyUiState(
      * #604 lot 2 — the quote cards, in citation order (reorderable). Transient like the
      * multi-quote basket : never persisted, the #405 row only ever carries the typed body.
      */
-    val quotes: List<QuotedPostPreview> = emptyList(),
+    val quotes: List<QuoteSelection> = emptyList(),
     val isSubmitting: Boolean = false,
     /**
      * #805 arbitrage — cards OFF : a `[quotemsg]` materialisation is in flight for this opening.
@@ -95,7 +95,7 @@ sealed interface QuickReplyEffect {
      * carries the armed cards as FULL previews through the :app handoff — the editor renders
      * the same cards (mockup P3) and defers the `[quotemsg]` materialisation to its own submit.
      */
-    data class EscalateToFullEditor(val quotes: List<QuotedPostPreview>) : QuickReplyEffect
+    data class EscalateToFullEditor(val quotes: List<QuoteSelection>) : QuickReplyEffect
 }
 
 /**
@@ -114,7 +114,7 @@ sealed interface QuickReplyEffect {
 class QuickReplyViewModel @AssistedInject constructor(
     @Assisted private val request: QuickReplyRequest,
     private val replyRepository: ReplyRepository,
-    private val quoteMaterializer: ReplyQuoteMaterializer,
+    private val quoteMaterializer: TopicReplyQuoteMaterializer,
     private val draftStore: EditorDraftStore,
     private val userPreferencesRepository: UserPreferencesRepository,
 ) : ViewModel() {
@@ -200,7 +200,7 @@ class QuickReplyViewModel @AssistedInject constructor(
      * `[quotemsg]` prefills are fetched now and APPENDED to the live field content at completion
      * (never a replacement computed from the row — réserve Codex n°1).
      */
-    fun onSheetOpened(initialQuotes: List<QuotedPostPreview> = emptyList()) {
+    fun onSheetOpened(initialQuotes: List<QuoteSelection> = emptyList()) {
         materializeJob?.cancel()
         openJob?.cancel()
         // Gate Sol #953 F2 — seal the previous session : if its owner snapshot never resolved,
@@ -249,7 +249,7 @@ class QuickReplyViewModel @AssistedInject constructor(
      * exactly what the pre-cards flow rode at submit.
      */
     @Suppress("TooGenericExceptionCaught") // mapped to a typed error below; cancellation rethrown.
-    private fun materializeInlineQuotes(quotes: List<QuotedPostPreview>) {
+    private fun materializeInlineQuotes(quotes: List<QuoteSelection>) {
         materializeJob?.cancel()
         materializeJob = viewModelScope.launch {
             _state.update { it.copy(isPreparingQuotes = true, submitError = null) }
@@ -293,7 +293,7 @@ class QuickReplyViewModel @AssistedInject constructor(
     }
 
     /** #604 lot 2 — arm a quote card ; idempotent per numreponse (re-citing a post is a no-op). */
-    fun onQuoteAdded(preview: QuotedPostPreview) {
+    fun onQuoteAdded(preview: QuoteSelection) {
         _state.update { current ->
             if (current.quotes.any { it.numreponse == preview.numreponse }) {
                 current

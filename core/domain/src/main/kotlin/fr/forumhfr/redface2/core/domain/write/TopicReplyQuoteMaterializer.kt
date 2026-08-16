@@ -6,9 +6,9 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * #291 multi-quote, promoted to a shared collaborator for the Postage wave (#604 lot 2, cadrage
- * Codex : ONE implementation of « fetch N quote forms + concat + ride the first form's hash »,
- * consumed by both the full-screen editor and the quick-reply sheet).
+ * Topic-only multi-quote materialiser (#291), promoted to a shared collaborator for the Postage
+ * wave (#604 lot 2, cadrage Codex : ONE implementation of « fetch N quote forms + concat + ride
+ * the first form's hash », consumed by both the full-screen editor and the quick-reply sheet).
  *
  * The quote form fetch (#146) returns ONE `[quotemsg]` prefill per `numrep`, so additional quoted
  * posts are fetched by replaying the same contract with `quotedNumreponse` swapped, then
@@ -19,9 +19,14 @@ import javax.inject.Singleton
  * Sequential on purpose: N is tiny (a handful of posts), order must be deterministic, and a failed
  * extra fails the whole fetch — silently dropping a quote the user explicitly selected would be
  * worse than the retryable form-fetch error.
+ *
+ * This collaborator is deliberately topic-specific. Its extra-quote fetches omit `ref` because the
+ * topic contract was proven live with `numrep` alone. Private-message quote URLs have only been
+ * observed with their page-local `ref`; they require a separate materialiser that consumes each
+ * selection's full `QuoteLocator` instead of copying this fallback.
  */
 @Singleton
-class ReplyQuoteMaterializer @Inject constructor(
+class TopicReplyQuoteMaterializer @Inject constructor(
     private val replyRepository: ReplyRepository,
 ) {
 
@@ -58,7 +63,8 @@ class ReplyQuoteMaterializer @Inject constructor(
         val prefills = buildList {
             add(form.initialContent)
             extraQuoteNumreponses.forEach { numreponse ->
-                // quoteRef is positional/cosmetic and belongs to the FIRST post only.
+                // TOPIC-ONLY contract: extra quotes resolve by numrep alone. Do not copy this
+                // nulling to cat=prive, where ref omission has not been observed.
                 add(
                     replyRepository
                         .fetchReplyForm(context.copy(quotedNumreponse = numreponse, quoteRef = null))
