@@ -16,6 +16,20 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.42.4` — `internal` (dev) — 2026-08-16
+
+### Ajouté
+
+- **Citer un message dans une conversation privée** : l'action « Citer » apparaît dans le pied de chaque message et ouvre l'éditeur avec la citation déjà en place ([#1074](https://github.com/ForumHFR/redface2/issues/1074), chantier de parité [#1040](https://github.com/ForumHFR/redface2/issues/1040)). Le serveur exposait ce lien sur les pages `cat=prive` depuis toujours ; c'est l'app qui n'en faisait rien. Le contrat a été mesuré avant d'être implémenté (spike [#1041](https://github.com/ForumHFR/redface2/issues/1041)) et le texte de citation renvoyé par HFR est réutilisé verbatim, jamais reconstruit localement.
+
+  **Limitation en MultiMP (DT)** : les deux formulaires de réponse DT capturés portent un champ que la validation de citation rejette. En DT, l'action est donc masquée ou échoue explicitement, tant que le formulaire de citation DT n'a pas été capturé. La citation multiple reste absente des deux.
+
+### Interne
+
+- La carte de message MP a désormais un **contrôle visuel** (capture Roborazzi record-only à 360 dp), que la surface de lecture privée n'avait pas — c'est ce trou qui avait laissé partir en `0.42.2` un bandeau d'identité décalé vers le bas.
+
+---
+
 ## `0.42.3` — `internal` (dev) — 2026-08-16
 
 ### Ajouté
