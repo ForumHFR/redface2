@@ -11,6 +11,13 @@ data class Post(
     val isEditable: Boolean,
     val isOwnPost: Boolean,
     val quotedAuthors: List<String>,
+    /**
+     * Reserved legacy field (#1055). The topic parser has never derived a stable global index from a
+     * topic page, so production parsing leaves this `null` and no UI consumes it. The property is
+     * retained only because its Room column has existed since schema v1; removing that inert column
+     * alone does not justify a user-data migration. Do not populate or display it without first
+     * establishing the cross-page semantics from real HFR fixtures.
+     */
     val postIndex: Int?,
     /**
      * `ref` parameter parsed from HFR's quote link href

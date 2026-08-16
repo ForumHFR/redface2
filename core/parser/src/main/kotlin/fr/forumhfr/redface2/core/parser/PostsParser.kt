@@ -78,6 +78,7 @@ class PostsParser(
             isEditable = hasEditLink,
             isOwnPost = hasEditLink,
             quotedAuthors = content.quotedAuthors,
+            // #1055 — reserved legacy field: HFR exposes no proven stable global index here.
             postIndex = null,
             quoteRef = parseQuoteRef(postTable),
             profileId = parseProfileId(postTable),

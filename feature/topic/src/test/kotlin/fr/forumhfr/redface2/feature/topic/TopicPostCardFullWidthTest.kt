@@ -42,7 +42,9 @@ import java.time.Instant
  *    invariant family as `TopicZoomQuoteFoldTest`/#946);
  *  - resolution of the vague-2 a11y caveat: each post exposes EXACTLY ONE TalkBack heading,
  *    carried by the REAL pseudo text node (gold-sheen creator variant and plain variant alike) —
- *    not by a generic wrapper around the slot, which would double the heading.
+ *    not by a generic wrapper around the slot, which would double the heading;
+ *  - #1055: the reserved legacy `postIndex` never leaks into that identity line, even if an old
+ *    cached row happens to carry a non-null value.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w360dp-h780dp-xxhdpi")
@@ -186,6 +188,23 @@ class TopicPostCardFullWidthTest {
     }
 
     @Test
+    fun `reserved post index is not rendered even when a legacy row carries a value`() {
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                TopicPostCard(
+                    post = samplePost(author = "Lt Ripley", postIndex = 12),
+                    citedCount = 0,
+                    onQuote = null,
+                    onEdit = null,
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("#12 •", substring = true).assertDoesNotExist()
+        assertSingleHeadingOnPseudo("Lt Ripley")
+    }
+
+    @Test
     fun `creator pseudo - the gold-sheen variant carries the same single heading`() {
         // "XaTriX" routes through CreatorPseudoText (#221) — the OTHER pseudo branch of
         // TopicPostIdentityHeader; both must carry the heading on their own text node.
@@ -219,6 +238,7 @@ class TopicPostCardFullWidthTest {
     private fun samplePost(
         author: String,
         content: PostContent = PostContent(blocks = emptyList()),
+        postIndex: Int? = null,
     ): Post = Post(
         numreponse = 16244,
         author = author,
@@ -228,7 +248,7 @@ class TopicPostCardFullWidthTest {
         isEditable = false,
         isOwnPost = false,
         quotedAuthors = emptyList(),
-        postIndex = null,
+        postIndex = postIndex,
         quoteRef = 1,
         profileId = null,
     )
