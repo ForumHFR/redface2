@@ -39,6 +39,11 @@ data class PostEntity(
      */
     val isOwnPost: Boolean,
     val quotedAuthors: List<String>,
+    /**
+     * Reserved legacy column (#1055), kept solely for schema compatibility. The topic parser writes
+     * `null` and the UI does not consume it; removing the v1 column would require a Room migration
+     * without delivering user-visible value. See `Post.postIndex` for the domain contract.
+     */
     val postIndex: Int?,
     val fetchedAt: Instant,
     /**

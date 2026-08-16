@@ -2940,8 +2940,8 @@ internal const val TOPIC_POST_IDENTITY_BAND_TAG = "TopicPostIdentityBand"
  * [PostIdentityHeader]. A thin adapter: it maps the [Post] fields to the primitive's slots and reinjects
  * the topic's header padding via [modifier] (densities stay feature-owned). The neutral shape — avatar,
  * pseudo, date, optional `⋯` trailing — lives in `:core:ui`; the topic-specific bits stay here:
- *  - `pseudo` slot — the optional `topic_post_index_prefix` + the pseudo (gold-sheen [CreatorPseudoText]
- *    for an RF2 creator #221, plain ellipsised text otherwise), tappable to open the profile (#208);
+ *  - `pseudo` slot — the pseudo (gold-sheen [CreatorPseudoText] for an RF2 creator #221, plain
+ *    ellipsised text otherwise), tappable to open the profile (#208);
  *  - `dateTrailing` slot — the compact « · édité » marker (#483) when the post was edited;
  *  - `trailing` slot — the per-post `⋯` contextual-menu glyph (#362).
  * Profile-tap labels/min-size and the pseudo's no-min-size convention come from the primitive.
@@ -2976,13 +2976,6 @@ private fun TopicPostIdentityHeader(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                post.postIndex?.let { postIndex ->
-                    Text(
-                        text = stringResource(R.string.topic_post_index_prefix, postIndex),
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
                 // #884 a11y (vague 3) — heading() rides on the REAL pseudo text node (both variants
                 // below share this modifier), so TalkBack heading navigation jumps post to post on
                 // the pseudo itself. The shared PostIdentityHeader adds NO wrapper heading around a

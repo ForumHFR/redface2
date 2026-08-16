@@ -121,10 +121,12 @@ sa ligne retourne dans la matrice.
 **Index du message** (`Post.postIndex`) — retirée de la matrice le 2026-08-14. La ligne affirmait
 « affiché via le menu contextuel côté topic » : réfuté. Le champ existe mais n'est jamais peuplé —
 son unique producteur, `PostsParser`, le fixe à `null` (épinglé par `TopicPageParserTest`) ;
-mappers (`TopicMappers`) et Room (`PostEntity`) ne font que le transporter. Le rendu topic existe
-(`topic_post_index_prefix`, dans `TopicPostIdentityHeader`) mais est inatteignable : code mort. Le
-menu contextuel (#362) affiche `numreponse` (`topic_post_menu_number`), pas l'index. Présence de
-l'index sur les pages `cat=prive` non caractérisée par la fixture de #1041.
+mappers (`TopicMappers`) et Room (`PostEntity`) ne font que le transporter. #1055 retient un
+nettoyage sans migration : le rendu mort de `TopicPostIdentityHeader` et sa ressource ont été
+supprimés, tandis que le champ et la colonne Room v1 restent réservés pour compatibilité de schéma.
+Le menu contextuel (#362) continue d'afficher `numreponse` (`topic_post_menu_number`), pas l'index.
+L'`assertNull` reste la garde du contrat parser ; le champ ne doit pas être peuplé ou réaffiché sans
+caractériser son sens entre pages, préférences HFR et cache à partir de fixtures réelles.
 
 ## Ce qui reste hors matrice, par surface
 
