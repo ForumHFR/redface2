@@ -28,6 +28,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -55,7 +56,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.currentStateAsState
 import fr.forumhfr.redface2.core.domain.author.isRf2Creator
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.ego.deriveEgoCanonicalPseudo
@@ -120,6 +124,8 @@ fun PrivateMessageThreadScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val mode = state.mode
     val networkLoadedThread = mode.networkLoadedThreadOrNull()
+
+    PrivateMessageThreadPrefetchLifecycleGate(viewModel::setPrefetchActive)
 
     LaunchedEffect(networkLoadedThread) {
         if (networkLoadedThread != null) onLoaded()
@@ -202,6 +208,23 @@ fun PrivateMessageThreadScreen(
         ),
         topBarActions = topBarActions,
     )
+}
+
+/**
+ * ADR-013 foreground gate. The ViewModel may outlive this composition in the navigation back stack,
+ * so authenticated prefetch is enabled only while the owning entry is composed and RESUMED.
+ */
+@Composable
+internal fun PrivateMessageThreadPrefetchLifecycleGate(onActiveChanged: (Boolean) -> Unit) {
+    val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
+    val currentOnActiveChanged by rememberUpdatedState(onActiveChanged)
+    val active = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
+    DisposableEffect(active) {
+        if (active) currentOnActiveChanged(true)
+        onDispose {
+            if (active) currentOnActiveChanged(false)
+        }
+    }
 }
 
 /** Cache content is display-only; navigation/badge callbacks belong to the network revalidation. */

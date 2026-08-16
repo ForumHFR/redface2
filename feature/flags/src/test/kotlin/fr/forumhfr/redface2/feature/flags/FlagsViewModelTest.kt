@@ -2817,6 +2817,7 @@ class FlagsViewModelTest {
         override fun observeUnreadMpCount(): Flow<Int?> = MutableStateFlow(null)
         override fun requestUnreadRefresh() = Unit
         override fun markThreadRead(threadId: Int) = Unit
+        override suspend fun prefetchPrivateMessageThread(threadId: Int, page: Int) = Unit
 
         override suspend fun getPrivateMessageList(page: Int): PrivateMessageListPage {
             getListCalls += 1

@@ -18,7 +18,11 @@ Cette ADR formalise les arbitrages rendus dans [#351](https://github.com/ForumHF
 
 - **Décision 1 — livrée** (PR [#428](https://github.com/ForumHFR/redface2/pull/428) tranche a + [#429](https://github.com/ForumHFR/redface2/pull/429) tranche b, ainsi que le prérequis UI keep-content des Conséquences ; factorisation des primitives de liste/carte topic↔MP finalisée par [#351](https://github.com/ForumHFR/redface2/issues/351) c1/c2/c3).
 - **Décision 2 — étages 1 et 2 LIVRÉS** : la **position de lecture locale par conversation** existe — table Room `mp_read_positions` (`MpReadPositionEntity` / `MpReadPositionDao`), `RoomPrivateMessageReadPositionStore` (impl de `PrivateMessageReadPositionStore`), sauvegarde dans `PrivateMessageThreadViewModel`, et seed des positions DT depuis MPStorage (`DefaultMpStorageReadPositionSeeder`, ADR-014 §5). Le **cache RAM de session** est livré par `PrivateMessageThreadSessionCache` : LRU globale de cinq pages, clé par compte canonique/conversation/page, purge synchrone et génération anti-réponse tardive via `CacheInvalidator`, émission `SESSION_CACHE` immédiatement suivie d'une revalidation `NETWORK`. Suivi [#430](https://github.com/ForumHFR/redface2/issues/430)/[#1080](https://github.com/ForumHFR/redface2/issues/1080)/[#6](https://github.com/ForumHFR/redface2/issues/6). Reste **à implémenter** : étage 3 (cache Room du **contenu**, opt-in, **vérifié absent** du code).
-- **Décision 3 — à implémenter** : aucun prefetch MP intra-conversation dans le code à ce jour.
+- **Décision 3 — implémentée, preuve live multipage en attente** : le point d'entrée authentifié
+  dédié, l'ordonnanceur N−1/N+1, le gate composition + `RESUMED`, l'annulation structurée et la
+  garde Konsist anti-appel depuis la liste sont présents. La matrice de parité ne passe toutefois
+  pas à « oui, livré » avant la capture réelle de trois pages d'une même conversation : la fixture
+  MP actuelle est monopage et ne prouve ni les deux voisins ni le rabattement serveur.
 
 ## Contexte
 
@@ -58,7 +62,9 @@ C'est le cas « (b) binaire » anticipé par #361, mais avec une observation cl�
 
 ## Décision
 
-> La décision 1 est livrée ; la décision 2 **étages 1 et 2 sont livrés** (position de lecture locale et cache RAM de session), l'étage 3 et la décision 3 (prefetch MP) restent à implémenter (cf. Statut).
+> La décision 1 est livrée ; la décision 2 **étages 1 et 2 sont livrés** (position de lecture locale
+> et cache RAM de session), l'étage 3 reste à implémenter. La décision 3 est implémentée mais sa
+> livraison reste suspendue à la preuve live multipage décrite dans le Statut.
 
 ### 1. Partage topic↔MP à deux niveaux dans `:core:ui` — LIVRÉ (PR #428/#429)
 
@@ -82,7 +88,17 @@ L'invariant général « les requêtes de prefetch ne sont jamais authentifiées
 - **Autorisé : prefetch authentifié intra-conversation ouverte** — les **pages adjacentes (N−1 et N+1, le swipe est bidirectionnel)** de la conversation que l'utilisateur lit ; « ouverte » = l'écran de la conversation est composé et au premier plan (un prefetch encore en vol quand l'écran se ferme s'annule avec le scope, il n'en repart pas de nouveau). **Pas d'effet supplémentaire dans le cas nominal** : le GET d'ouverture a déjà effacé le dot binaire de toute la conversation, et en MultiMP l'utilisateur est déjà sorti de la liste « pas lu par » ([#361, verdict 1](https://github.com/ForumHFR/redface2/issues/361#issuecomment-4663312132)). Pas de compensation nécessaire. Hors cas nominal, une race **documentée et assumée** : un message arrivant entre la lecture de N et le prefetch d'une page adjacente verrait son dot effacé (et, en MultiMP, le read-receipt mis à jour) sans avoir été affiché — effet observable mais jugé bénin, l'utilisateur est précisément dans cette conversation. **Cas particulier** : si l'app expose un jour « Marquer comme non lu » (opportunité notée en Conséquences), un marquage manuel doit **suspendre le prefetch de cette conversation jusqu'à réouverture** — le raisonnement « le dot est déjà consommé » ne tient plus après un `nonlu.php` délibéré.
 - **Interdit : prefetch depuis la liste** (conversations non ouvertes, dot non-lu) : il effacerait un non-lu jamais vu par l'utilisateur **et** le retirerait de la liste « pas lu par » des autres participants en MultiMP (read-receipt). La compensation `nonlu.php` serait sans perte, mais les deux requêtes ne sont pas atomiques : un crash entre les deux corromprait un état visible des autres clients ([#361, verdict 2](https://github.com/ForumHFR/redface2/issues/361#issuecomment-4663312132)). Interdit en v1, réévaluable.
 
-Conséquence d'implémentation : la garde Konsist actuelle (`ArchitectureKonsistTest`, test « prefetch call sites use the prefetch entry points only ») ne couvre que le domaine topic — elle interdit aux contextes prefetch d'appeler `refreshTopicPage`/`refreshTopicList`, avec le marqueur d'exemption `konsist:bypass-prefetch-guard` déjà en place. Un prefetch MP authentifié ne la déclencherait donc pas du tout : le travail réel de la PR qui introduira ce prefetch est d'**étendre la garde au domaine MP** (nommage dédié du point d'entrée + règle qui le reconnaît), pas d'exempter un call-site — à faire explicitement, pas silencieusement.
+Conséquence d'implémentation — réalisée dans #1080 : la garde Konsist
+(`ArchitectureKonsistTest`, test « prefetch call sites use the prefetch entry points only ») conserve
+sa règle topic (un contexte prefetch ne peut appeler `refreshTopicPage`/`refreshTopicList`, avec le
+marqueur d'exemption `konsist:bypass-prefetch-guard`) et couvre désormais explicitement le domaine
+MP. Elle scanne le texte intégral des fichiers de production et n'autorise le nom du point d'entrée
+`MessagesRepository.prefetchPrivateMessageThread` que dans l'interface `MessagesRepository`, son
+implémentation `DefaultMessagesRepository` et `PrivateMessageThreadViewModel`. Au moins un usage doit
+rester dans ce ViewModel : un appel qualifié ou sans récepteur, une référence callable, y compris dans
+un bloc `init` ou un initialiseur de propriété, depuis `MessagesViewModel`, un écran ou un helper
+extérieur fait échouer la garde. Il ne s'agit donc pas d'une exemption au prefetch authentifié
+général, mais de la frontière bornée exigée par cette ADR.
 
 > **Contradiction documentaire relevée et TRANCHÉE le 2026-08-12 ([#1041](https://github.com/ForumHFR/redface2/issues/1041))** —
 > `AGENTS.md` § « Règles spécifiques au projet » énonce la règle prefetch sous sa forme absolue

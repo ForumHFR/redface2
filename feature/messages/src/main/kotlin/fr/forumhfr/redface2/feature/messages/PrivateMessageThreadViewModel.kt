@@ -38,6 +38,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
 
 /**
  * ViewModel for one private-message conversation. Receives its route arguments via Hilt
@@ -70,6 +71,11 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     // A new page load (or retry) cancels the previous in-flight one so a stale result cannot
     // overwrite the page the user is actually on.
     private var loadJob: Job? = null
+    // ADR-013 decision 3 — one structured group owns both adjacent authenticated prefetches. The
+    // Compose lifecycle gate controls [prefetchActive]; the ViewModel remains retained off-screen.
+    private var prefetchJob: Job? = null
+    private var prefetchedGroup: PrivateMessagePrefetchGroup? = null
+    private var prefetchActive = false
     // #430 — single in-flight position write, latest-wins (cf. savePosition).
     private var saveJob: Job? = null
     private var authenticatedPseudo: String? = null
@@ -150,6 +156,22 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
         val current = _state.value
         if (current.mode !is PrivateMessageThreadUiState.Mode.Content || current.isRefreshing) return
         load(current.page)
+    }
+
+    /**
+     * Called only by [PrivateMessageThreadPrefetchLifecycleGate]. A retained ViewModel is not enough:
+     * authenticated warmups are allowed only while the conversation composition is RESUMED. The
+     * completed/cancelled group marker stays set so pause/resume or recomposition cannot retry the
+     * same center-page group; a genuine page/account change produces a distinct group.
+     */
+    fun setPrefetchActive(active: Boolean) {
+        if (prefetchActive == active) return
+        prefetchActive = active
+        if (active) {
+            maybeSchedulePrivateMessagePrefetch()
+        } else {
+            prefetchJob?.cancel()
+        }
     }
 
     /**
@@ -302,6 +324,8 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
         val egoPostEnabled = _state.value.egoPostEnabled
         authenticatedPseudo = null
         loadJob?.cancel()
+        prefetchJob?.cancel()
+        prefetchedGroup = null
         saveJob?.cancel()
         rosterJob?.cancel()
         blacklistJob?.cancel()
@@ -360,6 +384,9 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
             clearPrivateState()
             return
         }
+        // Changing the center page invalidates both N-1/N+1 children immediately, before the new
+        // visible-page request suspends. A same-page refresh keeps its best-effort group intact.
+        if (page != _state.value.page) prefetchJob?.cancel()
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
             fetchPage(page)
@@ -450,6 +477,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
                         owner,
                         lastPostNumreponse = thread.messages.lastOrNull()?.numreponse,
                     )
+                    maybeSchedulePrivateMessagePrefetch()
                 }
             }
         } catch (cancellation: CancellationException) {
@@ -477,6 +505,67 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
                     it.copy(mode = PrivateMessageThreadUiState.Mode.Error(classifyHfrError(error)))
                 }
             }
+        }
+    }
+
+    /**
+     * The unique ADR-013 scheduler. Its group contains only the valid adjacent pages around the
+     * terminal network page currently displayed; both children share one cancellable parent.
+     *
+     * #1087 — if production gains « Marquer comme non lu », gate this scheduler after that action
+     * until the conversation is reopened: a deliberate `nonlu.php` restores the unread dot, so the
+     * nominal « already consumed » rationale no longer applies. No dormant state before the action
+     * exists.
+     */
+    private fun maybeSchedulePrivateMessagePrefetch() {
+        val group = currentPrivateMessagePrefetchGroup() ?: return
+        if (group == prefetchedGroup) return
+        prefetchJob?.cancel()
+        prefetchedGroup = group
+        prefetchJob = viewModelScope.launch {
+            supervisorScope {
+                group.pages.forEach { targetPage ->
+                    launch {
+                        repository.prefetchPrivateMessageThread(
+                            threadId = group.threadId,
+                            page = targetPage,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun currentPrivateMessagePrefetchGroup(): PrivateMessagePrefetchGroup? {
+        val content = _state.value.mode as? PrivateMessageThreadUiState.Mode.Content
+        val owner = authenticatedPseudo?.let(::canonicalizePseudo)
+        val thread = content?.thread
+        val pages = thread?.let { adjacentPages(it.page, it.totalPages) }.orEmpty()
+
+        val isScreenActive = prefetchActive
+        val isTerminalNetworkPage = content?.source == PrivateMessageThreadPage.Source.NETWORK
+        val hasAuthenticatedOwner = owner != null
+        val isRequestedThread = thread?.threadId == request.threadId
+        val hasAdjacentPages = pages.isNotEmpty()
+        val candidateGroup =
+            owner?.let { sealedOwner ->
+                thread?.let { sealedThread ->
+                    PrivateMessagePrefetchGroup(
+                        sealedOwner,
+                        request.threadId,
+                        sealedThread.page,
+                        pages,
+                    )
+                }
+            }
+
+        return when {
+            !isScreenActive -> null
+            !isTerminalNetworkPage -> null
+            !hasAuthenticatedOwner -> null
+            !isRequestedThread -> null
+            !hasAdjacentPages -> null
+            else -> candidateGroup
         }
     }
 
@@ -555,6 +644,19 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     interface Factory {
         fun create(request: PrivateMessageThreadRequest): PrivateMessageThreadViewModel
     }
+
+    private data class PrivateMessagePrefetchGroup(
+        val owner: String,
+        val threadId: Int,
+        val centerPage: Int,
+        val pages: List<Int>,
+    )
+}
+
+/** Returns only N-1/N+1 inside the server-reported page bounds, in deterministic order. */
+internal fun adjacentPages(page: Int, totalPages: Int): List<Int> = buildList {
+    if (page in 2..totalPages) add(page - 1)
+    if (page in 1 until totalPages) add(page + 1)
 }
 
 /**

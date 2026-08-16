@@ -33,6 +33,7 @@ import java.time.Instant
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -74,6 +75,7 @@ class PrivateMessageThreadViewModelTest {
     @Suppress("LongParameterList") // Test factory : each dep has a default so call-sites stay terse.
     private fun threadViewModel(
         repository: MessagesRepository,
+        threadRequest: PrivateMessageThreadRequest = request,
         authRepository: AuthRepository = FakeAuthRepository(),
         userPreferencesRepository: UserPreferencesRepository = userPreferences(),
         blacklistRepository: BlacklistRepository = FakeBlacklistRepository(),
@@ -82,7 +84,7 @@ class PrivateMessageThreadViewModelTest {
         writeRepository: PrivateMessageWriteRepository = mockk(relaxed = true),
         postImageSaver: PostImageSaver = mockk(relaxed = true),
     ) = PrivateMessageThreadViewModel(
-        request = request,
+        request = threadRequest,
         repository = repository,
         authRepository = authRepository,
         userPreferencesRepository = userPreferencesRepository,
@@ -284,7 +286,10 @@ class PrivateMessageThreadViewModelTest {
         val repository = loadedRepository()
         val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
 
-        val viewModel = threadViewModel(repository, authRepository)
+        val viewModel = threadViewModel(
+            repository = repository,
+            authRepository = authRepository,
+        )
         assertEquals("alice", viewModel.state.value.connectedPseudo)
 
         authRepository.emit(AuthState.Authenticated("bob"))
@@ -439,6 +444,189 @@ class PrivateMessageThreadViewModelTest {
     }
 
     @Test
+    fun `foreground prefetch targets only both adjacent pages`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 3, fallbackCorrespondent = null)
+        } returns network(thread(page = 3, totalPages = 5))
+        coEvery { repository.prefetchPrivateMessageThread(threadId = 42, page = any()) } returns Unit
+        val viewModel = threadViewModel(
+            repository = repository,
+            threadRequest = request.copy(page = 3),
+        )
+
+        viewModel.setPrefetchActive(true)
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { repository.prefetchPrivateMessageThread(threadId = 42, page = 2) }
+        coVerify(exactly = 1) { repository.prefetchPrivateMessageThread(threadId = 42, page = 4) }
+        coVerify(exactly = 0) {
+            repository.prefetchPrivateMessageThread(
+                threadId = 42,
+                page = match { it !in setOf(2, 4) },
+            )
+        }
+    }
+
+    @Test
+    fun `first and last conversation pages prefetch only their existing neighbor`() = runTest {
+        val firstRepository = mockk<MessagesRepository>()
+        coEvery {
+            firstRepository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns network(thread(page = 1, totalPages = 3))
+        coEvery { firstRepository.prefetchPrivateMessageThread(threadId = 42, page = any()) } returns Unit
+        val firstViewModel = threadViewModel(firstRepository)
+
+        firstViewModel.setPrefetchActive(true)
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { firstRepository.prefetchPrivateMessageThread(threadId = 42, page = 2) }
+        coVerify(exactly = 0) {
+            firstRepository.prefetchPrivateMessageThread(threadId = 42, page = match { it != 2 })
+        }
+
+        val lastRepository = mockk<MessagesRepository>()
+        coEvery {
+            lastRepository.getPrivateMessageThread(threadId = 42, page = 3, fallbackCorrespondent = null)
+        } returns network(thread(page = 3, totalPages = 3))
+        coEvery { lastRepository.prefetchPrivateMessageThread(threadId = 42, page = any()) } returns Unit
+        val lastViewModel = threadViewModel(
+            repository = lastRepository,
+            threadRequest = request.copy(page = 3),
+        )
+
+        lastViewModel.setPrefetchActive(true)
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { lastRepository.prefetchPrivateMessageThread(threadId = 42, page = 2) }
+        coVerify(exactly = 0) {
+            lastRepository.prefetchPrivateMessageThread(threadId = 42, page = match { it != 2 })
+        }
+    }
+
+    @Test
+    fun `same landed page is prefetched once across activation and refresh emissions`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 3, fallbackCorrespondent = null)
+        } returns network(thread(page = 3, totalPages = 5))
+        coEvery { repository.prefetchPrivateMessageThread(threadId = 42, page = any()) } returns Unit
+        val viewModel = threadViewModel(
+            repository = repository,
+            threadRequest = request.copy(page = 3),
+        )
+
+        viewModel.setPrefetchActive(true)
+        viewModel.setPrefetchActive(true)
+        viewModel.refresh()
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { repository.prefetchPrivateMessageThread(threadId = 42, page = 2) }
+        coVerify(exactly = 1) { repository.prefetchPrivateMessageThread(threadId = 42, page = 4) }
+    }
+
+    @Test
+    fun `leaving foreground cancels the group and same page activation does not restart it`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 3, fallbackCorrespondent = null)
+        } returns network(thread(page = 3, totalPages = 5))
+        val started = mutableListOf<Int>()
+        val cancelled = mutableListOf<Int>()
+        coEvery { repository.prefetchPrivateMessageThread(threadId = 42, page = any()) } coAnswers {
+            val page = secondArg<Int>()
+            started += page
+            try {
+                awaitCancellation()
+            } finally {
+                cancelled += page
+            }
+        }
+        val viewModel = threadViewModel(
+            repository = repository,
+            threadRequest = request.copy(page = 3),
+        )
+        viewModel.setPrefetchActive(true)
+
+        viewModel.setPrefetchActive(false)
+        viewModel.setPrefetchActive(true)
+        advanceUntilIdle()
+
+        assertEquals(setOf(2, 4), cancelled.toSet())
+        assertEquals(1, started.count { it == 2 })
+        assertEquals(1, started.count { it == 4 })
+    }
+
+    @Test
+    fun `page change cancels the previous adjacent prefetch group`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 3, fallbackCorrespondent = null)
+        } returns network(thread(page = 3, totalPages = 5))
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 4, fallbackCorrespondent = null)
+        } returns network(thread(page = 4, totalPages = 5))
+        val started = mutableListOf<Int>()
+        val cancelled = mutableListOf<Int>()
+        coEvery { repository.prefetchPrivateMessageThread(threadId = 42, page = any()) } coAnswers {
+            val page = secondArg<Int>()
+            started += page
+            try {
+                awaitCancellation()
+            } finally {
+                cancelled += page
+            }
+        }
+        val viewModel = threadViewModel(
+            repository = repository,
+            threadRequest = request.copy(page = 3),
+        )
+        viewModel.setPrefetchActive(true)
+        assertEquals(setOf(2, 4), started.toSet())
+
+        viewModel.selectPage(4)
+        advanceUntilIdle()
+
+        assertTrue(cancelled.containsAll(listOf(2, 4)))
+        assertTrue(started.containsAll(listOf(3, 5)))
+        viewModel.setPrefetchActive(false)
+    }
+
+    @Test
+    fun `account switch cancels and replaces the previous account prefetch group`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 3, fallbackCorrespondent = null)
+        } returns network(thread(page = 3, totalPages = 5))
+        val started = mutableListOf<Int>()
+        val cancelled = mutableListOf<Int>()
+        coEvery { repository.prefetchPrivateMessageThread(threadId = 42, page = any()) } coAnswers {
+            val page = secondArg<Int>()
+            started += page
+            try {
+                awaitCancellation()
+            } finally {
+                cancelled += page
+            }
+        }
+        val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
+        val viewModel = threadViewModel(
+            repository = repository,
+            threadRequest = request.copy(page = 3),
+            authRepository = authRepository,
+        )
+        viewModel.setPrefetchActive(true)
+
+        authRepository.emit(AuthState.Authenticated("bob"))
+        advanceUntilIdle()
+
+        assertTrue(cancelled.containsAll(listOf(2, 4)))
+        assertEquals(2, started.count { it == 2 })
+        assertEquals(2, started.count { it == 4 })
+        viewModel.setPrefetchActive(false)
+    }
+
+    @Test
     fun `cache content renders immediately but only network saves private read side effects`() = runTest {
         val repository = mockk<MessagesRepository>()
         val cached = thread(page = 1, totalPages = 2, messages = listOf(post(7)))
@@ -451,6 +639,7 @@ class PrivateMessageThreadViewModelTest {
             networkGate.await()
             emit(networkPage(refreshed))
         }
+        coEvery { repository.prefetchPrivateMessageThread(threadId = 42, page = any()) } returns Unit
         val store = FakeReadPositionStore()
         val mpStorage = FakeMpStorageRepository()
 
@@ -459,6 +648,7 @@ class PrivateMessageThreadViewModelTest {
             readPositionStore = store,
             mpStorageRepository = mpStorage,
         )
+        viewModel.setPrefetchActive(true)
 
         val cachedState = viewModel.state.value
         val cachedContent = cachedState.mode as PrivateMessageThreadUiState.Mode.Content
@@ -468,6 +658,7 @@ class PrivateMessageThreadViewModelTest {
         assertEquals(emptyMap<Int, Int>(), store.saved)
         assertEquals(emptyList<MpStorageFlagEntry>(), mpStorage.ifPresentCalls)
         assertNull(cachedContent.networkLoadedThreadOrNull())
+        coVerify(exactly = 0) { repository.prefetchPrivateMessageThread(threadId = 42, page = any()) }
 
         networkGate.complete(Unit)
         advanceUntilIdle()
@@ -480,6 +671,7 @@ class PrivateMessageThreadViewModelTest {
         assertEquals(1, store.saved[42])
         assertEquals(1, mpStorage.ifPresentCalls.size)
         assertEquals(refreshed, networkContent.networkLoadedThreadOrNull())
+        coVerify(exactly = 1) { repository.prefetchPrivateMessageThread(threadId = 42, page = 2) }
     }
 
     @Test
@@ -637,7 +829,10 @@ class PrivateMessageThreadViewModelTest {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
         } returns network(thread(page = 1, totalPages = 1))
 
-        val viewModel = threadViewModel(repository, authRepository)
+        val viewModel = threadViewModel(
+            repository = repository,
+            authRepository = authRepository,
+        )
         assertTrue(viewModel.state.value.mode is PrivateMessageThreadUiState.Mode.Content)
 
         authRepository.emit(AuthState.Anonymous)
@@ -879,7 +1074,11 @@ class PrivateMessageThreadViewModelTest {
         val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
         val mpStorage = FakeMpStorageRepository()
 
-        threadViewModel(repository, authRepository, mpStorageRepository = mpStorage)
+        threadViewModel(
+            repository = repository,
+            authRepository = authRepository,
+            mpStorageRepository = mpStorage,
+        )
         authRepository.emit(AuthState.Authenticated("bob"))
         advanceUntilIdle()
         gate.complete(thread(page = 3, totalPages = 9, messages = listOf(post(123))))

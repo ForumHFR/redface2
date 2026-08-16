@@ -70,4 +70,16 @@ interface MessagesRepository {
         page: Int = 1,
         fallbackCorrespondent: String? = null,
     ): Flow<PrivateMessageThreadPage>
+
+    /**
+     * Authenticated, bounded prefetch of one private-conversation page (ADR-013 decision 3).
+     * This is the sole exception to the project's anonymous-prefetch rule: callers may request
+     * only an adjacent page of the conversation currently open in the foreground. Inbox/list
+     * callers are forbidden because this GET clears the conversation's unread/read-receipt state.
+     *
+     * A page already present in the process-memory session cache is a no-op. A successful response
+     * enters that same account/thread/page cache only after its parsed target and session stamp are
+     * validated. Failures are best-effort and silent; caller cancellation always propagates.
+     */
+    suspend fun prefetchPrivateMessageThread(threadId: Int, page: Int)
 }

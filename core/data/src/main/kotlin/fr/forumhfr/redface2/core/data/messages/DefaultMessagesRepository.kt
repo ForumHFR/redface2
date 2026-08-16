@@ -191,6 +191,40 @@ class DefaultMessagesRepository @Inject internal constructor(
             }
         }
 
+        fetchAndCacheThreadPage(threadId, page, fallbackCorrespondent, stamp)?.let { parsed ->
+            emit(PrivateMessageThreadPage(parsed, PrivateMessageThreadPage.Source.NETWORK))
+        }
+    }.flowOn(ioDispatcher)
+
+    override suspend fun prefetchPrivateMessageThread(threadId: Int, page: Int) =
+        withContext(ioDispatcher) {
+            try {
+                val owner = currentPseudo()
+                if (owner != null) {
+                    val stamp = threadSessionCache.capture(owner)
+                    if (isCurrentSession(stamp) && threadSessionCache.read(stamp, threadId, page) == null) {
+                        fetchAndCacheThreadPage(threadId, page, fallbackCorrespondent = null, stamp)
+                    }
+                }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (@Suppress("TooGenericExceptionCaught") _: Exception) {
+                // Best-effort and deliberately silent (#316): HfrServerException carries the
+                // private forum2.php URL. Never hand the raw throwable to Log or DiagnosticsLog.
+            }
+        }
+
+    /**
+     * Shared terminal-network path for visible reads and prefetch. The parsed target is validated
+     * once, immediately before the cache write; the account/generation stamp is then rechecked
+     * again before the caller may use the response.
+     */
+    private suspend fun fetchAndCacheThreadPage(
+        threadId: Int,
+        page: Int,
+        fallbackCorrespondent: String?,
+        stamp: PrivateMessageThreadSessionCache.Stamp,
+    ): PrivateMessageThread? {
         val parsed = threadParser.parse(
             html = hfrClient.getPrivateMessageThreadPage(threadId = threadId, page = page),
             fallbackCorrespondent = fallbackCorrespondent,
@@ -198,10 +232,8 @@ class DefaultMessagesRepository @Inject internal constructor(
         if (parsed.matchesTarget(threadId, page) && isCurrentSession(stamp)) {
             threadSessionCache.write(stamp, threadId, page, parsed)
         }
-        if (isCurrentSession(stamp)) {
-            emit(PrivateMessageThreadPage(parsed, PrivateMessageThreadPage.Source.NETWORK))
-        }
-    }.flowOn(ioDispatcher)
+        return parsed.takeIf { isCurrentSession(stamp) }
+    }
 
     private suspend fun isCurrentSession(stamp: PrivateMessageThreadSessionCache.Stamp): Boolean =
         threadSessionCache.isCurrent(stamp) &&
