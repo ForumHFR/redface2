@@ -12,6 +12,8 @@ Recette reproductible pour capturer, sans envoyer de message, le formulaire HFR 
 l'action « Répondre à ce message » d'une conversation privée.
 {: .fs-5 .fw-300 }
 
+Les trois captures MP du lot 4 peuvent être enchaînées dans une session par [`scripts/capture-mp-quote-fixtures.sh`](https://github.com/ForumHFR/redface2/blob/main/scripts/capture-mp-quote-fixtures.sh) ; la recette manuelle ci-dessous reste la référence normative.
+
 ---
 
 > **Exécutée le 2026-08-12** ([#1041](https://github.com/ForumHFR/redface2/issues/1041)) — la recette
