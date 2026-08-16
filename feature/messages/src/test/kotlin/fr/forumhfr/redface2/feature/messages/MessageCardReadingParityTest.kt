@@ -117,10 +117,10 @@ class MessageCardReadingParityTest {
         compose.runOnIdle { metrics.value = TALL_RHYTHM_METRICS }
         val tallHeight = measuredCardHeightDp()
 
-        // MessageCard's vertical envelope from the preset: the band-less header re-injects
-        // cardBodyTop above itself, the shared body adds cardBodyTop as the header↔body gap and
-        // cardBodyBottom below (footer-less card). The two presets share every other metric, so
-        // the height delta isolates exactly those three paddings.
+        // MessageCard's vertical envelope from the preset: the zero-padding identity band leaves the
+        // header's historical cardBodyTop inset untouched, while the shared body adds cardBodyTop as
+        // the header↔body gap and cardBodyBottom below (footer-less card). The two presets share every
+        // other metric, so the height delta still isolates exactly those three MP-owned paddings.
         val expectedDelta =
             2 * (TALL_RHYTHM_METRICS.cardBodyTop - BASE_METRICS.cardBodyTop).value +
                 (TALL_RHYTHM_METRICS.cardBodyBottom - BASE_METRICS.cardBodyBottom).value

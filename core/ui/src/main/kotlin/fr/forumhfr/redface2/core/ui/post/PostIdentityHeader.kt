@@ -23,8 +23,8 @@ import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
 /**
  * #351 — the poster-identity line shared by the topic post card and the private-message thread card:
  * an avatar, an author pseudo and a date, optionally with a contextual-menu trigger and an extra
- * sub-line. The neutral half of the identity; the tinted strip behind it is [PostIdentityBand] (a
- * separate primitive so the band-less MP can use this header on its own).
+ * sub-line. The neutral half of the identity; the tinted strip behind it is [PostIdentityBand], a
+ * separate primitive so each reading host can own its colour independently from this layout.
  *
  * Layout: `Row[ avatar, Column(weight 1f){ pseudo ; date + subline }, trailing ]`, centred so the
  * avatar reads against the name+date block as one tidy unit. Slots, so each feature supplies its own

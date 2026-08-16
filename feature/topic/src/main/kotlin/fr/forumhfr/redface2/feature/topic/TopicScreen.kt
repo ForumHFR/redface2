@@ -2959,7 +2959,7 @@ internal const val TOPIC_POST_IDENTITY_BAND_TAG = "TopicPostIdentityBand"
  * pseudo, date, optional `⋯` trailing — lives in `:core:ui`; the topic-specific bits stay here:
  *  - `pseudo` slot — the optional `topic_post_index_prefix` + the pseudo (gold-sheen [CreatorPseudoText]
  *    for an RF2 creator #221, plain ellipsised text otherwise), tappable to open the profile (#208);
- *  - `subline` slot — the compact « · édité » marker (#483) when the post was edited;
+ *  - `dateTrailing` slot — the compact « · édité » marker (#483) when the post was edited;
  *  - `trailing` slot — the per-post `⋯` contextual-menu glyph (#362).
  * Profile-tap labels/min-size and the pseudo's no-min-size convention come from the primitive.
  */
