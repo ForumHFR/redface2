@@ -20,6 +20,7 @@ import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.core.ui.post.CREATOR_PSEUDO_TEXT_TAG
 import fr.forumhfr.redface2.core.ui.post.POST_CARD_SHELL_DIVIDER_TAG
 import fr.forumhfr.redface2.core.ui.post.PostCardShellFlatBottomEdge
 import fr.forumhfr.redface2.core.ui.theme.LocalFoldLongQuotes
@@ -180,6 +181,7 @@ class TopicPostCardFullWidthTest {
             }
         }
 
+        composeTestRule.onNodeWithTag(CREATOR_PSEUDO_TEXT_TAG).assertDoesNotExist()
         assertSingleHeadingOnPseudo("Lt Ripley")
     }
 
@@ -198,6 +200,7 @@ class TopicPostCardFullWidthTest {
             }
         }
 
+        composeTestRule.onNodeWithTag(CREATOR_PSEUDO_TEXT_TAG).assertExists()
         assertSingleHeadingOnPseudo("XaTriX")
     }
 

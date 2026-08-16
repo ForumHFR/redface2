@@ -26,6 +26,7 @@ import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.core.ui.post.CREATOR_PSEUDO_TEXT_TAG
 import fr.forumhfr.redface2.core.ui.post.POST_CARD_SHELL_DIVIDER_TAG
 import fr.forumhfr.redface2.core.ui.post.ReadingPostCardPresentation
 import fr.forumhfr.redface2.core.ui.theme.DisplayMetrics
@@ -54,9 +55,9 @@ import org.robolectric.annotation.Implements
  *  - the same body state (quote + spoiler) survives the #1050 full-width flip;
  *  - the body is selectable, and that capability derives from NEITHER the density preset NOR the
  *    presence of a callback or full-width presentation — it is structurally constant (#946);
- *  - the profile tap reaches [MessageCard.onOpenProfile] from both the avatar and the pseudo,
- *    without adding a second TalkBack heading (the #884 exactly-one-heading contract, whose
- *    default-card side lives in [MessageCardShellSmokeTest]).
+ *  - the profile tap reaches [MessageCard.onOpenProfile] from both the avatar and the gold creator
+ *    pseudo, without adding a second TalkBack heading (the #884 exactly-one-heading contract, whose
+ *    two MP pseudo variants live in [MessageCardShellSmokeTest]).
  */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -292,7 +293,7 @@ class MessageCardReadingParityTest {
     }
 
     @Test
-    fun `profile tap fires from the avatar and the pseudo and keeps exactly one heading`() {
+    fun `profile tap survives on the gold creator pseudo and keeps exactly one heading`() {
         var taps = 0
         compose.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
@@ -300,12 +301,11 @@ class MessageCardReadingParityTest {
             }
         }
 
-        compose.onNodeWithText(AUTHOR).performClick()
+        compose.onNodeWithTag(CREATOR_PSEUDO_TEXT_TAG).performClick()
         compose.onNodeWithContentDescription("Avatar de $AUTHOR").performClick()
         assertEquals("avatar and pseudo must both reach onOpenProfile", 2, taps)
 
-        // Wiring the author tap must not disturb the #884 contract: the fallback pseudo stays the
-        // card's single TalkBack heading (the callback-less side is pinned by the smoke test).
+        // The supplied creator slot owns its click AND its heading; the shared header must add none.
         val heading = SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading)
         compose.onAllNodes(heading, useUnmergedTree = true).assertCountEquals(1)
     }

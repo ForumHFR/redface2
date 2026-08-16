@@ -123,6 +123,7 @@ import fr.forumhfr.redface2.core.ui.RedfacePlaceholderScreen
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
+import fr.forumhfr.redface2.core.ui.post.CreatorPseudoText
 import fr.forumhfr.redface2.core.ui.post.HiddenPostCard
 import fr.forumhfr.redface2.core.ui.post.PostCardShellFlatBottomEdge
 import fr.forumhfr.redface2.core.ui.post.PostIdentityBand
@@ -137,7 +138,6 @@ import fr.forumhfr.redface2.core.ui.post.collectPostMediaUrls
 import fr.forumhfr.redface2.core.ui.post.retryFailedPostMedia
 import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
-import fr.forumhfr.redface2.core.ui.theme.rememberCreatorPseudoBrush
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -2738,23 +2738,6 @@ private fun TopicPollCard(
             }
         }
     }
-}
-
-/**
- * #221 — a Redface 2 creator's pseudo, painted with the animated gold sheen. Kept as its own leaf
- * composable so the per-frame shimmer ([rememberCreatorPseudoBrush]) invalidates only this text node,
- * never the enclosing (and expensive) post card.
- */
-@Composable
-private fun CreatorPseudoText(author: String, modifier: Modifier = Modifier) {
-    Text(
-        text = author,
-        style = MaterialTheme.typography.titleSmall.copy(brush = rememberCreatorPseudoBrush()),
-        fontWeight = FontWeight.SemiBold,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-        modifier = modifier,
-    )
 }
 
 @Composable

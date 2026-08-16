@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.messages
 
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
@@ -9,13 +10,18 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.text.TextLayoutResult
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.core.ui.post.CREATOR_PSEUDO_TEXT_TAG
 import fr.forumhfr.redface2.core.ui.post.POST_CARD_SHELL_DIVIDER_TAG
 import java.time.Instant
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -31,7 +37,7 @@ import org.robolectric.annotation.Config
  *
  * Also guards the MP side of the `PostIdentityHeader` heading contract: the real author pseudo is
  * the card's exactly-one TalkBack heading, whether [MessageCard] uses the fallback text or a
- * feature-owned pseudo slot. The topic-side twin is `TopicPostCardFullWidthTest`.
+ * caller-supplied creator slot. The topic-side twin is `TopicPostCardFullWidthTest`.
  */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -60,24 +66,29 @@ class MessageCardShellSmokeTest {
     }
 
     @Test
-    fun `MessageCard exposes exactly one heading on the author pseudo`() {
+    fun `creator pseudo uses the gold-sheen leaf and stays the card's single heading`() {
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 MessageCard(message = sampleMessage())
             }
         }
 
-        // #884 a11y — the real author pseudo is the card's single heading. PostIdentityHeader marks
-        // its fallback text; if MessageCard supplies a pseudo slot, that slot must mark its own text.
-        // The heading rides on the pseudo text node…
-        val heading = SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading)
-        composeTestRule
-            .onNode(heading.and(hasText("XaTriX")), useUnmergedTree = true)
-            .assertExists()
-        // …and it is the ONLY heading of the card — the shared header adds no wrapper heading.
-        composeTestRule
-            .onAllNodes(heading, useUnmergedTree = true)
-            .assertCountEquals(1)
+        composeTestRule.onNodeWithTag(CREATOR_PSEUDO_TEXT_TAG).assertIsDisplayed()
+        assertPseudoBrush("XaTriX", expectedGold = true)
+        assertSingleHeadingOnPseudo("XaTriX")
+    }
+
+    @Test
+    fun `plain pseudo skips the gold-sheen leaf and stays the card's single heading`() {
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                MessageCard(message = sampleMessage(author = "Lt Ripley"))
+            }
+        }
+
+        composeTestRule.onNodeWithTag(CREATOR_PSEUDO_TEXT_TAG).assertDoesNotExist()
+        assertPseudoBrush("Lt Ripley", expectedGold = false)
+        assertSingleHeadingOnPseudo("Lt Ripley")
     }
 
     @Test
@@ -109,9 +120,37 @@ class MessageCardShellSmokeTest {
         composeTestRule.onNodeWithText("cité", substring = true).assertDoesNotExist()
     }
 
-    private fun sampleMessage(): Post = Post(
+    private fun assertSingleHeadingOnPseudo(author: String) {
+        val heading = SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading)
+        // #884 a11y — both the supplied creator slot and the fallback put heading() on the real
+        // pseudo text node…
+        composeTestRule
+            .onNode(heading.and(hasText(author)), useUnmergedTree = true)
+            .assertExists()
+        // …and it is the ONLY heading of the card — the shared header adds no wrapper heading.
+        composeTestRule
+            .onAllNodes(heading, useUnmergedTree = true)
+            .assertCountEquals(1)
+    }
+
+    private fun assertPseudoBrush(author: String, expectedGold: Boolean) {
+        val layouts = mutableListOf<TextLayoutResult>()
+        val pseudo = composeTestRule.onNodeWithText(author, useUnmergedTree = true)
+        val readLayout = requireNotNull(
+            pseudo.fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action,
+        )
+        assertTrue("the pseudo Text layout must be readable", readLayout(layouts))
+        val brush = layouts.single().layoutInput.style.brush
+        if (expectedGold) {
+            assertNotNull("creator pseudo must carry the gold-sheen brush", brush)
+        } else {
+            assertNull("plain pseudo must keep the neutral text style", brush)
+        }
+    }
+
+    private fun sampleMessage(author: String = "XaTriX"): Post = Post(
         numreponse = 1,
-        author = "XaTriX",
+        author = author,
         date = Instant.EPOCH,
         content = PostContent(
             blocks = listOf(
