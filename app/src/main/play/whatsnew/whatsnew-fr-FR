@@ -1,6 +1,4 @@
-Redface 2 v0.42.2 — dev.
+Redface 2 v0.42.3 — dev.
 
-- Un appui long sur un message privé ouvre désormais son menu : copier le texte, ouvrir le profil, bloquer ou débloquer l'auteur.
-- Vous pouvez donc maintenant bloquer un auteur sans quitter la conversation privée.
-- Les cartes MP ont le même bandeau d'identité teinté que les posts de sujet.
-- Le menu d'un message de sujet propose désormais « Copier le texte ».
+- Les pseudos des quelques créateurs recensés dans l'app sont désormais dorés dans les conversations privées, comme dans les sujets.
+- Le contenu du bandeau d'identité des cartes MP est recentré verticalement ; il collait au bord inférieur depuis la 0.42.2.

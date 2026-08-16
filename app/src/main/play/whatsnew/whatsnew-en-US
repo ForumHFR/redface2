@@ -1,6 +1,4 @@
-Redface 2 v0.42.2 — dev.
+Redface 2 v0.42.3 — dev.
 
-- Long-pressing a private message now opens its menu: copy the text, open the profile, or block and unblock the author.
-- You can now block an author without leaving the private conversation.
-- Private message cards have the same tinted identity band as topic posts.
-- A topic message's menu now offers “Copy text”.
+- Usernames for the few creators listed in the app are now gold in private conversations, as they already were in topics.
+- Private-message identity-band content is vertically centered again; it had been sitting against the bottom edge since 0.42.2.

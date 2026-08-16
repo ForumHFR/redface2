@@ -16,6 +16,21 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.42.3` — `internal` (dev) — 2026-08-16
+
+### Ajouté
+
+- **Les pseudos de la poignée de créateurs de Redface 2 recensés dans la liste statique embarquée sont désormais dorés dans les conversations privées**, comme dans les sujets ([#1060](https://github.com/ForumHFR/redface2/issues/1060), chantier de parité [#1040](https://github.com/ForumHFR/redface2/issues/1040)).
+
+### Corrigé
+
+- **Le contenu du bandeau d'identité des cartes MP était décalé vers le bas depuis son arrivée en 0.42.2 ; il est désormais recentré verticalement.** Ce défaut a été constaté par **XaTriX** sur son téléphone, alors que ni les tests ni les relectures ne l'avaient vu.
+
+### Interne
+
+- `CreatorPseudoText` est promu dans `:core:ui` en feuille de rendu doré constante, partagée entre Topic et MP ; la détection des créateurs reste à la charge de l'appelant.
+- Contrat d'accessibilité du slot de pseudo : lorsqu'il est fourni, le pseudo porte lui-même le `heading` du message ; l'en-tête n'en ajoute aucun autour afin d'éviter un doublon.
+
 ## `0.42.2` — `internal` (dev) — 2026-08-16
 
 ### Ajouté
