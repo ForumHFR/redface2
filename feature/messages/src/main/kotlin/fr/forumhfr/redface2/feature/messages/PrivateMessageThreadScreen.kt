@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.messages
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -42,7 +43,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -51,6 +54,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.domain.author.isRf2Creator
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.ego.deriveEgoCanonicalPseudo
 import fr.forumhfr.redface2.core.domain.ego.isEgoPost
@@ -59,6 +63,7 @@ import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.list.ScrollToTopOnPageChange
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
+import fr.forumhfr.redface2.core.ui.post.CreatorPseudoText
 import fr.forumhfr.redface2.core.ui.post.HiddenPostCard
 import fr.forumhfr.redface2.core.ui.post.PostCardShellFlatBottomEdge
 import fr.forumhfr.redface2.core.ui.post.PostIdentityBand
@@ -826,8 +831,8 @@ internal fun MessageCard(
         null
     }
     // #1050 — same #874 P1 gesture as the topic card: the EgoPost a11y marker is a StateDescription
-    // on the identity node (TalkBack traverses it first), never a heading — the fallback pseudo
-    // stays the card's exactly-one heading (#884 contract, pinned by MessageCardShellSmokeTest).
+    // on the identity node (TalkBack traverses it first), never a heading. The fallback pseudo or
+    // creator slot stays the card's exactly-one heading (#884, pinned by MessageCardShellSmokeTest).
     val egoPostStateDescription = stringResource(R.string.messages_post_ego_state_description)
     val menuLabel = if (onOpenMenu != null) {
         stringResource(R.string.messages_message_menu_action)
@@ -841,6 +846,10 @@ internal fun MessageCard(
         Modifier
     }
     val citedCount = message.citedCount ?: 0
+    // #221 — canonical creator detection (case / format-char / NBSP insensitive) runs once per
+    // author, not on every recomposition of this hot list row. Only creators need a pseudo slot;
+    // everyone else keeps PostIdentityHeader's neutral fallback and its built-in interaction/a11y.
+    val isCreator = remember(message.author) { isRf2Creator(message.author) }
     ReadingPostCard(
         post = message,
         modifier = menuModifier,
@@ -861,9 +870,9 @@ internal fun MessageCard(
                 },
                 containerColor = MaterialTheme.colorScheme.secondaryContainer,
             ) {
-                // No pseudo slot is supplied, so the header's fallback pseudo text carries the card's
-                // exactly-one TalkBack heading (#884 contract, pinned by MessageCardShellSmokeTest)
-                // and its author tap rides onAuthorClick. The band adds no heading of its own.
+                // A creator supplies the shared gold pseudo leaf; everyone else uses the neutral
+                // fallback. Per the slot contract, the creator branch owns both the profile tap and
+                // the exactly-one heading on its real text node. The band adds no heading of its own.
                 PostIdentityHeader(
                     author = message.author,
                     avatarUrl = message.avatarUrl,
@@ -877,6 +886,27 @@ internal fun MessageCard(
                     onAvatarClickLabel = openProfileLabel,
                     onAuthorClick = onOpenProfile,
                     onAuthorClickLabel = openProfileLabel,
+                    pseudo = if (isCreator) {
+                        {
+                            val pseudoModifier = (
+                                if (onOpenProfile != null) {
+                                    Modifier.clickable(
+                                        onClick = onOpenProfile,
+                                        role = Role.Button,
+                                        onClickLabel = openProfileLabel,
+                                    )
+                                } else {
+                                    Modifier
+                                }
+                                ).semantics { heading() }
+                            CreatorPseudoText(
+                                author = message.author,
+                                modifier = pseudoModifier,
+                            )
+                        }
+                    } else {
+                        null
+                    },
                     // #483/#1051 — same compact data-driven marker as the topic; null emits no slot.
                     dateTrailing = if (message.editedAt != null) {
                         {

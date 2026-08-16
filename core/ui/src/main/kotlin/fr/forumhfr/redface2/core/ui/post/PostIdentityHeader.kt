@@ -29,8 +29,9 @@ import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
  * Layout: `Row[ avatar, Column(weight 1f){ pseudo ; date + subline }, trailing ]`, centred so the
  * avatar reads against the name+date block as one tidy unit. Slots, so each feature supplies its own
  * labels/icons without `:core:ui` reaching a feature string or a material-icon:
- *  - [pseudo] (optional) — overrides the default pseudo text; the topic passes its gold-sheen
- *    `CreatorPseudoText` (#221). When `null`, a plain ellipsised [Text] of [author] is drawn. Note:
+ *  - [pseudo] (optional) — overrides the default pseudo text; the topic and MP pass the gold-sheen
+ *    [CreatorPseudoText] for an RF2 creator (#221). When `null`, a plain ellipsised [Text] of [author]
+ *    is drawn. Note:
  *    [onAuthorClick] is applied to that fallback text only — a supplied [pseudo] owns its own
  *    interaction. CONTRACT (#884): the provided slot also OWNS the post heading semantics — exactly
  *    one node inside it must set `semantics { heading() }`, on the real pseudo text node (the best
@@ -107,8 +108,9 @@ fun PostIdentityHeader(
             verticalArrangement = Arrangement.spacedBy(lineSpacing),
         ) {
             if (pseudo != null) {
-                // #884 a11y — a caller-supplied pseudo owns its heading semantics (the topic marks
-                // its real pseudo text node); wrapping the slot here would double the heading.
+                // #884 a11y — a caller-supplied pseudo owns its heading semantics (the topic and
+                // creator-MP branches mark their real pseudo text node); wrapping the slot here
+                // would double the heading.
                 pseudo()
             } else {
                 val pseudoModifier = if (onAuthorClick != null) {
