@@ -80,6 +80,14 @@ C'est `[advisory]` (une discipline, pas un gate dur — aucun runner CI ne l'imp
 - **Validation** : reproduire la CI canonique en local via le skill **`/validate`** — la commande exacte et ses garde-fous (env Docker, `--rerun-tasks`, et « jamais `:app:testDevDebugUnitTest` seul ») y sont définis comme **source unique**, pour éviter deux formulations divergentes.
 - **Review** : un agent distinct du producteur (cf. § Rôle du LLM) — en pratique Codex (cadrage avant un chantier non-trivial + relecture du diff + gate avant merge) puis `/code-review`. Les conséquences opérationnelles pour les agents (cadence Codex, méta-règle `[enforced]`/`[advisory]`) vivent dans [`AGENTS.md`](https://github.com/ForumHFR/redface2/blob/main/AGENTS.md) § Cadence de validation, qui pointe vers cette page comme source canonique.
 
+Exception au caractère `[advisory]` du pipeline : la **règle d'entretien de la matrice de parité de
+lecture** ([reading-parity.md]({{ site.baseurl }}/specs/reading-parity) § Règle d'entretien) est
+`[enforced]` depuis [#1045](https://github.com/ForumHFR/redface2/issues/1045) — garde A par chemins
+dans le job `repo-guards` de la CI (échappatoire `Parity-Impact: none — <raison>` documentée dans le
+template de PR, corps relu en direct au re-run du job), garde B par symboles dans
+`DocsConsistencyTest` (exécutée par la CI et en local via `/validate`). Détail des gardes machine :
+[contributing.md]({{ site.baseurl }}/guides/contributing) § « Enforcement au build ».
+
 ## Exemples concrets
 
 | Sujet | Approche | Pourquoi |

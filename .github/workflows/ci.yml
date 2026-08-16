@@ -5,7 +5,11 @@ on:
     branches:
       - main
       - dev
+  # `edited` (en plus du trio par défaut) relance la CI quand le corps de la PR change : la garde
+  # parité lit le corps EN DIRECT, donc RETIRER une ligne « Parity-Impact: none » après un run vert
+  # doit re-déclencher la garde — sans `edited`, le check vert périmé resterait accroché (#1045).
   pull_request:
+    types: [opened, synchronize, reopened, edited]
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -59,9 +63,15 @@ jobs:
   # Repo hygiene guards (no Gradle/SDK needed — pure bash). Fixture provenance is BLOCKING;
   # the large-file report is advisory (writes to the job summary, never fails). Wired into the
   # required aggregate check below so the guard is actually enforced on `main` (dev→main promotion).
+  # Job-level permissions REPLACE the workflow-level block: `pull-requests: read` lets the
+  # reading-parity guard re-read the PR body LIVE (`gh pr view`) so editing the body + re-running
+  # the job unblocks it — the `github.event` payload is frozen at trigger time (#1045).
   repo-guards:
     name: repo-guards
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -84,6 +94,23 @@ jobs:
           else
             echo "versionName inchangé -> pas de check changelog requis"
           fi
+      - name: Reading-parity matrix touched with the reading surface (PR, blocking)
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Fetch the base at its EVENT-TIME SHA, not the branch's current tip: a re-run keeps the
+          # original merge-commit HEAD (GitHub re-runs reuse the initial GITHUB_SHA/GITHUB_REF), so
+          # diffing against a base that moved on would blame unrelated base commits on this PR.
+          # HEAD is the PR merge ref, so the two-dot diff against BASE_SHA is exactly the PR's
+          # effective diff (no merge-base needed on a shallow clone).
+          git fetch --depth=1 origin "$BASE_SHA"
+          bash scripts/check-reading-parity-touch.sh "$BASE_SHA"
       - name: Large production files report (advisory)
         run: bash scripts/report-large-files.sh
 

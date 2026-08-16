@@ -252,3 +252,13 @@ dependencies {
     // crossover in tests).
     testImplementation(project(":core:parser"))
 }
+
+// Guard B (#1045): DocsConsistencyTest reads docs/specs/reading-parity.md at runtime, so the page
+// must be a declared input of the test tasks. Without it, both the local UP-TO-DATE check and the
+// CI-restored build cache (setup-gradle) could serve a stale green result to a docs-only PR that
+// breaks a symbol citation.
+tasks.withType<Test>().configureEach {
+    inputs.file(rootProject.layout.projectDirectory.file("docs/specs/reading-parity.md"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+        .withPropertyName("readingParityMatrix")
+}
