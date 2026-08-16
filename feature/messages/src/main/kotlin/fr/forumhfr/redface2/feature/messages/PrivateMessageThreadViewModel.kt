@@ -173,6 +173,18 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     }
 
     /**
+     * #1051 — block/unblock an author from the private-message menu. The independent blacklist
+     * collector rebuilds [PrivateMessageThreadUiState.Mode.Content] through [contentMode], so the
+     * author's messages and quotes disappear/reappear together from the page already in memory.
+     * No conversation fetch is involved.
+     */
+    fun setAuthorBlocked(author: String, blocked: Boolean) {
+        viewModelScope.launch {
+            if (blocked) blacklistRepository.block(author) else blacklistRepository.unblock(author)
+        }
+    }
+
+    /**
      * #612 — open the « Participants » sheet. LAZY (Codex framing): the reply form is fetched here,
      * on demand, never on screen entry — it is an owner-only, rarely-used GET that also carries a
      * session `hash_check`. A cached form (from a previous open this screen-life) is reused, so

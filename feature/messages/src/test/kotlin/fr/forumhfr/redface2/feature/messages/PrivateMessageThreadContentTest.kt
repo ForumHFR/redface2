@@ -96,6 +96,39 @@ class PrivateMessageThreadContentTest {
     }
 
     @Test
+    fun `message long click opens only the decided MP menu and keeps one message heading`() {
+        setContent(
+            mode = PrivateMessageThreadUiState.Mode.Content(
+                PrivateMessageThread(
+                    threadId = THREAD_ID,
+                    subject = "Menu MP",
+                    correspondent = "Correspondant",
+                    messages = listOf(message(101, "Alice", "Texte à copier")),
+                    page = 1,
+                    totalPages = 1,
+                    canReply = false,
+                ),
+            ),
+            page = 1,
+            totalPages = 1,
+        )
+
+        compose.onNode(
+            SemanticsMatcher.keyIsDefined(SemanticsActions.OnLongClick),
+            useUnmergedTree = true,
+        ).performSemanticsAction(SemanticsActions.OnLongClick)
+
+        compose.onNodeWithText("Copier le texte").assertIsDisplayed()
+        compose.onNodeWithText("Masquer cet utilisateur").assertIsDisplayed()
+        compose.onNodeWithText("Copier le lien de ce post").assertDoesNotExist()
+        compose.onNodeWithText("Ouvrir dans le navigateur").assertDoesNotExist()
+        compose.onNodeWithText("Citer").assertDoesNotExist()
+
+        val heading = SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading)
+        compose.onAllNodes(heading, useUnmergedTree = true).assertCountEquals(1)
+    }
+
+    @Test
     fun `requires login keeps private content out of the composition`() {
         setContent(
             mode = PrivateMessageThreadUiState.Mode.RequiresLogin,

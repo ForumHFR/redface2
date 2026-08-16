@@ -40,7 +40,7 @@ import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
  *    `PostIdentityHeaderTest` (contract, both directions) plus one exactly-one-heading assert per
  *    production variant (`TopicPostCardFullWidthTest`, `MessageCardShellSmokeTest`).
  *  - [dateTrailing] (optional) — a marker on the SAME row as the date, to its right (the topic's
- *    `· édité` #483); `null` on the MP keeps the date as a plain single line.
+ *    and MP's data-driven `· édité`, #483/#1051); `null` keeps the date as a plain single line.
  *  - [subline] (optional) — extra line under the date; unused by the topic now, available for MP.
  *  - [trailing] (optional) — the `⋯` per-post menu glyph (topic); `null` on the MP.
  *

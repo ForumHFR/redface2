@@ -90,6 +90,25 @@
     <!-- #1042 — tap avatar/pseudo d'un message privé : ouvre le profil (parité topic #208). -->
     <string name="messages_open_profile_action">Voir le profil</string>
 
+    <!-- #1051 — menu contextuel propre aux messages privés. Le permalien et la citation sont
+         volontairement absents tant que leurs contrats MP ne sont pas implémentés/prouvés. -->
+    <string name="messages_message_menu_action">Options du message</string>
+    <string name="messages_message_menu_number">Message n°%1$d</string>
+    <string name="messages_message_menu_copy_text">Copier le texte</string>
+    <string name="messages_message_menu_text_copied">Texte copié</string>
+    <string name="messages_message_menu_block_author">Masquer cet utilisateur</string>
+    <string name="messages_message_menu_unblock_author">Ne plus masquer cet utilisateur</string>
+    <string name="messages_message_menu_edited">Édité le %1$s</string>
+    <string name="messages_message_edited_inline">édité</string>
+    <plurals name="messages_message_menu_cited">
+        <item quantity="one">Cité %1$d fois</item>
+        <item quantity="other">Cité %1$d fois</item>
+    </plurals>
+    <plurals name="messages_message_cited_count">
+        <item quantity="one">cité %1$d fois</item>
+        <item quantity="other">cité %1$d fois</item>
+    </plurals>
+
     <!-- #831/#1051 — retours d'effet de sauvegarde possédés par l'hôte MP. Le sheet et ses
          libellés synchrones restent partagés dans :core:ui. -->
     <string name="messages_image_menu_saved">Image enregistrée dans Pictures/Redface2</string>
