@@ -137,7 +137,32 @@ class ArchitectureKonsistTest {
                 PRIVATE_CACHE_FORBIDDEN_IMPORT_PREFIXES.any(name::startsWith) ||
                     name.endsWith("Dao") ||
                     name.endsWith(".Log")
-            } || PRIVATE_CACHE_FORBIDDEN_TEXT.any(file.text::contains)
+            } ||
+                PRIVATE_CACHE_FORBIDDEN_TEXT.any(file.text::contains) ||
+                PRIVATE_CACHE_FORBIDDEN_USAGE.any { it.containsMatchIn(file.text) }
+        }
+    }
+
+    @Test
+    fun `private message cache guard recognizes console and java logging usage shapes`() {
+        // #1086 — the production guard scans the WHOLE file text. These shapes pin the holes left
+        // by import-only/function-only checks: init blocks, property initializers, default-imported
+        // println and fully-qualified calls all have to be recognized.
+        val guardedUsages = mapOf(
+            "println in init block" to "init { println(thread) }",
+            "print in property initializer" to "private val leaked = print(thread)",
+            "fully-qualified Kotlin println" to "kotlin.io.println(thread)",
+            "System out" to "private val sink = System.out",
+            "fully-qualified System err" to "java.lang.System.err.println(thread)",
+            "java util logging" to "java.util.logging.Logger.getLogger(\"PrivateCache\")",
+            "stack trace" to "error.printStackTrace()",
+        )
+
+        guardedUsages.forEach { (shape, source) ->
+            assertTrue(
+                "Private-message cache guard must recognize $shape",
+                PRIVATE_CACHE_FORBIDDEN_USAGE.any { it.containsMatchIn(source) },
+            )
         }
     }
 
@@ -306,6 +331,9 @@ class ArchitectureKonsistTest {
             "androidx.room.",
             "fr.forumhfr.redface2.core.database.",
             "fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog",
+            "java.lang.System",
+            "java.util.logging.",
+            "kotlin.io.print",
         )
         val PRIVATE_CACHE_FORBIDDEN_TEXT = listOf(
             "android.util.Log",
@@ -313,6 +341,12 @@ class ArchitectureKonsistTest {
             "androidx.room.",
             "Dao",
             "DiagnosticsLog",
+        )
+        val PRIVATE_CACHE_FORBIDDEN_USAGE = listOf(
+            Regex("""\b(?:kotlin\.io\.)?print(?:ln)?\s*\("""),
+            Regex("""\b(?:java\.lang\.)?System\s*\.\s*(?:out|err)\b"""),
+            Regex("""\bjava\.util\.logging\b"""),
+            Regex("""\bprintStackTrace\s*\("""),
         )
     }
 }

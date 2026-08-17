@@ -9,6 +9,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.blacklist.BlacklistRepository
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
+import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.media.ImageSaveException
 import fr.forumhfr.redface2.core.domain.media.PostImageSaver
@@ -33,6 +34,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -446,6 +448,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
         // replaces it immediately, still under the refresh indicator until mandatory network
         // revalidation completes. `page` is never advanced before an actual cache/network emission.
         var hasContent = _state.value.mode is PrivateMessageThreadUiState.Mode.Content
+        var hasEmittedPage = false
         _state.update {
             if (hasContent) {
                 it.copy(isRefreshing = true)
@@ -460,6 +463,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
                 fallbackCorrespondent = null,
             ).collect { loadedPage ->
                 val thread = loadedPage.thread
+                hasEmittedPage = true
                 hasContent = true
                 _state.update {
                     it.copy(
@@ -480,6 +484,14 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
                     maybeSchedulePrivateMessagePrefetch()
                 }
             }
+            // The repository intentionally completes without an emission when its session stamp is
+            // refused. If the SAME account still owns this load, the refusal is the invalidator race
+            // from #1086: expose the existing generic retry path instead of leaving Loading (or the
+            // refresh indicator) forever. If the owner changed, the auth collector owns the reset and
+            // the replacement load; never turn that genuine cross-account refusal into a fake error.
+            if (!hasEmittedPage && isCurrentLoadOwner(owner)) {
+                surfaceLoadFailure(hasContent, HfrErrorKind.Other)
+            }
         } catch (cancellation: CancellationException) {
             // Deliberately does NOT clear isRefreshing: a cancellation only comes from a
             // superseding load() (which owns the flag from its own start) or from
@@ -494,16 +506,28 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
             // (classifyHfrError) so the screen can tell an HFR 5xx outage from a network cut.
             @Suppress("TooGenericExceptionCaught") error: Exception,
         ) {
-            if (hasContent) {
-                // #351 — the page on screen stays put (it is still valid); the screen surfaces
-                // a one-shot Toast instead of swapping a readable conversation for an Error
-                // placeholder. Initial loads (nothing on screen) keep the Error + Retry path.
-                _state.update { it.copy(isRefreshing = false) }
-                _effects.send(PrivateMessageThreadEffect.RefreshFailed)
-            } else {
-                _state.update {
-                    it.copy(mode = PrivateMessageThreadUiState.Mode.Error(classifyHfrError(error)))
-                }
+            surfaceLoadFailure(hasContent, classifyHfrError(error))
+        }
+    }
+
+    private suspend fun isCurrentLoadOwner(owner: String): Boolean =
+        (authRepository.observeAuthState().first() as? AuthState.Authenticated)
+            ?.pseudo
+            ?.let(::canonicalizePseudo) == canonicalizePseudo(owner)
+
+    private suspend fun surfaceLoadFailure(hasContent: Boolean, kind: HfrErrorKind) {
+        if (hasContent) {
+            // #351 — the page on screen stays put (it is still valid); the screen surfaces
+            // a one-shot Toast instead of swapping a readable conversation for an Error
+            // placeholder. Initial loads (nothing on screen) keep the Error + Retry path.
+            _state.update { it.copy(isRefreshing = false) }
+            _effects.send(PrivateMessageThreadEffect.RefreshFailed)
+        } else {
+            _state.update {
+                it.copy(
+                    mode = PrivateMessageThreadUiState.Mode.Error(kind),
+                    isRefreshing = false,
+                )
             }
         }
     }

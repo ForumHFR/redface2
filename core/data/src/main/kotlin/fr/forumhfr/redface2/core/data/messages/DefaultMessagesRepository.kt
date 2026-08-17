@@ -194,6 +194,10 @@ class DefaultMessagesRepository @Inject internal constructor(
         fetchAndCacheThreadPage(threadId, page, fallbackCorrespondent, stamp)?.let { parsed ->
             emit(PrivateMessageThreadPage(parsed, PrivateMessageThreadPage.Source.NETWORK))
         }
+        // A stale stamp deliberately produces no terminal emission: turning the refusal into data
+        // here would let a response owned by a previous generation cross the repository boundary.
+        // The conversation ViewModel owns the empty-collection UI fallback and scopes it to the
+        // account that started the load, so a real account switch stays a refusal.
     }.flowOn(ioDispatcher)
 
     override suspend fun prefetchPrivateMessageThread(threadId: Int, page: Int) =
