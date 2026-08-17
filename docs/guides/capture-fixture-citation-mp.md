@@ -20,7 +20,7 @@ Les trois captures MP du lot 4 peuvent être enchaînées dans une session par [
 > a produit `private_message_quote_form.html` et son témoin `private_message_reply_form.html`. Ce
 > qu'elle a mesuré, et les deux écarts constatés par rapport à ce qu'elle anticipait, sont consignés
 > au § « Résultat de la première exécution » en fin de page ; le contrat lui-même vit dans
-> [protocol-hfr.md]({{ site.baseurl }}/specs/protocol-hfr) § « MP — citer un message ».
+> [protocol-hfr.md]({{ site.baseurl }}/specs/protocol-hfr) § « MP/DT — citer un message ».
 
 ## Pourquoi cette recette vit dans `docs/guides/`
 
