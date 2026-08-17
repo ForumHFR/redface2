@@ -37,6 +37,7 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
@@ -406,6 +407,67 @@ class PrivateMessageThreadViewModelTest {
         val mode = viewModel.state.value.mode
         assertTrue(mode is PrivateMessageThreadUiState.Mode.Error)
         assertEquals(HfrErrorKind.Network, (mode as PrivateMessageThreadUiState.Mode.Error).kind)
+    }
+
+    @Test
+    fun `a zero-emission initial load surfaces a retryable generic Error`() = runTest {
+        // #1086 — the repository refuses a response whose session-cache stamp lost the race with
+        // invalidation by completing without data. This is not a network failure: the ViewModel
+        // maps the empty collection to the privacy-safe generic error, whose existing button retries.
+        val repository = mockk<MessagesRepository>()
+        val recovered = thread(page = 1, totalPages = 1)
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns emptyFlow() andThen network(recovered)
+
+        val viewModel = threadViewModel(repository)
+
+        val refused = viewModel.state.value.mode
+        assertTrue(refused is PrivateMessageThreadUiState.Mode.Error)
+        assertEquals(HfrErrorKind.Other, (refused as PrivateMessageThreadUiState.Mode.Error).kind)
+
+        viewModel.retry()
+        advanceUntilIdle()
+
+        val loaded = viewModel.state.value.mode as PrivateMessageThreadUiState.Mode.Content
+        assertEquals(recovered, loaded.thread)
+        coVerify(exactly = 2) {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        }
+    }
+
+    @Test
+    fun `a zero-emission load from a replaced account cannot overwrite the new Loading state`() = runTest {
+        // The same empty completion is a deliberate refusal when A was replaced by B. The auth
+        // collector cancels A, purges its state and starts B's load; A must not pose Error over B's
+        // spinner while B is still in flight.
+        val repository = mockk<MessagesRepository>()
+        val pageForB = CompletableDeferred<PrivateMessageThread>()
+        val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
+        var calls = 0
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } answers {
+            if (calls++ == 0) {
+                flow {
+                    authRepository.emit(AuthState.Authenticated("bob"))
+                    // Alice's response is refused: complete without an emission.
+                }
+            } else {
+                flow { emit(networkPage(pageForB.await())) }
+            }
+        }
+
+        val viewModel = threadViewModel(repository, authRepository = authRepository)
+        advanceUntilIdle()
+
+        val switched = viewModel.state.value
+        assertEquals(PrivateMessageThreadUiState.Mode.Loading, switched.mode)
+        assertEquals("bob", switched.connectedPseudo)
+
+        pageForB.complete(thread(page = 1, totalPages = 1))
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value.mode is PrivateMessageThreadUiState.Mode.Content)
     }
 
     @Test
