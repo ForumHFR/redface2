@@ -108,15 +108,13 @@ class PostContentParserTest {
             quotes.isNotEmpty(),
         )
         assertEquals("XaTriX", quotes.first().author)
-        // Known limitation pinned here: the logged-in oldcitation header href is a dynamic
-        // `forum2.php?...page=N...#tM` link, NOT the static `sujet_<post>_<page>.htm#tN`
-        // permalink that CITATION_HREF_REGEX matches. So page/numreponse stay null in
-        // logged-in mode → scroll-to-cited-post is inactive when authenticated. Tracked by a
-        // TODO next to CITATION_HREF_REGEX in PostContentParser; deliberate, Phase 2 work.
-        assertEquals("page stays null for the logged-in forum2.php citation href", null, quotes.first().page)
+        // The authenticated topic href now complements the static permalink form: page comes
+        // from the query string, while the cited numreponse comes from #t2785311. The query's
+        // numreponse=0 proves it cannot be used as the cited-post identifier on topics.
+        assertEquals("page is extracted from the logged-in forum2.php citation href", 25, quotes.first().page)
         assertEquals(
-            "numreponse stays null for the logged-in forum2.php citation href",
-            null,
+            "numreponse is extracted from the logged-in forum2.php citation fragment",
+            2785311,
             quotes.first().numreponse,
         )
         // The reply text outside the citation survives, and the citation header is not
@@ -131,6 +129,24 @@ class PostContentParserTest {
         assertFalse(
             "citation header `XaTriX a écrit :` must not leak into rendered text, got=$renderedText",
             renderedText.contains("XaTriX a écrit"),
+        )
+    }
+
+    @Test
+    fun `private-message citation fixture exposes its dynamic target`() {
+        val contentElement = Jsoup.parse(fixture("private_message_thread_with_quote.html"))
+            .selectFirst("div[id^=para]")
+
+        val ast = PostContentParser().parse(contentElement).ast
+
+        val quotes = ast.allBlocks().filterIsInstance<PostBlock.Quote>()
+        assertEquals("real cat=prive fixture should contain one quote", 1, quotes.size)
+        assertEquals("TestUser", quotes.single().author)
+        assertEquals("page is extracted from the cat=prive query string", 1, quotes.single().page)
+        assertEquals(
+            "numreponse is extracted from the cat=prive citation fragment",
+            1980000101,
+            quotes.single().numreponse,
         )
     }
 
