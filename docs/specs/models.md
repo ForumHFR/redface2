@@ -590,8 +590,8 @@ data class NewMultiMP(
 Le MVP Phase 3 #298 ne couvrait que la **lecture** des MPs classiques
 (`PrivateMessageSummary`, `PrivateMessageListPage`, `PrivateMessageThread`). La suite
 Phase 3 est **désormais livrée** (Phase 3 close) : `NewMP` et `NewMultiMP` (composition),
-reply MP (#301), citation simple par message (#1074, contrat GET mesuré en #1041 mais aucun
-POST live), gestion des membres MultiMP via
+reply MP (#301), citation simple par message (#1074, contrat GET mesuré en 1:1 par #1041 puis en DT
+le 2026-08-17, mais aucun POST live), gestion des membres MultiMP via
 `newdest` (#606/#612), et
 MPStorage (lecture + seed des positions DT + écriture opt-in #593/#597, cf. § MPStorage
 ci-dessous). Le seul reste hors clôture est la synchronisation MPStorage bidirectionnelle

@@ -1,0 +1,46 @@
+Provenance — private_message_thread_with_quote.html (#1074, saut vers un message cité en MP)
+
+FIXTURE RÉDUITE. Capture authentifiée live du 2026-08-17, compte du mainteneur en LECTURE SEULE,
+sur une conversation privée 1:1 réelle déjà utilisée par les fixtures MP, avec son autorisation
+explicite. Aucun message n'a été envoyé pendant la capture.
+
+Séquence : POST login_validation.php (cookie jar sous /tmp, jamais -L), puis GET authentifié de la
+page de conversation `forum2.php?cat=prive`. Aucun formulaire de cette page n'a été soumis.
+
+URL capturée (identifiants déjà remplacés par leurs valeurs fictives) :
+  /forum2.php?config=hfr.inc&cat=prive&post=3000001&page=1&p=1&sondage=0&owntopic=0&trash=0
+  &trash_post=0&print=0&numreponse=0&quote_only=0&new=0&nojs=0
+
+RÉDUCTION guidée par le code : `PrivateMessageThreadParser` délègue chaque `div[id^=para]` à
+`PostsParser`, puis `PostContentParser` cherche dans ce contenu
+`table.citation b.s1 a.Topic`. La fixture ne conserve donc que le `div[id^=para]` du message utile,
+et dans celui-ci la `table.citation` contenant l'en-tête et son lien. Tout le reste est RETIRÉ :
+- chrome, onglets, recherche rapide, pager, sujet et pied de page ;
+- autres messages, corps de la réponse hôte, récapitulatifs, vue rapide et formulaires ;
+- auteurs hors citation, dates, profils, avatars, signatures, smileys favoris et ignore-lists ;
+- toutes les toolbars par message et tous leurs `md_*cryptlink`.
+
+Les huit cryptlinks du brut ont TOUS été décodés avant réduction : #1 portail www.hardware.fr,
+#2 `/unlog.php?config&codehex` (jeton de déconnexion), #3 `/user/editprofil.php?config`,
+#4 `/online.php?config`, #5 et #7 liens d'édition `message.php?numreponse`, #6 et #8 liens de citation
+`message.php?numrep&ref`. Tous étaient hors du `div[id^=para]` utile et ont été retirés ; aucun
+cryptlink encodé ou décodé ne subsiste.
+
+CE QUE LA FIXTURE PROUVE :
+- dans une conversation privée rendue par HFR, l'en-tête d'une citation utilise le lien dynamique
+  `/forum2.php?config=hfr.inc&cat=prive&post={threadId}&page={N}&…&numreponse={cité}…#t{cité}` ;
+- cette forme ne correspond pas au motif topic actuel
+  `sujet_{topicId}_{page}.htm#t{numreponse}` de `PostContentParser` ;
+- le sous-arbre `table.citation` et les classes lues par le parser sont ceux servis réellement.
+
+La fixture ne revendique PAS le support du saut : l'extension du motif et son test appartiennent à
+la PR suivante. Elle apporte uniquement la preuve positive capturée.
+
+SANITISATION (mapping fictif stable) :
+- conversation 1:1 existante -> post=3000001 ; compte courant -> TestUser ;
+- message cité -> numreponse=1980000101 et ancre #t1980000101 ; message hôte -> para1980000102 ;
+- corps cité réel -> « Message prive cite de test (contenu remplace). » ;
+- sujet, réponse hôte, correspondant et toutes les autres identités ont disparu à la réduction ;
+- paramètres de routage non identifiants et structure HTML de la citation conservés.
+
+Le brut de la capture n'est PAS conservé dans le dépôt.

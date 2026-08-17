@@ -626,12 +626,13 @@ Gestion des destinataires d'une conversation MultiMP / DT par son **owner** (#60
 - La mutation produit un **message système « Modération »** dans le fil (trace serveur de l'ajout/retrait).
 - Un non-owner ne voit pas `newdest` préempli : pour lui le POST de réponse ne touche pas la composition de la conversation.
 
-### MP — citer un message (vérifié live 2026-08-12, #1041)
+### MP/DT — citer un message (1:1 vérifié le 2026-08-12, DT le 2026-08-17)
 
 Seul inconnu serveur du chantier [#1040](https://github.com/ForumHFR/redface2/issues/1040) (partage
-de la surface de lecture Topic → MP), tranché par deux captures authentifiées de la **même**
-conversation `cat=prive` dans la **même** session : `private_message_quote_form.html` et son témoin
-`private_message_reply_form.html`. Aucun POST n'a été émis.
+de la surface de lecture Topic → MP), d'abord tranché en 1:1 par deux captures authentifiées de la
+**même** conversation `cat=prive` dans la **même** session : `private_message_quote_form.html` et son
+témoin `private_message_reply_form.html`. Le contrat a ensuite été reproduit en DT par
+`private_message_dt_quote_form.html` (#1074). Aucun POST n'a été émis.
 
 Chaque message d'une page `cat=prive` porte son lien « citer » :
 
@@ -653,6 +654,13 @@ et la même forme qu'une citation de topic**. Ce qui le distingue :
 - options en vraies cases à cocher (`signature` cochée par défaut) et `MsgIcon=1` pré-coché, comme
   tout formulaire `message.php`.
 
+La capture DT sert exactement les mêmes **20 champs cachés** que la citation 1:1, avec
+`cat=prive`, `numreponse=""`, `numrep` = message cité, aucun champ caché `ref` et aucun `newdest`.
+Elle ne rend pas non plus de ligne « Destinataires ». Le `ref=0` et l'absence de `numreponse`
+observés auparavant appartiennent au formulaire de **réponse** DT owner : ils ne se transportent pas
+au formulaire de citation. Sur appareil, « Citer » dans un DT ouvre l'éditeur prérempli par HFR sans
+erreur ; aucun envoi live n'a été tenté.
+
 **`numrep` a trois sens selon le formulaire servi** — ne jamais en déduire une sémantique unique :
 
 | Formulaire | Origine | `numrep` | `content_form` |
@@ -661,11 +669,11 @@ et la même forme qu'une citation de topic**. Ce qui le distingue :
 | Réponse simple | `message.php` suivi depuis `form#repondre_form` | **vide** | vide |
 | Citation | `message.php` suivi depuis le lien « citer » | **message cité** | `[quotemsg=…]` |
 
-Conséquence pour le lot 4 de #1040 : la citation MP ne demande **aucun** nouveau parser ni champ
+Conséquence pour le lot 4 de #1040 : la citation MP/DT ne demande **aucun** nouveau parser ni champ
 supplémentaire — `ReplyFormParser` transporte déjà tous les champs cachés verbatim et le
-`content_form` prérempli. Ce qui reste à écrire est l'affordance « citer » par message côté app et le
-scope typé de la clé du panier multi-quote (`cat=prive` est une chaîne, `numreponse` n'est unique que
-par catégorie).
+`content_form` prérempli. La citation simple est livrée ; le panier de citation multiple reste absent
+et demande toujours un scope typé (`cat=prive` est une chaîne, `numreponse` n'est unique que par
+catégorie).
 
 ### Écriture MPStorage — read-modify-write `bdd.php cat=prive` (#593/#597)
 
