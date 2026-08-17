@@ -87,6 +87,28 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     private var blacklistJob: Job? = null
     private var blockedCanonicals: Set<String> = emptySet()
 
+    /**
+     * #1074 — MP-specific cited-message landing. Unlike the topic engine, this owner includes the
+     * authenticated account. A cross-page jump dispatches only from a terminal NETWORK page; a
+     * same-page user tap can use the content already rendered. [page] starts as the requested page
+     * and is replaced by the parsed [PrivateMessageThread.page] before dispatch, so an HFR
+     * out-of-bounds fallback can never leave an effect scoped to a page that was not rendered.
+     */
+    private var landingGeneration: Int = 0
+    private var pendingCitedMessageLanding: ArmedCitedMessageLanding? = null
+    private var activeLoadOwner: CitedMessageLandingOwner? = null
+
+    private data class CitedMessageLandingOwner(
+        val generation: Int,
+        val account: String,
+        val page: Int,
+    )
+
+    private data class ArmedCitedMessageLanding(
+        val numreponse: Int,
+        val owner: CitedMessageLandingOwner,
+    )
+
     // #612 — participant roster. Single in-flight fetch (dedup on rapid taps / recomposition) and a
     // memory cache for the life of the screen: re-opening the sheet reuses the parsed list without a
     // second network round-trip. `null` means « not yet loaded ».
@@ -143,6 +165,21 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     fun selectPage(page: Int) {
         if (page < 1) return
         load(page)
+    }
+
+    /**
+     * #1074 — jumps to the message referenced by a parsed quote header. A target already on the
+     * rendered page is dispatched immediately without a load. A cross-page target is armed before
+     * the cache-aside request starts; only its terminal network emission may consume the landing.
+     */
+    fun goToCitedMessage(targetPage: Int, numreponse: Int) {
+        if (targetPage < 1 || numreponse < 1) return
+        val content = _state.value.mode as? PrivateMessageThreadUiState.Mode.Content ?: return
+        if (content.thread.page == targetPage) {
+            landOnDisplayedMessage(content.thread, numreponse)
+        } else {
+            load(targetPage, citedNumreponse = numreponse)
+        }
     }
 
     fun retry() {
@@ -325,6 +362,9 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
         val egoQuoteEnabled = _state.value.egoQuoteEnabled
         val egoPostEnabled = _state.value.egoPostEnabled
         authenticatedPseudo = null
+        landingGeneration++
+        pendingCitedMessageLanding = null
+        activeLoadOwner = null
         loadJob?.cancel()
         prefetchJob?.cancel()
         prefetchedGroup = null
@@ -374,15 +414,26 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
      * under B's userId (review Codex PR #462).
      */
     private fun loadInitial() {
+        val account = authenticatedPseudo ?: return
+        val generation = ++landingGeneration
+        pendingCitedMessageLanding = null
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
-            val owner = authenticatedPseudo ?: return@launch
-            fetchPage(openingPage(owner))
+            val page = openingPage(account)
+            val owner = CitedMessageLandingOwner(generation, account, page)
+            if (!isCurrentLandingOwner(owner)) return@launch
+            activeLoadOwner = owner
+            try {
+                fetchPage(owner)
+            } finally {
+                if (activeLoadOwner == owner) activeLoadOwner = null
+            }
         }
     }
 
-    private fun load(page: Int) {
-        if (authenticatedPseudo == null) {
+    private fun load(page: Int, citedNumreponse: Int? = null) {
+        val account = authenticatedPseudo
+        if (account == null) {
             clearPrivateState()
             return
         }
@@ -390,8 +441,17 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
         // visible-page request suspends. A same-page refresh keeps its best-effort group intact.
         if (page != _state.value.page) prefetchJob?.cancel()
         loadJob?.cancel()
+        val owner = CitedMessageLandingOwner(++landingGeneration, account, page)
+        pendingCitedMessageLanding = citedNumreponse?.let { numreponse ->
+            ArmedCitedMessageLanding(numreponse, owner)
+        }
+        activeLoadOwner = owner
         loadJob = viewModelScope.launch {
-            fetchPage(page)
+            try {
+                fetchPage(owner)
+            } finally {
+                if (activeLoadOwner == owner) activeLoadOwner = null
+            }
         }
     }
 
@@ -441,9 +501,10 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
             .mapTo(mutableSetOf()) { message -> message.numreponse }
     }
 
-    private suspend fun fetchPage(page: Int) {
+    private suspend fun fetchPage(owner: CitedMessageLandingOwner) {
         // Snapshot of the session that issued this fetch — savePosition is sealed to it (#462).
-        val owner = authenticatedPseudo ?: return
+        if (!isCurrentLandingOwner(owner)) return
+        val page = owner.page
         // Keep the displayed conversation on screen while (re)loading. A hit for the target page
         // replaces it immediately, still under the refresh indicator until mandatory network
         // revalidation completes. `page` is never advanced before an actual cache/network emission.
@@ -462,6 +523,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
                 page = page,
                 fallbackCorrespondent = null,
             ).collect { loadedPage ->
+                if (!isCurrentLandingOwner(owner)) return@collect
                 val thread = loadedPage.thread
                 hasEmittedPage = true
                 hasContent = true
@@ -478,9 +540,10 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
                     // and no MPStorage write. Only the terminal revalidation owns those side effects.
                     savePosition(
                         thread.page,
-                        owner,
+                        owner.account,
                         lastPostNumreponse = thread.messages.lastOrNull()?.numreponse,
                     )
+                    dispatchPendingCitedMessageLanding(thread, owner)
                     maybeSchedulePrivateMessagePrefetch()
                 }
             }
@@ -489,7 +552,12 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
             // from #1086: expose the existing generic retry path instead of leaving Loading (or the
             // refresh indicator) forever. If the owner changed, the auth collector owns the reset and
             // the replacement load; never turn that genuine cross-account refusal into a fake error.
-            if (!hasEmittedPage && isCurrentLoadOwner(owner)) {
+            if (
+                !hasEmittedPage &&
+                isCurrentLandingOwner(owner) &&
+                isCurrentLoadOwner(owner.account)
+            ) {
+                clearCitedMessageLanding(owner)
                 surfaceLoadFailure(hasContent, HfrErrorKind.Other)
             }
         } catch (cancellation: CancellationException) {
@@ -506,9 +574,77 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
             // (classifyHfrError) so the screen can tell an HFR 5xx outage from a network cut.
             @Suppress("TooGenericExceptionCaught") error: Exception,
         ) {
-            surfaceLoadFailure(hasContent, classifyHfrError(error))
+            if (isCurrentLandingOwner(owner)) {
+                clearCitedMessageLanding(owner)
+                surfaceLoadFailure(hasContent, classifyHfrError(error))
+            }
         }
     }
+
+    private fun landOnDisplayedMessage(thread: PrivateMessageThread, numreponse: Int) {
+        val account = authenticatedPseudo ?: return
+        val activeOwner = activeLoadOwner
+        val supersedesCrossPageLoad = activeOwner != null && activeOwner.page != thread.page
+        // Preserve mandatory network revalidation when the displayed page came from cache. Only a
+        // load aimed at ANOTHER page is superseded by this newer, explicitly local jump.
+        val owner = if (supersedesCrossPageLoad) {
+            loadJob?.cancel()
+            activeLoadOwner = null
+            _state.update { current -> current.copy(isRefreshing = false) }
+            CitedMessageLandingOwner(++landingGeneration, account, thread.page)
+        } else {
+            activeOwner
+                ?.takeIf { candidate -> candidate.account == account }
+                ?: CitedMessageLandingOwner(landingGeneration, account, thread.page)
+        }
+        pendingCitedMessageLanding = ArmedCitedMessageLanding(numreponse, owner)
+        dispatchPendingCitedMessageLanding(thread, owner, appliesWhileRefreshing = true)
+    }
+
+    /**
+     * Consumes one armed jump against the page HFR actually rendered. The cache COLLECTION path
+     * never calls this method; only an explicit same-page tap may use cached content. Missing targets
+     * are terminal too: the compare-and-clear prevents the old jump from firing later on an
+     * unrelated page, without erasing a newer owner's landing.
+     */
+    private fun dispatchPendingCitedMessageLanding(
+        thread: PrivateMessageThread,
+        loadOwner: CitedMessageLandingOwner,
+        appliesWhileRefreshing: Boolean = false,
+    ) {
+        val armed = pendingCitedMessageLanding
+            ?.takeIf { landing -> landing.owner == loadOwner }
+            ?: return
+        val parsed = armed.copy(owner = loadOwner.copy(page = thread.page))
+        if (pendingCitedMessageLanding == armed) pendingCitedMessageLanding = parsed
+        val targetExists = thread.threadId == request.threadId &&
+            thread.messages.any { message -> message.numreponse == parsed.numreponse }
+        if (targetExists) {
+            val delivered = _effects.trySend(
+                PrivateMessageThreadEffect.ScrollToCitedMessage(
+                    page = thread.page,
+                    numreponse = parsed.numreponse,
+                    account = parsed.owner.account,
+                    appliesWhileRefreshing = appliesWhileRefreshing,
+                ),
+            ).isSuccess
+            if (delivered) clearCitedMessageLanding(parsed)
+        } else {
+            clearCitedMessageLanding(parsed)
+        }
+    }
+
+    private fun clearCitedMessageLanding(owner: CitedMessageLandingOwner) {
+        val armed = pendingCitedMessageLanding ?: return
+        if (armed.owner == owner) pendingCitedMessageLanding = null
+    }
+
+    private fun clearCitedMessageLanding(armed: ArmedCitedMessageLanding) {
+        if (pendingCitedMessageLanding == armed) pendingCitedMessageLanding = null
+    }
+
+    private fun isCurrentLandingOwner(owner: CitedMessageLandingOwner): Boolean =
+        owner.generation == landingGeneration && owner.account == authenticatedPseudo
 
     private suspend fun isCurrentLoadOwner(owner: String): Boolean =
         (authRepository.observeAuthState().first() as? AuthState.Authenticated)

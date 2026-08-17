@@ -66,10 +66,10 @@ import fr.forumhfr.redface2.core.domain.ego.deriveEgoCanonicalPseudo
 import fr.forumhfr.redface2.core.domain.ego.isEgoPost
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
 import fr.forumhfr.redface2.core.model.Post
+import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
 import fr.forumhfr.redface2.core.model.write.PrivateMessageQuote
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
-import fr.forumhfr.redface2.core.ui.list.ScrollToTopOnPageChange
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
 import fr.forumhfr.redface2.core.ui.post.CreatorPseudoText
 import fr.forumhfr.redface2.core.ui.post.HiddenPostCard
@@ -124,11 +124,29 @@ fun PrivateMessageThreadScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val mode = state.mode
     val networkLoadedThread = mode.networkLoadedThreadOrNull()
+    // #1074 — the screen owns the suspending list scroll. A newer effect replaces an older one;
+    // completion below compare-and-clears the exact effect so it cannot erase that newer landing.
+    var citedMessageLanding by remember {
+        mutableStateOf<PrivateMessageThreadEffect.ScrollToCitedMessage?>(null)
+    }
 
     PrivateMessageThreadPrefetchLifecycleGate(viewModel::setPrefetchActive)
 
     LaunchedEffect(networkLoadedThread) {
         if (networkLoadedThread != null) onLoaded()
+    }
+
+    // A logout/account switch removes Content before the replacement account loads. Drop any
+    // already-delivered scroll effect here as well as in the ViewModel, so logging back into the
+    // same pseudo cannot replay a landing whose composition was cancelled by the private-state purge.
+    LaunchedEffect(mode is PrivateMessageThreadUiState.Mode.Content, state.connectedPseudo) {
+        val landing = citedMessageLanding
+        if (
+            landing != null &&
+            (mode !is PrivateMessageThreadUiState.Mode.Content || landing.account != state.connectedPseudo)
+        ) {
+            if (citedMessageLanding == landing) citedMessageLanding = null
+        }
     }
 
     // #351 — one-shot effects (same idiom as TopicScreen): a keep-content load failure keeps the
@@ -138,6 +156,9 @@ fun PrivateMessageThreadScreen(
     LaunchedEffect(Unit) {
         viewModel.effects.collect { effect ->
             when (effect) {
+                is PrivateMessageThreadEffect.ScrollToCitedMessage -> {
+                    citedMessageLanding = effect
+                }
                 PrivateMessageThreadEffect.RefreshFailed -> {
                     android.widget.Toast.makeText(
                         context,
@@ -192,9 +213,22 @@ fun PrivateMessageThreadScreen(
                     )
                 }
             },
-            onRetry = viewModel::retry,
-            onRefresh = viewModel::refresh,
-            onSelectPage = viewModel::selectPage,
+            onRetry = {
+                citedMessageLanding = null
+                viewModel.retry()
+            },
+            onRefresh = {
+                citedMessageLanding = null
+                viewModel.refresh()
+            },
+            onSelectPage = { page ->
+                citedMessageLanding = null
+                viewModel.selectPage(page)
+            },
+            onGoToCitedPost = { page, numreponse ->
+                citedMessageLanding = null
+                viewModel.goToCitedMessage(page, numreponse)
+            },
             onOpenRoster = viewModel::openRoster,
             onDismissRoster = viewModel::dismissRoster,
             onRetryRoster = viewModel::retryRoster,
@@ -205,6 +239,12 @@ fun PrivateMessageThreadScreen(
             onOpenProfile = onOpenProfile,
             onSetAuthorBlocked = viewModel::setAuthorBlocked,
             onSaveImage = viewModel::saveImage,
+        ),
+        citedMessageLanding = PrivateMessageCitedLanding(
+            effect = citedMessageLanding,
+            onConsumed = { consumed ->
+                if (citedMessageLanding == consumed) citedMessageLanding = null
+            },
         ),
         topBarActions = topBarActions,
     )
@@ -234,6 +274,97 @@ internal fun PrivateMessageThreadUiState.Mode.networkLoadedThreadOrNull() =
         ?.thread
 
 /**
+ * Screen-owned one-shot cited-message landing and its compare-and-clear acknowledgement. The value
+ * and callback deliberately travel together: they form one state-hoisted protocol with the same
+ * owner and lifetime, rather than two independent user actions in [PrivateMessageThreadCallbacks].
+ */
+internal data class PrivateMessageCitedLanding(
+    val effect: PrivateMessageThreadEffect.ScrollToCitedMessage? = null,
+    val onConsumed: (PrivateMessageThreadEffect.ScrollToCitedMessage) -> Unit = {},
+)
+
+private data class CitedMessageLandingDecision(
+    val localTargetIndex: Int? = null,
+    val landingToAcknowledge: PrivateMessageThreadEffect.ScrollToCitedMessage? = null,
+)
+
+/** Resolves whether the cited target applies locally, remains armed remotely, or is now stale. */
+private fun decideCitedMessageLanding(
+    citedMessageLanding: PrivateMessageCitedLanding,
+    thread: PrivateMessageThread,
+    connectedPseudo: String?,
+    isRefreshing: Boolean,
+): CitedMessageLandingDecision {
+    val landing = citedMessageLanding.effect
+    return if (landing == null) {
+        CitedMessageLandingDecision()
+    } else {
+        val accountChanged = landing.account != connectedPseudo
+        val targetsRenderedPage = landing.page == thread.page
+        val remoteTargetStillArmed = isRefreshing &&
+            (!landing.appliesWhileRefreshing || !targetsRenderedPage)
+        when {
+            accountChanged -> CitedMessageLandingDecision(landingToAcknowledge = landing)
+            remoteTargetStillArmed -> CitedMessageLandingDecision()
+            !targetsRenderedPage -> CitedMessageLandingDecision(landingToAcknowledge = landing)
+            else -> {
+                val targetIndex = thread.messages.indexOfFirst { message ->
+                    message.numreponse == landing.numreponse
+                }
+                CitedMessageLandingDecision(
+                    localTargetIndex = targetIndex.takeIf { index -> index >= 0 },
+                    landingToAcknowledge = landing,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * #351/#1074 — the MP list has one landing authority. A normal rendered-page change goes to the
+ * top, while a cited-message effect for that page/account goes to the keyed message and
+ * wins over the top reset. [LaunchedEffect] cancellation scopes the suspending scroll to the
+ * rendered page, account and refresh owner. [PrivateMessageCitedLanding.onConsumed] runs only after
+ * the scroll (or the terminal missing-target decision); the screen compare-and-clears that exact
+ * effect so a newer landing cannot be erased by an older completion.
+ */
+@Composable
+internal fun PrivateMessagePageLandingEffect(
+    listState: LazyListState,
+    thread: PrivateMessageThread,
+    connectedPseudo: String?,
+    isRefreshing: Boolean,
+    citedMessageLanding: PrivateMessageCitedLanding,
+) {
+    val lastRenderedPage = remember { mutableStateOf<Int?>(null) }
+    val currentOnConsumed by rememberUpdatedState(citedMessageLanding.onConsumed)
+    val citedLanding = citedMessageLanding.effect
+    val renderedPage = thread.page
+    val messages = thread.messages
+    LaunchedEffect(renderedPage, connectedPseudo, isRefreshing, citedLanding, messages) {
+        val landingDecision = decideCitedMessageLanding(
+            citedMessageLanding = citedMessageLanding,
+            thread = thread,
+            connectedPseudo = connectedPseudo,
+            isRefreshing = isRefreshing,
+        )
+        val pageChanged = lastRenderedPage.value != null && lastRenderedPage.value != renderedPage
+        when {
+            // The cited target has explicit priority when it arrives with a rendered-page change.
+            landingDecision.localTargetIndex != null -> {
+                listState.scrollToItem(landingDecision.localTargetIndex)
+            }
+            pageChanged -> listState.scrollToItem(0)
+        }
+        lastRenderedPage.value = renderedPage
+
+        landingDecision.landingToAcknowledge?.let { landing ->
+            currentOnConsumed(landing)
+        }
+    }
+}
+
+/**
  * State-hoisted callbacks for [PrivateMessageThreadContent]. Keeping this seam free of Hilt makes
  * the complete thread surface characterizable in JVM Compose tests while the public screen remains
  * the sole owner of the ViewModel and route arguments.
@@ -249,6 +380,8 @@ internal data class PrivateMessageThreadCallbacks(
     val onDismissRoster: () -> Unit,
     val onRetryRoster: () -> Unit,
     val onManageRecipients: () -> Unit,
+    /** Parsed quote-header target; production routes it to the page-scoped ViewModel landing. */
+    val onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
     /** Null only in isolated hosts; production supplies it and the list applies reply/ref gates. */
     val onQuote: ((Post) -> Unit)? = null,
     // #1042 — defaulted (unlike its siblings) so the pre-#1042 characterization mounts compile
@@ -271,6 +404,7 @@ internal fun PrivateMessageThreadContent(
     state: PrivateMessageThreadUiState,
     isMultiRecipientHint: Boolean,
     callbacks: PrivateMessageThreadCallbacks,
+    citedMessageLanding: PrivateMessageCitedLanding = PrivateMessageCitedLanding(),
     topBarActions: @Composable (() -> Unit)? = null,
 ) {
     val mode = state.mode
@@ -414,10 +548,16 @@ internal fun PrivateMessageThreadContent(
                 }
 
                 is PrivateMessageThreadUiState.Mode.Content -> {
-                    // #351c — moved to :core:ui (was a local copy here). Lands at the top when a NEW
-                    // page replaces the kept-on-screen one; the null guard on the first render keeps a
-                    // restored position on rotation/recreation.
-                    ScrollToTopOnPageChange(listState = listState, renderedPage = mode.thread.page)
+                    // #1074 — one effect owns both default page-top and cited-message landings, so
+                    // the former cannot overwrite the latter. The target wins when both arrive in
+                    // the same recomposition; a page/account change cancels the suspending scroll.
+                    PrivateMessagePageLandingEffect(
+                        listState = listState,
+                        thread = mode.thread,
+                        connectedPseudo = state.connectedPseudo,
+                        isRefreshing = state.isRefreshing,
+                        citedMessageLanding = citedMessageLanding,
+                    )
                     // #335/#351 — pull-to-refresh re-fetches the displayed page; the indicator also
                     // covers the keep-content page changes (same isRefreshing flag).
                     PullToRefreshBox(
@@ -448,6 +588,7 @@ internal fun PrivateMessageThreadContent(
                                 canReply = mode.thread.canReply,
                                 onSelectPage = callbacks.onSelectPage,
                                 onQuote = callbacks.onQuote,
+                                onGoToCitedPost = callbacks.onGoToCitedPost,
                                 onOpenProfile = callbacks.onOpenProfile,
                                 onOpenMessageMenu = openMessageMenu,
                                 onImageLongPress = postImageActions.onLongPress,
@@ -710,6 +851,7 @@ private fun ThreadMessages(
     canReply: Boolean,
     onSelectPage: (Int) -> Unit,
     onQuote: ((Post) -> Unit)?,
+    onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)?,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit,
     onOpenMessageMenu: (Post) -> Unit,
     onImageLongPress: (PostImageTarget) -> Unit,
@@ -799,6 +941,7 @@ private fun ThreadMessages(
                     },
                     onOpenMenu = { onOpenMessageMenu(message) },
                     onImageLongPress = onImageLongPress,
+                    onGoToCitedPost = onGoToCitedPost,
                     // #1074 — MP citation is fail-closed: unlike the topic fallback, the measured
                     // contract requires the server-provided 1-based page rank. Missing/zero `ref`,
                     // read-only thread, or absent host callback means no footer action.
@@ -877,6 +1020,8 @@ internal fun isHiddenMessage(message: Post, hidden: Set<Int>, revealed: Set<Int>
  * the remaining card surface opens the message menu.
  * [onImageLongPress] is likewise a capability by presence: the MP screen supplies it, while direct
  * hosts that omit it keep every content image inert (editor previews and signatures stay unchanged).
+ * [onGoToCitedPost] wires parsed quote-header targets to the thread ViewModel's page/account-scoped
+ * landing. A null host keeps the shared quote header inert.
  * [onQuote] supplies the footer « Citer » action. The list passes it only for a writable thread and
  * a message carrying a positive server-provided `quoteRef`; hidden messages never mount this card.
  * [presentation] is the shared render-only state bundle. The list derives its values from reader
@@ -893,6 +1038,7 @@ internal fun MessageCard(
     onOpenProfile: (() -> Unit)? = null,
     onOpenMenu: (() -> Unit)? = null,
     onImageLongPress: ((PostImageTarget) -> Unit)? = null,
+    onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
     onQuote: (() -> Unit)? = null,
 ) {
     // #287/#1042 — structural spacing from the active density preset, like the shared card's body.
@@ -926,6 +1072,7 @@ internal fun MessageCard(
         post = message,
         modifier = menuModifier,
         presentation = presentation,
+        onGoToCitedPost = onGoToCitedPost,
         onImageLongPress = onImageLongPress,
         identity = {
             // An MP has no anchor/category tint, but still carries the same full-width identity band
