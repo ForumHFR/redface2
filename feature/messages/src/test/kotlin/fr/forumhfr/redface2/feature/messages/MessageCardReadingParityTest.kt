@@ -21,10 +21,20 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
+import androidx.test.core.app.ApplicationProvider
+import coil3.ColorImage
+import coil3.ImageLoader
+import coil3.SingletonImageLoader
+import coil3.annotation.DelicateCoilApi
+import coil3.intercept.Interceptor
+import coil3.request.CachePolicy
+import coil3.request.ImageResult
+import coil3.test.FakeImageLoaderEngine
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
+import fr.forumhfr.redface2.core.model.SmileyKind
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.post.CREATOR_PSEUDO_TEXT_TAG
 import fr.forumhfr.redface2.core.ui.post.POST_CARD_SHELL_DIVIDER_TAG
@@ -33,6 +43,7 @@ import fr.forumhfr.redface2.core.ui.theme.DisplayMetrics
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 import fr.forumhfr.redface2.core.ui.theme.LocalFoldLongQuotes
 import java.time.Instant
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.awaitCancellation
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -58,6 +69,8 @@ import org.robolectric.annotation.Implements
  *  - the profile tap reaches [MessageCard.onOpenProfile] from both the avatar and the gold creator
  *    pseudo, without adding a second TalkBack heading (the #884 exactly-one-heading contract, whose
  *    two MP pseudo variants live in [MessageCardShellSmokeTest]).
+ *  - every Coil request originating from the card's MP PostContent body disables the shared disk
+ *    cache (#1096).
  */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -310,6 +323,55 @@ class MessageCardReadingParityTest {
         compose.onAllNodes(heading, useUnmergedTree = true).assertCountEquals(1)
     }
 
+    @OptIn(DelicateCoilApi::class)
+    @Test
+    fun `MP block inline and smiley requests all disable the Coil disk cache`() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val observed = CopyOnWriteArrayList<Pair<String, CachePolicy>>()
+        val recorder = object : Interceptor {
+            override suspend fun intercept(chain: Interceptor.Chain): ImageResult {
+                (chain.request.data as? String)?.let { url ->
+                    if (url in MEDIA_URLS) observed += url to chain.request.diskCachePolicy
+                }
+                return chain.proceed()
+            }
+        }
+        val engine = FakeImageLoaderEngine.Builder()
+            .intercept(BLOCK_IMAGE_URL, ColorImage(width = 640, height = 480))
+            .intercept(INLINE_IMAGE_URL, ColorImage(width = 320, height = 240))
+            .intercept(SMILEY_URL, ColorImage(width = 16, height = 16))
+            .build()
+        SingletonImageLoader.setUnsafe(
+            ImageLoader.Builder(context).components {
+                add(recorder)
+                add(engine)
+            }.build(),
+        )
+
+        try {
+            compose.setContent {
+                RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                    MessageCard(message = sampleMessage(content = mediaContent()))
+                }
+            }
+
+            compose.waitUntil(timeoutMillis = 5_000) {
+                val counts = observed.groupingBy { it.first }.eachCount()
+                counts.getOrDefault(BLOCK_IMAGE_URL, 0) >= 1 &&
+                    counts.getOrDefault(INLINE_IMAGE_URL, 0) >= 1 &&
+                    counts.getOrDefault(SMILEY_URL, 0) >= 1
+            }
+
+            assertEquals(MEDIA_URLS, observed.map { it.first }.toSet())
+            assertTrue(
+                "every MP probe and painter request must disable disk reads and writes: $observed",
+                observed.all { (_, policy) -> policy == CachePolicy.DISABLED },
+            )
+        } finally {
+            SingletonImageLoader.reset()
+        }
+    }
+
     private fun measuredBodyGutterDp(): Float = measuredGutterDp(BODY_TEXT)
 
     private fun measuredGutterDp(text: String): Float {
@@ -340,6 +402,18 @@ class MessageCardReadingParityTest {
 
     private fun paragraph(text: String): PostContent = PostContent(
         blocks = listOf(PostBlock.Paragraph(inlines = listOf(PostInline.Text(text)))),
+    )
+
+    private fun mediaContent(): PostContent = PostContent(
+        blocks = listOf(
+            PostBlock.Paragraph(
+                inlines = listOf(
+                    PostInline.InlineImage(url = INLINE_IMAGE_URL, description = "image inline privée"),
+                    PostInline.Smiley(kind = SmileyKind.Builtin(":jap:"), imageUrl = SMILEY_URL),
+                ),
+            ),
+            PostBlock.Image(url = BLOCK_IMAGE_URL, description = "image bloc privée"),
+        ),
     )
 
     private fun longQuoteContent(): PostContent {
@@ -380,8 +454,12 @@ class MessageCardReadingParityTest {
         const val MARKER_TEXT = "repère hors citation"
         const val SPOILER_TEXT = "contenu secret révélé"
         const val CARD_TAG = "MessageCardUnderTest"
+        const val BLOCK_IMAGE_URL = "https://private-media.invalid/block.png"
+        const val INLINE_IMAGE_URL = "https://private-media.invalid/inline.png"
+        const val SMILEY_URL = "https://private-media.invalid/smiley.gif"
         const val DP_TOLERANCE = 0.01f
         val NO_OP: () -> Unit = {}
+        val MEDIA_URLS = setOf(BLOCK_IMAGE_URL, INLINE_IMAGE_URL, SMILEY_URL)
 
         // Same values as DisplayMetrics.Comfort, restated locally so the measurements pin the
         // MECHANISM (geometry tracks whatever preset is provided), not the shipped preset values.

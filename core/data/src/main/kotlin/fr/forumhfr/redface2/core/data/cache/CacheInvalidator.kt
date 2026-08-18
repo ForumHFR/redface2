@@ -8,6 +8,7 @@ import fr.forumhfr.redface2.core.database.dao.MpReadPositionDao
 import fr.forumhfr.redface2.core.database.dao.MpStorageLocationDao
 import fr.forumhfr.redface2.core.database.dao.UploadedImageDao
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.cache.ImageCacheMaintenance
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.model.AuthState
@@ -53,6 +54,11 @@ import kotlinx.coroutines.plus
  * transition too: the row reveals the account owns a cross-userscript storage MP and at which
  * conversation, so it must not survive the session that discovered it.
  *
+ * Coil's global image cache is wiped too (#1096). Entries created before MP requests disabled
+ * their disk cache carry no public-topic/private-message marker, so a selective purge is
+ * impossible. The safe transition therefore clears both memory and disk globally; public-topic
+ * images disappear as collateral and are downloaded again on demand.
+ *
  * On a `Authenticated(A) → Authenticated(B)` switch (login, then logout, then
  * login as someone else), we wipe rows owned by A explicitly. The session
  * cache held in [FlagRepository.clearSessionCache] is also flushed so that the
@@ -67,7 +73,7 @@ import kotlinx.coroutines.plus
  * anonymous prefetch from clobbering authenticated rows.
  */
 @Singleton
-@Suppress("LongParameterList") // All constructor args are injected per-user caches the invalidator aggregates.
+@Suppress("LongParameterList") // Injected cache seams aggregated behind the auth transition.
 class CacheInvalidator @Inject internal constructor(
     private val authRepository: AuthRepository,
     private val flagDao: FlagDao,
@@ -77,6 +83,7 @@ class CacheInvalidator @Inject internal constructor(
     private val mpStorageLocationDao: MpStorageLocationDao,
     private val flagRepository: FlagRepository,
     private val privateMessageThreadSessionCache: PrivateMessageThreadSessionCache,
+    private val imageCacheMaintenance: ImageCacheMaintenance,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) {
 
@@ -103,6 +110,8 @@ class CacheInvalidator @Inject internal constructor(
                     // lands while they run must already carry an obsolete generation and be unable
                     // to refill the RAM cache or reach the UI under the next account (#1080).
                     privateMessageThreadSessionCache.clearAndAdvanceGeneration()
+                    runCatching { imageCacheMaintenance.clearImageCache() }
+                        .onFailure { Log.w(LOG_TAG, "Failed to purge global image cache", it) }
                     runCatching { flagDao.deleteAllForUser(previousPseudo) }
                         .onFailure { Log.w(LOG_TAG, "Failed to purge flag cache for $previousPseudo", it) }
                     runCatching { mpReadPositionDao.deleteAllForUser(previousPseudo) }

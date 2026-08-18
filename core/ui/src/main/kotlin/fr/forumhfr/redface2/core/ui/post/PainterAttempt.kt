@@ -113,7 +113,7 @@ internal class PainterAttempt(
         if (!deposited && cache.get(url)?.size != painterSize) {
             Log.d(
                 MEDIA_GEOMETRY_LOG_TAG,
-                "geometry disagreement for $url: kept=${cache.get(url)?.size} painter=$painterSize " +
+                "geometry disagreement: kept=${cache.get(url)?.size} painter=$painterSize " +
                     "(first valid pair wins, §3)",
             )
         }

@@ -51,8 +51,9 @@ import kotlinx.coroutines.launch
  * - « Afficher en taille réelle (à venir) » — DISABLED placeholder (#288 « menu vitrine »
  *   pattern). The affordance remains visible until the fullscreen viewer (#182) enables it.
  *
- * The hero shows the image thumbnail (Coil caches) + the host and full URL so the user can tell
- * WHICH image the menu targets when a post carries several.
+ * The hero shows the image thumbnail + the host and full URL so the user can tell WHICH image the
+ * menu targets when a post carries several. [mediaDiskCachePolicy] follows the source surface:
+ * public topics reuse Coil's disk cache, while MP thumbnails remain memory-only (#1096).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -60,6 +61,7 @@ fun PostImageMenuSheet(
     target: PostImageTarget,
     onSave: (url: String) -> Unit,
     onDismiss: () -> Unit,
+    mediaDiskCachePolicy: PostMediaDiskCachePolicy = PostMediaDiskCachePolicy.ENABLED,
 ) {
     val sheetState = rememberModalBottomSheetState()
     val coroutineScope = rememberCoroutineScope()
@@ -78,7 +80,7 @@ fun PostImageMenuSheet(
                 .padding(horizontal = 16.dp, vertical = 8.dp)
                 .navigationBarsPadding(),
         ) {
-            PostImageMenuHero(target)
+            PostImageMenuHero(target, mediaDiskCachePolicy)
 
             Spacer(Modifier.height(16.dp))
 
@@ -138,7 +140,10 @@ fun PostImageMenuSheet(
  * (« rehost.diberie.com »); the full URL underneath disambiguates several images from the same host.
  */
 @Composable
-private fun PostImageMenuHero(target: PostImageTarget) {
+private fun PostImageMenuHero(
+    target: PostImageTarget,
+    mediaDiskCachePolicy: PostMediaDiskCachePolicy,
+) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -147,6 +152,7 @@ private fun PostImageMenuHero(target: PostImageTarget) {
         PostImageThumbnail(
             url = target.url,
             contentDescription = target.description,
+            mediaDiskCachePolicy = mediaDiskCachePolicy,
         )
         Column {
             Text(

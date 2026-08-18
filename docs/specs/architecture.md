@@ -378,14 +378,15 @@ class TopicViewModel @Inject constructor(
 | Drapeaux REST (par compte) | Cache Room (`flag_topics`) avec `userId` dans la clé primaire ; purge au logout / changement de compte par `CacheInvalidator` | 30 s (`CachePolicy.flags`) |
 | Catégories | Cache mémoire HFR-public, replay sur stale puis refresh | 24 h (`CachePolicy.categories`) |
 | Sous-catégories | Cache mémoire par `cat`, même sémantique stale-replay | 6 h (`CachePolicy.subcategories`) |
-| Smileys | Cache Coil, ne changent jamais | Infini |
+| Smileys (hors `PostContent` MP, voir ligne dédiée) | Cache Coil, ne changent jamais | Infini |
 | Avatars | Cache Coil, ETag | 1 h |
 | MultiMP flags | Room, jamais expire (donnée locale) | Permanent |
 | Position de lecture MP (par compte/conversation) | Room (`mp_read_positions`), sauvegardée à chaque page affichée ; purge au logout / changement de compte par `CacheInvalidator` | Permanent jusqu'à déconnexion |
 | Contenu des conversations MP | `PrivateMessageThreadSessionCache`, LRU mémoire processus globale de cinq pages, clé par compte/conversation/page ; hit immédiat puis revalidation réseau obligatoire ; purge logout / changement de compte par `CacheInvalidator` | Session processus |
+| Médias d'un `PostContent` MP | Requêtes Coil avec `PostMediaDiskCachePolicy.DISABLED`, probe intrinsèque compris : cache mémoire autorisé, aucune lecture/écriture du cache disque ; purge globale des caches Coil au logout / changement de compte par `CacheInvalidator` | Bitmap Coil jusqu'à éviction/déconnexion ; métadonnées intrinsèques jusqu'à éviction/process death ; aucune nouvelle entrée disque |
 | Préférences | DataStore | Permanent |
 
-> **Acté — [ADR-013]({{ site.baseurl }}/adr/013-mp-lecture-cache-prefetch) (accepté 2026-06-12)** : politique de cache des conversations MP à trois étages — position de lecture locale par conversation (survit au process death, purgée à la déconnexion), cache RAM de session, cache Room du contenu en opt-in explicite (défaut OFF, purge au logout). **État réel** : les étages 1 et 2 sont livrés. La position locale existe depuis la Phase 3 ([#430](https://github.com/ForumHFR/redface2/issues/430)) via `MpReadPositionEntity`, `RoomPrivateMessageReadPositionStore` et la table `mp_read_positions`. Le contenu passe depuis #1080 par `PrivateMessageThreadSessionCache`, LRU de cinq pages sans écriture disque, avec génération avancée synchroniquement par `CacheInvalidator` avant les purges DAO. L'étage 3 (cache Room du contenu, opt-in OFF) reste à implémenter.
+> **Acté — [ADR-013]({{ site.baseurl }}/adr/013-mp-lecture-cache-prefetch) (accepté 2026-06-12)** : politique de cache des conversations MP à trois étages — position de lecture locale par conversation (survit au process death, purgée à la déconnexion), cache RAM de session, cache Room du contenu en opt-in explicite (défaut OFF, purge au logout). **État réel** : les étages 1 et 2 sont livrés. La position locale existe depuis la Phase 3 ([#430](https://github.com/ForumHFR/redface2/issues/430)) via `MpReadPositionEntity`, `RoomPrivateMessageReadPositionStore` et la table `mp_read_positions`. Le contenu passe depuis #1080 par `PrivateMessageThreadSessionCache`, LRU de cinq pages sans écriture disque, avec génération avancée synchroniquement par `CacheInvalidator` avant les purges DAO. Depuis #1096, les médias issus de ce contenu restent eux aussi non persistants par défaut : leurs requêtes Coil désactivent le cache disque et une transition de compte purge le cache global historique, faute de marque permettant de distinguer les anciennes entrées MP des images publiques. L'étage 3 (cache Room du contenu, opt-in OFF) reste à implémenter.
 
 ### Sémantique fresh / stale
 
@@ -403,7 +404,10 @@ Le `refreshTopicPage` explicite **bypasse** le TTL et renvoie systématiquement 
 Les drapeaux sont strictement scopés par pseudo (lowercase) dans `flag_topics.userId`. À la transition `Authenticated(A) → Anonymous` ou `Authenticated(A) → Authenticated(B)`, `CacheInvalidator` :
 
 - vide les rows `flag_topics` pour l'ancien `userId` ;
-- appelle `FlagRepository.clearSessionCache()` pour purger le cache mémoire.
+- appelle `FlagRepository.clearSessionCache()` pour purger le cache mémoire ;
+- vide les caches Coil mémoire et disque. Cette purge est volontairement globale : les anciennes
+  entrées ne portent aucun marqueur MP/public, donc les images de sujets sont aussi évincées et
+  seront retéléchargées à leur prochain affichage (#1096).
 
 Les pages topic (`topic_pages` / `posts`) ne sont pas purgées : le HTML est partagé entre lecteurs, et la TTL courte de 60 s + le garde-fou `authMode` rendent la fuite de champs per-user (`isOwnPost`, `isEditable`) bornée.
 
@@ -434,7 +438,7 @@ Les requêtes de prefetch ne doivent **jamais** inclure les cookies de session �
 
 Côté cache disque, l'entrée est tagguée `authMode = ANONYMOUS` et **ne remplace pas** une row existante taguée `AUTHENTICATED` (cf. § Stratégie de cache).
 
-> **Acté — [ADR-013]({{ site.baseurl }}/adr/013-mp-lecture-cache-prefetch) (accepté 2026-06-12)** : exception **bornée aux MP** — prefetch authentifié limité aux pages adjacentes (N−1/N+1) de la conversation `cat=prive` actuellement ouverte (l'état lu/non-lu serveur est binaire par conversation et déjà consommé à l'ouverture, vérifié live dans [#361](https://github.com/ForumHFR/redface2/issues/361#issuecomment-4663312132)) ; prefetch depuis la liste interdit ; suspendu après un « marquer comme non lu » manuel jusqu'à réouverture. La garde Konsist sera **étendue** au domaine MP pour vérifier cette borne (pas une exemption). La règle générale ci-dessus reste en vigueur partout ailleurs. Pas encore implémenté (décision 3 de l'ADR).
+> **Acté — [ADR-013]({{ site.baseurl }}/adr/013-mp-lecture-cache-prefetch) (accepté 2026-06-12)** : exception **bornée aux MP** — prefetch authentifié limité aux pages adjacentes (N−1/N+1) de la conversation `cat=prive` actuellement ouverte (l'état lu/non-lu serveur est binaire par conversation et déjà consommé à l'ouverture, vérifié live dans [#361](https://github.com/ForumHFR/redface2/issues/361#issuecomment-4663312132)) ; prefetch depuis la liste interdit ; suspendu après un « marquer comme non lu » manuel jusqu'à réouverture. **Implémenté depuis [#1088](https://github.com/ForumHFR/redface2/pull/1088)** : `PrivateMessageThreadViewModel` borne et annule les pages adjacentes, `MessagesRepository.prefetchPrivateMessageThread` alimente le cache RAM, et la garde Konsist interdit ce point d'entrée hors du ViewModel de conversation. La règle générale ci-dessus reste en vigueur partout ailleurs. La preuve live multipage reste manquante, donc la matrice de parité ne revendique pas encore la livraison complète.
 
 ---
 
