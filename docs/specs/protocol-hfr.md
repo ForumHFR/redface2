@@ -671,9 +671,12 @@ erreur ; aucun envoi live n'a été tenté.
 
 Conséquence pour le lot 4 de #1040 : la citation MP/DT ne demande **aucun** nouveau parser ni champ
 supplémentaire — `ReplyFormParser` transporte déjà tous les champs cachés verbatim et le
-`content_form` prérempli. La citation simple est livrée ; le panier de citation multiple reste absent
-et demande toujours un scope typé (`cat=prive` est une chaîne, `numreponse` n'est unique que par
-catégorie).
+`content_form` prérempli. La citation simple et le panier multiple sont livrés avec un scope MP typé.
+Pour plusieurs citations, le client rejoue séquentiellement le contrat unitaire avec la page et le
+`ref` propres à chaque sélection, puis concatène les préremplissages ; il n'applique pas le fallback
+topic sans `ref`. Les captures ci-dessus prouvent seulement chaque formulaire pris isolément : aucune
+capture live n'a encore observé cette séquence de GET ni l'acceptation d'un POST portant plusieurs
+blocs `[quotemsg]`.
 
 ### Écriture MPStorage — read-modify-write `bdd.php cat=prive` (#593/#597)
 

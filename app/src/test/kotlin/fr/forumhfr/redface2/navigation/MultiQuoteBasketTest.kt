@@ -57,6 +57,31 @@ class MultiQuoteBasketTest {
     }
 
     @Test
+    fun `hidden selections are removed only from the matching scope`() {
+        val privateScope = QuoteScope.PrivateMessage(threadId = 4_242_424)
+        val basket = MultiQuoteBasket(
+            scope = privateScope,
+            selections = listOf(
+                selection(101, "alice", page = 2, ref = 7),
+                selection(202, "bob", page = 4, ref = 3),
+                selection(303, "alice", page = 8, ref = 1),
+            ),
+        )
+
+        val pruned = basket.withoutSelections(privateScope, setOf(101, 303))
+
+        assertEquals(listOf(202), pruned?.numreponses)
+        assertEquals(basket, basket.withoutSelections(topicScope, setOf(101)))
+    }
+
+    @Test
+    fun `removing every hidden selection clears the basket`() {
+        val basket = MultiQuoteBasket(topicScope, listOf(selection(101, "alice")))
+
+        assertNull(basket.withoutSelections(topicScope, setOf(101)))
+    }
+
+    @Test
     fun `private-message scope is representable without a numeric category`() {
         val privateScope = QuoteScope.PrivateMessage(threadId = 4_242_424)
 
@@ -82,6 +107,20 @@ class MultiQuoteBasketTest {
         assertNull(handoff.forScope(QuoteScope.Topic(CAT, POST + 1)))
         assertNull(handoff.forScope(QuoteScope.PrivateMessage(threadId = POST)))
         assertNull(handoff.forScope(null))
+    }
+
+    @Test
+    fun `private-message editor handoff keeps complete locators only for its conversation`() {
+        val privateScope = QuoteScope.PrivateMessage(threadId = 4_242_424)
+        val quote = selection(101, "alice", page = 7, ref = 3)
+        val handoff = EditorQuotesHandoff(
+            scope = privateScope,
+            quotes = listOf(quote),
+            consumesBasket = true,
+        )
+
+        assertEquals(listOf(quote), handoff.forScope(privateScope)?.quotes)
+        assertNull(handoff.forScope(QuoteScope.PrivateMessage(threadId = 4_242_425)))
     }
 
     private fun selection(

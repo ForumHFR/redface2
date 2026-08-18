@@ -9,6 +9,7 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -127,6 +128,23 @@ class MessageMenuSheetTest {
     }
 
     @Test
+    fun `multi quote entry exposes selected state and toggles the basket`() {
+        var toggles = 0
+        mount(
+            message = sampleMessage(),
+            onToggleMultiQuote = { toggles++ },
+        )
+
+        compose.onNodeWithText("Ajouter à la citation multiple").assertDoesNotExist()
+        compose.onNodeWithText("Retirer de la citation multiple")
+            .assertIsDisplayed()
+            .assertIsSelected()
+            .performClick()
+
+        assertEquals(1, toggles)
+    }
+
+    @Test
     fun `edited and cited information is strictly data driven`() {
         mount(
             message = sampleMessage().copy(
@@ -151,6 +169,7 @@ class MessageMenuSheetTest {
         message: Post,
         authorBlocked: Boolean = false,
         onOpenProfile: (() -> Unit)? = null,
+        onToggleMultiQuote: (() -> Unit)? = null,
         onToggleBlockAuthor: (() -> Unit)? = null,
     ) {
         compose.setContent {
@@ -160,6 +179,8 @@ class MessageMenuSheetTest {
                     authorBlocked = authorBlocked,
                     onDismiss = {},
                     onOpenProfile = onOpenProfile,
+                    multiQuoteSelected = onToggleMultiQuote != null,
+                    onToggleMultiQuote = onToggleMultiQuote,
                     onToggleBlockAuthor = onToggleBlockAuthor,
                 )
             }
