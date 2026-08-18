@@ -81,8 +81,6 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -1228,8 +1226,8 @@ internal fun TopicContent(
                     ) {
                         // #300/#351 — the intra-page scrollbar now rides inside PostListScaffold
                         // (overlaying the list's right edge, outside the scrolled element), so the
-                        // manual Box + LazyListScrollbar wrapper is gone. PullToRefreshBox stays the
-                        // feature's wrapper (its refresh state belongs to the ViewModel).
+                        // manual Box + LazyListScrollbar wrapper is gone. The low-level PTR modifier
+                        // stays feature-owned because its refresh state belongs to the ViewModel.
                         //
                         // #785 — the blacklist applies inside quotes too: the canonical blocked set
                         // is provided to the post renderers so QuoteBlock masks a citation OF a
@@ -2044,7 +2042,7 @@ private fun TopicLoadedContent(
             // #382 — double-tap anywhere on the list to refresh the page (RF1 parity). Child
             // clickables (links, buttons, avatar) consume their own up events, so taps on them
             // never count toward this detector; drags past slop cancel it, so scrolling and the
-            // #282 page swipe are untouched. The PullToRefreshBox spinner gives the feedback
+            // #282 page swipe are untouched. The pull-to-refresh indicator gives the feedback
             // (isRefreshing is already shared with the pull gesture); the haptic tick confirms
             // the trigger under the finger.
             .pointerInput(Unit) {
@@ -2061,20 +2059,12 @@ private fun TopicLoadedContent(
                     },
                 )
             }
-            // POC #182 — the zoom draw layer, LAST in the chain (innermost): the magnifier and the
+            // #182/#1040 — the shared zoom draw layer, LAST in the chain (innermost): the
+            // magnifier and the
             // swipe read their pointers in untransformed space, and the swipe's own translation
             // layer (identity while zoomed — the swipe is suspended) composes OUTSIDE this scale.
-            // Top-left origin per the contract; scale/panX are frame-state reads (no recomposition).
-            .graphicsLayer {
-                val zoomScale = zoomState.scale.floatValue
-                scaleX = zoomScale
-                scaleY = zoomScale
-                translationX = zoomState.panX.floatValue
-                // Bounded complement of the real scroll at the bottom edge (contract amendment,
-                // POC iter 1) — never exposes uncomposed content, see TopicZoomState.panY.
-                translationY = zoomState.panY.floatValue
-                transformOrigin = TransformOrigin(0f, 0f)
-            },
+            // Top-left origin and draw-phase state reads now live in the promoted modifier.
+            .topicZoomTransform(zoomState),
     ) {
         item {
             // Vague 3 (#604, mockup « Lecture A ») — the header card is DISSOLVED: title and page

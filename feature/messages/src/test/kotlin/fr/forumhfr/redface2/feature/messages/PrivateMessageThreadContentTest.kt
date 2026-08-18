@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -20,9 +21,12 @@ import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostBlock
@@ -623,6 +627,126 @@ class PrivateMessageThreadContentTest {
         )
     }
 
+    @Test
+    fun `pinch zoom disables the pull gesture until reset`() {
+        var refreshCount = 0
+        val state = contentState(messages = listOf(message(1, "Alice", "Corps du MP")))
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                PrivateMessageThreadContent(
+                    state = state,
+                    isMultiRecipientHint = false,
+                    callbacks = NO_OP_CALLBACKS.copy(onRefresh = { refreshCount++ }),
+                )
+            }
+        }
+
+        pullDownThread()
+        assertEquals("the rest-state pull must reach the refresh callback", 1, refreshCount)
+
+        pinchOutThread()
+        compose.onNodeWithContentDescription(ZOOM_RESET_DESCRIPTION).assertIsDisplayed()
+        pullDownThread()
+
+        assertEquals(
+            "the low-level disabled pull modifier must not arm or refresh while zoomed",
+            1,
+            refreshCount,
+        )
+        compose.onNodeWithContentDescription(ZOOM_RESET_DESCRIPTION).performClick()
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription(ZOOM_RESET_DESCRIPTION).assertDoesNotExist()
+    }
+
+    @Test
+    fun `zoom resets when the feature owned conversation page key changes`() {
+        val renderedPage = mutableStateOf(1)
+        compose.setContent {
+            val state = contentState(
+                messages = listOf(message(renderedPage.value, "Alice", "Page ${renderedPage.value}")),
+                page = renderedPage.value,
+                totalPages = 2,
+            )
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                PrivateMessageThreadContent(
+                    state = state,
+                    isMultiRecipientHint = false,
+                    callbacks = NO_OP_CALLBACKS,
+                )
+            }
+        }
+
+        pinchOutThread()
+        compose.onNodeWithContentDescription(ZOOM_RESET_DESCRIPTION).assertIsDisplayed()
+
+        compose.runOnIdle { renderedPage.value = 2 }
+        compose.waitForIdle()
+
+        compose.onNodeWithContentDescription(ZOOM_RESET_DESCRIPTION).assertDoesNotExist()
+        compose.onNodeWithText("Page 2").assertIsDisplayed()
+    }
+
+    @Test
+    fun `thread page swipe is suspended after the pinch engages`() {
+        val selectedPages = mutableListOf<Int>()
+        val state = contentState(
+            messages = listOf(message(1, "Alice", "Corps du MP")),
+            page = 1,
+            totalPages = 3,
+        )
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                PrivateMessageThreadContent(
+                    state = state,
+                    isMultiRecipientHint = false,
+                    callbacks = NO_OP_CALLBACKS.copy(onSelectPage = selectedPages::add),
+                )
+            }
+        }
+
+        swipeThreadLeft()
+        assertEquals("the shared magnifier must remain transparent at 1x", listOf(2), selectedPages)
+
+        pinchOutThread()
+        swipeThreadLeft()
+
+        assertEquals("a zoomed MP must not dispatch a page swipe", listOf(2), selectedPages)
+    }
+
+    private fun pinchOutThread() {
+        compose.onNodeWithTag(PRIVATE_MESSAGE_THREAD_READER_TAG).performTouchInput {
+            down(0, center - Offset(0f, 150f))
+            down(1, center + Offset(0f, 150f))
+            repeat(10) { index ->
+                val halfGap = 150f + 25f * (index + 1)
+                updatePointerTo(0, center - Offset(0f, halfGap))
+                updatePointerTo(1, center + Offset(0f, halfGap))
+                move()
+            }
+            up(0)
+            up(1)
+        }
+        compose.waitForIdle()
+    }
+
+    private fun pullDownThread() {
+        compose.onNodeWithTag(PRIVATE_MESSAGE_THREAD_READER_TAG).performTouchInput {
+            down(0, center - Offset(0f, 300f))
+            repeat(8) { moveBy(0, Offset(0f, 100f)) }
+            up(0)
+        }
+        compose.waitForIdle()
+    }
+
+    private fun swipeThreadLeft() {
+        compose.onNodeWithTag(PRIVATE_MESSAGE_THREAD_READER_TAG).performTouchInput {
+            down(0, center)
+            repeat(8) { moveBy(0, Offset(-60f, 0f)) }
+            up(0)
+        }
+        compose.waitForIdle()
+    }
+
     private fun setContent(
         mode: PrivateMessageThreadUiState.Mode,
         page: Int,
@@ -707,6 +831,7 @@ class PrivateMessageThreadContentTest {
         const val TARGET_INDEX = 10
         const val TARGET_AUTHOR = "Auteur 11"
         const val ANCHOR_TOLERANCE_PX = 0.5f
+        const val ZOOM_RESET_DESCRIPTION = "Revenir au zoom normal"
 
         val NO_OP_CALLBACKS = PrivateMessageThreadCallbacks(
             onBack = {},

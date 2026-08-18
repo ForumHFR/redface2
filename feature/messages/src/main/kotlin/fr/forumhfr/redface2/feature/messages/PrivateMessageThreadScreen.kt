@@ -27,15 +27,19 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.pullToRefresh
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -46,12 +50,14 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
@@ -89,6 +95,10 @@ import fr.forumhfr.redface2.core.ui.post.ReadingPostCard
 import fr.forumhfr.redface2.core.ui.post.ReadingPostCardPresentation
 import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
+import fr.forumhfr.redface2.core.ui.zoom.PinchZoomState
+import fr.forumhfr.redface2.core.ui.zoom.pinchZoom
+import fr.forumhfr.redface2.core.ui.zoom.pinchZoomTransform
+import fr.forumhfr.redface2.core.ui.zoom.rememberPinchZoomState
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -585,6 +595,15 @@ internal fun PrivateMessageThreadContent(
                 }
 
                 is PrivateMessageThreadUiState.Mode.Content -> {
+                    // #1040 lot 6 — the feature owns the full MP route key. An in-place page
+                    // landing or a different conversation starts at 1×; the shared state remains
+                    // ephemeral across process recreation, like the topic reader.
+                    val zoomAnimationScope = rememberCoroutineScope()
+                    val zoomState = rememberPinchZoomState(
+                        pageKey = mode.thread.threadId to mode.thread.page,
+                        animationScope = zoomAnimationScope,
+                    )
+                    val isZoomed by remember(zoomState) { derivedStateOf { zoomState.zoomed } }
                     // #1074 — one effect owns both default page-top and cited-message landings, so
                     // the former cannot overwrite the latter. The target wins when both arrive in
                     // the same recomposition; a page/account change cancels the suspending scroll.
@@ -595,12 +614,20 @@ internal fun PrivateMessageThreadContent(
                         isRefreshing = state.isRefreshing,
                         citedMessageLanding = presentation.citedMessageLanding,
                     )
-                    // #335/#351 — pull-to-refresh re-fetches the displayed page; the indicator also
-                    // covers the keep-content page changes (same isRefreshing flag).
-                    PullToRefreshBox(
-                        isRefreshing = state.isRefreshing,
-                        onRefresh = callbacks.onRefresh,
-                        modifier = Modifier.fillMaxSize(),
+                    // #335/#351/#1040 — PullToRefreshBox cannot disable its gesture. The low-level
+                    // modifier prevents nested-scroll pull consumption and indicator arming while
+                    // zoomed; gating only callbacks.onRefresh would be too late.
+                    val pullToRefreshState = rememberPullToRefreshState()
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .testTag(PRIVATE_MESSAGE_THREAD_READER_TAG)
+                            .pullToRefresh(
+                                isRefreshing = state.isRefreshing,
+                                state = pullToRefreshState,
+                                enabled = !isZoomed,
+                                onRefresh = callbacks.onRefresh,
+                            ),
                     ) {
                         // #300/#351c — the list overlay (LazyColumn + auto-hiding scrollbar) is now the
                         // shared PostListScaffold; the swipe chain rides the inner list via listModifier
@@ -637,6 +664,7 @@ internal fun PrivateMessageThreadContent(
                                 // and restart the round-trip (supersede), never advance faster.
                                 pagerEnabled = !state.isRefreshing,
                                 listState = listState,
+                                zoomState = zoomState,
                                 // #351b — horizontal swipe changes page in place (same thresholds
                                 // and feel as the topic via the shared :core:ui geometry).
                                 swipeModifier = rememberThreadSwipeModifier(
@@ -644,7 +672,22 @@ internal fun PrivateMessageThreadContent(
                                     totalPages = state.totalPages,
                                     isRefreshing = state.isRefreshing,
                                     onSelectPage = callbacks.onSelectPage,
+                                    zoomed = isZoomed,
                                 ),
+                            )
+                        }
+                        PullToRefreshDefaults.Indicator(
+                            state = pullToRefreshState,
+                            isRefreshing = state.isRefreshing,
+                            modifier = Modifier.align(Alignment.TopCenter),
+                        )
+                        if (isZoomed) {
+                            ThreadZoomResetChip(
+                                zoomState = zoomState,
+                                listState = listState,
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(12.dp),
                             )
                         }
                     }
@@ -681,6 +724,45 @@ internal fun PrivateMessageThreadContent(
         onSave = callbacks.onSaveImage,
         onClear = { imageMenuTarget = null },
     )
+}
+
+/** Feature-owned reset chrome; the shared zoom API deliberately contains no labels or surfaces. */
+@Composable
+private fun ThreadZoomResetChip(
+    zoomState: PinchZoomState,
+    listState: LazyListState,
+    modifier: Modifier = Modifier,
+) {
+    val zoomResetDescription = stringResource(R.string.messages_zoom_reset)
+    Surface(
+        onClick = {
+            zoomState.settleAnchoredTo(
+                targetScale = 1f,
+                anchorX = zoomState.viewportWidthPx / 2f,
+                anchorY = zoomState.viewportHeightPx / 2f,
+                listState = listState,
+            )
+        },
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        shadowElevation = 3.dp,
+        modifier = modifier
+            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+            .semantics {
+                contentDescription = zoomResetDescription
+                role = Role.Button
+            },
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.messages_zoom_reset_chip),
+                style = MaterialTheme.typography.labelLarge,
+            )
+        }
+    }
 }
 
 /**
@@ -888,7 +970,7 @@ private fun ThreadReplyFab(canReply: Boolean, onReply: () -> Unit) {
  * stable lambdas: [threadPageSwipe]'s `pointerInput` is keyed on `Unit` and NEVER re-keyed (the
  * in-place pager changes pages under a live composition), so the lambdas captured by its initial
  * block must keep reading live values for the whole life of the composition. The gesture is gated
- * off while a load is in flight ([isRefreshing]) and re-arms when it settles.
+ * off while a load is in flight ([isRefreshing]) or the reader is zoomed, then re-arms at rest.
  */
 @Composable
 internal fun rememberThreadSwipeModifier(
@@ -896,12 +978,13 @@ internal fun rememberThreadSwipeModifier(
     totalPages: Int,
     isRefreshing: Boolean,
     onSelectPage: (Int) -> Unit,
+    zoomed: Boolean = false,
 ): Modifier {
     val dragOffset = remember { mutableFloatStateOf(0f) }
     val haptics = LocalHapticFeedback.current
     val currentPage = rememberUpdatedState(renderedPage)
     val currentTotal = rememberUpdatedState(totalPages)
-    val swipeEnabled = rememberUpdatedState(!isRefreshing)
+    val swipeEnabled = rememberUpdatedState(!isRefreshing && !zoomed)
     val currentOnSelectPage = rememberUpdatedState(onSelectPage)
     // Codex review — dragOffset SURVIVES the in-place page change (no composition teardown; the
     // topic's offset survives too since #895 étape 4 and is reset the same way, by a
@@ -971,6 +1054,7 @@ private fun ThreadMessages(
     onImageLongPress: (PostImageTarget) -> Unit,
     pagerEnabled: Boolean = true,
     listState: LazyListState,
+    zoomState: PinchZoomState,
     swipeModifier: Modifier = Modifier,
 ) {
     // #509/#1050 — reveal is deliberately page-local and non-saveable. In-place pagination keeps
@@ -1021,11 +1105,16 @@ private fun ThreadMessages(
     // [PostListScaffold.listModifier], like the topic's LazyColumn: the scrollbar overlay outside
     // stays fixed on screen. [LocalShowScrollbar] (#105) is honoured by the scaffold's scrollbar,
     // so the call leaves showScrollbar at its default.
+    val zoomSuspendsScroll by remember(zoomState) { derivedStateOf { zoomState.zoomed } }
     PostListScaffold(
         listState = listState,
+        userScrollEnabled = !zoomSuspendsScroll,
         contentPadding = threadListContentPadding(fullWidthPosts),
         verticalArrangement = threadListArrangement(fullWidthPosts),
-        listModifier = swipeModifier,
+        listModifier = Modifier
+            .pinchZoom(zoomState, listState)
+            .then(swipeModifier)
+            .pinchZoomTransform(zoomState),
     ) {
         itemsIndexed(
             items = messages,
@@ -1409,6 +1498,7 @@ private fun Modifier.messageMenuLongPress(
 
 // #351b — same blend as the topic edge glow (#282): a full-primary glow read as an imposing panel.
 private const val ACCENT_PRIMARY_BLEND = 0.3f
+internal const val PRIVATE_MESSAGE_THREAD_READER_TAG = "private_message_thread_reader"
 
 private val messageDateFormatter = DateTimeFormatter
     .ofPattern("dd/MM/yyyy HH:mm:ss", Locale.FRANCE)
