@@ -144,6 +144,19 @@ data class PrivateMessageThreadUiState(
  */
 sealed interface PrivateMessageThreadEffect {
     /**
+     * #1074 — one page/account-scoped landing. Cross-page jumps are emitted only after the terminal
+     * network page proved that [numreponse] is present; a same-page tap may use the rendered content
+     * immediately. [page] is always parsed, never the possibly out-of-bounds page requested from HFR.
+     */
+    data class ScrollToCitedMessage(
+        val page: Int,
+        val numreponse: Int,
+        val account: String,
+        /** True only for a user tap whose target is already present on the rendered page. */
+        val appliesWhileRefreshing: Boolean = false,
+    ) : PrivateMessageThreadEffect
+
+    /**
      * #351 — a load that kept the conversation on screen (pull-to-refresh, or a page change from a
      * loaded page) failed. The displayed page stays put; the screen surfaces a Toast inviting a new
      * attempt. Initial loads (nothing on screen yet) keep going through [Mode.Error] + Retry instead.

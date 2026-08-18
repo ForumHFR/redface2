@@ -16,12 +16,12 @@ import androidx.compose.runtime.remember
  * rotation / recreation with content already loaded keeps the position `rememberLazyListState` just
  * restored instead of being yanked back to the top.
  *
- * Moved verbatim from `PrivateMessageThreadScreen` to `:core:ui` (#351): a generic
- * [LazyListState] behaviour the private-message thread will call in c3. NOT invoked by
- * [fr.forumhfr.redface2.core.ui.post.PostListScaffold] — the topic does not want it (its in-VM
- * engine resolves each landing by priority: anchor, bottom step, top — #895 étape 4; historically,
- * route-driven page changes started at the top for free), so it stays an opt-in the call-site
- * applies, not part of the scaffold.
+ * Moved verbatim from `PrivateMessageThreadScreen` to `:core:ui` (#351). Since #1074 the MP thread
+ * uses one feature-owned effect for both top and cited-message landings, so those two suspending
+ * scrolls cannot race. This generic helper remains an opt-in (and characterized independently),
+ * never a behaviour of [fr.forumhfr.redface2.core.ui.post.PostListScaffold] : the topic does not
+ * want it either, because its in-VM engine resolves each landing by priority (anchor, bottom step,
+ * top — #895 étape 4).
  */
 @Composable
 fun ScrollToTopOnPageChange(listState: LazyListState, renderedPage: Int) {

@@ -506,6 +506,170 @@ class PrivateMessageThreadViewModelTest {
     }
 
     @Test
+    fun `cited message on the rendered page lands without loading`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        val target = 101
+        val networkGate = CompletableDeferred<Unit>()
+        val loaded = thread(page = 1, totalPages = 2, messages = listOf(post(target)))
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns flow {
+            emit(PrivateMessageThreadPage(loaded, PrivateMessageThreadPage.Source.SESSION_CACHE))
+            networkGate.await()
+            emit(networkPage(loaded))
+        }
+        val viewModel = threadViewModel(repository)
+
+        viewModel.effects.test {
+            viewModel.goToCitedMessage(targetPage = 1, numreponse = target)
+
+            assertEquals(
+                PrivateMessageThreadEffect.ScrollToCitedMessage(
+                    page = 1,
+                    numreponse = target,
+                    account = "xaat",
+                    appliesWhileRefreshing = true,
+                ),
+                awaitItem(),
+            )
+            // The local jump must not cancel the mandatory revalidation of this cached page.
+            networkGate.complete(Unit)
+            advanceUntilIdle()
+            val refreshed = viewModel.state.value.mode as PrivateMessageThreadUiState.Mode.Content
+            assertEquals(PrivateMessageThreadPage.Source.NETWORK, refreshed.source)
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+        coVerify(exactly = 1) {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        }
+    }
+
+    @Test
+    fun `cross-page cited landing ignores cache and fires once after network`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        val target = 202
+        val networkGate = CompletableDeferred<Unit>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns network(thread(page = 1, totalPages = 2, messages = listOf(post(101))))
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 2, fallbackCorrespondent = null)
+        } returns flow {
+            val cached = thread(page = 2, totalPages = 2, messages = listOf(post(target)))
+            emit(PrivateMessageThreadPage(cached, PrivateMessageThreadPage.Source.SESSION_CACHE))
+            networkGate.await()
+            emit(networkPage(cached))
+        }
+        val viewModel = threadViewModel(repository)
+
+        viewModel.effects.test {
+            viewModel.goToCitedMessage(targetPage = 2, numreponse = target)
+
+            val cached = viewModel.state.value.mode as PrivateMessageThreadUiState.Mode.Content
+            assertEquals(PrivateMessageThreadPage.Source.SESSION_CACHE, cached.source)
+            expectNoEvents()
+
+            networkGate.complete(Unit)
+            advanceUntilIdle()
+            assertEquals(
+                PrivateMessageThreadEffect.ScrollToCitedMessage(
+                    page = 2,
+                    numreponse = target,
+                    account = "xaat",
+                ),
+                awaitItem(),
+            )
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `missing target is cleared against the parsed fallback page`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        val target = 999
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns network(thread(page = 1, totalPages = 99, messages = listOf(post(101))))
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 99, fallbackCorrespondent = null)
+        } returns network(thread(page = 3, totalPages = 4, messages = listOf(post(301))))
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 4, fallbackCorrespondent = null)
+        } returns network(thread(page = 4, totalPages = 4, messages = listOf(post(target))))
+        val viewModel = threadViewModel(repository)
+
+        viewModel.effects.test {
+            viewModel.goToCitedMessage(targetPage = 99, numreponse = target)
+            advanceUntilIdle()
+
+            assertEquals(3, viewModel.state.value.page)
+            expectNoEvents()
+
+            // A later unrelated page happens to contain the same numreponse: the terminal miss on
+            // parsed page 3 must have compare-and-cleared the old landing.
+            viewModel.selectPage(4)
+            advanceUntilIdle()
+            assertEquals(4, viewModel.state.value.page)
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `manual page change supersedes an in-flight cited landing`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        val target = 202
+        val targetGate = CompletableDeferred<PrivateMessageThread>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns network(thread(page = 1, totalPages = 3, messages = listOf(post(101))))
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 2, fallbackCorrespondent = null)
+        } returns flow { emit(networkPage(targetGate.await())) }
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 3, fallbackCorrespondent = null)
+        } returns network(thread(page = 3, totalPages = 3, messages = listOf(post(target))))
+        val viewModel = threadViewModel(repository)
+
+        viewModel.effects.test {
+            viewModel.goToCitedMessage(targetPage = 2, numreponse = target)
+            viewModel.selectPage(3)
+            advanceUntilIdle()
+
+            assertEquals(3, viewModel.state.value.page)
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `account switch clears an in-flight cited landing`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        val target = 202
+        val targetGate = CompletableDeferred<PrivateMessageThread>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns network(thread(page = 1, totalPages = 2, messages = listOf(post(101))))
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 2, fallbackCorrespondent = null)
+        } returns flow { emit(networkPage(targetGate.await())) }
+        val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
+        val viewModel = threadViewModel(repository, authRepository = authRepository)
+
+        viewModel.effects.test {
+            viewModel.goToCitedMessage(targetPage = 2, numreponse = target)
+            authRepository.emit(AuthState.Authenticated("bob"))
+            advanceUntilIdle()
+
+            assertEquals("bob", viewModel.state.value.connectedPseudo)
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `foreground prefetch targets only both adjacent pages`() = runTest {
         val repository = mockk<MessagesRepository>()
         coEvery {

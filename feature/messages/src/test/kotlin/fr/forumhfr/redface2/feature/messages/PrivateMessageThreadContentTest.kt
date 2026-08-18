@@ -1,6 +1,14 @@
 package fr.forumhfr.redface2.feature.messages
 
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.Text
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -15,6 +23,7 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
@@ -149,6 +158,117 @@ class PrivateMessageThreadContentTest {
 
         assertEquals(101, quotedMessage?.numreponse)
         assertEquals(4, quotedMessage?.quoteRef)
+    }
+
+    @Test
+    fun `parsed MP quote header reaches the cited-message host callback`() {
+        var citedTarget: Pair<Int, Int>? = null
+        val quotingMessage = message(102, "Bob", "Réponse").copy(
+            content = PostContent(
+                blocks = listOf(
+                    PostBlock.Quote(
+                        author = "Alice",
+                        numreponse = 101,
+                        page = 3,
+                        content = PostContent(
+                            blocks = listOf(
+                                PostBlock.Paragraph(
+                                    inlines = listOf(PostInline.Text("Message cité")),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        val state = contentState(messages = listOf(quotingMessage))
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                PrivateMessageThreadContent(
+                    state = state,
+                    isMultiRecipientHint = false,
+                    callbacks = NO_OP_CALLBACKS.copy(
+                        onGoToCitedPost = { page, numreponse -> citedTarget = page to numreponse },
+                    ),
+                )
+            }
+        }
+
+        compose.onNodeWithText("Citation de Alice").performClick()
+
+        assertEquals(3 to 101, citedTarget)
+    }
+
+    @Test
+    fun `cited-message landing wins over the page-change top reset`() {
+        val messages = (1..40).map { index -> message(index, "Auteur $index", "Message $index") }
+        val renderedPage = mutableStateOf(1)
+        val isRefreshing = mutableStateOf(false)
+        val landing = mutableStateOf<PrivateMessageThreadEffect.ScrollToCitedMessage?>(null)
+        val consumed = mutableListOf<PrivateMessageThreadEffect.ScrollToCitedMessage>()
+        lateinit var listState: LazyListState
+        compose.setContent {
+            listState = rememberLazyListState(initialFirstVisibleItemIndex = 10)
+            val mode = contentState(messages = messages, page = renderedPage.value).mode
+            val thread = (mode as PrivateMessageThreadUiState.Mode.Content).thread
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                PrivateMessagePageLandingEffect(
+                    listState = listState,
+                    thread = thread,
+                    connectedPseudo = "xaat",
+                    isRefreshing = isRefreshing.value,
+                    citedMessageLanding = PrivateMessageCitedLanding(
+                        effect = landing.value,
+                        onConsumed = { effect ->
+                            consumed += effect
+                            if (landing.value == effect) landing.value = null
+                        },
+                    ),
+                )
+                LazyColumn(state = listState) {
+                    items(messages, key = { message -> message.numreponse }) { message ->
+                        Text(
+                            text = "Message ${message.numreponse}",
+                            modifier = Modifier.fillMaxWidth().height(100.dp),
+                        )
+                    }
+                }
+            }
+        }
+        compose.waitForIdle()
+        assertEquals("first render keeps the restored position", 10, listState.firstVisibleItemIndex)
+
+        val localTarget = PrivateMessageThreadEffect.ScrollToCitedMessage(
+            page = 1,
+            numreponse = 25,
+            account = "xaat",
+            appliesWhileRefreshing = true,
+        )
+        compose.runOnIdle {
+            isRefreshing.value = true
+            landing.value = localTarget
+        }
+        compose.waitForIdle()
+        assertEquals("a local jump can use the rendered cache page", 24, listState.firstVisibleItemIndex)
+
+        val target = PrivateMessageThreadEffect.ScrollToCitedMessage(
+            page = 2,
+            numreponse = 21,
+            account = "xaat",
+        )
+        compose.runOnIdle {
+            isRefreshing.value = false
+            renderedPage.value = 2
+            landing.value = target
+        }
+        compose.waitForIdle()
+
+        assertEquals("the cited message, not item 0, owns the landing", 20, listState.firstVisibleItemIndex)
+        assertEquals(listOf(localTarget, target), consumed)
+
+        compose.runOnIdle { renderedPage.value = 3 }
+        compose.waitForIdle()
+        assertEquals("a later ordinary page change still lands at the top", 0, listState.firstVisibleItemIndex)
     }
 
     @Test
