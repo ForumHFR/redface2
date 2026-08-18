@@ -25,11 +25,11 @@ import fr.forumhfr.redface2.core.ui.list.LazyListScrollbar
  *    from silently changing either screen's spacing.
  *  - the page-swipe machinery stays in the feature (both hosts paginate in place since #895 étape 4,
  *    but the couplings differ: the topic gesture is tied to its in-ViewModel engine — per-page
- *    re-key, slide-out — while the MP gesture is gated by `isRefreshing`; see `PageSwipe.kt` /
+ *    re-key, slide-out — while the MP gesture is gated by its refresh and zoom states; see `PageSwipe.kt` /
  *    ADR-013 amendée) and is injected through [listModifier],
  *    applied to the **`LazyColumn`** (so the list follows the finger) and never to the outer [Box] (so
- *    the scrollbar overlay stays fixed). `PullToRefreshBox` is NOT absorbed here — it stays the
- *    feature's wrapper, since its refresh state belongs to the screen's ViewModel.
+ *    the scrollbar overlay stays fixed). The pull-to-refresh modifier and indicator are NOT absorbed
+ *    here — they stay in each feature, since their refresh state belongs to the screen's ViewModel.
  *  - [showScrollbar] gates the scrollbar overlay off entirely. The scrollbar ALSO self-hides on the
  *    « afficher l'ascenseur » preference (`LazyListScrollbar` reads `LocalShowScrollbar`), so this flag
  *    is only for a call-site that wants no scrollbar at all regardless of that preference; both
@@ -44,8 +44,8 @@ fun PostListScaffold(
     modifier: Modifier = Modifier,
     listModifier: Modifier = Modifier,
     showScrollbar: Boolean = true,
-    // #182 — the topic magnifier suspends native list scrolling while zoomed (the vertical axis is
-    // then driven programmatically via dispatchRawDelta). Default keeps both consumers unchanged.
+    // #182/#1040 — either reader's magnifier suspends native list scrolling while zoomed (the
+    // vertical axis is then driven programmatically via dispatchRawDelta).
     userScrollEnabled: Boolean = true,
     content: LazyListScope.() -> Unit,
 ) {

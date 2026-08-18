@@ -1,4 +1,6 @@
 <resources>
+    <string name="messages_zoom_reset_chip">1×</string>
+    <string name="messages_zoom_reset">Revenir au zoom normal</string>
     <string name="messages_title">Messages</string>
     <string name="messages_empty">Aucun message privé.</string>
     <string name="messages_multi_recipient">Interlocuteurs multiples</string>
