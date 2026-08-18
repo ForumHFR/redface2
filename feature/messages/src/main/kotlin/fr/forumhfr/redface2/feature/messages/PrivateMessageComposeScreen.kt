@@ -44,6 +44,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
+import fr.forumhfr.redface2.core.ui.post.PostMediaDiskCachePolicy
 
 /**
  * New-conversation composer (#301 follow-up). Same chrome as the reply editor — shared header,
@@ -313,7 +314,11 @@ private fun ComposeEditorBody(
             HorizontalDivider()
             // Plain block inside the outer scroll (a nested same-direction verticalScroll is a
             // Compose error) — same shape as TopicFormScreen's preview.
-            BbcodePreview(content = state.preview, modifier = Modifier.fillMaxWidth())
+            BbcodePreview(
+                content = state.preview,
+                modifier = Modifier.fillMaxWidth(),
+                mediaDiskCachePolicy = PostMediaDiskCachePolicy.DISABLED,
+            )
         }
 
         if (state.restorableDraft != null ||

@@ -25,7 +25,9 @@ import kotlinx.coroutines.ensureActive
  * The memory cache is disabled BOTH ways on this request: the metadata pseudo-image must never be
  * served to a render request (and a cached render bitmap must not short-circuit the probe with
  * its possibly-resized dimensions — the §3 "first valid pair" authority stays with the probe).
- * The disk cache stays active: the downloaded bytes serve the subsequent render decode.
+ * The disk policy comes from the rendering host. Public posts keep it active so the downloaded
+ * bytes serve the subsequent render decode. Private-message media disables disk reads and writes;
+ * the probe still succeeds, but its later painter must fetch the media again (#1096).
  * `execute()` is main-safe (Coil dispatches its own I/O); the caller invokes it from a
  * `LaunchedEffect` and caches the result by URL. Returns `null` on error / non-positive
  * dimensions. The returned size is in SOURCE PIXELS — the §3 equation consumes it as physical px.
@@ -39,12 +41,14 @@ internal suspend fun measureIntrinsicMediaSize(
     url: String,
     context: PlatformContext,
     imageLoader: ImageLoader,
+    diskCachePolicy: PostMediaDiskCachePolicy = PostMediaDiskCachePolicy.ENABLED,
 ): IntrinsicMediaMetadata? {
     val result = imageLoader.execute(
         ImageRequest.Builder(context)
             .data(url)
             .decoderFactory(ProbeMetadataDecoder.Factory)
             .memoryCachePolicy(CachePolicy.DISABLED)
+            .diskCachePolicy(diskCachePolicy.coilPolicy)
             .build(),
     )
     val image = (result as? SuccessResult)?.image ?: return null
@@ -83,9 +87,9 @@ internal suspend fun measureIntrinsicMediaSize(
  */
 private val inFlightMeasurements = ConcurrentHashMap<String, CompletableDeferred<Unit>>()
 
-// LongParameterList: the trailing `probe` is a test-only seam (cancellation-race pins); the five
-// real parameters are the url + its pipeline collaborators — grouping them would be a one-call
-// holder class with no other purpose.
+// LongParameterList: the trailing `probe` is a test-only seam (cancellation-race pins); the real
+// parameters are the url, its pipeline collaborators and the host's persistence policy — grouping
+// them would be a one-call holder class with no other purpose.
 @Suppress("LongParameterList")
 internal suspend fun measureAndCacheIntrinsicMediaSize(
     url: String,
@@ -93,9 +97,12 @@ internal suspend fun measureAndCacheIntrinsicMediaSize(
     ledger: MediaAttemptLedger,
     context: PlatformContext,
     imageLoader: ImageLoader,
+    diskCachePolicy: PostMediaDiskCachePolicy = PostMediaDiskCachePolicy.ENABLED,
     // Injectable for the cancellation-race tests only — production callers keep the default.
     probe: suspend (String, PlatformContext, ImageLoader) -> IntrinsicMediaMetadata? =
-        ::measureIntrinsicMediaSize,
+        { probeUrl, probeContext, loader ->
+            measureIntrinsicMediaSize(probeUrl, probeContext, loader, diskCachePolicy)
+        },
 ) {
     while (true) {
         val now = System.currentTimeMillis()
@@ -153,7 +160,7 @@ private suspend fun probeUnderReservation(
             if (!deposited && cache.get(url)?.size != metadata.size) {
                 Log.d(
                     MEDIA_GEOMETRY_LOG_TAG,
-                    "geometry disagreement for $url: kept=${cache.get(url)?.size} probe=${metadata.size} " +
+                    "geometry disagreement: kept=${cache.get(url)?.size} probe=${metadata.size} " +
                         "(first valid pair wins, §3)",
                 )
             }

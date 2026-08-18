@@ -91,6 +91,7 @@ import fr.forumhfr.redface2.core.ui.post.PostImageActions
 import fr.forumhfr.redface2.core.ui.post.PostImageMenuSheet
 import fr.forumhfr.redface2.core.ui.post.PostImageTarget
 import fr.forumhfr.redface2.core.ui.post.PostListScaffold
+import fr.forumhfr.redface2.core.ui.post.PostMediaDiskCachePolicy
 import fr.forumhfr.redface2.core.ui.post.ReadingPostCard
 import fr.forumhfr.redface2.core.ui.post.ReadingPostCardPresentation
 import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
@@ -853,6 +854,9 @@ private fun ThreadImageMenuHost(
                 target = imageTarget,
                 onSave = onSave,
                 onDismiss = onClear,
+                // The thumbnail is a second request for the same private PostContent URL and
+                // lives outside ReadingPostCard's provider, so carry the policy explicitly.
+                mediaDiskCachePolicy = PostMediaDiskCachePolicy.DISABLED,
             )
         }
     }
@@ -1335,6 +1339,10 @@ internal fun MessageCard(
         post = message,
         modifier = menuModifier,
         presentation = presentation.copy(selected = multiQuoteSelected),
+        // #1096 — the singleton Coil loader has no caller identity. Mark the whole MP
+        // PostContent at this host boundary so painters and intrinsic probes cannot persist its
+        // media URLs or bytes to Coil's shared disk cache.
+        mediaDiskCachePolicy = PostMediaDiskCachePolicy.DISABLED,
         onGoToCitedPost = onGoToCitedPost,
         onImageLongPress = onImageLongPress,
         identity = {

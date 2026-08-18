@@ -10,7 +10,16 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
+import coil3.ColorImage
+import coil3.ImageLoader
+import coil3.SingletonImageLoader
+import coil3.annotation.DelicateCoilApi
+import coil3.intercept.Interceptor
+import coil3.request.CachePolicy
+import coil3.request.ImageResult
+import coil3.test.FakeImageLoaderEngine
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -44,11 +53,51 @@ class PostImageMenuSheetTest {
         linkUrl = null,
     )
 
-    private fun mount(onSave: (String) -> Unit = {}, onDismiss: () -> Unit = {}) {
+    private fun mount(
+        onSave: (String) -> Unit = {},
+        onDismiss: () -> Unit = {},
+        mediaDiskCachePolicy: PostMediaDiskCachePolicy = PostMediaDiskCachePolicy.ENABLED,
+    ) {
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                PostImageMenuSheet(target = target, onSave = onSave, onDismiss = onDismiss)
+                PostImageMenuSheet(
+                    target = target,
+                    onSave = onSave,
+                    onDismiss = onDismiss,
+                    mediaDiskCachePolicy = mediaDiskCachePolicy,
+                )
             }
+        }
+    }
+
+    @OptIn(DelicateCoilApi::class)
+    @Test
+    fun `private-media thumbnail disables the Coil disk cache`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val observed = CopyOnWriteArrayList<CachePolicy>()
+        val recorder = object : Interceptor {
+            override suspend fun intercept(chain: Interceptor.Chain): ImageResult {
+                if (chain.request.data == target.url) observed += chain.request.diskCachePolicy
+                return chain.proceed()
+            }
+        }
+        val engine = FakeImageLoaderEngine.Builder()
+            .intercept(target.url, ColorImage(width = 64, height = 64))
+            .build()
+        SingletonImageLoader.setUnsafe(
+            ImageLoader.Builder(context).components {
+                add(recorder)
+                add(engine)
+            }.build(),
+        )
+
+        try {
+            mount(mediaDiskCachePolicy = PostMediaDiskCachePolicy.DISABLED)
+            composeTestRule.waitUntil(timeoutMillis = 5_000) { observed.isNotEmpty() }
+
+            assertEquals(setOf(CachePolicy.DISABLED), observed.toSet())
+        } finally {
+            SingletonImageLoader.reset()
         }
     }
 

@@ -34,15 +34,20 @@ import fr.forumhfr.redface2.core.ui.theme.egoHighlightColors
  * corresponding renderer affordance inert. Selection is deliberately always enabled: changing
  * `PostRenderer.selectable` at runtime would insert or remove its `SelectionContainer`, recreate
  * the body subtree and discard nested `rememberSaveable` state (#946).
+ *
+ * [mediaDiskCachePolicy] is host context, not a property that the global Coil loader can infer.
+ * Public-topic callers keep the default; private-message callers disable disk reads and writes for
+ * every media request made by the body and signature, including intrinsic-size probes (#1096).
  */
 @Composable
-// LongParameterList: post + mandatory identity + presentation, then four independent host seams.
+// LongParameterList: post + mandatory identity + presentation, then independent host seams.
 @Suppress("LongParameterList")
 fun ReadingPostCard(
     post: Post,
     identity: @Composable () -> Unit,
     modifier: Modifier = Modifier,
     presentation: ReadingPostCardPresentation = ReadingPostCardPresentation(),
+    mediaDiskCachePolicy: PostMediaDiskCachePolicy = PostMediaDiskCachePolicy.ENABLED,
     onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
     onImageLongPress: ((PostImageTarget) -> Unit)? = null,
     badges: (@Composable () -> Unit)? = null,
@@ -72,42 +77,44 @@ fun ReadingPostCard(
         header = identity,
         badges = badges,
         body = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(
-                        start = m.cardBodyHorizontal,
-                        top = m.cardBodyTop,
-                        end = m.cardBodyHorizontal,
-                        bottom = if (hasFooter) 0.dp else m.cardBodyBottom,
-                    ),
-                verticalArrangement = Arrangement.spacedBy(m.postSpacing),
-            ) {
-                val imageActions = remember(onImageLongPress) {
-                    onImageLongPress?.let { PostImageActions(onLongPress = it) }
-                }
-                CompositionLocalProvider(
-                    LocalPostImageActions provides imageActions,
-                    LocalEgoQuotePseudo provides presentation.egoQuoteCanonicalPseudo,
+            CompositionLocalProvider(LocalPostMediaDiskCachePolicy provides mediaDiskCachePolicy) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(
+                            start = m.cardBodyHorizontal,
+                            top = m.cardBodyTop,
+                            end = m.cardBodyHorizontal,
+                            bottom = if (hasFooter) 0.dp else m.cardBodyBottom,
+                        ),
+                    verticalArrangement = Arrangement.spacedBy(m.postSpacing),
                 ) {
-                    PostRenderer(
-                        content = post.content,
-                        // #946 — constant by construction: never swap SelectionContainer at runtime.
-                        selectable = true,
-                        onGoToCitedPost = onGoToCitedPost,
-                    )
-                }
-                post.signature?.let { signature ->
-                    if (presentation.showSignature) {
-                        HorizontalDivider(
-                            modifier = Modifier.testTag(READING_POST_SIGNATURE_DIVIDER_TAG),
-                            color = MaterialTheme.colorScheme.outlineVariant,
+                    val imageActions = remember(onImageLongPress) {
+                        onImageLongPress?.let { PostImageActions(onLongPress = it) }
+                    }
+                    CompositionLocalProvider(
+                        LocalPostImageActions provides imageActions,
+                        LocalEgoQuotePseudo provides presentation.egoQuoteCanonicalPseudo,
+                    ) {
+                        PostRenderer(
+                            content = post.content,
+                            // #946 — constant by construction: never swap SelectionContainer at runtime.
+                            selectable = true,
+                            onGoToCitedPost = onGoToCitedPost,
                         )
-                        CompositionLocalProvider(LocalIgnoreInlineColors provides true) {
-                            PostRenderer(
-                                content = signature,
-                                modifier = Modifier.alpha(READING_POST_SIGNATURE_ALPHA),
+                    }
+                    post.signature?.let { signature ->
+                        if (presentation.showSignature) {
+                            HorizontalDivider(
+                                modifier = Modifier.testTag(READING_POST_SIGNATURE_DIVIDER_TAG),
+                                color = MaterialTheme.colorScheme.outlineVariant,
                             )
+                            CompositionLocalProvider(LocalIgnoreInlineColors provides true) {
+                                PostRenderer(
+                                    content = signature,
+                                    modifier = Modifier.alpha(READING_POST_SIGNATURE_ALPHA),
+                                )
+                            }
                         }
                     }
                 }

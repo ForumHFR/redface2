@@ -25,7 +25,8 @@ import kotlinx.coroutines.withContext
  * enough that splitting dispatchers would only add complexity. Both caches are nullable
  * on the loader (a loader can be configured without either) — null simply means nothing
  * to clear. Same "no DiagnosticsLog" rationale as [DefaultTopicCacheMaintenance]: the
- * result is surfaced through `SettingsState` and there is no payload to redact.
+ * manual result is surfaced through `SettingsState`; the auth-transition caller emits only a
+ * generic failure message. Neither path includes a media URL or cache key in diagnostics (#316).
  */
 @Singleton
 class DefaultImageCacheMaintenance @Inject constructor(
