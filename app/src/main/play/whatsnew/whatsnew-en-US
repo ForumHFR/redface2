@@ -1,5 +1,6 @@
-Redface 2 v0.42.5 — dev.
+Redface 2 v0.42.6 — dev.
 
-- Private conversations keep their pages in memory: returning to a page you already read is instant.
-- Adjacent pages are prefetched while you read, only for the conversation on screen — never from the list, so an unread you never saw is not cleared.
-- Nothing is written to disk: the cache is gone when the app closes and when you sign out.
+- Quote several messages from a private conversation at once, from the message menu then "Citer N".
+- Pinch zoom finally works in private messages, on the same engine as topics.
+- Tapping a citation header now lands on the quoted message.
+- Private-message images are no longer written to disk, and signing out clears the image cache.

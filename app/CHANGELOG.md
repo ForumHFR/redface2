@@ -16,6 +16,28 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.42.6` — `internal` (dev) — 2026-08-18
+
+### Ajouté
+
+- **Citer plusieurs messages d'une conversation privée à la fois** ([#1074](https://github.com/ForumHFR/redface2/issues/1074), chantier de parité [#1040](https://github.com/ForumHFR/redface2/issues/1040)). Le menu d'un message permet de l'ajouter à un panier de citations, et un bouton « Citer N » ouvre l'éditeur avec toutes les citations. Appui long pour vider le panier. Un message masqué par la liste noire quitte le panier automatiquement.
+
+- **Le zoom pincé fonctionne dans les conversations privées** ([#1040](https://github.com/ForumHFR/redface2/issues/1040) lot 6). Le moteur est désormais partagé avec les sujets, à rendu identique au pixel près. Pendant un zoom, le défilement, le balayage de page et le tirer-pour-rafraîchir sont suspendus — le geste lui-même est désarmé, pas seulement son effet.
+
+- **Appuyer sur l'en-tête d'une citation amène au message cité**, dans les conversations privées ([#1074](https://github.com/ForumHFR/redface2/issues/1074)). La page se charge si nécessaire, puis l'atterrissage se fait sur le bon message.
+
+### Corrigé
+
+- **Les images des conversations privées ne sont plus écrites sur le disque de l'appareil** ([#1096](https://github.com/ForumHFR/redface2/issues/1096)). Elles l'étaient jusqu'ici par défaut, et **survivaient à la déconnexion**. La déconnexion et le changement de compte vident désormais le cache d'images — celui des sujets publics aussi, faute de pouvoir distinguer les entrées déjà écrites.
+
+  Conséquence visible : enregistrer une image d'un message privé la retélécharge au lieu de la lire sur le disque.
+
+- **Le saut vers un message cité fonctionnait pour personne de connecté**, sujets compris ([#625](https://github.com/ForumHFR/redface2/issues/625)). Le lien servi en mode authentifié n'a pas la forme du lien public, et il n'était pas reconnu.
+
+- Un chargement de conversation qui n'aboutissait ni en contenu ni en erreur laissait un indicateur sans issue ; il propose maintenant de réessayer ([#1086](https://github.com/ForumHFR/redface2/issues/1086)).
+
+---
+
 ## `0.42.5` — `internal` (dev) — 2026-08-16
 
 ### Ajouté
