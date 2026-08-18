@@ -31,6 +31,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.model.Post
@@ -41,11 +43,11 @@ import fr.forumhfr.redface2.core.ui.post.hideThenDismiss
 /**
  * #1051 — contextual menu owned by `:feature:messages` for one private message.
  *
- * This is deliberately not a specialization of the topic's `PostMenuSheet`: the MP surface has
- * only three author/message capabilities (copy the complete readable text, open the profile, and
- * block/unblock the author) plus the two data-driven information lines. It exposes neither a quote
- * entry nor a private permalink: simple citation (#1074) lives in the message-card footer, matching
- * the topic affordance, while no tested HFR contract can build a precise private-message permalink.
+ * This is deliberately not a specialization of the topic's `PostMenuSheet`: the MP surface owns
+ * copy, profile, multi-quote selection and block/unblock plus the two data-driven information
+ * lines. It exposes neither the simple quote entry nor a private permalink: simple citation (#1074)
+ * lives in the message-card footer, while adding/removing a message from the basket is contextual,
+ * like the topic's multi-quote action. No tested HFR contract builds a precise MP permalink.
  *
  * The profile action rides on the hero row, like the topic menu. A null callback keeps that row
  * inert. The block action is likewise hidden by capability (the caller omits it for one's own
@@ -54,12 +56,15 @@ import fr.forumhfr.redface2.core.ui.post.hideThenDismiss
  * empty clip silently.
  */
 @OptIn(ExperimentalMaterial3Api::class)
+@Suppress("LongParameterList")
 @Composable
 internal fun MessageMenuSheet(
     message: Post,
     authorBlocked: Boolean,
     onDismiss: () -> Unit,
     onOpenProfile: (() -> Unit)? = null,
+    multiQuoteSelected: Boolean = false,
+    onToggleMultiQuote: (() -> Unit)? = null,
     onToggleBlockAuthor: (() -> Unit)? = null,
 ) {
     val sheetState = rememberModalBottomSheetState()
@@ -131,6 +136,29 @@ internal fun MessageMenuSheet(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(stringResource(R.string.messages_message_menu_copy_text))
+            }
+
+            if (onToggleMultiQuote != null) {
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = {
+                        onToggleMultiQuote()
+                        hideThenDismiss(coroutineScope, sheetState, onDismiss)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .semantics { selected = multiQuoteSelected },
+                ) {
+                    Text(
+                        stringResource(
+                            if (multiQuoteSelected) {
+                                R.string.messages_multi_quote_remove
+                            } else {
+                                R.string.messages_multi_quote_add
+                            },
+                        ),
+                    )
+                }
             }
 
             if (onToggleBlockAuthor != null) {

@@ -156,6 +156,31 @@ class DefaultPrivateMessageWriteRepositoryTest {
     }
 
     @Test
+    fun `private multi quote POST keeps the first form routing and forwards every block`() = runTest {
+        // Client-only proof: the first form comes from the real capture, while the second block is
+        // synthetic BBCode. MockWebServer records serialization; it cannot prove HFR accepts it.
+        server.enqueue(MockResponse().setBody(fixture("private_message_quote_form.html")))
+        server.enqueue(MockResponse().setBody(fixture("write_reply_success_response.html")))
+        val form = repository.fetchReplyForm(quoteContext)
+        val secondPrefill = "[quotemsg=1980000005,5,990003]Deuxième citation[/quotemsg]\n"
+        val combinedPrefill = form.initialContent + "\n" + secondPrefill
+
+        repository.submitReply(
+            context = quoteContext,
+            form = form.copy(initialContent = combinedPrefill),
+            bbcodeContent = combinedPrefill,
+            options = form.options,
+        )
+
+        server.takeRequest() // typed quote GET
+        val body = parseFormBody(server.takeRequest().body.readUtf8())
+        assertEquals("the first quote keeps POST routing", "1980000004", body["numrep"])
+        assertEquals(combinedPrefill, body["content_form"])
+        assertEquals(2, Regex("\\[quotemsg=").findAll(body.getValue("content_form")).count())
+        assertFalse("ref remains GET/BBCode-only", body.containsKey("ref"))
+    }
+
+    @Test
     fun `private quote fails closed when HFR serves the simple reply form`() = runTest {
         server.enqueue(MockResponse().setBody(fixture("private_message_reply_form.html")))
 

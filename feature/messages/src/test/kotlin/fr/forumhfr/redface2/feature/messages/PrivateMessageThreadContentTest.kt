@@ -29,6 +29,8 @@ import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
+import fr.forumhfr.redface2.core.model.write.QuoteLocator
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.post.POST_CARD_SHELL_DIVIDER_TAG
 import java.time.Instant
@@ -295,6 +297,75 @@ class PrivateMessageThreadContentTest {
         compose.onNodeWithText("Visible sans rang").assertIsDisplayed()
         compose.onNodeWithText("Post de Bob masqué").assertIsDisplayed()
         compose.onNodeWithText("Citer").assertDoesNotExist()
+    }
+
+    @Test
+    fun `a selected message becoming hidden is reported to the app basket`() {
+        var removed = emptySet<Int>()
+        val selected = listOf(
+            QuoteSelection(
+                locator = QuoteLocator(page = 1, numreponse = 102, ref = 2),
+                author = "Bob",
+                excerpt = "Masqué",
+            ),
+            QuoteSelection(
+                locator = QuoteLocator(page = 8, numreponse = 999, ref = 4),
+                author = "BOB",
+                excerpt = "Sélectionné sur une autre page",
+            ),
+        )
+        val state = contentState(
+            messages = listOf(message(102, "Bob", "Masqué").copy(quoteRef = 2)),
+            hiddenNumreponses = setOf(102),
+            blockedQuoteAuthors = setOf("bob"),
+            canReply = true,
+        )
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                PrivateMessageThreadContent(
+                    state = state,
+                    isMultiRecipientHint = false,
+                    callbacks = NO_OP_CALLBACKS.copy(onRemoveMultiQuotes = { removed = it }),
+                    presentation = PrivateMessageThreadPresentation(
+                        multiQuoteSelections = selected,
+                    ),
+                )
+            }
+        }
+
+        compose.waitUntil { removed == setOf(102, 999) }
+    }
+
+    @Test
+    fun `an explicitly revealed blocked message stays outside both quote affordances`() {
+        val state = contentState(
+            messages = listOf(message(102, "Bob", "Révélé mais bloqué").copy(quoteRef = 2)),
+            hiddenNumreponses = setOf(102),
+            blockedQuoteAuthors = setOf("bob"),
+            canReply = true,
+        )
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                PrivateMessageThreadContent(
+                    state = state,
+                    isMultiRecipientHint = false,
+                    callbacks = NO_OP_CALLBACKS.copy(
+                        onQuote = {},
+                        onToggleMultiQuote = {},
+                    ),
+                )
+            }
+        }
+
+        compose.onNodeWithText("Afficher").performClick()
+        compose.onNodeWithText("Révélé mais bloqué").assertIsDisplayed()
+        compose.onNodeWithText("Citer").assertDoesNotExist()
+        compose.onNode(
+            SemanticsMatcher.keyIsDefined(SemanticsActions.OnLongClick),
+            useUnmergedTree = true,
+        ).performSemanticsAction(SemanticsActions.OnLongClick)
+        compose.onNodeWithText("Ajouter à la citation multiple").assertDoesNotExist()
+        compose.onNodeWithText("Ne plus masquer cet utilisateur").assertIsDisplayed()
     }
 
     @Test

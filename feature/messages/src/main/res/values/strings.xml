@@ -20,6 +20,14 @@
     <!-- #301 — réponse à une conversation privée (écriture MP). -->
     <string name="messages_reply">Répondre</string>
     <string name="messages_quote">Citer</string>
+    <plurals name="messages_multi_quote_count">
+        <item quantity="one">Citer %1$d message sélectionné</item>
+        <item quantity="other">Citer %1$d messages sélectionnés</item>
+    </plurals>
+    <string name="messages_multi_quote_short">Citer %1$d</string>
+    <string name="messages_multi_quote_clear">Vider la sélection de citations</string>
+    <string name="messages_multi_quote_add">Ajouter à la citation multiple</string>
+    <string name="messages_multi_quote_remove">Retirer de la citation multiple</string>
     <string name="messages_reply_title">Répondre</string>
     <string name="messages_compose_title">Nouveau message</string>
     <string name="messages_compose_new">Nouveau</string>
@@ -92,7 +100,7 @@
     <string name="messages_open_profile_action">Voir le profil</string>
 
     <!-- #1051/#1074 — menu contextuel propre aux messages privés. Le permalien reste absent ; la
-         citation simple est une action du pied de carte, comme côté topic, et non de ce menu. -->
+         citation simple reste au pied de carte et la sélection multiple vit dans ce menu. -->
     <string name="messages_message_menu_action">Options du message</string>
     <string name="messages_message_menu_number">Message n°%1$d</string>
     <string name="messages_message_menu_copy_text">Copier le texte</string>

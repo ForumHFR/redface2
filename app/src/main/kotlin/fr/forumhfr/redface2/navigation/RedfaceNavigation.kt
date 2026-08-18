@@ -1132,7 +1132,7 @@ fun RedfaceApp(intent: Intent?) {
         // losing it on process death just means re-selecting, like the markers above.
         var multiQuoteBasket by remember { mutableStateOf<MultiQuoteBasket?>(null) }
         // #604/#1074 — scoped quote selections handed to the NEXT full-screen editor (mockup P3):
-        // set immediately before pushing a PostEditorRoute (« Citer N » or a sheet escalation),
+        // set immediately before pushing a topic or MP editor (« Citer N » or a sheet escalation),
         // consumed ONCE by
         // the editor entry (read into the request, then cleared) so a later editor can never
         // resurrect a stale citation set. In-memory on purpose — the cards are transient by
@@ -1376,6 +1376,9 @@ fun RedfaceApp(intent: Intent?) {
                             basket = multiQuoteBasket,
                             onToggle = { scope, selection ->
                                 multiQuoteBasket = multiQuoteBasket.toggled(scope, selection)
+                            },
+                            onRemove = { scope, numreponses ->
+                                multiQuoteBasket = multiQuoteBasket.withoutSelections(scope, numreponses)
                             },
                             onClear = { multiQuoteBasket = null },
                             pendingEditorQuotes = pendingEditorQuotes,
@@ -1804,9 +1807,9 @@ private data class TopicSubmitNavState(
  * hoisted-state bundles ([TopicScrollNavState], `TopicTitleNavState`).
  *
  * #604 lot 3 — also carries the editor quote HANDOFF : [pendingEditorQuotes] is set (via
- * [onEditorQuotesHandoff]) right before a PostEditorRoute is pushed with citations (« Citer N »
- * or a sheet escalation), read once by the editor entry into `PostEditorRequest.initialQuotes`,
- * then cleared (null). Never serialised into the route — the cards are transient by decision.
+ * [onEditorQuotesHandoff]) right before a topic or MP editor is pushed with citations (« Citer N »
+ * or a sheet escalation), read once by that editor entry into its assisted request, then cleared
+ * (null). Never serialised into the route — the selections are transient by decision.
  *
  * #868/#869/#870 — the handoff also says whether the editor session CONSUMED the hoisted basket
  * ([EditorQuotesHandoff.consumesBasket]): only a « Citer N » launch (or a sheet escalation of one)
@@ -1817,6 +1820,7 @@ private data class TopicSubmitNavState(
 private data class MultiQuoteNavState(
     val basket: MultiQuoteBasket?,
     val onToggle: (scope: QuoteScope, selection: QuoteSelection) -> Unit,
+    val onRemove: (scope: QuoteScope, numreponses: Set<Int>) -> Unit,
     val onClear: () -> Unit,
     val pendingEditorQuotes: EditorQuotesHandoff? = null,
     val onEditorQuotesHandoff: (EditorQuotesHandoff?) -> Unit = {},
@@ -1829,7 +1833,7 @@ private data class MultiQuoteNavState(
  * is decided by the OPEN PATH (« Citer N » / escalation of a basket-armed sheet = true ; « Citer »
  * simple, #823 long-press and plain replies = false) — never inferred from the quote count. The
  * [scope] is checked by the receiving editor before exposing the selections, so a handoff for one
- * topic — or a future private conversation — cannot bleed into another writing target.
+ * topic or private conversation cannot bleed into another writing target.
  */
 internal data class EditorQuotesHandoff(
     val scope: QuoteScope,
@@ -1948,6 +1952,18 @@ internal fun MultiQuoteBasket?.toggled(scope: QuoteScope, selection: QuoteSelect
         current.selections + selection
     }
     return if (next.isEmpty()) null else current.copy(selections = next)
+}
+
+/** Removes selected ids from one exact scope; a different active basket is left untouched. */
+internal fun MultiQuoteBasket?.withoutSelections(
+    scope: QuoteScope,
+    numreponses: Set<Int>,
+): MultiQuoteBasket? {
+    val current = this?.takeIf { it.matches(scope) } ?: return this
+    val remaining = current.selections.filterNot { selection ->
+        selection.numreponse in numreponses
+    }
+    return remaining.takeIf { it.isNotEmpty() }?.let { current.copy(selections = it) }
 }
 
 /**
@@ -2245,6 +2261,7 @@ private fun RedfaceNavHost(
                 )
             }
             entry<PrivateMessageThreadRoute> { route ->
+                val privateMessageQuoteScope = QuoteScope.PrivateMessage(route.threadId)
                 PrivateMessageThreadScreen(
                     request = PrivateMessageThreadRequest(
                         threadId = route.threadId,
@@ -2272,6 +2289,33 @@ private fun RedfaceNavHost(
                             ),
                         )
                     },
+                    multiQuoteSelections = multiQuoteNavState.basket
+                        ?.takeIf { it.matches(privateMessageQuoteScope) }
+                        ?.selections
+                        .orEmpty(),
+                    onToggleMultiQuote = { selection ->
+                        multiQuoteNavState.onToggle(privateMessageQuoteScope, selection)
+                    },
+                    onMultiQuote = { threadId, page ->
+                        val selections = multiQuoteNavState.basket
+                            ?.takeIf { it.matches(privateMessageQuoteScope) }
+                            ?.selections
+                            .orEmpty()
+                        if (selections.isNotEmpty()) {
+                            multiQuoteNavState.onEditorQuotesHandoff(
+                                EditorQuotesHandoff(
+                                    scope = privateMessageQuoteScope,
+                                    quotes = selections,
+                                    consumesBasket = true,
+                                ),
+                            )
+                            backStack.add(PrivateMessageReplyRoute(threadId = threadId, page = page))
+                        }
+                    },
+                    onClearMultiQuote = multiQuoteNavState.onClear,
+                    onRemoveMultiQuotes = { numreponses ->
+                        multiQuoteNavState.onRemove(privateMessageQuoteScope, numreponses)
+                    },
                     // #618 — owner-only « Gérer les destinataires » entry from the Participants sheet:
                     // open the reply composer with its recipient-manager sheet auto-opened.
                     onManageRecipients = { threadId, page ->
@@ -2290,6 +2334,11 @@ private fun RedfaceNavHost(
                 )
             }
             entry<PrivateMessageReplyRoute> { route ->
+                val privateMessageQuoteScope = QuoteScope.PrivateMessage(route.threadId)
+                val editorQuotesHandoff = remember(route) {
+                    multiQuoteNavState.pendingEditorQuotes.forScope(privateMessageQuoteScope)
+                }
+                LaunchedEffect(Unit) { multiQuoteNavState.onEditorQuotesHandoff(null) }
                 PrivateMessageReplyScreen(
                     request = PrivateMessageReplyRequest(
                         threadId = route.threadId,
@@ -2301,8 +2350,14 @@ private fun RedfaceNavHost(
                                 ref = requireNotNull(route.quoteRef),
                             )
                         },
+                        initialQuotes = editorQuotesHandoff?.quotes.orEmpty(),
                     ),
                     onSubmitSucceeded = { threadId, page ->
+                        if (editorQuotesHandoff?.consumesBasket == true &&
+                            multiQuoteNavState.basket?.matches(privateMessageQuoteScope) == true
+                        ) {
+                            multiQuoteNavState.onClear()
+                        }
                         // Pop the editor, then replace the conversation entry with a fresh key
                         // (bumped submitSignal) so the thread re-fetches and shows the sent message.
                         // Mirrors PostEditorRoute.onSubmitSucceeded. Never collapse below the tab root.

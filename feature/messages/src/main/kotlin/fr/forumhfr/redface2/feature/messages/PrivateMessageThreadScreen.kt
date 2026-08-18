@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.messages
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -67,7 +69,10 @@ import fr.forumhfr.redface2.core.domain.ego.isEgoPost
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
+import fr.forumhfr.redface2.core.model.postContentExcerpt
 import fr.forumhfr.redface2.core.model.write.PrivateMessageQuote
+import fr.forumhfr.redface2.core.model.write.QuoteLocator
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
@@ -109,6 +114,13 @@ fun PrivateMessageThreadScreen(
     // #1074 — per-message footer action. The quote target is typed before navigation; no private
     // href or BBCode enters the route.
     onQuote: (threadId: Int, page: Int, quote: PrivateMessageQuote) -> Unit,
+    // #1074 — scope-filtered basket state is owned by :app; this feature only renders and mutates
+    // the current conversation's selections. Complete locators stay inside each QuoteSelection.
+    multiQuoteSelections: List<QuoteSelection> = emptyList(),
+    onToggleMultiQuote: (QuoteSelection) -> Unit = {},
+    onMultiQuote: (threadId: Int, page: Int) -> Unit = { _, _ -> },
+    onClearMultiQuote: () -> Unit = {},
+    onRemoveMultiQuotes: (Set<Int>) -> Unit = {},
     // #618 — owner-only entry to the recipient editor, from the « Participants » sheet. Navigates to
     // the reply composer with the recipient-manager sheet auto-opened (member changes ship as a reply).
     onManageRecipients: (threadId: Int, page: Int) -> Unit = { _, _ -> },
@@ -213,6 +225,10 @@ fun PrivateMessageThreadScreen(
                     )
                 }
             },
+            onToggleMultiQuote = onToggleMultiQuote,
+            onMultiQuote = { onMultiQuote(request.threadId, state.page) },
+            onClearMultiQuote = onClearMultiQuote,
+            onRemoveMultiQuotes = onRemoveMultiQuotes,
             onRetry = {
                 citedMessageLanding = null
                 viewModel.retry()
@@ -240,11 +256,14 @@ fun PrivateMessageThreadScreen(
             onSetAuthorBlocked = viewModel::setAuthorBlocked,
             onSaveImage = viewModel::saveImage,
         ),
-        citedMessageLanding = PrivateMessageCitedLanding(
-            effect = citedMessageLanding,
-            onConsumed = { consumed ->
-                if (citedMessageLanding == consumed) citedMessageLanding = null
-            },
+        presentation = PrivateMessageThreadPresentation(
+            citedMessageLanding = PrivateMessageCitedLanding(
+                effect = citedMessageLanding,
+                onConsumed = { consumed ->
+                    if (citedMessageLanding == consumed) citedMessageLanding = null
+                },
+            ),
+            multiQuoteSelections = multiQuoteSelections,
         ),
         topBarActions = topBarActions,
     )
@@ -281,6 +300,16 @@ internal fun PrivateMessageThreadUiState.Mode.networkLoadedThreadOrNull() =
 internal data class PrivateMessageCitedLanding(
     val effect: PrivateMessageThreadEffect.ScrollToCitedMessage? = null,
     val onConsumed: (PrivateMessageThreadEffect.ScrollToCitedMessage) -> Unit = {},
+)
+
+/**
+ * Host-owned transient presentation inputs for [PrivateMessageThreadContent]. The cited landing and
+ * multi-quote selection snapshot share the screen composition's lifetime; user actions remain in
+ * [PrivateMessageThreadCallbacks].
+ */
+internal data class PrivateMessageThreadPresentation(
+    val citedMessageLanding: PrivateMessageCitedLanding = PrivateMessageCitedLanding(),
+    val multiQuoteSelections: List<QuoteSelection> = emptyList(),
 )
 
 private data class CitedMessageLandingDecision(
@@ -384,6 +413,10 @@ internal data class PrivateMessageThreadCallbacks(
     val onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
     /** Null only in isolated hosts; production supplies it and the list applies reply/ref gates. */
     val onQuote: ((Post) -> Unit)? = null,
+    val onToggleMultiQuote: (QuoteSelection) -> Unit = {},
+    val onMultiQuote: () -> Unit = {},
+    val onClearMultiQuote: () -> Unit = {},
+    val onRemoveMultiQuotes: (Set<Int>) -> Unit = {},
     // #1042 — defaulted (unlike its siblings) so the pre-#1042 characterization mounts compile
     // unchanged; a host that does not navigate keeps the tap a no-op, like the topic screen default.
     val onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
@@ -404,10 +437,11 @@ internal fun PrivateMessageThreadContent(
     state: PrivateMessageThreadUiState,
     isMultiRecipientHint: Boolean,
     callbacks: PrivateMessageThreadCallbacks,
-    citedMessageLanding: PrivateMessageCitedLanding = PrivateMessageCitedLanding(),
+    presentation: PrivateMessageThreadPresentation = PrivateMessageThreadPresentation(),
     topBarActions: @Composable (() -> Unit)? = null,
 ) {
     val mode = state.mode
+    val multiQuoteSelections = presentation.multiQuoteSelections
     val listState = rememberLazyListState()
     // #1051 — private message whose feature-owned menu is open. Kept local like the image menu:
     // ephemeral UI state contains no route/private-data persistence across process death.
@@ -492,10 +526,13 @@ internal fun PrivateMessageThreadContent(
             )
         },
         floatingActionButton = {
-            ThreadReplyFab(
-                // #301 — reply affordance, shown only once the page proved a reply form is available.
-                canReply = (mode as? PrivateMessageThreadUiState.Mode.Content)?.thread?.canReply == true,
+            val canReply = (mode as? PrivateMessageThreadUiState.Mode.Content)?.thread?.canReply == true
+            ThreadBottomActions(
+                canReply = canReply,
+                multiQuoteCount = if (canReply) multiQuoteSelections.size else 0,
                 onReply = callbacks.onReply,
+                onMultiQuote = callbacks.onMultiQuote,
+                onClearMultiQuote = callbacks.onClearMultiQuote,
             )
         },
     ) { innerPadding ->
@@ -556,7 +593,7 @@ internal fun PrivateMessageThreadContent(
                         thread = mode.thread,
                         connectedPseudo = state.connectedPseudo,
                         isRefreshing = state.isRefreshing,
-                        citedMessageLanding = citedMessageLanding,
+                        citedMessageLanding = presentation.citedMessageLanding,
                     )
                     // #335/#351 — pull-to-refresh re-fetches the displayed page; the indicator also
                     // covers the keep-content page changes (same isRefreshing flag).
@@ -578,6 +615,7 @@ internal fun PrivateMessageThreadContent(
                             ThreadMessages(
                                 messages = mode.thread.messages,
                                 hiddenNumreponses = mode.hiddenNumreponses,
+                                blockedQuoteAuthors = mode.blockedQuoteAuthors,
                                 page = state.page,
                                 totalPages = state.totalPages,
                                 fullWidthPosts = state.fullWidthPosts,
@@ -586,8 +624,10 @@ internal fun PrivateMessageThreadContent(
                                 egoPostEnabled = state.egoPostEnabled,
                                 connectedPseudo = state.connectedPseudo,
                                 canReply = mode.thread.canReply,
+                                multiQuoteSelections = multiQuoteSelections,
                                 onSelectPage = callbacks.onSelectPage,
                                 onQuote = callbacks.onQuote,
+                                onRemoveMultiQuotes = callbacks.onRemoveMultiQuotes,
                                 onGoToCitedPost = callbacks.onGoToCitedPost,
                                 onOpenProfile = callbacks.onOpenProfile,
                                 onOpenMessageMenu = openMessageMenu,
@@ -629,6 +669,8 @@ internal fun PrivateMessageThreadContent(
         connectedPseudo = state.connectedPseudo,
         target = messageMenuTarget,
         onOpenProfile = callbacks.onOpenProfile,
+        multiQuoteSelections = multiQuoteSelections,
+        onToggleMultiQuote = callbacks.onToggleMultiQuote,
         onSetAuthorBlocked = callbacks.onSetAuthorBlocked,
         onClear = { messageMenuTarget = null },
     )
@@ -654,6 +696,8 @@ private fun ThreadMessageMenuHost(
     connectedPseudo: String?,
     target: Post?,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit,
+    multiQuoteSelections: List<QuoteSelection>,
+    onToggleMultiQuote: (QuoteSelection) -> Unit,
     onSetAuthorBlocked: (author: String, blocked: Boolean) -> Unit,
     onClear: () -> Unit,
 ) {
@@ -672,6 +716,7 @@ private fun ThreadMessageMenuHost(
                 connectedPseudo?.let(::canonicalizePseudo)
             }
             val authorBlocked = authorCanonical in mode.blockedQuoteAuthors
+            val quoteSelection = message.toPrivateMessageQuoteSelectionOrNull(mode.thread.page)
             MessageMenuSheet(
                 message = message,
                 authorBlocked = authorBlocked,
@@ -688,6 +733,14 @@ private fun ThreadMessageMenuHost(
                 } else {
                     { onSetAuthorBlocked(message.author, !authorBlocked) }
                 },
+                multiQuoteSelected = multiQuoteSelections.any { selection ->
+                    selection.numreponse == message.numreponse
+                },
+                // A blocked-but-explicitly-revealed message remains outside the basket until its
+                // author is unblocked; otherwise changing page would silently re-hide a selected MP.
+                onToggleMultiQuote = quoteSelection
+                    ?.takeIf { mode.thread.canReply && !authorBlocked }
+                    ?.let { selection -> { onToggleMultiQuote(selection) } },
             )
         }
     }
@@ -747,6 +800,64 @@ private fun ThreadTopBarActions(
         }
     }
     topBarActions?.invoke()
+}
+
+/** Bottom write cluster: basket entry first, then the stable reply affordance. */
+@Composable
+private fun ThreadBottomActions(
+    canReply: Boolean,
+    multiQuoteCount: Int,
+    onReply: () -> Unit,
+    onMultiQuote: () -> Unit,
+    onClearMultiQuote: () -> Unit,
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (multiQuoteCount > 0) {
+            MessageMultiQuoteFab(
+                count = multiQuoteCount,
+                onClick = onMultiQuote,
+                onClear = onClearMultiQuote,
+            )
+        }
+        ThreadReplyFab(canReply = canReply, onReply = onReply)
+    }
+}
+
+/**
+ * #1074 — visible « Citer N » entry to the MP editor. A long press mirrors the topic affordance and
+ * clears the complete scoped basket without navigating; the semantics exposes both gestures.
+ */
+@Composable
+internal fun MessageMultiQuoteFab(count: Int, onClick: () -> Unit, onClear: () -> Unit) {
+    val label = pluralStringResource(R.plurals.messages_multi_quote_count, count, count)
+    val shortLabel = stringResource(R.string.messages_multi_quote_short, count)
+    val clearLabel = stringResource(R.string.messages_multi_quote_clear)
+    Surface(
+        modifier = Modifier
+            .semantics { contentDescription = label }
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onClear,
+                onLongClickLabel = clearLabel,
+                role = Role.Button,
+            ),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        shadowElevation = 6.dp,
+    ) {
+        Box(
+            modifier = Modifier
+                .sizeIn(minHeight = 56.dp)
+                .padding(horizontal = 16.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(text = shortLabel, style = MaterialTheme.typography.labelLarge)
+        }
+    }
 }
 
 /**
@@ -841,6 +952,7 @@ internal fun rememberThreadSwipeModifier(
 private fun ThreadMessages(
     messages: List<Post>,
     hiddenNumreponses: Set<Int>,
+    blockedQuoteAuthors: Set<String>,
     page: Int,
     totalPages: Int,
     fullWidthPosts: Boolean,
@@ -849,8 +961,10 @@ private fun ThreadMessages(
     egoPostEnabled: Boolean,
     connectedPseudo: String?,
     canReply: Boolean,
+    multiQuoteSelections: List<QuoteSelection>,
     onSelectPage: (Int) -> Unit,
     onQuote: ((Post) -> Unit)?,
+    onRemoveMultiQuotes: (Set<Int>) -> Unit,
     onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)?,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit,
     onOpenMessageMenu: (Post) -> Unit,
@@ -862,6 +976,16 @@ private fun ThreadMessages(
     // #509/#1050 — reveal is deliberately page-local and non-saveable. In-place pagination keeps
     // this composition alive, so keying on the landed page is what re-collapses every placeholder.
     var revealedHiddenMessages by remember(page) { mutableStateOf(emptySet<Int>()) }
+    // #1074 — :feature:messages observes the live blacklist while :app owns the scoped basket.
+    // Remove any selected message that becomes hidden, including after a settings-side change.
+    // revealedHiddenMessages deliberately does not weaken this rule: « Afficher » is temporary,
+    // while the basket could otherwise survive the next page change that hides the message again.
+    PruneHiddenMultiQuotesEffect(
+        hiddenNumreponses = hiddenNumreponses,
+        blockedQuoteAuthors = blockedQuoteAuthors,
+        selections = multiQuoteSelections,
+        onRemoveMultiQuotes = onRemoveMultiQuotes,
+    )
     // #1050 — the MP mirror of the topic list's #874 derivation: canonicalize the live session
     // pseudo ONCE for the rendered page, then match the page's message authors once while building
     // the set below. Lazy cards only consume the resulting pseudo/set. `Post.isOwnPost` is
@@ -924,6 +1048,9 @@ private fun ThreadMessages(
                 )
                 MessageCard(
                     message = message,
+                    multiQuoteSelected = multiQuoteSelections.any { selection ->
+                        selection.numreponse == message.numreponse
+                    },
                     presentation = ReadingPostCardPresentation(
                         showSignature = showSignatures,
                         flat = fullWidthPosts,
@@ -945,7 +1072,12 @@ private fun ThreadMessages(
                     // #1074 — MP citation is fail-closed: unlike the topic fallback, the measured
                     // contract requires the server-provided 1-based page rank. Missing/zero `ref`,
                     // read-only thread, or absent host callback means no footer action.
-                    onQuote = messageQuoteAction(canReply, message, onQuote),
+                    onQuote = messageQuoteAction(
+                        canReply = canReply,
+                        authorBlocked = message.numreponse in hiddenNumreponses,
+                        message = message,
+                        onQuote = onQuote,
+                    ),
                 )
             }
         }
@@ -983,14 +1115,54 @@ private fun ThreadMessages(
 /** Fail-closed MP quote gate, kept outside the hot list builder's complexity budget. */
 private fun messageQuoteAction(
     canReply: Boolean,
+    authorBlocked: Boolean,
     message: Post,
     onQuote: ((Post) -> Unit)?,
 ): (() -> Unit)? {
     val ref = message.quoteRef ?: return null
-    return if (!canReply || ref < 1 || onQuote == null) {
-        null
-    } else {
-        { onQuote(message) }
+    return onQuote
+        ?.takeIf { canReply && !authorBlocked && ref >= 1 }
+        ?.let { quote -> { quote(message) } }
+}
+
+/** Builds the complete locator only when the measured MP contract can be represented. */
+internal fun Post.toPrivateMessageQuoteSelectionOrNull(page: Int): QuoteSelection? {
+    val ref = quoteRef?.takeIf { it >= 1 } ?: return null
+    return QuoteSelection(
+        locator = QuoteLocator(page = page, numreponse = numreponse, ref = ref),
+        author = author,
+        excerpt = postContentExcerpt(content),
+    )
+}
+
+/** Selected messages hidden by the current blacklist, including snapshots made on older pages. */
+internal fun hiddenMultiQuoteNumreponses(
+    selections: List<QuoteSelection>,
+    hiddenNumreponses: Set<Int>,
+    blockedQuoteAuthors: Set<String>,
+): Set<Int> = selections
+    .asSequence()
+    .filter { selection ->
+        selection.numreponse in hiddenNumreponses ||
+            canonicalizePseudo(selection.author) in blockedQuoteAuthors
+    }
+    .mapTo(mutableSetOf()) { selection -> selection.numreponse }
+
+/** Prunes selections after any live blacklist change, including changes made outside this screen. */
+@Composable
+private fun PruneHiddenMultiQuotesEffect(
+    hiddenNumreponses: Set<Int>,
+    blockedQuoteAuthors: Set<String>,
+    selections: List<QuoteSelection>,
+    onRemoveMultiQuotes: (Set<Int>) -> Unit,
+) {
+    LaunchedEffect(hiddenNumreponses, blockedQuoteAuthors, selections) {
+        val hiddenSelections = hiddenMultiQuoteNumreponses(
+            selections = selections,
+            hiddenNumreponses = hiddenNumreponses,
+            blockedQuoteAuthors = blockedQuoteAuthors,
+        )
+        if (hiddenSelections.isNotEmpty()) onRemoveMultiQuotes(hiddenSelections)
     }
 }
 
@@ -1024,6 +1196,7 @@ internal fun isHiddenMessage(message: Post, hidden: Set<Int>, revealed: Set<Int>
  * landing. A null host keeps the shared quote header inert.
  * [onQuote] supplies the footer « Citer » action. The list passes it only for a writable thread and
  * a message carrying a positive server-provided `quoteRef`; hidden messages never mount this card.
+ * [multiQuoteSelected] reuses the shared selected border/semantics without adding a dynamic badge.
  * [presentation] is the shared render-only state bundle. The list derives its values from reader
  * preferences, the session pseudo (#1050 Ego markers) and message position, while this adapter
  * forwards the bundle unchanged — its only addition is the EgoPost StateDescription on the
@@ -1035,6 +1208,7 @@ internal fun isHiddenMessage(message: Post, hidden: Set<Int>, revealed: Set<Int>
 internal fun MessageCard(
     message: Post,
     presentation: ReadingPostCardPresentation = ReadingPostCardPresentation(),
+    multiQuoteSelected: Boolean = false,
     onOpenProfile: (() -> Unit)? = null,
     onOpenMenu: (() -> Unit)? = null,
     onImageLongPress: ((PostImageTarget) -> Unit)? = null,
@@ -1071,7 +1245,7 @@ internal fun MessageCard(
     ReadingPostCard(
         post = message,
         modifier = menuModifier,
-        presentation = presentation,
+        presentation = presentation.copy(selected = multiQuoteSelected),
         onGoToCitedPost = onGoToCitedPost,
         onImageLongPress = onImageLongPress,
         identity = {

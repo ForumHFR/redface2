@@ -13,6 +13,8 @@ import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.write.PrivateMessageQuote
 import fr.forumhfr.redface2.core.model.write.PrivateMessageReplyContext
+import fr.forumhfr.redface2.core.model.write.QuoteLocator
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
@@ -200,6 +202,55 @@ class PrivateMessageReplyViewModelTest {
                 bbcodeContent = prefill,
                 options = ReplyFormOptions(signatureEnabled = true),
                 // No member edit: the repository forwards the original `newdest` verbatim.
+                recipientsOverride = null,
+            )
+        }
+    }
+
+    @Test
+    fun `multi quote hydrates every server prefill and submits with the first locator`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        val firstPrefill = "[quotemsg=303,2,1]Trois[/quotemsg]\n"
+        val secondPrefill = "[quotemsg=101,9,1]Un[/quotemsg]\n"
+        val multiQuoteRequest = PrivateMessageReplyRequest(
+            threadId = 3_000_001,
+            page = 6,
+            initialQuotes = listOf(
+                QuoteSelection(QuoteLocator(page = 8, numreponse = 303, ref = 2), "Carol", "Trois"),
+                QuoteSelection(QuoteLocator(page = 3, numreponse = 101, ref = 9), "Alice", "Un"),
+            ),
+        )
+        coEvery { repository.fetchReplyForm(any(), any()) } coAnswers {
+            val context = firstArg<PrivateMessageReplyContext>()
+            val quote = requireNotNull(context.quote)
+            form(
+                hashCheck = "hash-${quote.numreponse}",
+                hiddenFields = mapOf("numrep" to quote.numreponse.toString()),
+                initialContent = if (quote.numreponse == 303) firstPrefill else secondPrefill,
+            )
+        }
+        coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
+            ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+
+        val viewModel = PrivateMessageReplyViewModel(
+            multiQuoteRequest, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
+        )
+
+        val expected = firstPrefill + "\n" + secondPrefill
+        assertEquals(expected, viewModel.state.value.draft.text)
+        viewModel.onSubmit()
+
+        coVerify {
+            repository.submitReply(
+                context = match { submitContext ->
+                    submitContext.page == 8 &&
+                        submitContext.quote == PrivateMessageQuote(numreponse = 303, ref = 2)
+                },
+                form = match { submittedForm -> submittedForm.hashCheck == "hash-303" },
+                bbcodeContent = expected,
+                options = any(),
                 recipientsOverride = null,
             )
         }

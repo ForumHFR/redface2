@@ -23,6 +23,7 @@ import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.write.PrivateMessageReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.model.write.PrivateMessageReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
@@ -50,8 +51,9 @@ import kotlinx.coroutines.launch
 /**
  * ViewModel for replying to a private-message conversation (#301). Receives its route arguments via
  * Hilt assisted injection ([PrivateMessageReplyRequest]). On creation it GETs either the normal MP
- * reply form or the typed per-message quote form (fresh `hash_check` + hidden fields), then lets the
- * user edit the server-provided BBCode with the shared toolbar/preview and submit it.
+ * reply form, one typed quote form, or one typed form per multi-quote selection (fresh `hash_check`
+ * + hidden fields from the first), then lets the user edit the server-provided BBCode with the
+ * shared toolbar/preview and submit it.
  *
  * Two private-message specifics drive the design (cf. the #301 design notes / independent review):
  *  - The HFR POST success sentence for a private reply is not pinned by a live fixture, so an
@@ -87,8 +89,10 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         page = request.page.coerceAtLeast(1),
         quote = request.quote,
     )
+    private val quoteMaterializer = PrivateMessageReplyQuoteMaterializer(repository)
 
     private var loadedForm: ReplyForm? = null
+    private var loadedSubmitContext: PrivateMessageReplyContext? = null
     private var formJob: Job? = null
     private var submitJob: Job? = null
 
@@ -264,19 +268,23 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                 // message.php one carrying `newdest` (owner) ; refuse the forum2.php quick-reply
                 // fallback (no newdest → no member editor → silently lands on a plain composer). A
                 // failed message.php GET then surfaces as a form error (retry) rather than a dead end.
-                val form = repository.fetchReplyForm(
-                    context,
+                val materialized = quoteMaterializer.fetchFormWithQuotes(
+                    context = context,
+                    selections = request.initialQuotes,
                     allowEmbeddedFallback = !request.openRecipientManager,
                 )
+                val form = materialized.form
                 if (form.isAnonymous) {
                     // Session vanished between opening the thread and replying — treat like a form
                     // error so the user re-authenticates (the reply route is only reachable while
                     // authenticated, so this is rare).
                     loadedForm = null
+                    loadedSubmitContext = null
                     _state.update { it.copy(isLoadingForm = false, formAvailable = false, formError = true) }
                     return@launch
                 }
                 loadedForm = form
+                loadedSubmitContext = materialized.submitContext
                 _state.update { current ->
                     // #1074 — consume HFR's quote BBCode exactly once. If the user typed while the
                     // GET was in flight, keep that text below the verbatim server prefill. A silent
@@ -337,6 +345,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             ) {
                 // No raw message reaches the UI (#316): a private form GET can embed the private URL.
                 loadedForm = null
+                loadedSubmitContext = null
                 _state.update { it.copy(isLoadingForm = false, formAvailable = false, formError = true) }
             }
         }
@@ -480,6 +489,10 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             loadForm()
             return
         }
+        val submitContext = loadedSubmitContext ?: run {
+            loadForm()
+            return
+        }
         if (form.isAnonymous) {
             _state.update { it.copy(submitError = PrivateMessageReplyError.LoginRequired) }
             return
@@ -512,7 +525,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         submitJob = viewModelScope.launch {
             val outcome = runCatching {
                 repository.submitReply(
-                    context = context,
+                    context = submitContext,
                     form = form,
                     bbcodeContent = snapshot.draft.text,
                     options = options,
