@@ -10,7 +10,7 @@ permalink: /adr/009-okhttp-5-3-plus
 
 ## Statut
 
-Accepté — 2026-04-19
+Accepté — 2026-04-19 · **amendé 2026-08-23 (passe de cohérence specs↔code)** : la décision est tenue sur son fond (OkHttp 5.3+ direct, sans Retrofit — `okhttp = "5.3.2"` dans `gradle/libs.versions.toml`), mais **une de ses prémisses n'est pas réalisée** — voir la note sous § Décision. Pas de statut `Superseded` : aucune ADR ne remplace celle-ci.
 
 ## Contexte
 
@@ -33,6 +33,8 @@ Les bénéfices retenus :
 - démarrage sur une base stable et actuelle
 
 Le report éventuel du KMP post-v1 est un **choix de scope**, pas une contrainte liée à OkHttp 5.
+
+> **Prémisse non réalisée — `mockwebserver3` (relevé 2026-08-23).** Le bénéfice « API moderne » ci-dessus cite `mockwebserver3` ; le dépôt ne le consomme **pas**. `gradle/libs.versions.toml` déclare `com.squareup.okhttp3:mockwebserver` (module legacy, même `version.ref` que OkHttp), consommé par `:core:network` et `:core:data`, et **les 13 fichiers de test qui l'utilisent importent tous `okhttp3.mockwebserver.*`** — **zéro** import `mockwebserver3` dans l'arbre. La décision reste valable sans cette prémisse : elle ne portait aucune contrainte sur le harnais de test. Si la migration est un jour souhaitée, la traiter comme un chantier de harnais de test à part entière et non comme un simple changement de coordonnée Gradle : les paquets, et donc tous les imports et les appels, changent.
 
 ## Conséquences
 
