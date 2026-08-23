@@ -205,6 +205,16 @@ Mandat de refonte des écrans chauds avant la 1.0 (post HFR XaTriX 2788560) :
 - [x] **Refonte de la vue Drapeaux** — #603 (livrée, bêta 0.18.0 — [ADR-017]({{ site.baseurl }}/adr/017-refonte-vue-drapeaux))
 - [x] **Refonte de la vue Topic** — #604 (livrée, bêta 0.37.0 : cinq vagues, moteur de pagination in-VM #895, loupe #182, passe images #876 ; reliquats en Vue · Topic 2)
 - [x] **Hygiène repo / audit des dérives** — exécutée (2026-06) ; #605 requalifiée en ombrelle de suivi Phase 4
+- [ ] **Partage de la surface de lecture Topic → MP/DT** — [#1040](https://github.com/ForumHFR/redface2/issues/1040) (**en cours**, dev 0.42.0 → 0.42.6). Le chantier répond à un délaissement mesuré : 74 commits sur `feature/topic` contre 7 sur `feature/messages` entre le 20/06 et le 12/08, sans document pour tracer l'écart. **Huit lots (0 → 7)** ; les lots 0 à 5 sont clos et le lot 6 est entamé :
+  - lot 0 — caractérisation MP, correction de la prose route-driven et création de la page canonique [Parité de lecture Topic ↔ MP]({{ site.baseurl }}/specs/reading-parity) ([#1041](https://github.com/ForumHFR/redface2/issues/1041)), rendue `[enforced]` par deux gardes machine en [#1045](https://github.com/ForumHFR/redface2/issues/1045) ;
+  - lot 1 — `ReadingPostCard`, carte de lecture commune promue dans `:core:ui` ([#1042](https://github.com/ForumHFR/redface2/issues/1042)) : densité, sélection de texte, profil au tap ;
+  - lot 2 — préférences de lecture transverses ([#1050](https://github.com/ForumHFR/redface2/issues/1050)) : pleine largeur, EgoQuote/EgoPost, liste noire, signatures ;
+  - lot 3 — actions contextuelles ([#1051](https://github.com/ForumHFR/redface2/issues/1051)) : menu de message, appui long sur image ;
+  - lot 4 — citation MP ([#1074](https://github.com/ForumHFR/redface2/issues/1074)) : citation simple, citation multiple, saut vers le message cité — contrat de formulaire mesuré en 1:1 et en DT, aucun POST live ;
+  - lot 5 — cache RAM de session et prefetch authentifié borné ([#1080](https://github.com/ForumHFR/redface2/issues/1080), ADR-013 décision 2 étage 2 et décision 3) ;
+  - lot 6 — pagination riche, gestes et zoom : **entamé**, zoom pincé partagé livré ([#1098](https://github.com/ForumHFR/redface2/pull/1098)) ; picker de pages, raccourcis premier/dernier, ancres par page et double-tap restants ;
+  - lot 7 — cache Room du contenu MP, opt-in OFF (ADR-013 décision 2 étage 3) : **non commencé**.
+  - **écarts encore ouverts, hors lots** : l'affordance directe d'ajout au panier multi-quote sur la carte MP ([#1102](https://github.com/ForumHFR/redface2/issues/1102)) et la clause dormante de suspension du prefetch après un « marquer comme non lu » ([#1087](https://github.com/ForumHFR/redface2/issues/1087)).
 
 **Livrable :** les features communautaires les plus demandées + une UI refondue prête pour la 1.0.
 

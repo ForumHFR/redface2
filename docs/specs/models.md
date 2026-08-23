@@ -304,8 +304,8 @@ sealed interface PostBlock {
     data class Paragraph(val inlines: List<PostInline>) : PostBlock
     data class Quote(
         val author: String?,
-        val numreponse: Int?,            // depuis [quotemsg=N,P,auteur], null si la source HTML ne l'expose pas
-        val page: Int?,                  // idem, sert à reconstruire un lien vers le post cité quand disponible
+        val numreponse: Int?,            // lu dans le href de l'ancre auteur de la citation (PostContentParser.parseQuote, CITATION_HREF_REGEX ou DYNAMIC_CITATION_HREF_REGEX) : c'est le fragment #t<num> qui est autoritaire, PAS le paramètre numreponse= (il vaut 0 sur les sujets authentifiés). Jamais dérivé du tag [quotemsg=…] du BBCode source, que le HTML rendu n'expose pas. Null si l'ancre manque (table.quote / table.oldquote d'un [quote] nu) ou si le href n'a aucune des deux formes
+        val page: Int?,                  // même source : 1er groupe de la même regex (segment sujet_<id>_<page>.htm en anonyme, paramètre page= en authentifié). Sert à reconstruire un lien vers le post cité et à router le saut #625/#1093
         val content: PostContent,
     ) : PostBlock
     data class Spoiler(val label: String?, val content: PostContent) : PostBlock

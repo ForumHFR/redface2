@@ -699,6 +699,43 @@ blocs `[quotemsg]`.
 
 Marqueur dans le HTML des posts : un `div.edited` en fin de contenu, ex. `<div class="edited"><a …>Message cité 1 fois</a><br />Message édité par jubjub le 14-03-2016&nbsp;à&nbsp;12:09:00</div>`. Le lien « Message cité N fois » est optionnel et peut exister **sans** ligne « Message édité » (post cité jamais édité) — et inversement. Extrait côté parser (#362) en champ `Post.editedAt: Instant?` via `HfrDateParser.parseEditedAtOrNull` (regex non ancrée, le préfixe citation est toléré ; null si pas de marqueur d'édition). Le `div.edited` reste par ailleurs retiré du contenu rendu (`PostContentParser`).
 
+### En-tête d'une citation rendue — deux formes de lien, `#t{numreponse}` autoritaire
+
+Le bandeau « *Pseudo* a écrit : » d'une citation rendue (`table.citation b.s1 a.Topic`, ou
+`table.oldcitation` pour un profil au style classique) porte le **permalien du message cité**. HFR en
+sert **deux formes selon la session**, et un client qui n'en connaît qu'une casse le saut vers le
+message cité pour l'autre moitié des lecteurs ([#625](https://github.com/ForumHFR/redface2/issues/625),
+corrigé par #1092) :
+
+| Session | Forme du href | Page | Message cité |
+|---|---|---|---|
+| **Anonyme** | `…/{slug}-sujet_{topicId}_{page}.htm#t{numreponse}` (permalien statique) | 2ᵉ entier du segment `sujet_…` | fragment `#t{…}` |
+| **Authentifiée** | `…/forum2.php?config=hfr.inc&cat={cat}&…&page={N}&…&numreponse={M}&…#t{numreponse}` | paramètre `page=` | fragment `#t{…}` |
+
+La forme authentifiée est la **même sur les sujets et sur les MP** (`cat=prive`) : ce n'était pas un
+défaut propre aux MP.
+
+> **Piège mesuré : `numreponse=` en query n'est pas le message cité.** Sur les pages de sujet
+> authentifiées, le paramètre `numreponse=` de ce href vaut **`0`** — seul le **fragment `#t{num}`**
+> identifie le message cité. Lire le paramètre donne un correctif *vert* en MP (où il porte bien la
+> même valeur que le fragment) et **cassé sur les sujets**. Le fragment est donc la source unique
+> pour les deux formes et les deux surfaces.
+>
+> Preuves dans l'arbre, ancres `a.Topic` d'un `table.citation` / `table.oldcitation` :
+> `write_ia_topic_page.html` — **sujet authentifié**, `…&cat=32&post=7&page=1&…&numreponse=0&…#t29892`
+> (page réelle dans `page=`, cible dans le fragment, `numreponse=0`) ; le fragment de HTML brut
+> authentifié épinglé par `PostContentParserTest` (topic RF2 page 25) porte de même
+> `…&page=25&…&numreponse=0&…#t2785311`. `private_message_thread_with_quote.html` — **MP authentifié**,
+> `…&cat=prive&page=1&…&numreponse=1980000101&…#t1980000101` (les deux coïncident : c'est ce qui rend
+> un correctif fondé sur la query vert en MP et faux sur les sujets).
+> `topic_loisirs_chutes_p4344.html` — **permalien anonyme**, `…sujet_27848_4344.htm#t74598425`.
+
+Côté implémentation, `PostContentParser.parseQuote` essaie la forme statique puis la forme
+authentifiée (`CITATION_HREF_REGEX`, sinon `DYNAMIC_CITATION_HREF_REGEX`) et alimente
+`PostBlock.Quote.page` / `.numreponse` (cf. [models.md]({{ site.baseurl }}/specs/models)). Les deux
+formes sont épinglées par `PostContentParserTest`. Un `[quote]` nu (`table.quote` / `table.oldquote`)
+n'a pas d'ancre auteur : auteur, page et `numreponse` restent `null`, sans erreur.
+
 ### Posts supprimés / modérés
 
 Structure HTML altérée : le `<table class="messagetable">` peut ne plus contenir que le bandeau d'auteur + une mention de suppression. Le parser doit gérer ce cas sans crasher — `Post.content` devient un `PostContent` vide ou un bloc sentinel `"Message supprimé"`.
