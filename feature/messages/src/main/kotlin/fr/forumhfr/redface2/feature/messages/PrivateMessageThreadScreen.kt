@@ -701,8 +701,11 @@ internal fun PrivateMessageThreadContent(
     )
 }
 
-/** Long-lived list coordination retained by [PrivateMessageThreadContent] across its UI modes. */
-private data class PrivateMessageReaderSession(
+/**
+ * Long-lived list coordination retained by [PrivateMessageThreadContent] across its UI modes.
+ * Module visibility lets the production gate be tested without a shadow test-only session DTO.
+ */
+internal data class PrivateMessageReaderSession(
     val listState: LazyListState,
     val alignment: PrivateMessageListAlignment,
     val isScrollbarDragging: () -> Boolean,
@@ -890,9 +893,9 @@ private fun PrivateMessageThreadReader(
  * Live page-position producers that must settle before a swipe may capture an anchor and commit.
  * A pending same-page cited landing is explicit because its numeric page remains aligned until its
  * programmatic scroll starts; [PrivateMessageListAlignment] covers the cross-page content/position
- * mismatch window.
+ * mismatch window. Module visibility keeps the regression proof on this exact predicate.
  */
-private fun hasCompetingThreadListProducer(
+internal fun hasCompetingThreadListProducer(
     state: PrivateMessageThreadUiState,
     session: PrivateMessageReaderSession,
     zoomState: PinchZoomState,
@@ -974,7 +977,7 @@ private fun ThreadMessageMenuHost(
     }
 
     if (mode is PrivateMessageThreadUiState.Mode.Content && targetStillOnPage) {
-        target?.let { message ->
+        target.let { message ->
             val authorCanonical = remember(message.author) { canonicalizePseudo(message.author) }
             val connectedCanonical = remember(connectedPseudo) {
                 connectedPseudo?.let(::canonicalizePseudo)
