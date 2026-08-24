@@ -1154,10 +1154,12 @@ private fun ThreadReplyFab(canReply: Boolean, onReply: () -> Unit) {
  * #351b — builds the swipe modifier chain for the message list: shared edge glow
  * ([pageSwipeEdgeHint]) + in-place page-change gesture ([threadPageSwipe]).
  *
- * The pointer block is re-keyed by rendered page and refresh state: the page re-arms a successful
- * warm transition, while `isRefreshing=true→false` re-arms a cold failure whose rendered page never
- * changed. Counts, callbacks, cache warmth, competing producers and gesture insets stay live through
- * [rememberUpdatedState] without making a page-count/inset change cancel an in-flight release.
+ * The load started by selection publishes `isRefreshing=true` while the outgoing page is still
+ * rendered; a later cache/network emission alone may change that page. Both values re-key the
+ * pointer block, but the fresh block remains disabled while refresh is true. Terminal
+ * `isRefreshing=true→false` is the usable re-arm, including after a cold failure whose rendered page
+ * never changed. Counts, callbacks, cache warmth, competing producers and gesture insets stay live
+ * through [rememberUpdatedState] without making a page-count/inset change cancel an in-flight release.
  */
 internal data class ThreadSwipeInteraction(
     val onSelectPage: (Int) -> Unit,

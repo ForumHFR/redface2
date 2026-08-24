@@ -50,11 +50,12 @@ import kotlinx.coroutines.launch
  *   readable under the refresh indicator for the network round-trip; failure therefore also leaves
  *   readable content at rest instead of a blank/off-screen page.
  *
- * The latch is local to `pointerInput(currentPage, isRefreshing)`. A committed selection first
- * changes `isRefreshing`, then either a target emission changes [currentPage] or a failure returns
- * `isRefreshing` to false: each transition re-keys the pointer block and creates a fresh latch. This
- * is the explicit in-place rearm that prevents both duplicate commits during release and the
- * historical frozen-after-first-swipe failure.
+ * The latch is local to `pointerInput(currentPage, isRefreshing)` and stays committed for the whole
+ * release, including a second DOWN before selection. The load started by selection then changes
+ * `isRefreshing` before an asynchronous target emission can change [currentPage]. Those transitions
+ * may create a fresh pointer block, but [ThreadSwipeHandlers.enabled] keeps it inert while refresh is
+ * true; only the terminal success/failure reopens the gate. This explicit in-place rearm prevents
+ * both duplicate commits during release and the historical frozen-after-first-swipe failure.
  *
  * #936 multi-touch cancellation is native to this machine: a secondary pointer after horizontal
  * slop cancels an uncommitted drag into spring-back, even after it armed. [ThreadSwipeHandlers.enabled]
@@ -69,8 +70,9 @@ internal fun Modifier.threadPageSwipe(
     dragOffset: MutableFloatState,
     handlers: ThreadSwipeHandlers,
 ): Modifier = this
-    // Re-key on the rendered page AND the load gate. A cold failure keeps the page number unchanged,
-    // so isRefreshing=true→false is the event that discards its committed latch and re-arms.
+    // Re-key on the rendered page AND the load gate. A new block created while refresh is true stays
+    // inert; terminal isRefreshing=true→false is the usable re-arm, including a cold failure whose
+    // rendered page number never changed.
     .pointerInput(currentPage, isRefreshing) {
         val commitDistancePx = swipeCommitDistancePx(size.width.toFloat(), MIN_COMMIT_DISTANCE.toPx())
         val flingThresholdPx = FLING_VELOCITY_THRESHOLD.toPx()

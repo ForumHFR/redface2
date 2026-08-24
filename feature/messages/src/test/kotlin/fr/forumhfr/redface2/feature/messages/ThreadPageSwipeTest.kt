@@ -67,18 +67,27 @@ class ThreadPageSwipeTest {
             onSelectPage = { target ->
                 offsetsAtSelection += dragOffset.floatValue
                 selectedPages += target
-                currentPage.value = target
+                // The production load first keeps mode.thread (the rendered page) and closes the
+                // load gate. Only a later cache/network emission may replace currentPage.
+                isRefreshing.value = true
             },
         )
         val pageWidthPx = pageWidth()
+        compose.mainClock.autoAdvance = false
 
         swipeLeft(waitForIdle = false)
+        assertEquals("selection must wait for the slide-out", emptyList<Int>(), selectedPages)
         // A second gesture starts inside the 200 ms slide-out window. The committed latch must
-        // ignore it rather than compute another target from the still-rendered page 2.
+        // ignore it rather than compute another target from the still-rendered page 2. Freezing
+        // the frame clock is essential: a second Compose test action otherwise advances the first
+        // animation to idle before injecting its DOWN and no longer represents overlapping input.
         swipeLeft(waitForIdle = false)
+        compose.mainClock.advanceTimeBy(SLIDE_OUT_TEST_ADVANCE_MILLIS)
         compose.waitForIdle()
 
         assertEquals(listOf(3), selectedPages)
+        assertEquals("selection alone must not replace rendered content", 2, currentPage.value)
+        assertTrue("selection must close the production load gate", isRefreshing.value)
         assertEquals(
             "warm selection must happen only after the outgoing page reached the left edge",
             -pageWidthPx,
@@ -92,7 +101,15 @@ class ThreadPageSwipeTest {
             GEOMETRY_TOLERANCE_PX,
         )
 
-        // Page 3 re-keys pointerInput and creates a fresh latch: the next independent swipe works.
+        // Mirror the production order: the asynchronous cache emission renders page 3 while
+        // revalidation keeps the fresh pointer block disabled, then the terminal network emission
+        // reopens the gate. Only then is another intentional swipe independent.
+        compose.runOnIdle { currentPage.value = 3 }
+        compose.waitForIdle()
+        assertTrue(isRefreshing.value)
+        compose.runOnIdle { isRefreshing.value = false }
+        compose.mainClock.autoAdvance = true
+        compose.waitForIdle()
         swipeLeft()
         assertEquals(listOf(3, 4), selectedPages)
     }
@@ -365,6 +382,51 @@ class ThreadPageSwipeTest {
     }
 
     @Test
+    fun `production modifier keeps one commit until the warm page has landed`() {
+        val renderedPage = mutableStateOf(2)
+        val isRefreshing = mutableStateOf(false)
+        val selectedPages = mutableListOf<Int>()
+        setProductionSwipeContent(
+            currentPage = renderedPage,
+            isRefreshing = isRefreshing,
+            interaction = ThreadSwipeInteraction(
+                onSelectPage = { target ->
+                    selectedPages += target
+                    // PrivateMessageThreadViewModel.fetchPage publishes this keep-content state
+                    // before its repository Flow can emit the target page on the IO dispatcher.
+                    isRefreshing.value = true
+                },
+                isTargetPageWarm = { true },
+            ),
+        )
+        compose.mainClock.autoAdvance = false
+
+        swipeLeft(waitForIdle = false)
+        assertEquals("selection must wait for the slide-out", emptyList<Int>(), selectedPages)
+        swipeLeft(waitForIdle = false)
+        compose.mainClock.advanceTimeBy(SLIDE_OUT_TEST_ADVANCE_MILLIS)
+        compose.waitForIdle()
+
+        assertEquals("the committed production modifier must select exactly once", listOf(3), selectedPages)
+        assertEquals("the outgoing page remains rendered until content arrives", 2, renderedPage.value)
+        assertTrue(isRefreshing.value)
+
+        // A cache hit now replaces the rendered page and re-keys pointerInput, but mandatory
+        // network revalidation keeps the new block disabled: a fresh latch is not yet a re-arm.
+        compose.runOnIdle { renderedPage.value = 3 }
+        compose.waitForIdle()
+        swipeLeft(waitForIdle = false)
+        assertEquals("cache landing must stay gated during revalidation", listOf(3), selectedPages)
+
+        compose.runOnIdle { isRefreshing.value = false }
+        compose.mainClock.autoAdvance = true
+        compose.waitForIdle()
+        swipeLeft()
+
+        assertEquals("terminal landing must re-arm one later intentional swipe", listOf(3, 4), selectedPages)
+    }
+
+    @Test
     fun `remember modifier resets an unfinished drag when refresh rekeys the gesture`() {
         val isRefreshing = mutableStateOf(false)
         setProductionSwipeContent(
@@ -584,6 +646,7 @@ class ThreadPageSwipeTest {
         const val PAGE = 2
         const val GEOMETRY_TOLERANCE_PX = 0.5f
         const val VISIBLE_TRANSLATION_FRACTION = 0.05f
+        const val SLIDE_OUT_TEST_ADVANCE_MILLIS = 250L
     }
 
     private data class ProducerScenario(
