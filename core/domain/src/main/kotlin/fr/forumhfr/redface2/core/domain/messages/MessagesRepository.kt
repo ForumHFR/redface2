@@ -72,6 +72,18 @@ interface MessagesRepository {
     ): Flow<PrivateMessageThreadPage>
 
     /**
+     * Whether [page] of [threadId] is immediately available in the process-memory cache for
+     * [account]. This is a synchronous hint for choosing the page-swipe release transition, not a
+     * substitute for [getPrivateMessageThread]: selection still performs mandatory network
+     * revalidation.
+     *
+     * Implementations must seal the probe to the same canonical account and invalidation generation
+     * as the cached content. A false negative only selects the conservative keep-content transition;
+     * a default implementation therefore safely reports cold for repositories without a RAM cache.
+     */
+    fun isPrivateMessageThreadPageWarm(account: String, threadId: Int, page: Int): Boolean = false
+
+    /**
      * Authenticated, bounded prefetch of one private-conversation page (ADR-013 decision 3).
      * This is the sole exception to the project's anonymous-prefetch rule: callers may request
      * only an adjacent page of the conversation currently open in the foreground. Inbox/list

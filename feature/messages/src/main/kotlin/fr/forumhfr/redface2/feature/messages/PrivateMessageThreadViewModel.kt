@@ -190,6 +190,17 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     }
 
     /**
+     * Gesture-time cache probe for the conditional slide-out. The repository captures and validates
+     * its current generation inside this call; retaining a page number in UI state would reopen the
+     * stale-generation race closed by the session cache.
+     */
+    fun isPageWarm(page: Int): Boolean {
+        val account = authenticatedPseudo ?: return false
+        if (page < 1) return false
+        return repository.isPrivateMessageThreadPageWarm(account, request.threadId, page)
+    }
+
+    /**
      * #1074 — jumps to the message referenced by a parsed quote header. A target already on the
      * rendered page is published immediately without a load. A cross-page target is armed before
      * the cache-aside request starts; the first rendered target emission owns the visual landing.

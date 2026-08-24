@@ -25,7 +25,9 @@ import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -458,6 +460,26 @@ class DefaultMessagesRepositoryTest {
             result,
         )
         coVerify(exactly = 1) { hfrClient.getPrivateMessageThreadPage(threadId = 42, page = 1) }
+    }
+
+    @Test
+    fun `warm page probe uses the cache account and current generation seal`() {
+        val cache = PrivateMessageThreadSessionCache()
+        cache.write(
+            cache.capture("xaat"),
+            threadId = 42,
+            page = 2,
+            thread = thread(page = 2, totalPages = 3),
+        )
+        val (repo, _) = buildRepository(threadSessionCache = cache)
+
+        assertTrue(repo.isPrivateMessageThreadPageWarm(" XaaT ", threadId = 42, page = 2))
+        assertFalse(repo.isPrivateMessageThreadPageWarm("bob", threadId = 42, page = 2))
+        assertFalse(repo.isPrivateMessageThreadPageWarm("xaat", threadId = 42, page = 1))
+
+        cache.clearAndAdvanceGeneration()
+
+        assertFalse(repo.isPrivateMessageThreadPageWarm("xaat", threadId = 42, page = 2))
     }
 
     @Test
