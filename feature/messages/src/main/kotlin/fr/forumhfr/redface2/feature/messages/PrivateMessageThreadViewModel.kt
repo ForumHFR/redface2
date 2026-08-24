@@ -195,9 +195,12 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
      * stale-generation race closed by the session cache.
      */
     fun isPageWarm(page: Int): Boolean {
-        val account = authenticatedPseudo ?: return false
-        if (page < 1) return false
-        return repository.isPrivateMessageThreadPageWarm(account, request.threadId, page)
+        val account = authenticatedPseudo
+        return when {
+            account == null -> false
+            page < 1 -> false
+            else -> repository.isPrivateMessageThreadPageWarm(account, request.threadId, page)
+        }
     }
 
     /**

@@ -137,8 +137,10 @@ internal fun Modifier.threadPageSwipe(
                         scope = animationScope,
                         release = release,
                         dragOffset = dragOffset,
-                        targetX = if (forward) -widthPx else widthPx,
-                        targetPage = target,
+                        target = ThreadSwipeTarget(
+                            x = if (forward) -widthPx else widthPx,
+                            page = target,
+                        ),
                         handlers = handlers,
                     )
                 } else {
@@ -215,18 +217,23 @@ private fun releaseCommittedThreadSwipe(
     scope: CoroutineScope,
     release: Animatable<Float, *>,
     dragOffset: MutableFloatState,
-    targetX: Float,
-    targetPage: Int,
+    target: ThreadSwipeTarget,
     handlers: ThreadSwipeHandlers,
-): Job = if (handlers.isTargetPageWarm(targetPage)) {
-    slideOutThenSelect(scope, release, dragOffset, targetX) {
-        handlers.onSelectPage(targetPage)
+): Job = if (handlers.isTargetPageWarm(target.page)) {
+    slideOutThenSelect(scope, release, dragOffset, target.x) {
+        handlers.onSelectPage(target.page)
     }
 } else {
     springBackToRest(scope, release, dragOffset) {
-        handlers.onSelectPage(targetPage)
+        handlers.onSelectPage(target.page)
     }
 }
+
+/** Page and terminal translation selected together when a swipe commits. */
+private data class ThreadSwipeTarget(
+    val x: Float,
+    val page: Int,
+)
 
 /**
  * Slide a warm outgoing page fully away, then select exactly once behind the committed latch. The
