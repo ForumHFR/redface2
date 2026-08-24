@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -26,6 +27,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -83,6 +85,8 @@ import kotlin.math.roundToInt
 fun LazyListScrollbar(
     listState: LazyListState,
     modifier: Modifier = Modifier,
+    /** True from thumb grab through the final seek's idle frame; false after it fully settles. */
+    onDragStateChanged: (Boolean) -> Unit = {},
 ) {
     // #105 — « afficher l'ascenseur » opt-out: render nothing when the preference is off (sujets AND
     // MP, both call-sites go through this composable). Read at the call-site of the local so flipping
@@ -104,15 +108,19 @@ fun LazyListScrollbar(
         }
     }
 
-    var isDragging by remember { mutableStateOf(false) }
     val active = canScroll && metrics != null
+    val dragInteraction = rememberScrollbarDragInteraction(
+        listState = listState,
+        totalItemsCount = listState.layoutInfo.totalItemsCount,
+        onDragStateChanged = onDragStateChanged,
+    )
 
     // Auto-hide alpha extracted to rememberScrollbarAlpha to keep this composable under the cyclomatic
     // complexity threshold; visible while scrolling/dragging, brief show-then-fade otherwise.
     val alpha = rememberScrollbarAlpha(
         active = active,
         isScrollInProgress = listState.isScrollInProgress,
-        isDragging = isDragging,
+        isDragging = dragInteraction.isDragging,
     )
     val thumbColor = MaterialTheme.colorScheme.primary
 
@@ -121,32 +129,9 @@ fun LazyListScrollbar(
     // springs only on the idle settle. Extracted to rememberScrollbarDrawOffset (spec per Codex review).
     val animatedOffset = rememberScrollbarDrawOffset(
         targetOffset = metrics?.offsetFraction ?: 0f,
-        snapping = isDragging || listState.isScrollInProgress,
+        snapping = dragInteraction.isDragging || listState.isScrollInProgress,
     )
     val drawnMetrics = metrics?.copy(offsetFraction = animatedOffset)
-
-    // Live total read inside the gesture without re-keying the pointerInput on the (per-frame) metrics.
-    val currentTotalCount = rememberUpdatedState(listState.layoutInfo.totalItemsCount)
-    val scope = rememberCoroutineScope()
-    var lastTargetIndex by remember { mutableIntStateOf(-1) }
-    var scrollJob by remember { mutableStateOf<Job?>(null) }
-
-    // Hoisted out of the layout tree so the `if` they contain doesn't add nesting depth below.
-    val onDraggingChange: (Boolean) -> Unit = { dragging ->
-        isDragging = dragging
-        if (dragging) lastTargetIndex = -1 // a fresh grab always re-evaluates the target
-    }
-    val onSeek: (Float) -> Unit = { travelFraction ->
-        val index = targetIndexForDrag(
-            travelFraction = travelFraction,
-            totalItemsCount = currentTotalCount.value,
-        )
-        if (index != lastTargetIndex) {
-            lastTargetIndex = index
-            scrollJob?.cancel()
-            scrollJob = scope.launch { listState.scrollToItem(index) }
-        }
-    }
 
     BoxWithConstraints(
         modifier = modifier
@@ -166,11 +151,81 @@ fun LazyListScrollbar(
                 listState = listState,
                 trackHeightPx = trackHeightPx,
                 metrics = m,
-                onDraggingChange = onDraggingChange,
-                onSeek = onSeek,
+                onDraggingChange = dragInteraction.onDraggingChange,
+                onSeek = dragInteraction.onSeek,
             )
         }
     }
+}
+
+/** Thumb-drag state and handlers kept together so the drawing composable only coordinates layers. */
+private data class ScrollbarDragInteraction(
+    val isDragging: Boolean,
+    val onDraggingChange: (Boolean) -> Unit,
+    val onSeek: (Float) -> Unit,
+)
+
+@Composable
+private fun rememberScrollbarDragInteraction(
+    listState: LazyListState,
+    totalItemsCount: Int,
+    onDragStateChanged: (Boolean) -> Unit,
+): ScrollbarDragInteraction {
+    var isDragging by remember { mutableStateOf(false) }
+    // Live values are read inside the gesture without re-keying pointerInput on layout/callback changes.
+    val currentTotalCount = rememberUpdatedState(totalItemsCount)
+    val currentOnDragStateChanged = rememberUpdatedState(onDragStateChanged)
+    val scope = rememberCoroutineScope()
+    var lastTargetIndex by remember { mutableIntStateOf(-1) }
+    var scrollJob by remember { mutableStateOf<Job?>(null) }
+    var dragGeneration by remember { mutableIntStateOf(0) }
+
+    // A preference flip/page disposal can remove the thumb mid-drag. Never leave its owner latched.
+    DisposableEffect(Unit) {
+        onDispose { currentOnDragStateChanged.value(false) }
+    }
+
+    val onDraggingChange: (Boolean) -> Unit = { dragging ->
+        isDragging = dragging
+        if (dragging) {
+            dragGeneration++
+            lastTargetIndex = -1 // a fresh grab always re-evaluates the target
+            currentOnDragStateChanged.value(true)
+        } else {
+            val completedGeneration = dragGeneration
+            val finalSeek = scrollJob
+            scope.launch {
+                finalSeek?.join()
+                // Keep the external exclusion latched through the idle frame emitted by the final
+                // scrollToItem. Otherwise its observer could persist this programmatic seek as a
+                // reading anchor after onDragEnd had already flipped the pointer-only state false.
+                withFrameNanos { }
+                if (
+                    !isDragging &&
+                    dragGeneration == completedGeneration &&
+                    scrollJob === finalSeek
+                ) {
+                    currentOnDragStateChanged.value(false)
+                }
+            }
+        }
+    }
+    val onSeek: (Float) -> Unit = { travelFraction ->
+        val index = targetIndexForDrag(
+            travelFraction = travelFraction,
+            totalItemsCount = currentTotalCount.value,
+        )
+        if (index != lastTargetIndex) {
+            lastTargetIndex = index
+            scrollJob?.cancel()
+            scrollJob = scope.launch { listState.scrollToItem(index) }
+        }
+    }
+    return ScrollbarDragInteraction(
+        isDragging = isDragging,
+        onDraggingChange = onDraggingChange,
+        onSeek = onSeek,
+    )
 }
 
 /**

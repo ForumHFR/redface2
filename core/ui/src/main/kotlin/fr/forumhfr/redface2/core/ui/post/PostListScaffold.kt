@@ -34,9 +34,12 @@ import fr.forumhfr.redface2.core.ui.list.LazyListScrollbar
  *    « afficher l'ascenseur » preference (`LazyListScrollbar` reads `LocalShowScrollbar`), so this flag
  *    is only for a call-site that wants no scrollbar at all regardless of that preference; both
  *    consumers leave it `true`.
+ *  - [onScrollbarDragStateChanged] exposes the fast-scroll producer to feature-owned position
+ *    persistence. It stays true through the final programmatic seek's idle frame, so that seek is
+ *    never mistaken for a user list-scroll settle.
  */
 @Composable
-@Suppress("LongParameterList") // List host: list state + density (padding/arrangement) + 2 modifiers + flag.
+@Suppress("LongParameterList") // Shared list host: state, geometry, modifiers and behavior hooks.
 fun PostListScaffold(
     listState: LazyListState,
     contentPadding: PaddingValues,
@@ -47,6 +50,7 @@ fun PostListScaffold(
     // #182/#1040 — either reader's magnifier suspends native list scrolling while zoomed (the
     // vertical axis is then driven programmatically via dispatchRawDelta).
     userScrollEnabled: Boolean = true,
+    onScrollbarDragStateChanged: (Boolean) -> Unit = {},
     content: LazyListScope.() -> Unit,
 ) {
     Box(modifier = modifier.fillMaxSize()) {
@@ -64,6 +68,7 @@ fun PostListScaffold(
             LazyListScrollbar(
                 listState = listState,
                 modifier = Modifier.align(Alignment.CenterEnd),
+                onDragStateChanged = onScrollbarDragStateChanged,
             )
         }
     }

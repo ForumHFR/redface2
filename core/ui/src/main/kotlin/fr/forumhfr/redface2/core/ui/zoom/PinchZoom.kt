@@ -101,6 +101,14 @@ class PinchZoomState(private val animationScope: CoroutineScope) {
     var gestureEngaged = false
         private set
 
+    /**
+     * True while the magnifier can mutate [LazyListState]: live pinch/pan, engage-time fling stop,
+     * release glide or reset settle. Feature-owned anchor reporters sample this only when a native
+     * scroll stops, excluding zoom-produced coordinates without observing per-frame index/offset.
+     */
+    val isListPositionMutationInProgress: Boolean
+        get() = gestureEngaged || stopFlingJob?.isActive == true || releaseJob?.isActive == true
+
     /** Called once per gesture, when the magnifier takes ownership (2nd pointer or zoomed pan). */
     fun engage(listState: LazyListState) {
         releaseJob?.cancel()

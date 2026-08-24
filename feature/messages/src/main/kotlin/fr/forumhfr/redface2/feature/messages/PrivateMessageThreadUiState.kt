@@ -38,6 +38,13 @@ data class PrivateMessageThreadUiState(
      */
     val connectedPseudo: String? = null,
     /**
+     * #1040 lot 6 — one landing published in the SAME state update as its first rendered page
+     * emission (session cache when present, network otherwise). Keeping it atomic with [mode]
+     * closes the cache→network double-scroll race: a later emission retains the same value until
+     * the screen applies and compare-and-clears it through the ViewModel.
+     */
+    val pageLanding: PrivateMessagePageLanding? = null,
+    /**
      * #612 — participant roster sheet state. Lazily loaded (only when the user opens the sheet, never
      * on screen entry) and cached for the life of the screen. See [Roster].
      */
@@ -95,7 +102,7 @@ data class PrivateMessageThreadUiState(
         data object Loading : Mode
         data class Content(
             val thread: PrivateMessageThread,
-            /** Cache content is render-only; only a terminal network page may trigger side effects. */
+            /** Cache content may own the first visual landing; domain writes remain network-only. */
             val source: PrivateMessageThreadPage.Source = PrivateMessageThreadPage.Source.NETWORK,
             /**
              * #509/#1050 — `numreponse` of this page's messages whose canonical author is blocked.
@@ -143,19 +150,6 @@ data class PrivateMessageThreadUiState(
  * channel idiom (`Channel(BUFFERED)` + `receiveAsFlow`, collected once by the screen).
  */
 sealed interface PrivateMessageThreadEffect {
-    /**
-     * #1074 — one page/account-scoped landing. Cross-page jumps are emitted only after the terminal
-     * network page proved that [numreponse] is present; a same-page tap may use the rendered content
-     * immediately. [page] is always parsed, never the possibly out-of-bounds page requested from HFR.
-     */
-    data class ScrollToCitedMessage(
-        val page: Int,
-        val numreponse: Int,
-        val account: String,
-        /** True only for a user tap whose target is already present on the rendered page. */
-        val appliesWhileRefreshing: Boolean = false,
-    ) : PrivateMessageThreadEffect
-
     /**
      * #351 — a load that kept the conversation on screen (pull-to-refresh, or a page change from a
      * loaded page) failed. The displayed page stays put; the screen surfaces a Toast inviting a new
