@@ -286,7 +286,7 @@ class ThreadEgoHighlightTest {
             onReply = {},
             onRetry = {},
             onRefresh = {},
-            onSelectPage = {},
+            onSelectPage = { _, _ -> },
             onOpenRoster = {},
             onDismissRoster = {},
             onRetryRoster = {},

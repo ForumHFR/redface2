@@ -506,6 +506,226 @@ class PrivateMessageThreadViewModelTest {
     }
 
     @Test
+    fun `A to B to A restores exact index and offset while an unvisited page lands at top`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns network(thread(page = 1, totalPages = 2))
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 2, fallbackCorrespondent = null)
+        } returns network(thread(page = 2, totalPages = 2))
+        val viewModel = threadViewModel(repository)
+        viewModel.acknowledgePageLanding(requireNotNull(viewModel.state.value.pageLanding))
+
+        val pageOneAnchor = PrivateMessageScrollAnchor(index = 7, offset = 42)
+        viewModel.selectPage(2, departureAnchor = pageOneAnchor)
+
+        val firstPageTwoLanding = viewModel.state.value.pageLanding
+        assertTrue("an unvisited page must not invent an anchor", firstPageTwoLanding is PrivateMessagePageLanding.Top)
+        viewModel.acknowledgePageLanding(requireNotNull(firstPageTwoLanding))
+
+        viewModel.selectPage(
+            page = 1,
+            departureAnchor = PrivateMessageScrollAnchor(index = 3, offset = 19),
+        )
+
+        val restored = viewModel.state.value.pageLanding
+        assertTrue(restored is PrivateMessagePageLanding.Anchor)
+        assertEquals(pageOneAnchor, (restored as PrivateMessagePageLanding.Anchor).anchor)
+    }
+
+    @Test
+    fun `cache then network retains one anchor landing until exact acknowledgement`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        val networkGate = CompletableDeferred<Unit>()
+        var pageTwoLoads = 0
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns network(thread(page = 1, totalPages = 2))
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 2, fallbackCorrespondent = null)
+        } answers {
+            if (pageTwoLoads++ == 0) {
+                network(thread(page = 2, totalPages = 2))
+            } else {
+                flow {
+                    val page = thread(page = 2, totalPages = 2)
+                    emit(PrivateMessageThreadPage(page, PrivateMessageThreadPage.Source.SESSION_CACHE))
+                    networkGate.await()
+                    emit(networkPage(page))
+                }
+            }
+        }
+        val viewModel = threadViewModel(repository)
+        viewModel.acknowledgePageLanding(requireNotNull(viewModel.state.value.pageLanding))
+        viewModel.selectPage(2)
+        viewModel.acknowledgePageLanding(requireNotNull(viewModel.state.value.pageLanding))
+        val anchor = PrivateMessageScrollAnchor(index = 5, offset = 27)
+        viewModel.selectPage(1, departureAnchor = anchor)
+        viewModel.acknowledgePageLanding(requireNotNull(viewModel.state.value.pageLanding))
+
+        viewModel.selectPage(2)
+        val cacheLanding = requireNotNull(viewModel.state.value.pageLanding)
+        assertEquals(anchor, (cacheLanding as PrivateMessagePageLanding.Anchor).anchor)
+
+        networkGate.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(
+            "network revalidation must retain the exact same one-shot landing",
+            cacheLanding,
+            viewModel.state.value.pageLanding,
+        )
+        viewModel.acknowledgePageLanding(cacheLanding)
+        assertNull(viewModel.state.value.pageLanding)
+    }
+
+    @Test
+    fun `A to B to C rejects a saved B anchor from the superseded load`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        val stalePageTwo = CompletableDeferred<PrivateMessageThread>()
+        var pageTwoLoads = 0
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns network(thread(page = 1, totalPages = 3))
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 2, fallbackCorrespondent = null)
+        } answers {
+            if (pageTwoLoads++ == 0) {
+                network(thread(page = 2, totalPages = 3))
+            } else {
+                flow { emit(networkPage(stalePageTwo.await())) }
+            }
+        }
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 3, fallbackCorrespondent = null)
+        } returns network(thread(page = 3, totalPages = 3))
+        val viewModel = threadViewModel(repository)
+        viewModel.acknowledgePageLanding(requireNotNull(viewModel.state.value.pageLanding))
+        viewModel.selectPage(2)
+        viewModel.acknowledgePageLanding(requireNotNull(viewModel.state.value.pageLanding))
+        viewModel.selectPage(
+            page = 1,
+            departureAnchor = PrivateMessageScrollAnchor(index = 6, offset = 28),
+        )
+        viewModel.acknowledgePageLanding(requireNotNull(viewModel.state.value.pageLanding))
+
+        viewModel.selectPage(2)
+        viewModel.selectPage(3)
+        stalePageTwo.complete(thread(page = 2, totalPages = 3))
+        advanceUntilIdle()
+
+        assertEquals(3, viewModel.state.value.page)
+        assertTrue(
+            "the current C owner keeps its Top; the late B anchor is rejected",
+            viewModel.state.value.pageLanding is PrivateMessagePageLanding.Top,
+        )
+    }
+
+    @Test
+    fun `cited landing wins over a saved anchor without deleting that anchor`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        val target = 202
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns network(thread(page = 1, totalPages = 2, messages = listOf(post(101))))
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 2, fallbackCorrespondent = null)
+        } returns network(thread(page = 2, totalPages = 2, messages = listOf(post(target))))
+        val viewModel = threadViewModel(repository)
+        viewModel.acknowledgePageLanding(requireNotNull(viewModel.state.value.pageLanding))
+        viewModel.selectPage(2)
+        viewModel.acknowledgePageLanding(requireNotNull(viewModel.state.value.pageLanding))
+        val pageTwoAnchor = PrivateMessageScrollAnchor(index = 4, offset = 31)
+        viewModel.selectPage(1, departureAnchor = pageTwoAnchor)
+        viewModel.acknowledgePageLanding(requireNotNull(viewModel.state.value.pageLanding))
+
+        viewModel.goToCitedMessage(targetPage = 2, numreponse = target)
+        val cited = requireNotNull(viewModel.state.value.pageLanding)
+        assertTrue(cited is PrivateMessagePageLanding.CitedMessage)
+        viewModel.acknowledgePageLanding(cited)
+
+        viewModel.selectPage(1)
+        viewModel.acknowledgePageLanding(requireNotNull(viewModel.state.value.pageLanding))
+        viewModel.selectPage(2)
+        val ordinaryReturn = viewModel.state.value.pageLanding
+        assertTrue(ordinaryReturn is PrivateMessagePageLanding.Anchor)
+        assertEquals(pageTwoAnchor, (ordinaryReturn as PrivateMessagePageLanding.Anchor).anchor)
+    }
+
+    @Test
+    fun `refresh stays immobile and submit event refetches once without dropping anchors`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns network(thread(page = 1, totalPages = 2))
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 2, fallbackCorrespondent = null)
+        } returns network(thread(page = 2, totalPages = 2))
+        val viewModel = threadViewModel(repository)
+        viewModel.acknowledgePageLanding(requireNotNull(viewModel.state.value.pageLanding))
+        val anchor = PrivateMessageScrollAnchor(index = 6, offset = 11)
+        viewModel.reportPageAnchor(anchor)
+
+        viewModel.refresh()
+        assertNull("same-page refresh must not arm a scroll", viewModel.state.value.pageLanding)
+
+        val submit = PrivateMessageSubmitResult(eventId = 17L, page = 1)
+        viewModel.applySubmitResult(submit)
+        viewModel.applySubmitResult(submit)
+        assertNull("same-page post-submit refetch stays at the current position", viewModel.state.value.pageLanding)
+        coVerify(exactly = 3) {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        }
+
+        // The event used the retained instance: leaving and returning still resolves the old anchor.
+        viewModel.selectPage(2)
+        viewModel.acknowledgePageLanding(requireNotNull(viewModel.state.value.pageLanding))
+        viewModel.selectPage(1)
+        val restored = viewModel.state.value.pageLanding as PrivateMessagePageLanding.Anchor
+        assertEquals(anchor, restored.anchor)
+    }
+
+    @Test
+    fun `account switch and logout purge every page anchor`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns network(thread(page = 1, totalPages = 2))
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 2, fallbackCorrespondent = null)
+        } returns network(thread(page = 2, totalPages = 2))
+        val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
+        val viewModel = threadViewModel(repository, authRepository = authRepository)
+        viewModel.acknowledgePageLanding(requireNotNull(viewModel.state.value.pageLanding))
+        viewModel.selectPage(2)
+        viewModel.acknowledgePageLanding(requireNotNull(viewModel.state.value.pageLanding))
+        viewModel.reportPageAnchor(PrivateMessageScrollAnchor(index = 8, offset = 64))
+
+        authRepository.emit(AuthState.Authenticated("bob"))
+        advanceUntilIdle()
+
+        assertEquals("bob", viewModel.state.value.connectedPseudo)
+        assertTrue(
+            "Bob's opening page must land at top, never on Alice's saved coordinates",
+            viewModel.state.value.pageLanding is PrivateMessagePageLanding.Top,
+        )
+        viewModel.acknowledgePageLanding(requireNotNull(viewModel.state.value.pageLanding))
+        viewModel.reportPageAnchor(PrivateMessageScrollAnchor(index = 9, offset = 72))
+
+        authRepository.emit(AuthState.Anonymous)
+        advanceUntilIdle()
+        assertEquals(PrivateMessageThreadUiState.Mode.RequiresLogin, viewModel.state.value.mode)
+        assertNull(viewModel.state.value.pageLanding)
+
+        authRepository.emit(AuthState.Authenticated("carol"))
+        advanceUntilIdle()
+        assertTrue(
+            "Carol's post-logout opening must not restore Bob's coordinates",
+            viewModel.state.value.pageLanding is PrivateMessagePageLanding.Top,
+        )
+    }
+
+    @Test
     fun `cited message on the rendered page lands without loading`() = runTest {
         val repository = mockk<MessagesRepository>()
         val target = 101
@@ -519,34 +739,28 @@ class PrivateMessageThreadViewModelTest {
             emit(networkPage(loaded))
         }
         val viewModel = threadViewModel(repository)
+        viewModel.acknowledgePageLanding(requireNotNull(viewModel.state.value.pageLanding))
 
-        viewModel.effects.test {
-            viewModel.goToCitedMessage(targetPage = 1, numreponse = target)
+        viewModel.goToCitedMessage(targetPage = 1, numreponse = target)
 
-            assertEquals(
-                PrivateMessageThreadEffect.ScrollToCitedMessage(
-                    page = 1,
-                    numreponse = target,
-                    account = "xaat",
-                    appliesWhileRefreshing = true,
-                ),
-                awaitItem(),
-            )
-            // The local jump must not cancel the mandatory revalidation of this cached page.
-            networkGate.complete(Unit)
-            advanceUntilIdle()
-            val refreshed = viewModel.state.value.mode as PrivateMessageThreadUiState.Mode.Content
-            assertEquals(PrivateMessageThreadPage.Source.NETWORK, refreshed.source)
-            expectNoEvents()
-            cancelAndIgnoreRemainingEvents()
-        }
+        val landing = viewModel.state.value.pageLanding
+        assertTrue(landing is PrivateMessagePageLanding.CitedMessage)
+        assertEquals(target, (landing as PrivateMessagePageLanding.CitedMessage).numreponse)
+        viewModel.acknowledgePageLanding(landing)
+        // The local jump must not cancel the mandatory revalidation of this cached page, and the
+        // terminal emission must not republish the acknowledged visual landing.
+        networkGate.complete(Unit)
+        advanceUntilIdle()
+        val refreshed = viewModel.state.value.mode as PrivateMessageThreadUiState.Mode.Content
+        assertEquals(PrivateMessageThreadPage.Source.NETWORK, refreshed.source)
+        assertNull(viewModel.state.value.pageLanding)
         coVerify(exactly = 1) {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
         }
     }
 
     @Test
-    fun `cross-page cited landing ignores cache and fires once after network`() = runTest {
+    fun `cross-page cited landing uses cache once and network does not replay it`() = runTest {
         val repository = mockk<MessagesRepository>()
         val target = 202
         val networkGate = CompletableDeferred<Unit>()
@@ -562,27 +776,20 @@ class PrivateMessageThreadViewModelTest {
             emit(networkPage(cached))
         }
         val viewModel = threadViewModel(repository)
+        viewModel.acknowledgePageLanding(requireNotNull(viewModel.state.value.pageLanding))
 
-        viewModel.effects.test {
-            viewModel.goToCitedMessage(targetPage = 2, numreponse = target)
+        viewModel.goToCitedMessage(targetPage = 2, numreponse = target)
 
-            val cached = viewModel.state.value.mode as PrivateMessageThreadUiState.Mode.Content
-            assertEquals(PrivateMessageThreadPage.Source.SESSION_CACHE, cached.source)
-            expectNoEvents()
+        val cached = viewModel.state.value.mode as PrivateMessageThreadUiState.Mode.Content
+        assertEquals(PrivateMessageThreadPage.Source.SESSION_CACHE, cached.source)
+        val landing = viewModel.state.value.pageLanding
+        assertTrue(landing is PrivateMessagePageLanding.CitedMessage)
+        assertEquals(2, landing?.page)
+        viewModel.acknowledgePageLanding(requireNotNull(landing))
 
-            networkGate.complete(Unit)
-            advanceUntilIdle()
-            assertEquals(
-                PrivateMessageThreadEffect.ScrollToCitedMessage(
-                    page = 2,
-                    numreponse = target,
-                    account = "xaat",
-                ),
-                awaitItem(),
-            )
-            expectNoEvents()
-            cancelAndIgnoreRemainingEvents()
-        }
+        networkGate.complete(Unit)
+        advanceUntilIdle()
+        assertNull(viewModel.state.value.pageLanding)
     }
 
     @Test
@@ -599,22 +806,24 @@ class PrivateMessageThreadViewModelTest {
             repository.getPrivateMessageThread(threadId = 42, page = 4, fallbackCorrespondent = null)
         } returns network(thread(page = 4, totalPages = 4, messages = listOf(post(target))))
         val viewModel = threadViewModel(repository)
+        viewModel.acknowledgePageLanding(requireNotNull(viewModel.state.value.pageLanding))
 
-        viewModel.effects.test {
-            viewModel.goToCitedMessage(targetPage = 99, numreponse = target)
-            advanceUntilIdle()
+        viewModel.goToCitedMessage(targetPage = 99, numreponse = target)
+        advanceUntilIdle()
 
-            assertEquals(3, viewModel.state.value.page)
-            expectNoEvents()
+        assertEquals(3, viewModel.state.value.page)
+        val missing = viewModel.state.value.pageLanding
+        assertTrue(missing is PrivateMessagePageLanding.CitedMessage)
+        assertEquals("the landing is scoped to HFR's parsed fallback", 3, missing?.page)
+        // The screen's terminal-missing fallback acknowledges the exact value.
+        viewModel.acknowledgePageLanding(requireNotNull(missing))
 
-            // A later unrelated page happens to contain the same numreponse: the terminal miss on
-            // parsed page 3 must have compare-and-cleared the old landing.
-            viewModel.selectPage(4)
-            advanceUntilIdle()
-            assertEquals(4, viewModel.state.value.page)
-            expectNoEvents()
-            cancelAndIgnoreRemainingEvents()
-        }
+        // A later unrelated page happens to contain the same numreponse: only its ordinary Top
+        // landing may remain; the terminal miss can never resurrect the cited intention.
+        viewModel.selectPage(4)
+        advanceUntilIdle()
+        assertEquals(4, viewModel.state.value.page)
+        assertTrue(viewModel.state.value.pageLanding is PrivateMessagePageLanding.Top)
     }
 
     @Test
@@ -632,16 +841,15 @@ class PrivateMessageThreadViewModelTest {
             repository.getPrivateMessageThread(threadId = 42, page = 3, fallbackCorrespondent = null)
         } returns network(thread(page = 3, totalPages = 3, messages = listOf(post(target))))
         val viewModel = threadViewModel(repository)
+        viewModel.acknowledgePageLanding(requireNotNull(viewModel.state.value.pageLanding))
 
-        viewModel.effects.test {
-            viewModel.goToCitedMessage(targetPage = 2, numreponse = target)
-            viewModel.selectPage(3)
-            advanceUntilIdle()
+        viewModel.goToCitedMessage(targetPage = 2, numreponse = target)
+        viewModel.selectPage(3)
+        targetGate.complete(thread(page = 2, totalPages = 3, messages = listOf(post(target))))
+        advanceUntilIdle()
 
-            assertEquals(3, viewModel.state.value.page)
-            expectNoEvents()
-            cancelAndIgnoreRemainingEvents()
-        }
+        assertEquals(3, viewModel.state.value.page)
+        assertTrue(viewModel.state.value.pageLanding is PrivateMessagePageLanding.Top)
     }
 
     @Test
@@ -657,16 +865,16 @@ class PrivateMessageThreadViewModelTest {
         } returns flow { emit(networkPage(targetGate.await())) }
         val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
         val viewModel = threadViewModel(repository, authRepository = authRepository)
+        viewModel.acknowledgePageLanding(requireNotNull(viewModel.state.value.pageLanding))
 
-        viewModel.effects.test {
-            viewModel.goToCitedMessage(targetPage = 2, numreponse = target)
-            authRepository.emit(AuthState.Authenticated("bob"))
-            advanceUntilIdle()
+        viewModel.goToCitedMessage(targetPage = 2, numreponse = target)
+        authRepository.emit(AuthState.Authenticated("bob"))
+        advanceUntilIdle()
 
-            assertEquals("bob", viewModel.state.value.connectedPseudo)
-            expectNoEvents()
-            cancelAndIgnoreRemainingEvents()
-        }
+        assertEquals("bob", viewModel.state.value.connectedPseudo)
+        val landing = viewModel.state.value.pageLanding
+        assertTrue(landing is PrivateMessagePageLanding.Top)
+        assertEquals("bob", landing?.account)
     }
 
     @Test
@@ -692,6 +900,51 @@ class PrivateMessageThreadViewModelTest {
                 page = match { it !in setOf(2, 4) },
             )
         }
+    }
+
+    @Test
+    fun `prefetching a page never creates a reading anchor for it`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns network(thread(page = 1, totalPages = 2))
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 2, fallbackCorrespondent = null)
+        } returns network(thread(page = 2, totalPages = 2))
+        coEvery { repository.prefetchPrivateMessageThread(threadId = 42, page = 1) } returns Unit
+        coEvery { repository.prefetchPrivateMessageThread(threadId = 42, page = 2) } returns Unit
+        val viewModel = threadViewModel(repository)
+        viewModel.acknowledgePageLanding(requireNotNull(viewModel.state.value.pageLanding))
+
+        viewModel.setPrefetchActive(true)
+        advanceUntilIdle()
+        coVerify(exactly = 1) {
+            repository.prefetchPrivateMessageThread(threadId = 42, page = 2)
+        }
+
+        viewModel.selectPage(2)
+        advanceUntilIdle()
+
+        val firstPrefetchedPageLanding = viewModel.state.value.pageLanding
+        assertTrue(
+            "a warmed but never displayed page still has the unvisited Top landing",
+            firstPrefetchedPageLanding is PrivateMessagePageLanding.Top,
+        )
+        assertEquals(2, firstPrefetchedPageLanding?.page)
+        viewModel.acknowledgePageLanding(requireNotNull(firstPrefetchedPageLanding))
+        coVerify(exactly = 1) {
+            repository.prefetchPrivateMessageThread(threadId = 42, page = 1)
+        }
+
+        viewModel.selectPage(1)
+        advanceUntilIdle()
+
+        val prefetchedPageLanding = viewModel.state.value.pageLanding
+        assertTrue(
+            "visiting a prefetched page must not restore an anchor created by the prefetch",
+            prefetchedPageLanding is PrivateMessagePageLanding.Top,
+        )
+        assertEquals(1, prefetchedPageLanding?.page)
     }
 
     @Test

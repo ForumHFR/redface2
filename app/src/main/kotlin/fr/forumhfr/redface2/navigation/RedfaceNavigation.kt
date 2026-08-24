@@ -95,6 +95,7 @@ import androidx.navigation3.scene.Scene
 import androidx.navigation3.ui.NavDisplay
 import fr.forumhfr.redface2.BuildConfig
 import fr.forumhfr.redface2.R
+import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.ui.R as CoreUiR
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.write.PrivateMessageQuote
@@ -124,6 +125,7 @@ import fr.forumhfr.redface2.feature.messages.MessagesScreen
 import fr.forumhfr.redface2.feature.messages.PrivateMessageComposeScreen
 import fr.forumhfr.redface2.feature.messages.PrivateMessageReplyRequest
 import fr.forumhfr.redface2.feature.messages.PrivateMessageReplyScreen
+import fr.forumhfr.redface2.feature.messages.PrivateMessageSubmitResult
 import fr.forumhfr.redface2.feature.messages.PrivateMessageThreadRequest
 import fr.forumhfr.redface2.feature.messages.PrivateMessageThreadScreen
 import fr.forumhfr.redface2.feature.profile.ProfilePreviewSheet
@@ -178,11 +180,9 @@ data class PrivateMessageThreadRoute(
     val threadId: Int,
     val page: Int = 1,
     /**
-     * #301 — bumped to `System.currentTimeMillis()` by the navigation host when the private-message
-     * reply editor pops back after a successful send. The new value invalidates the route key so a
-     * fresh [PrivateMessageThreadViewModel] is created and re-fetches the conversation (there is no MP
-     * cache, so a new entry always hits the network) — without it, returning to the retained entry
-     * would show the conversation as it was before the reply. `null` on every normal nav path.
+     * DEAD since #1040 lot 6 (PR 2) — the editor outcome now reaches the retained conversation
+     * ViewModel through an in-memory, account/thread-scoped handoff. Kept unread for navigation
+     * serialization compatibility: removing a route field is outside this PR.
      */
     val submitSignal: Long? = null,
 ) : RedfaceNavKey
@@ -1046,6 +1046,9 @@ fun RedfaceApp(intent: Intent?) {
         // every tab (Hilt hands back the same scoped instance for an identical owner).
         val accountViewModel: AppAccountViewModel = hiltViewModel()
         val authState by accountViewModel.authState.collectAsStateWithLifecycle()
+        val authenticatedCanonicalPseudo = (authState as? AuthState.Authenticated)
+            ?.pseudo
+            ?.let(::canonicalizePseudo)
         // #479 — avatar of the connected user for the top-bar account badge (null → pseudo initial).
         val accountAvatarUrl by accountViewModel.avatarUrl.collectAsStateWithLifecycle()
         // #718 — GLOBAL avatar appearance (border + background) for the top-bar account badge.
@@ -1100,6 +1103,12 @@ fun RedfaceApp(intent: Intent?) {
         // appears at the top (its thread id is unknown — the bddpost success response of a new MP
         // is not topic-shaped). In-memory only, like the other private-message hints above.
         var privateMessageSentSignal by remember { mutableStateOf<Long?>(null) }
+        // #1040 lot 6 — successful reply outcome owed to the RETAINED conversation ViewModel.
+        // Keyed by canonical account + thread, never serialized; the event counter prevents replay.
+        var privateMessagePendingSubmit by remember {
+            mutableStateOf<PrivateMessagePendingSubmit?>(null)
+        }
+        var privateMessageSubmitEventId by remember { mutableStateOf(0L) }
 
         // Bug fix (build 89) — per-topic title cache keyed by (cat, post). Historical trigger: a page
         // change used to replace the TopicRoute (new nav entry → new ViewModel → Loading with no
@@ -1172,6 +1181,7 @@ fun RedfaceApp(intent: Intent?) {
             // logout ; reload from generation 1 on a fresh authentication).
             lastReconciledGeneration = 0
             privateMessageSentSignal = null
+            privateMessagePendingSubmit = null
             // #291 — a write intention armed under another session must not survive the
             // transition (Codex review: stale « Citer N » after logout/login).
             multiQuoteBasket = null
@@ -1339,6 +1349,35 @@ fun RedfaceApp(intent: Intent?) {
                             sentSignal = privateMessageSentSignal,
                             onConversationSent = {
                                 privateMessageSentSignal = System.currentTimeMillis()
+                            },
+                        ),
+                        privateMessageSubmitNavState = PrivateMessageSubmitNavState(
+                            account = authenticatedCanonicalPseudo,
+                            pending = privateMessagePendingSubmit,
+                            onPublish = { threadId, page ->
+                                authenticatedCanonicalPseudo?.let { account ->
+                                    // A retained nav-entry ViewModel survives activity recreation,
+                                    // while this plain remember counter does not. Seed from wall time
+                                    // so the first post-recreation event cannot reuse the last small
+                                    // id remembered by that ViewModel; maxOf keeps rapid sends strict.
+                                    privateMessageSubmitEventId = maxOf(
+                                        privateMessageSubmitEventId + 1,
+                                        System.currentTimeMillis(),
+                                    )
+                                    privateMessagePendingSubmit = PrivateMessagePendingSubmit(
+                                        account = account,
+                                        threadId = threadId,
+                                        result = PrivateMessageSubmitResult(
+                                            eventId = privateMessageSubmitEventId,
+                                            page = page,
+                                        ),
+                                    )
+                                }
+                            },
+                            onConsumed = { eventId ->
+                                if (privateMessagePendingSubmit?.result?.eventId == eventId) {
+                                    privateMessagePendingSubmit = null
+                                }
                             },
                         ),
                         topicTitleNavState = TopicTitleNavState(
@@ -1803,6 +1842,35 @@ private data class TopicSubmitNavState(
 )
 
 /**
+ * #1040 lot 6 — one successful MP-reply outcome, scoped to the canonical authenticated pseudo and
+ * conversation. The payload stays opaque (event id + page); no private subject/correspondent enters
+ * navigation state. Plain memory only and purged on every authentication transition.
+ */
+internal data class PrivateMessagePendingSubmit(
+    val account: String,
+    val threadId: Int,
+    val result: PrivateMessageSubmitResult,
+) {
+    fun matches(account: String?, threadId: Int): Boolean =
+        account != null && this.account == account && this.threadId == threadId
+}
+
+/** The entry below an MP editor must be the exact conversation that accepted the reply. */
+internal fun isPrivateMessageThreadEntryFor(below: Any?, threadId: Int): Boolean =
+    (below as? PrivateMessageThreadRoute)?.threadId == threadId
+
+/**
+ * Editor→retained-conversation handoff. [onPublish] runs before the guarded editor pop and stamps a
+ * monotonic event id; [onConsumed] compare-and-clears the single slot after the ViewModel applies it.
+ */
+private data class PrivateMessageSubmitNavState(
+    val account: String?,
+    val pending: PrivateMessagePendingSubmit?,
+    val onPublish: (threadId: Int, page: Int) -> Unit,
+    val onConsumed: (eventId: Long) -> Unit,
+)
+
+/**
  * #291 — multi-quote nav bundle threaded into [RedfaceNavHost], same shape as the other
  * hoisted-state bundles ([TopicScrollNavState], `TopicTitleNavState`).
  *
@@ -2019,6 +2087,8 @@ private fun RedfaceNavHost(
     // report-email flow as the account menu (which owns `context` + the report strings).
     onReportContent: () -> Unit,
     privateMessageNavState: PrivateMessageNavState,
+    // #1040 lot 6 — successful reply handoff to the retained conversation ViewModel.
+    privateMessageSubmitNavState: PrivateMessageSubmitNavState,
     // Bug fix (build 89) — per-topic title cache threaded down from RedfaceApp (where the `var`
     // lives so it survives entry recreation — reopening a topic; in-topic page changes stopped
     // recreating the entry with #895 étape 4). Bundled to keep the param count in check.
@@ -2276,6 +2346,14 @@ private fun RedfaceNavHost(
                             backStack.removeAt(backStack.lastIndex)
                         }
                     },
+                    pendingSubmitResult = privateMessageSubmitNavState.pending
+                        ?.takeIf { pending ->
+                            pending.matches(privateMessageSubmitNavState.account, route.threadId)
+                        }
+                        ?.result,
+                    onSubmitResultConsumed = { result ->
+                        privateMessageSubmitNavState.onConsumed(result.eventId)
+                    },
                     onReply = { threadId, page ->
                         backStack.add(PrivateMessageReplyRoute(threadId = threadId, page = page))
                     },
@@ -2353,26 +2431,21 @@ private fun RedfaceNavHost(
                         initialQuotes = editorQuotesHandoff?.quotes.orEmpty(),
                     ),
                     onSubmitSucceeded = { threadId, page ->
+                        // #1040 lot 6 — arm the opaque result BEFORE popping, and only when the
+                        // entry directly below is this conversation. The revealed entry therefore
+                        // retains its ViewModel/anchor map and force-refetches exactly once.
+                        val below = backStack.getOrNull(backStack.lastIndex - 1)
+                        if (isPrivateMessageThreadEntryFor(below, threadId)) {
+                            privateMessageSubmitNavState.onPublish(threadId, page)
+                        }
                         if (editorQuotesHandoff?.consumesBasket == true &&
                             multiQuoteNavState.basket?.matches(privateMessageQuoteScope) == true
                         ) {
                             multiQuoteNavState.onClear()
                         }
-                        // Pop the editor, then replace the conversation entry with a fresh key
-                        // (bumped submitSignal) so the thread re-fetches and shows the sent message.
-                        // Mirrors PostEditorRoute.onSubmitSucceeded. Never collapse below the tab root.
+                        // One guarded pop only: the conversation route/key and its ViewModel stay.
                         if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)
-                        }
-                        val threadEntry = backStack.lastOrNull() as? PrivateMessageThreadRoute
-                        if (threadEntry != null) {
-                            backStack.removeAt(backStack.lastIndex)
-                            backStack.add(
-                                threadEntry.copy(
-                                    page = page,
-                                    submitSignal = System.currentTimeMillis(),
-                                ),
-                            )
                         }
                     },
                     // #803 pattern (state-hygiene audit 2026-07-05) — invoked only on

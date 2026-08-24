@@ -194,7 +194,9 @@ class PrivateMessageThreadContentTest {
                     state = state,
                     isMultiRecipientHint = false,
                     callbacks = NO_OP_CALLBACKS.copy(
-                        onGoToCitedPost = { page, numreponse -> citedTarget = page to numreponse },
+                        onGoToCitedPost = { page, numreponse, _ ->
+                            citedTarget = page to numreponse
+                        },
                     ),
                 )
             }
@@ -206,28 +208,31 @@ class PrivateMessageThreadContentTest {
     }
 
     @Test
-    fun `cited-message landing wins over the page-change top reset`() {
+    fun `typed page landing restores anchor and cited message without cache-network replay`() {
         val messages = (1..40).map { index -> message(index, "Auteur $index", "Message $index") }
         val renderedPage = mutableStateOf(1)
-        val isRefreshing = mutableStateOf(false)
-        val landing = mutableStateOf<PrivateMessageThreadEffect.ScrollToCitedMessage?>(null)
-        val consumed = mutableListOf<PrivateMessageThreadEffect.ScrollToCitedMessage>()
+        val isRefreshing = mutableStateOf(true)
+        val landing = mutableStateOf<PrivateMessagePageLanding?>(null)
+        val consumed = mutableListOf<PrivateMessagePageLanding>()
         lateinit var listState: LazyListState
         compose.setContent {
             listState = rememberLazyListState(initialFirstVisibleItemIndex = 10)
             val mode = contentState(messages = messages, page = renderedPage.value).mode
             val thread = (mode as PrivateMessageThreadUiState.Mode.Content).thread
+            val alignment = androidx.compose.runtime.remember { PrivateMessageListAlignment() }
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 PrivateMessagePageLandingEffect(
-                    listState = listState,
-                    thread = thread,
-                    connectedPseudo = "xaat",
-                    isRefreshing = isRefreshing.value,
-                    citedMessageLanding = PrivateMessageCitedLanding(
-                        effect = landing.value,
+                    context = PrivateMessageLandingRenderContext(
+                        listState = listState,
+                        thread = thread,
+                        connectedPseudo = "xaat",
+                        isRefreshing = isRefreshing.value,
+                        alignment = alignment,
+                    ),
+                    presentation = PrivateMessageLandingPresentation(
+                        landing = landing.value,
                         onConsumed = { effect ->
                             consumed += effect
-                            if (landing.value == effect) landing.value = null
                         },
                     ),
                 )
@@ -244,35 +249,46 @@ class PrivateMessageThreadContentTest {
         compose.waitForIdle()
         assertEquals("first render keeps the restored position", 10, listState.firstVisibleItemIndex)
 
-        val localTarget = PrivateMessageThreadEffect.ScrollToCitedMessage(
-            page = 1,
-            numreponse = 25,
+        val anchor = PrivateMessagePageLanding.Anchor(
+            generation = 2,
             account = "xaat",
-            appliesWhileRefreshing = true,
+            page = 2,
+            anchor = PrivateMessageScrollAnchor(index = 12, offset = 17),
         )
         compose.runOnIdle {
-            isRefreshing.value = true
-            landing.value = localTarget
+            renderedPage.value = 2
+            landing.value = anchor
         }
         compose.waitForIdle()
-        assertEquals("a local jump can use the rendered cache page", 24, listState.firstVisibleItemIndex)
+        assertEquals(12, listState.firstVisibleItemIndex)
+        assertEquals(17, listState.firstVisibleItemScrollOffset)
+        assertEquals(listOf(anchor), consumed)
 
-        val target = PrivateMessageThreadEffect.ScrollToCitedMessage(
-            page = 2,
-            numreponse = 21,
+        // Network revalidation retains the same landing value. Anchor/top effects deliberately do
+        // not key on isRefreshing, so this cannot produce a second scroll/acknowledgement.
+        compose.runOnIdle { isRefreshing.value = false }
+        compose.waitForIdle()
+        assertEquals(listOf(anchor), consumed)
+
+        val target = PrivateMessagePageLanding.CitedMessage(
+            generation = 3,
             account = "xaat",
+            page = 3,
+            numreponse = 21,
         )
         compose.runOnIdle {
-            isRefreshing.value = false
-            renderedPage.value = 2
+            renderedPage.value = 3
             landing.value = target
         }
         compose.waitForIdle()
 
         assertEquals("the cited message, not item 0, owns the landing", 20, listState.firstVisibleItemIndex)
-        assertEquals(listOf(localTarget, target), consumed)
+        assertEquals(listOf(anchor, target), consumed)
 
-        compose.runOnIdle { renderedPage.value = 3 }
+        compose.runOnIdle {
+            landing.value = null
+            renderedPage.value = 4
+        }
         compose.waitForIdle()
         assertEquals("a later ordinary page change still lands at the top", 0, listState.firstVisibleItemIndex)
     }
@@ -699,7 +715,9 @@ class PrivateMessageThreadContentTest {
                 PrivateMessageThreadContent(
                     state = state,
                     isMultiRecipientHint = false,
-                    callbacks = NO_OP_CALLBACKS.copy(onSelectPage = selectedPages::add),
+                    callbacks = NO_OP_CALLBACKS.copy(
+                        onSelectPage = { page, _ -> selectedPages += page },
+                    ),
                 )
             }
         }
@@ -838,7 +856,7 @@ class PrivateMessageThreadContentTest {
             onReply = {},
             onRetry = {},
             onRefresh = {},
-            onSelectPage = {},
+            onSelectPage = { _, _ -> },
             onOpenRoster = {},
             onDismissRoster = {},
             onRetryRoster = {},
