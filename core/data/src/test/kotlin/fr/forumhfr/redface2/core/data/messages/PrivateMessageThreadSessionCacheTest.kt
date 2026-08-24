@@ -17,7 +17,9 @@ class PrivateMessageThreadSessionCacheTest {
 
         cache.write(alice, threadId = 42, page = 2, thread = stored)
 
+        assertTrue(cache.contains(cache.capture("alice"), threadId = 42, page = 2))
         assertEquals(stored, cache.read(cache.capture("alice"), threadId = 42, page = 2))
+        assertFalse(cache.contains(cache.capture("bob"), threadId = 42, page = 2))
         assertNull(cache.read(cache.capture("alice"), threadId = 43, page = 2))
         assertNull(cache.read(cache.capture("alice"), threadId = 42, page = 1))
         assertNull(cache.read(cache.capture("bob"), threadId = 42, page = 2))
@@ -50,6 +52,7 @@ class PrivateMessageThreadSessionCacheTest {
         cache.clearAndAdvanceGeneration()
 
         assertFalse(cache.isCurrent(stale))
+        assertFalse(cache.contains(stale, threadId = 42, page = 1))
         assertNull(cache.read(stale, threadId = 42, page = 1))
         cache.write(stale, threadId = 42, page = 1, thread = thread(subject = "late"))
         val current = cache.capture("alice")

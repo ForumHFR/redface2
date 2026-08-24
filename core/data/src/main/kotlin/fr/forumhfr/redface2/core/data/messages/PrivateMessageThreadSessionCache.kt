@@ -36,6 +36,15 @@ internal class PrivateMessageThreadSessionCache @Inject constructor() {
     fun read(stamp: Stamp, threadId: Int, page: Int): PrivateMessageThread? =
         if (isStampCurrent(stamp)) pages[Key(stamp.account, threadId, page)] else null
 
+    /**
+     * Non-promoting availability probe used by the page-swipe transition. The same stamp check as
+     * [read] makes a result false as soon as logout/account invalidation advances the generation;
+     * [containsKey] deliberately does not perturb the LRU order merely because a gesture asked.
+     */
+    @Synchronized
+    fun contains(stamp: Stamp, threadId: Int, page: Int): Boolean =
+        isStampCurrent(stamp) && pages.containsKey(Key(stamp.account, threadId, page))
+
     @Synchronized
     fun write(stamp: Stamp, threadId: Int, page: Int, thread: PrivateMessageThread) {
         if (isStampCurrent(stamp)) pages[Key(stamp.account, threadId, page)] = thread

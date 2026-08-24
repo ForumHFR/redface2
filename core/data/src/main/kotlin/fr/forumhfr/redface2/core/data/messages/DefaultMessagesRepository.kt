@@ -200,6 +200,11 @@ class DefaultMessagesRepository @Inject internal constructor(
         // account that started the load, so a real account switch stays a refusal.
     }.flowOn(ioDispatcher)
 
+    override fun isPrivateMessageThreadPageWarm(account: String, threadId: Int, page: Int): Boolean {
+        val stamp = threadSessionCache.capture(account)
+        return threadSessionCache.contains(stamp, threadId, page)
+    }
+
     override suspend fun prefetchPrivateMessageThread(threadId: Int, page: Int) =
         withContext(ioDispatcher) {
             try {

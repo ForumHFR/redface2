@@ -1187,6 +1187,43 @@ class PrivateMessageThreadViewModelTest {
     }
 
     @Test
+    fun `swipe warmth probe delegates with the authenticated account and route thread`() = runTest {
+        val repository = loadedRepository()
+        every {
+            repository.isPrivateMessageThreadPageWarm(
+                account = "xaat",
+                threadId = 42,
+                page = 2,
+            )
+        } returns true
+        val viewModel = threadViewModel(repository)
+
+        assertTrue(viewModel.isPageWarm(2))
+        assertFalse(viewModel.isPageWarm(0))
+    }
+
+    @Test
+    fun `network failure after cold page selection keeps the outgoing content at rest`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        val pageOne = thread(page = 1, totalPages = 2)
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns network(pageOne)
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 2, fallbackCorrespondent = null)
+        } returns failure(IOException("offline"))
+        val viewModel = threadViewModel(repository)
+
+        viewModel.selectPage(2)
+
+        val failed = viewModel.state.value
+        assertFalse(failed.isRefreshing)
+        assertEquals(1, failed.page)
+        assertEquals(pageOne, (failed.mode as PrivateMessageThreadUiState.Mode.Content).thread)
+        assertEquals(PrivateMessageThreadEffect.RefreshFailed, viewModel.effects.first())
+    }
+
+    @Test
     fun `refresh re-fetches the displayed page in place`() = runTest {
         val repository = mockk<MessagesRepository>()
         val first = thread(page = 1, totalPages = 1)

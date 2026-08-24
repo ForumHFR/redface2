@@ -7,11 +7,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.systemGestures
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -50,7 +52,9 @@ import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -236,6 +240,7 @@ fun PrivateMessageThreadScreen(
             onRetry = viewModel::retry,
             onRefresh = viewModel::refresh,
             onSelectPage = viewModel::selectPage,
+            isPageWarm = viewModel::isPageWarm,
             onGoToCitedPost = viewModel::goToCitedMessage,
             onAnchorSettled = viewModel::reportPageAnchor,
             onPageLandingConsumed = viewModel::acknowledgePageLanding,
@@ -454,6 +459,8 @@ internal data class PrivateMessageThreadCallbacks(
     val onRetry: () -> Unit,
     val onRefresh: () -> Unit,
     val onSelectPage: (page: Int, departureAnchor: PrivateMessageScrollAnchor?) -> Unit,
+    /** Generation/account-sealed RAM availability probe used only to choose the swipe release. */
+    val isPageWarm: (page: Int) -> Boolean = { false },
     val onOpenRoster: () -> Unit,
     val onDismissRoster: () -> Unit,
     val onRetryRoster: () -> Unit,
@@ -694,8 +701,11 @@ internal fun PrivateMessageThreadContent(
     )
 }
 
-/** Long-lived list coordination retained by [PrivateMessageThreadContent] across its UI modes. */
-private data class PrivateMessageReaderSession(
+/**
+ * Long-lived list coordination retained by [PrivateMessageThreadContent] across its UI modes.
+ * Module visibility lets the production gate be tested without a shadow test-only session DTO.
+ */
+internal data class PrivateMessageReaderSession(
     val listState: LazyListState,
     val alignment: PrivateMessageListAlignment,
     val isScrollbarDragging: () -> Boolean,
@@ -748,6 +758,15 @@ private fun PrivateMessageThreadReader(
             )
         }
     }
+    val swipeInteraction = ThreadSwipeInteraction(
+        onSelectPage = { page ->
+            callbacks.onSelectPage(page, alignedDepartureAnchor())
+        },
+        isTargetPageWarm = callbacks.isPageWarm,
+        hasCompetingListProducer = {
+            hasCompetingThreadListProducer(latestState, session, zoomState)
+        },
+    )
     // #1074/#1040 — cited > saved anchor > top, one scroll authority. The effect closes the
     // alignment window only after the selected scroll completes.
     PrivateMessagePageLandingEffect(
@@ -848,10 +867,7 @@ private fun PrivateMessageThreadReader(
                         renderedPage = mode.thread.page,
                         totalPages = state.totalPages,
                         isRefreshing = state.isRefreshing,
-                        onSelectPage = { page ->
-                            callbacks.onSelectPage(page, alignedDepartureAnchor())
-                        },
-                        zoomed = isZoomed,
+                        interaction = swipeInteraction,
                     ),
                 ),
             )
@@ -871,6 +887,28 @@ private fun PrivateMessageThreadReader(
             )
         }
     }
+}
+
+/**
+ * Live page-position producers that must settle before a swipe may capture an anchor and commit.
+ * A pending same-page cited landing is explicit because its numeric page remains aligned until its
+ * programmatic scroll starts; [PrivateMessageListAlignment] covers the cross-page content/position
+ * mismatch window. Module visibility keeps the regression proof on this exact predicate.
+ */
+internal fun hasCompetingThreadListProducer(
+    state: PrivateMessageThreadUiState,
+    session: PrivateMessageReaderSession,
+    zoomState: PinchZoomState,
+): Boolean = when {
+    zoomState.zoomed -> true
+    zoomState.isListPositionMutationInProgress -> true
+    session.isScrollbarDragging() -> true
+    session.listState.isScrollInProgress -> true
+    state.pageLanding != null -> true
+    else -> !session.alignment.shouldPersist(
+        canonicalPage = state.page,
+        isLoaded = state.mode is PrivateMessageThreadUiState.Mode.Content,
+    )
 }
 
 /** Feature-owned reset chrome; the shared zoom API deliberately contains no labels or surfaces. */
@@ -939,7 +977,7 @@ private fun ThreadMessageMenuHost(
     }
 
     if (mode is PrivateMessageThreadUiState.Mode.Content && targetStillOnPage) {
-        target?.let { message ->
+        target.let { message ->
             val authorCanonical = remember(message.author) { canonicalizePseudo(message.author) }
             val connectedCanonical = remember(connectedPseudo) {
                 connectedPseudo?.let(::canonicalizePseudo)
@@ -1116,35 +1154,41 @@ private fun ThreadReplyFab(canReply: Boolean, onReply: () -> Unit) {
  * #351b — builds the swipe modifier chain for the message list: shared edge glow
  * ([pageSwipeEdgeHint]) + in-place page-change gesture ([threadPageSwipe]).
  *
- * Every input the gesture needs later is wrapped in [rememberUpdatedState] and read through
- * stable lambdas: [threadPageSwipe]'s `pointerInput` is keyed on `Unit` and NEVER re-keyed (the
- * in-place pager changes pages under a live composition), so the lambdas captured by its initial
- * block must keep reading live values for the whole life of the composition. The gesture is gated
- * off while a load is in flight ([isRefreshing]) or the reader is zoomed, then re-arms at rest.
+ * The load started by selection publishes `isRefreshing=true` while the outgoing page is still
+ * rendered; a later cache/network emission alone may change that page. Both values re-key the
+ * pointer block, but the fresh block remains disabled while refresh is true. Terminal
+ * `isRefreshing=true→false` is the usable re-arm, including after a cold failure whose rendered page
+ * never changed. Counts, callbacks, cache warmth, competing producers and gesture insets stay live
+ * through [rememberUpdatedState] without making a page-count/inset change cancel an in-flight release.
  */
+internal data class ThreadSwipeInteraction(
+    val onSelectPage: (Int) -> Unit,
+    val isTargetPageWarm: (Int) -> Boolean = { false },
+    val hasCompetingListProducer: () -> Boolean = { false },
+)
+
 @Composable
 internal fun rememberThreadSwipeModifier(
     renderedPage: Int,
     totalPages: Int,
     isRefreshing: Boolean,
-    onSelectPage: (Int) -> Unit,
-    zoomed: Boolean = false,
+    interaction: ThreadSwipeInteraction,
 ): Modifier {
     val dragOffset = remember { mutableFloatStateOf(0f) }
     val haptics = LocalHapticFeedback.current
-    val currentPage = rememberUpdatedState(renderedPage)
     val currentTotal = rememberUpdatedState(totalPages)
-    val swipeEnabled = rememberUpdatedState(!isRefreshing && !zoomed)
-    val currentOnSelectPage = rememberUpdatedState(onSelectPage)
-    // Codex review — dragOffset SURVIVES the in-place page change (no composition teardown; the
-    // topic's offset survives too since #895 étape 4 and is reset the same way, by a
-    // LaunchedEffect keyed on the rendered page — pre-#895 it died with the route-replaced
-    // screen). Drop any residual
-    // translation when a new page lands so the incoming content never inherits the old offset. An
-    // in-flight spring-back may stream a few frames after this reset; it converges to 0 by
-    // construction, so the transient is negligible. A drag still under the finger keeps following it
-    // (rare: the page swapped under an active drag) — coherent with the finger, assumed.
-    LaunchedEffect(renderedPage) {
+    val currentRefreshing = rememberUpdatedState(isRefreshing)
+    val currentInteraction = rememberUpdatedState(interaction)
+    val gestureDensity = rememberUpdatedState(LocalDensity.current)
+    val gestureLayoutDirection = rememberUpdatedState(LocalLayoutDirection.current)
+    val systemGestureInsets = rememberUpdatedState(WindowInsets.systemGestures)
+    val swipeEnabled: () -> Boolean = {
+        !currentRefreshing.value && !currentInteraction.value.hasCompetingListProducer()
+    }
+    // The release owner already parks zero after handing off a warm selection. Repeat the reset on
+    // both pointer-input keys as a composition-level belt: a page emission, a failed load or an
+    // external refresh that cancels a release can never leave retained content translated.
+    LaunchedEffect(renderedPage, isRefreshing) {
         dragOffset.floatValue = 0f
     }
     // Same desaturated accent as the topic edge glow (#282): mostly neutral with a touch of primary.
@@ -1153,15 +1197,20 @@ internal fun rememberThreadSwipeModifier(
         MaterialTheme.colorScheme.primary,
         ACCENT_PRIMARY_BLEND,
     )
-    // Captured ONCE by threadPageSwipe's pointerInput(Unit) block — deliberately remember-ed without
-    // keys so the code does not pretend a recreation would reach the gesture (it would not: the
-    // initial block keeps its first capture). The callback and the gate stay live through the
-    // rememberUpdatedState-backed lambdas; haptics (LocalHapticFeedback) is stable per Activity.
-    val handlers = remember {
+    val handlers = remember(haptics) {
         ThreadSwipeHandlers(
             haptics = haptics,
-            onSelectPage = { page -> currentOnSelectPage.value(page) },
-            enabled = { swipeEnabled.value },
+            onSelectPage = { page -> currentInteraction.value.onSelectPage(page) },
+            enabled = swipeEnabled,
+            isTargetPageWarm = { page -> currentInteraction.value.isTargetPageWarm(page) },
+            leftGestureInsetPx = {
+                systemGestureInsets.value
+                    .getLeft(gestureDensity.value, gestureLayoutDirection.value)
+            },
+            rightGestureInsetPx = {
+                systemGestureInsets.value
+                    .getRight(gestureDensity.value, gestureLayoutDirection.value)
+            },
         )
     }
     return Modifier
@@ -1170,11 +1219,12 @@ internal fun rememberThreadSwipeModifier(
             totalPages = { currentTotal.value },
             dragOffset = dragOffset,
             accent = accent,
-            enabled = { swipeEnabled.value },
+            enabled = swipeEnabled,
         )
         .threadPageSwipe(
-            currentPage = { currentPage.value },
+            currentPage = renderedPage,
             totalPages = { currentTotal.value },
+            isRefreshing = isRefreshing,
             dragOffset = dragOffset,
             handlers = handlers,
         )
