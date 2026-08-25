@@ -16,6 +16,28 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.42.8` — `internal` (dev) — 2026-08-25
+
+Lot 7 du chantier de parité de lecture Sujet ↔ Conversations privées ([#1040](https://github.com/ForumHFR/redface2/issues/1040), lot [#1097](https://github.com/ForumHFR/redface2/issues/1097)) : le cache disque des conversations privées, **désactivé par défaut**.
+
+### Ajouté
+
+- **Garder les conversations privées en cache sur l'appareil** ([#1097](https://github.com/ForumHFR/redface2/issues/1097)), nouveau réglage dans « Messages privés », **désactivé par défaut**. Activé, il permet d'afficher immédiatement une page déjà lue, même après avoir fermé l'application — la page s'affiche à titre **provisoire** et le rechargement réseau reste obligatoire.
+
+  **C'est la seule fonction de l'application qui écrit le contenu de vos messages privés sur le disque de l'appareil**, d'où le défaut à « désactivé » et la confirmation explicite avant activation. Le réglage vaut pour **tous les comptes** utilisés sur l'appareil.
+
+  **Désactiver efface immédiatement.** La déconnexion et le changement de compte effacent aussi les données du compte sortant. L'effacement ne se contente pas de supprimer les lignes : les octets sont réellement écrasés dans le fichier de base de données — décision documentée en [ADR-018](https://forumhfr.github.io/redface2/adr/018-mp-cache-disque-opt-in). Si un effacement échoue, la fonction se verrouille en lecture comme en écriture et réessaie au démarrage suivant, plutôt que de se réactiver silencieusement.
+
+  Le préchargement des pages voisines n'écrit **jamais** sur le disque, réglage activé ou non.
+
+### Interne
+
+- **Migration de schéma de base de données 16 → 17** ([#1135](https://github.com/ForumHFR/redface2/issues/1135)). Elle est **irréversible sans désinstallation** : une fois la base migrée, revenir à un binaire antérieur demande de réinstaller l'application. **Aucune donnée n'est écrite** par cette migration — les tables ajoutées restent vides tant que le réglage ci-dessus n'est pas activé.
+
+- Outillage de capture des preuves serveur manquantes du chantier ([#1107](https://github.com/ForumHFR/redface2/issues/1107)) : quatre cas ajoutés au script de capture, dont un contrôle positif qui était structurellement inopérant depuis sa livraison.
+
+---
+
 ## `0.42.7` — `internal` (dev) — 2026-08-25
 
 Lot 6 du chantier de parité de lecture Sujet ↔ Conversations privées ([#1040](https://github.com/ForumHFR/redface2/issues/1040), lot [#1103](https://github.com/ForumHFR/redface2/issues/1103)) : les conversations privées reçoivent les affordances de lecture qui leur manquaient encore.
