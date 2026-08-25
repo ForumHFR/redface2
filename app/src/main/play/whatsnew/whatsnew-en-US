@@ -1,6 +1,7 @@
-Redface 2 v0.42.6 — dev.
+Redface 2 v0.42.7 — dev.
 
-- Quote several messages from a private conversation at once, from the message menu then "Citer N".
-- Pinch zoom finally works in private messages, on the same engine as topics.
-- Tapping a citation header now lands on the quoted message.
-- Private-message images are no longer written to disk, and signing out clears the image cache.
+- Private conversations now restore the reading position of every page.
+- They get the topic pagination chrome: page picker in the bar, floating buttons, long press for the first or last page.
+- A private message's menu now opens from the header "..."; long-pressing the card no longer does anything.
+- Double-tap to refresh.
+- Page swipe is hardened: cancelled by a second finger, dead zone along the system bars.

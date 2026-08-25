@@ -1,6 +1,7 @@
-Redface 2 v0.42.6 — dev.
+Redface 2 v0.42.7 — dev.
 
-- Citer plusieurs messages d'une conversation privée d'un coup, via le menu de message puis « Citer N ».
-- Le zoom pincé marche enfin dans les MP, avec le même moteur que les sujets.
-- Appuyer sur l'en-tête d'une citation amène au message cité.
-- Les images des MP ne sont plus écrites sur le disque, et la déconnexion vide le cache d'images.
+- Les conversations privées retrouvent la position de lecture de chaque page.
+- Elles ont le chrome de pagination des sujets : sélecteur de page en barre, boutons flottants, appui long pour la première ou la dernière page.
+- Le menu d'un message privé s'ouvre par le « ... » de l'en-tête ; l'appui long sur la carte ne fait plus rien.
+- Double-tap pour rafraîchir.
+- Le balayage de page est durci : annulation à deux doigts, zone morte le long des bandes système.
