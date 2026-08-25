@@ -24,14 +24,17 @@ import fr.forumhfr.redface2.core.ui.R
  * and replaces only its card with this one-line surface. « Afficher » reveals the real card for the
  * current page only; page-scoped reveal state belongs to the host.
  *
- * By design this placeholder exposes no quote/edit/menu action: the reader reveals first, then acts
- * on the full card. The author label remains the item's exactly-one accessibility heading (#884),
- * mirroring the identity heading of a visible reading card.
+ * By design this placeholder exposes no quote/edit action: the reader reveals first, then acts on
+ * the full card. [trailing] lets a feature preserve access to an already-existing contextual menu
+ * without teaching this shared primitive which menu it is; the topic leaves it null, while MP uses
+ * it for the same `⋯` trigger as a visible message. The author label remains the item's exactly-one
+ * accessibility heading (#884), mirroring the identity heading of a visible reading card.
  */
 @Composable
 fun HiddenPostCard(
     author: String,
     onReveal: () -> Unit,
+    trailing: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Card(
@@ -58,6 +61,7 @@ fun HiddenPostCard(
             TextButton(onClick = onReveal) {
                 Text(text = stringResource(R.string.post_hidden_reveal))
             }
+            trailing?.invoke()
         }
     }
 }

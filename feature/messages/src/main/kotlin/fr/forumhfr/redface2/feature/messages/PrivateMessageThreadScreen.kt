@@ -2,7 +2,6 @@ package fr.forumhfr.redface2.feature.messages
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
@@ -31,6 +31,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.pullToRefresh
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
@@ -50,9 +51,6 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.hapticfeedback.HapticFeedback
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -63,10 +61,11 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -953,7 +952,10 @@ private fun PrivateMessageThreadReader(
                 connectedPseudo = state.connectedPseudo,
                 canReply = mode.thread.canReply,
                 multiQuoteSelections = presentation.multiQuoteSelections,
-                onQuote = callbacks.onQuote,
+                quoteCallbacks = MessageQuoteCallbacks(
+                    onQuote = callbacks.onQuote,
+                    onToggleMultiQuote = callbacks.onToggleMultiQuote,
+                ),
                 onRemoveMultiQuotes = callbacks.onRemoveMultiQuotes,
                 onGoToCitedPost = callbacks.onGoToCitedPost?.let { onGoToCitedPost ->
                     { page, numreponse ->
@@ -1524,6 +1526,18 @@ private data class ThreadScrollSession(
     val onScrollbarDragStateChanged: (Boolean) -> Unit,
 )
 
+/** Quote callbacks travel together so the hot list cannot grow a third independent capability. */
+private data class MessageQuoteCallbacks(
+    val onQuote: ((Post) -> Unit)?,
+    val onToggleMultiQuote: (QuoteSelection) -> Unit,
+)
+
+/** Both footer actions are either derived from one MP quote gate or absent together. */
+internal data class MessageQuoteAffordances(
+    val onQuote: () -> Unit,
+    val onToggleMultiQuote: () -> Unit,
+)
+
 @Composable
 @Suppress("LongParameterList") // List host: message presentation/actions remain independent inputs.
 private fun ThreadMessages(
@@ -1538,7 +1552,7 @@ private fun ThreadMessages(
     connectedPseudo: String?,
     canReply: Boolean,
     multiQuoteSelections: List<QuoteSelection>,
-    onQuote: ((Post) -> Unit)?,
+    quoteCallbacks: MessageQuoteCallbacks,
     onRemoveMultiQuotes: (Set<Int>) -> Unit,
     onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)?,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit,
@@ -1618,6 +1632,12 @@ private fun ThreadMessages(
                     onReveal = {
                         revealedHiddenMessages = revealedHiddenMessages + message.numreponse
                     },
+                    // Removing the card-wide long press must not strand a blocked author without
+                    // access to the existing unblock menu. The placeholder still exposes no quote
+                    // affordance: reveal and menu are its only explicit targets.
+                    trailing = {
+                        MessageMenuTrigger(onOpenMenu = { onOpenMessageMenu(message) })
+                    },
                     modifier = Modifier.threadIslandPadding(fullWidthPosts),
                 )
             } else {
@@ -1626,6 +1646,16 @@ private fun ThreadMessages(
                     nextMessage,
                     hiddenNumreponses,
                     revealedHiddenMessages,
+                )
+                // #1074/#1102 — derive simple quote and direct basket toggle ONCE, under the same
+                // authenticated/writable + visible + positive-ref gate. Keeping both callbacks in
+                // one nullable value makes a future #1110 relaxation a one-site change.
+                val quoteAffordances = messageQuoteAffordances(
+                    canReply = canReply,
+                    authorBlocked = message.numreponse in hiddenNumreponses,
+                    message = message,
+                    page = page,
+                    callbacks = quoteCallbacks,
                 )
                 MessageCard(
                     message = message,
@@ -1650,32 +1680,28 @@ private fun ThreadMessages(
                     onOpenMenu = { onOpenMessageMenu(message) },
                     onImageLongPress = onImageLongPress,
                     onGoToCitedPost = onGoToCitedPost,
-                    // #1074 — MP citation is fail-closed: unlike the topic fallback, the measured
-                    // contract requires the server-provided 1-based page rank. Missing/zero `ref`,
-                    // read-only thread, or absent host callback means no footer action.
-                    onQuote = messageQuoteAction(
-                        canReply = canReply,
-                        authorBlocked = message.numreponse in hiddenNumreponses,
-                        message = message,
-                        onQuote = onQuote,
-                    ),
+                    quoteAffordances = quoteAffordances,
                 )
             }
         }
     }
 }
 
-/** Fail-closed MP quote gate, kept outside the hot list builder's complexity budget. */
-private fun messageQuoteAction(
+/** Fail-closed MP quote gate shared structurally by « Citer » and the direct basket toggle. */
+private fun messageQuoteAffordances(
     canReply: Boolean,
     authorBlocked: Boolean,
     message: Post,
-    onQuote: ((Post) -> Unit)?,
-): (() -> Unit)? {
-    val ref = message.quoteRef ?: return null
-    return onQuote
-        ?.takeIf { canReply && !authorBlocked && ref >= 1 }
-        ?.let { quote -> { quote(message) } }
+    page: Int,
+    callbacks: MessageQuoteCallbacks,
+): MessageQuoteAffordances? {
+    val selection = message.toPrivateMessageQuoteSelectionOrNull(page) ?: return null
+    val quote = callbacks.onQuote ?: return null
+    if (!canReply || authorBlocked) return null
+    return MessageQuoteAffordances(
+        onQuote = { quote(message) },
+        onToggleMultiQuote = { callbacks.onToggleMultiQuote(selection) },
+    )
 }
 
 /** Builds the complete locator only when the measured MP contract can be represented. */
@@ -1740,15 +1766,16 @@ internal fun isHiddenMessage(message: Post, hidden: Set<Int>, revealed: Set<Int>
  * [onOpenProfile] — tapping the avatar or the author pseudo opens the profile surface (parity with
  * the topic card, #208); the MP page proves [Post.profileId] for its messages (#1042 fixture).
  * `null` (no profile link on the row) keeps the identity line inert.
- * [onOpenMenu] adds a long-press-only action to the card. Child gestures keep precedence: text
- * selection, profile taps and image long presses retain their own contracts, while a long press on
- * the remaining card surface opens the message menu.
+ * [onOpenMenu] adds the explicit `⋯` trigger to the identity header. The card surface owns no
+ * long-press menu gesture: text selection remains pure, and image long presses retain their own
+ * contextual-menu contract.
  * [onImageLongPress] is likewise a capability by presence: the MP screen supplies it, while direct
  * hosts that omit it keep every content image inert (editor previews and signatures stay unchanged).
  * [onGoToCitedPost] wires parsed quote-header targets to the thread ViewModel's page/account-scoped
  * landing. A null host keeps the shared quote header inert.
- * [onQuote] supplies the footer « Citer » action. The list passes it only for a writable thread and
- * a message carrying a positive server-provided `quoteRef`; hidden messages never mount this card.
+ * [quoteAffordances] supplies the footer « Citer » and direct basket-toggle actions as one nullable
+ * capability. The list passes both only for a writable thread and a message carrying a positive
+ * server-provided `quoteRef`; hidden messages never mount this card.
  * [multiQuoteSelected] reuses the shared selected border/semantics without adding a dynamic badge.
  * [presentation] is the shared render-only state bundle. The list derives its values from reader
  * preferences, the session pseudo (#1050 Ego markers) and message position, while this adapter
@@ -1766,7 +1793,7 @@ internal fun MessageCard(
     onOpenMenu: (() -> Unit)? = null,
     onImageLongPress: ((PostImageTarget) -> Unit)? = null,
     onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
-    onQuote: (() -> Unit)? = null,
+    quoteAffordances: MessageQuoteAffordances? = null,
 ) {
     // #287/#1042 — structural spacing from the active density preset, like the shared card's body.
     val m = LocalDisplayMetrics.current
@@ -1779,17 +1806,6 @@ internal fun MessageCard(
     // on the identity node (TalkBack traverses it first), never a heading. The fallback pseudo or
     // creator slot stays the card's exactly-one heading (#884, pinned by MessageCardShellSmokeTest).
     val egoPostStateDescription = stringResource(R.string.messages_post_ego_state_description)
-    val menuLabel = if (onOpenMenu != null) {
-        stringResource(R.string.messages_message_menu_action)
-    } else {
-        null
-    }
-    val haptics = LocalHapticFeedback.current
-    val menuModifier = if (onOpenMenu != null && menuLabel != null) {
-        Modifier.messageMenuLongPress(onOpenMenu, haptics, menuLabel)
-    } else {
-        Modifier
-    }
     val citedCount = message.citedCount ?: 0
     // #221 — canonical creator detection (case / format-char / NBSP insensitive) runs once per
     // author, not on every recomposition of this hot list row. Only creators need a pseudo slot;
@@ -1797,7 +1813,6 @@ internal fun MessageCard(
     val isCreator = remember(message.author) { isRf2Creator(message.author) }
     ReadingPostCard(
         post = message,
-        modifier = menuModifier,
         presentation = presentation.copy(selected = multiQuoteSelected),
         // #1096 — the singleton Coil loader has no caller identity. Mark the whole MP
         // PostContent at this host boundary so painters and intrinsic probes cannot persist its
@@ -1856,6 +1871,11 @@ internal fun MessageCard(
                     } else {
                         null
                     },
+                    // #1117 — strict topic parity: one explicit 48.dp menu target in the header,
+                    // and no competing card-wide long press that can collide with text selection.
+                    trailing = onOpenMenu?.let { openMenu ->
+                        { MessageMenuTrigger(onOpenMenu = openMenu) }
+                    },
                     // #483/#1051 — same compact data-driven marker as the topic; null emits no slot.
                     dateTrailing = if (message.editedAt != null) {
                         {
@@ -1884,10 +1904,11 @@ internal fun MessageCard(
         } else {
             null
         },
-        footer = onQuote?.let { quote ->
+        footer = quoteAffordances?.let { actions ->
             {
-                MessageQuoteAction(
-                    onQuote = quote,
+                MessageQuoteActions(
+                    actions = actions,
+                    multiQuoteSelected = multiQuoteSelected,
                     horizontalPadding = m.cardBodyHorizontal,
                 )
             }
@@ -1895,9 +1916,13 @@ internal fun MessageCard(
     )
 }
 
-/** #1074 — sober MP footer action, aligned with the topic card's per-message actions row. */
+/** #1074/#1102 — direct MP quote actions, aligned with the topic card's per-post actions row. */
 @Composable
-private fun MessageQuoteAction(onQuote: () -> Unit, horizontalPadding: Dp) {
+private fun MessageQuoteActions(
+    actions: MessageQuoteAffordances,
+    multiQuoteSelected: Boolean,
+    horizontalPadding: Dp,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1905,10 +1930,61 @@ private fun MessageQuoteAction(onQuote: () -> Unit, horizontalPadding: Dp) {
             .padding(horizontal = horizontalPadding),
         horizontalArrangement = Arrangement.End,
     ) {
-        TextButton(onClick = onQuote) {
+        val toggleDescription = stringResource(
+            if (multiQuoteSelected) {
+                R.string.messages_multi_quote_remove
+            } else {
+                R.string.messages_multi_quote_add
+            },
+        )
+        TextButton(
+            onClick = actions.onToggleMultiQuote,
+            colors = if (multiQuoteSelected) {
+                ButtonDefaults.textButtonColors()
+            } else {
+                ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            },
+            modifier = Modifier.semantics {
+                contentDescription = toggleDescription
+                selected = multiQuoteSelected
+            },
+        ) {
+            Text(
+                text = stringResource(
+                    if (multiQuoteSelected) {
+                        R.string.messages_multi_quote_remove_short
+                    } else {
+                        R.string.messages_multi_quote_add_short
+                    },
+                ),
+            )
+        }
+        TextButton(onClick = actions.onQuote) {
             Text(text = stringResource(R.string.messages_quote))
         }
     }
+}
+
+/** Topic-parity menu glyph reused by visible and hidden MP cards. */
+@Composable
+private fun MessageMenuTrigger(onOpenMenu: () -> Unit) {
+    val menuLabel = stringResource(R.string.messages_message_menu_action)
+    Text(
+        text = "⋯",
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .minimumInteractiveComponentSize()
+            .clickable(
+                onClick = onOpenMenu,
+                role = Role.Button,
+                onClickLabel = menuLabel,
+            )
+            .semantics { contentDescription = menuLabel },
+    )
 }
 
 /** Citation-count pill for the MP card, supplied through [ReadingPostCard]'s badges slot. */
@@ -1938,31 +2014,6 @@ private fun MessageCitedCountBadge(citedCount: Int, horizontalPadding: Dp) {
         }
     }
 }
-
-/**
- * Long-press-only card gesture. Child nodes consume their own gestures first, preserving profile
- * taps, selectable post text and the dedicated image menu; otherwise this detector owns the long
- * press. The explicit semantics action gives TalkBack the same labelled capability.
- */
-private fun Modifier.messageMenuLongPress(
-    onOpenMenu: () -> Unit,
-    haptics: HapticFeedback,
-    label: String,
-): Modifier = this
-    .pointerInput(onOpenMenu) {
-        detectTapGestures(
-            onLongPress = {
-                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                onOpenMenu()
-            },
-        )
-    }
-    .semantics {
-        onLongClick(label = label) {
-            onOpenMenu()
-            true
-        }
-    }
 
 // #351b — same blend as the topic edge glow (#282): a full-primary glow read as an imposing panel.
 private const val ACCENT_PRIMARY_BLEND = 0.3f

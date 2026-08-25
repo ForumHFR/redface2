@@ -39,6 +39,9 @@
     <string name="messages_multi_quote_clear">Vider la sélection de citations</string>
     <string name="messages_multi_quote_add">Ajouter à la citation multiple</string>
     <string name="messages_multi_quote_remove">Retirer de la citation multiple</string>
+    <!-- Labels visuels courts ; les libellés longs ci-dessus portent l'action TalkBack. -->
+    <string name="messages_multi_quote_add_short">+ Citer</string>
+    <string name="messages_multi_quote_remove_short">✓ Cité</string>
     <string name="messages_reply_title">Répondre</string>
     <string name="messages_compose_title">Nouveau message</string>
     <string name="messages_compose_new">Nouveau</string>
@@ -110,8 +113,8 @@
     <!-- #1042 — tap avatar/pseudo d'un message privé : ouvre le profil (parité topic #208). -->
     <string name="messages_open_profile_action">Voir le profil</string>
 
-    <!-- #1051/#1074 — menu contextuel propre aux messages privés. Le permalien reste absent ; la
-         citation simple reste au pied de carte et la sélection multiple vit dans ce menu. -->
+    <!-- #1051/#1074/#1102 — menu contextuel propre aux messages privés. Le permalien reste absent ;
+         citation simple et sélection multiple ont aussi leurs affordances directes au pied. -->
     <string name="messages_message_menu_action">Options du message</string>
     <string name="messages_message_menu_number">Message n°%1$d</string>
     <string name="messages_message_menu_copy_text">Copier le texte</string>
