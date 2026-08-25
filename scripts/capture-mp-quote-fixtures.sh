@@ -15,6 +15,8 @@ hfr_capture_password=''
 search_tool=''
 last_effective_url=''
 last_response_date=''
+last_response_code=''
+last_response_sha256=''
 
 declare -A selected=(
   [mp_quote]=0
@@ -85,6 +87,12 @@ Pour le troisième cas, si aucune conversation de test ne contient encore de
 citation, Redface 2 0.42.4 permet d'en créer une : citer un message dans une
 conversation de test consentie, puis fournir au script la page qui affiche le
 message nouvellement envoyé.
+
+ATTENTION pour toute capture MP : chaque requête authentifiée sur une conversation
+efface le dot non-lu du compte lecteur. Sur un MultiMP, elle retire aussi ce lecteur
+de la liste « pas lu par » visible par les autres participants : elle modifie donc
+un état visible par des tiers. Ne capturer que des conversations 1:1 déjà lues,
+pour lesquelles cet effet est nul.
 
 ATTENTION pour --control-topic : le GET est authentifié. Lire ainsi un topic
 public déplace le drapeau de lecture du compte sur ce topic. Choisir un contrôle
@@ -297,7 +305,7 @@ def redacted_url_value(raw_url):
     redacted = []
     for segment in raw_query_segments(parts):
         key, separator, _value = segment.partition("=")
-        if decoded_query_key(segment) == "hash_check":
+        if decoded_query_key(segment).lower() == "hash_check":
             redacted.append(key + separator + "<masqué>")
         else:
             redacted.append(segment)
@@ -630,6 +638,7 @@ class PageEvidenceParser(HTMLParser):
         self.message_table_depth = 0
         self.signature_depth = 0
         self.signature_text = None
+        self.signature_rendered_children = 0
         self.content_depth = 0
         self.edited_depth = 0
         self.edited_text = None
@@ -695,6 +704,9 @@ class PageEvidenceParser(HTMLParser):
             elif "signature" in classes:
                 self.signature_depth = 1
                 self.signature_text = []
+                self.signature_rendered_children = 0
+        if self.signature_depth and tag == "img":
+            self.signature_rendered_children += 1
         if tag == "div":
             if self.content_depth:
                 self.content_depth += 1
@@ -742,8 +754,14 @@ class PageEvidenceParser(HTMLParser):
         if tag == "span" and self.signature_depth:
             self.signature_depth -= 1
             if self.signature_depth == 0 and self.signature_text is not None:
-                self.current_message["signatures"].append(normalized_text(self.signature_text))
+                self.current_message["signatures"].append(
+                    {
+                        "text": normalized_text(self.signature_text),
+                        "rendered_children": self.signature_rendered_children,
+                    }
+                )
                 self.signature_text = None
+                self.signature_rendered_children = 0
         if tag == "div":
             if self.edited_depth:
                 self.edited_depth -= 1
@@ -762,6 +780,7 @@ class PageEvidenceParser(HTMLParser):
                 self.current_message = None
                 self.signature_depth = 0
                 self.signature_text = None
+                self.signature_rendered_children = 0
                 self.content_depth = 0
                 self.edited_depth = 0
                 self.edited_text = None
@@ -824,7 +843,11 @@ def signature_verdict(message):
     signatures = message["signatures"]
     if not signatures:
         return "absent"
-    meaningful = [re.sub(r"^\s*-{3,}\s*", "", text).strip() for text in signatures]
+    meaningful = [
+        re.sub(r"^\s*-{3,}\s*", "", signature["text"]).strip()
+        or signature["rendered_children"] > 0
+        for signature in signatures
+    ]
     return "présent" if any(meaningful) else "présent mais vide"
 
 
@@ -1011,7 +1034,9 @@ record_get_provenance() {
   record "Provenance GET — $label"
   record_url '  URL demandée' "$requested_url"
   record_url '  URL effective' "$last_effective_url"
+  record "  Code HTTP : ${last_response_code:-absent}"
   record "  Date HTTP : ${last_response_date:-absente}"
+  record "  SHA-256 du fichier brut : ${last_response_sha256:-absent}"
   record "  Rang de capture : $rank/$count"
   if [[ -n "$page_file" ]]; then
     if ! anchor_count="$(html_tool anchor-count "$page_file" 2>&1)" \
@@ -1242,12 +1267,15 @@ hfr_get() {
   local requested_url="$2"
   local output_file="$3"
   local headers_file="$output_file.headers"
-  local effective_url_file="$output_file.effective-url"
+  local transfer_metadata_file="$output_file.transfer-metadata"
+  local -a transfer_metadata=()
   local validated_url=''
   local effective_validation=''
   local validator=''
   last_effective_url=''
   last_response_date=''
+  last_response_code=''
+  last_response_sha256=''
   case "$kind" in
     thread) validator='validate-thread' ;;
     thread-page) validator='validate-thread-page' ;;
@@ -1270,8 +1298,8 @@ hfr_get() {
   fi
   : > "$output_file"
   : > "$headers_file"
-  : > "$effective_url_file"
-  chmod 600 "$output_file" "$headers_file" "$effective_url_file"
+  : > "$transfer_metadata_file"
+  chmod 600 "$output_file" "$headers_file" "$transfer_metadata_file"
   if ! curl -fsSL \
     --proto '=https' \
     --request GET \
@@ -1279,16 +1307,22 @@ hfr_get() {
     -b "$cookie_jar" \
     -c "$cookie_jar" \
     -D "$headers_file" \
-    -w '%{url_effective}\n' \
+    -w '%{url_effective}\n%{http_code}\n' \
     "$validated_url" \
-    -o "$output_file" > "$effective_url_file"; then
-    chmod 600 "$output_file" "$headers_file" "$effective_url_file" "$cookie_jar"
+    -o "$output_file" > "$transfer_metadata_file"; then
+    chmod 600 "$output_file" "$headers_file" "$transfer_metadata_file" "$cookie_jar"
     return 1
   fi
-  chmod 600 "$output_file" "$headers_file" "$effective_url_file" "$cookie_jar"
-  IFS= read -r last_effective_url < "$effective_url_file" || last_effective_url=''
+  chmod 600 "$output_file" "$headers_file" "$transfer_metadata_file" "$cookie_jar"
+  mapfile -t transfer_metadata < "$transfer_metadata_file"
+  last_effective_url="${transfer_metadata[0]:-}"
+  last_response_code="${transfer_metadata[1]:-}"
   if [[ -z "$last_effective_url" ]]; then
     record 'GET refusé après réseau : curl n’a pas fourni d’URL effective.'
+    return 1
+  fi
+  if [[ ! "$last_response_code" =~ ^[0-9]{3}$ ]]; then
+    record 'GET refusé après réseau : curl n’a pas fourni de code HTTP exploitable.'
     return 1
   fi
   if ! effective_validation="$(html_tool "$validator" "$last_effective_url" 2>&1)"; then
@@ -1297,15 +1331,21 @@ hfr_get() {
   fi
   last_effective_url="$effective_validation"
   last_response_date="$(awk '
-    BEGIN { IGNORECASE = 1; date = "" }
-    /^HTTP\// { date = "" }
-    /^Date:[[:space:]]*/ {
-      sub(/^Date:[[:space:]]*/, "")
-      sub(/\r$/, "")
-      date = $0
+    BEGIN { date = "" }
+    {
+      lower = tolower($0)
+    }
+    lower ~ /^http\// { date = "" }
+    lower ~ /^date:[[:space:]]*/ {
+      line = $0
+      sub(/^[^:]*:[[:space:]]*/, "", line)
+      sub(/\r$/, "", line)
+      date = line
     }
     END { print date }
   ' "$headers_file")"
+  last_response_sha256="$(sha256sum "$output_file")"
+  last_response_sha256="${last_response_sha256%% *}"
 }
 
 capture_quote_form() {
@@ -1670,7 +1710,7 @@ if [[ "$explicit_selection" -eq 0 ]]; then
   selected[ref_probe]=1
 fi
 
-for dependency in curl python3 awk mktemp chmod tee; do
+for dependency in curl python3 awk sha256sum mktemp chmod tee; do
   require_command "$dependency"
 done
 select_search_tool
