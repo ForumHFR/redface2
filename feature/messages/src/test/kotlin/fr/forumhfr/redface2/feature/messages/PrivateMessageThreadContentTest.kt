@@ -20,6 +20,8 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasScrollAction
@@ -63,7 +65,9 @@ import org.robolectric.annotation.GraphicsMode
  * chrome, one ordered card per message, top-bar picker and bottom page-FAB cluster, and the anonymous
  * placeholder. #1050 adds the mounted full-width sequence, hot signature presentation and internal
  * LazyListState anchor proofs without weakening those default-path assertions. #509/#1050 adds the
- * blacklist placeholder, page-local reveal and blocked-quote provider contracts.
+ * blacklist placeholder, page-local reveal and blocked-quote provider contracts. #1102/#1117
+ * extend the existing message-interaction inventory with the explicit menu and footer targets,
+ * while image/link targets remain characterized once in [PostRendererHostMatrixTest].
  */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -301,41 +305,45 @@ class PrivateMessageThreadContentTest {
     }
 
     @Test
-    fun `message long click opens only the decided MP menu and keeps one message heading`() {
-        setContent(
-            mode = PrivateMessageThreadUiState.Mode.Content(
-                PrivateMessageThread(
-                    threadId = THREAD_ID,
-                    subject = "Menu MP",
-                    correspondent = "Correspondant",
-                    messages = listOf(message(101, "Alice", "Texte à copier")),
-                    page = 1,
-                    totalPages = 1,
-                    canReply = false,
+    fun `message child target inventory has explicit actions and no card long click`() {
+        val state = contentState(
+            messages = listOf(
+                message(101, "Alice", "Texte à copier").copy(
+                    quoteRef = 4,
+                    profileId = 7,
                 ),
             ),
-            page = 1,
-            totalPages = 1,
+            canReply = true,
+        )
+        mountState(
+            state = state,
+            callbacks = NO_OP_CALLBACKS.copy(onQuote = {}, onToggleMultiQuote = {}),
         )
 
         compose.onNode(
             SemanticsMatcher.keyIsDefined(SemanticsActions.OnLongClick),
             useUnmergedTree = true,
-        ).performSemanticsAction(SemanticsActions.OnLongClick)
+        ).assertDoesNotExist()
+        compose.onNode(hasText("Alice").and(hasClickAction()), useUnmergedTree = true).assertExists()
+        compose.onNodeWithContentDescription("Ajouter à la citation multiple").assertIsDisplayed()
+        compose.onNodeWithText("Citer").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Options du message")
+            .assertIsDisplayed()
+            .performClick()
 
-        compose.onNodeWithText("Copier le texte").assertIsDisplayed()
+        compose.onNodeWithText("Copier le texte").assertIsDisplayed().assertIsEnabled()
         compose.onNodeWithText("Masquer cet utilisateur").assertIsDisplayed()
         compose.onNodeWithText("Copier le lien de ce post").assertDoesNotExist()
         compose.onNodeWithText("Ouvrir dans le navigateur").assertDoesNotExist()
-        compose.onNodeWithText("Citer").assertDoesNotExist()
 
         val heading = SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading)
         compose.onAllNodes(heading, useUnmergedTree = true).assertCountEquals(1)
     }
 
     @Test
-    fun `visible message with server ref exposes the footer quote action`() {
+    fun `visible message with server ref exposes both footer quote actions from one gate`() {
         var quotedMessage: Post? = null
+        var toggledSelection: QuoteSelection? = null
         val state = contentState(
             messages = listOf(message(101, "Alice", "Message citable").copy(quoteRef = 4)),
             canReply = true,
@@ -345,15 +353,59 @@ class PrivateMessageThreadContentTest {
                 PrivateMessageThreadContent(
                     state = state,
                     isMultiRecipientHint = false,
-                    callbacks = NO_OP_CALLBACKS.copy(onQuote = { quotedMessage = it }),
+                    callbacks = NO_OP_CALLBACKS.copy(
+                        onQuote = { quotedMessage = it },
+                        onToggleMultiQuote = { toggledSelection = it },
+                    ),
                 )
             }
         }
 
+        compose.onNodeWithContentDescription("Ajouter à la citation multiple")
+            .assertIsDisplayed()
+            .performClick()
         compose.onNodeWithText("Citer").assertIsDisplayed().performClick()
 
         assertEquals(101, quotedMessage?.numreponse)
         assertEquals(4, quotedMessage?.quoteRef)
+        assertEquals(QuoteLocator(page = 1, numreponse = 101, ref = 4), toggledSelection?.locator)
+    }
+
+    @Test
+    fun `selected direct multi quote action exposes state and removes the exact locator`() {
+        val selection = QuoteSelection(
+            locator = QuoteLocator(page = 3, numreponse = 101, ref = 4),
+            author = "Alice",
+            excerpt = "Message citable",
+        )
+        var toggledSelection: QuoteSelection? = null
+        val state = contentState(
+            messages = listOf(message(101, "Alice", "Message citable").copy(quoteRef = 4)),
+            page = 3,
+            canReply = true,
+        )
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                PrivateMessageThreadContent(
+                    state = state,
+                    isMultiRecipientHint = false,
+                    callbacks = NO_OP_CALLBACKS.copy(
+                        onQuote = {},
+                        onToggleMultiQuote = { toggledSelection = it },
+                    ),
+                    presentation = PrivateMessageThreadPresentation(
+                        multiQuoteSelections = listOf(selection),
+                    ),
+                )
+            }
+        }
+
+        compose.onNodeWithContentDescription("Retirer de la citation multiple")
+            .assertIsDisplayed()
+            .assertIsSelected()
+            .performClick()
+
+        assertEquals(selection, toggledSelection)
     }
 
     @Test
@@ -484,7 +536,7 @@ class PrivateMessageThreadContentTest {
     }
 
     @Test
-    fun `missing ref and hidden message expose no quote action`() {
+    fun `missing ref and hidden message expose neither footer quote action`() {
         val state = contentState(
             messages = listOf(
                 message(101, "Alice", "Visible sans rang"),
@@ -506,6 +558,48 @@ class PrivateMessageThreadContentTest {
 
         compose.onNodeWithText("Visible sans rang").assertIsDisplayed()
         compose.onNodeWithText("Post de Bob masqué").assertIsDisplayed()
+        compose.onNodeWithText("Citer").assertDoesNotExist()
+        compose.onNodeWithText("+ Citer").assertDoesNotExist()
+        compose.onNodeWithText("✓ Cité").assertDoesNotExist()
+    }
+
+    @Test
+    fun `read only thread exposes neither footer quote action despite a positive ref`() {
+        val state = contentState(
+            messages = listOf(message(101, "Alice", "Lecture seule").copy(quoteRef = 4)),
+            canReply = false,
+        )
+        mountState(
+            state = state,
+            callbacks = NO_OP_CALLBACKS.copy(onQuote = {}, onToggleMultiQuote = {}),
+        )
+
+        compose.onNodeWithText("Citer").assertDoesNotExist()
+        compose.onNodeWithText("+ Citer").assertDoesNotExist()
+    }
+
+    @Test
+    fun `hidden placeholder menu keeps copy disabled and exposes no quote affordance`() {
+        val state = contentState(
+            messages = listOf(message(102, "Bob", "Masqué").copy(quoteRef = 2)),
+            hiddenNumreponses = setOf(102),
+            blockedQuoteAuthors = setOf("bob"),
+            canReply = true,
+        )
+        mountState(
+            state = state,
+            callbacks = NO_OP_CALLBACKS.copy(onQuote = {}, onToggleMultiQuote = {}),
+        )
+
+        compose.onNodeWithText("Post de Bob masqué").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Options du message")
+            .assertIsDisplayed()
+            .performClick()
+        compose.onNodeWithText("Copier le texte")
+            .assertIsDisplayed()
+            .assertIsNotEnabled()
+        compose.onNodeWithText("Ne plus masquer cet utilisateur").assertIsDisplayed()
+        compose.onNodeWithText("Ajouter à la citation multiple").assertDoesNotExist()
         compose.onNodeWithText("Citer").assertDoesNotExist()
     }
 
@@ -547,7 +641,7 @@ class PrivateMessageThreadContentTest {
     }
 
     @Test
-    fun `an explicitly revealed blocked message stays outside both quote affordances`() {
+    fun `an explicitly revealed blocked message enables copy but stays outside quote affordances`() {
         val state = contentState(
             messages = listOf(message(102, "Bob", "Révélé mais bloqué").copy(quoteRef = 2)),
             hiddenNumreponses = setOf(102),
@@ -570,10 +664,9 @@ class PrivateMessageThreadContentTest {
         compose.onNodeWithText("Afficher").performClick()
         compose.onNodeWithText("Révélé mais bloqué").assertIsDisplayed()
         compose.onNodeWithText("Citer").assertDoesNotExist()
-        compose.onNode(
-            SemanticsMatcher.keyIsDefined(SemanticsActions.OnLongClick),
-            useUnmergedTree = true,
-        ).performSemanticsAction(SemanticsActions.OnLongClick)
+        compose.onNodeWithText("+ Citer").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Options du message").performClick()
+        compose.onNodeWithText("Copier le texte").assertIsEnabled()
         compose.onNodeWithText("Ajouter à la citation multiple").assertDoesNotExist()
         compose.onNodeWithText("Ne plus masquer cet utilisateur").assertIsDisplayed()
     }
@@ -926,6 +1019,33 @@ class PrivateMessageThreadContentTest {
         swipeThreadLeft()
 
         assertEquals("a zoomed MP must not dispatch a page swipe", listOf(2), selectedPages)
+    }
+
+    @Test
+    fun `direct multi quote target is inert while the reader is zoomed`() {
+        var toggles = 0
+        val state = contentState(
+            messages = listOf(message(1, "Alice", "Corps du MP").copy(quoteRef = 1)),
+            canReply = true,
+        )
+        mountState(
+            state = state,
+            callbacks = NO_OP_CALLBACKS.copy(
+                onQuote = {},
+                onToggleMultiQuote = { toggles++ },
+            ),
+        )
+
+        compose.onNodeWithContentDescription("Ajouter à la citation multiple")
+            .performTouchInput { click() }
+        assertEquals("the target must work at rest", 1, toggles)
+
+        pinchOutThread()
+        compose.onNodeWithContentDescription(ZOOM_RESET_DESCRIPTION).assertIsDisplayed()
+        compose.onNodeWithContentDescription("Ajouter à la citation multiple")
+            .performTouchInput { click() }
+
+        assertEquals("the zoom modifier must consume down before the child target", 1, toggles)
     }
 
     private fun pinchOutThread() {

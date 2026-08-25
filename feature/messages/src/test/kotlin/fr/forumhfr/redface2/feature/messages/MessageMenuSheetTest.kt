@@ -30,7 +30,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
-/** #1051 — exact capabilities and data-driven metadata of the private-message menu. */
+/** #1051/#1117 — exact capabilities and data-driven metadata of the private-message menu. */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w360dp-h1000dp-xxhdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -44,7 +44,7 @@ class MessageMenuSheetTest {
     fun `copy writes the complete neutral projection and forbidden entries stay absent`() {
         mount(
             message = richMessage(),
-            onToggleBlockAuthor = {},
+            callbacks = MenuCallbacks(onToggleBlockAuthor = {}),
         )
 
         compose.onNodeWithText("Copier le texte").assertIsDisplayed()
@@ -84,12 +84,27 @@ class MessageMenuSheetTest {
     }
 
     @Test
+    fun `a nonblank hidden message keeps copy visible but disabled`() {
+        mount(
+            message = sampleMessage(),
+            authorBlocked = true,
+            contentVisible = false,
+        )
+
+        compose.onNodeWithText("Copier le texte")
+            .assertIsDisplayed()
+            .assertIsNotEnabled()
+    }
+
+    @Test
     fun `profile hero routes the profile action`() {
         var profileOpens = 0
         mount(
             message = sampleMessage(),
-            onOpenProfile = { profileOpens++ },
-            onToggleBlockAuthor = {},
+            callbacks = MenuCallbacks(
+                onOpenProfile = { profileOpens++ },
+                onToggleBlockAuthor = {},
+            ),
         )
 
         val profileActionLabel = ApplicationProvider.getApplicationContext<Application>()
@@ -116,7 +131,7 @@ class MessageMenuSheetTest {
         mount(
             message = sampleMessage(),
             authorBlocked = true,
-            onToggleBlockAuthor = { toggles++ },
+            callbacks = MenuCallbacks(onToggleBlockAuthor = { toggles++ }),
         )
 
         compose.onNodeWithText("Masquer cet utilisateur").assertDoesNotExist()
@@ -132,7 +147,7 @@ class MessageMenuSheetTest {
         var toggles = 0
         mount(
             message = sampleMessage(),
-            onToggleMultiQuote = { toggles++ },
+            callbacks = MenuCallbacks(onToggleMultiQuote = { toggles++ }),
         )
 
         compose.onNodeWithText("Ajouter à la citation multiple").assertDoesNotExist()
@@ -168,24 +183,30 @@ class MessageMenuSheetTest {
     private fun mount(
         message: Post,
         authorBlocked: Boolean = false,
-        onOpenProfile: (() -> Unit)? = null,
-        onToggleMultiQuote: (() -> Unit)? = null,
-        onToggleBlockAuthor: (() -> Unit)? = null,
+        contentVisible: Boolean = true,
+        callbacks: MenuCallbacks = MenuCallbacks(),
     ) {
         compose.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 MessageMenuSheet(
                     message = message,
                     authorBlocked = authorBlocked,
+                    contentVisible = contentVisible,
                     onDismiss = {},
-                    onOpenProfile = onOpenProfile,
-                    multiQuoteSelected = onToggleMultiQuote != null,
-                    onToggleMultiQuote = onToggleMultiQuote,
-                    onToggleBlockAuthor = onToggleBlockAuthor,
+                    onOpenProfile = callbacks.onOpenProfile,
+                    multiQuoteSelected = callbacks.onToggleMultiQuote != null,
+                    onToggleMultiQuote = callbacks.onToggleMultiQuote,
+                    onToggleBlockAuthor = callbacks.onToggleBlockAuthor,
                 )
             }
         }
     }
+
+    private data class MenuCallbacks(
+        val onOpenProfile: (() -> Unit)? = null,
+        val onToggleMultiQuote: (() -> Unit)? = null,
+        val onToggleBlockAuthor: (() -> Unit)? = null,
+    )
 
     private fun richMessage(): Post = sampleMessage().copy(
         content = PostContent(
