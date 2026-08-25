@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.data.cache
 
 import android.util.Log
 import fr.forumhfr.redface2.core.data.messages.PrivateMessageThreadSessionCache
+import fr.forumhfr.redface2.core.data.messages.PrivateMessageContentCacheMaintenance
 import fr.forumhfr.redface2.core.database.dao.EditorDraftDao
 import fr.forumhfr.redface2.core.database.dao.FlagDao
 import fr.forumhfr.redface2.core.database.dao.MpReadPositionDao
@@ -22,6 +23,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.scan
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
 
 /**
@@ -54,6 +56,12 @@ import kotlinx.coroutines.plus
  * transition too: the row reveals the account owns a cross-userscript storage MP and at which
  * conversation, so it must not survive the session that discovered it.
  *
+ * Opted-in private-message content follows the same transition through its dedicated persistence
+ * façade. That façade applies the existing Room `lowercase()` account convention to reads, writes
+ * and purges alike. Purge failures carry no identifier in logs and leave a durable pending marker;
+ * [start] retries the global purge at the next application startup, while the access gate refuses
+ * every content-table read and write until that reconciliation has completed.
+ *
  * Coil's global image cache is wiped too (#1096). Entries created before MP requests disabled
  * their disk cache carry no public-topic/private-message marker, so a selective purge is
  * impossible. The safe transition therefore clears both memory and disk globally; public-topic
@@ -83,6 +91,7 @@ class CacheInvalidator @Inject internal constructor(
     private val mpStorageLocationDao: MpStorageLocationDao,
     private val flagRepository: FlagRepository,
     private val privateMessageThreadSessionCache: PrivateMessageThreadSessionCache,
+    private val privateMessageContentCacheMaintenance: PrivateMessageContentCacheMaintenance,
     private val imageCacheMaintenance: ImageCacheMaintenance,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) {
@@ -100,6 +109,10 @@ class CacheInvalidator @Inject internal constructor(
      */
     fun start(parent: Job? = null): Job {
         val scope = CoroutineScope(ioDispatcher + (parent ?: SupervisorJob()))
+        scope.launch {
+            runCatching { privateMessageContentCacheMaintenance.reconcilePendingPurge() }
+                .onFailure { Log.w(LOG_TAG, "Failed to reconcile private content purge") }
+        }
         return authRepository.observeAuthState()
             .distinctUntilChanged()
             .scan(InvalidatorState(previous = null)) { state, current -> state.transition(current) }
@@ -122,6 +135,8 @@ class CacheInvalidator @Inject internal constructor(
                         .onFailure { Log.w(LOG_TAG, "Failed to purge uploaded images for $previousPseudo", it) }
                     runCatching { mpStorageLocationDao.deleteAllForUser(previousPseudo) }
                         .onFailure { Log.w(LOG_TAG, "Failed to purge MPStorage location for $previousPseudo", it) }
+                    runCatching { privateMessageContentCacheMaintenance.purgeForUser(previousPseudo) }
+                        .onFailure { Log.w(LOG_TAG, "Failed to purge private message content") }
                     flagRepository.clearSessionCache()
                 }
             }

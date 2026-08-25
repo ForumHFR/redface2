@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.data.cache
 
 import fr.forumhfr.redface2.core.data.messages.PrivateMessageThreadSessionCache
+import fr.forumhfr.redface2.core.data.messages.PrivateMessageContentCacheMaintenance
 import fr.forumhfr.redface2.core.database.dao.EditorDraftDao
 import fr.forumhfr.redface2.core.database.dao.FlagDao
 import fr.forumhfr.redface2.core.database.dao.MpReadPositionDao
@@ -41,6 +42,10 @@ class CacheInvalidatorTest {
         coVerify(exactly = 0) { fixture.uploadedImageDao.deleteAllForUser(any()) }
         coVerify(exactly = 0) { fixture.mpStorageLocationDao.deleteAllForUser(any()) }
         coVerify(exactly = 0) { fixture.imageCacheMaintenance.clearImageCache() }
+        coVerify(exactly = 0) { fixture.privateMessageContentCacheMaintenance.purgeForUser(any()) }
+        coVerify(exactly = 1) {
+            fixture.privateMessageContentCacheMaintenance.reconcilePendingPurge()
+        }
         verify(exactly = 0) { fixture.threadSessionCache.clearAndAdvanceGeneration() }
         verify(exactly = 0) { fixture.flagRepository.clearSessionCache() }
     }
@@ -61,6 +66,7 @@ class CacheInvalidatorTest {
                 fixture.editorDraftDao.deletePrivateForUser("alice")
                 fixture.uploadedImageDao.deleteAllForUser("alice")
                 fixture.mpStorageLocationDao.deleteAllForUser("alice")
+                fixture.privateMessageContentCacheMaintenance.purgeForUser("alice")
             }
             verify { fixture.threadSessionCache.clearAndAdvanceGeneration() }
             verify { fixture.flagRepository.clearSessionCache() }
@@ -105,6 +111,7 @@ class CacheInvalidatorTest {
         coVerify(exactly = 1) { fixture.editorDraftDao.deletePrivateForUser("alice") }
         coVerify(exactly = 1) { fixture.uploadedImageDao.deleteAllForUser("alice") }
         coVerify(exactly = 1) { fixture.mpStorageLocationDao.deleteAllForUser("alice") }
+        coVerify(exactly = 1) { fixture.privateMessageContentCacheMaintenance.purgeForUser("alice") }
         verify(exactly = 1) { fixture.flagRepository.clearSessionCache() }
     }
 
@@ -123,12 +130,14 @@ class CacheInvalidatorTest {
         coVerify { fixture.editorDraftDao.deletePrivateForUser("alice") }
         coVerify { fixture.uploadedImageDao.deleteAllForUser("alice") }
         coVerify { fixture.mpStorageLocationDao.deleteAllForUser("alice") }
+        coVerify { fixture.privateMessageContentCacheMaintenance.purgeForUser("alice") }
         coVerify { fixture.imageCacheMaintenance.clearImageCache() }
         coVerify(exactly = 0) { fixture.flagDao.deleteAllForUser("bob") }
         coVerify(exactly = 0) { fixture.mpReadPositionDao.deleteAllForUser("bob") }
         coVerify(exactly = 0) { fixture.editorDraftDao.deletePrivateForUser("bob") }
         coVerify(exactly = 0) { fixture.uploadedImageDao.deleteAllForUser("bob") }
         coVerify(exactly = 0) { fixture.mpStorageLocationDao.deleteAllForUser("bob") }
+        coVerify(exactly = 0) { fixture.privateMessageContentCacheMaintenance.purgeForUser("bob") }
         verify { fixture.threadSessionCache.clearAndAdvanceGeneration() }
         verify { fixture.flagRepository.clearSessionCache() }
     }
@@ -149,6 +158,7 @@ class CacheInvalidatorTest {
         coVerify(exactly = 0) { fixture.uploadedImageDao.deleteAllForUser(any()) }
         coVerify(exactly = 0) { fixture.mpStorageLocationDao.deleteAllForUser(any()) }
         coVerify(exactly = 0) { fixture.imageCacheMaintenance.clearImageCache() }
+        coVerify(exactly = 0) { fixture.privateMessageContentCacheMaintenance.purgeForUser(any()) }
         verify(exactly = 0) { fixture.threadSessionCache.clearAndAdvanceGeneration() }
         verify(exactly = 0) { fixture.flagRepository.clearSessionCache() }
     }
@@ -162,6 +172,7 @@ class CacheInvalidatorTest {
         val mpStorageLocationDao: MpStorageLocationDao,
         val threadSessionCache: PrivateMessageThreadSessionCache,
         val imageCacheMaintenance: ImageCacheMaintenance,
+        val privateMessageContentCacheMaintenance: PrivateMessageContentCacheMaintenance,
         val flagRepository: FlagRepository,
     )
 
@@ -176,6 +187,8 @@ class CacheInvalidatorTest {
         val mpStorageLocationDao = mockk<MpStorageLocationDao>(relaxed = true)
         val threadSessionCache = mockk<PrivateMessageThreadSessionCache>(relaxed = true)
         val imageCacheMaintenance = mockk<ImageCacheMaintenance>(relaxed = true)
+        val privateMessageContentCacheMaintenance =
+            mockk<PrivateMessageContentCacheMaintenance>(relaxed = true)
         val flagRepository = mockk<FlagRepository>(relaxed = true)
         val invalidator = CacheInvalidator(
             authRepository = authRepository,
@@ -186,6 +199,7 @@ class CacheInvalidatorTest {
             mpStorageLocationDao = mpStorageLocationDao,
             flagRepository = flagRepository,
             privateMessageThreadSessionCache = threadSessionCache,
+            privateMessageContentCacheMaintenance = privateMessageContentCacheMaintenance,
             imageCacheMaintenance = imageCacheMaintenance,
             ioDispatcher = UnconfinedTestDispatcher(),
         )
@@ -198,6 +212,7 @@ class CacheInvalidatorTest {
             mpStorageLocationDao,
             threadSessionCache,
             imageCacheMaintenance,
+            privateMessageContentCacheMaintenance,
             flagRepository,
         )
     }

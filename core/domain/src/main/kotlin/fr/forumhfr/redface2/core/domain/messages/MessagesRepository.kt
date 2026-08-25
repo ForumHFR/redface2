@@ -56,8 +56,9 @@ interface MessagesRepository {
 
     /**
      * Reads one page of a private-message conversation (`forum2.php?cat=prive&post={threadId}`).
-     * A session-cache hit is emitted first with [PrivateMessageThreadPage.Source.SESSION_CACHE],
-     * then the page is always revalidated and emitted from
+     * A session-cache hit is emitted first with [PrivateMessageThreadPage.Source.SESSION_CACHE].
+     * Otherwise an enabled persistent-cache hit may be emitted with
+     * [PrivateMessageThreadPage.Source.DISK]. The page is then always revalidated and emitted from
      * [PrivateMessageThreadPage.Source.NETWORK]. No TTL skips that network request.
      *
      * @param fallbackCorrespondent optional caller-provided correspondent label, used only when

@@ -43,6 +43,31 @@ Workflow source : [`.github/workflows/release.yml`](https://github.com/ForumHFR/
 - **Routing (`resolve-target`)** : `channel=beta` → Play track `beta` + F-Droid `.beta` ; `channel=dev` → Play track `internal` + F-Droid `.dev`. Le **label** (`-PappLabel`) et le **versionCode** (`-PversionCodeOverride`, calculé depuis le registre) sont injectés au build des deux artefacts ; un **check CI** (`aapt2 dump badging`) vérifie package + label + **versionCode** de chaque APK avant publication.
 - **Sérialisation** : le `concurrency: group: release` (sans `cancel-in-progress`) sérialise les runs pour que deux dispatches n'allouent jamais le même code.
 
+### Compatibilité Room et rollback
+
+Depuis le schéma Room **17**, `redface.db` contient les tables du substrat de cache des conversations
+privées. Les migrations du projet sont uniquement ascendantes et aucun fallback destructif n'est
+configuré : dès qu'un binaire 17 a ouvert la base, un ancien binaire limité au schéma 16 **ne peut
+plus la rouvrir**.
+
+Conséquence de publication : ne jamais publier directement un APK/AAB construit depuis un commit
+antérieur au schéma 17 sur un track ayant déjà reçu ce schéma. Préparer un rollback compatible en
+avant, puis le publier avec un nouveau `versionCode`, selon l'une de ces deux voies :
+
+- rester en schéma 17 et conserver les deux entités MP, la préférence, le verrou commun aux accès et
+  purges, la réconciliation au démarrage et la migration correspondante, même si l'UI est retirée ;
+- passer en schéma 18 ou supérieur avec une migration ascendante explicite supprimant les deux tables,
+  exporter et commiter le nouveau schéma, puis conserver la chaîne complète `16 → 17 → 18`.
+
+Conserver seulement les entités sans les chemins de purge n'est pas un rollback valide après
+activation : du contenu privé pourrait alors rester indéfiniment dans la base.
+
+Le contenu supprimé par purge ou éviction peut rester dans les pages libres SQLite ou dans le WAL :
+`DELETE` n'est pas un effacement physique. Le substrat reste inaccessible depuis l'UI tant que
+l'arbitrage sécurité n'a pas retenu et documenté soit `PRAGMA secure_delete=ON` sur `redface.db`, soit
+l'acceptation explicite de cette rémanence dans le modèle de menace. `allowBackup=false` et
+`fullBackupContent=false` empêchent toutefois la base d'entrer dans les sauvegardes cloud Android.
+
 ## Pré-requis (à faire une fois)
 
 ### 1. Service account Play Console (côté GCP IAM + Play Console)

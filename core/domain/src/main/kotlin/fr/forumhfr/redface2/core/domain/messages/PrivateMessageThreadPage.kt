@@ -9,6 +9,7 @@ data class PrivateMessageThreadPage(
 ) {
     enum class Source {
         SESSION_CACHE,
+        DISK,
         NETWORK,
     }
 }

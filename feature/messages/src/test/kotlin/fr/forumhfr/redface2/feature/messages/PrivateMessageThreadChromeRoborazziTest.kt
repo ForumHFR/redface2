@@ -9,6 +9,7 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import com.github.takahirom.roborazzi.captureRoboImage
+import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
@@ -141,6 +142,7 @@ class PrivateMessageThreadChromeRoborazziTest {
                     totalPages = 4,
                     canReply = true,
                 ),
+                source = PrivateMessageThreadPage.Source.NETWORK,
             ),
             page = 2,
             totalPages = 4,

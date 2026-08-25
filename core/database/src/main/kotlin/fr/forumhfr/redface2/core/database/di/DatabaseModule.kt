@@ -12,6 +12,7 @@ import fr.forumhfr.redface2.core.database.dao.EditorDraftDao
 import fr.forumhfr.redface2.core.database.dao.FlagDao
 import fr.forumhfr.redface2.core.database.dao.MpReadPositionDao
 import fr.forumhfr.redface2.core.database.dao.MpStorageLocationDao
+import fr.forumhfr.redface2.core.database.dao.PrivateMessageContentDao
 import fr.forumhfr.redface2.core.database.dao.TopicDao
 import fr.forumhfr.redface2.core.database.dao.UploadedImageDao
 import fr.forumhfr.redface2.core.database.migrations.MIGRATION_10_11
@@ -20,6 +21,7 @@ import fr.forumhfr.redface2.core.database.migrations.MIGRATION_12_13
 import fr.forumhfr.redface2.core.database.migrations.MIGRATION_13_14
 import fr.forumhfr.redface2.core.database.migrations.MIGRATION_14_15
 import fr.forumhfr.redface2.core.database.migrations.MIGRATION_15_16
+import fr.forumhfr.redface2.core.database.migrations.MIGRATION_16_17
 import fr.forumhfr.redface2.core.database.migrations.MIGRATION_1_2
 import fr.forumhfr.redface2.core.database.migrations.MIGRATION_2_3
 import fr.forumhfr.redface2.core.database.migrations.MIGRATION_3_4
@@ -59,6 +61,7 @@ object DatabaseModule {
             MIGRATION_13_14,
             MIGRATION_14_15,
             MIGRATION_15_16,
+            MIGRATION_16_17,
         )
         .build()
 
@@ -83,4 +86,8 @@ object DatabaseModule {
     @Provides
     fun provideMpStorageLocationDao(database: RedfaceDatabase): MpStorageLocationDao =
         database.mpStorageLocationDao()
+
+    @Provides
+    fun providePrivateMessageContentDao(database: RedfaceDatabase): PrivateMessageContentDao =
+        database.privateMessageContentDao()
 }

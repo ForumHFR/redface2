@@ -167,6 +167,84 @@ class ArchitectureKonsistTest {
     }
 
     @Test
+    fun `private message content database access stays behind its silent facade`() {
+        val productionFiles = Konsist
+            .scopeFromProject()
+            .slice { file ->
+                file.path.contains("/src/main/") && !file.path.contains("/build/")
+            }
+            .files
+
+        assertTrue("Konsist must scan production files", productionFiles.isNotEmpty())
+
+        productionFiles.forEach { file ->
+            assertTrue(
+                "${file.path} references the private-message content database access outside " +
+                    "the database declaration/wiring or its dedicated facade",
+                privateMessageDatabaseReferenceIsAllowed(file.path, file.text),
+            )
+        }
+
+        val facadeFiles = productionFiles.filter { file ->
+            file.path.endsWith(PRIVATE_MESSAGE_DISK_FACADE_PATH)
+        }
+        assertTrue("Konsist must find exactly one private-message disk facade", facadeFiles.size == 1)
+        org.junit.Assert.assertFalse(
+            "The private-message disk facade must remain silent (#316)",
+            privateMessageFacadeLeaksToDiagnostics(facadeFiles.single().text),
+        )
+    }
+
+    @Test
+    fun `private message content database guard rejects repository access and facade logging`() {
+        val forbiddenDatabaseAccess = listOf(
+            "private val contentDao: PrivateMessageContentDao",
+            "database.privateMessageContentDao()",
+            "RedfaceDatabase::privateMessageContentDao",
+            "database.query(\"SELECT * FROM mp_thread_pages\")",
+            "database.execSQL(\"DELETE FROM mp_messages\")",
+        )
+        forbiddenDatabaseAccess.forEach { source ->
+            org.junit.Assert.assertFalse(
+                privateMessageDatabaseReferenceIsAllowed(
+                    "/core/data/src/main/kotlin/example/OtherRepository.kt",
+                    source,
+                ),
+            )
+        }
+        assertTrue(
+            privateMessageDatabaseReferenceIsAllowed(
+                PRIVATE_MESSAGE_DISK_FACADE_PATH,
+                "private val contentDao: PrivateMessageContentDao",
+            ),
+        )
+
+        val forbiddenDiagnostics = listOf(
+            "android.util.Log.w(\"PrivateCache\", \"failed\")",
+            "diagnostics.record(DiagnosticsLog.Level.WARN, \"tag\", \"failed\")",
+            "println(\"failed\")",
+            "System.out.println(\"failed\")",
+            "Logger.getLogger(\"PrivateCache\")",
+            "error.printStackTrace()",
+        )
+        forbiddenDiagnostics.forEach { source ->
+            assertTrue(
+                "Private-message facade guard must recognize $source",
+                privateMessageFacadeLeaksToDiagnostics(source),
+            )
+        }
+    }
+
+    private fun privateMessageDatabaseReferenceIsAllowed(path: String, source: String): Boolean =
+        !PRIVATE_MESSAGE_CONTENT_DATABASE_USAGE.containsMatchIn(source) ||
+            PRIVATE_MESSAGE_CONTENT_DATABASE_ALLOWED_PATHS.any(path::endsWith)
+
+    private fun privateMessageFacadeLeaksToDiagnostics(source: String): Boolean =
+        PRIVATE_MESSAGE_FACADE_FORBIDDEN_USAGE.any { forbidden ->
+            forbidden.containsMatchIn(source)
+        }
+
+    @Test
     fun `feature topic does not depend on feature profile`() {
         // Phase 2 finish (#208) — the « ouvrir le profil » affordance is hoisted to `:app`
         // as a callback `onOpenProfile(userId, pseudo, avatarUrl)` so `:feature:topic` can
@@ -317,6 +395,45 @@ class ArchitectureKonsistTest {
         const val PRIVATE_MESSAGE_THREAD_VIEW_MODEL_PATH =
             "/feature/messages/src/main/kotlin/fr/forumhfr/redface2/feature/messages/" +
                 "PrivateMessageThreadViewModel.kt"
+        const val PRIVATE_MESSAGE_DISK_FACADE_PATH =
+            "/core/data/src/main/kotlin/fr/forumhfr/redface2/core/data/messages/" +
+                "PrivateMessageThreadDiskCache.kt"
+        const val PRIVATE_MESSAGE_CONTENT_DAO_PATH =
+            "/core/database/src/main/kotlin/fr/forumhfr/redface2/core/database/dao/" +
+                "PrivateMessageContentDao.kt"
+        const val REDFACE_DATABASE_PATH =
+            "/core/database/src/main/kotlin/fr/forumhfr/redface2/core/database/RedfaceDatabase.kt"
+        const val DATABASE_MODULE_PATH =
+            "/core/database/src/main/kotlin/fr/forumhfr/redface2/core/database/di/DatabaseModule.kt"
+        const val DATABASE_MIGRATIONS_PATH =
+            "/core/database/src/main/kotlin/fr/forumhfr/redface2/core/database/migrations/Migrations.kt"
+        const val PRIVATE_MESSAGE_PAGE_ENTITY_PATH =
+            "/core/database/src/main/kotlin/fr/forumhfr/redface2/core/database/entities/" +
+                "PrivateMessageThreadPageEntity.kt"
+        const val PRIVATE_MESSAGE_ENTITY_PATH =
+            "/core/database/src/main/kotlin/fr/forumhfr/redface2/core/database/entities/" +
+                "PrivateMessageEntity.kt"
+        val PRIVATE_MESSAGE_CONTENT_DATABASE_ALLOWED_PATHS = setOf(
+            PRIVATE_MESSAGE_CONTENT_DAO_PATH,
+            REDFACE_DATABASE_PATH,
+            DATABASE_MODULE_PATH,
+            DATABASE_MIGRATIONS_PATH,
+            PRIVATE_MESSAGE_PAGE_ENTITY_PATH,
+            PRIVATE_MESSAGE_ENTITY_PATH,
+            PRIVATE_MESSAGE_DISK_FACADE_PATH,
+        )
+        val PRIVATE_MESSAGE_CONTENT_DATABASE_USAGE = Regex(
+            """\b(?:PrivateMessageContentDao|privateMessageContentDao|mp_thread_pages|mp_messages)\b""",
+        )
+        val PRIVATE_MESSAGE_FACADE_FORBIDDEN_USAGE = listOf(
+            Regex("""\b(?:android\.util\.)?Log\s*\."""),
+            Regex("""\bDiagnosticsLog\b"""),
+            Regex("""\b(?:kotlin\.io\.)?print(?:ln)?\s*\("""),
+            Regex("""\b(?:java\.lang\.)?System\s*\.\s*(?:out|err)\b"""),
+            Regex("""\bjava\.util\.logging\b"""),
+            Regex("""\b(?:java\.util\.logging\.)?Logger\s*\."""),
+            Regex("""\bprintStackTrace\s*\("""),
+        )
         val PRIVATE_MESSAGE_PREFETCH_ALLOWED_PATHS = setOf(
             MESSAGES_REPOSITORY_PATH,
             DEFAULT_MESSAGES_REPOSITORY_PATH,

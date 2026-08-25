@@ -8,7 +8,11 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ## [Unreleased]
 
-_(rien pour l'instant)_
+### Changed
+
+- ADR-013, architecture, roadmap et matrice de parité alignées sur le substrat Room dormant du
+  contenu MP : schéma 17, ordre RAM → Room opt-in → réseau obligatoire, verrou commun aux accès et
+  purges, éviction cinq pages, réconciliation au démarrage et prérequis sécurité avant activation UI.
 
 ---
 

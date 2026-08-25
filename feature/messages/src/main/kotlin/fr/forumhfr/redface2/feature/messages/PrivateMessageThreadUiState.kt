@@ -108,7 +108,7 @@ data class PrivateMessageThreadUiState(
         data class Content(
             val thread: PrivateMessageThread,
             /** Cache content may own the first visual landing; domain writes remain network-only. */
-            val source: PrivateMessageThreadPage.Source = PrivateMessageThreadPage.Source.NETWORK,
+            val source: PrivateMessageThreadPage.Source,
             /**
              * #509/#1050 — `numreponse` of this page's messages whose canonical author is blocked.
              * The full [PrivateMessageThread.messages] list stays intact; the screen replaces only
