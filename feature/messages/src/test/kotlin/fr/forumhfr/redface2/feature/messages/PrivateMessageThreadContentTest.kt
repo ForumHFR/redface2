@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.messages
 
+import android.content.Context
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyColumn
@@ -11,7 +12,13 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.hapticfeedback.HapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.UriHandler
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -22,6 +29,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.doubleClick
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasScrollAction
@@ -40,6 +48,11 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import androidx.test.core.app.ApplicationProvider
+import coil3.ColorImage
+import coil3.ImageLoader
+import coil3.SingletonImageLoader
+import coil3.test.FakeImageLoaderEngine
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
@@ -49,7 +62,10 @@ import fr.forumhfr.redface2.core.model.write.QuoteLocator
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.post.POST_CARD_SHELL_DIVIDER_TAG
+import fr.forumhfr.redface2.core.ui.post.PostCardShellContainerColorKey
+import fr.forumhfr.redface2.feature.messages.NoopShadowMagnifier
 import java.time.Instant
+import org.junit.Before
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -66,16 +82,31 @@ import org.robolectric.annotation.GraphicsMode
  * placeholder. #1050 adds the mounted full-width sequence, hot signature presentation and internal
  * LazyListState anchor proofs without weakening those default-path assertions. #509/#1050 adds the
  * blacklist placeholder, page-local reveal and blocked-quote provider contracts. #1102/#1117
- * extend the existing message-interaction inventory with the explicit menu and footer targets,
- * while image/link targets remain characterized once in [PostRendererHostMatrixTest].
+ * extend the message-interaction inventory with the explicit menu and footer targets; #1103 then
+ * proves the list-level double-tap arbiter against every real card target, including links/images.
  */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34], qualifiers = "w360dp-h780dp-xxhdpi")
+// Robolectric's platform magnifier popup never obtains a Surface; use the no-op shadow.
+@Config(
+    sdk = [34],
+    qualifiers = "w360dp-h780dp-xxhdpi",
+    shadows = [NoopShadowMagnifier::class],
+)
 class PrivateMessageThreadContentTest {
 
     @get:Rule
     val compose = createComposeRule()
+
+    @OptIn(coil3.annotation.DelicateCoilApi::class)
+    @Before
+    fun installFakeImageLoader() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val engine = FakeImageLoaderEngine.Builder()
+            .intercept(GESTURE_IMAGE_URL, ColorImage(0xFF1565C0.toInt(), width = 400, height = 300))
+            .build()
+        SingletonImageLoader.setUnsafe(ImageLoader.Builder(context).components { add(engine) }.build())
+    }
 
     @Test
     fun `content renders the header ordered message list page pill and FAB cluster`() {
@@ -341,6 +372,374 @@ class PrivateMessageThreadContentTest {
     }
 
     @Test
+    fun `double tap on a visible message refreshes exactly once confirms and shows shared indicator`() {
+        var refreshCount = 0
+        val haptics = RecordingHapticFeedback()
+        val state = mutableStateOf(
+            contentState(messages = listOf(message(101, "Alice", "Surface libre"))),
+        )
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(LocalHapticFeedback provides haptics) {
+                    PrivateMessageThreadContent(
+                        state = state.value,
+                        isMultiRecipientHint = false,
+                        callbacks = NO_OP_CALLBACKS.copy(
+                            onRefresh = {
+                                refreshCount += 1
+                                state.value = state.value.copy(isRefreshing = true)
+                            },
+                        ),
+                    )
+                }
+            }
+        }
+
+        doubleTapThreadAt(freeVisibleCardPosition())
+
+        assertEquals(1, refreshCount)
+        assertEquals(listOf(HapticFeedbackType.Confirm), haptics.events)
+        compose.onNodeWithTag(PRIVATE_MESSAGE_THREAD_REFRESH_INDICATOR_TAG).assertIsDisplayed()
+    }
+
+    @Test
+    fun `double tap inside selectable quote text is consumed and never refreshes`() {
+        var refreshCount = 0
+        val quotingMessage = message(102, "Bob", "Réponse").copy(
+            content = PostContent(
+                blocks = listOf(
+                    PostBlock.Quote(
+                        author = "Alice",
+                        numreponse = 101,
+                        page = 3,
+                        content = PostContent(
+                            blocks = listOf(
+                                PostBlock.Paragraph(
+                                    inlines = listOf(PostInline.Text("Corps de citation")),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        mountState(
+            state = contentState(messages = listOf(quotingMessage)),
+            callbacks = NO_OP_CALLBACKS.copy(onRefresh = { refreshCount += 1 }),
+        )
+
+        compose.onNodeWithText("Corps de citation").performTouchInput { doubleClick() }
+
+        // ReadingPostCard's SelectionContainer consumes word selection before the list detector.
+        assertEquals(0, refreshCount)
+    }
+
+    @Test
+    fun `double tap in a list interstice refreshes exactly once`() {
+        var refreshCount = 0
+        mountState(
+            state = contentState(
+                messages = listOf(
+                    message(101, "Alice", "Premier message"),
+                    message(102, "Bob", "Deuxième message"),
+                ),
+            ),
+            callbacks = NO_OP_CALLBACKS.copy(onRefresh = { refreshCount += 1 }),
+        )
+
+        val cardBounds = visibleCardBounds()
+        val readerBounds = compose.onNodeWithTag(PRIVATE_MESSAGE_THREAD_READER_TAG)
+            .fetchSemanticsNode().boundsInRoot
+        val interstice = Offset(
+            x = readerBounds.center.x - readerBounds.left,
+            y = (cardBounds[0].bottom + cardBounds[1].top) / 2f - readerBounds.top,
+        )
+        doubleTapThreadAt(interstice)
+
+        assertEquals(1, refreshCount)
+    }
+
+    @Test
+    fun `double tap on hidden placeholder free surface refreshes exactly once`() {
+        var refreshCount = 0
+        mountState(
+            state = contentState(
+                messages = listOf(message(101, "Alice", "Secret")),
+                hiddenNumreponses = setOf(101),
+                blockedQuoteAuthors = setOf("alice"),
+            ),
+            callbacks = NO_OP_CALLBACKS.copy(onRefresh = { refreshCount += 1 }),
+        )
+
+        doubleTapThreadAt(hiddenCardFreePosition("Alice"))
+
+        assertEquals(1, refreshCount)
+        compose.onNodeWithText("Post de Alice masqué").assertIsDisplayed()
+        compose.onNodeWithText("Secret").assertDoesNotExist()
+    }
+
+    @Test
+    fun `second hidden-placeholder tap consumed by reveal reveals only and never refreshes`() {
+        var refreshCount = 0
+        val haptics = RecordingHapticFeedback()
+        mountState(
+            state = contentState(
+                messages = listOf(message(101, "Alice", "Secret révélé")),
+                hiddenNumreponses = setOf(101),
+                blockedQuoteAuthors = setOf("alice"),
+            ),
+            callbacks = NO_OP_CALLBACKS.copy(onRefresh = { refreshCount += 1 }),
+            hapticFeedback = haptics,
+        )
+
+        val readerBounds = compose.onNodeWithTag(PRIVATE_MESSAGE_THREAD_READER_TAG)
+            .fetchSemanticsNode().boundsInRoot
+        val revealBounds = compose.onNodeWithText("Afficher").fetchSemanticsNode().boundsInRoot
+        val firstTap = Offset(
+            x = revealBounds.left - readerBounds.left - HIDDEN_TARGET_NEARBY_INSET_PX,
+            y = revealBounds.center.y - readerBounds.top,
+        )
+        val secondTap = Offset(
+            x = revealBounds.center.x - readerBounds.left,
+            y = revealBounds.center.y - readerBounds.top,
+        )
+        compose.onNodeWithTag(PRIVATE_MESSAGE_THREAD_READER_TAG).performTouchInput {
+            down(0, firstTap)
+            up(0)
+            advanceEventTime(100)
+            down(0, secondTap)
+            up(0)
+        }
+        compose.waitForIdle()
+
+        assertEquals(0, refreshCount)
+        assertTrue(haptics.events.isEmpty())
+        compose.onNodeWithText("Secret révélé").assertIsDisplayed()
+        compose.onNodeWithText("Post de Alice masqué").assertDoesNotExist()
+    }
+
+    @Test
+    fun `hidden-placeholder menu consumes double tap and never refreshes`() {
+        var refreshCount = 0
+        val haptics = RecordingHapticFeedback()
+        mountState(
+            state = contentState(
+                messages = listOf(message(101, "Alice", "Secret")),
+                hiddenNumreponses = setOf(101),
+                blockedQuoteAuthors = setOf("alice"),
+            ),
+            callbacks = NO_OP_CALLBACKS.copy(onRefresh = { refreshCount += 1 }),
+            hapticFeedback = haptics,
+        )
+
+        compose.onNodeWithContentDescription("Options du message")
+            .performTouchInput { doubleClick() }
+
+        assertEquals(0, refreshCount)
+        assertTrue(haptics.events.isEmpty())
+        compose.onNodeWithText("Ne plus masquer cet utilisateur").assertIsDisplayed()
+    }
+
+    @Test
+    fun `visible message menu consumes double tap and never refreshes`() {
+        var refreshCount = 0
+        val haptics = RecordingHapticFeedback()
+        mountState(
+            state = contentState(messages = listOf(interactiveGestureMessage()), canReply = true),
+            callbacks = NO_OP_CALLBACKS.copy(onRefresh = { refreshCount += 1 }),
+            hapticFeedback = haptics,
+        )
+
+        compose.onNodeWithContentDescription("Options du message")
+            .performTouchInput { doubleClick() }
+
+        assertEquals(0, refreshCount)
+        assertTrue(haptics.events.isEmpty())
+        compose.onNodeWithText("Copier le texte").assertIsDisplayed()
+    }
+
+    @Test
+    fun `simple quote action consumes double tap and never refreshes`() {
+        var refreshCount = 0
+        var quoteCount = 0
+        val haptics = RecordingHapticFeedback()
+        mountState(
+            state = contentState(messages = listOf(interactiveGestureMessage()), canReply = true),
+            callbacks = NO_OP_CALLBACKS.copy(
+                onRefresh = { refreshCount += 1 },
+                onQuote = { quoteCount += 1 },
+            ),
+            hapticFeedback = haptics,
+        )
+
+        compose.onNodeWithText("Citer").performTouchInput { doubleClick() }
+
+        assertEquals(0, refreshCount)
+        assertTrue(haptics.events.isEmpty())
+        assertEquals(2, quoteCount)
+    }
+
+    @Test
+    fun `multi quote add action consumes double tap and never refreshes`() {
+        var refreshCount = 0
+        var toggleCount = 0
+        val haptics = RecordingHapticFeedback()
+        mountState(
+            state = contentState(messages = listOf(interactiveGestureMessage()), canReply = true),
+            callbacks = NO_OP_CALLBACKS.copy(
+                onRefresh = { refreshCount += 1 },
+                onQuote = {},
+                onToggleMultiQuote = { toggleCount += 1 },
+            ),
+            hapticFeedback = haptics,
+        )
+
+        compose.onNodeWithContentDescription("Ajouter à la citation multiple")
+            .performTouchInput { doubleClick() }
+
+        assertEquals(0, refreshCount)
+        assertTrue(haptics.events.isEmpty())
+        assertEquals(2, toggleCount)
+    }
+
+    @Test
+    fun `pseudo consumes double tap and never refreshes`() {
+        var refreshCount = 0
+        var profileCount = 0
+        val haptics = RecordingHapticFeedback()
+        mountState(
+            state = contentState(messages = listOf(interactiveGestureMessage()), canReply = true),
+            callbacks = NO_OP_CALLBACKS.copy(
+                onRefresh = { refreshCount += 1 },
+                onOpenProfile = { _, _, _ -> profileCount += 1 },
+            ),
+            hapticFeedback = haptics,
+        )
+
+        compose.onNode(hasText("Alice").and(hasClickAction()), useUnmergedTree = true)
+            .performTouchInput { doubleClick() }
+
+        assertEquals(0, refreshCount)
+        assertTrue(haptics.events.isEmpty())
+        assertEquals(2, profileCount)
+    }
+
+    @Test
+    fun `avatar is a distinct 48 dp button that consumes double tap`() {
+        var refreshCount = 0
+        var profileCount = 0
+        val haptics = RecordingHapticFeedback()
+        mountState(
+            state = contentState(messages = listOf(interactiveGestureMessage()), canReply = true),
+            callbacks = NO_OP_CALLBACKS.copy(
+                onRefresh = { refreshCount += 1 },
+                onOpenProfile = { _, _, _ -> profileCount += 1 },
+            ),
+            hapticFeedback = haptics,
+        )
+        val avatar = compose.onNodeWithContentDescription("Avatar de Alice")
+        val avatarNode = avatar.fetchSemanticsNode()
+
+        assertEquals(Role.Button, avatarNode.config[SemanticsProperties.Role])
+        with(compose.density) {
+            assertTrue(
+                "avatar width must be at least 48 dp",
+                avatarNode.boundsInRoot.width.toDp() >= 48.dp,
+            )
+            assertTrue(
+                "avatar height must be at least 48 dp",
+                avatarNode.boundsInRoot.height.toDp() >= 48.dp,
+            )
+        }
+        avatar.performTouchInput { doubleClick() }
+
+        assertEquals(0, refreshCount)
+        assertTrue(haptics.events.isEmpty())
+        assertEquals(2, profileCount)
+    }
+
+    @Test
+    fun `cited post header consumes double tap and never refreshes`() {
+        var refreshCount = 0
+        val citedTargets = mutableListOf<Pair<Int, Int>>()
+        val haptics = RecordingHapticFeedback()
+        mountState(
+            state = contentState(messages = listOf(interactiveGestureMessage()), canReply = true),
+            callbacks = NO_OP_CALLBACKS.copy(
+                onRefresh = { refreshCount += 1 },
+                onGoToCitedPost = { page, numreponse, _ ->
+                    citedTargets += page to numreponse
+                },
+            ),
+            hapticFeedback = haptics,
+        )
+
+        compose.onNodeWithText("Citation de Bob").performTouchInput { doubleClick() }
+
+        assertEquals(0, refreshCount)
+        // The first tap navigates once; selection consumes the second and may emit platform haptics.
+        assertTrue(HapticFeedbackType.Confirm !in haptics.events)
+        assertEquals(listOf(2 to 99), citedTargets)
+    }
+
+    @Test
+    fun `body link consumes double tap and never refreshes`() {
+        var refreshCount = 0
+        val haptics = RecordingHapticFeedback()
+        val uriHandler = RecordingUriHandler()
+        mountState(
+            state = contentState(messages = listOf(interactiveGestureMessage()), canReply = true),
+            callbacks = NO_OP_CALLBACKS.copy(onRefresh = { refreshCount += 1 }),
+            uriHandler = uriHandler,
+            hapticFeedback = haptics,
+        )
+
+        compose.onNodeWithText("Lien cible", useUnmergedTree = true)
+            .performTouchInput { doubleClick() }
+
+        assertEquals(0, refreshCount)
+        assertTrue(haptics.events.isEmpty())
+        assertEquals(listOf(GESTURE_LINK_URL, GESTURE_LINK_URL), uriHandler.opened)
+    }
+
+    @Test
+    fun `linked body image consumes double tap and never refreshes`() {
+        var refreshCount = 0
+        val haptics = RecordingHapticFeedback()
+        val uriHandler = RecordingUriHandler()
+        mountState(
+            state = contentState(messages = listOf(interactiveGestureMessage()), canReply = true),
+            callbacks = NO_OP_CALLBACKS.copy(onRefresh = { refreshCount += 1 }),
+            uriHandler = uriHandler,
+            hapticFeedback = haptics,
+        )
+
+        compose.onNodeWithContentDescription("Image cible")
+            .performTouchInput { doubleClick() }
+
+        assertEquals(0, refreshCount)
+        assertTrue(haptics.events.isEmpty())
+        assertEquals(
+            listOf(GESTURE_IMAGE_LINK_URL, GESTURE_IMAGE_LINK_URL),
+            uriHandler.opened,
+        )
+    }
+
+    @Test
+    fun `image long press remains functional beside card double tap arbiter`() {
+        var refreshCount = 0
+        mountState(
+            state = contentState(messages = listOf(interactiveGestureMessage()), canReply = true),
+            callbacks = NO_OP_CALLBACKS.copy(onRefresh = { refreshCount += 1 }),
+        )
+
+        compose.onNodeWithContentDescription("Image cible").performTouchInput { longClick() }
+
+        assertEquals(0, refreshCount)
+        compose.onNodeWithText("Enregistrer l'image").assertIsDisplayed()
+    }
+
+    @Test
     fun `visible message with server ref exposes both footer quote actions from one gate`() {
         var quotedMessage: Post? = null
         var toggledSelection: QuoteSelection? = null
@@ -372,13 +771,15 @@ class PrivateMessageThreadContentTest {
     }
 
     @Test
-    fun `selected direct multi quote action exposes state and removes the exact locator`() {
+    fun `selected direct multi quote action consumes double tap and removes the exact locator`() {
         val selection = QuoteSelection(
             locator = QuoteLocator(page = 3, numreponse = 101, ref = 4),
             author = "Alice",
             excerpt = "Message citable",
         )
         var toggledSelection: QuoteSelection? = null
+        var refreshCount = 0
+        val haptics = RecordingHapticFeedback()
         val state = contentState(
             messages = listOf(message(101, "Alice", "Message citable").copy(quoteRef = 4)),
             page = 3,
@@ -386,25 +787,30 @@ class PrivateMessageThreadContentTest {
         )
         compose.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                PrivateMessageThreadContent(
-                    state = state,
-                    isMultiRecipientHint = false,
-                    callbacks = NO_OP_CALLBACKS.copy(
-                        onQuote = {},
-                        onToggleMultiQuote = { toggledSelection = it },
-                    ),
-                    presentation = PrivateMessageThreadPresentation(
-                        multiQuoteSelections = listOf(selection),
-                    ),
-                )
+                CompositionLocalProvider(LocalHapticFeedback provides haptics) {
+                    PrivateMessageThreadContent(
+                        state = state,
+                        isMultiRecipientHint = false,
+                        callbacks = NO_OP_CALLBACKS.copy(
+                            onRefresh = { refreshCount += 1 },
+                            onQuote = {},
+                            onToggleMultiQuote = { toggledSelection = it },
+                        ),
+                        presentation = PrivateMessageThreadPresentation(
+                            multiQuoteSelections = listOf(selection),
+                        ),
+                    )
+                }
             }
         }
 
         compose.onNodeWithContentDescription("Retirer de la citation multiple")
             .assertIsDisplayed()
             .assertIsSelected()
-            .performClick()
+            .performTouchInput { doubleClick() }
 
+        assertEquals(0, refreshCount)
+        assertTrue(haptics.events.isEmpty())
         assertEquals(selection, toggledSelection)
     }
 
@@ -934,16 +1340,81 @@ class PrivateMessageThreadContentTest {
     }
 
     @Test
-    fun `pinch zoom disables the pull gesture until reset`() {
+    fun `vertical drag cancels double tap without breaking list scroll`() {
         var refreshCount = 0
+        val haptics = RecordingHapticFeedback()
+        mountState(
+            state = contentState(
+                messages = (1..30).map { index ->
+                    message(index, "Auteur $index", "Message $index")
+                },
+            ),
+            callbacks = NO_OP_CALLBACKS.copy(onRefresh = { refreshCount += 1 }),
+            hapticFeedback = haptics,
+        )
+
+        val scrollNode = compose.onNode(hasScrollAction())
+        val scrollBefore = scrollNode.fetchSemanticsNode()
+            .config[SemanticsProperties.VerticalScrollAxisRange].value()
+        scrollNode.performTouchInput {
+            down(0, center)
+            repeat(8) { moveBy(0, Offset(0f, -60f)) }
+            up(0)
+        }
+        compose.waitForIdle()
+        val scrollAfter = scrollNode.fetchSemanticsNode()
+            .config[SemanticsProperties.VerticalScrollAxisRange].value()
+        assertTrue("the vertical drag must move the real LazyColumn", scrollAfter > scrollBefore)
+        assertEquals(0, refreshCount)
+        assertTrue(haptics.events.isEmpty())
+    }
+
+    @Test
+    fun `horizontal drag cancels double tap without breaking page swipe`() {
+        var refreshCount = 0
+        val selectedPages = mutableListOf<Int>()
+        val haptics = RecordingHapticFeedback()
+        mountState(
+            state = contentState(
+                messages = listOf(message(1, "Alice", "Corps du MP")),
+                page = 1,
+                totalPages = 3,
+            ),
+            callbacks = NO_OP_CALLBACKS.copy(
+                onRefresh = { refreshCount += 1 },
+                onSelectPage = { page, _ -> selectedPages += page },
+            ),
+            hapticFeedback = haptics,
+        )
+
+        swipeThreadLeft()
+
+        assertEquals(0, refreshCount)
+        assertEquals(
+            "the drag must emit only the page-swipe haptics, never an extra double-tap tick",
+            listOf(
+                HapticFeedbackType.GestureThresholdActivate,
+                HapticFeedbackType.Confirm,
+            ),
+            haptics.events,
+        )
+        assertEquals(listOf(2), selectedPages)
+    }
+
+    @Test
+    fun `pinch zoom disables pull and double tap refresh until reset`() {
+        var refreshCount = 0
+        val haptics = RecordingHapticFeedback()
         val state = contentState(messages = listOf(message(1, "Alice", "Corps du MP")))
         compose.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                PrivateMessageThreadContent(
-                    state = state,
-                    isMultiRecipientHint = false,
-                    callbacks = NO_OP_CALLBACKS.copy(onRefresh = { refreshCount++ }),
-                )
+                CompositionLocalProvider(LocalHapticFeedback provides haptics) {
+                    PrivateMessageThreadContent(
+                        state = state,
+                        isMultiRecipientHint = false,
+                        callbacks = NO_OP_CALLBACKS.copy(onRefresh = { refreshCount++ }),
+                    )
+                }
             }
         }
 
@@ -953,12 +1424,14 @@ class PrivateMessageThreadContentTest {
         pinchOutThread()
         compose.onNodeWithContentDescription(ZOOM_RESET_DESCRIPTION).assertIsDisplayed()
         pullDownThread()
+        compose.onNodeWithTag(PRIVATE_MESSAGE_THREAD_READER_TAG).performTouchInput { doubleClick() }
 
         assertEquals(
-            "the low-level disabled pull modifier must not arm or refresh while zoomed",
+            "zoom must disarm both pull and double-tap refresh",
             1,
             refreshCount,
         )
+        assertTrue(haptics.events.isEmpty())
         compose.onNodeWithContentDescription(ZOOM_RESET_DESCRIPTION).performClick()
         compose.waitForIdle()
         compose.onNodeWithContentDescription(ZOOM_RESET_DESCRIPTION).assertDoesNotExist()
@@ -1082,6 +1555,38 @@ class PrivateMessageThreadContentTest {
         compose.waitForIdle()
     }
 
+    private fun doubleTapThreadAt(position: Offset) {
+        compose.onNodeWithTag(PRIVATE_MESSAGE_THREAD_READER_TAG).performTouchInput {
+            doubleClick(position = position)
+        }
+        compose.waitForIdle()
+    }
+
+    private fun visibleCardBounds() = compose.onAllNodes(
+        SemanticsMatcher.keyIsDefined(PostCardShellContainerColorKey),
+        useUnmergedTree = true,
+    ).fetchSemanticsNodes().map { node -> node.boundsInRoot }.sortedBy { bounds -> bounds.top }
+
+    private fun freeVisibleCardPosition(): Offset {
+        val card = visibleCardBounds().single()
+        val reader = compose.onNodeWithTag(PRIVATE_MESSAGE_THREAD_READER_TAG)
+            .fetchSemanticsNode().boundsInRoot
+        return Offset(
+            x = card.center.x - reader.left,
+            y = card.bottom - reader.top - FREE_SURFACE_INSET_PX,
+        )
+    }
+
+    private fun hiddenCardFreePosition(author: String): Offset {
+        val label = compose.onNodeWithText("Post de $author masqué").fetchSemanticsNode().boundsInRoot
+        val reader = compose.onNodeWithTag(PRIVATE_MESSAGE_THREAD_READER_TAG)
+            .fetchSemanticsNode().boundsInRoot
+        return Offset(
+            x = label.left - reader.left - HIDDEN_TARGET_NEARBY_INSET_PX,
+            y = label.center.y - reader.top,
+        )
+    }
+
     private fun setContent(
         mode: PrivateMessageThreadUiState.Mode,
         page: Int,
@@ -1103,11 +1608,17 @@ class PrivateMessageThreadContentTest {
         state: PrivateMessageThreadUiState,
         callbacks: PrivateMessageThreadCallbacks = NO_OP_CALLBACKS,
         fontScale: Float = 1f,
+        uriHandler: UriHandler? = null,
+        hapticFeedback: HapticFeedback? = null,
     ) {
         compose.setContent {
             val baseDensity = LocalDensity.current
+            val platformUriHandler = LocalUriHandler.current
+            val platformHapticFeedback = LocalHapticFeedback.current
             CompositionLocalProvider(
                 LocalDensity provides Density(baseDensity.density, fontScale),
+                LocalUriHandler provides (uriHandler ?: platformUriHandler),
+                LocalHapticFeedback provides (hapticFeedback ?: platformHapticFeedback),
             ) {
                 RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                     PrivateMessageThreadContent(
@@ -1119,6 +1630,48 @@ class PrivateMessageThreadContentTest {
             }
         }
     }
+
+    private fun interactiveGestureMessage(): Post = message(101, "Alice", "Réponse").copy(
+        quoteRef = 4,
+        profileId = 7,
+        content = PostContent(
+            blocks = listOf(
+                PostBlock.Quote(
+                    author = "Bob",
+                    numreponse = 99,
+                    page = 2,
+                    content = PostContent(
+                        blocks = listOf(
+                            PostBlock.Paragraph(
+                                inlines = listOf(PostInline.Text("Corps cité")),
+                            ),
+                        ),
+                    ),
+                ),
+                PostBlock.Paragraph(
+                    inlines = listOf(
+                        PostInline.Link(
+                            url = GESTURE_LINK_URL,
+                            children = listOf(PostInline.Text("Lien cible")),
+                        ),
+                    ),
+                ),
+                PostBlock.Paragraph(
+                    inlines = listOf(
+                        PostInline.Link(
+                            url = GESTURE_IMAGE_LINK_URL,
+                            children = listOf(
+                                PostInline.InlineImage(
+                                    url = GESTURE_IMAGE_URL,
+                                    description = "Image cible",
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
 
     private fun multiRecipientState(subject: String): PrivateMessageThreadUiState {
         val base = contentState(
@@ -1202,12 +1755,33 @@ class PrivateMessageThreadContentTest {
         signature = signature,
     )
 
+    private class RecordingHapticFeedback : HapticFeedback {
+        val events = mutableListOf<HapticFeedbackType>()
+
+        override fun performHapticFeedback(hapticFeedbackType: HapticFeedbackType) {
+            events += hapticFeedbackType
+        }
+    }
+
+    private class RecordingUriHandler : UriHandler {
+        val opened = mutableListOf<String>()
+
+        override fun openUri(uri: String) {
+            opened += uri
+        }
+    }
+
     private companion object {
         const val THREAD_ID = 42
         const val TARGET_INDEX = 10
         const val TARGET_AUTHOR = "Auteur 11"
         const val ANCHOR_TOLERANCE_PX = 0.5f
         const val ZOOM_RESET_DESCRIPTION = "Revenir au zoom normal"
+        const val FREE_SURFACE_INSET_PX = 24f
+        const val HIDDEN_TARGET_NEARBY_INSET_PX = 8f
+        const val GESTURE_IMAGE_URL = "https://rehost.diberie.com/Picture/Get/f/mp-double-tap.png"
+        const val GESTURE_LINK_URL = "https://example.org/message-link"
+        const val GESTURE_IMAGE_LINK_URL = "https://example.org/message-image-link"
 
         val NO_OP_CALLBACKS = PrivateMessageThreadCallbacks(
             onBack = {},

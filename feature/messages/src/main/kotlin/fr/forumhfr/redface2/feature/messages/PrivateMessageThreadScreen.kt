@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.feature.messages
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -51,6 +52,8 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -866,9 +869,22 @@ private fun PrivateMessageThreadReader(
 ) {
     val mode = state.mode as PrivateMessageThreadUiState.Mode.Content
     val latestState by rememberUpdatedState(state)
+    val latestCallbacks by rememberUpdatedState(callbacks)
     val zoomState = runtime.zoomState
     val pageInteraction = runtime.pageInteraction
     val isZoomed by remember(zoomState) { derivedStateOf { zoomState.zoomed } }
+    val haptics = LocalHapticFeedback.current
+    // #382/#1103 — one refresh authority for the single list-level detector. PinchZoom already
+    // consumes the first down on Initial while zoomed; the explicit zoom guard is defense in depth,
+    // matching the topic contract even if the modifier order changes later.
+    val onDoubleTapRefresh = remember(haptics, zoomState) {
+        {
+            if (!zoomState.zoomed) {
+                haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+                latestCallbacks.onRefresh()
+            }
+        }
+    }
     val currentAnchor = {
         PrivateMessageScrollAnchor(
             index = session.listState.firstVisibleItemIndex,
@@ -975,6 +991,7 @@ private fun PrivateMessageThreadReader(
                 scrollSession = ThreadScrollSession(
                     listState = session.listState,
                     zoomState = zoomState,
+                    onDoubleTapRefresh = onDoubleTapRefresh,
                     onScrollbarDragStateChanged = session.onScrollbarDragStateChanged,
                     // #351b — horizontal swipe changes page in place (same thresholds and feel as
                     // topic via the shared geometry).
@@ -990,7 +1007,9 @@ private fun PrivateMessageThreadReader(
         PullToRefreshDefaults.Indicator(
             state = pullToRefreshState,
             isRefreshing = state.isRefreshing,
-            modifier = Modifier.align(Alignment.TopCenter),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .testTag(PRIVATE_MESSAGE_THREAD_REFRESH_INDICATOR_TAG),
         )
         if (isZoomed) {
             ThreadZoomResetChip(
@@ -1531,8 +1550,20 @@ private data class ThreadScrollSession(
     val listState: LazyListState,
     val zoomState: PinchZoomState,
     val swipeModifier: Modifier,
+    val onDoubleTapRefresh: () -> Unit,
     val onScrollbarDragStateChanged: (Boolean) -> Unit,
 )
+
+/**
+ * #382/#1103 — the topic detector reused as the single MP double-tap arbiter on the LazyColumn.
+ * Since #1117 removed the card-wide long press, free card surfaces and list interstices reach this
+ * one owner. Explicit child targets consume their up, which cancels the detector; drags beyond
+ * touch slop cancel through [detectTapGestures].
+ */
+private fun Modifier.privateMessageDoubleTapRefresh(onDoubleTapRefresh: () -> Unit): Modifier =
+    pointerInput(Unit) {
+        detectTapGestures(onDoubleTap = { onDoubleTapRefresh() })
+    }
 
 /** Quote callbacks travel together so the hot list cannot grow a third independent capability. */
 private data class MessageQuoteCallbacks(
@@ -1628,6 +1659,8 @@ private fun ThreadMessages(
         listModifier = Modifier
             .pinchZoom(scrollSession.zoomState, scrollSession.listState)
             .then(scrollSession.swipeModifier)
+            // One owner covers free card surfaces and interstices; child clickables consume their up.
+            .privateMessageDoubleTapRefresh(scrollSession.onDoubleTapRefresh)
             .pinchZoomTransform(scrollSession.zoomState),
     ) {
         itemsIndexed(
@@ -2039,6 +2072,8 @@ private fun MessageCitedCountBadge(citedCount: Int, horizontalPadding: Dp) {
 // #351b — same blend as the topic edge glow (#282): a full-primary glow read as an imposing panel.
 private const val ACCENT_PRIMARY_BLEND = 0.3f
 internal const val PRIVATE_MESSAGE_THREAD_READER_TAG = "private_message_thread_reader"
+internal const val PRIVATE_MESSAGE_THREAD_REFRESH_INDICATOR_TAG =
+    "private_message_thread_refresh_indicator"
 
 private val messageDateFormatter = DateTimeFormatter
     .ofPattern("dd/MM/yyyy HH:mm:ss", Locale.FRANCE)
