@@ -59,8 +59,8 @@ import kotlinx.coroutines.plus
  * Opted-in private-message content follows the same transition through its dedicated persistence
  * façade. That façade applies the existing Room `lowercase()` account convention to reads, writes
  * and purges alike. Purge failures carry no identifier in logs and leave a durable pending marker;
- * [start] retries the global purge at the next application startup, while the access gate refuses
- * every content-table read and write until that reconciliation has completed.
+ * [start] owns the startup reconciliation: every OFF startup retries the global purge, while the
+ * access gate refuses every content-table read and write until it has completed.
  *
  * Coil's global image cache is wiped too (#1096). Entries created before MP requests disabled
  * their disk cache carry no public-topic/private-message marker, so a selective purge is
@@ -110,7 +110,7 @@ class CacheInvalidator @Inject internal constructor(
     fun start(parent: Job? = null): Job {
         val scope = CoroutineScope(ioDispatcher + (parent ?: SupervisorJob()))
         scope.launch {
-            runCatching { privateMessageContentCacheMaintenance.reconcilePendingPurge() }
+            runCatching { privateMessageContentCacheMaintenance.reconcileOnStartup() }
                 .onFailure { Log.w(LOG_TAG, "Failed to reconcile private content purge") }
         }
         return authRepository.observeAuthState()
@@ -135,6 +135,8 @@ class CacheInvalidator @Inject internal constructor(
                         .onFailure { Log.w(LOG_TAG, "Failed to purge uploaded images for $previousPseudo", it) }
                     runCatching { mpStorageLocationDao.deleteAllForUser(previousPseudo) }
                         .onFailure { Log.w(LOG_TAG, "Failed to purge MPStorage location for $previousPseudo", it) }
+                    // Deliberately last among Room deletions: this façade finishes with a WAL
+                    // checkpoint + VACUUM, so every private row deleted above is scrubbed too.
                     runCatching { privateMessageContentCacheMaintenance.purgeForUser(previousPseudo) }
                         .onFailure { Log.w(LOG_TAG, "Failed to purge private message content") }
                     flagRepository.clearSessionCache()

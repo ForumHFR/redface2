@@ -115,6 +115,14 @@ data class SettingsState(
     val isUpdatingMpUnreadBadge: Boolean = false,
     val mpUnreadBadgeError: Boolean = false,
     val mpUnreadBadgeTouchedLocally: Boolean = false,
+    // #1040 lot 7 — global application opt-in for private-message Room content. OFF is both the
+    // default and the effective value while a failed purge is pending.
+    val privateMessageContentCacheEnabled: Boolean = false,
+    val isUpdatingPrivateMessageContentCache: Boolean = false,
+    val showDisablePrivateMessageContentCacheConfirm: Boolean = false,
+    val privateMessageContentCachePersistError: Boolean = false,
+    val privateMessageContentCachePurgePending: Boolean = false,
+    val privateMessageContentCachePurgeError: Boolean = false,
     // #456 — sondages dépliés par défaut dans la lecture de sujet. Default FALSE (repliés) :
     // la carte reste dépliable/repliable par sujet, le réglage ne sème que l'état initial.
     val topicPollsExpanded: Boolean = false,
@@ -388,6 +396,12 @@ data class SettingsState(
     val canToggleSyncPrivateMessagesWriteEnabled: Boolean
         get() = !isUpdatingSyncPrivateMessagesWriteEnabled
 
+    val canTogglePrivateMessageContentCache: Boolean
+        get() = !isUpdatingPrivateMessageContentCache
+
+    val canRetryPrivateMessageContentCachePurge: Boolean
+        get() = privateMessageContentCachePurgePending && !isUpdatingPrivateMessageContentCache
+
     // #378 — flags auto-refresh, gated only by its own write.
     val canToggleFlagsAutoRefresh: Boolean
         get() = !isUpdatingFlagsAutoRefresh
@@ -549,6 +563,15 @@ sealed interface SettingsIntent {
 
     /** #6 — experimental opt-in for the MPStorage write-back (sync DT en écriture). */
     data class SyncPrivateMessagesWriteEnabledChanged(val enabled: Boolean) : SettingsIntent
+
+    /** #1040 lot 7 — ON activates directly; OFF first opens an explicit purge confirmation. */
+    data class PrivateMessageContentCacheChanged(val enabled: Boolean) : SettingsIntent
+
+    data object DisablePrivateMessageContentCacheConfirmed : SettingsIntent
+
+    data object DisablePrivateMessageContentCacheDismissed : SettingsIntent
+
+    data object RetryPrivateMessageContentCachePurge : SettingsIntent
 
     // Drapeaux — #378 auto-refresh on landing. Optimistic-flip contract, like the flags
     // toggles: the boolean is the desired post-flip state.

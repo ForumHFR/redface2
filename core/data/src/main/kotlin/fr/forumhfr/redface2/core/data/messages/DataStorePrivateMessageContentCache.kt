@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import fr.forumhfr.redface2.core.data.preferences.UserPreferencesDataStore
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageContentCache
+import fr.forumhfr.redface2.core.domain.messages.PrivateMessageContentCacheException
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
 import java.time.Instant
 import javax.inject.Inject
@@ -19,7 +20,7 @@ import kotlinx.coroutines.sync.Mutex
 internal interface PrivateMessageContentCacheMaintenance {
     suspend fun purgeForUser(userId: String)
 
-    suspend fun reconcilePendingPurge()
+    suspend fun reconcileOnStartup()
 }
 
 /** Repository-facing access gate. Every Room operation shares the preference/purge mutex. */
@@ -35,10 +36,10 @@ internal interface PrivateMessageContentAccess {
 }
 
 /**
- * Safe preference boundary for the dormant MP content cache.
+ * Safe preference boundary for the opt-in MP content cache.
  *
  * OFF is persisted before the RAM generation advances and before the global Room purge starts.
- * A failed purge leaves [KEY_PURGE_PENDING] set, so [reconcilePendingPurge] retries at app startup.
+ * A failed purge leaves [KEY_PURGE_PENDING] set, so [reconcileOnStartup] retries at app startup.
  */
 @Singleton
 class DataStorePrivateMessageContentCache @Inject internal constructor(
@@ -52,37 +53,53 @@ class DataStorePrivateMessageContentCache @Inject internal constructor(
         .map(::isEffectivelyEnabled)
         .distinctUntilChanged()
 
+    override fun observePurgePending(): Flow<Boolean> = dataStore.data
+        .map { preferences -> preferences[KEY_PURGE_PENDING] ?: false }
+        .distinctUntilChanged()
+
     override suspend fun isEnabled(): Boolean = observeEnabled().first()
 
     override suspend fun setEnabled(enabled: Boolean) {
         if (enabled) {
             withRoomAccess {
-                reconcilePendingPurgeLocked()
-                dataStore.edit { preferences -> preferences[KEY_ENABLED] = true }
+                reconcilePendingPurgeLocked(forceWhenOff = false)
+                try {
+                    dataStore.edit { preferences -> preferences[KEY_ENABLED] = true }
+                } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+                    throw PrivateMessageContentCacheException.PreferenceWriteFailed(error)
+                }
             }
             return
         }
 
         // Persist OFF before waiting for an in-flight Room operation. New contenders observe OFF;
         // an operation already past its final seal completes before the purge acquired below.
-        val purgeRequired = dataStore.edit { preferences ->
-            val wasEnabled = preferences[KEY_ENABLED] ?: false
-            val wasPending = preferences[KEY_PURGE_PENDING] ?: false
-            preferences[KEY_ENABLED] = false
-            preferences[KEY_PURGE_PENDING] = wasEnabled || wasPending
-        }[KEY_PURGE_PENDING] ?: false
+        val purgeRequired = try {
+            dataStore.edit { preferences ->
+                val wasEnabled = preferences[KEY_ENABLED] ?: false
+                val wasPending = preferences[KEY_PURGE_PENDING] ?: false
+                preferences[KEY_ENABLED] = false
+                preferences[KEY_PURGE_PENDING] = wasEnabled || wasPending
+            }[KEY_PURGE_PENDING] ?: false
+        } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+            throw PrivateMessageContentCacheException.PreferenceWriteFailed(error)
+        }
         if (!purgeRequired) return
 
         sessionCache.clearAndAdvanceGeneration()
-        withRoomAccess {
-            // A concurrent enable may have completed while OFF was waiting for the mutex. Reassert
-            // the caller's terminal state so setEnabled(false) cannot return with the cache active.
-            dataStore.edit { preferences ->
-                preferences[KEY_ENABLED] = false
-                preferences[KEY_PURGE_PENDING] = true
+        try {
+            withRoomAccess {
+                // A concurrent enable may have completed while OFF was waiting for the mutex.
+                // Reassert the caller's terminal state before the serialized purge.
+                dataStore.edit { preferences ->
+                    preferences[KEY_ENABLED] = false
+                    preferences[KEY_PURGE_PENDING] = true
+                }
+                diskCache.clearAll()
+                dataStore.edit { preferences -> preferences[KEY_PURGE_PENDING] = false }
             }
-            diskCache.clearAll()
-            dataStore.edit { preferences -> preferences[KEY_PURGE_PENDING] = false }
+        } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+            throw PrivateMessageContentCacheException.PurgeFailed(error)
         }
     }
 
@@ -112,38 +129,53 @@ class DataStorePrivateMessageContentCache @Inject internal constructor(
         diskCache.replace(userId, thread, fetchedAt)
     }
 
-    /** Retries only an explicitly pending failed purge; default-OFF startup never opens the tables. */
+    /** Every account transition purges rows and scrubs SQLite, whether the opt-in is ON or OFF. */
     override suspend fun purgeForUser(userId: String) {
-        val preferences = dataStore.data.first()
-        val cacheEnabled = preferences[KEY_ENABLED] ?: false
-        val purgePending = preferences[KEY_PURGE_PENDING] ?: false
-        if (!cacheEnabled && !purgePending) return
-        withRoomAccess {
-            val current = dataStore.data.first()
-            if (!(current[KEY_ENABLED] ?: false) && !(current[KEY_PURGE_PENDING] ?: false)) {
-                return@withRoomAccess
-            }
-            try {
+        try {
+            withRoomAccess {
+                // Persist the fail-closed marker before DELETE. If the scrub fails, the setting
+                // may still be stored as ON but its effective state remains OFF until startup or
+                // the manual settings retry completes the global purge.
+                dataStore.edit { preferences -> preferences[KEY_PURGE_PENDING] = true }
                 diskCache.clearForUser(userId)
-            } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
-                dataStore.edit { mutable -> mutable[KEY_PURGE_PENDING] = true }
-                throw error
+                dataStore.edit { preferences -> preferences[KEY_PURGE_PENDING] = false }
             }
+        } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+            runCatching { dataStore.edit { preferences -> preferences[KEY_PURGE_PENDING] = true } }
+            throw PrivateMessageContentCacheException.PurgeFailed(error)
         }
     }
 
-    override suspend fun reconcilePendingPurge() {
-        val purgePending = dataStore.data.first()[KEY_PURGE_PENDING] ?: false
-        if (!purgePending) return
+    /** Startup owner: [fr.forumhfr.redface2.core.data.cache.CacheInvalidator]. */
+    override suspend fun reconcileOnStartup() {
+        val preferences = dataStore.data.first()
+        if ((preferences[KEY_ENABLED] ?: false) && !(preferences[KEY_PURGE_PENDING] ?: false)) return
         sessionCache.clearAndAdvanceGeneration()
-        withRoomAccess { reconcilePendingPurgeLocked() }
+        try {
+            withRoomAccess { reconcilePendingPurgeLocked(forceWhenOff = true) }
+        } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+            throw PrivateMessageContentCacheException.PurgeFailed(error)
+        }
     }
 
-    private suspend fun reconcilePendingPurgeLocked() {
-        val purgePending = dataStore.data.first()[KEY_PURGE_PENDING] ?: false
-        if (!purgePending) return
+    override suspend fun retryPendingPurge() {
+        if (!(dataStore.data.first()[KEY_PURGE_PENDING] ?: false)) return
+        sessionCache.clearAndAdvanceGeneration()
+        try {
+            withRoomAccess { reconcilePendingPurgeLocked(forceWhenOff = false) }
+        } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+            throw PrivateMessageContentCacheException.PurgeFailed(error)
+        }
+    }
+
+    private suspend fun reconcilePendingPurgeLocked(forceWhenOff: Boolean) {
+        val preferences = dataStore.data.first()
+        val purgePending = preferences[KEY_PURGE_PENDING] ?: false
+        val preferenceOff = !(preferences[KEY_ENABLED] ?: false)
+        if (!purgePending && !(forceWhenOff && preferenceOff)) return
+        dataStore.edit { mutable -> mutable[KEY_PURGE_PENDING] = true }
         diskCache.clearAll()
-        dataStore.edit { preferences -> preferences[KEY_PURGE_PENDING] = false }
+        dataStore.edit { mutable -> mutable[KEY_PURGE_PENDING] = false }
     }
 
     private suspend fun <T> withRoomAccess(block: suspend () -> T): T {
