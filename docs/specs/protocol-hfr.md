@@ -670,13 +670,14 @@ erreur ; aucun envoi live n'a été tenté.
 | Citation | `message.php` suivi depuis le lien « citer » | **message cité** | `[quotemsg=…]` |
 
 **Le premier « message » d'une page N > 1 est une « Reprise du message précédent », servie avec
-`ref=0` — mesuré, plus supposé.** La capture `thread_multipage` du 2026-08-24
+`ref=0` — mesuré, plus supposé.** La capture `thread_multipage` du 2026-08-25
 ([#1107](https://github.com/ForumHFR/redface2/issues/1107)) a lu, dans une seule session
 authentifiée, trois pages adjacentes de la même conversation `cat=prive` : sur N comme sur N+1, la
 première ancre est bien le récapitulatif du dernier message de la page précédente — jeux d'ancres
 réelles disjoints entre les trois pages — et son lien « citer » porte `ref=0`. Ce n'est donc pas un
-rang **manquant** mais un rang **nul déclaré par HFR** ; le message réel existe sur la page N−1 avec
-son vrai rang. Le fail-closed MP (`ref >= 1`) masque « Citer » sur ce récapitulatif, en 1:1 comme en
+rang **manquant** mais un rang **nul déclaré par HFR** ; le message réel existe sur la page N−1 —
+l'égalité d'ancres entre pages le mesure — **vraisemblablement** avec son vrai rang, que la sonde
+n'y extrait pas. Le fail-closed MP (`ref >= 1`) masque « Citer » sur ce récapitulatif, en 1:1 comme en
 DT — trou de couverture suivi par [#1110](https://github.com/ForumHFR/redface2/issues/1110). La même
 capture a mesuré le **rabattement serveur** : une demande de page au-delà de la dernière est servie
 comme la dernière, l'URL effective en fait foi.
