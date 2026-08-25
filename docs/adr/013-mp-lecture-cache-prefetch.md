@@ -10,7 +10,20 @@ permalink: /adr/013-mp-lecture-cache-prefetch
 
 ## Statut
 
-Accepté — 2026-06-12 (proposé 2026-06-10 ; révisé le 2026-06-12 après audit adversarial : descriptions actualisées au code livré, bornes du prefetch précisées — le fond des décisions est inchangé) · **amendé 2026-08-12** ([#1041](https://github.com/ForumHFR/redface2/issues/1041), lot 0 de [#1040](https://github.com/ForumHFR/redface2/issues/1040) : la prémisse « topic = route-driven » du Contexte est périmée depuis le 12 juillet 2026 (#895 étape 4) — la décision 4 est réécrite par amendement, les décisions 1 à 3 sont inchangées sur le fond) · **étage 2 livré le 2026-08-16** ([#1080](https://github.com/ForumHFR/redface2/issues/1080)) · **Conséquence « vie privée » amendée le 2026-08-23** (elle était fausse pour les médias jusqu'à [#1099](https://github.com/ForumHFR/redface2/pull/1099) — cf. § Conséquences) · **swipe MP amendé le 2026-08-24** (lot 6 PR 4 de [#1040](https://github.com/ForumHFR/redface2/issues/1040) : la clause « sans slide-out » tombe après livraison du cache RAM qui la conditionnait ; l'ADR reste acceptée, non supersédée) · **substrat de l'étage 3 livré dormant le 2026-08-25** (lot 7 PR 2 : schéma, façade, politique OFF et purges ; aucune exposition UI avant la PR 3)
+**Superseded par [ADR-018]({{ site.baseurl }}/adr/018-mp-cache-disque-opt-in) — 2026-08-25**
+([#1097](https://github.com/ForumHFR/redface2/issues/1097), lot 7 PR 3 de
+[#1040](https://github.com/ForumHFR/redface2/issues/1040)). Cette page **ne fait plus autorité sur
+aucune décision** et n'est conservée que comme historique des arbitrages de juin 2026, du contexte
+serveur mesuré en [#361](https://github.com/ForumHFR/redface2/issues/361) et des amendements
+énumérés ci-dessous.
+
+⚠ **La supersession est totale, le remplacement ne l'est pas.** Le lot 7 ne remplace qu'**une** des
+quatre décisions portées ici — la décision 2 étage 3 (cache Room du contenu), dont il lève la
+décision-gate « rémanence SQLite » posée en § Conséquences. Les décisions **1**, **3** et **4**, et
+les **étages 1 et 2** de la décision 2, restent **actives sur le fond** : l'ADR-018 les **reprend
+explicitement** et en devient la source unique. Ne pas les lire ici : les lire là-bas.
+
+Historique du statut : Accepté — 2026-06-12 (proposé 2026-06-10 ; révisé le 2026-06-12 après audit adversarial : descriptions actualisées au code livré, bornes du prefetch précisées — le fond des décisions est inchangé) · **amendé 2026-08-12** ([#1041](https://github.com/ForumHFR/redface2/issues/1041), lot 0 de [#1040](https://github.com/ForumHFR/redface2/issues/1040) : la prémisse « topic = route-driven » du Contexte est périmée depuis le 12 juillet 2026 (#895 étape 4) — la décision 4 est réécrite par amendement, les décisions 1 à 3 sont inchangées sur le fond) · **étage 2 livré le 2026-08-16** ([#1080](https://github.com/ForumHFR/redface2/issues/1080)) · **Conséquence « vie privée » amendée le 2026-08-23** (elle était fausse pour les médias jusqu'à [#1099](https://github.com/ForumHFR/redface2/pull/1099) — cf. § Conséquences) · **swipe MP amendé le 2026-08-24** (lot 6 PR 4 de [#1040](https://github.com/ForumHFR/redface2/issues/1040) : la clause « sans slide-out » tombe après livraison du cache RAM qui la conditionnait ; l'ADR reste acceptée, non supersédée) · **substrat de l'étage 3 livré dormant le 2026-08-25** (lot 7 PR 2 : schéma, façade, politique OFF et purges ; aucune exposition UI avant la PR 3)
 
 Cette ADR formalise les arbitrages rendus dans [#351](https://github.com/ForumHFR/redface2/issues/351) ([analyse code](https://github.com/ForumHFR/redface2/issues/351#issuecomment-4662808989) + [addendum cache](https://github.com/ForumHFR/redface2/issues/351#issuecomment-4663229671)) et [#361](https://github.com/ForumHFR/redface2/issues/361) ([investigation live du contrat serveur lu/non-lu](https://github.com/ForumHFR/redface2/issues/361#issuecomment-4663312132), 2026-06-09). Elle n'invente aucun verdict : chaque assertion factuelle sur HFR renvoie au commentaire d'issue qui l'a vérifiée.
 
@@ -148,7 +161,10 @@ Tant qu'ils ne sont pas réunis, les MP restent in-place avec le swipe minimal (
   `PRAGMA secure_delete=ON` pour `redface.db`, soit l'acceptation explicite de cette rémanence dans
   le modèle de menace. Fait bornant : `allowBackup=false` et `fullBackupContent=false` empêchent la
   base d'atteindre les sauvegardes cloud Android. Cette décision-gate doit être levée par la PR 3,
-  pas silencieusement par le présent substrat.
+  pas silencieusement par le présent substrat. **Levée le 2026-08-25 par
+  l'[ADR-018]({{ site.baseurl }}/adr/018-mp-cache-disque-opt-in) § décision 6** : scrub événementiel
+  (`DELETE` + `PRAGMA wal_checkpoint(TRUNCATE)` + `VACUUM`) aux trois événements de confidentialité,
+  `secure_delete=ON` seul explicitement rejeté, résidus d'éviction LRU explicitement acceptés.
 - Opportunité produit hors périmètre de cette ADR : exposer « Marquer comme non lu » dans l'app — le contrat `nonlu.php` est trivial (GET sans `hash_check`, [#361](https://github.com/ForumHFR/redface2/issues/361#issuecomment-4663312132)).
 - Pages canoniques mises à jour à l'acceptation (2026-06-12) : [architecture.md]({{ site.baseurl }}/specs/architecture) (stratégie de cache MP, exception prefetch), [protocol-hfr.md]({{ site.baseurl }}/specs/protocol-hfr) (exception MP à la règle prefetch, contrat `nonlu.php`). [navigation.md]({{ site.baseurl }}/specs/navigation) reste inchangé tant que la convergence route-driven (décision 4) n'est pas engagée.
 

@@ -11,7 +11,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /** Narrow persistence façade; private-message repositories must not reach database primitives. */
-interface PrivateMessageThreadDiskCache {
+internal interface PrivateMessageThreadDiskCache {
     suspend fun read(userId: String, threadId: Int, page: Int): PrivateMessageThread?
 
     suspend fun replace(userId: String, thread: PrivateMessageThread, fetchedAt: Instant)
@@ -29,6 +29,7 @@ interface PrivateMessageThreadDiskCache {
 @Singleton
 class RoomPrivateMessageThreadDiskCache @Inject internal constructor(
     private val contentDao: PrivateMessageContentDao,
+    private val databaseScrubber: PrivateContentDatabaseScrubber,
 ) : PrivateMessageThreadDiskCache {
     override suspend fun read(userId: String, threadId: Int, page: Int): PrivateMessageThread? =
         contentDao.getPage(canonicalRoomUserId(userId), threadId, page)?.toModel()
@@ -50,10 +51,12 @@ class RoomPrivateMessageThreadDiskCache @Inject internal constructor(
 
     override suspend fun clearForUser(userId: String) {
         contentDao.clearForUser(canonicalRoomUserId(userId))
+        databaseScrubber.scrub()
     }
 
     override suspend fun clearAll() {
         contentDao.clearAll()
+        databaseScrubber.scrub()
     }
 
     private fun StoredPrivateMessageThreadPage.toModel(): PrivateMessageThread =

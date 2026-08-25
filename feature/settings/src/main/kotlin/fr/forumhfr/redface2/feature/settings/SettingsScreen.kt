@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
@@ -17,6 +18,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -28,6 +30,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -772,6 +776,7 @@ internal fun buildSettingsCatalogue(
                 errorRes = R.string.settings_mp_unread_badge_persist_failed.takeIf { state.mpUnreadBadgeError },
                 onCheckedChange = { onIntent(SettingsIntent.MpUnreadBadgeChanged(it)) },
             ),
+            privateMessageContentCacheRow(state = state, onIntent = onIntent),
             // #6, ADR-014 §4 — experimental opt-in for the MPStorage write-back. OFF by default ; the
             // description warns it is experimental (the write contract was never observed live).
             toggleRow(
@@ -983,6 +988,97 @@ private fun toggleRow(
         }
     },
 )
+
+/** Global MP-content opt-in, with a destructive OFF confirmation and durable purge retry. */
+@Composable
+private fun privateMessageContentCacheRow(
+    state: SettingsState,
+    onIntent: (SettingsIntent) -> Unit,
+): SettingsCatalogueRow {
+    val title = stringResource(R.string.settings_mp_content_cache_title)
+    val description = stringResource(R.string.settings_mp_content_cache_description)
+    val purgeError = stringResource(R.string.settings_mp_content_cache_purge_failed)
+    val retryLabel = stringResource(R.string.settings_mp_content_cache_retry)
+    val confirmTitle = stringResource(R.string.settings_mp_content_cache_disable_title)
+    val confirmBody = stringResource(R.string.settings_mp_content_cache_disable_body)
+    val confirmAction = stringResource(R.string.settings_mp_content_cache_disable_action)
+    val confirmCancel = stringResource(R.string.settings_mp_content_cache_disable_cancel)
+    return SettingsCatalogueRow(
+        searchable = SettingsSearchableItem(
+            id = "private_message_content_cache",
+            title = title,
+            description = description,
+            keywords = listOf("cache", "disque", "Room", "tous les comptes", "hors ligne"),
+        ),
+        render = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                RedfaceSettingsListItem(
+                    title = title,
+                    description = description,
+                    trailingContent = {
+                        Switch(
+                            checked = state.privateMessageContentCacheEnabled,
+                            enabled = state.canTogglePrivateMessageContentCache,
+                            onCheckedChange = {
+                                onIntent(SettingsIntent.PrivateMessageContentCacheChanged(it))
+                            },
+                            modifier = Modifier.semantics {
+                                contentDescription = "$title. $description"
+                            },
+                        )
+                    },
+                )
+                if (state.privateMessageContentCachePersistError) {
+                    Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                        PreferencePersistError(R.string.settings_mp_content_cache_persist_failed)
+                    }
+                }
+                if (state.privateMessageContentCachePurgeError) {
+                    Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+                        Text(
+                            text = purgeError,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        TextButton(
+                            onClick = { onIntent(SettingsIntent.RetryPrivateMessageContentCachePurge) },
+                            enabled = state.canRetryPrivateMessageContentCachePurge,
+                        ) {
+                            Text(retryLabel)
+                        }
+                    }
+                }
+            }
+            if (state.showDisablePrivateMessageContentCacheConfirm) {
+                AlertDialog(
+                    onDismissRequest = {
+                        onIntent(SettingsIntent.DisablePrivateMessageContentCacheDismissed)
+                    },
+                    title = { Text(confirmTitle) },
+                    text = { Text(confirmBody) },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                onIntent(SettingsIntent.DisablePrivateMessageContentCacheConfirmed)
+                            },
+                        ) {
+                            Text(confirmAction)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = {
+                                onIntent(SettingsIntent.DisablePrivateMessageContentCacheDismissed)
+                            },
+                        ) {
+                            Text(confirmCancel)
+                        }
+                    },
+                )
+            }
+        },
+    )
+}
 
 /**
  * One option of a single-choice radio group (#806 writing surface) : a leading M3 [RadioButton] with

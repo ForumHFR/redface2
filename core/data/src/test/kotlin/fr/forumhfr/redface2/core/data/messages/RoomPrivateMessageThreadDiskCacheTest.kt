@@ -8,6 +8,7 @@ import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.coVerifyOrder
 import io.mockk.mockk
 import io.mockk.slot
 import java.time.Instant
@@ -21,8 +22,9 @@ class RoomPrivateMessageThreadDiskCacheTest {
         val dao = mockk<PrivateMessageContentDao>(relaxed = true)
         val pageSlot = slot<PrivateMessageThreadPageEntity>()
         val messagesSlot = slot<List<PrivateMessageEntity>>()
+        val scrubber = mockk<PrivateContentDatabaseScrubber>(relaxed = true)
         coEvery { dao.replacePage(capture(pageSlot), capture(messagesSlot), 5) } returns Unit
-        val cache = RoomPrivateMessageThreadDiskCache(dao)
+        val cache = RoomPrivateMessageThreadDiskCache(dao, scrubber)
         val rawPseudo = " Alice  \u200bX "
 
         cache.replace(rawPseudo, thread(), FETCHED_AT)
@@ -34,6 +36,21 @@ class RoomPrivateMessageThreadDiskCacheTest {
         assertEquals(listOf(expected), messagesSlot.captured.map { it.userId }.distinct())
         coVerify(exactly = 1) { dao.getPage(expected, 42, 1) }
         coVerify(exactly = 1) { dao.clearForUser(expected) }
+        coVerify(exactly = 1) { scrubber.scrub() }
+    }
+
+    @Test
+    fun `global purge deletes both tables before scrubbing SQLite`() = runTest {
+        val dao = mockk<PrivateMessageContentDao>(relaxed = true)
+        val scrubber = mockk<PrivateContentDatabaseScrubber>(relaxed = true)
+        val cache = RoomPrivateMessageThreadDiskCache(dao, scrubber)
+
+        cache.clearAll()
+
+        coVerifyOrder {
+            dao.clearAll()
+            scrubber.scrub()
+        }
     }
 
     private fun thread() = PrivateMessageThread(

@@ -31,7 +31,7 @@ Mécanique du format réel (détail complet dans [le rapport #6](https://github.
 - enveloppe JSON `{ data: [ { version: '0.1', <clés par outil> } ], sourceName, lastUpdate }` — namespacing faible, chaque outil pose ses clés dans l'entrée partagée ;
 - lecture = GET du formulaire d'édition du premier post (textarea `content_form`) ; écriture = POST `bdd.php` `cat=prive` en **remplacement intégral** (last-write-wins, pas de verrou) ;
 - piège connu de la bibliothèque d'origine : contenu invalide → **reset destructif au défaut** ;
-- `mpFlags.list[]` (DTCloud) = **position de reprise de lecture** par conversation DT (`{uri, post, page, href: "t<numreponse>", p}` — sémantique champ par champ dans [le rapport #6](https://github.com/ForumHFR/redface2/issues/6#issuecomment-4673324560)), pas un lu/non-lu (cf. ADR-013/#361 : le lu/non-lu MP est le dot serveur binaire).
+- `mpFlags.list[]` (DTCloud) = **position de reprise de lecture** par conversation DT (`{uri, post, page, href: "t<numreponse>", p}` — sémantique champ par champ dans [le rapport #6](https://github.com/ForumHFR/redface2/issues/6#issuecomment-4673324560)), pas un lu/non-lu (cf. ADR-018/#361 : le lu/non-lu MP est le dot serveur binaire).
 
 Vérifications live 2026-06-11 (GET only, compte XaTriX) :
 
@@ -49,7 +49,7 @@ Vérifications live 2026-06-11 (GET only, compte XaTriX) :
    - **Cap** : `MAX_CONTENT_FORM_BYTES = 64 KiB` ; dépassement ⇒ `TooLarge`, aucun POST (fail-closed, HFR tronque silencieusement).
    - **Opt-in OFF par défaut** : gardé par le réglage `KEY_SYNC_PRIVATE_MESSAGES_WRITE_ENABLED` ; OFF ⇒ `DisabledByPreference`, aucune requête.
    - **Arbitrage de clé write-back (#597)** : la clé d'identification d'une entrée (threadId du MP vs id de topic DT côté forum) comporte un risque résiduel d'écriture dans la mauvaise entrée. Il est **borné** par le mode UPDATE-ONLY (jamais de création silencieuse) mais **non nul** — à requalifier avant d'activer l'opt-in par défaut (Phase 4, #6/#577). Le contrat `bdd.php cat=prive` reste **non observé live**.
-5. **Surface UI** : l'onglet « DT » opt-in (PR #397) consommera `mpFlags` (liste des conversations DT avec position de reprise) ; fusion avec le drapal local ADR-013 étage 1 (local prioritaire, MPStorage = seed + sync).
+5. **Surface UI** : l'onglet « DT » opt-in (PR #397) consommera `mpFlags` (liste des conversations DT avec position de reprise) ; fusion avec le drapal local ADR-018 décision 2 (local prioritaire, MPStorage = seed + sync).
 
 ## Conséquences
 

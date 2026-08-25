@@ -30,6 +30,15 @@
     <string name="settings_mp_sync_write_title">Sync DT en écriture (expérimental)</string>
     <string name="settings_mp_sync_write_description">Écrit vos positions de lecture DT dans le document MPStorage partagé avec les autres outils (DTCloud…). Expérimental : désactivé par défaut, le contrat d\'écriture n\'a pas été validé sur le serveur.</string>
     <string name="settings_mp_sync_write_persist_failed">Impossible d\'enregistrer ce réglage pour le moment.</string>
+    <string name="settings_mp_content_cache_title">Cache disque des messages privés (tous les comptes)</string>
+    <string name="settings_mp_content_cache_description">Activé pour tous les comptes utilisés sur cet appareil. Conserve jusqu\'à 5 pages par compte ; chaque page est revalidée par le réseau, sans mode hors ligne.</string>
+    <string name="settings_mp_content_cache_persist_failed">Impossible d\'enregistrer ce réglage. Le cache reste dans son état précédent.</string>
+    <string name="settings_mp_content_cache_purge_failed">Le cache reste désactivé, mais la suppression n\'a pas abouti. Les lectures et écritures disque restent bloquées.</string>
+    <string name="settings_mp_content_cache_retry">Réessayer la suppression</string>
+    <string name="settings_mp_content_cache_disable_title">Désactiver le cache disque privé ?</string>
+    <string name="settings_mp_content_cache_disable_body">Les messages privés mis en cache seront immédiatement supprimés pour tous les comptes utilisés sur cet appareil. Cette action n\'efface aucun message sur HFR.</string>
+    <string name="settings_mp_content_cache_disable_action">Désactiver et supprimer</string>
+    <string name="settings_mp_content_cache_disable_cancel">Annuler</string>
     <string name="settings_section_hfr_account">Compte HFR</string>
     <string name="settings_section_notifications">Notifications</string>
     <string name="settings_section_accessibility">Accessibilité</string>
@@ -53,7 +62,7 @@
     <string name="settings_category_subtitle_display">Thème, AMOLED, densité, police</string>
     <string name="settings_category_subtitle_flags">Regroupement, masquer lus, auto-refresh</string>
     <string name="settings_category_subtitle_topic">Barre, sondages, navigation</string>
-    <string name="settings_category_subtitle_mp">Badge de non-lus</string>
+    <string name="settings_category_subtitle_mp">Badge de non-lus, cache disque global</string>
     <string name="settings_category_subtitle_editing">Confirmation avant envoi</string>
     <string name="settings_category_subtitle_images">Hébergeur, Client-ID, insertion</string>
     <string name="settings_category_subtitle_start">Écran ouvert au lancement</string>

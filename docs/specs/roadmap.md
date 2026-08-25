@@ -162,7 +162,7 @@ Le PostRenderer sera développé de manière incrémentale : texte brut d'abord,
 - [x] Nouveau MP — création
 - [x] MultiMPs — liste avec vue drapeaux, lecture, reply, onglet « DT » des Drapeaux listant les MultiMP + reprise de lecture MPStorage livré 2026-06-19, app-v166. La citation simple et multiple par message (#1074) est livrée comme sur les MP classiques. Le GET d'une citation a été mesuré en DT le 2026-08-17 : mêmes 20 champs cachés que le 1:1, `cat=prive`, `numreponse` vide, `numrep` = message cité, aucun `ref` caché et aucun `newdest`. Le `ref=0` sans `numreponse` appartient au formulaire de **réponse** DT owner et ne décrit pas la citation. Vérifié aussi sur appareil : « Citer » ouvre l'éditeur prérempli par HFR sans erreur ; aucun POST live n'a été émis. La citation multiple enchaîne côté client un GET typé par sélection et concatène les préremplissages, mais ni cet enchaînement ni le POST de plusieurs `[quotemsg]` n'ont été mesurés live.
 - [x] Nouveau MultiMP — création (2+ destinataires)
-- [x] Intégration MPStorage — **lecture livrée** (découverte par scan inbox + parsing + seed des positions DT) **et écriture déclencheur de synchronisation de la position de lecture DT livrée** (`writeBackFlagIfPresent` UPDATE-ONLY, **opt-in OFF par défaut**, #593/#597 via PR #608, RMW guardé + verify-after-write + cap 64 KiB, POST `bdd.php cat=prive` non observé live). **Activation opt-in par défaut + cache Room du contenu + synchronisation bidirectionnelle = Phase 4 (#6/#577)** (ADR-013 déc. 2/3 + ADR-014 §4).
+- [x] Intégration MPStorage — **lecture livrée** (découverte par scan inbox + parsing + seed des positions DT) **et écriture déclencheur de synchronisation de la position de lecture DT livrée** (`writeBackFlagIfPresent` UPDATE-ONLY, **opt-in OFF par défaut**, #593/#597 via PR #608, RMW guardé + verify-after-write + cap 64 KiB, POST `bdd.php cat=prive` non observé live). **Activation opt-in par défaut + cache Room du contenu + synchronisation bidirectionnelle = Phase 4 (#6/#577)** (ADR-018 déc. 2, 3 et 7 + ADR-014 §4).
 - [x] Notifications MP (#313)
 - [x] Recherche intra-topic (#546/#576/#585) — `transsearch.php`, saut préc./suiv., filtre pseudo, tout-le-sujet
 - [x] Mode plein écran (#518)
@@ -197,9 +197,9 @@ Le PostRenderer sera développé de manière incrémentale : texte brut d'abord,
 
 **Synchronisation MPStorage (suite Phase 3, requalifiée ici) :**
 - [ ] Activation de l'écriture MPStorage opt-in par défaut + clé write-back tranchée (#597 reste OFF en attendant) — umbrella **#6** / **#577**
-- [ ] Cache Room du contenu MP (opt-in, ADR-013 étage 3) + synchronisation bidirectionnelle —
-  substrat Room et politique OFF livrés au lot 7 PR 2 ; activation UI et arbitrage de rémanence
-  SQLite encore requis
+- [ ] Synchronisation bidirectionnelle MPStorage — le **cache Room du contenu MP** (opt-in,
+  ADR-018 décision 3) est **livré** : substrat et politique OFF au lot 7 PR 2, réglage exposé et
+  rémanence SQLite arbitrée au lot 7 PR 3 ([#1097](https://github.com/ForumHFR/redface2/issues/1097))
 
 ### Refonte UI pré-1.0
 
@@ -213,9 +213,9 @@ Mandat de refonte des écrans chauds avant la 1.0 (post HFR XaTriX 2788560) :
   - lot 2 — préférences de lecture transverses ([#1050](https://github.com/ForumHFR/redface2/issues/1050)) : pleine largeur, EgoQuote/EgoPost, liste noire, signatures ;
   - lot 3 — actions contextuelles ([#1051](https://github.com/ForumHFR/redface2/issues/1051)) : menu de message, appui long sur image ;
   - lot 4 — citation MP ([#1074](https://github.com/ForumHFR/redface2/issues/1074)) : citation simple, citation multiple, saut vers le message cité — contrat de formulaire mesuré en 1:1 et en DT, aucun POST live ;
-  - lot 5 — cache RAM de session et prefetch authentifié borné ([#1080](https://github.com/ForumHFR/redface2/issues/1080), ADR-013 décision 2 étage 2 et décision 3) ;
+  - lot 5 — cache RAM de session et prefetch authentifié borné ([#1080](https://github.com/ForumHFR/redface2/issues/1080), ADR-018 décisions 2 et 7) ;
   - lot 6 — pagination riche, gestes et zoom ([#1103](https://github.com/ForumHFR/redface2/issues/1103), **six PR mergées**) : zoom pincé partagé, ancres de scroll par page, durcissement du swipe, chrome de pagination riche, double-tap pour rafraîchir et affordance directe d'ajout au panier multi-quote ;
-  - lot 7 — cache Room du contenu MP, opt-in OFF (ADR-013 décision 2 étage 3) : **PR 2, substrat dormant livré** — schéma 17, façade sérialisée, préférence inaccessible depuis l'UI et purges ; la PR 3 exposera le réglage après arbitrage de la rémanence SQLite.
+  - lot 7 — cache Room du contenu MP, opt-in OFF (ADR-018 décision 3), **clos** : **PR 2, substrat dormant** — schéma 17, façade sérialisée, préférence inaccessible depuis l'UI et purges ; **PR 3, réglage exposé** — toggle unique et global à l'application, défaut OFF, purge immédiate de tous les comptes à la désactivation après confirmation, et scrub événementiel des octets SQLite tranché par l'ADR-018.
   - **écart encore ouvert, hors lots** : la clause dormante de suspension du prefetch après un « marquer comme non lu » ([#1087](https://github.com/ForumHFR/redface2/issues/1087)).
 
 **Livrable :** les features communautaires les plus demandées + une UI refondue prête pour la 1.0.

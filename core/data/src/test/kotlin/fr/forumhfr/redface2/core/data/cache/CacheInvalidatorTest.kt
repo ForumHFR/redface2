@@ -44,7 +44,7 @@ class CacheInvalidatorTest {
         coVerify(exactly = 0) { fixture.imageCacheMaintenance.clearImageCache() }
         coVerify(exactly = 0) { fixture.privateMessageContentCacheMaintenance.purgeForUser(any()) }
         coVerify(exactly = 1) {
-            fixture.privateMessageContentCacheMaintenance.reconcilePendingPurge()
+            fixture.privateMessageContentCacheMaintenance.reconcileOnStartup()
         }
         verify(exactly = 0) { fixture.threadSessionCache.clearAndAdvanceGeneration() }
         verify(exactly = 0) { fixture.flagRepository.clearSessionCache() }

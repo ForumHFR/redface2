@@ -25,9 +25,15 @@ abstract class MessagesRepositoryModule {
 
     @Binds
     @Singleton
-    abstract fun bindPrivateMessageThreadDiskCache(
+    internal abstract fun bindPrivateMessageThreadDiskCache(
         impl: RoomPrivateMessageThreadDiskCache,
     ): PrivateMessageThreadDiskCache
+
+    @Binds
+    @Singleton
+    internal abstract fun bindPrivateContentDatabaseScrubber(
+        impl: RoomPrivateContentDatabaseScrubber,
+    ): PrivateContentDatabaseScrubber
 
     @Binds
     @Singleton

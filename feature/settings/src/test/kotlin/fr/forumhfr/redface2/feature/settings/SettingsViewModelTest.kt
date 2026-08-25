@@ -2,6 +2,8 @@ package fr.forumhfr.redface2.feature.settings
 
 import fr.forumhfr.redface2.core.domain.cache.ImageCacheMaintenance
 import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
+import fr.forumhfr.redface2.core.domain.messages.PrivateMessageContentCache
+import fr.forumhfr.redface2.core.domain.messages.PrivateMessageContentCacheException
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
@@ -47,6 +49,7 @@ class SettingsViewModelTest {
     private val repository = FakeUserPreferencesRepository()
     private val topicCacheMaintenance = FakeTopicCacheMaintenance()
     private val imageCacheMaintenance = FakeImageCacheMaintenance()
+    private val privateMessageContentCache = FakePrivateMessageContentCache()
 
     @Before
     fun setUp() {
@@ -78,6 +81,72 @@ class SettingsViewModelTest {
         assertEquals("8080", state.proxyPort)
         assertEquals("user", state.proxyUsername)
         assertEquals("secret", state.proxyPassword)
+    }
+
+    @Test
+    fun `private content OFF request requires confirmation before persistence`() = runTest {
+        privateMessageContentCache.emitEnabled(true)
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.PrivateMessageContentCacheChanged(false))
+
+        assertTrue(viewModel.state.value.showDisablePrivateMessageContentCacheConfirm)
+        assertEquals(emptyList<Boolean>(), privateMessageContentCache.setCalls)
+
+        viewModel.submit(SettingsIntent.DisablePrivateMessageContentCacheDismissed)
+        assertFalse(viewModel.state.value.showDisablePrivateMessageContentCacheConfirm)
+        assertTrue(viewModel.state.value.privateMessageContentCacheEnabled)
+    }
+
+    @Test
+    fun `private content preference failure leaves cache ON without purge error`() = runTest {
+        privateMessageContentCache.emitEnabled(true)
+        privateMessageContentCache.nextSetFailure =
+            PrivateMessageContentCacheException.PreferenceWriteFailed(IllegalStateException("unavailable"))
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.PrivateMessageContentCacheChanged(false))
+        viewModel.submit(SettingsIntent.DisablePrivateMessageContentCacheConfirmed)
+
+        val state = viewModel.state.value
+        assertTrue(state.privateMessageContentCacheEnabled)
+        assertTrue(state.privateMessageContentCachePersistError)
+        assertFalse(state.privateMessageContentCachePurgePending)
+        assertFalse(state.privateMessageContentCachePurgeError)
+    }
+
+    @Test
+    fun `private content purge failure stays OFF and manual retry clears the error`() = runTest {
+        privateMessageContentCache.emitEnabled(true)
+        privateMessageContentCache.nextSetFailure =
+            PrivateMessageContentCacheException.PurgeFailed(IllegalStateException("busy"))
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.PrivateMessageContentCacheChanged(false))
+        viewModel.submit(SettingsIntent.DisablePrivateMessageContentCacheConfirmed)
+
+        assertFalse(viewModel.state.value.privateMessageContentCacheEnabled)
+        assertTrue(viewModel.state.value.privateMessageContentCachePurgePending)
+        assertTrue(viewModel.state.value.privateMessageContentCachePurgeError)
+
+        viewModel.submit(SettingsIntent.RetryPrivateMessageContentCachePurge)
+
+        assertEquals(1, privateMessageContentCache.retryCalls)
+        assertFalse(viewModel.state.value.privateMessageContentCacheEnabled)
+        assertFalse(viewModel.state.value.privateMessageContentCachePurgePending)
+        assertFalse(viewModel.state.value.privateMessageContentCachePurgeError)
+    }
+
+    @Test
+    fun `startup pending purge is exposed as a retryable OFF error`() = runTest {
+        privateMessageContentCache.emitPurgePending(true)
+
+        val state = newViewModel().state.value
+
+        assertFalse(state.privateMessageContentCacheEnabled)
+        assertTrue(state.privateMessageContentCachePurgePending)
+        assertTrue(state.privateMessageContentCachePurgeError)
+        assertTrue(state.canRetryPrivateMessageContentCachePurge)
     }
 
     @Test
@@ -1909,7 +1978,49 @@ class SettingsViewModelTest {
         }
 
     private fun newViewModel(): SettingsViewModel =
-        SettingsViewModel(repository, topicCacheMaintenance, imageCacheMaintenance)
+        SettingsViewModel(
+            repository,
+            topicCacheMaintenance,
+            imageCacheMaintenance,
+            privateMessageContentCache,
+        )
+
+    private class FakePrivateMessageContentCache : PrivateMessageContentCache {
+        private val enabled = MutableStateFlow(false)
+        private val purgePending = MutableStateFlow(false)
+        val setCalls = mutableListOf<Boolean>()
+        var retryCalls: Int = 0
+            private set
+        var nextSetFailure: PrivateMessageContentCacheException? = null
+
+        override fun observeEnabled(): Flow<Boolean> = enabled
+
+        override fun observePurgePending(): Flow<Boolean> = purgePending
+
+        override suspend fun isEnabled(): Boolean = enabled.value && !purgePending.value
+
+        override suspend fun setEnabled(enabled: Boolean) {
+            setCalls += enabled
+            val failure = nextSetFailure.also { nextSetFailure = null }
+            if (failure is PrivateMessageContentCacheException.PreferenceWriteFailed) throw failure
+            this.enabled.value = enabled
+            purgePending.value = failure is PrivateMessageContentCacheException.PurgeFailed
+            if (failure != null) throw failure
+        }
+
+        override suspend fun retryPendingPurge() {
+            retryCalls += 1
+            purgePending.value = false
+        }
+
+        fun emitEnabled(value: Boolean) {
+            enabled.value = value
+        }
+
+        fun emitPurgePending(value: Boolean) {
+            purgePending.value = value
+        }
+    }
 
     private class FakeUserPreferencesRepository : UserPreferencesRepository {
         private val config = MutableStateFlow(ProxyConfig())

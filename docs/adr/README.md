@@ -40,8 +40,9 @@ Les numéros `004` à `007` sont volontairement laissés libres pour des décisi
 | [ADR-010]({{ site.baseurl }}/adr/010-licence-client-android) | GPL-3.0-only retenue pour le client Android |
 | [ADR-011]({{ site.baseurl }}/adr/011-postcontent-ast) | AST sémantique `PostContent` comme contrat de rendu |
 | [ADR-012]({{ site.baseurl }}/adr/012-credentials-proxy) | Credentials proxy : extension d'Option A |
-| [ADR-013]({{ site.baseurl }}/adr/013-mp-lecture-cache-prefetch) | Lecture MP : partage topic↔MP, cache à trois étages, prefetch borné |
+| [ADR-013]({{ site.baseurl }}/adr/013-mp-lecture-cache-prefetch) | Lecture MP : partage topic↔MP, cache à trois étages, prefetch borné — **superseded par ADR-018** |
 | [ADR-014]({{ site.baseurl }}/adr/014-mpstorage-v01-de-facto) | MPStorage : enveloppe v0.1 de facto, lecture d'abord, écriture opt-in (OFF par défaut) |
 | [ADR-015]({{ site.baseurl }}/adr/015-iconographie-boutons-icones) | Iconographie des boutons-icônes : vector drawables stroke locaux, primitive `RedfaceVectorIcon` |
 | [ADR-016]({{ site.baseurl }}/adr/016-roborazzi-screenshot-testing) | Roborazzi pour le rendu visuel (screenshot testing JVM), mode record en Phase 4 |
 | [ADR-017]({{ site.baseurl }}/adr/017-refonte-vue-drapeaux) | Refonte vue Drapeaux (#603) : modèle de présentation, marqueur barre de couleur, super-favori local, `quotedMe` différé |
+| [ADR-018]({{ site.baseurl }}/adr/018-mp-cache-disque-opt-in) | Lecture MP : cache disque opt-in activé, rémanence SQLite scrubée à l'événement — **supersède l'ADR-013 et en reprend les décisions actives** |

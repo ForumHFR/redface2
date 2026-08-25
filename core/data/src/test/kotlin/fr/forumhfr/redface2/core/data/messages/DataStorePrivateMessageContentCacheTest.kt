@@ -3,11 +3,13 @@ package fr.forumhfr.redface2.core.data.messages
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
+import fr.forumhfr.redface2.core.domain.messages.PrivateMessageContentCacheException
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.coVerifyOrder
 import io.mockk.mockk
+import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
@@ -26,26 +28,34 @@ import org.junit.rules.TemporaryFolder
 class DataStorePrivateMessageContentCacheTest {
     @get:Rule val tempFolder = TemporaryFolder()
 
-    private lateinit var dataStore: DataStore<Preferences>
+    private lateinit var dataStore: FailingWriteDataStore
     private lateinit var sessionCache: PrivateMessageThreadSessionCache
     private lateinit var diskCache: PrivateMessageThreadDiskCache
     private lateinit var cache: DataStorePrivateMessageContentCache
 
     @Before
     fun setUp() {
-        dataStore = PreferenceDataStoreFactory.create(
-            produceFile = { tempFolder.newFile("mp-cache.preferences_pb") },
+        dataStore = FailingWriteDataStore(
+            PreferenceDataStoreFactory.create(
+                produceFile = { tempFolder.newFile("mp-cache.preferences_pb") },
+            ),
         )
         sessionCache = PrivateMessageThreadSessionCache()
         diskCache = mockk(relaxed = true)
         cache = DataStorePrivateMessageContentCache(dataStore, sessionCache, diskCache)
     }
 
+    /**
+     * Default OFF is the whole fleet: nothing was ever written, so startup has nothing to purge.
+     * Scrubbing anyway would checkpoint and VACUUM the entire database on every launch, and a busy
+     * checkpoint would report a purge failure to users who never opted in. Startup is not a privacy
+     * event — only a genuinely pending purge scrubs there (see the sibling retry test).
+     */
     @Test
-    fun `default OFF and startup without pending purge never access private tables`() = runTest {
+    fun `default OFF startup scrubs nothing and normal OFF access never reaches content rows`() = runTest {
         assertFalse(cache.isEnabled())
 
-        cache.reconcilePendingPurge()
+        cache.reconcileOnStartup()
         cache.setEnabled(false)
         assertNull(cache.readIfEnabled("alice", 42, 1))
         cache.replaceIfEnabled("alice", thread(), java.time.Instant.EPOCH) { true }
@@ -61,6 +71,10 @@ class DataStorePrivateMessageContentCacheTest {
         cache.setEnabled(true)
         val oldStamp = sessionCache.capture("alice")
         sessionCache.write(oldStamp, 42, 1, thread())
+        coEvery { diskCache.clearAll() } coAnswers {
+            assertFalse("OFF must be effective before Room DELETE", cache.isEnabled())
+            assertFalse("RAM generation must advance before Room DELETE", sessionCache.isCurrent(oldStamp))
+        }
 
         cache.setEnabled(false)
 
@@ -76,22 +90,38 @@ class DataStorePrivateMessageContentCacheTest {
 
         val failure = runCatching { cache.setEnabled(false) }.exceptionOrNull()
 
-        assertTrue(failure is IllegalStateException)
+        assertTrue(failure is PrivateMessageContentCacheException.PurgeFailed)
         assertFalse(cache.isEnabled())
-        cache.reconcilePendingPurge()
+        assertTrue(cache.observePurgePending().first())
+        cache.reconcileOnStartup()
         coVerify(exactly = 2) { diskCache.clearAll() }
     }
 
+    /** R5: re-enabling runs the pending purge first, and its failure must stay a typed PurgeFailed. */
     @Test
-    fun `logout purge is skipped while OFF and scheduled globally after an enabled failure`() = runTest {
+    fun `re-enabling over a pending purge fails as PurgeFailed and never turns ON`() = runTest {
+        cache.setEnabled(true)
+        coEvery { diskCache.clearAll() } throws IOException("busy")
+        assertTrue(runCatching { cache.setEnabled(false) }.isFailure)
+
+        val failure = runCatching { cache.setEnabled(true) }.exceptionOrNull()
+
+        assertTrue(failure is PrivateMessageContentCacheException.PurgeFailed)
+        assertFalse(cache.isEnabled())
+        assertTrue(cache.observePurgePending().first())
+    }
+
+    @Test
+    fun `logout purges while OFF and an enabled failure is retried globally`() = runTest {
         cache.purgeForUser("alice")
-        coVerify(exactly = 0) { diskCache.clearForUser(any()) }
+        coVerify(exactly = 1) { diskCache.clearForUser("alice") }
 
         cache.setEnabled(true)
         coEvery { diskCache.clearForUser("alice") } throws IllegalStateException("unavailable")
         assertTrue(runCatching { cache.purgeForUser("alice") }.isFailure)
 
-        cache.reconcilePendingPurge()
+        assertFalse(cache.isEnabled())
+        cache.reconcileOnStartup()
         coVerify(exactly = 1) { diskCache.clearAll() }
     }
 
@@ -172,7 +202,7 @@ class DataStorePrivateMessageContentCacheTest {
         }
         coEvery { diskCache.read("alice", 42, 1) } returns null
 
-        val reconciliation = async { cache.reconcilePendingPurge() }
+        val reconciliation = async { cache.reconcileOnStartup() }
         purgeStarted.await()
         val read = async { cache.readIfEnabled("alice", 42, 1) }
         runCurrent()
@@ -185,6 +215,49 @@ class DataStorePrivateMessageContentCacheTest {
         reconciliation.await()
         read.await()
         coVerify(exactly = 1) { diskCache.read("alice", 42, 1) }
+    }
+
+    @Test
+    fun `failed OFF preference write remains ON and neither invalidates nor purges`() = runTest {
+        cache.setEnabled(true)
+        val stamp = sessionCache.capture("alice")
+        dataStore.failNextWrite = true
+
+        val failure = runCatching { cache.setEnabled(false) }.exceptionOrNull()
+
+        assertTrue(failure is PrivateMessageContentCacheException.PreferenceWriteFailed)
+        assertTrue(cache.isEnabled())
+        assertTrue(sessionCache.isCurrent(stamp))
+        coVerify(exactly = 0) { diskCache.clearAll() }
+    }
+
+    @Test
+    fun `manual retry keeps access blocked until the failed purge succeeds`() = runTest {
+        cache.setEnabled(true)
+        coEvery { diskCache.clearAll() } throws IOException("busy") andThen Unit
+        assertTrue(runCatching { cache.setEnabled(false) }.isFailure)
+
+        cache.retryPendingPurge()
+
+        assertFalse(cache.isEnabled())
+        assertFalse(cache.observePurgePending().first())
+        coVerify(exactly = 2) { diskCache.clearAll() }
+    }
+
+    private class FailingWriteDataStore(
+        private val delegate: DataStore<Preferences>,
+    ) : DataStore<Preferences> by delegate {
+        var failNextWrite: Boolean = false
+
+        override suspend fun updateData(
+            transform: suspend (Preferences) -> Preferences,
+        ): Preferences {
+            if (failNextWrite) {
+                failNextWrite = false
+                throw IOException("preference unavailable")
+            }
+            return delegate.updateData(transform)
+        }
     }
 
     private fun thread() = PrivateMessageThread(

@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.cache.ImageCacheMaintenance
 import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
+import fr.forumhfr.redface2.core.domain.messages.PrivateMessageContentCache
+import fr.forumhfr.redface2.core.domain.messages.PrivateMessageContentCacheException
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
@@ -38,6 +40,7 @@ class SettingsViewModel @Inject constructor(
     private val userPreferencesRepository: UserPreferencesRepository,
     private val topicCacheMaintenance: TopicCacheMaintenance,
     private val imageCacheMaintenance: ImageCacheMaintenance,
+    private val privateMessageContentCache: PrivateMessageContentCache,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SettingsState())
@@ -106,6 +109,27 @@ class SettingsViewModel @Inject constructor(
             flow = userPreferencesRepository.observeMpUnreadBadge(),
             isLocked = { it.isUpdatingMpUnreadBadge },
             apply = { state, value -> state.copy(mpUnreadBadge = value) },
+        )
+        observePreference(
+            flow = privateMessageContentCache.observeEnabled(),
+            isLocked = { it.isUpdatingPrivateMessageContentCache },
+            apply = { state, value ->
+                state.copy(
+                    privateMessageContentCacheEnabled = value,
+                    showDisablePrivateMessageContentCacheConfirm =
+                        state.showDisablePrivateMessageContentCacheConfirm && value,
+                )
+            },
+        )
+        observePreference(
+            flow = privateMessageContentCache.observePurgePending(),
+            isLocked = { it.isUpdatingPrivateMessageContentCache },
+            apply = { state, pending ->
+                state.copy(
+                    privateMessageContentCachePurgePending = pending,
+                    privateMessageContentCachePurgeError = pending,
+                )
+            },
         )
         observePreference(
             flow = userPreferencesRepository.observeTopicPollsExpanded(),
@@ -328,6 +352,14 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.ShowDtSectionChanged -> updateShowDtSection(intent.enabled)
             is SettingsIntent.SyncPrivateMessagesWriteEnabledChanged ->
                 updateSyncPrivateMessagesWriteEnabled(intent.enabled)
+            is SettingsIntent.PrivateMessageContentCacheChanged ->
+                updatePrivateMessageContentCache(intent.enabled)
+            SettingsIntent.DisablePrivateMessageContentCacheConfirmed ->
+                disablePrivateMessageContentCache()
+            SettingsIntent.DisablePrivateMessageContentCacheDismissed ->
+                _state.update { it.copy(showDisablePrivateMessageContentCacheConfirm = false) }
+            SettingsIntent.RetryPrivateMessageContentCachePurge ->
+                retryPrivateMessageContentCachePurge()
             is SettingsIntent.ConfirmBeforePostingChanged -> updateConfirmBeforePosting(intent.enabled)
             is SettingsIntent.QuoteCardsEnabledChanged -> updateQuoteCardsEnabled(intent.enabled)
             is SettingsIntent.FlagsAutoRefreshChanged -> updateFlagsAutoRefresh(intent.enabled)
@@ -1373,6 +1405,106 @@ class SettingsViewModel @Inject constructor(
             },
             persist = userPreferencesRepository::setSyncPrivateMessagesWriteEnabled,
         )
+    }
+
+    private fun updatePrivateMessageContentCache(desired: Boolean) {
+        if (!desired) {
+            _state.update { state ->
+                state.copy(
+                    showDisablePrivateMessageContentCacheConfirm =
+                        state.privateMessageContentCacheEnabled,
+                )
+            }
+            return
+        }
+        persistPrivateMessageContentCache(enabled = true)
+    }
+
+    private fun disablePrivateMessageContentCache() {
+        _state.update {
+            it.copy(
+                showDisablePrivateMessageContentCacheConfirm = false,
+                isUpdatingPrivateMessageContentCache = true,
+                privateMessageContentCachePersistError = false,
+                privateMessageContentCachePurgeError = false,
+            )
+        }
+        viewModelScope.launch {
+            val result = runCatching { privateMessageContentCache.setEnabled(false) }
+            _state.update { state -> disablePrivateMessageContentCacheResult(state, result) }
+        }
+    }
+
+    private fun persistPrivateMessageContentCache(enabled: Boolean) {
+        _state.update {
+            it.copy(
+                isUpdatingPrivateMessageContentCache = true,
+                privateMessageContentCachePersistError = false,
+                privateMessageContentCachePurgeError = false,
+            )
+        }
+        viewModelScope.launch {
+            val result = runCatching { privateMessageContentCache.setEnabled(enabled) }
+            _state.update { state ->
+                when (result.exceptionOrNull()) {
+                    null -> state.copy(
+                        privateMessageContentCacheEnabled = enabled,
+                        isUpdatingPrivateMessageContentCache = false,
+                    )
+                    is PrivateMessageContentCacheException.PurgeFailed -> state.copy(
+                        privateMessageContentCacheEnabled = false,
+                        isUpdatingPrivateMessageContentCache = false,
+                        privateMessageContentCachePurgePending = true,
+                        privateMessageContentCachePurgeError = true,
+                    )
+                    else -> state.copy(
+                        isUpdatingPrivateMessageContentCache = false,
+                        privateMessageContentCachePersistError = true,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun disablePrivateMessageContentCacheResult(
+        state: SettingsState,
+        result: Result<Unit>,
+    ): SettingsState = when (result.exceptionOrNull()) {
+        null -> state.copy(
+            privateMessageContentCacheEnabled = false,
+            isUpdatingPrivateMessageContentCache = false,
+            privateMessageContentCachePurgePending = false,
+        )
+        is PrivateMessageContentCacheException.PreferenceWriteFailed -> state.copy(
+            privateMessageContentCacheEnabled = true,
+            isUpdatingPrivateMessageContentCache = false,
+            privateMessageContentCachePersistError = true,
+        )
+        else -> state.copy(
+            privateMessageContentCacheEnabled = false,
+            isUpdatingPrivateMessageContentCache = false,
+            privateMessageContentCachePurgePending = true,
+            privateMessageContentCachePurgeError = true,
+        )
+    }
+
+    private fun retryPrivateMessageContentCachePurge() {
+        _state.update {
+            it.copy(
+                isUpdatingPrivateMessageContentCache = true,
+                privateMessageContentCachePurgeError = false,
+            )
+        }
+        viewModelScope.launch {
+            val result = runCatching { privateMessageContentCache.retryPendingPurge() }
+            _state.update { state ->
+                state.copy(
+                    isUpdatingPrivateMessageContentCache = false,
+                    privateMessageContentCachePurgePending = result.isFailure,
+                    privateMessageContentCachePurgeError = result.isFailure,
+                )
+            }
+        }
     }
 
     private fun updateFlagsAutoRefresh(desired: Boolean) {
