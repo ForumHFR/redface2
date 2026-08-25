@@ -197,7 +197,9 @@ Le PostRenderer sera développé de manière incrémentale : texte brut d'abord,
 
 **Synchronisation MPStorage (suite Phase 3, requalifiée ici) :**
 - [ ] Activation de l'écriture MPStorage opt-in par défaut + clé write-back tranchée (#597 reste OFF en attendant) — umbrella **#6** / **#577**
-- [ ] Cache Room du contenu MP (opt-in, ADR-013 étage 3) + synchronisation bidirectionnelle
+- [ ] Cache Room du contenu MP (opt-in, ADR-013 étage 3) + synchronisation bidirectionnelle —
+  substrat Room et politique OFF livrés au lot 7 PR 2 ; activation UI et arbitrage de rémanence
+  SQLite encore requis
 
 ### Refonte UI pré-1.0
 
@@ -205,15 +207,15 @@ Mandat de refonte des écrans chauds avant la 1.0 (post HFR XaTriX 2788560) :
 - [x] **Refonte de la vue Drapeaux** — #603 (livrée, bêta 0.18.0 — [ADR-017]({{ site.baseurl }}/adr/017-refonte-vue-drapeaux))
 - [x] **Refonte de la vue Topic** — #604 (livrée, bêta 0.37.0 : cinq vagues, moteur de pagination in-VM #895, loupe #182, passe images #876 ; reliquats en Vue · Topic 2)
 - [x] **Hygiène repo / audit des dérives** — exécutée (2026-06) ; #605 requalifiée en ombrelle de suivi Phase 4
-- [ ] **Partage de la surface de lecture Topic → MP/DT** — [#1040](https://github.com/ForumHFR/redface2/issues/1040) (**en cours**, dev 0.42.0 → 0.42.6). Le chantier répond à un délaissement mesuré : 74 commits sur `feature/topic` contre 7 sur `feature/messages` entre le 20/06 et le 12/08, sans document pour tracer l'écart. **Huit lots (0 → 7)** ; les lots 0 à 5 sont clos et le lot 6 est en cours :
+- [ ] **Partage de la surface de lecture Topic → MP/DT** — [#1040](https://github.com/ForumHFR/redface2/issues/1040) (**en cours**, dev 0.42.x). Le chantier répond à un délaissement mesuré : 74 commits sur `feature/topic` contre 7 sur `feature/messages` entre le 20/06 et le 12/08, sans document pour tracer l'écart. **Huit lots (0 → 7)** ; les lots 0 à 6 sont clos et le lot 7 est en cours :
   - lot 0 — caractérisation MP, correction de la prose route-driven et création de la page canonique [Parité de lecture Topic ↔ MP]({{ site.baseurl }}/specs/reading-parity) ([#1041](https://github.com/ForumHFR/redface2/issues/1041)), rendue `[enforced]` par deux gardes machine en [#1045](https://github.com/ForumHFR/redface2/issues/1045) ;
   - lot 1 — `ReadingPostCard`, carte de lecture commune promue dans `:core:ui` ([#1042](https://github.com/ForumHFR/redface2/issues/1042)) : densité, sélection de texte, profil au tap ;
   - lot 2 — préférences de lecture transverses ([#1050](https://github.com/ForumHFR/redface2/issues/1050)) : pleine largeur, EgoQuote/EgoPost, liste noire, signatures ;
   - lot 3 — actions contextuelles ([#1051](https://github.com/ForumHFR/redface2/issues/1051)) : menu de message, appui long sur image ;
   - lot 4 — citation MP ([#1074](https://github.com/ForumHFR/redface2/issues/1074)) : citation simple, citation multiple, saut vers le message cité — contrat de formulaire mesuré en 1:1 et en DT, aucun POST live ;
   - lot 5 — cache RAM de session et prefetch authentifié borné ([#1080](https://github.com/ForumHFR/redface2/issues/1080), ADR-013 décision 2 étage 2 et décision 3) ;
-  - lot 6 — pagination riche, gestes et zoom ([#1103](https://github.com/ForumHFR/redface2/issues/1103), **six PR**) : **trois PR mergées** — zoom pincé partagé en PR 1 ([#1098](https://github.com/ForumHFR/redface2/pull/1098)), ancres de scroll par page en PR 2 ([#1118](https://github.com/ForumHFR/redface2/pull/1118)), puis durcissement du swipe en PR 4 ([#1120](https://github.com/ForumHFR/redface2/pull/1120) : slide-out, annulation multi-touch [#936](https://github.com/ForumHFR/redface2/issues/936), dead-zone des bandes système [#752](https://github.com/ForumHFR/redface2/issues/752)). Restent le chrome de pagination riche — picker borné, premier/dernier, indicateur de la page réellement rendue (PR 3) —, le double-tap pour rafraîchir (PR 5) et l'affordance directe d'ajout au panier multi-quote ([#1102](https://github.com/ForumHFR/redface2/issues/1102), PR 6) ;
-  - lot 7 — cache Room du contenu MP, opt-in OFF (ADR-013 décision 2 étage 3) : **non commencé**.
+  - lot 6 — pagination riche, gestes et zoom ([#1103](https://github.com/ForumHFR/redface2/issues/1103), **six PR mergées**) : zoom pincé partagé, ancres de scroll par page, durcissement du swipe, chrome de pagination riche, double-tap pour rafraîchir et affordance directe d'ajout au panier multi-quote ;
+  - lot 7 — cache Room du contenu MP, opt-in OFF (ADR-013 décision 2 étage 3) : **PR 2, substrat dormant livré** — schéma 17, façade sérialisée, préférence inaccessible depuis l'UI et purges ; la PR 3 exposera le réglage après arbitrage de la rémanence SQLite.
   - **écart encore ouvert, hors lots** : la clause dormante de suspension du prefetch après un « marquer comme non lu » ([#1087](https://github.com/ForumHFR/redface2/issues/1087)).
 
 **Livrable :** les features communautaires les plus demandées + une UI refondue prête pour la 1.0.

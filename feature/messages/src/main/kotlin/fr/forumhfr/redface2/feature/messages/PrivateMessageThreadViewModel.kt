@@ -594,7 +594,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
      */
     private fun contentMode(
         thread: PrivateMessageThread,
-        source: PrivateMessageThreadPage.Source = PrivateMessageThreadPage.Source.NETWORK,
+        source: PrivateMessageThreadPage.Source,
     ) =
         PrivateMessageThreadUiState.Mode.Content(
             thread = thread,
@@ -642,7 +642,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
                         mode = contentMode(thread, loadedPage.source),
                         page = thread.page,
                         totalPages = thread.totalPages,
-                        isRefreshing = loadedPage.source == PrivateMessageThreadPage.Source.SESSION_CACHE,
+                        isRefreshing = loadedPage.source != PrivateMessageThreadPage.Source.NETWORK,
                         // The landing and the first target Content emission are one atomic state
                         // publication. Cache and network reuse this same value until the screen
                         // acknowledges it, so revalidation can never produce a second scroll.

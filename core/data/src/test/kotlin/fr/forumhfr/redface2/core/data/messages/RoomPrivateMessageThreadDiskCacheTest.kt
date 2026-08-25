@@ -1,0 +1,63 @@
+package fr.forumhfr.redface2.core.data.messages
+
+import fr.forumhfr.redface2.core.database.dao.PrivateMessageContentDao
+import fr.forumhfr.redface2.core.database.entities.PrivateMessageEntity
+import fr.forumhfr.redface2.core.database.entities.PrivateMessageThreadPageEntity
+import fr.forumhfr.redface2.core.model.Post
+import fr.forumhfr.redface2.core.model.PostContent
+import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
+import io.mockk.coEvery
+import io.mockk.coVerify
+import io.mockk.mockk
+import io.mockk.slot
+import java.time.Instant
+import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
+import org.junit.Test
+
+class RoomPrivateMessageThreadDiskCacheTest {
+    @Test
+    fun `every operation uses the same lowercase-only Room account key`() = runTest {
+        val dao = mockk<PrivateMessageContentDao>(relaxed = true)
+        val pageSlot = slot<PrivateMessageThreadPageEntity>()
+        val messagesSlot = slot<List<PrivateMessageEntity>>()
+        coEvery { dao.replacePage(capture(pageSlot), capture(messagesSlot), 5) } returns Unit
+        val cache = RoomPrivateMessageThreadDiskCache(dao)
+        val rawPseudo = " Alice  \u200bX "
+
+        cache.replace(rawPseudo, thread(), FETCHED_AT)
+        cache.read(rawPseudo, threadId = 42, page = 1)
+        cache.clearForUser(rawPseudo)
+
+        val expected = " alice  \u200bx "
+        assertEquals(expected, pageSlot.captured.userId)
+        assertEquals(listOf(expected), messagesSlot.captured.map { it.userId }.distinct())
+        coVerify(exactly = 1) { dao.getPage(expected, 42, 1) }
+        coVerify(exactly = 1) { dao.clearForUser(expected) }
+    }
+
+    private fun thread() = PrivateMessageThread(
+        threadId = 42,
+        subject = "subject",
+        correspondent = "correspondent",
+        messages = listOf(
+            Post(
+                numreponse = 7,
+                author = "author",
+                date = FETCHED_AT,
+                content = PostContent(emptyList()),
+                avatarUrl = null,
+                isEditable = false,
+                isOwnPost = false,
+                quotedAuthors = emptyList(),
+                postIndex = null,
+            ),
+        ),
+        page = 1,
+        totalPages = 1,
+    )
+
+    private companion object {
+        val FETCHED_AT: Instant = Instant.parse("2026-08-24T12:00:00Z")
+    }
+}

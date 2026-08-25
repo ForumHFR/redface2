@@ -18,6 +18,7 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.pager.MIN_COMMIT_DISTANCE
@@ -576,6 +577,7 @@ class ThreadPageSwipeTest {
                     page = PAGE,
                     totalPages = 5,
                 ),
+                source = PrivateMessageThreadPage.Source.NETWORK,
             ),
             totalPages = 5,
             pageLanding = if (pageLandingPending) {

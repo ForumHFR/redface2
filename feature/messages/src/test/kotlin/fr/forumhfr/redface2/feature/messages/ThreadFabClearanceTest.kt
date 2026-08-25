@@ -12,6 +12,7 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performSemanticsAction
+import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
@@ -93,7 +94,7 @@ class ThreadFabClearanceTest {
         val state = PrivateMessageThreadUiState(
             request = request,
             mode = PrivateMessageThreadUiState.Mode.Content(
-                PrivateMessageThread(
+                thread = PrivateMessageThread(
                     threadId = THREAD_ID,
                     subject = "Dégagement FAB",
                     correspondent = "Correspondant",
@@ -102,6 +103,7 @@ class ThreadFabClearanceTest {
                     totalPages = 4,
                     canReply = true,
                 ),
+                source = PrivateMessageThreadPage.Source.NETWORK,
             ),
             page = 2,
             totalPages = 4,

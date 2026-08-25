@@ -7,6 +7,11 @@ import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.platform.app.InstrumentationRegistry
 import fr.forumhfr.redface2.core.database.RedfaceDatabase
+import fr.forumhfr.redface2.core.database.entities.PrivateMessageEntity
+import fr.forumhfr.redface2.core.database.entities.PrivateMessageThreadPageEntity
+import fr.forumhfr.redface2.core.model.PostContent
+import java.time.Instant
+import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -27,8 +32,10 @@ import org.robolectric.annotation.Config
  * `MIGRATION_9_10` (#430 added the `mp_read_positions` table in v10),
  * `MIGRATION_10_11` (#405 added the `editor_drafts` table in v11),
  * `MIGRATION_11_12` (#459 added the `uploaded_images` table in v12),
- * `MIGRATION_12_13` (#6/ADR-014 added the `mp_storage_locations` table in v13) and
- * `MIGRATION_13_14` (#330 added `Post.signature` in v14).
+ * `MIGRATION_12_13` (#6/ADR-014 added the `mp_storage_locations` table in v13),
+ * `MIGRATION_13_14` (#330 added `Post.signature` in v14), `MIGRATION_14_15` (#863 added
+ * `Post.citedCount` in v15), `MIGRATION_15_16` (#638 added flag position metadata in v16), and
+ * `MIGRATION_16_17` (#1040/#1097 added the dormant private-message content tables in v17).
  * Without these tests a typo (missing column, wrong index name, wrong default)
  * would only crash on a real upgrade-in-place install, where the diagnostic loop is
  * days long. The tests take seconds.
@@ -129,6 +136,7 @@ class MigrationTest {
                 MIGRATION_13_14,
                 MIGRATION_14_15,
                 MIGRATION_15_16,
+                MIGRATION_16_17,
             )
             .build()
 
@@ -275,6 +283,7 @@ class MigrationTest {
                 MIGRATION_13_14,
                 MIGRATION_14_15,
                 MIGRATION_15_16,
+                MIGRATION_16_17,
             )
             .build()
 
@@ -381,6 +390,7 @@ class MigrationTest {
                 MIGRATION_13_14,
                 MIGRATION_14_15,
                 MIGRATION_15_16,
+                MIGRATION_16_17,
             )
             .build()
 
@@ -459,6 +469,7 @@ class MigrationTest {
                 MIGRATION_13_14,
                 MIGRATION_14_15,
                 MIGRATION_15_16,
+                MIGRATION_16_17,
             )
             .build()
 
@@ -533,6 +544,7 @@ class MigrationTest {
                 MIGRATION_13_14,
                 MIGRATION_14_15,
                 MIGRATION_15_16,
+                MIGRATION_16_17,
             )
             .build()
 
@@ -598,6 +610,7 @@ class MigrationTest {
                 MIGRATION_13_14,
                 MIGRATION_14_15,
                 MIGRATION_15_16,
+                MIGRATION_16_17,
             )
             .build()
 
@@ -677,6 +690,7 @@ class MigrationTest {
                 MIGRATION_13_14,
                 MIGRATION_14_15,
                 MIGRATION_15_16,
+                MIGRATION_16_17,
             )
             .build()
 
@@ -743,6 +757,7 @@ class MigrationTest {
                 MIGRATION_13_14,
                 MIGRATION_14_15,
                 MIGRATION_15_16,
+                MIGRATION_16_17,
             )
             .build()
 
@@ -799,6 +814,7 @@ class MigrationTest {
                 MIGRATION_13_14,
                 MIGRATION_14_15,
                 MIGRATION_15_16,
+                MIGRATION_16_17,
             )
             .build()
 
@@ -859,6 +875,7 @@ class MigrationTest {
                 MIGRATION_13_14,
                 MIGRATION_14_15,
                 MIGRATION_15_16,
+                MIGRATION_16_17,
             )
             .build()
 
@@ -924,6 +941,7 @@ class MigrationTest {
                 MIGRATION_13_14,
                 MIGRATION_14_15,
                 MIGRATION_15_16,
+                MIGRATION_16_17,
             )
             .build()
 
@@ -989,6 +1007,7 @@ class MigrationTest {
                 MIGRATION_13_14,
                 MIGRATION_14_15,
                 MIGRATION_15_16,
+                MIGRATION_16_17,
             )
             .build()
 
@@ -1064,6 +1083,7 @@ class MigrationTest {
                 MIGRATION_13_14,
                 MIGRATION_14_15,
                 MIGRATION_15_16,
+                MIGRATION_16_17,
             )
             .build()
 
@@ -1136,6 +1156,7 @@ class MigrationTest {
                 MIGRATION_13_14,
                 MIGRATION_14_15,
                 MIGRATION_15_16,
+                MIGRATION_16_17,
             )
             .build()
 
@@ -1203,6 +1224,7 @@ class MigrationTest {
                 MIGRATION_13_14,
                 MIGRATION_14_15,
                 MIGRATION_15_16,
+                MIGRATION_16_17,
             )
             .build()
 
@@ -1218,5 +1240,167 @@ class MigrationTest {
             migrated.close()
         }
     }
+
+    /**
+     * v16 → v17 (#1040/#1097) — dormant private-message content tables.
+     *
+     * The sentinel is deliberately inserted before the new tables exist. After raw schema
+     * validation, Room reopens the migrated file before any MP row is written, proving that the
+     * hand-written migration and the compiled schema describe the same database.
+     */
+    @Test
+    fun migrate_16_to_17_preserves_existing_data_and_creates_private_message_tables() = runTest {
+        val dbName = "migration_16_17_test"
+
+        helper.createDatabase(dbName, 16).use { v16 ->
+            v16.execSQL(
+                """INSERT INTO flag_topics (userId, type, cat, subcat, topicId, title, totalPages,
+                   replyCount, isFavorite, hasUnread, lastReadPage, lastPostReadId, firstPostAuthor,
+                   lastReplyAuthor, lastReplyAt, fetchedAt, authMode, lastPosition, postsPerPage)
+                   VALUES ('sentinel', 'CYAN', 23, 550, 35395, 'survives v17', 14, 540, 0, 1, 12,
+                   2783256, 'author', 'reply', '2026-08-24 12:00', 1000, 'AUTHENTICATED', 480, 40)""",
+            )
+        }
+
+        helper.runMigrationsAndValidate(dbName, 17, true, MIGRATION_16_17).use { v17 ->
+            v17.query("SELECT title FROM flag_topics WHERE userId = 'sentinel'").use { cursor ->
+                assertTrue("the v16 sentinel must survive", cursor.moveToFirst())
+                assertEquals("survives v17", cursor.getString(0))
+            }
+
+            assertEquals(
+                setOf(
+                    "userId",
+                    "threadId",
+                    "page",
+                    "subject",
+                    "correspondent",
+                    "totalPages",
+                    "canReply",
+                    "isMultiRecipient",
+                    "fetchedAt",
+                ),
+                v17.columnNames("mp_thread_pages"),
+            )
+            assertEquals(
+                setOf(
+                    "userId",
+                    "threadId",
+                    "page",
+                    "numreponse",
+                    "ordinal",
+                    "author",
+                    "date",
+                    "content",
+                    "avatarUrl",
+                    "isEditable",
+                    "isOwnPost",
+                    "quotedAuthors",
+                    "postIndex",
+                    "quoteRef",
+                    "profileId",
+                    "editedAt",
+                    "citedCount",
+                    "signature",
+                ),
+                v17.columnNames("mp_messages"),
+            )
+            v17.query("PRAGMA foreign_key_list(`mp_messages`)").use { cursor ->
+                val parentIndex = cursor.getColumnIndexOrThrow("table")
+                val onDeleteIndex = cursor.getColumnIndexOrThrow("on_delete")
+                var compositeParts = 0
+                while (cursor.moveToNext()) {
+                    assertEquals("mp_thread_pages", cursor.getString(parentIndex))
+                    assertEquals("CASCADE", cursor.getString(onDeleteIndex))
+                    compositeParts++
+                }
+                assertEquals("the composite parent has three columns", 3, compositeParts)
+            }
+            v17.query("PRAGMA index_list(`mp_messages`)").use { cursor ->
+                val nameIndex = cursor.getColumnIndexOrThrow("name")
+                val names = buildSet {
+                    while (cursor.moveToNext()) add(cursor.getString(nameIndex))
+                }
+                assertTrue(
+                    names.contains("index_mp_messages_userId_threadId_page_ordinal"),
+                )
+            }
+        }
+
+        val migrated = Room.databaseBuilder(
+            ApplicationProvider.getApplicationContext(),
+            RedfaceDatabase::class.java,
+            dbName,
+        )
+            .allowMainThreadQueries()
+            .addMigrations(
+                MIGRATION_1_2,
+                MIGRATION_2_3,
+                MIGRATION_3_4,
+                MIGRATION_4_5,
+                MIGRATION_5_6,
+                MIGRATION_6_7,
+                MIGRATION_7_8,
+                MIGRATION_8_9,
+                MIGRATION_9_10,
+                MIGRATION_10_11,
+                MIGRATION_11_12,
+                MIGRATION_12_13,
+                MIGRATION_13_14,
+                MIGRATION_14_15,
+                MIGRATION_15_16,
+                MIGRATION_16_17,
+            )
+            .build()
+
+        try {
+            val page = PrivateMessageThreadPageEntity(
+                userId = "alice",
+                threadId = 42,
+                page = 1,
+                subject = "subject",
+                correspondent = "correspondent",
+                totalPages = 1,
+                canReply = true,
+                isMultiRecipient = false,
+                fetchedAt = Instant.parse("2026-08-24T12:00:00Z"),
+            )
+            val message = PrivateMessageEntity(
+                userId = "alice",
+                threadId = 42,
+                page = 1,
+                numreponse = 7,
+                ordinal = 0,
+                author = "author",
+                date = Instant.parse("2026-08-24T12:00:00Z"),
+                content = PostContent(emptyList()),
+                avatarUrl = null,
+                isEditable = false,
+                isOwnPost = false,
+                quotedAuthors = emptyList(),
+                postIndex = null,
+                quoteRef = null,
+                profileId = null,
+                editedAt = null,
+                citedCount = null,
+                signature = null,
+            )
+            migrated.privateMessageContentDao().replacePage(page, listOf(message), maxPages = 5)
+
+            val stored = migrated.privateMessageContentDao().getPage("alice", 42, 1)
+            assertEquals("subject", stored?.page?.subject)
+            assertEquals(listOf(7), stored?.messages?.map { it.numreponse })
+        } finally {
+            migrated.close()
+        }
+    }
+
+    private fun androidx.sqlite.db.SupportSQLiteDatabase.columnNames(table: String): Set<String> =
+        query("PRAGMA table_info(`$table`)").use { cursor ->
+            val nameIndex = cursor.getColumnIndexOrThrow("name")
+            buildSet {
+                while (cursor.moveToNext()) add(cursor.getString(nameIndex))
+            }
+        }
 
 }

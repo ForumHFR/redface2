@@ -8,6 +8,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
@@ -212,7 +213,7 @@ class ThreadEgoHighlightTest {
         return PrivateMessageThreadUiState(
             request = request,
             mode = PrivateMessageThreadUiState.Mode.Content(
-                PrivateMessageThread(
+                thread = PrivateMessageThread(
                     threadId = THREAD_ID,
                     subject = "Sujet",
                     correspondent = OTHER_AUTHOR,
@@ -222,6 +223,7 @@ class ThreadEgoHighlightTest {
                     canReply = false,
                     isMultiRecipient = isMultiRecipient,
                 ),
+                source = PrivateMessageThreadPage.Source.NETWORK,
             ),
             page = 1,
             totalPages = 1,

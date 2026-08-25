@@ -13,6 +13,7 @@ import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.parser.messages.PrivateMessageListParser
 import fr.forumhfr.redface2.core.parser.messages.PrivateMessageThreadParser
+import java.time.Instant
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
@@ -47,12 +48,14 @@ import kotlinx.coroutines.withContext
  * (newest-first ordering) — sufficient for "is there anything new?" UX.
  */
 @Singleton
+@Suppress("LongParameterList") // Auth/network/parser plus the two deliberately separate cache tiers.
 class DefaultMessagesRepository @Inject internal constructor(
     private val authRepository: AuthRepository,
     private val hfrClient: HfrClient,
     private val parser: PrivateMessageListParser,
     private val threadParser: PrivateMessageThreadParser,
     private val threadSessionCache: PrivateMessageThreadSessionCache,
+    private val privateMessageContentAccess: PrivateMessageContentAccess,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : MessagesRepository {
 
@@ -183,15 +186,31 @@ class DefaultMessagesRepository @Inject internal constructor(
         val owner = currentPseudo()
             ?: throw SessionExpiredException(REDACTED_PRIVATE_MESSAGE_URL)
         val stamp = threadSessionCache.capture(owner)
+        var sessionCacheHit = false
         if (isCurrentSession(stamp)) {
             threadSessionCache.read(stamp, threadId, page)?.let { cached ->
                 if (isCurrentSession(stamp)) {
+                    sessionCacheHit = true
                     emit(PrivateMessageThreadPage(cached, PrivateMessageThreadPage.Source.SESSION_CACHE))
                 }
             }
         }
+        if (!sessionCacheHit) {
+            readDiskPageOrNull(owner, threadId, page)?.let { cached ->
+                if (isCurrentSession(stamp)) {
+                    emit(PrivateMessageThreadPage(cached, PrivateMessageThreadPage.Source.DISK))
+                }
+            }
+        }
 
-        fetchAndCacheThreadPage(threadId, page, fallbackCorrespondent, stamp)?.let { parsed ->
+        fetchAndCacheThreadPage(
+            threadId = threadId,
+            page = page,
+            fallbackCorrespondent = fallbackCorrespondent,
+            stamp = stamp,
+            diskUserId = owner,
+            persistToDisk = true,
+        )?.let { parsed ->
             emit(PrivateMessageThreadPage(parsed, PrivateMessageThreadPage.Source.NETWORK))
         }
         // A stale stamp deliberately produces no terminal emission: turning the refusal into data
@@ -212,7 +231,14 @@ class DefaultMessagesRepository @Inject internal constructor(
                 if (owner != null) {
                     val stamp = threadSessionCache.capture(owner)
                     if (isCurrentSession(stamp) && threadSessionCache.read(stamp, threadId, page) == null) {
-                        fetchAndCacheThreadPage(threadId, page, fallbackCorrespondent = null, stamp)
+                        fetchAndCacheThreadPage(
+                            threadId = threadId,
+                            page = page,
+                            fallbackCorrespondent = null,
+                            stamp = stamp,
+                            diskUserId = owner,
+                            persistToDisk = false,
+                        )
                     }
                 }
             } catch (cancellation: CancellationException) {
@@ -233,6 +259,8 @@ class DefaultMessagesRepository @Inject internal constructor(
         page: Int,
         fallbackCorrespondent: String?,
         stamp: PrivateMessageThreadSessionCache.Stamp,
+        diskUserId: String,
+        persistToDisk: Boolean,
     ): PrivateMessageThread? {
         val parsed = threadParser.parse(
             html = hfrClient.getPrivateMessageThreadPage(threadId = threadId, page = page),
@@ -240,8 +268,42 @@ class DefaultMessagesRepository @Inject internal constructor(
         )
         if (parsed.matchesTarget(threadId, page) && isCurrentSession(stamp)) {
             threadSessionCache.write(stamp, threadId, page, parsed)
+            if (persistToDisk) persistTerminalPage(diskUserId, parsed, stamp)
         }
         return parsed.takeIf { isCurrentSession(stamp) }
+    }
+
+    private suspend fun readDiskPageOrNull(
+        userId: String,
+        threadId: Int,
+        page: Int,
+    ): PrivateMessageThread? = try {
+        privateMessageContentAccess.readIfEnabled(userId, threadId, page)
+    } catch (cancellation: CancellationException) {
+        throw cancellation
+    } catch (@Suppress("TooGenericExceptionCaught") _: Exception) {
+        // Optional private storage is best-effort and deliberately silent (#316).
+        null
+    }
+
+    /** Preference and session seal are both re-read immediately before the Room transaction. */
+    private suspend fun persistTerminalPage(
+        userId: String,
+        thread: PrivateMessageThread,
+        stamp: PrivateMessageThreadSessionCache.Stamp,
+    ) {
+        try {
+            privateMessageContentAccess.replaceIfEnabled(
+                userId = userId,
+                thread = thread,
+                fetchedAt = Instant.now(),
+                isSessionCurrent = { isCurrentSession(stamp) },
+            )
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (@Suppress("TooGenericExceptionCaught") _: Exception) {
+            // Optional private storage is best-effort and deliberately silent (#316).
+        }
     }
 
     private suspend fun isCurrentSession(stamp: PrivateMessageThreadSessionCache.Stamp): Boolean =

@@ -58,6 +58,7 @@ import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
+import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
 import fr.forumhfr.redface2.core.model.write.QuoteLocator
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
@@ -112,7 +113,7 @@ class PrivateMessageThreadContentTest {
     fun `content renders the header ordered message list page pill and FAB cluster`() {
         setContent(
             mode = PrivateMessageThreadUiState.Mode.Content(
-                PrivateMessageThread(
+                thread = PrivateMessageThread(
                     threadId = THREAD_ID,
                     subject = "Sujet caracterise",
                     correspondent = "Correspondant",
@@ -125,6 +126,7 @@ class PrivateMessageThreadContentTest {
                     totalPages = 4,
                     canReply = true,
                 ),
+                source = PrivateMessageThreadPage.Source.NETWORK,
             ),
             page = 2,
             totalPages = 4,
@@ -1098,7 +1100,7 @@ class PrivateMessageThreadContentTest {
     fun `full width keeps one heading per message and no dangling hairline after the last message`() {
         setContent(
             mode = PrivateMessageThreadUiState.Mode.Content(
-                PrivateMessageThread(
+                thread = PrivateMessageThread(
                     threadId = THREAD_ID,
                     subject = "Pleine largeur",
                     correspondent = "Correspondant",
@@ -1111,6 +1113,7 @@ class PrivateMessageThreadContentTest {
                     totalPages = 4,
                     canReply = false,
                 ),
+                source = PrivateMessageThreadPage.Source.NETWORK,
             ),
             page = 2,
             totalPages = 4,
@@ -1725,6 +1728,7 @@ class PrivateMessageThreadContentTest {
                     canReply = canReply,
                     isMultiRecipient = isMultiRecipient,
                 ),
+                source = PrivateMessageThreadPage.Source.NETWORK,
                 hiddenNumreponses = hiddenNumreponses,
                 blockedQuoteAuthors = blockedQuoteAuthors,
             ),

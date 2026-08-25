@@ -4,6 +4,7 @@ import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.LoginError
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
+import fr.forumhfr.redface2.core.domain.messages.PrivateMessageContentCache
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageListPage
@@ -433,6 +434,95 @@ class DefaultMessagesRepositoryTest {
     }
 
     @Test
+    fun `OFF performs no private content table read or write on a visible load`() = runTest {
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.getPrivateMessageThreadPage(threadId = 42, page = 1) } returns FAKE_HTML
+        val threadParser = mockk<PrivateMessageThreadParser>()
+        coEvery { threadParser.parse(FAKE_HTML, null) } returns thread()
+        val diskCache = mockk<PrivateMessageThreadDiskCache>(relaxed = true)
+        val contentCache = mockk<PrivateMessageContentCache>(relaxed = true)
+        coEvery { contentCache.isEnabled() } returns false
+        val (repo, authStates) = buildRepository(
+            hfrClient = hfrClient,
+            threadParser = threadParser,
+            persistentCache = PersistentCacheFixture(diskCache, contentCache),
+        )
+        authStates.emit(AuthState.Authenticated("alice"))
+
+        repo.getPrivateMessageThread(threadId = 42, page = 1).toList()
+
+        coVerify(exactly = 0) { diskCache.read(any(), any(), any()) }
+        coVerify(exactly = 0) { diskCache.replace(any(), any(), any()) }
+    }
+
+    @Test
+    fun `disk hit is provisional skips RAM population and is followed by network`() = runTest {
+        val cache = PrivateMessageThreadSessionCache()
+        val diskPage = thread(subject = "disk")
+        val networkPage = thread(subject = "network")
+        val diskCache = mockk<PrivateMessageThreadDiskCache>()
+        coEvery { diskCache.read("Alice", 42, 1) } returns diskPage
+        coEvery { diskCache.replace(any(), any(), any()) } returns Unit
+        val contentCache = mockk<PrivateMessageContentCache>(relaxed = true)
+        coEvery { contentCache.isEnabled() } returns true
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.getPrivateMessageThreadPage(42, 1) } coAnswers {
+            assertNull(
+                "a provisional disk hit must not warm the session cache",
+                cache.read(cache.capture("alice"), 42, 1),
+            )
+            FAKE_HTML
+        }
+        val threadParser = mockk<PrivateMessageThreadParser>()
+        coEvery { threadParser.parse(FAKE_HTML, null) } returns networkPage
+        val (repo, authStates) = buildRepository(
+            hfrClient = hfrClient,
+            threadParser = threadParser,
+            threadSessionCache = cache,
+            persistentCache = PersistentCacheFixture(diskCache, contentCache),
+        )
+        authStates.emit(AuthState.Authenticated("Alice"))
+
+        val result = repo.getPrivateMessageThread(threadId = 42, page = 1).toList()
+
+        assertEquals(
+            listOf(
+                PrivateMessageThreadPage(diskPage, PrivateMessageThreadPage.Source.DISK),
+                PrivateMessageThreadPage(networkPage, PrivateMessageThreadPage.Source.NETWORK),
+            ),
+            result,
+        )
+        assertEquals(networkPage, cache.read(cache.capture("alice"), 42, 1))
+        coVerify(exactly = 1) { diskCache.replace("Alice", networkPage, any()) }
+    }
+
+    @Test
+    fun `flip OFF during network prevents the terminal response from reaching disk`() = runTest {
+        var enabled = true
+        val contentCache = mockk<PrivateMessageContentCache>(relaxed = true)
+        coEvery { contentCache.isEnabled() } answers { enabled }
+        val diskCache = mockk<PrivateMessageThreadDiskCache>(relaxed = true)
+        coEvery { diskCache.read(any(), any(), any()) } returns null
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.getPrivateMessageThreadPage(42, 1) } returns FAKE_HTML
+        val threadParser = mockk<PrivateMessageThreadParser>()
+        coEvery { threadParser.parse(FAKE_HTML, null) } answers {
+            enabled = false
+            thread()
+        }
+        val (repo, authStates) = buildRepository(
+            hfrClient = hfrClient,
+            threadParser = threadParser,
+            persistentCache = PersistentCacheFixture(diskCache, contentCache),
+        )
+        authStates.emit(AuthState.Authenticated("alice"))
+
+        repo.getPrivateMessageThread(threadId = 42, page = 1).toList()
+
+        coVerify(exactly = 0) { diskCache.replace(any(), any(), any()) }
+    }
+
+    @Test
     fun `a session cache hit emits immediately then is always revalidated by network`() = runTest {
         val hfrClient = mockk<HfrClient>()
         coEvery { hfrClient.getPrivateMessageThreadPage(threadId = 42, page = 1) } returns FAKE_HTML
@@ -443,10 +533,14 @@ class DefaultMessagesRepositoryTest {
         val cache = PrivateMessageThreadSessionCache()
         val stamp = cache.capture("xaat")
         cache.write(stamp, threadId = 42, page = 1, thread = cached)
+        val diskCache = mockk<PrivateMessageThreadDiskCache>(relaxed = true)
+        val contentCache = mockk<PrivateMessageContentCache>(relaxed = true)
+        coEvery { contentCache.isEnabled() } returns true
         val (repo, authStates) = buildRepository(
             hfrClient = hfrClient,
             threadParser = threadParser,
             threadSessionCache = cache,
+            persistentCache = PersistentCacheFixture(diskCache, contentCache),
         )
         authStates.emit(AuthState.Authenticated("XaaT"))
 
@@ -460,6 +554,7 @@ class DefaultMessagesRepositoryTest {
             result,
         )
         coVerify(exactly = 1) { hfrClient.getPrivateMessageThreadPage(threadId = 42, page = 1) }
+        coVerify(exactly = 0) { diskCache.read(any(), any(), any()) }
     }
 
     @Test
@@ -490,10 +585,15 @@ class DefaultMessagesRepositoryTest {
         val threadParser = mockk<PrivateMessageThreadParser>()
         coEvery { threadParser.parse(FAKE_HTML, null) } returns clamped
         val cache = PrivateMessageThreadSessionCache()
+        val diskCache = mockk<PrivateMessageThreadDiskCache>(relaxed = true)
+        coEvery { diskCache.read(any(), any(), any()) } returns null
+        val contentCache = mockk<PrivateMessageContentCache>(relaxed = true)
+        coEvery { contentCache.isEnabled() } returns true
         val (repo, authStates) = buildRepository(
             hfrClient = hfrClient,
             threadParser = threadParser,
             threadSessionCache = cache,
+            persistentCache = PersistentCacheFixture(diskCache, contentCache),
         )
         authStates.emit(AuthState.Authenticated("xaat"))
 
@@ -504,6 +604,7 @@ class DefaultMessagesRepositoryTest {
             result,
         )
         assertNull(cache.read(cache.capture("xaat"), threadId = 42, page = 9))
+        coVerify(exactly = 0) { diskCache.replace(any(), any(), any()) }
     }
 
     @Test
@@ -517,10 +618,15 @@ class DefaultMessagesRepositoryTest {
             thread()
         }
         val cache = PrivateMessageThreadSessionCache()
+        val diskCache = mockk<PrivateMessageThreadDiskCache>(relaxed = true)
+        coEvery { diskCache.read(any(), any(), any()) } returns null
+        val contentCache = mockk<PrivateMessageContentCache>(relaxed = true)
+        coEvery { contentCache.isEnabled() } returns true
         val (repo, states) = buildRepository(
             hfrClient = hfrClient,
             threadParser = threadParser,
             threadSessionCache = cache,
+            persistentCache = PersistentCacheFixture(diskCache, contentCache),
         )
         authStates = states
         authStates.emit(AuthState.Authenticated("alice"))
@@ -530,6 +636,7 @@ class DefaultMessagesRepositoryTest {
         assertEquals(emptyList<PrivateMessageThreadPage>(), result)
         assertNull(cache.read(cache.capture("alice"), threadId = 42, page = 1))
         assertNull(cache.read(cache.capture("bob"), threadId = 42, page = 1))
+        coVerify(exactly = 0) { diskCache.replace(any(), any(), any()) }
     }
 
     @Test
@@ -542,10 +649,15 @@ class DefaultMessagesRepositoryTest {
             cache.clearAndAdvanceGeneration()
             thread()
         }
+        val diskCache = mockk<PrivateMessageThreadDiskCache>(relaxed = true)
+        coEvery { diskCache.read(any(), any(), any()) } returns null
+        val contentCache = mockk<PrivateMessageContentCache>(relaxed = true)
+        coEvery { contentCache.isEnabled() } returns true
         val (repo, authStates) = buildRepository(
             hfrClient = hfrClient,
             threadParser = threadParser,
             threadSessionCache = cache,
+            persistentCache = PersistentCacheFixture(diskCache, contentCache),
         )
         authStates.emit(AuthState.Authenticated("alice"))
 
@@ -553,6 +665,7 @@ class DefaultMessagesRepositoryTest {
 
         assertEquals(emptyList<PrivateMessageThreadPage>(), result)
         assertNull(cache.read(cache.capture("alice"), threadId = 42, page = 1))
+        coVerify(exactly = 0) { diskCache.replace(any(), any(), any()) }
     }
 
     @Test
@@ -563,10 +676,14 @@ class DefaultMessagesRepositoryTest {
         val threadParser = mockk<PrivateMessageThreadParser>()
         coEvery { threadParser.parse(FAKE_HTML, null) } returns parsed
         val cache = PrivateMessageThreadSessionCache()
+        val diskCache = mockk<PrivateMessageThreadDiskCache>(relaxed = true)
+        val contentCache = mockk<PrivateMessageContentCache>(relaxed = true)
+        coEvery { contentCache.isEnabled() } returns true
         val (repo, authStates) = buildRepository(
             hfrClient = hfrClient,
             threadParser = threadParser,
             threadSessionCache = cache,
+            persistentCache = PersistentCacheFixture(diskCache, contentCache),
         )
         authStates.emit(AuthState.Authenticated(" XaaT "))
 
@@ -574,6 +691,8 @@ class DefaultMessagesRepositoryTest {
 
         assertEquals(parsed, cache.read(cache.capture("xaat"), threadId = 42, page = 2))
         coVerify(exactly = 1) { hfrClient.getPrivateMessageThreadPage(threadId = 42, page = 2) }
+        coVerify(exactly = 0) { diskCache.read(any(), any(), any()) }
+        coVerify(exactly = 0) { diskCache.replace(any(), any(), any()) }
     }
 
     @Test
@@ -651,6 +770,7 @@ class DefaultMessagesRepositoryTest {
         parser: PrivateMessageListParser = mockk(relaxed = true),
         threadParser: PrivateMessageThreadParser = mockk(relaxed = true),
         threadSessionCache: PrivateMessageThreadSessionCache = PrivateMessageThreadSessionCache(),
+        persistentCache: PersistentCacheFixture = PersistentCacheFixture(),
     ): Pair<DefaultMessagesRepository, MutableSharedFlow<AuthState>> {
         // replay=1 mirrors production (the current auth state is readable at any time) : the
         // repository snapshots the session pseudo via `first()` at fetch call-time (#439).
@@ -669,9 +789,38 @@ class DefaultMessagesRepositoryTest {
             parser = parser,
             threadParser = threadParser,
             threadSessionCache = threadSessionCache,
+            privateMessageContentAccess = persistentCache.access,
             ioDispatcher = UnconfinedTestDispatcher(),
         )
         return repo to authStates
+    }
+
+    private class PersistentCacheFixture(
+        val disk: PrivateMessageThreadDiskCache = mockk(relaxed = true),
+        val preference: PrivateMessageContentCache = mockk(relaxed = true),
+    ) {
+        val access = object : PrivateMessageContentAccess {
+            override suspend fun readIfEnabled(
+                userId: String,
+                threadId: Int,
+                page: Int,
+            ): PrivateMessageThread? = if (preference.isEnabled()) {
+                disk.read(userId, threadId, page)
+            } else {
+                null
+            }
+
+            override suspend fun replaceIfEnabled(
+                userId: String,
+                thread: PrivateMessageThread,
+                fetchedAt: Instant,
+                isSessionCurrent: suspend () -> Boolean,
+            ) {
+                if (preference.isEnabled() && isSessionCurrent()) {
+                    disk.replace(userId, thread, fetchedAt)
+                }
+            }
+        }
     }
 
     private companion object {

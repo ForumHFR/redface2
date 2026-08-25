@@ -1149,7 +1149,7 @@ class PrivateMessageThreadViewModelTest {
     }
 
     @Test
-    fun `cache content renders immediately but only network saves private read side effects`() = runTest {
+    fun `disk content stays provisional and only network saves private read side effects`() = runTest {
         val repository = mockk<MessagesRepository>()
         val cached = thread(page = 1, totalPages = 2, messages = listOf(post(7)))
         val refreshed = thread(page = 1, totalPages = 2, messages = listOf(post(8)))
@@ -1157,7 +1157,7 @@ class PrivateMessageThreadViewModelTest {
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
         } returns flow {
-            emit(PrivateMessageThreadPage(cached, PrivateMessageThreadPage.Source.SESSION_CACHE))
+            emit(PrivateMessageThreadPage(cached, PrivateMessageThreadPage.Source.DISK))
             networkGate.await()
             emit(networkPage(refreshed))
         }
@@ -1175,7 +1175,7 @@ class PrivateMessageThreadViewModelTest {
         val cachedState = viewModel.state.value
         val cachedContent = cachedState.mode as PrivateMessageThreadUiState.Mode.Content
         assertEquals(cached, cachedContent.thread)
-        assertEquals(PrivateMessageThreadPage.Source.SESSION_CACHE, cachedContent.source)
+        assertEquals(PrivateMessageThreadPage.Source.DISK, cachedContent.source)
         assertTrue(cachedState.isRefreshing)
         assertEquals(emptyMap<Int, Int>(), store.saved)
         assertEquals(emptyList<MpStorageFlagEntry>(), mpStorage.ifPresentCalls)
