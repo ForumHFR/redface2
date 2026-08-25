@@ -117,6 +117,7 @@ import fr.forumhfr.redface2.core.ui.RedfacePlaceholderScreen
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.pager.PageFab
+import fr.forumhfr.redface2.core.ui.pager.PageFabDefaults
 import fr.forumhfr.redface2.core.ui.pager.PageNavigation
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
 import fr.forumhfr.redface2.core.ui.post.CreatorPseudoText
@@ -3445,15 +3446,15 @@ private fun TopicBottomActions(
 @Composable
 private fun FabSlot(visible: Boolean, content: @Composable () -> Unit) {
     Box(
-        modifier = Modifier.sizeIn(minWidth = FAB_SLOT_SIZE, minHeight = FAB_SLOT_SIZE),
+        modifier = Modifier.sizeIn(
+            minWidth = PageFabDefaults.Size,
+            minHeight = PageFabDefaults.Size,
+        ),
         contentAlignment = Alignment.Center,
     ) {
         if (visible) content()
     }
 }
-
-/** #599 — M3 small-FAB container footprint, the reserved geometry of every [FabSlot]. */
-private val FAB_SLOT_SIZE = 40.dp
 
 // `internal` (#436): MultiQuoteFabClearTest mounts the FAB directly to pin the « Tout vider »
 // long-press wiring (tap → onClick, long press → onClear) without standing up the whole screen.
@@ -3487,7 +3488,10 @@ internal fun MultiQuoteFab(count: Int, onClick: () -> Unit, onClear: () -> Unit)
         shadowElevation = 6.dp,
     ) {
         Box(
-            modifier = Modifier.sizeIn(minWidth = FAB_SLOT_SIZE, minHeight = FAB_SLOT_SIZE),
+            modifier = Modifier.sizeIn(
+                minWidth = PageFabDefaults.Size,
+                minHeight = PageFabDefaults.Size,
+            ),
             contentAlignment = Alignment.Center,
         ) {
             Text("❝$count", style = MaterialTheme.typography.labelLarge)

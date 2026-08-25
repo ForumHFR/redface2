@@ -89,6 +89,7 @@ import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.pager.PageFab
+import fr.forumhfr.redface2.core.ui.pager.PageFabDefaults
 import fr.forumhfr.redface2.core.ui.pager.PageNavigation
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
 import fr.forumhfr.redface2.core.ui.post.CreatorPseudoText
@@ -749,16 +750,17 @@ private data class PrivateMessageReaderPresentation(
     val onImageLongPress: (PostImageTarget) -> Unit,
 )
 
-/** Page selection and departure-anchor capture shared by swipe, picker and page FABs. */
+/** Chrome selection plus departure-anchor capture also reused by the committed swipe path. */
 private data class PrivateMessagePageInteraction(
     val alignedDepartureAnchor: () -> PrivateMessageScrollAnchor?,
     val onSelectPage: (Int) -> Boolean,
 )
 
 /**
- * Builds the single tap-time page authority used by every MP navigation gesture. Bounds and the
- * rendered page come from the latest parsed state; a concurrent list producer rejects the action
- * before the exact same aligned departure anchor used by the swipe can be sampled.
+ * Builds the tap-time page authority used by the picker and page FABs. Bounds and the rendered page
+ * come from the latest parsed state; a concurrent list producer rejects those chrome actions. The
+ * swipe machine consumes the same producer gate before commit, then reuses only
+ * [PrivateMessagePageInteraction.alignedDepartureAnchor] when its irrevocable release completes.
  */
 @Composable
 private fun rememberPrivateMessagePageInteraction(
@@ -868,7 +870,12 @@ private fun PrivateMessageThreadReader(
         )
     }
     val swipeInteraction = ThreadSwipeInteraction(
-        onSelectPage = { page -> pageInteraction.onSelectPage(page) },
+        // Competing producers are consumed by the swipe machine up to lift-off. Once it has
+        // committed, a producer appearing during the release animation must not revoke the page
+        // switch; only its now-unaligned departure anchor is discarded.
+        onSelectPage = { page ->
+            callbacks.onSelectPage(page, pageInteraction.alignedDepartureAnchor())
+        },
         isTargetPageWarm = callbacks.isPageWarm,
         hasCompetingListProducer = {
             hasCompetingThreadListProducer(latestState, session, zoomState)
@@ -1180,7 +1187,7 @@ private fun ThreadTopBarTitle(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f, fill = true),
                 )
                 ThreadBarPagePill(
                     page = content.thread.page,
@@ -1335,7 +1342,7 @@ private fun ThreadBottomActions(
             )
         }
         if (pageChrome.show) {
-            ThreadPageFabSlot(visible = pageChrome.canGoPrevious) {
+            ThreadFabSlot(visible = pageChrome.canGoPrevious) {
                 PageFab(
                     description = previousLabel,
                     iconRes = fr.forumhfr.redface2.core.ui.R.drawable.ic_chevron_left,
@@ -1345,7 +1352,7 @@ private fun ThreadBottomActions(
                     enabled = pageChrome.enabled,
                 )
             }
-            ThreadPageFabSlot(visible = pageChrome.canGoNext) {
+            ThreadFabSlot(visible = pageChrome.canGoNext) {
                 PageFab(
                     description = nextLabel,
                     iconRes = fr.forumhfr.redface2.core.ui.R.drawable.ic_chevron_right,
@@ -1356,25 +1363,25 @@ private fun ThreadBottomActions(
                 )
             }
         }
-        ThreadReplyFab(canReply = canReply, onReply = callbacks.onReply)
+        ThreadFabSlot(visible = canReply) {
+            ThreadReplyFab(onReply = callbacks.onReply)
+        }
     }
 }
 
-/** Fixed 40.dp page slot: a boundary disappearing must not move its sibling under the thumb. */
+/** Fixed action slot: a disappearing page or reply affordance must not move its siblings. */
 @Composable
-private fun ThreadPageFabSlot(visible: Boolean, content: @Composable () -> Unit) {
+private fun ThreadFabSlot(visible: Boolean, content: @Composable () -> Unit) {
     Box(
         modifier = Modifier.sizeIn(
-            minWidth = THREAD_PAGE_FAB_SLOT_SIZE,
-            minHeight = THREAD_PAGE_FAB_SLOT_SIZE,
+            minWidth = PageFabDefaults.Size,
+            minHeight = PageFabDefaults.Size,
         ),
         contentAlignment = Alignment.Center,
     ) {
         if (visible) content()
     }
 }
-
-private val THREAD_PAGE_FAB_SLOT_SIZE = 40.dp
 
 /**
  * #1074 — visible « Citer N » entry to the MP editor. A long press mirrors the topic affordance and
@@ -1412,13 +1419,12 @@ internal fun MessageMultiQuoteFab(count: Int, onClick: () -> Unit, onClear: () -
 
 /**
  * #301 — reply FAB, extracted from the screen host (with [ThreadTopBarActions]) to keep it under
- * detekt's cyclomatic-complexity threshold. Shown only once the page proved a writable reply form
- * ([canReply]); [onReply] carries the page the user is viewing so HFR's prefilled `numrep` matches
- * what is on screen.
+ * detekt's cyclomatic-complexity threshold. [ThreadBottomActions] mounts it only once the page
+ * proved a writable reply form; [onReply] carries the page the user is viewing so HFR's prefilled
+ * `numrep` matches what is on screen.
  */
 @Composable
-private fun ThreadReplyFab(canReply: Boolean, onReply: () -> Unit) {
-    if (!canReply) return
+private fun ThreadReplyFab(onReply: () -> Unit) {
     val replyLabel = stringResource(R.string.messages_reply)
     ExtendedFloatingActionButton(
         text = { Text(replyLabel) },

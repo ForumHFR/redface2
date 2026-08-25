@@ -14,6 +14,8 @@ import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
+import fr.forumhfr.redface2.core.model.write.QuoteLocator
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import java.time.Instant
 import org.junit.Rule
@@ -24,10 +26,12 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * Record-only visual review of the complete MP thread chrome at the narrow 360.dp reference width.
- * Four synthetic captures complement the interaction assertions in [PrivateMessageThreadContentTest]:
+ * Record-only visual review of the complete MP thread chrome at the narrow 360 dp reference width.
+ * Five synthetic captures complement the interaction assertions in [PrivateMessageThreadContentTest]:
  * settled page pill/FAB cluster, open picker, keep-content spinner with disarmed controls, and the
- * zoomed reader with its reset chip. No real private subject, correspondent or excerpt is embedded.
+ * zoomed reader with its reset chip. The fifth combines the armed multi-quote basket with both page
+ * FABs at 360 dp so their tight but complete single-row fit can be reviewed without guessing from
+ * nominal component widths. No real private subject, correspondent or excerpt is embedded.
  *
  *     ./scripts/docker-dev.sh ./gradlew :feature:messages:testDebugUnitTest \
  *         --tests '*PrivateMessageThreadChromeRoborazziTest*' --console=plain --no-daemon
@@ -86,14 +90,31 @@ class PrivateMessageThreadChromeRoborazziTest {
         capture("private_message_thread_zoom")
     }
 
-    private fun mount(isRefreshing: Boolean = false) {
+    @Test
+    fun multiQuotePageChromeAtNarrowWidth() {
+        mount(multiQuoteCount = 3)
+
+        capture("private_message_thread_multi_quote_page_chrome")
+    }
+
+    private fun mount(isRefreshing: Boolean = false, multiQuoteCount: Int = 0) {
         val state = threadState(isRefreshing)
+        val selections = (1..multiQuoteCount).map { index ->
+            QuoteSelection(
+                locator = QuoteLocator(page = 2, numreponse = 200 + index, ref = index),
+                author = "Auteur synthétique $index",
+                excerpt = "Extrait synthétique $index",
+            )
+        }
         compose.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 PrivateMessageThreadContent(
                     state = state,
                     isMultiRecipientHint = false,
                     callbacks = NO_OP_CALLBACKS,
+                    presentation = PrivateMessageThreadPresentation(
+                        multiQuoteSelections = selections,
+                    ),
                 )
             }
         }

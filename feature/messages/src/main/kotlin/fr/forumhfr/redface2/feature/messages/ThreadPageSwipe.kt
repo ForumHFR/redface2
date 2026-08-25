@@ -61,7 +61,9 @@ import kotlinx.coroutines.launch
  * slop cancels an uncommitted drag into spring-back, even after it armed. [ThreadSwipeHandlers.enabled]
  * is sampled at DOWN and rechecked before commit; it folds the screen's competing producers
  * (refresh, zoom gesture/fling/settle, scrollbar drag and page landing/alignment). A child consuming
- * the horizontal primary drag still cancels ours; edges remain a damped no-op wall.
+ * the horizontal primary drag still cancels ours. Once lift-off commits, that decision survives the
+ * release animation; a producer starting afterwards cannot turn the completed slide into a no-op.
+ * Edges remain a damped no-op wall.
  */
 internal fun Modifier.threadPageSwipe(
     currentPage: Int,

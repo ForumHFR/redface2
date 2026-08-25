@@ -3,12 +3,12 @@ package fr.forumhfr.redface2.feature.messages
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
-import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performSemanticsAction
@@ -19,7 +19,6 @@ import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import java.time.Instant
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -48,15 +47,10 @@ class ThreadFabClearanceTest {
     fun `scrolled to the end, the last message clears the complete page and reply FAB cluster`() {
         mountOverflowingThread()
 
-        // Guard against a trivially green run: the fixture page must overflow the viewport, so the
-        // last message is NOT composed yet — otherwise the whole list fits above the FAB and
-        // the measurement below would pass with ANY bottom inset, 16.dp included.
-        assertEquals(
-            "fixture must overflow the viewport (grow the message bodies if this fails)",
-            0,
-            compose.onAllNodesWithText(LAST_MESSAGE_PREFIX, substring = true)
-                .fetchSemanticsNodes().size,
-        )
+        // Guard against a trivially green run: LazyColumn may precompose/cache an off-viewport
+        // item, so node count does NOT prove that the whole page fits. What matters here is that
+        // the last message is not displayed before the explicit end scroll below.
+        compose.onNodeWithText(LAST_MESSAGE_PREFIX, substring = true).assertIsNotDisplayed()
 
         // Scroll to the ABSOLUTE end: the lazy list's semantics ScrollBy clamps at the content
         // bounds, and the end of the list is where the defect lived (the last items settled under

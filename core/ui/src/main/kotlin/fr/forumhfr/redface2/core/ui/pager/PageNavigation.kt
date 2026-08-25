@@ -43,7 +43,10 @@ fun PageNavigation(
     enabled: Boolean = true,
     onOpenPage: (Int) -> Unit,
 ) {
-    val totalPages = availablePages.lastOrNull()?.coerceAtLeast(1) ?: 1
+    // The requested page remains the recovery ceiling while metadata is unavailable. In
+    // particular, an initial-load failure keeps availablePages empty: page N must still be able
+    // to emit N - 1 instead of exposing an enabled but dead Previous button.
+    val totalPages = maxOf(availablePages.lastOrNull() ?: currentPage, currentPage, 1)
     val selectPage = { target: Int ->
         if (enabled && target in 1..totalPages && target != currentPage) onOpenPage(target)
     }

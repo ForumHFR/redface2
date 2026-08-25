@@ -17,7 +17,7 @@ import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 
 /**
  * Shared previous/next page FAB primitive. It owns the cross-surface interaction contract only:
- * the 40.dp footprint, TalkBack role and labels, long-press haptics supplied by
+ * the [PageFabDefaults.Size] footprint, TalkBack role and labels, long-press haptics supplied by
  * [combinedClickable], and the hand-rolled Surface required by #820. A real M3 small FAB installs
  * its own click handler and swallows a `combinedClickable` placed on its modifier, silently losing
  * the first/last-page gesture.
@@ -51,7 +51,10 @@ fun PageFab(
         shadowElevation = 6.dp,
     ) {
         Box(
-            modifier = Modifier.sizeIn(minWidth = PAGE_FAB_SIZE, minHeight = PAGE_FAB_SIZE),
+            modifier = Modifier.sizeIn(
+                minWidth = PageFabDefaults.Size,
+                minHeight = PageFabDefaults.Size,
+            ),
             contentAlignment = Alignment.Center,
         ) {
             RedfaceVectorIcon(resId = iconRes)
@@ -59,4 +62,7 @@ fun PageFab(
     }
 }
 
-private val PAGE_FAB_SIZE = 40.dp
+/** Shared geometry for [PageFab] and the feature-owned slots that reserve its position. */
+object PageFabDefaults {
+    val Size = 40.dp
+}

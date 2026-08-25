@@ -385,6 +385,7 @@ class ThreadPageSwipeTest {
     fun `production modifier keeps one commit until the warm page has landed`() {
         val renderedPage = mutableStateOf(2)
         val isRefreshing = mutableStateOf(false)
+        val competingProducer = mutableStateOf(false)
         val selectedPages = mutableListOf<Int>()
         setProductionSwipeContent(
             currentPage = renderedPage,
@@ -397,12 +398,16 @@ class ThreadPageSwipeTest {
                     isRefreshing.value = true
                 },
                 isTargetPageWarm = { true },
+                hasCompetingListProducer = { competingProducer.value },
             ),
         )
         compose.mainClock.autoAdvance = false
 
         swipeLeft(waitForIdle = false)
         assertEquals("selection must wait for the slide-out", emptyList<Int>(), selectedPages)
+        // The decision was acquired at lift-off. A scrollbar/zoom/list producer appearing during
+        // the release may invalidate the departure anchor, but must not revoke the page switch.
+        competingProducer.value = true
         swipeLeft(waitForIdle = false)
         compose.mainClock.advanceTimeBy(SLIDE_OUT_TEST_ADVANCE_MILLIS)
         compose.waitForIdle()
@@ -411,6 +416,7 @@ class ThreadPageSwipeTest {
         assertEquals("the outgoing page remains rendered until content arrives", 2, renderedPage.value)
         assertTrue(isRefreshing.value)
 
+        competingProducer.value = false
         // A cache hit now replaces the rendered page and re-keys pointerInput, but mandatory
         // network revalidation keeps the new block disabled: a fresh latch is not yet a re-arm.
         compose.runOnIdle { renderedPage.value = 3 }
