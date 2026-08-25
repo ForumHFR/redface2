@@ -669,6 +669,18 @@ erreur ; aucun envoi live n'a été tenté.
 | Réponse simple | `message.php` suivi depuis `form#repondre_form` | **vide** | vide |
 | Citation | `message.php` suivi depuis le lien « citer » | **message cité** | `[quotemsg=…]` |
 
+**Le premier « message » d'une page N > 1 est une « Reprise du message précédent », servie avec
+`ref=0` — mesuré, plus supposé.** La capture `thread_multipage` du 2026-08-24
+([#1107](https://github.com/ForumHFR/redface2/issues/1107)) a lu, dans une seule session
+authentifiée, trois pages adjacentes de la même conversation `cat=prive` : sur N comme sur N+1, la
+première ancre est bien le récapitulatif du dernier message de la page précédente — jeux d'ancres
+réelles disjoints entre les trois pages — et son lien « citer » porte `ref=0`. Ce n'est donc pas un
+rang **manquant** mais un rang **nul déclaré par HFR** ; le message réel existe sur la page N−1 avec
+son vrai rang. Le fail-closed MP (`ref >= 1`) masque « Citer » sur ce récapitulatif, en 1:1 comme en
+DT — trou de couverture suivi par [#1110](https://github.com/ForumHFR/redface2/issues/1110). La même
+capture a mesuré le **rabattement serveur** : une demande de page au-delà de la dernière est servie
+comme la dernière, l'URL effective en fait foi.
+
 Conséquence pour le lot 4 de #1040 : la citation MP/DT ne demande **aucun** nouveau parser ni champ
 supplémentaire — `ReplyFormParser` transporte déjà tous les champs cachés verbatim et le
 `content_form` prérempli. La citation simple et le panier multiple sont livrés avec un scope MP typé.
