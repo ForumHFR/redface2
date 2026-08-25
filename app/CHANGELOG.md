@@ -16,6 +16,41 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.43.0` — `open` (bêta) — 2026-08-25
+
+Promotion bêta du chantier de **parité de lecture Sujet ↔ Conversations privées** ([#1040](https://github.com/ForumHFR/redface2/issues/1040)), livré en dev de `0.42.0` à `0.42.8`.
+
+Les conversations privées lisent désormais avec la même surface que les sujets : même carte, mêmes gestes, même chrome de pagination, mêmes affordances.
+
+### Ajouté
+
+- **Zoom pincé, balayage de page, double-tap pour rafraîchir, tirer-pour-rafraîchir** dans les conversations privées, sur les moteurs partagés avec les sujets. Pendant un zoom, les autres gestes sont **désarmés**, pas seulement leur effet.
+
+- **Le chrome de pagination des sujets** : sélecteur de page en barre, cluster de boutons flottants dont l'appui long saute à la première ou à la dernière page.
+
+- **La position de lecture de chaque page est retrouvée** en revenant dessus. L'atterrissage est arbitré : message cité explicite, puis position mémorisée, puis haut de page.
+
+- **Citer plusieurs messages d'un coup**, avec un panier et une affordance directe au pied de chaque carte — comme dans les sujets.
+
+- **Le menu d'un message s'ouvre par le `⋯` de l'en-tête.** L'appui long sur la carte ne fait plus rien : il levait deux gestes à la fois, la sélection de texte et le menu.
+
+- **Liste noire, EgoQuote/EgoPost, pleine largeur, densité, signatures, marqueur d'édition** : les préférences de lecture des sujets s'appliquent aux messages privés.
+
+- **Cache disque des conversations privées**, opt-in, **désactivé par défaut** — la seule fonction qui écrit vos messages privés sur le disque. Désactiver efface immédiatement, et les octets sont réellement écrasés.
+
+### Corrigé
+
+- **Les images des conversations privées ne sont plus écrites sur le disque** et ne survivent plus à la déconnexion.
+- **Le saut vers un message cité fonctionne en authentifié**, sujets compris.
+- Le préchargement des pages voisines est **borné** : jamais depuis la liste, jamais sur disque.
+
+### Interne
+
+- Migration de schéma 16 → 17, **irréversible sans désinstallation**, sans écriture de données.
+- Matrice de parité : **29 fonctions livrées sur 32**, 2 impossibles côté serveur, 1 en attente de preuve.
+
+---
+
 ## `0.42.8` — `internal` (dev) — 2026-08-25
 
 Lot 7 du chantier de parité de lecture Sujet ↔ Conversations privées ([#1040](https://github.com/ForumHFR/redface2/issues/1040), lot [#1097](https://github.com/ForumHFR/redface2/issues/1097)) : le cache disque des conversations privées, **désactivé par défaut**.

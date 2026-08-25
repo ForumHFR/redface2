@@ -1,6 +1,10 @@
-Redface 2 v0.42.8 — dev.
+Redface 2 v0.43.0 — bêta.
 
-- Nouveau réglage « garder les conversations privées en cache sur l'appareil », dans Messages privés. Désactivé par défaut.
-- C'est la seule fonction qui écrit vos messages privés sur le disque, d'où la confirmation avant activation.
-- Le désactiver efface immédiatement, et les octets sont réellement écrasés — pas seulement les lignes supprimées.
-- La déconnexion et le changement de compte effacent aussi les données du compte sortant.
+Les conversations privées lisent enfin comme les sujets.
+
+- Zoom pincé, balayage de page, double-tap pour rafraîchir.
+- Le chrome de pagination des sujets : sélecteur de page, boutons flottants, appui long pour la première ou la dernière page.
+- La position de lecture de chaque page est retrouvée.
+- Citer plusieurs messages d'un coup, avec un bouton sur chaque carte.
+- Le menu s'ouvre par le « ... » de l'en-tête.
+- Cache local des conversations, désactivé par défaut.

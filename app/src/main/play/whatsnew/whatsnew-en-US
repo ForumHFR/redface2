@@ -1,6 +1,10 @@
-Redface 2 v0.42.8 — dev.
+Redface 2 v0.43.0 — beta.
 
-- New setting "keep private conversations cached on the device", under Private messages. Off by default.
-- It is the only feature that writes your private messages to disk, hence the confirmation before enabling it.
-- Turning it off erases immediately, and the bytes are actually overwritten — not merely the rows deleted.
-- Signing out and switching accounts also erase the outgoing account's data.
+Private conversations finally read like topics.
+
+- Pinch zoom, page swipe, double-tap to refresh.
+- The topic pagination chrome: page picker, floating buttons, long press for the first or last page.
+- The reading position of each page is restored when you come back to it.
+- Quote several messages at once, with a button on every card.
+- A message's menu opens from the header "...".
+- New: keep conversations cached on the device, off by default.
