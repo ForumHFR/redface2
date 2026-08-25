@@ -25,10 +25,11 @@ import fr.forumhfr.redface2.core.ui.R
  * current page only; page-scoped reveal state belongs to the host.
  *
  * By design this placeholder exposes no quote/edit action: the reader reveals first, then acts on
- * the full card. [trailing] lets a feature preserve access to an already-existing contextual menu
- * without teaching this shared primitive which menu it is; the topic leaves it null, while MP uses
- * it for the same `⋯` trigger as a visible message. The author label remains the item's exactly-one
- * accessibility heading (#884), mirroring the identity heading of a visible reading card.
+ * the full card. [trailing] lets a feature add a contextual target without teaching this shared
+ * primitive which menu it is; the topic leaves it null, while MP uses it to improve access to the
+ * unblock action through the same `⋯` trigger as a visible message. That menu must keep body-derived
+ * actions disabled until reveal. The author label remains the item's exactly-one accessibility
+ * heading (#884), mirroring the identity heading of a visible reading card.
  */
 @Composable
 fun HiddenPostCard(

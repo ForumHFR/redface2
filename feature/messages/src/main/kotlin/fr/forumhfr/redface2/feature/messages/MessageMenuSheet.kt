@@ -46,14 +46,16 @@ import fr.forumhfr.redface2.core.ui.post.hideThenDismiss
  * This is deliberately not a specialization of the topic's `PostMenuSheet`: the MP surface owns
  * copy, profile, multi-quote selection and block/unblock plus the two data-driven information
  * lines. It exposes neither the simple quote entry nor a private permalink: simple citation (#1074)
- * lives in the message-card footer, while adding/removing a message from the basket is contextual,
- * like the topic's multi-quote action. No tested HFR contract builds a precise MP permalink.
+ * lives in the message-card footer. Adding/removing a message from the basket keeps this contextual
+ * entry in addition to the direct footer affordance (#1102), like on the topic card. No tested HFR
+ * contract builds a precise MP permalink.
  *
  * The profile action rides on the hero row, like the topic menu. A null callback keeps that row
  * inert. The block action is likewise hidden by capability (the caller omits it for one's own
- * messages), never rendered disabled. Image-only messages project to an empty string through
- * [postContentPlainText]; their copy button stays visible but disabled so the UI never copies an
- * empty clip silently.
+ * messages), never rendered disabled. Copy additionally follows the card's reveal state: a hidden
+ * message must be explicitly revealed before its projected body can leave the sheet. Image-only
+ * messages project to an empty string through [postContentPlainText]; their copy button stays
+ * visible but disabled so the UI never copies an empty clip silently.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Suppress("LongParameterList")
@@ -61,6 +63,7 @@ import fr.forumhfr.redface2.core.ui.post.hideThenDismiss
 internal fun MessageMenuSheet(
     message: Post,
     authorBlocked: Boolean,
+    contentVisible: Boolean,
     onDismiss: () -> Unit,
     onOpenProfile: (() -> Unit)? = null,
     multiQuoteSelected: Boolean = false,
@@ -132,7 +135,7 @@ internal fun MessageMenuSheet(
                     copyMessageTextToClipboard(context, plainText, copiedFeedback)
                     hideThenDismiss(coroutineScope, sheetState, onDismiss)
                 },
-                enabled = plainText.isNotBlank(),
+                enabled = contentVisible && plainText.isNotBlank(),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(stringResource(R.string.messages_message_menu_copy_text))

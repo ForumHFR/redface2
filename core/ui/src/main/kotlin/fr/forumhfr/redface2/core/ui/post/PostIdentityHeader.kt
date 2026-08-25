@@ -43,7 +43,8 @@ import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
  *  - [dateTrailing] (optional) — a marker on the SAME row as the date, to its right (the topic's
  *    and MP's data-driven `· édité`, #483/#1051); `null` keeps the date as a plain single line.
  *  - [subline] (optional) — extra line under the date; unused by the topic now, available for MP.
- *  - [trailing] (optional) — the `⋯` per-post menu glyph (topic); `null` on the MP.
+ *  - [trailing] (optional) — the `⋯` per-post menu glyph supplied by topic and MP cards; `null` for
+ *    hosts without a contextual menu.
  *
  * Clicks: [RedfaceUserAvatar] carries no `onClick` of its own, so the avatar tap is a
  * `Modifier.clickable` this header wraps around it (with `role = Role.Button` and a

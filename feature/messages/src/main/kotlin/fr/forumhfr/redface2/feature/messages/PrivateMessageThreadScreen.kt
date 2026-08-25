@@ -512,9 +512,10 @@ internal fun PrivateMessageThreadContent(
     // list coordinates before B's Top landing runs.
     val alignment = remember(state.connectedPseudo) { PrivateMessageListAlignment() }
     var isScrollbarDragging by remember { mutableStateOf(false) }
-    // #1051 — private message whose feature-owned menu is open. Kept local like the image menu:
-    // ephemeral UI state contains no route/private-data persistence across process death.
-    var messageMenuTarget by remember { mutableStateOf<Post?>(null) }
+    // #1051/#1117 — private message whose feature-owned menu is open, plus whether a blocked body
+    // was explicitly revealed at the originating target. Kept local like the image menu: ephemeral
+    // UI state contains no route/private-data persistence across process death.
+    var messageMenuTarget by remember { mutableStateOf<MessageMenuTarget?>(null) }
     // #831/#1051 — post image whose contextual menu is open (null = closed). Deliberately not
     // rememberSaveable: losing an ephemeral menu across process death is acceptable.
     var imageMenuTarget by remember { mutableStateOf<PostImageTarget?>(null) }
@@ -528,10 +529,10 @@ internal fun PrivateMessageThreadContent(
             },
         )
     }
-    val openMessageMenu = remember<(Post) -> Unit> {
-        { message ->
+    val openMessageMenu = remember<(Post, Boolean) -> Unit> {
+        { message, contentRevealed ->
             imageMenuTarget = null
-            messageMenuTarget = message
+            messageMenuTarget = MessageMenuTarget(message, contentRevealed)
         }
     }
     val content = mode as? PrivateMessageThreadUiState.Mode.Content
@@ -745,8 +746,14 @@ internal data class PrivateMessageReaderSession(
 /** Reader-only presentation inputs owned locally by [PrivateMessageThreadContent]. */
 private data class PrivateMessageReaderPresentation(
     val multiQuoteSelections: List<QuoteSelection>,
-    val onOpenMessageMenu: (Post) -> Unit,
+    val onOpenMessageMenu: (message: Post, contentRevealed: Boolean) -> Unit,
     val onImageLongPress: (PostImageTarget) -> Unit,
+)
+
+/** Ephemeral menu target; explicit reveal prevents a hidden body from escaping through copy. */
+private data class MessageMenuTarget(
+    val message: Post,
+    val contentRevealed: Boolean,
 )
 
 /** Chrome selection plus departure-anchor capture also reused by the committed swipe path. */
@@ -1069,7 +1076,7 @@ private fun ThreadZoomResetChip(
 private fun ThreadMessageMenuHost(
     mode: PrivateMessageThreadUiState.Mode,
     connectedPseudo: String?,
-    target: Post?,
+    target: MessageMenuTarget?,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit,
     multiQuoteSelections: List<QuoteSelection>,
     onToggleMultiQuote: (QuoteSelection) -> Unit,
@@ -1078,46 +1085,47 @@ private fun ThreadMessageMenuHost(
 ) {
     val targetStillOnPage = mode is PrivateMessageThreadUiState.Mode.Content &&
         target != null &&
-        mode.thread.messages.any { message -> message.numreponse == target.numreponse }
+        mode.thread.messages.any { message -> message.numreponse == target.message.numreponse }
 
     LaunchedEffect(mode, target) {
         if (!targetStillOnPage) onClear()
     }
 
-    if (mode is PrivateMessageThreadUiState.Mode.Content && targetStillOnPage) {
-        target.let { message ->
-            val authorCanonical = remember(message.author) { canonicalizePseudo(message.author) }
-            val connectedCanonical = remember(connectedPseudo) {
-                connectedPseudo?.let(::canonicalizePseudo)
-            }
-            val authorBlocked = authorCanonical in mode.blockedQuoteAuthors
-            val quoteSelection = message.toPrivateMessageQuoteSelectionOrNull(mode.thread.page)
-            MessageMenuSheet(
-                message = message,
-                authorBlocked = authorBlocked,
-                onDismiss = onClear,
-                onOpenProfile = message.profileId?.let { profileId ->
-                    { onOpenProfile(profileId, message.author, message.avatarUrl) }
-                },
-                // Same self-block gate as the topic, based on the live session pseudo rather than
-                // Post.isOwnPost (HFR can omit ownership tools for affichoutils=0 profiles).
-                onToggleBlockAuthor = if (
-                    connectedCanonical != null && authorCanonical == connectedCanonical
-                ) {
-                    null
-                } else {
-                    { onSetAuthorBlocked(message.author, !authorBlocked) }
-                },
-                multiQuoteSelected = multiQuoteSelections.any { selection ->
-                    selection.numreponse == message.numreponse
-                },
-                // A blocked-but-explicitly-revealed message remains outside the basket until its
-                // author is unblocked; otherwise changing page would silently re-hide a selected MP.
-                onToggleMultiQuote = quoteSelection
-                    ?.takeIf { mode.thread.canReply && !authorBlocked }
-                    ?.let { selection -> { onToggleMultiQuote(selection) } },
-            )
+    if (mode is PrivateMessageThreadUiState.Mode.Content && target != null && targetStillOnPage) {
+        val message = target.message
+        val authorCanonical = remember(message.author) { canonicalizePseudo(message.author) }
+        val connectedCanonical = remember(connectedPseudo) {
+            connectedPseudo?.let(::canonicalizePseudo)
         }
+        val authorBlocked = authorCanonical in mode.blockedQuoteAuthors
+        val contentVisible = message.numreponse !in mode.hiddenNumreponses || target.contentRevealed
+        val quoteSelection = message.toPrivateMessageQuoteSelectionOrNull(mode.thread.page)
+        MessageMenuSheet(
+            message = message,
+            authorBlocked = authorBlocked,
+            contentVisible = contentVisible,
+            onDismiss = onClear,
+            onOpenProfile = message.profileId?.let { profileId ->
+                { onOpenProfile(profileId, message.author, message.avatarUrl) }
+            },
+            // Same self-block gate as the topic, based on the live session pseudo rather than
+            // Post.isOwnPost (HFR can omit ownership tools for affichoutils=0 profiles).
+            onToggleBlockAuthor = if (
+                connectedCanonical != null && authorCanonical == connectedCanonical
+            ) {
+                null
+            } else {
+                { onSetAuthorBlocked(message.author, !authorBlocked) }
+            },
+            multiQuoteSelected = multiQuoteSelections.any { selection ->
+                selection.numreponse == message.numreponse
+            },
+            // A blocked-but-explicitly-revealed message remains outside the basket until its
+            // author is unblocked; otherwise changing page would silently re-hide a selected MP.
+            onToggleMultiQuote = quoteSelection
+                ?.takeIf { mode.thread.canReply && !authorBlocked }
+                ?.let { selection -> { onToggleMultiQuote(selection) } },
+        )
     }
 }
 
@@ -1556,7 +1564,7 @@ private fun ThreadMessages(
     onRemoveMultiQuotes: (Set<Int>) -> Unit,
     onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)?,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit,
-    onOpenMessageMenu: (Post) -> Unit,
+    onOpenMessageMenu: (message: Post, contentRevealed: Boolean) -> Unit,
     onImageLongPress: (PostImageTarget) -> Unit,
     scrollSession: ThreadScrollSession,
 ) {
@@ -1633,10 +1641,13 @@ private fun ThreadMessages(
                         revealedHiddenMessages = revealedHiddenMessages + message.numreponse
                     },
                     // Removing the card-wide long press must not strand a blocked author without
-                    // access to the existing unblock menu. The placeholder still exposes no quote
-                    // affordance: reveal and menu are its only explicit targets.
+                    // access to the unblock menu newly exposed here. The placeholder still exposes
+                    // no quote affordance or body access: reveal and menu are its only explicit
+                    // targets, and the menu knows that the content remains hidden.
                     trailing = {
-                        MessageMenuTrigger(onOpenMenu = { onOpenMessageMenu(message) })
+                        MessageMenuTrigger(
+                            onOpenMenu = { onOpenMessageMenu(message, false) },
+                        )
                     },
                     modifier = Modifier.threadIslandPadding(fullWidthPosts),
                 )
@@ -1648,8 +1659,8 @@ private fun ThreadMessages(
                     revealedHiddenMessages,
                 )
                 // #1074/#1102 — derive simple quote and direct basket toggle ONCE, under the same
-                // authenticated/writable + visible + positive-ref gate. Keeping both callbacks in
-                // one nullable value makes a future #1110 relaxation a one-site change.
+                // writable + unblocked + positive-ref + quote-callback gate. Keeping both callbacks
+                // in one nullable value makes a future #1110 relaxation a one-site change.
                 val quoteAffordances = messageQuoteAffordances(
                     canReply = canReply,
                     authorBlocked = message.numreponse in hiddenNumreponses,
@@ -1677,7 +1688,12 @@ private fun ThreadMessages(
                     onOpenProfile = message.profileId?.let { profileId ->
                         { onOpenProfile(profileId, message.author, message.avatarUrl) }
                     },
-                    onOpenMenu = { onOpenMessageMenu(message) },
+                    onOpenMenu = {
+                        onOpenMessageMenu(
+                            message,
+                            message.numreponse in revealedHiddenMessages,
+                        )
+                    },
                     onImageLongPress = onImageLongPress,
                     onGoToCitedPost = onGoToCitedPost,
                     quoteAffordances = quoteAffordances,
@@ -1695,13 +1711,18 @@ private fun messageQuoteAffordances(
     page: Int,
     callbacks: MessageQuoteCallbacks,
 ): MessageQuoteAffordances? {
-    val selection = message.toPrivateMessageQuoteSelectionOrNull(page) ?: return null
-    val quote = callbacks.onQuote ?: return null
-    if (!canReply || authorBlocked) return null
-    return MessageQuoteAffordances(
-        onQuote = { quote(message) },
-        onToggleMultiQuote = { callbacks.onToggleMultiQuote(selection) },
-    )
+    val selection = message.toPrivateMessageQuoteSelectionOrNull(page)
+    val quote = callbacks.onQuote
+    return when {
+        !canReply -> null
+        authorBlocked -> null
+        selection == null -> null
+        quote == null -> null
+        else -> MessageQuoteAffordances(
+            onQuote = { quote(message) },
+            onToggleMultiQuote = { callbacks.onToggleMultiQuote(selection) },
+        )
+    }
 }
 
 /** Builds the complete locator only when the measured MP contract can be represented. */
