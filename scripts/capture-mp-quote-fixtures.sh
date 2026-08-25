@@ -13,6 +13,7 @@ cookie_jar=''
 observations_file=''
 hfr_capture_password=''
 search_tool=''
+self_test_control_redirect=0
 last_effective_url=''
 last_response_date=''
 last_response_code=''
@@ -70,6 +71,8 @@ manquantes de #1040/#1107 :
                    présence sur les deux pages dans la même session
   --ref-probe      depuis un href de citation servi : ref d'origine, ref absent,
                    puis ref=0, sans soumettre aucun formulaire
+  --self-test-control-redirect
+                   tester hors ligne la garde de redirection du topic public
   --all            les six captures (comportement par défaut)
   -h, --help       afficher cette aide
 
@@ -176,6 +179,9 @@ from urllib.parse import parse_qs, unquote_plus, urldefrag, urlsplit, urlunsplit
 
 HFR_HOST = "forum.hardware.fr"
 HFR_HOST_URL = "https://forum.hardware.fr"
+PRETTY_TOPIC_PATH = re.compile(
+    r"^/hfr/(?:[^/]+/)+[^/]+-sujet_([1-9][0-9]*)_([1-9][0-9]*)\.htm$"
+)
 
 
 def fail(message, code=2):
@@ -183,7 +189,7 @@ def fail(message, code=2):
     raise SystemExit(code)
 
 
-def split_hfr_url(raw_url, expected_path, category="private"):
+def split_hfr_origin_url(raw_url):
     try:
         parts = urlsplit(raw_url.strip())
         port = parts.port
@@ -193,6 +199,11 @@ def split_hfr_url(raw_url, expected_path, category="private"):
         fail("URL refusée : fournir une URL HTTPS de forum.hardware.fr")
     if parts.username is not None or parts.password is not None or port not in (None, 443):
         fail("URL refusée : identifiants ou port inattendus")
+    return parts
+
+
+def split_hfr_url(raw_url, expected_path, category="private"):
+    parts = split_hfr_origin_url(raw_url)
     if parts.path != expected_path:
         fail(f"URL refusée : chemin attendu {expected_path}, reçu {parts.path or '/'}")
     query = parse_qs(parts.query, keep_blank_values=True)
@@ -236,6 +247,64 @@ def validate_url(
             fail("URL de citation refusée : ref doit être un entier unique ou être absent")
     # Un fragment navigateur n'est jamais envoyé au serveur.
     print(urlunsplit(("https", HFR_HOST, parts.path, parts.query, "")))
+
+
+def validate_control_effective_url(raw_url, requested_url):
+    _requested_parts, requested_query = split_hfr_url(
+        requested_url,
+        "/forum2.php",
+        category="public",
+    )
+    requested_post = require_single_positive(requested_query, "post", "post")
+    requested_page = require_single_positive(requested_query, "page", "page")
+
+    parts = split_hfr_origin_url(raw_url)
+    if parts.path == "/forum2.php":
+        _parts, query = split_hfr_url(raw_url, "/forum2.php", category="public")
+        require_single_positive(query, "post", "post")
+        require_single_positive(query, "page", "page")
+        print(urlunsplit(("https", HFR_HOST, parts.path, parts.query, "")))
+        return
+
+    match = PRETTY_TOPIC_PATH.fullmatch(parts.path)
+    if match is None or parts.query:
+        fail(
+            "URL refusée : chemin attendu /forum2.php ou URL jolie de topic public, "
+            f"reçu {parts.path or '/'}"
+        )
+    effective_post, effective_page = map(int, match.groups())
+    if effective_post != requested_post or effective_page != requested_page:
+        fail(
+            "URL jolie de contrôle refusée : post/page effectifs "
+            f"{effective_post}/{effective_page}, attendus {requested_post}/{requested_page}"
+        )
+    print(urlunsplit(("https", HFR_HOST, parts.path, "", "")))
+
+
+def self_test_control_effective_url():
+    import contextlib
+    import io
+
+    requested = "https://forum.hardware.fr/forum2.php?cat=23&post=35421&page=66"
+    accepted = (
+        "https://forum.hardware.fr/hfr/gsmgpspda/android/"
+        "redface-canal-developpement-sujet_35421_66.htm"
+    )
+    rejected = (
+        accepted.replace("sujet_35421_", "sujet_99999_"),
+        accepted.replace("_66.htm", "_67.htm"),
+        accepted.replace("forum.hardware.fr", "example.com"),
+    )
+    with contextlib.redirect_stdout(io.StringIO()):
+        validate_control_effective_url(accepted, requested)
+    for candidate in rejected:
+        try:
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                validate_control_effective_url(candidate, requested)
+        except SystemExit:
+            continue
+        fail(f"Auto-test en échec : URL indûment acceptée : {candidate}", code=1)
+    print("Auto-test redirection control_topic : OK")
 
 
 def validate_multipage_urls(raw_urls):
@@ -977,6 +1046,10 @@ elif command == "validate-control" and len(sys.argv) == 3:
         category="public",
         require_thread_page=True,
     )
+elif command == "validate-control-effective" and len(sys.argv) == 4:
+    validate_control_effective_url(sys.argv[2], sys.argv[3])
+elif command == "self-test-control-effective" and len(sys.argv) == 2:
+    self_test_control_effective_url()
 elif command == "validate-quote" and len(sys.argv) == 3:
     validate_url(sys.argv[2], "/message.php", require_quote_keys=True)
 elif command == "validate-quote-probe" and len(sys.argv) == 3:
@@ -1325,7 +1398,14 @@ hfr_get() {
     record 'GET refusé après réseau : curl n’a pas fourni de code HTTP exploitable.'
     return 1
   fi
-  if ! effective_validation="$(html_tool "$validator" "$last_effective_url" 2>&1)"; then
+  if [[ "$kind" == 'control-topic' ]]; then
+    effective_validation="$(
+      html_tool validate-control-effective "$last_effective_url" "$validated_url" 2>&1
+    )" || {
+      record "GET refusé après redirection : $effective_validation"
+      return 1
+    }
+  elif ! effective_validation="$(html_tool "$validator" "$last_effective_url" 2>&1)"; then
     record "GET refusé après redirection : $effective_validation"
     return 1
   fi
@@ -1679,6 +1759,9 @@ while [[ "$#" -gt 0 ]]; do
       selected[ref_probe]=1
       explicit_selection=1
       ;;
+    --self-test-control-redirect)
+      self_test_control_redirect=1
+      ;;
     --all)
       selected[mp_quote]=1
       selected[dt_quote]=1
@@ -1700,6 +1783,12 @@ while [[ "$#" -gt 0 ]]; do
   esac
   shift
 done
+
+if [[ "$self_test_control_redirect" -eq 1 ]]; then
+  require_command python3
+  html_tool self-test-control-effective
+  exit 0
+fi
 
 if [[ "$explicit_selection" -eq 0 ]]; then
   selected[mp_quote]=1
