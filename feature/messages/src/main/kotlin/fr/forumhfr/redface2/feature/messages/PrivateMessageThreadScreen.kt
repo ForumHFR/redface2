@@ -555,6 +555,7 @@ internal fun PrivateMessageThreadContent(
     // Keep-content loading is the observable switch state and disarms every chrome control. Other
     // producers can start between composition and the tap, so the action rechecks the live gate.
     val pageControlsEnabled = content != null && !state.isRefreshing
+    val canReply = content?.thread?.canReply == true
     var pagePickerOpen by remember { mutableStateOf(false) }
     LaunchedEffect(content) {
         if (content == null) pagePickerOpen = false
@@ -606,31 +607,23 @@ internal fun PrivateMessageThreadContent(
         },
         floatingActionButton = {
             ThreadBottomActions(
-                canReply = content?.thread?.canReply == true,
-                multiQuoteCount = if (content?.thread?.canReply == true) {
+                canReply = canReply,
+                multiQuoteCount = if (canReply) {
                     multiQuoteSelections.size
                 } else {
                     0
                 },
-                pageChrome = ThreadPageFabChrome(
-                    show = state.showPageFabs && content != null,
-                    canGoPrevious = content?.thread?.page?.let { it > 1 } == true,
-                    canGoNext = content?.thread?.let { it.page < it.totalPages } == true,
+                pageChrome = threadPageFabChrome(
+                    showPageFabs = state.showPageFabs,
+                    content = content,
                     enabled = pageControlsEnabled,
-                    actions = ThreadPageFabActions(
-                        onPreviousPage = {
-                            pageInteraction.onSelectPage(state.page - 1)
-                        },
-                        onNextPage = {
-                            pageInteraction.onSelectPage(state.page + 1)
-                        },
-                        onFirstPage = { pageInteraction.onSelectPage(1) },
-                        onLastPage = { pageInteraction.onSelectPage(state.totalPages) },
-                    ),
+                    pageInteraction = pageInteraction,
                 ),
-                onReply = callbacks.onReply,
-                onMultiQuote = callbacks.onMultiQuote,
-                onClearMultiQuote = callbacks.onClearMultiQuote,
+                callbacks = ThreadBottomActionCallbacks(
+                    onReply = callbacks.onReply,
+                    onMultiQuote = callbacks.onMultiQuote,
+                    onClearMultiQuote = callbacks.onClearMultiQuote,
+                ),
             )
         },
     ) { innerPadding ->
@@ -684,7 +677,6 @@ internal fun PrivateMessageThreadContent(
 
                 is PrivateMessageThreadUiState.Mode.Content -> PrivateMessageThreadReader(
                     state = state,
-                    mode = mode,
                     callbacks = callbacks,
                     session = readerSession,
                     runtime = PrivateMessageReaderRuntime(
@@ -701,35 +693,13 @@ internal fun PrivateMessageThreadContent(
         }
     }
 
-    if (pagePickerOpen && content != null) {
-        ModalBottomSheet(onDismissRequest = { pagePickerOpen = false }) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-                    .navigationBarsPadding(),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text(
-                    text = stringResource(R.string.messages_page_picker_title),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                PageNavigation(
-                    currentPage = content.thread.page,
-                    availablePages = remember(content.thread.totalPages) {
-                        (1..content.thread.totalPages.coerceAtLeast(1)).toList()
-                    },
-                    canGoPrevious = content.thread.page > 1,
-                    canGoNext = content.thread.page < content.thread.totalPages,
-                    enabled = pageControlsEnabled,
-                    onOpenPage = { target ->
-                        if (pageInteraction.onSelectPage(target)) pagePickerOpen = false
-                    },
-                )
-            }
-        }
-    }
+    ThreadPagePickerHost(
+        open = pagePickerOpen,
+        content = content,
+        enabled = pageControlsEnabled,
+        pageInteraction = pageInteraction,
+        onDismiss = { pagePickerOpen = false },
+    )
 
     // #612 — participant roster sheet. Renders nothing while Hidden; the ViewModel drives the
     // open / loading / loaded / unavailable / error states (lazy fetch + memory cache).
@@ -830,6 +800,47 @@ private fun rememberPrivateMessagePageInteraction(
     )
 }
 
+/** Feature-owned sheet host: the shared picker primitive contains no lifecycle or placement policy. */
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun ThreadPagePickerHost(
+    open: Boolean,
+    content: PrivateMessageThreadUiState.Mode.Content?,
+    enabled: Boolean,
+    pageInteraction: PrivateMessagePageInteraction,
+    onDismiss: () -> Unit,
+) {
+    if (!open || content == null) return
+    val thread = content.thread
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .navigationBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.messages_page_picker_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            PageNavigation(
+                currentPage = thread.page,
+                availablePages = remember(thread.totalPages) {
+                    (1..thread.totalPages.coerceAtLeast(1)).toList()
+                },
+                canGoPrevious = thread.page > 1,
+                canGoNext = thread.page < thread.totalPages,
+                enabled = enabled,
+                onOpenPage = { target ->
+                    if (pageInteraction.onSelectPage(target)) onDismiss()
+                },
+            )
+        }
+    }
+}
+
 /** Compose runtime shared by reader gestures and the feature-owned pagination chrome. */
 private data class PrivateMessageReaderRuntime(
     val zoomState: PinchZoomState,
@@ -840,12 +851,12 @@ private data class PrivateMessageReaderRuntime(
 @Composable
 private fun PrivateMessageThreadReader(
     state: PrivateMessageThreadUiState,
-    mode: PrivateMessageThreadUiState.Mode.Content,
     callbacks: PrivateMessageThreadCallbacks,
     session: PrivateMessageReaderSession,
     runtime: PrivateMessageReaderRuntime,
     presentation: PrivateMessageReaderPresentation,
 ) {
+    val mode = state.mode as PrivateMessageThreadUiState.Mode.Content
     val latestState by rememberUpdatedState(state)
     val zoomState = runtime.zoomState
     val pageInteraction = runtime.pageInteraction
@@ -1269,15 +1280,44 @@ private data class ThreadPageFabActions(
     val onLastPage: () -> Unit,
 )
 
+/** Derives only MP policy and parsed-page targets; [PageFab] remains a value/callback primitive. */
+private fun threadPageFabChrome(
+    showPageFabs: Boolean,
+    content: PrivateMessageThreadUiState.Mode.Content?,
+    enabled: Boolean,
+    pageInteraction: PrivateMessagePageInteraction,
+): ThreadPageFabChrome {
+    val thread = content?.thread
+    val renderedPage = thread?.page ?: 1
+    val renderedTotalPages = thread?.totalPages ?: 1
+    return ThreadPageFabChrome(
+        show = showPageFabs && thread != null,
+        canGoPrevious = renderedPage > 1,
+        canGoNext = renderedPage < renderedTotalPages,
+        enabled = enabled,
+        actions = ThreadPageFabActions(
+            onPreviousPage = { pageInteraction.onSelectPage(renderedPage - 1) },
+            onNextPage = { pageInteraction.onSelectPage(renderedPage + 1) },
+            onFirstPage = { pageInteraction.onSelectPage(1) },
+            onLastPage = { pageInteraction.onSelectPage(renderedTotalPages) },
+        ),
+    )
+}
+
+/** User-triggered actions for the bottom cluster, separate from its visible state and page chrome. */
+private data class ThreadBottomActionCallbacks(
+    val onReply: () -> Unit,
+    val onMultiQuote: () -> Unit,
+    val onClearMultiQuote: () -> Unit,
+)
+
 /** Bottom cluster: basket first, feature-owned page slots, then the stable reply affordance. */
 @Composable
 private fun ThreadBottomActions(
     canReply: Boolean,
     multiQuoteCount: Int,
     pageChrome: ThreadPageFabChrome,
-    onReply: () -> Unit,
-    onMultiQuote: () -> Unit,
-    onClearMultiQuote: () -> Unit,
+    callbacks: ThreadBottomActionCallbacks,
 ) {
     val previousLabel = stringResource(R.string.messages_fab_previous_page)
     val nextLabel = stringResource(R.string.messages_fab_next_page)
@@ -1290,8 +1330,8 @@ private fun ThreadBottomActions(
         if (multiQuoteCount > 0) {
             MessageMultiQuoteFab(
                 count = multiQuoteCount,
-                onClick = onMultiQuote,
-                onClear = onClearMultiQuote,
+                onClick = callbacks.onMultiQuote,
+                onClear = callbacks.onClearMultiQuote,
             )
         }
         if (pageChrome.show) {
@@ -1316,7 +1356,7 @@ private fun ThreadBottomActions(
                 )
             }
         }
-        ThreadReplyFab(canReply = canReply, onReply = onReply)
+        ThreadReplyFab(canReply = canReply, onReply = callbacks.onReply)
     }
 }
 

@@ -256,6 +256,8 @@ class PrivateMessageThreadContentTest {
         compose.onNodeWithText("Précédent").assertIsNotEnabled()
         compose.onNodeWithText("Suivant").assertIsNotEnabled()
         compose.onNodeWithText("Y aller").assertIsNotEnabled()
+        compose.onNodeWithContentDescription("Page 2 sur 4, actualisation en cours")
+            .assertIsNotEnabled()
         compose.onNodeWithContentDescription("Page précédente").assertIsNotEnabled()
         compose.onNodeWithContentDescription("Page suivante").assertIsNotEnabled()
         assertEquals(emptyList<Int>(), selectedPages)
