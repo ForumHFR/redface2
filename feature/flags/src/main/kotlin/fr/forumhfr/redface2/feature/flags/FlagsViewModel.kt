@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.coroutines.ApplicationScope
+import fr.forumhfr.redface2.core.domain.coroutines.awaitDetached
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
@@ -29,6 +31,7 @@ import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import javax.inject.Inject
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -70,6 +73,11 @@ class FlagsViewModel @Inject constructor(
     private val messagesRepository: MessagesRepository,
     private val mpStorageRepository: MpStorageRepository,
     private val clock: Clock,
+    // #1144 — process-lifetime scope for the ONE HFR mutation this ViewModel owns (« Retirer le
+    // drapeau »). Since #1083 the delflag GET is genuinely cancellable, so leaving the Drapeaux
+    // screen right after confirming would abort it; [awaitDetached] re-parents it here. Every read
+    // and every preference write stays as it was.
+    @param:ApplicationScope private val externalScope: CoroutineScope,
 ) : ViewModel() {
 
     private var observedPseudo: String? = null
@@ -667,7 +675,10 @@ class FlagsViewModel @Inject constructor(
         _removeFlagState.value = RemoveFlagState.Removing(flag)
         viewModelScope.launch {
             try {
-                val result = flagRepository.removeFlag(flag)
+                // #1144 — detached: the removal the user just confirmed must not die with the
+                // screen. The event below stays on this coroutine — with no screen left there is no
+                // snackbar to raise; the outcome trail is DiagnosticsLog, written by the repository.
+                val result = externalScope.awaitDetached { flagRepository.removeFlag(flag) }
                 _removeFlagEvent.update {
                     if (result.isSuccess) {
                         RemoveFlagEvent.Success(flag.title)

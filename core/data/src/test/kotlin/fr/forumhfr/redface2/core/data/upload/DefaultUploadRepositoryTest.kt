@@ -15,9 +15,14 @@ import io.mockk.slot
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -38,12 +43,19 @@ class DefaultUploadRepositoryTest {
         io.mockk.every { observeUploadProvider() } returns selectedProvider
     }
 
-    private fun repository(): DefaultUploadRepository = DefaultUploadRepository(
+    /**
+     * #1144 — stands in for the `@ApplicationScope` singleton the upsert is detached onto. Never
+     * cancelled by the tests, like the process-lifetime scope it mirrors.
+     */
+    private fun repository(
+        externalScope: CoroutineScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher()),
+    ): DefaultUploadRepository = DefaultUploadRepository(
         providers = mapOf(UploadProviderId.DIBERIE to diberie, UploadProviderId.IMGUR to imgur),
         uploadedImageDao = dao,
         userPreferencesRepository = prefs,
         ioDispatcher = UnconfinedTestDispatcher(),
         clock = Clock.fixed(FIXED_NOW, ZoneOffset.UTC),
+        externalScope = externalScope,
     )
 
     @Test
@@ -81,6 +93,44 @@ class DefaultUploadRepositoryTest {
         repository().uploadWithCurrentProvider(sampleImage(), userId = "alice")
 
         assertEquals("https://host/f/NOHANDLE", entitySlot.captured.picId)
+    }
+
+    @Test
+    fun `the upload trace survives the caller being cancelled after the host accepted (#1144)`() = runTest {
+        // The upload ITSELF stays cancellable on purpose (#459 cancels `uploadJob` in the editors'
+        // `onCleared`). What must not be lost is the bookkeeping that follows a COMPLETED host POST:
+        // without the local row, « Mes images » can neither list nor ever delete that picture again.
+        val appScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        val upsertGate = CompletableDeferred<Unit>()
+        val upserted = CompletableDeferred<Unit>()
+        coEvery { diberie.upload(any()) } returns UploadedImage(
+            provider = UploadProviderId.DIBERIE,
+            imageUrl = "https://host/f/PIC1",
+            thumbnailUrl = null,
+            resizedUrl = null,
+            deleteHandle = "PIC1",
+            expiresAt = null,
+        )
+        coEvery { dao.upsert(any()) } coAnswers {
+            upsertGate.await()
+            upserted.complete(Unit)
+        }
+
+        val caller = launch { repository(externalScope = appScope).uploadWithCurrentProvider(sampleImage(), "alice") }
+        advanceUntilIdle()
+        assertFalse("the trace write is in flight", upserted.isCompleted)
+
+        // The composer is destroyed (back press) while the row is being written.
+        caller.cancel()
+        advanceUntilIdle()
+
+        upsertGate.complete(Unit)
+        advanceUntilIdle()
+
+        assertTrue(
+            "the host already holds the picture: its local trace must be persisted anyway",
+            upserted.isCompleted,
+        )
     }
 
     @Test

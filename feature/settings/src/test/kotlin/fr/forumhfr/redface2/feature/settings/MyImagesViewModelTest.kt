@@ -1,5 +1,8 @@
 package fr.forumhfr.redface2.feature.settings
 
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStore
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
@@ -10,8 +13,11 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import java.time.Instant
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -41,6 +47,28 @@ class MyImagesViewModelTest {
         Dispatchers.resetMain()
     }
 
+    /**
+     * #1144 — stands in for the `@ApplicationScope` singleton the ViewModel now injects. Its
+     * `SupervisorJob` is never cancelled by the tests, exactly like the process-lifetime scope.
+     */
+    private fun appScope(): CoroutineScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher())
+
+    /**
+     * #1144 — destroys [target] the way the framework does on screen leave: `ViewModelStore.clear()`
+     * cancels `viewModelScope` and calls `onCleared()`.
+     */
+    private fun destroyViewModel(target: ViewModel) {
+        val store = ViewModelStore()
+        ViewModelProvider(
+            store,
+            object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(modelClass: Class<T>): T = target as T
+            },
+        ).get(target::class.java)
+        store.clear()
+    }
+
     @Test
     fun `emits the records from the repository flow scoped to the lowercased pseudo`() = runTest {
         val upload = mockk<UploadRepository>()
@@ -48,7 +76,7 @@ class MyImagesViewModelTest {
         // The active pseudo is "XaaT" ; the screen must scope to its lowercased form.
         coEvery { upload.observeUploads("xaat") } returns flowOf(records)
 
-        val viewModel = MyImagesViewModel(FakeAuthRepository(AuthState.Authenticated("XaaT")), upload)
+        val viewModel = MyImagesViewModel(FakeAuthRepository(AuthState.Authenticated("XaaT")), upload, appScope())
 
         val mode = viewModel.state.value.mode
         assertTrue(mode is MyImagesUiState.Mode.Content)
@@ -61,7 +89,7 @@ class MyImagesViewModelTest {
         val upload = mockk<UploadRepository>()
         coEvery { upload.observeUploads(any()) } returns flowOf(emptyList())
 
-        val viewModel = MyImagesViewModel(FakeAuthRepository(), upload)
+        val viewModel = MyImagesViewModel(FakeAuthRepository(), upload, appScope())
 
         val mode = viewModel.state.value.mode
         assertTrue(mode is MyImagesUiState.Mode.Content)
@@ -72,7 +100,7 @@ class MyImagesViewModelTest {
     fun `shows RequiresLogin and never reads uploads when anonymous`() = runTest {
         val upload = mockk<UploadRepository>()
 
-        val viewModel = MyImagesViewModel(FakeAuthRepository(AuthState.Anonymous), upload)
+        val viewModel = MyImagesViewModel(FakeAuthRepository(AuthState.Anonymous), upload, appScope())
 
         assertEquals(MyImagesUiState.Mode.RequiresLogin, viewModel.state.value.mode)
         coVerify(exactly = 0) { upload.observeUploads(any()) }
@@ -84,7 +112,7 @@ class MyImagesViewModelTest {
             val upload = mockk<UploadRepository>()
             coEvery { upload.observeUploads(any()) } returns flowOf(listOf(record("a")))
 
-            val viewModel = MyImagesViewModel(FakeAuthRepository(), upload)
+            val viewModel = MyImagesViewModel(FakeAuthRepository(), upload, appScope())
             val target = record("a")
 
             viewModel.requestDelete(target)
@@ -103,7 +131,7 @@ class MyImagesViewModelTest {
             coEvery { upload.observeUploads("xaat") } returns flowOf(listOf(target))
             coEvery { upload.delete(target, "xaat") } returns true
 
-            val viewModel = MyImagesViewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), upload)
+            val viewModel = MyImagesViewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), upload, appScope())
 
             viewModel.requestDelete(target)
             viewModel.confirmDelete()
@@ -121,7 +149,7 @@ class MyImagesViewModelTest {
         coEvery { upload.observeUploads(any()) } returns flowOf(listOf(target))
         coEvery { upload.delete(target, "xaat") } returns false
 
-        val viewModel = MyImagesViewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), upload)
+        val viewModel = MyImagesViewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), upload, appScope())
 
         viewModel.requestDelete(target)
         viewModel.confirmDelete()
@@ -131,13 +159,51 @@ class MyImagesViewModelTest {
     }
 
     @Test
+    fun `a confirmed image deletion outlives the ViewModel destroyed mid-request (#1144)`() = runTest {
+        // Same class of defect as the four topic/flags mutations: a user-confirmed destructive host
+        // call left on `viewModelScope`. Here the local row is evicted by the repository AFTER the
+        // host round-trip, so an aborted delete would strand the picture on Imgur/Diberie.
+        val scope = appScope()
+        val gate = CompletableDeferred<Boolean>()
+        val completed = CompletableDeferred<Unit>()
+        val upload = mockk<UploadRepository>()
+        val target = record("a")
+        coEvery { upload.observeUploads(any()) } returns flowOf(listOf(target))
+        coEvery { upload.delete(target, "xaat") } coAnswers {
+            // Suspends until the test releases it — and only records completion PAST the suspension,
+            // so a cancelled call can never satisfy the assertion below.
+            val confirmed = gate.await()
+            completed.complete(Unit)
+            confirmed
+        }
+
+        val viewModel = MyImagesViewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), upload, scope)
+        viewModel.requestDelete(target)
+        viewModel.confirmDelete()
+        advanceUntilIdle()
+        assertTrue("the host DELETE is in flight", !completed.isCompleted)
+
+        destroyViewModel(viewModel)
+        advanceUntilIdle()
+
+        gate.complete(true)
+        advanceUntilIdle()
+
+        assertTrue(
+            "the deletion the user confirmed must still reach the host after the screen is gone",
+            completed.isCompleted,
+        )
+        coVerify(exactly = 1) { upload.delete(target, "xaat") }
+    }
+
+    @Test
     fun `consumeDeletionMessage clears the one-shot snackbar`() = runTest {
         val upload = mockk<UploadRepository>()
         val target = record("a")
         coEvery { upload.observeUploads(any()) } returns flowOf(listOf(target))
         coEvery { upload.delete(any(), any()) } returns true
 
-        val viewModel = MyImagesViewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), upload)
+        val viewModel = MyImagesViewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), upload, appScope())
         viewModel.requestDelete(target)
         viewModel.confirmDelete()
         advanceUntilIdle()
@@ -153,7 +219,7 @@ class MyImagesViewModelTest {
         val uploads = MutableStateFlow(listOf(record("a"), record("b")))
         coEvery { upload.observeUploads("xaat") } returns uploads
 
-        val viewModel = MyImagesViewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), upload)
+        val viewModel = MyImagesViewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), upload, appScope())
 
         viewModel.state.test {
             assertEquals(2, (awaitItem().mode as MyImagesUiState.Mode.Content).images.size)
@@ -173,7 +239,7 @@ class MyImagesViewModelTest {
             coEvery { upload.observeUploads("bob") } returns flowOf(emptyList())
             val auth = FakeAuthRepository(AuthState.Authenticated("alice"))
 
-            val viewModel = MyImagesViewModel(auth, upload)
+            val viewModel = MyImagesViewModel(auth, upload, appScope())
             viewModel.requestDelete(target)
             assertEquals(target, viewModel.state.value.pendingDeletion)
 

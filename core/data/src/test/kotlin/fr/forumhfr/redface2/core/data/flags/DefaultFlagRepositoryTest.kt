@@ -6,6 +6,7 @@ import fr.forumhfr.redface2.core.database.entities.FetchMode
 import fr.forumhfr.redface2.core.database.entities.FlagTopicEntity
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
@@ -27,6 +28,7 @@ import java.io.IOException
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
@@ -1661,6 +1663,88 @@ class DefaultFlagRepositoryTest {
         }
     }
 
+    // ──────────────────────────────────────────────────────────────────────
+    // #1144 — cancellation is control flow, not an outcome
+    //
+    // Both mutations wrap their work in `runCatching`, which catches Throwable — CancellationException
+    // included. Folding it into `Result.failure` reported « l'ajout a échoué » for a caller that had
+    // merely gone away, AND made the `if (raised is CancellationException) throw raised` guard in
+    // TopicViewModel.confirmRemoveTopicFlag unreachable — the exact net that hid the defect #1144 is
+    // about. These two tests pin the re-throw.
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `addFlag re-throws a cancellation instead of folding it into a failed Result (#1144)`() = runTest {
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.addFlag(any()) } throws CancellationException("caller went away")
+        val repo = buildRepository(
+            apiClient = mockk(relaxed = true),
+            forumRepository = stubForumRepository(sampleCategories),
+            hfrClient = hfrClient,
+        )
+
+        var propagated: Throwable? = null
+        var returned: Result<Unit>? = null
+        try {
+            returned = repo.addFlag(sampleFlagAddContext())
+        } catch (cancellation: CancellationException) {
+            propagated = cancellation
+        }
+
+        assertNull("a cancellation must NOT come back as a Result", returned)
+        assertTrue("expected the CancellationException to propagate", propagated is CancellationException)
+        assertEquals("caller went away", propagated?.message)
+    }
+
+    @Test
+    fun `removeFlag re-throws a cancellation instead of folding it into a failed Result (#1144)`() = runTest {
+        val hfrClient = mockk<HfrClient>()
+        coEvery {
+            hfrClient.removeFlag(cat = any(), subcat = any(), topicId = any(), type = any(), page = any())
+        } throws CancellationException("caller went away")
+        val repo = buildRepository(
+            apiClient = mockk(relaxed = true),
+            forumRepository = stubForumRepository(sampleCategories),
+            hfrClient = hfrClient,
+        )
+
+        var propagated: Throwable? = null
+        var returned: Result<Unit>? = null
+        try {
+            returned = repo.removeFlag(sampleFlag(FlagType.CYAN, topicId = 35395))
+        } catch (cancellation: CancellationException) {
+            propagated = cancellation
+        }
+
+        assertNull("a cancellation must NOT come back as a Result", returned)
+        assertTrue("expected the CancellationException to propagate", propagated is CancellationException)
+        assertEquals("caller went away", propagated?.message)
+    }
+
+    @Test
+    fun `addFlag traces both outcomes so a detached mutation is never silent (#1144)`() = runTest {
+        // The callers are detached now (`awaitDetached`), so a back press can leave the write running
+        // with no ViewModel left to raise a snackbar. DiagnosticsLog — surfaced by the in-app viewer —
+        // is what keeps the mutation from succeeding, or failing, without a trace.
+        val diagnostics = DiagnosticsLog()
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.addFlag(any()) } throws SessionExpiredException("https://forum.hardware.fr/login.php")
+        val repo = buildRepository(
+            apiClient = mockk(relaxed = true),
+            forumRepository = stubForumRepository(sampleCategories),
+            hfrClient = hfrClient,
+            diagnostics = diagnostics,
+        )
+
+        assertTrue(repo.addFlag(sampleFlagAddContext()).isFailure)
+
+        val traced = diagnostics.entries.value.filter { it.tag == "FlagRepository" }
+        assertTrue(
+            "a failed favourite must leave a WARN trace, got $traced",
+            traced.any { it.level == DiagnosticsLog.Level.WARN && it.message.startsWith("addflag FAILED topic=35395") },
+        )
+    }
+
     @Test
     fun `removeFlag success drops the item from the exposed cache and Room`() = runTest {
         // Seed the in-memory cache with the captured cat23 participated flag (topic 35395).
@@ -1997,6 +2081,7 @@ class DefaultFlagRepositoryTest {
         flagDao: FlagDao = stubFlagDao(),
         clock: Clock = Clock.fixed(Instant.parse("2026-05-03T12:00:00Z"), ZoneOffset.UTC),
         hfrClient: HfrClient = mockk(relaxed = true),
+        diagnostics: DiagnosticsLog = DiagnosticsLog(),
     ): DefaultFlagRepository = DefaultFlagRepository(
         apiClient = apiClient,
         hfrClient = hfrClient,
@@ -2012,6 +2097,7 @@ class DefaultFlagRepositoryTest {
         json = json,
         ioDispatcher = UnconfinedTestDispatcher(),
         clock = clock,
+        diagnostics = diagnostics,
     )
 
     private fun stubAuthRepository(pseudo: String = "XaT"): AuthRepository {
