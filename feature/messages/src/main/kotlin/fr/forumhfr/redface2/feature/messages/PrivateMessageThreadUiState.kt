@@ -28,6 +28,11 @@ data class PrivateMessageThreadUiState(
     /** #1050 — shared #874 EgoPost preference, independent from [egoQuoteEnabled]; render-only. */
     val egoPostEnabled: Boolean = true,
     /**
+     * #383/#1040 — historical topic-page-FAB preference, now shared by both reading surfaces.
+     * Keeping the state name generic avoids exposing the persisted key's legacy name to the UI.
+     */
+    val showPageFabs: Boolean = true,
+    /**
      * #1050 — pseudo of the authenticated session, the session-bound input of the Ego markers
      * (the list derives both from it; `Post.isOwnPost` is deliberately not trusted, see
      * `core.domain.ego.isEgoPost`). This is NOT private conversation metadata (the #316/#298

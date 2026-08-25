@@ -451,8 +451,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
 
     override fun observeTopicPageFabs(): Flow<Boolean> =
         dataStore.data
-            // Default `true`: the ‹/› cluster (#283) predates the swipe (#282); hiding it is the
-            // #383 opt-out for readers who navigate by swipe only.
+            // Historical key retained: #1040 extends the same #383 opt-out from topics to MP/DT.
             .map { prefs -> prefs[KEY_TOPIC_PAGE_FABS] ?: true }
             .distinctUntilChanged()
             .catch { emit(true) }

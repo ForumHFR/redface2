@@ -101,11 +101,13 @@ class PrivateMessageThreadViewModelTest {
         showSignatures: Flow<Boolean> = MutableStateFlow(false),
         egoQuoteEnabled: Flow<Boolean> = MutableStateFlow(true),
         egoPostEnabled: Flow<Boolean> = MutableStateFlow(true),
+        showPageFabs: Flow<Boolean> = MutableStateFlow(true),
     ): UserPreferencesRepository = mockk {
         every { observeTopicFullWidthPosts() } returns fullWidthPosts
         every { observeTopicSignatures() } returns showSignatures
         every { observeTopicEgoQuoteEnabled() } returns egoQuoteEnabled
         every { observeTopicEgoPostEnabled() } returns egoPostEnabled
+        every { observeTopicPageFabs() } returns showPageFabs
     }
 
     @Test
@@ -169,6 +171,25 @@ class PrivateMessageThreadViewModelTest {
 
         assertTrue(viewModel.state.value.fullWidthPosts)
         assertTrue(viewModel.state.value.showSignatures)
+        coVerify(exactly = 1) {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        }
+    }
+
+    @Test
+    fun `historical page FAB preference updates MP chrome without refetching the thread`() = runTest {
+        val repository = loadedRepository()
+        val showPageFabs = MutableStateFlow(true)
+        val viewModel = threadViewModel(
+            repository = repository,
+            userPreferencesRepository = userPreferences(showPageFabs = showPageFabs),
+        )
+
+        assertTrue(viewModel.state.value.showPageFabs)
+        showPageFabs.value = false
+        advanceUntilIdle()
+
+        assertFalse(viewModel.state.value.showPageFabs)
         coVerify(exactly = 1) {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
         }
@@ -503,6 +524,28 @@ class PrivateMessageThreadViewModelTest {
         val state = viewModel.state.value
         assertEquals(2, state.page)
         assertTrue(state.canGoPrevious)
+    }
+
+    @Test
+    fun `selectPage ignores current and out-of-bounds targets`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns network(thread(page = 1, totalPages = 3))
+
+        val viewModel = threadViewModel(repository)
+        viewModel.selectPage(1)
+        viewModel.selectPage(0)
+        viewModel.selectPage(4)
+
+        assertEquals(1, viewModel.state.value.page)
+        coVerify(exactly = 0) {
+            repository.getPrivateMessageThread(
+                threadId = 42,
+                page = match { it != 1 },
+                fallbackCorrespondent = null,
+            )
+        }
     }
 
     @Test

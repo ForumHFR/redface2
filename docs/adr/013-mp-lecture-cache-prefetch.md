@@ -129,9 +129,10 @@ Tant qu'ils ne sont pas réunis, les MP restent in-place avec le swipe minimal (
 > faire converger les MP. Depuis #895 étape 4 (cf. amendement du Contexte), le topic a rejoint la
 > pagination in-place — le critère de convergence est donc **inversé** : les deux surfaces partagent
 > déjà le modèle, ce qui reste à converger, ce sont les garanties. Ce qui survit de la décision :
-> les deux prérequis (cache MP a minima RAM + prefetch intra-conversation borné) restent la condition
-> de la **parité de ressenti** de la pagination MP (slide-out, stale-while-switching, atterrissages
-> instantanés) — ils gardent leur rôle de gate, portés par les lots 5 et 6 de
+> le slide-out est livré depuis l'amendement du 2026-08-24. Les deux prérequis (cache MP a minima RAM
+> + prefetch intra-conversation borné) restent le socle de la **parité de ressenti** de la pagination
+> MP — stale-while-switching et atterrissages instantanés compris. Leur rôle de gate reste porté par
+> les lots 5 et 6 de
 > [#1040](https://github.com/ForumHFR/redface2/issues/1040). Le partage de la surface de lecture
 > elle-même (la carte d'un message, prolongement de la décision 1) est arbitré par #1040 et n'attend
 > pas ces prérequis.

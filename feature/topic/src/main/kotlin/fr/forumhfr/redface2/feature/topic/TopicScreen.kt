@@ -1,7 +1,6 @@
 package fr.forumhfr.redface2.feature.topic
 
 import androidx.activity.compose.BackHandler
-import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -11,7 +10,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,8 +29,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -99,7 +95,6 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -121,6 +116,9 @@ import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.RedfacePlaceholderScreen
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
+import fr.forumhfr.redface2.core.ui.pager.PageFab
+import fr.forumhfr.redface2.core.ui.pager.PageFabDefaults
+import fr.forumhfr.redface2.core.ui.pager.PageNavigation
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
 import fr.forumhfr.redface2.core.ui.post.CreatorPseudoText
 import fr.forumhfr.redface2.core.ui.post.HiddenPostCard
@@ -1178,7 +1176,7 @@ internal fun TopicContent(
                         title = stringResource(R.string.topic_error_title),
                         body = stringResource(R.string.topic_error_body, state.request.page, detail),
                     ) {
-                        TopicPageNavigation(
+                        PageNavigation(
                             currentPage = state.request.page,
                             availablePages = state.availablePages,
                             canGoPrevious = state.canGoPrevious,
@@ -1601,9 +1599,9 @@ internal fun TopicTopBar(
             TopicSearchBar(search = state.search, onIntent = onIntent)
         }
     }
-    // Vague 3 (#604) — page-picker sheet: the dissolved header card's TopicPageNavigation
+    // Vague 3 (#604) — page-picker sheet: the dissolved header card's PageNavigation
     // (prev/next + jump field + compact range row), verbatim, in a bottom sheet anchored to the
-    // top-bar pill. The Error path keeps its own inline TopicPageNavigation — recovery navigation
+    // top-bar pill. The Error path keeps its own inline PageNavigation — recovery navigation
     // must not hide behind a sheet (cadrage Codex vague 3).
     if (pagePickerOpen && loaded != null) {
         ModalBottomSheet(onDismissRequest = { pagePickerOpen = false }) {
@@ -1619,7 +1617,7 @@ internal fun TopicTopBar(
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
-                TopicPageNavigation(
+                PageNavigation(
                     currentPage = loaded.topic.page,
                     availablePages = state.availablePages,
                     canGoPrevious = state.canGoPrevious,
@@ -2549,106 +2547,6 @@ private fun EndOfSearchResultsCard(modifier: Modifier = Modifier) {
     }
 }
 
-/**
- * Primary page navigation : Previous / page X/Y indicator / Next + a jump-to-page
- * input for long topics. The Previous button is disabled on page 1, Next on the
- * last page — both intents are no-ops outside their valid range. The legacy
- * exhaustive 1..N row stays below as a complement (kept usable on small topics
- * where a finger-tap on the right page is faster than typing).
- */
-@Composable
-private fun TopicPageNavigation(
-    currentPage: Int,
-    availablePages: List<Int>,
-    canGoPrevious: Boolean,
-    canGoNext: Boolean,
-    onOpenPage: (Int) -> Unit,
-) {
-    val totalPages = availablePages.lastOrNull() ?: 1
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            OutlinedButton(
-                onClick = { if (canGoPrevious) onOpenPage(currentPage - 1) },
-                enabled = canGoPrevious,
-            ) {
-                Text(stringResource(R.string.topic_page_previous))
-            }
-            Text(
-                text = stringResource(R.string.topic_page_indicator, currentPage, totalPages),
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f),
-            )
-            OutlinedButton(
-                onClick = { if (canGoNext) onOpenPage(currentPage + 1) },
-                enabled = canGoNext,
-            ) {
-                Text(stringResource(R.string.topic_page_next))
-            }
-        }
-        TopicPageJumpField(
-            currentPage = currentPage,
-            totalPages = totalPages,
-            onOpenPage = onOpenPage,
-        )
-        if (availablePages.size in 2..PAGE_GRID_LIMIT) {
-            // Compact range row : keeps the historical UX for small topics. Not
-            // surfaced for long topics (>40 pages) — Previous/Next + jump cover them.
-            Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                availablePages.forEach { page ->
-                    if (page == currentPage) {
-                        Button(onClick = {}) {
-                            Text(text = page.toString())
-                        }
-                    } else {
-                        OutlinedButton(onClick = { onOpenPage(page) }) {
-                            Text(text = page.toString())
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun TopicPageJumpField(
-    currentPage: Int,
-    totalPages: Int,
-    onOpenPage: (Int) -> Unit,
-) {
-    var input by remember(currentPage) { mutableStateOf("") }
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        OutlinedTextField(
-            value = input,
-            onValueChange = { raw -> input = coercePageJumpInput(raw, totalPages) },
-            singleLine = true,
-            label = { Text(stringResource(R.string.topic_page_jump_label)) },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            modifier = Modifier.width(160.dp),
-        )
-        TextButton(
-            onClick = {
-                val target = input.toIntOrNull() ?: return@TextButton
-                if (target in 1..totalPages && target != currentPage) {
-                    input = ""
-                    onOpenPage(target)
-                }
-            },
-        ) {
-            Text(stringResource(R.string.topic_page_jump_action))
-        }
-    }
-}
-
 @Composable
 private fun TopicPollCard(
     poll: Poll,
@@ -3548,15 +3446,15 @@ private fun TopicBottomActions(
 @Composable
 private fun FabSlot(visible: Boolean, content: @Composable () -> Unit) {
     Box(
-        modifier = Modifier.sizeIn(minWidth = FAB_SLOT_SIZE, minHeight = FAB_SLOT_SIZE),
+        modifier = Modifier.sizeIn(
+            minWidth = PageFabDefaults.Size,
+            minHeight = PageFabDefaults.Size,
+        ),
         contentAlignment = Alignment.Center,
     ) {
         if (visible) content()
     }
 }
-
-/** #599 — M3 small-FAB container footprint, the reserved geometry of every [FabSlot]. */
-private val FAB_SLOT_SIZE = 40.dp
 
 // `internal` (#436): MultiQuoteFabClearTest mounts the FAB directly to pin the « Tout vider »
 // long-press wiring (tap → onClick, long press → onClear) without standing up the whole screen.
@@ -3590,56 +3488,13 @@ internal fun MultiQuoteFab(count: Int, onClick: () -> Unit, onClear: () -> Unit)
         shadowElevation = 6.dp,
     ) {
         Box(
-            modifier = Modifier.sizeIn(minWidth = FAB_SLOT_SIZE, minHeight = FAB_SLOT_SIZE),
+            modifier = Modifier.sizeIn(
+                minWidth = PageFabDefaults.Size,
+                minHeight = PageFabDefaults.Size,
+            ),
             contentAlignment = Alignment.Center,
         ) {
             Text("❝$count", style = MaterialTheme.typography.labelLarge)
-        }
-    }
-}
-
-// `internal` (#822): PageFabLongPressTest mounts the FAB directly to pin the gesture split
-// (tap → onClick, long press → onLongClick) without standing up the whole screen — same
-// visibility relaxation as MultiQuoteFab above.
-@Composable
-internal fun PageFab(
-    description: String,
-    @DrawableRes iconRes: Int,
-    onClick: () -> Unit,
-    onLongClick: () -> Unit,
-    onLongClickLabel: String,
-) {
-    // #360 / ADR-015 — chevron en vector stroke unifié (poids optique aligné sur la flèche retour),
-    // dimensionné en dp via le primitive partagé :core:ui plutôt qu'un glyphe « ‹ »/« › » dépendant
-    // de la police. Pas de Material icons (detekt ForbiddenImport). L'étiquette a11y reste sur le FAB,
-    // donc l'icône est décorative.
-    // #822 — a LONG PRESS jumps straight to the first/last page (‹ → page 1, › → totalPages), on
-    // the same FAB as the single-page step. Hand-rolled FAB (pattern #820, cloned from
-    // MultiQuoteFab above): a NON-clickable Surface carries the combinedClickable, because a real
-    // SmallFloatingActionButton's inner clickable swallows the pointer input of any
-    // combinedClickable stacked on its modifier — neither gesture ever fires (pinned by
-    // MultiQuoteFabClearTest). combinedClickable brings the built-in long-press haptics and
-    // announces the jump through onLongClickLabel for TalkBack. Shape/colors/elevation and the
-    // FAB_SLOT_SIZE footprint mirror the M3 small-FAB defaults of the sibling ReplyFab.
-    Surface(
-        modifier = Modifier
-            .semantics { contentDescription = description }
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = onLongClick,
-                onLongClickLabel = onLongClickLabel,
-                role = Role.Button,
-            ),
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.primaryContainer,
-        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-        shadowElevation = 6.dp,
-    ) {
-        Box(
-            modifier = Modifier.sizeIn(minWidth = FAB_SLOT_SIZE, minHeight = FAB_SLOT_SIZE),
-            contentAlignment = Alignment.Center,
-        ) {
-            RedfaceVectorIcon(resId = iconRes)
         }
     }
 }
@@ -3927,13 +3782,3 @@ internal fun shouldShowEditFirstPost(
         topic.subcat > 0 &&
         topic.page == 1 &&
         topic.posts.isNotEmpty()
-
-// #235 — the page-jump field must accept any valid page. Binding the input width to the digit
-// count of [totalPages] (instead of a fixed 4-digit ceiling that made pages >= 10000 untypable)
-// lets very long topics — e.g. the ~16k-page Ukraine topic — reach their last pages, while a
-// small topic stays tight. The jump action already validates `target in 1..totalPages`, so the
-// cap only needs to mirror that bound. `maxOf(1, …)` guards a degenerate totalPages <= 0.
-internal fun coercePageJumpInput(raw: String, totalPages: Int): String =
-    raw.filter(Char::isDigit).take(maxOf(1, totalPages).toString().length)
-
-private const val PAGE_GRID_LIMIT = 40

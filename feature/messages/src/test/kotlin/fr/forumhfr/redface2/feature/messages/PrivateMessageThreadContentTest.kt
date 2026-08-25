@@ -7,9 +7,11 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Text
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -17,16 +19,24 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasAnyDescendant
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostBlock
@@ -45,11 +55,12 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
 
 /**
  * #1041 — characterization of the complete, state-hoisted private-thread surface before the shared
  * reading-card refactor. These assertions pin the CURRENT MP composition: subject/correspondent
- * chrome, one ordered card per message, a trailing pager on multi-page threads, and the anonymous
+ * chrome, one ordered card per message, top-bar picker and bottom page-FAB cluster, and the anonymous
  * placeholder. #1050 adds the mounted full-width sequence, hot signature presentation and internal
  * LazyListState anchor proofs without weakening those default-path assertions. #509/#1050 adds the
  * blacklist placeholder, page-local reveal and blocked-quote provider contracts.
@@ -63,7 +74,7 @@ class PrivateMessageThreadContentTest {
     val compose = createComposeRule()
 
     @Test
-    fun `content renders the header ordered message list and trailing pager`() {
+    fun `content renders the header ordered message list page pill and FAB cluster`() {
         setContent(
             mode = PrivateMessageThreadUiState.Mode.Content(
                 PrivateMessageThread(
@@ -106,8 +117,187 @@ class PrivateMessageThreadContentTest {
         }
 
         compose.onNodeWithText("Page 2 / 4").assertIsDisplayed()
-        compose.onNodeWithText("Précédent").assertIsDisplayed().assertIsEnabled()
-        compose.onNodeWithText("Suivant").assertIsDisplayed().assertIsEnabled()
+        compose.onNodeWithContentDescription("Page précédente").assertIsDisplayed().assertIsEnabled()
+        compose.onNodeWithContentDescription("Page suivante").assertIsDisplayed().assertIsEnabled()
+        compose.onNodeWithText("Précédent").assertDoesNotExist()
+        compose.onNodeWithText("Suivant").assertDoesNotExist()
+    }
+
+    @Test
+    fun `historical page FAB preference hides only page controls`() {
+        mountState(
+            state = contentState(
+                messages = listOf(message(101, "Alpha", "Corps du MP")),
+                page = 2,
+                totalPages = 4,
+                canReply = true,
+            ).copy(showPageFabs = false),
+        )
+
+        compose.onNodeWithContentDescription("Page précédente").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Page suivante").assertDoesNotExist()
+        // Assert the actual affordance rather than ExtendedFAB's animated Text leaf: the leaf can
+        // exist with transient zero bounds while the complete clickable surface is already placed.
+        compose.onNode(
+            hasClickAction() and hasAnyDescendant(hasText("Répondre")),
+            useUnmergedTree = true,
+        ).assertIsDisplayed()
+        compose.onNodeWithText("Page 2 / 4").assertIsDisplayed()
+    }
+
+    @Test
+    fun `page chrome refuses selection while a landing owns the list`() {
+        var selectionCount = 0
+        val state = contentState(
+            messages = listOf(message(201, "Alpha", "Page deux")),
+            page = 2,
+            totalPages = 4,
+        ).copy(
+            pageLanding = PrivateMessagePageLanding.Top(
+                generation = 1,
+                account = "xaat",
+                page = 2,
+            ),
+        )
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                PrivateMessageThreadContent(
+                    state = state,
+                    isMultiRecipientHint = false,
+                    callbacks = NO_OP_CALLBACKS.copy(
+                        onSelectPage = { _, _ -> selectionCount += 1 },
+                    ),
+                )
+            }
+        }
+        compose.waitForIdle()
+
+        compose.onNodeWithContentDescription("Page précédente").performClick()
+
+        assertEquals(0, selectionCount)
+    }
+
+    @Test
+    fun `page FAB taps and long presses each dispatch exactly one bounded target with an anchor`() {
+        val selections = mutableListOf<Pair<Int, PrivateMessageScrollAnchor?>>()
+        mountState(
+            state = contentState(
+                messages = listOf(message(201, "Alpha", "Page deux")),
+                page = 2,
+                totalPages = 4,
+            ),
+            callbacks = NO_OP_CALLBACKS.copy(
+                onSelectPage = { page, anchor -> selections += page to anchor },
+            ),
+        )
+        compose.waitForIdle()
+
+        compose.onNodeWithContentDescription("Page précédente").performClick()
+        compose.onNodeWithContentDescription("Page suivante").performClick()
+        compose.onNodeWithContentDescription("Page précédente").performTouchInput { longClick() }
+        compose.onNodeWithContentDescription("Page suivante").performTouchInput { longClick() }
+
+        assertEquals(listOf(1, 3, 1, 4), selections.map { it.first })
+        assertTrue("every chrome action must capture the aligned departure anchor", selections.all {
+            it.second != null
+        })
+    }
+
+    @Test
+    fun `page picker ignores out of bounds and current targets then dispatches one valid target`() {
+        val selectedPages = mutableListOf<Int>()
+        mountState(
+            state = contentState(
+                messages = listOf(message(201, "Alpha", "Page deux")),
+                page = 2,
+                totalPages = 4,
+            ),
+            callbacks = NO_OP_CALLBACKS.copy(
+                onSelectPage = { page, _ -> selectedPages += page },
+            ),
+        )
+        compose.waitForIdle()
+
+        compose.onNodeWithContentDescription("Page 2 sur 4").performClick()
+        val jumpField = compose.onNode(hasSetTextAction())
+        jumpField.performTextReplacement("9")
+        compose.onNodeWithText("Y aller").performClick()
+        jumpField.performTextReplacement("2")
+        compose.onNodeWithText("Y aller").performClick()
+        assertEquals(emptyList<Int>(), selectedPages)
+
+        jumpField.performTextReplacement("3")
+        compose.onNodeWithText("Y aller").performClick()
+        compose.waitForIdle()
+
+        assertEquals(listOf(3), selectedPages)
+        compose.onNodeWithText("Aller à une page").assertDoesNotExist()
+    }
+
+    @Test
+    fun `an in-flight switch disarms the pill picker and both page FABs`() {
+        val selectedPages = mutableListOf<Int>()
+        val state = mutableStateOf(
+            contentState(
+                messages = listOf(message(101, "Alice", "Corps du MP")),
+                page = 2,
+                totalPages = 4,
+            ),
+        )
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                PrivateMessageThreadContent(
+                    state = state.value,
+                    isMultiRecipientHint = false,
+                    callbacks = NO_OP_CALLBACKS.copy(
+                        onSelectPage = { page, _ -> selectedPages += page },
+                    ),
+                )
+            }
+        }
+
+        compose.onNodeWithContentDescription("Page 2 sur 4").performClick()
+        compose.runOnIdle { state.value = state.value.copy(isRefreshing = true) }
+        compose.waitForIdle()
+
+        compose.onNodeWithText("Précédent").assertIsNotEnabled()
+        compose.onNodeWithText("Suivant").assertIsNotEnabled()
+        compose.onNodeWithText("Y aller").assertIsNotEnabled()
+        compose.onNodeWithContentDescription("Page 2 sur 4, actualisation en cours")
+            .assertIsNotEnabled()
+        compose.onNodeWithContentDescription("Page précédente").assertIsNotEnabled()
+        compose.onNodeWithContentDescription("Page suivante").assertIsNotEnabled()
+        assertEquals(emptyList<Int>(), selectedPages)
+    }
+
+    // Native text metrics keep the observable single-line and complete-pill contracts reliable.
+    @Test
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    fun `at 360 dp and large font the complete MultiMP subtitle fits left of the complete page pill`() {
+        val subjectText = "Sujet très long qui doit rester sur la première ligne"
+        val subtitleText = "Interlocuteurs multiples"
+        val pagePosition = "Page 987 / 1234"
+        mountState(state = multiRecipientState(subjectText), fontScale = 2f)
+
+        val subject = compose.onNodeWithText(subjectText).assertIsDisplayed()
+            .fetchSemanticsNode().boundsInRoot
+        val subtitle = compose.onNodeWithText(subtitleText).assertIsDisplayed()
+            .fetchSemanticsNode().boundsInRoot
+        val pill = compose.onNodeWithText(pagePosition).assertIsDisplayed()
+            .fetchSemanticsNode().boundsInRoot
+        assertTrue("the subject must remain on the first line", subject.bottom <= subtitle.top)
+        assertTrue("the weighted subtitle must stay left of the page pill", subtitle.right <= pill.left)
+
+        val subtitleLayout = textLayout(subtitleText)
+        assertEquals(1, subtitleLayout.lineCount)
+
+        // Coverage gap for the follow-up issue: overflow must ellipsize the subtitle, never the pill,
+        // but isLineEllipsized reports false here with 139 px available for 183 px requested.
+
+        val pillLayout = textLayout(pagePosition)
+        assertEquals(1, pillLayout.lineCount)
+        assertTrue("the page pill must not ellipsize", !pillLayout.isLineEllipsized(0))
+        assertEquals(pagePosition.length, pillLayout.getLineEnd(0, visibleEnd = true))
     }
 
     @Test
@@ -406,7 +596,7 @@ class PrivateMessageThreadContentTest {
     }
 
     @Test
-    fun `full width keeps one heading per message and no hairline before the pager`() {
+    fun `full width keeps one heading per message and no dangling hairline after the last message`() {
         setContent(
             mode = PrivateMessageThreadUiState.Mode.Content(
                 PrivateMessageThread(
@@ -428,10 +618,17 @@ class PrivateMessageThreadContentTest {
             fullWidthPosts = true,
         )
 
-        // Three messages produce exactly two message→message boundaries. The third message is
-        // followed by the pager island and must not leave a second/dangling boundary before it.
-        compose.onAllNodesWithTag(POST_CARD_SHELL_DIVIDER_TAG, useUnmergedTree = true)
+        // Three messages produce exactly two message→message boundaries. The third is now the last
+        // list item and must not leave a dangling boundary below it.
+        val dividers = compose.onAllNodesWithTag(POST_CARD_SHELL_DIVIDER_TAG, useUnmergedTree = true)
             .assertCountEquals(2)
+            .fetchSemanticsNodes()
+        val finalMessageTop = compose.onNodeWithText("Troisieme message").assertIsDisplayed()
+            .fetchSemanticsNode().boundsInRoot.top
+        assertTrue(
+            "the final message must follow the last message-to-message divider",
+            dividers.maxOf { it.boundsInRoot.bottom } <= finalMessageTop,
+        )
         val heading = SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading)
         compose.onAllNodes(heading, useUnmergedTree = true).assertCountEquals(3)
     }
@@ -779,15 +976,56 @@ class PrivateMessageThreadContentTest {
             totalPages = totalPages,
             fullWidthPosts = fullWidthPosts,
         )
+        mountState(state)
+    }
+
+    private fun mountState(
+        state: PrivateMessageThreadUiState,
+        callbacks: PrivateMessageThreadCallbacks = NO_OP_CALLBACKS,
+        fontScale: Float = 1f,
+    ) {
         compose.setContent {
-            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                PrivateMessageThreadContent(
-                    state = state,
-                    isMultiRecipientHint = false,
-                    callbacks = NO_OP_CALLBACKS,
-                )
+            val baseDensity = LocalDensity.current
+            CompositionLocalProvider(
+                LocalDensity provides Density(baseDensity.density, fontScale),
+            ) {
+                RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                    PrivateMessageThreadContent(
+                        state = state,
+                        isMultiRecipientHint = false,
+                        callbacks = callbacks,
+                    )
+                }
             }
         }
+    }
+
+    private fun multiRecipientState(subject: String): PrivateMessageThreadUiState {
+        val base = contentState(
+            messages = listOf(message(101, "Alice", "Corps du MP")),
+            page = 987,
+            totalPages = 1234,
+            isMultiRecipient = true,
+        )
+        val content = base.mode as PrivateMessageThreadUiState.Mode.Content
+        return base.copy(
+            mode = content.copy(
+                thread = content.thread.copy(
+                    subject = subject,
+                    correspondent = "Ce correspondant ne doit pas remplacer le libellé MultiMP",
+                ),
+            ),
+        )
+    }
+
+    private fun textLayout(text: String): TextLayoutResult {
+        val layouts = mutableListOf<TextLayoutResult>()
+        val readLayout = requireNotNull(
+            compose.onNodeWithText(text, useUnmergedTree = true)
+                .fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action,
+        )
+        assertTrue("the Text layout for '$text' must be readable", readLayout(layouts))
+        return layouts.single()
     }
 
     @Suppress("LongParameterList") // Test state factory: every argument controls one independent contract.
