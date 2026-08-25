@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- #1040 lot 6 — primitive de sélection de page partagée, sans politique de feature. -->
+    <string name="pager_previous">Précédent</string>
+    <string name="pager_next">Suivant</string>
+    <string name="pager_position">page %1$d / %2$d</string>
+    <string name="pager_jump_label">Aller à la page</string>
+    <string name="pager_jump_action">Y aller</string>
     <string name="post_quote_author">Citation de %1$s</string>
     <string name="post_quote_bare">Citation</string>
     <string name="post_quote_ego_state_description">Citation de votre message</string>

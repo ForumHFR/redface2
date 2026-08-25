@@ -20,7 +20,7 @@ import fr.forumhfr.redface2.core.ui.post.PostCardShellFlatBottomEdge
  * arbitration, not re-litigated here.
  *
  * Full-width keeps the #1046 top/FAB insets, but drops the side gutters and inter-message gap. The
- * trailing pager is not a message: its row keeps owning its local 8.dp vertical padding.
+ * With the inline pager removed in #1040 lot 6, the last message is the trailing list item.
  */
 internal fun threadListContentPadding(fullWidthPosts: Boolean): PaddingValues = if (fullWidthPosts) {
     PaddingValues(top = LIST_TOP_INSET, bottom = LIST_BOTTOM_INSET)
@@ -49,7 +49,7 @@ internal fun Modifier.threadIslandPadding(fullWidthPosts: Boolean): Modifier = i
 
 /**
  * #983/#1050 — closes a flat message only when another ordinary message follows. The last message
- * never draws a dangling rule, including when the pager island follows it. Card mode returns the
+ * never draws a dangling rule. Card mode returns the
  * shell default; [PostCardShellFlatBottomEdge] is ignored there.
  */
 internal fun threadMessageFlatBottomEdge(
@@ -69,8 +69,8 @@ private val LIST_TOP_INSET: Dp = 16.dp
 
 /**
  * #1046 — clearance under the last list item for the « Répondre » ExtendedFAB (#301) the Scaffold
- * floats over the list: at 16.dp the last message and the pager row ended up UNDER the FAB at the
- * end of the list. Same value as the topic's #283 bottom-cluster clearance (its
+ * floats over the list: at 16.dp the last message ended up UNDER the FAB cluster at the end of the
+ * list. Same value as the topic's #283 bottom-cluster clearance (its
  * `LIST_BOTTOM_INSET`), so both reading surfaces reserve the same bottom breathing room.
  */
 private val LIST_BOTTOM_INSET: Dp = 88.dp

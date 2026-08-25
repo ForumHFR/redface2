@@ -338,10 +338,10 @@
     <string name="settings_topic_topbar_auto_hide_description">La barre du haut disparaît en défilant vers le bas, réapparaît en remontant.</string>
     <string name="settings_topic_topbar_auto_hide_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
 
-    <!-- #383 — Boutons flottants ‹/› de changement de page (#283). Le swipe (#282) couvre déjà le
-         changement de page ; ce réglage est l'opt-out demandé en bêta. « Répondre » reste affiché. -->
+    <!-- #383/#1040 — opt-out commun des boutons flottants ‹/› sur les deux surfaces de lecture.
+         La clé DataStore et le nom d'API historiques topic_page_fabs restent inchangés. -->
     <string name="settings_topic_page_fabs_title">Boutons de changement de page</string>
-    <string name="settings_topic_page_fabs_description">Boutons flottants ‹ et › en bas du sujet ; le bouton Répondre reste affiché.</string>
+    <string name="settings_topic_page_fabs_description">Boutons flottants ‹ et › en bas des sujets et conversations privées ; le bouton Répondre reste affiché.</string>
     <string name="settings_topic_page_fabs_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
     <!-- #456 — sondages dépliés par défaut dans la lecture de sujet. -->
     <string name="settings_topic_polls_expanded_title">Déplier les sondages</string>

@@ -181,10 +181,16 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
         userPreferencesRepository.observeTopicEgoPostEnabled()
             .onEach { enabled -> _state.update { it.copy(egoPostEnabled = enabled) } }
             .launchIn(viewModelScope)
+        // #383/#1040 — keep the historical repository API/DataStore key, but apply the preference
+        // to the MP page-FAB cluster as well as the topic cluster. Render-only: never refetch.
+        userPreferencesRepository.observeTopicPageFabs()
+            .onEach { enabled -> _state.update { it.copy(showPageFabs = enabled) } }
+            .launchIn(viewModelScope)
     }
 
     fun selectPage(page: Int, departureAnchor: PrivateMessageScrollAnchor? = null) {
-        if (page < 1 || page == _state.value.page) return
+        val current = _state.value
+        if (page !in 1..current.totalPages || page == current.page) return
         departureAnchor?.let(::reportPageAnchor)
         load(page, LandingRequest.RestoreOrTop)
     }
@@ -427,7 +433,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
 
     /**
      * Purges everything owned by the previous session: the in-flight jobs, the cached roster form
-     * and the whole UI state — only the four render-only preferences survive the reset (they are
+     * and the whole UI state — only the five render-only preferences survive the reset (they are
      * not session data); the blacklist collector and its cached snapshot do not. This is the single
      * purge path for the three session exits of the architecture contract (anonymous, logout,
      * session change): the anonymous/logout callers keep
@@ -442,6 +448,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
         val showSignatures = _state.value.showSignatures
         val egoQuoteEnabled = _state.value.egoQuoteEnabled
         val egoPostEnabled = _state.value.egoPostEnabled
+        val showPageFabs = _state.value.showPageFabs
         authenticatedPseudo = null
         landingGeneration++
         pendingPageLanding = null
@@ -468,6 +475,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
                 showSignatures = showSignatures,
                 egoQuoteEnabled = egoQuoteEnabled,
                 egoPostEnabled = egoPostEnabled,
+                showPageFabs = showPageFabs,
             )
     }
 

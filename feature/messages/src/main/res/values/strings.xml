@@ -15,9 +15,18 @@
     <string name="messages_state_read">Lu</string>
     <string name="messages_state_unread">Non lu</string>
     <string name="messages_back">Retour</string>
+    <!-- Pager de la liste d'inbox ; le thread utilise désormais le picker partagé. -->
     <string name="messages_pager_previous">Précédent</string>
     <string name="messages_pager_next">Suivant</string>
     <string name="messages_pager_position">Page %1$d / %2$d</string>
+    <string name="messages_pager_position_a11y">Page %1$d sur %2$d</string>
+    <string name="messages_pager_position_refreshing_a11y">Page %1$d sur %2$d, actualisation en cours</string>
+    <string name="messages_page_picker_open">Changer de page</string>
+    <string name="messages_page_picker_title">Aller à une page</string>
+    <string name="messages_fab_previous_page">Page précédente</string>
+    <string name="messages_fab_next_page">Page suivante</string>
+    <string name="messages_fab_first_page">Aller à la première page</string>
+    <string name="messages_fab_last_page">Aller à la dernière page</string>
 
     <!-- #301 — réponse à une conversation privée (écriture MP). -->
     <string name="messages_reply">Répondre</string>

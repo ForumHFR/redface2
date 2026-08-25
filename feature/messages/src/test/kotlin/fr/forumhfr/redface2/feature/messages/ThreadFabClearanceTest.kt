@@ -9,6 +9,7 @@ import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performSemanticsAction
 import fr.forumhfr.redface2.core.model.Post
@@ -28,10 +29,10 @@ import org.robolectric.annotation.Config
 
 /**
  * #1046 — the MP thread's end-of-list clearance, measured on the MOUNTED surface: with the full
- * [PrivateMessageThreadContent] composition (Scaffold + « Répondre » ExtendedFAB, #301) scrolled to
- * the absolute end of an overflowing page, the trailing pager row — the item closest to the FAB —
- * must sit entirely ABOVE the FAB, not under it. At the pre-#1046 16.dp bottom inset the pager
- * settled squarely under the FAB; the 88.dp clearance (pinned exactly, list-side, in
+ * [PrivateMessageThreadContent] composition (Scaffold + page/« Répondre » FAB cluster) scrolled to
+ * the absolute end of an overflowing page, the last message must sit entirely ABOVE the cluster,
+ * not under it. At the pre-#1046 16.dp bottom inset the trailing content settled under the FAB;
+ * the 88.dp clearance (pinned exactly, list-side, in
  * [ThreadListLayoutTest]) keeps it clear. The 360.dp-wide qualifier matches the project's narrow
  * reference device (S10e).
  */
@@ -44,16 +45,17 @@ class ThreadFabClearanceTest {
     val compose = createComposeRule()
 
     @Test
-    fun `scrolled to the end of the list, the pager row is not covered by the reply FAB`() {
+    fun `scrolled to the end, the last message clears the complete page and reply FAB cluster`() {
         mountOverflowingThread()
 
         // Guard against a trivially green run: the fixture page must overflow the viewport, so the
-        // trailing pager item is NOT composed yet — otherwise the whole list fits above the FAB and
+        // last message is NOT composed yet — otherwise the whole list fits above the FAB and
         // the measurement below would pass with ANY bottom inset, 16.dp included.
         assertEquals(
             "fixture must overflow the viewport (grow the message bodies if this fails)",
             0,
-            compose.onAllNodesWithText(PAGER_POSITION).fetchSemanticsNodes().size,
+            compose.onAllNodesWithText(LAST_MESSAGE_PREFIX, substring = true)
+                .fetchSemanticsNodes().size,
         )
 
         // Scroll to the ABSOLUTE end: the lazy list's semantics ScrollBy clamps at the content
@@ -63,31 +65,32 @@ class ThreadFabClearanceTest {
             .performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 100_000f) }
         compose.waitForIdle()
 
-        // The M3 ExtendedFAB label matches in the UNMERGED tree only under this harness (the
-        // merged-tree text query finds no node), so locate the FAB as the clickable ancestor of
-        // its label — which also measures the full FAB envelope rather than the label's bounds.
-        val fabBounds = compose.onNode(
+        val replyFabBounds = compose.onNode(
             hasClickAction() and hasAnyDescendant(hasText("Répondre")),
             useUnmergedTree = true,
         ).fetchSemanticsNode().boundsInRoot
-        // The pager row is the LAST list item — the deepest content at end-of-scroll, so proving IT
-        // clears the FAB proves every message above it does too. Its row container carries no
-        // semantics: measure its three visible children and take the deepest edge.
-        val pagerBottom = listOf("Précédent", PAGER_POSITION, "Suivant").maxOf { text ->
-            compose.onNodeWithText(text).assertIsDisplayed()
-                .fetchSemanticsNode().boundsInRoot.bottom
+        val previousFabBounds = compose.onNodeWithContentDescription("Page précédente")
+            .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val nextFabBounds = compose.onNodeWithContentDescription("Page suivante")
+            .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val clusterTop = minOf(replyFabBounds.top, previousFabBounds.top, nextFabBounds.top)
+        // The card container carries no stable merged bounds contract. As for the former pager-row
+        // proof, measure the last item's visible children and take their deepest edge.
+        val lastMessageBottom = listOf("Auteur $MESSAGE_COUNT", LAST_MESSAGE_PREFIX).maxOf { text ->
+            compose.onNodeWithText(text, substring = text == LAST_MESSAGE_PREFIX)
+                .assertIsDisplayed().fetchSemanticsNode().boundsInRoot.bottom
         }
-        val clearanceDp = with(compose.density) { (fabBounds.top - pagerBottom).toDp().value }
+        val clearanceDp = with(compose.density) { (clusterTop - lastMessageBottom).toDp().value }
         assertTrue(
-            "the trailing pager row must clear the reply FAB at end of scroll " +
-                "(pager bottom ${pagerBottom}px vs FAB top ${fabBounds.top}px = ${clearanceDp}dp)",
+            "the last message must clear the complete FAB cluster at end of scroll " +
+                "(message bottom ${lastMessageBottom}px vs cluster top ${clusterTop}px = ${clearanceDp}dp)",
             clearanceDp >= 0f,
         )
     }
 
     /**
-     * Full thread surface, `canReply = true` (the FAB is in the composition) and a multi-page
-     * thread (the pager row exists and trails the list). Message bodies are long on purpose:
+     * Full thread surface, `canReply = true` and a multi-page thread (both page FABs plus reply are
+     * in the composition). Message bodies are long on purpose:
      * the page MUST overflow the 780.dp viewport for the end-of-scroll measurement to mean
      * anything (cf. the guard in the test).
      */
@@ -148,7 +151,7 @@ class ThreadFabClearanceTest {
     private companion object {
         const val THREAD_ID = 42
         const val MESSAGE_COUNT = 8
-        const val PAGER_POSITION = "Page 2 / 4"
+        const val LAST_MESSAGE_PREFIX = "Message 8"
 
         val NO_OP_CALLBACKS = PrivateMessageThreadCallbacks(
             onBack = {},
