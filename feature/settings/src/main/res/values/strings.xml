@@ -32,7 +32,7 @@
     <string name="settings_mp_sync_write_persist_failed">Impossible d\'enregistrer ce réglage pour le moment.</string>
     <string name="settings_mp_content_cache_title">Cache disque des messages privés (tous les comptes)</string>
     <string name="settings_mp_content_cache_description">Activé pour tous les comptes utilisés sur cet appareil. Conserve jusqu\'à 5 pages par compte ; chaque page est revalidée par le réseau, sans mode hors ligne.</string>
-    <string name="settings_mp_content_cache_persist_failed">Impossible d\'enregistrer ce réglage. Le cache reste activé.</string>
+    <string name="settings_mp_content_cache_persist_failed">Impossible d\'enregistrer ce réglage. Le cache reste dans son état précédent.</string>
     <string name="settings_mp_content_cache_purge_failed">Le cache reste désactivé, mais la suppression n\'a pas abouti. Les lectures et écritures disque restent bloquées.</string>
     <string name="settings_mp_content_cache_retry">Réessayer la suppression</string>
     <string name="settings_mp_content_cache_disable_title">Désactiver le cache disque privé ?</string>

@@ -169,8 +169,9 @@ Les chemins d'échec, qui font la fiabilité de la fonction :
 - **aucun retour silencieux à ON**, dans aucun cas.
 
 Le **propriétaire de la reprise** est nommé : `CacheInvalidator.start()`, lancé par
-`RedfaceApplication`, appelle `reconcileOnStartup()` à chaque démarrage ; le ViewModel des réglages
-expose en plus le réessai manuel. Un utilisateur qui croit avoir purgé alors que non est le pire
+`RedfaceApplication`, appelle `reconcileOnStartup()` à chaque démarrage — qui ne fait quelque chose
+que si une purge est **pendante**, l'accès disque restant refusé tant qu'elle l'est ; le ViewModel
+des réglages expose en plus le réessai manuel. Un utilisateur qui croit avoir purgé alors que non est le pire
 état possible pour cette fonction.
 
 ### 6. Rémanence SQLite : **scrub événementiel**, pas de réglage permanent
@@ -178,19 +179,37 @@ expose en plus le réessai manuel. Un utilisateur qui croit avoir purgé alors q
 C'est la décision-gate posée par l'ADR-013, tranchée par @XaTriX le 2026-08-25 sur recommandation
 d'un gate indépendant.
 
-**Décidé** : `DELETE` **+ `PRAGMA wal_checkpoint(TRUNCATE)` + `VACUUM`**, exécuté aux **trois
-événements de confidentialité** — passage du toggle à OFF, déconnexion, bascule de compte. Le scrub
-vit dans `PrivateContentDatabaseScrubber` et s'insère dans `CacheInvalidator`, qui sérialise déjà
-les purges DAO ; il y est **délibérément le dernier**, de sorte que les lignes privées supprimées
-par les purges qui le précèdent (drapeaux, positions de lecture, brouillons MP, images uploadées,
+**Décidé** : `DELETE` **+ `PRAGMA wal_checkpoint(TRUNCATE)` + `VACUUM` + un second
+`PRAGMA wal_checkpoint(TRUNCATE)`**, exécuté aux **trois événements de confidentialité** — passage
+du toggle à OFF, déconnexion, bascule de compte. Le scrub vit dans
+`PrivateContentDatabaseScrubber` et s'insère dans `CacheInvalidator`, qui sérialise déjà les purges
+DAO ; il y est **délibérément le dernier**, de sorte que les lignes privées supprimées par les
+purges qui le précèdent (drapeaux, positions de lecture, brouillons MP, images uploadées,
 localisation MPStorage) soient scrubées elles aussi.
+
+⚠ **Le second checkpoint n'est pas une ceinture, c'est la moitié de la garantie.** En mode WAL, le
+`VACUUM` est une transaction ordinaire : il écrit son image propre **dans le journal**, et le
+fichier principal n'est réécrit qu'au checkpoint **suivant**. Mesuré : après
+`DELETE` + `wal_checkpoint(TRUNCATE)` + `VACUUM`, la sentinelle est **toujours** présente dans
+`redface.db` ; elle n'en disparaît qu'au second checkpoint. L'autocheckpoint passif d'Android
+rattrape souvent le coup, mais ne le garantit jamais — ni sur une base de moins de ~400 Ko, ni sous
+lecteur concurrent — donc sans ce second checkpoint la fenêtre post-purge que ce scrub existe pour
+fermer resterait ouverte. Il porte le **même** contrôle `busy == 0` que le premier : un checkpoint
+occupé fait échouer le scrub, donc retombe dans le mécanisme fail-closed de la décision 5. Ce
+constat **confirme** le choix `VACUUM`, il ne l'invalide pas : le repli documenté plus bas n'est pas
+déclenché.
 
 Le raisonnement, qui borne exactement ce qu'on achète : l'adversaire résiduel lit les **lignes
 vivantes** tant que l'opt-in est ON — rémanence ou pas. Le seul delta que la rémanence ajoute, c'est
 la fenêtre **post-purge**, où l'utilisateur a désactivé le cache ou s'est déconnecté **en croyant la
 donnée effacée**. C'est cette garantie-là, et seulement elle, qu'il faut payer :
 **événement de purge ⇒ octets disparus**. Le coût de régime permanent est nul — rien ne change entre
-deux événements de confidentialité.
+deux événements de confidentialité. **Le démarrage n'en est pas un** : la réconciliation lancée par
+`CacheInvalidator` ne scrubbe que si une purge est réellement **pendante**. Forcer un scrub au seul
+motif que la préférence lit OFF ferait un checkpoint et un `VACUUM` de la base **entière** —
+`topic_pages` et `posts` compris — à chaque lancement de tout le parc, qui est OFF par défaut, et un
+checkpoint occupé y annoncerait « lectures et écritures bloquées » à des utilisateurs n'ayant jamais
+rien activé.
 
 **Explicitement accepté, et écrit ici pour que personne n'ait à le redécouvrir** : les **évictions
 LRU** qui surviennent pendant que l'opt-in est ON (la sixième page d'un compte chasse la plus
@@ -212,9 +231,21 @@ engagé : rien ne l'a rendu nécessaire à ce jour, et il doit être **mesuré**
 écrit une **sentinelle** reconnaissable dans le contenu d'un message privé, vérifie d'abord qu'elle a
 **réellement atteint SQLite**, déclenche la purge, puis **scanne les octets** du fichier `redface.db`
 **et** de son `-wal` pour vérifier qu'elle a disparu. Un test qui vérifierait seulement que la table
-est vide ne prouverait rien ici. Mesure faite à l'exécution : sous Robolectric le journal est bien en
-mode `wal`, et **avant** le scrub la sentinelle n'existe que dans le fichier `-wal` — c'est-à-dire
-exactement le fichier qu'un `secure_delete=ON` seul ne couvrirait pas.
+est vide ne prouverait rien ici.
+
+Il le fait sur **deux** scénarios, parce qu'un seul ne couvre qu'une moitié du disque :
+
+1. **sans checkpoint intermédiaire** — la sentinelle n'a jamais quitté le `-wal` avant le scrub,
+   c'est-à-dire exactement le fichier qu'un `secure_delete=ON` seul ne couvrirait pas ;
+2. **avec checkpoint intermédiaire, et `PRAGMA secure_delete=OFF`** — la sentinelle est d'abord
+   **constatée dans `redface.db`** lui-même, l'état que tout appareil atteint dès que SQLite
+   autocheckpointe, et le zérotage à la suppression est retiré pour qu'aucune béquille ne puisse
+   expliquer sa disparition à la place du scrub.
+
+**Contre-épreuve exécutée** : le second scénario **échoue** (« sentinel must disappear from
+redface.db ») quand on retire le checkpoint post-`VACUUM`, et **passe** quand on le remet — pendant
+que le premier reste vert dans les deux cas. C'est ce qui établit que la garantie tient par la
+séquence de scrub, et non par le mode `secure_delete` du SQLite embarqué.
 
 Un checkpoint qui rend `SQLITE_BUSY` n'est pas silencieux : il fait échouer le scrub, donc retombe
 dans le mécanisme de la décision 5 — purge échouée, OFF verrouillé, réessai au démarrage.
@@ -274,8 +305,10 @@ plus les modèles, ce sont les **garanties**. Le partage de la surface de lectur
 - **+** La décision-gate « rémanence SQLite » de l'ADR-013 est levée **explicitement et par écrit**,
   au lieu de l'être silencieusement par la livraison d'un substrat.
 - **+** La garantie vendue à l'utilisateur est **exactement** celle qui est prouvée : « j'ai
-  désactivé / je me suis déconnecté ⇒ les octets ont disparu », épinglée par un test à sentinelle
-  qui scanne les fichiers, pas par un `COUNT(*)`.
+  désactivé / je me suis déconnecté ⇒ les octets ont disparu », épinglée sur les **deux** fichiers —
+  `redface.db` comme son `-wal` — par un test à sentinelle qui les scanne, pas par un `COUNT(*)`, et
+  dont la variante `redface.db` a été vérifiée par contre-épreuve : elle échoue si le second
+  checkpoint est retiré.
 - **+** Le traitement du texte s'aligne enfin sur celui des médias : le précédent #1096/#1099 n'est
   plus contredit.
 - **−** Un résidu subsiste dans les pages libres entre deux événements de confidentialité, du fait
@@ -299,8 +332,10 @@ plus les modèles, ce sont les **garanties**. Le partage de la surface de lectur
   checkpoint, et un reset de WAL **ne tronque pas** le fichier. C'est en outre un réglage **par
   connexion**, alors que Room en WAL utilise un **pool** : rien ne garantit contractuellement qu'un
   `execSQL` dans `onOpen` couvre toutes les connexions. La mesure du test à sentinelle confirme le
-  point central : avant le scrub, la sentinelle vit **uniquement dans le `-wal`**. Acceptable en
-  ceinture-bretelles, jamais comme pièce porteuse.
+  point central : tant que rien n'a été checkpointé, la sentinelle vit **uniquement dans le
+  `-wal`** ; et une fois checkpointée dans `redface.db`, c'est le `VACUUM` **suivi de son
+  checkpoint** qui l'en retire, `secure_delete` désactivé. Acceptable en ceinture-bretelles, jamais
+  comme pièce porteuse.
 - **Acceptation sèche de la rémanence** (documenter le risque et ne rien faire) — **rejetée**. Elle
   contredit le précédent que le dépôt vient de poser : #1096/#1099 ont qualifié de **défaut** la
   survie des images MP à la déconnexion et amendé l'ADR-013 en conséquence. Le même raisonnement

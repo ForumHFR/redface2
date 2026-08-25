@@ -59,8 +59,10 @@ import kotlinx.coroutines.plus
  * Opted-in private-message content follows the same transition through its dedicated persistence
  * façade. That façade applies the existing Room `lowercase()` account convention to reads, writes
  * and purges alike. Purge failures carry no identifier in logs and leave a durable pending marker;
- * [start] owns the startup reconciliation: every OFF startup retries the global purge, while the
- * access gate refuses every content-table read and write until it has completed.
+ * [start] owns the startup reconciliation, which retries the global purge only while that marker is
+ * set — startup is not a privacy event, so a default-OFF install with nothing pending scrubs
+ * nothing. The access gate refuses every content-table read and write until a pending purge has
+ * completed.
  *
  * Coil's global image cache is wiped too (#1096). Entries created before MP requests disabled
  * their disk cache carry no public-topic/private-message marker, so a selective purge is
@@ -136,7 +138,8 @@ class CacheInvalidator @Inject internal constructor(
                     runCatching { mpStorageLocationDao.deleteAllForUser(previousPseudo) }
                         .onFailure { Log.w(LOG_TAG, "Failed to purge MPStorage location for $previousPseudo", it) }
                     // Deliberately last among Room deletions: this façade finishes with a WAL
-                    // checkpoint + VACUUM, so every private row deleted above is scrubbed too.
+                    // checkpoint, a VACUUM and a second checkpoint, so every private row deleted
+                    // above is scrubbed too.
                     runCatching { privateMessageContentCacheMaintenance.purgeForUser(previousPseudo) }
                         .onFailure { Log.w(LOG_TAG, "Failed to purge private message content") }
                     flagRepository.clearSessionCache()

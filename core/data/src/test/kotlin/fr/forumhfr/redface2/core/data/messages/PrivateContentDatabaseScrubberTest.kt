@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.data.messages
 import android.content.Context
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.test.core.app.ApplicationProvider
 import fr.forumhfr.redface2.core.database.RedfaceDatabase
 import fr.forumhfr.redface2.core.model.Post
@@ -12,6 +13,7 @@ import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
 import java.io.File
 import java.time.Instant
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
@@ -37,19 +39,15 @@ class PrivateContentDatabaseScrubberTest {
     private lateinit var context: Context
     private lateinit var database: RedfaceDatabase
     private lateinit var databaseFile: File
+    private lateinit var walFile: File
 
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
         context.deleteDatabase(RedfaceDatabase.DATABASE_NAME)
         databaseFile = context.getDatabasePath(RedfaceDatabase.DATABASE_NAME)
-        database = Room.databaseBuilder(
-            context,
-            RedfaceDatabase::class.java,
-            RedfaceDatabase.DATABASE_NAME,
-        )
-            .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
-            .build()
+        walFile = File("${databaseFile.path}-wal")
+        database = openDatabase(disableSecureDelete = false)
     }
 
     @After
@@ -60,11 +58,7 @@ class PrivateContentDatabaseScrubberTest {
 
     @Test
     fun `privacy purge removes sentinel bytes from database and WAL`() = runTest {
-        val scrubber = RoomPrivateContentDatabaseScrubber(
-            database = database,
-            ioDispatcher = UnconfinedTestDispatcher(testScheduler),
-        )
-        val cache = RoomPrivateMessageThreadDiskCache(database.privateMessageContentDao(), scrubber)
+        val cache = sentinelCache(UnconfinedTestDispatcher(testScheduler))
         cache.replace("Alice", sentinelThread(), Instant.parse("2026-08-25T12:00:00Z"))
 
         assertTrue("sentinel must really reach SQLite before the purge", containsSentinel())
@@ -76,6 +70,72 @@ class PrivateContentDatabaseScrubberTest {
         assertFalse("sentinel must disappear from redface.db and redface.db-wal", containsSentinel())
     }
 
+    /**
+     * Counter-proof of the sibling test, which only ever exercises a sentinel that never left the
+     * WAL: here an intermediate checkpoint merges it into `redface.db` itself — the state any
+     * device reaches as soon as SQLite autocheckpoints — and `secure_delete` is stripped so that
+     * nothing but the scrub sequence can explain the bytes disappearing. Without the post-VACUUM
+     * checkpoint, VACUUM commits its clean image into the WAL and `redface.db` keeps the sentinel.
+     */
+    @Test
+    fun `privacy purge removes sentinel bytes already checkpointed into the main database file`() = runTest {
+        database.close()
+        database = openDatabase(disableSecureDelete = true)
+        val cache = sentinelCache(UnconfinedTestDispatcher(testScheduler))
+        cache.replace("Alice", sentinelThread(), Instant.parse("2026-08-25T12:00:00Z"))
+        assertEquals("the zeroing crutch must really be off for this proof", 0, secureDeleteSetting())
+
+        checkpointTruncate()
+
+        assertTrue("sentinel must reach redface.db itself, not only its WAL", containsSentinel(databaseFile))
+
+        cache.clearAll()
+
+        assertEquals(0, rowCount("mp_messages"))
+        assertEquals(0, rowCount("mp_thread_pages"))
+        assertFalse("sentinel must disappear from redface.db", containsSentinel(databaseFile))
+        assertFalse("sentinel must disappear from redface.db-wal", containsSentinel(walFile))
+    }
+
+    private fun openDatabase(disableSecureDelete: Boolean): RedfaceDatabase {
+        val builder = Room.databaseBuilder(
+            context,
+            RedfaceDatabase::class.java,
+            RedfaceDatabase.DATABASE_NAME,
+        )
+            .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
+        if (disableSecureDelete) {
+            builder.addCallback(
+                object : RoomDatabase.Callback() {
+                    override fun onOpen(db: SupportSQLiteDatabase) {
+                        db.query("PRAGMA secure_delete=OFF").use { cursor -> cursor.moveToFirst() }
+                    }
+                },
+            )
+        }
+        return builder.build()
+    }
+
+    private fun sentinelCache(
+        ioDispatcher: CoroutineDispatcher,
+    ): RoomPrivateMessageThreadDiskCache = RoomPrivateMessageThreadDiskCache(
+        contentDao = database.privateMessageContentDao(),
+        databaseScrubber = RoomPrivateContentDatabaseScrubber(database, ioDispatcher),
+    )
+
+    private fun secureDeleteSetting(): Int = database.openHelper.writableDatabase
+        .query("PRAGMA secure_delete")
+        .use { cursor ->
+            check(cursor.moveToFirst())
+            cursor.getInt(0)
+        }
+
+    private fun checkpointTruncate() {
+        database.openHelper.writableDatabase
+            .query("PRAGMA wal_checkpoint(TRUNCATE)")
+            .use { cursor -> check(cursor.moveToFirst()) }
+    }
+
     private fun rowCount(table: String): Int = database.openHelper.readableDatabase
         .query("SELECT COUNT(*) FROM $table")
         .use { cursor ->
@@ -83,11 +143,12 @@ class PrivateContentDatabaseScrubberTest {
             cursor.getInt(0)
         }
 
-    private fun containsSentinel(): Boolean {
-        val sentinel = SENTINEL.encodeToByteArray()
-        return listOf(databaseFile, File("${databaseFile.path}-wal"))
-            .filter(File::exists)
-            .any { file -> file.readBytes().containsSubsequence(sentinel) }
+    private fun containsSentinel(): Boolean =
+        listOf(databaseFile, walFile).any(::containsSentinel)
+
+    private fun containsSentinel(file: File): Boolean {
+        if (!file.exists()) return false
+        return file.readBytes().containsSubsequence(SENTINEL.encodeToByteArray())
     }
 
     private fun ByteArray.containsSubsequence(needle: ByteArray): Boolean {

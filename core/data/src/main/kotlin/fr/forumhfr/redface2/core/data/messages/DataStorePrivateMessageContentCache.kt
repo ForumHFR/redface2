@@ -62,7 +62,13 @@ class DataStorePrivateMessageContentCache @Inject internal constructor(
     override suspend fun setEnabled(enabled: Boolean) {
         if (enabled) {
             withRoomAccess {
-                reconcilePendingPurgeLocked(forceWhenOff = false)
+                // A pending purge must complete before ON becomes effective again, and its failure
+                // is a purge failure — never an untyped escape past the sealed contract.
+                try {
+                    reconcilePendingPurgeLocked()
+                } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+                    throw PrivateMessageContentCacheException.PurgeFailed(error)
+                }
                 try {
                     dataStore.edit { preferences -> preferences[KEY_ENABLED] = true }
                 } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
@@ -146,33 +152,30 @@ class DataStorePrivateMessageContentCache @Inject internal constructor(
         }
     }
 
-    /** Startup owner: [fr.forumhfr.redface2.core.data.cache.CacheInvalidator]. */
-    override suspend fun reconcileOnStartup() {
-        val preferences = dataStore.data.first()
-        if ((preferences[KEY_ENABLED] ?: false) && !(preferences[KEY_PURGE_PENDING] ?: false)) return
-        sessionCache.clearAndAdvanceGeneration()
-        try {
-            withRoomAccess { reconcilePendingPurgeLocked(forceWhenOff = true) }
-        } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
-            throw PrivateMessageContentCacheException.PurgeFailed(error)
-        }
-    }
+    /**
+     * Startup owner: [fr.forumhfr.redface2.core.data.cache.CacheInvalidator].
+     *
+     * Only a genuinely **pending** purge scrubs here. Startup is not one of the three privacy
+     * events (ADR-018 §6): forcing a purge merely because the preference reads OFF would run a
+     * checkpoint and a whole-database `VACUUM` — `topic_pages` and `posts` included — on every
+     * launch of every install that never opted in, and a checkpoint turning busy against the
+     * concurrent startup reads would report "reads and writes blocked" to users who never
+     * enabled anything.
+     */
+    override suspend fun reconcileOnStartup() = retryPendingPurge()
 
     override suspend fun retryPendingPurge() {
         if (!(dataStore.data.first()[KEY_PURGE_PENDING] ?: false)) return
         sessionCache.clearAndAdvanceGeneration()
         try {
-            withRoomAccess { reconcilePendingPurgeLocked(forceWhenOff = false) }
+            withRoomAccess { reconcilePendingPurgeLocked() }
         } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
             throw PrivateMessageContentCacheException.PurgeFailed(error)
         }
     }
 
-    private suspend fun reconcilePendingPurgeLocked(forceWhenOff: Boolean) {
-        val preferences = dataStore.data.first()
-        val purgePending = preferences[KEY_PURGE_PENDING] ?: false
-        val preferenceOff = !(preferences[KEY_ENABLED] ?: false)
-        if (!purgePending && !(forceWhenOff && preferenceOff)) return
+    private suspend fun reconcilePendingPurgeLocked() {
+        if (!(dataStore.data.first()[KEY_PURGE_PENDING] ?: false)) return
         dataStore.edit { mutable -> mutable[KEY_PURGE_PENDING] = true }
         diskCache.clearAll()
         dataStore.edit { mutable -> mutable[KEY_PURGE_PENDING] = false }

@@ -45,8 +45,14 @@ class DataStorePrivateMessageContentCacheTest {
         cache = DataStorePrivateMessageContentCache(dataStore, sessionCache, diskCache)
     }
 
+    /**
+     * Default OFF is the whole fleet: nothing was ever written, so startup has nothing to purge.
+     * Scrubbing anyway would checkpoint and VACUUM the entire database on every launch, and a busy
+     * checkpoint would report a purge failure to users who never opted in. Startup is not a privacy
+     * event — only a genuinely pending purge scrubs there (see the sibling retry test).
+     */
     @Test
-    fun `default OFF startup scrubs once while normal OFF access never reaches content rows`() = runTest {
+    fun `default OFF startup scrubs nothing and normal OFF access never reaches content rows`() = runTest {
         assertFalse(cache.isEnabled())
 
         cache.reconcileOnStartup()
@@ -54,7 +60,7 @@ class DataStorePrivateMessageContentCacheTest {
         assertNull(cache.readIfEnabled("alice", 42, 1))
         cache.replaceIfEnabled("alice", thread(), java.time.Instant.EPOCH) { true }
 
-        coVerify(exactly = 1) { diskCache.clearAll() }
+        coVerify(exactly = 0) { diskCache.clearAll() }
         coVerify(exactly = 0) { diskCache.clearForUser(any()) }
         coVerify(exactly = 0) { diskCache.read(any(), any(), any()) }
         coVerify(exactly = 0) { diskCache.replace(any(), any(), any()) }
@@ -89,6 +95,20 @@ class DataStorePrivateMessageContentCacheTest {
         assertTrue(cache.observePurgePending().first())
         cache.reconcileOnStartup()
         coVerify(exactly = 2) { diskCache.clearAll() }
+    }
+
+    /** R5: re-enabling runs the pending purge first, and its failure must stay a typed PurgeFailed. */
+    @Test
+    fun `re-enabling over a pending purge fails as PurgeFailed and never turns ON`() = runTest {
+        cache.setEnabled(true)
+        coEvery { diskCache.clearAll() } throws IOException("busy")
+        assertTrue(runCatching { cache.setEnabled(false) }.isFailure)
+
+        val failure = runCatching { cache.setEnabled(true) }.exceptionOrNull()
+
+        assertTrue(failure is PrivateMessageContentCacheException.PurgeFailed)
+        assertFalse(cache.isEnabled())
+        assertTrue(cache.observePurgePending().first())
     }
 
     @Test
