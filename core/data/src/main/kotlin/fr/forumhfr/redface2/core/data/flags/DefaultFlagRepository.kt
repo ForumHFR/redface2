@@ -5,6 +5,7 @@ import fr.forumhfr.redface2.core.data.forum.RestListEnvelope
 import fr.forumhfr.redface2.core.data.forum.RestTopic
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
@@ -95,6 +96,11 @@ class DefaultFlagRepository @Inject constructor(
     @param:FlagsJson private val json: Json,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
     private val clock: Clock,
+    // #1144 — outcome trail for the two HFR mutations. Their callers are now detached
+    // (`awaitDetached`), so a back press can leave the write running with nobody to raise a
+    // snackbar: every add / remove records its result here (the in-app Diagnostics viewer),
+    // mirroring what `DefaultDeletePostRepository` already does for a deletion.
+    private val diagnostics: DiagnosticsLog,
 ) : FlagRepository {
 
     private val cachedSuccesses: MutableMap<FlagType, FlagsResult.Success> = EnumMap(FlagType::class.java)
@@ -328,7 +334,28 @@ class DefaultFlagRepository @Inject constructor(
                 FlagDeleteResult.Success -> Unit
                 FlagDeleteResult.Failure -> throw FlagDeleteFailedException(flag.topicId)
             }
+        }.onFailure { raised ->
+            // #1144 — a cancellation is NOT an outcome to report: folding it into `Result.failure`
+            // told the caller « la suppression a echoue » for what was only a torn-down caller, and
+            // it silently killed the CancellationException branch of
+            // `TopicViewModel.confirmRemoveTopicFlag`. Re-throw it untouched; only real failures
+            // become a failed Result (and get traced).
+            if (raised is CancellationException) throw raised
+            diagnostics.record(
+                DiagnosticsLog.Level.WARN,
+                LOG_TAG,
+                "delflag FAILED topic=${flag.topicId} type=${flag.type} : " +
+                    (raised.message ?: raised::class.simpleName ?: "(no message)"),
+            )
         }.onSuccess {
+            // Traced from the repository, not from the ViewModel: since #1144 the caller may already
+            // be gone (detached mutation) and its snackbar with it, so this is the only surviving
+            // record of what the app did to the user's drapeaux.
+            diagnostics.record(
+                DiagnosticsLog.Level.INFO,
+                LOG_TAG,
+                "delflag OK topic=${flag.topicId} type=${flag.type}",
+            )
             evictFlagFromCaches(userId = userId, flag = flag)
         }
     }
@@ -365,7 +392,22 @@ class DefaultFlagRepository @Inject constructor(
                 FlagAddResult.Success -> Unit
                 FlagAddResult.Failure -> throw FlagAddFailedException(context.topicId)
             }
+        }.onFailure { raised ->
+            // #1144 — same rule as [removeFlag]: cancellation propagates, it is not a failed add.
+            if (raised is CancellationException) throw raised
+            diagnostics.record(
+                DiagnosticsLog.Level.WARN,
+                LOG_TAG,
+                "addflag FAILED topic=${context.topicId} : " +
+                    (raised.message ?: raised::class.simpleName ?: "(no message)"),
+            )
         }.onSuccess {
+            // #1144 — the surviving trace of a favourite added by a caller that may already be gone.
+            diagnostics.record(
+                DiagnosticsLog.Level.INFO,
+                LOG_TAG,
+                "addflag OK topic=${context.topicId}",
+            )
             // A session change while addflag.php was in flight must not reconcile the previous
             // account's mutation into the current account's caches. The UI independently guards its
             // own state token; this is the repository-side ownership fence.

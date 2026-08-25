@@ -2,7 +2,9 @@ package fr.forumhfr.redface2.core.data.upload
 
 import fr.forumhfr.redface2.core.database.dao.UploadedImageDao
 import fr.forumhfr.redface2.core.database.entities.UploadedImageEntity
+import fr.forumhfr.redface2.core.domain.coroutines.ApplicationScope
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
+import fr.forumhfr.redface2.core.domain.coroutines.awaitDetached
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.ImageUpload
 import fr.forumhfr.redface2.core.domain.upload.UploadProvider
@@ -15,6 +17,7 @@ import java.time.Instant
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -41,6 +44,9 @@ internal class DefaultUploadRepository @Inject constructor(
     private val userPreferencesRepository: UserPreferencesRepository,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
     private val clock: Clock,
+    // #1144 — see [uploadWithCurrentProvider]: the bookkeeping that follows a COMPLETED host upload
+    // must not be lost to the caller's cancellation.
+    @param:ApplicationScope private val externalScope: CoroutineScope,
 ) : UploadRepository {
 
     override suspend fun uploadWithCurrentProvider(image: ImageUpload, userId: String): UploadedImage {
@@ -48,8 +54,16 @@ internal class DefaultUploadRepository @Inject constructor(
         val provider = providers[providerId]
             ?: error("No UploadProvider registered for $providerId")
         val result = provider.upload(image)
-        withContext(ioDispatcher) {
-            uploadedImageDao.upsert(result.toEntity(userId.lowercase(), Instant.now(clock)))
+        // #1144 — the upload ITSELF stays cancellable on purpose (#459 cancels `uploadJob` in the
+        // editors' `onCleared`: an image picked for an abandoned draft should not keep uploading).
+        // But once the host has accepted the picture, dropping this row would strand it: « Mes
+        // images » could neither list nor delete it ever again. So the trace — and only the trace —
+        // is written on the process-lifetime scope, closing the window between the POST returning
+        // and the upsert landing.
+        externalScope.awaitDetached {
+            withContext(ioDispatcher) {
+                uploadedImageDao.upsert(result.toEntity(userId.lowercase(), Instant.now(clock)))
+            }
         }
         return result
     }
