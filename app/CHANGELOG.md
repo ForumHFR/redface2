@@ -16,6 +16,32 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.42.7` — `internal` (dev) — 2026-08-25
+
+Lot 6 du chantier de parité de lecture Sujet ↔ Conversations privées ([#1040](https://github.com/ForumHFR/redface2/issues/1040), lot [#1103](https://github.com/ForumHFR/redface2/issues/1103)) : les conversations privées reçoivent les affordances de lecture qui leur manquaient encore.
+
+### Ajouté
+
+- **Les conversations privées retrouvent la position de lecture de chaque page** ([#1103](https://github.com/ForumHFR/redface2/issues/1103)). Revenir sur une page déjà lue reprend là où on s'était arrêté, au lieu de remonter en haut. L'atterrissage est arbitré : un message cité explicite l'emporte sur la position mémorisée, qui l'emporte sur le haut de page. La position vit uniquement en mémoire, le temps de la session d'affichage — rien sur disque, tout purgé à la déconnexion.
+
+- **Les conversations privées ont le chrome de pagination des sujets** ([#1103](https://github.com/ForumHFR/redface2/issues/1103)) : sélecteur de page en barre, et cluster de boutons flottants dont l'appui long saute à la première ou à la dernière page. Les rangées de boutons inline disparaissent.
+
+- **La carte d'un message privé a les affordances de la carte de sujet** ([#1117](https://github.com/ForumHFR/redface2/issues/1117), [#1102](https://github.com/ForumHFR/redface2/issues/1102)) : le menu s'ouvre par le `⋯` de l'en-tête, et l'ajout au panier de citations est une affordance directe au pied de la carte.
+
+  **L'appui long sur la carte ne fait plus rien**, par parité stricte avec les sujets. Il levait jusqu'ici deux gestes d'un coup — la barre de sélection Android *et* la feuille de menu.
+
+- **Le double-tap rafraîchit une conversation privée**, comme dans les sujets ([#1103](https://github.com/ForumHFR/redface2/issues/1103)).
+
+### Corrigé
+
+- **Le balayage horizontal de page des conversations privées est durci au niveau de celui des sujets** ([#1103](https://github.com/ForumHFR/redface2/issues/1103), [#936](https://github.com/ForumHFR/redface2/issues/936), [#752](https://github.com/ForumHFR/redface2/issues/752)) : glissement de la page sortante, annulation dès qu'un second doigt se pose, et zone morte le long des bandes système. Quand la page visée n'est pas en cache, la page courante reste lisible sous l'indicateur au lieu de glisser dans le vide, et un échec réseau laisse le geste réarmable.
+
+### Interne
+
+- Correction des affirmations périmées des pages de specs et câblage aux issues correspondantes ([#1115](https://github.com/ForumHFR/redface2/issues/1115)).
+
+---
+
 ## `0.42.6` — `internal` (dev) — 2026-08-18
 
 ### Ajouté
