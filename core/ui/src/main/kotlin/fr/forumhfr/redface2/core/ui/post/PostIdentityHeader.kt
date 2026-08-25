@@ -89,12 +89,14 @@ fun PostIdentityHeader(
     ) {
         val avatarModifier = if (onAvatarClick != null) {
             Modifier
-                .minimumInteractiveComponentSize()
                 .clickable(
                     onClick = onAvatarClick,
                     role = Role.Button,
                     onClickLabel = onAvatarClickLabel,
                 )
+                // Keep the clickable semantics outside the 40.dp avatar so its own bounds expose
+                // the complete Material 48.dp target, not only touch-target expansion around it.
+                .minimumInteractiveComponentSize()
         } else {
             Modifier
         }

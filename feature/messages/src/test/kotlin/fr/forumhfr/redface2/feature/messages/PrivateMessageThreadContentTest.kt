@@ -63,6 +63,7 @@ import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.post.POST_CARD_SHELL_DIVIDER_TAG
 import fr.forumhfr.redface2.core.ui.post.PostCardShellContainerColorKey
+import fr.forumhfr.redface2.feature.messages.NoopShadowMagnifier
 import java.time.Instant
 import org.junit.Before
 import org.junit.Assert.assertEquals
@@ -86,7 +87,12 @@ import org.robolectric.annotation.GraphicsMode
  */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34], qualifiers = "w360dp-h780dp-xxhdpi")
+// Robolectric's platform magnifier popup never obtains a Surface; use the no-op shadow.
+@Config(
+    sdk = [34],
+    qualifiers = "w360dp-h780dp-xxhdpi",
+    shadows = [NoopShadowMagnifier::class],
+)
 class PrivateMessageThreadContentTest {
 
     @get:Rule
@@ -397,7 +403,7 @@ class PrivateMessageThreadContentTest {
     }
 
     @Test
-    fun `double tap inside a quote refreshes exactly once`() {
+    fun `double tap inside selectable quote text is consumed and never refreshes`() {
         var refreshCount = 0
         val quotingMessage = message(102, "Bob", "Réponse").copy(
             content = PostContent(
@@ -424,7 +430,8 @@ class PrivateMessageThreadContentTest {
 
         compose.onNodeWithText("Corps de citation").performTouchInput { doubleClick() }
 
-        assertEquals(1, refreshCount)
+        // ReadingPostCard's SelectionContainer consumes word selection before the list detector.
+        assertEquals(0, refreshCount)
     }
 
     @Test
@@ -670,8 +677,9 @@ class PrivateMessageThreadContentTest {
         compose.onNodeWithText("Citation de Bob").performTouchInput { doubleClick() }
 
         assertEquals(0, refreshCount)
-        assertTrue(haptics.events.isEmpty())
-        assertEquals(listOf(2 to 99, 2 to 99), citedTargets)
+        // The first tap navigates once; selection consumes the second and may emit platform haptics.
+        assertTrue(HapticFeedbackType.Confirm !in haptics.events)
+        assertEquals(listOf(2 to 99), citedTargets)
     }
 
     @Test
@@ -1382,7 +1390,14 @@ class PrivateMessageThreadContentTest {
         swipeThreadLeft()
 
         assertEquals(0, refreshCount)
-        assertTrue(haptics.events.isEmpty())
+        assertEquals(
+            "the drag must emit only the page-swipe haptics, never an extra double-tap tick",
+            listOf(
+                HapticFeedbackType.GestureThresholdActivate,
+                HapticFeedbackType.Confirm,
+            ),
+            haptics.events,
+        )
         assertEquals(listOf(2), selectedPages)
     }
 
