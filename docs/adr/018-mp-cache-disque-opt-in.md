@@ -272,9 +272,13 @@ L'invariant général « les requêtes de prefetch ne sont jamais authentifiées
   `MessagesRepository.prefetchPrivateMessageThread` à son interface, son implémentation et
   `PrivateMessageThreadViewModel`.
 
-La preuve live multipage manque toujours (fixture MP monopage) : la matrice de parité ne revendique
-donc pas la livraison de cette ligne. Suivi
-[#1107](https://github.com/ForumHFR/redface2/issues/1107).
+La preuve live multipage a été exécutée le 2026-08-24
+([#1107](https://github.com/ForumHFR/redface2/issues/1107)) : capture `thread_multipage` de trois
+pages adjacentes d'une même conversation, une seule session authentifiée, six contrôles de cohérence
+passés — conversation unique, ordre rendu conforme, jeux d'ancres réelles disjoints, les deux
+reprises servies avec `ref=0`, et le rabattement de la demande hors borne sur la dernière page
+annoncée, prouvé par l'URL effective. La matrice de parité revendique donc désormais la livraison de
+cette ligne.
 
 ### 8. Critère de convergence topic↔MP — repris de l'ADR-013 dans sa forme amendée
 

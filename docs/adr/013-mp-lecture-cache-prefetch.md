@@ -31,11 +31,12 @@ Cette ADR formalise les arbitrages rendus dans [#351](https://github.com/ForumHF
 
 - **Décision 1 — livrée** (PR [#428](https://github.com/ForumHFR/redface2/pull/428) tranche a + [#429](https://github.com/ForumHFR/redface2/pull/429) tranche b, ainsi que le prérequis UI keep-content des Conséquences ; factorisation des primitives de liste/carte topic↔MP finalisée par [#351](https://github.com/ForumHFR/redface2/issues/351) c1/c2/c3).
 - **Décision 2 — substrats des trois étages LIVRÉS, étage 3 dormant** : la **position de lecture locale par conversation** existe — table Room `mp_read_positions` (`MpReadPositionEntity` / `MpReadPositionDao`), `RoomPrivateMessageReadPositionStore` (impl de `PrivateMessageReadPositionStore`), sauvegarde dans `PrivateMessageThreadViewModel`, et seed des positions DT depuis MPStorage (`DefaultMpStorageReadPositionSeeder`, ADR-014 §5). Le **cache RAM de session** est livré par `PrivateMessageThreadSessionCache` : LRU globale de cinq pages, clé par compte canonique/conversation/page, purge synchrone et génération anti-réponse tardive via `CacheInvalidator`, émission `SESSION_CACHE` immédiatement suivie d'une revalidation `NETWORK`. Le substrat **Room du contenu** porte deux tables séparées, une préférence globale OFF par défaut, une source provisoire `DISK`, une borne de cinq pages par compte et les purges compte/globale. Aucun écran ne peut encore activer la préférence : la fonction reste « oui mais absent » jusqu'à la PR 3. Suivi [#430](https://github.com/ForumHFR/redface2/issues/430)/[#1080](https://github.com/ForumHFR/redface2/issues/1080)/[#6](https://github.com/ForumHFR/redface2/issues/6).
-- **Décision 3 — implémentée, preuve live multipage en attente** : le point d'entrée authentifié
-  dédié, l'ordonnanceur N−1/N+1, le gate composition + `RESUMED`, l'annulation structurée et la
-  garde Konsist anti-appel depuis la liste sont présents. La matrice de parité ne passe toutefois
-  pas à « oui, livré » avant la capture réelle de trois pages d'une même conversation : la fixture
-  MP actuelle est monopage et ne prouve ni les deux voisins ni le rabattement serveur.
+- **Décision 3 — livrée, preuve live multipage acquise le 2026-08-24** : le point d'entrée
+  authentifié dédié, l'ordonnanceur N−1/N+1, le gate composition + `RESUMED`, l'annulation
+  structurée et la garde Konsist anti-appel depuis la liste sont présents, et la capture de trois
+  pages adjacentes d'une même conversation qui manquait a été exécutée
+  ([#1107](https://github.com/ForumHFR/redface2/issues/1107)) : six contrôles de cohérence passés,
+  dont les deux voisins et le rabattement serveur. La matrice de parité passe à « oui, livré ».
 
 ## Contexte
 
@@ -76,8 +77,8 @@ C'est le cas « (b) binaire » anticipé par #361, mais avec une observation cl�
 ## Décision
 
 > La décision 1 est livrée ; la décision 2 a ses **trois substrats livrés** (position de lecture,
-> cache RAM, puis Room dormant), mais l'étage 3 reste inaccessible depuis l'UI jusqu'à la PR 3. La décision 3 est implémentée mais sa
-> livraison reste suspendue à la preuve live multipage décrite dans le Statut.
+> cache RAM, puis Room dormant), mais l'étage 3 reste inaccessible depuis l'UI jusqu'à la PR 3. La décision 3 est livrée : sa
+> preuve live multipage a été acquise le 2026-08-24 (cf. Statut).
 
 ### 1. Partage topic↔MP à deux niveaux dans `:core:ui` — LIVRÉ (PR #428/#429)
 
