@@ -204,13 +204,12 @@ sealed class FlagsResult {
 
 Les noms de champs (`Flag.cat`, `Flag.topicId`, `Flag.type`, `Flag.replyCount`, `Flag.totalPages`, `Flag.lastReadPage`, …) suivent strictement [`models.md`]({{ site.baseurl }}/specs/models#drapeaux). Pas de `topic.postId` ni `topic.flagType` ni `topic.lastDate` — ces noms n'existent pas dans le modèle.
 
-### Cible future (Phase 1D / Phase 2)
+### Extension possible
 
 Quand le besoin arrive, on pourra élargir le contrat :
 
-- ajout d'intents `RemoveFlag` / `UndoRemoveFlag` (avec timer `delay(5_000)` + rollback réseau, pattern documenté dans `:feature:topic`),
-- pré-calcul UI `filteredFlags` derived avec un `SortMode` / `FlagFilter`,
-- `PullToRefreshBox` Material 3 sur le `LazyColumn` (l'API Phase 1B se contente d'un bouton « Réessayer » sur état d'erreur).
+- enrichissement du `filteredFlags` derived existant (filtre « non-lus uniquement ») avec un
+  `SortMode` / `FlagFilter`.
 
 Quand cette extension arrive, `FlagsState` agrégé peut redevenir préférable au triplet de `StateFlow` actuel ; ce sera un changement scope au moment du chantier, documenté ici à ce moment-là — pas avant.
 
@@ -222,9 +221,9 @@ Quand cette extension arrive, `FlagsState` agrégé peut redevenir préférable 
 
 ## Écran Topic (lecture)
 
-> **Statut Phase 1A** : le `TopicUiState` réellement exposé par `feature/topic/.../TopicUiState.kt` est aujourd'hui `(request: TopicRequest, mode: Mode, availablePages: List<Int>)` avec `Mode = Loading | Loaded(topic) | Error(message)`, et l'unique intent est `Retry`. Le ViewModel collecte `TopicRepository.observeTopicPage(...)` (cache-aside : émet le cache puis le fresh) et calcule `availablePages = (1..topic.totalPages).toList()` à chaque émission. Le contrat ci-dessous est la **cible Phase 1 fin / Phase 2** quand pull-to-refresh, edit FP, flag et image viewer arriveront. La navigation de page est désormais **route-driven** (le swipe gauche/droite #282 et les contrôles de pager appellent tous `onOpenPage(targetPage)`, qui remplace la `TopicRoute` courante — ce n'est pas un intent du `TopicUiState`) ; les actions sur posts (réponse, édition, viewer image) restent la cible Phase 2. Cohérent avec la méthodologie hybride (squelette illustratif, pas figé).
+> **Statut** : le `TopicUiState` réellement exposé est celui de `feature/topic/.../TopicUiState.kt` — **c'est lui qui fait foi**, il a beaucoup grandi depuis la Phase 1A (session authentifiée, pseudo, recherche intra-topic, drapeaux, blacklist…) et `TopicIntent` porte aujourd'hui une quinzaine de membres, pas seulement `Retry`. Cette page ne réénumère plus ses champs : une liste recopiée ici pourrit à chaque ajout (constat #1041). `Mode = Loading | Loaded(topic) | Error(message)` reste la charpente. Le ViewModel collecte `TopicRepository.observeTopicPage(...)` (cache-aside : émet le cache puis le fresh) et calcule `availablePages = (1..topic.totalPages).toList()` à chaque émission. Le contrat ci-dessous a été écrit comme une **cible Phase 1 fin / Phase 2** ; le pull-to-refresh, l'édition du premier post et les drapeaux sont **livrés**, tandis que le viewer d'image plein écran reste **à venir** (le bouton de `PostImageMenuSheet` est désactivé). Il reste un squelette illustratif : le source fait foi. La pagination est **in-ViewModel** depuis #895 étape 4 (12/07/2026 ; elle fut route-driven de #282 à #895) : le swipe gauche/droite #282 et les contrôles de pager appellent tous `onOpenPage(targetPage)`, qui alimente `TopicViewModel.switchToPage()` — la `TopicRoute` est figée à l'entrée (entrée nav unique, ViewModel retenu) et un changement de page ne traverse plus la navigation ; ce n'est pas non plus un intent du `TopicUiState`. Cohérent avec la méthodologie hybride (squelette illustratif, pas figé).
 >
-> **Statut Phase 1D-2 (#107) + Phase 2 (#200)** : `TopicEffect.ScrollToPost` (deep link + post-submit avec numreponse extrait) et `TopicEffect.ScrollToEndOfPage` + `TopicEffect.PostSubmitRefreshFailed` (post-submit, cf. #200) sont livrés. `ScrollToPost` pilote le scroll one-shot vers un `numreponse` connu ; `ScrollToEndOfPage` est émis pour la plain reply (HFR anchor `#bas`, numreponse non extractible) afin que l'utilisateur voie son post en bas de la page rafraîchie ; `PostSubmitRefreshFailed` est émis quand le force-refresh post-submit a échoué et que la screen doit prévenir l'utilisateur (Toast côté `TopicScreen`) que la soumission est partie côté HFR mais que la page locale n'a pas pu être rafraîchie. Les autres effets listés ci-dessous (`NavigateToReply`, `NavigateToEdit`, `NavigateToEditFirstPost`, `NavigateToImage`, `Error`) restent du **contrat cible Phase 2** — ils ne sont ni émis ni câblés tant que les actions correspondantes (réponse, édition, viewer image, surface d'erreur) n'arrivent pas.
+> **Statut Phase 1D-2 (#107) + Phase 2 (#200)** : `TopicEffect.ScrollToPost` (deep link + post-submit avec numreponse extrait) et `TopicEffect.ScrollToEndOfPage` + `TopicEffect.PostSubmitRefreshFailed` (post-submit, cf. #200) sont livrés. `ScrollToPost` pilote le scroll one-shot vers un `numreponse` connu ; `ScrollToEndOfPage` est émis pour la plain reply (HFR anchor `#bas`, numreponse non extractible) afin que l'utilisateur voie son post en bas de la page rafraîchie ; `PostSubmitRefreshFailed` est émis quand le force-refresh post-submit a échoué et que la screen doit prévenir l'utilisateur (Toast côté `TopicScreen`) que la soumission est partie côté HFR mais que la page locale n'a pas pu être rafraîchie. Les autres effets listés ci-dessous restent illustratifs et ne décrivent pas le câblage livré : la réponse et les éditions passent par les callbacks de `TopicScreen` vers la navigation, tandis que `NavigateToImage` reste la cible non livrée du viewer plein écran.
 
 ```kotlin
 data class TopicUiState(
@@ -286,7 +285,7 @@ data class PostEditorState(
     val page: Int?,                       // (Phase 2C) page topic en cours
     val subcat: Int?,                     // (Phase 2C) sous-cat HFR, requis pour reply
     val quotedNumreponse: Int? = null,    // (Phase 2C #146) numreponse cité ; null = reply, non-null = quote
-    val quoteRef: Int? = null,            // (Phase 2C #146/#227) ref opaque parsé depuis le href quote quand disponible ; null accepté sur quote obfusquée
+    val quoteRef: Int? = null,            // (Phase 2C #146/#227/#986) rang 1-based dans la page (`0` pour le récapitulatif), transmis sans recalcul ; null accepté sur une citation topic obfusquée
     val draft: TextFieldValue = TextFieldValue(),
     val preview: PostContent = PostContent(blocks = emptyList()),
     val isPreviewVisible: Boolean = false,

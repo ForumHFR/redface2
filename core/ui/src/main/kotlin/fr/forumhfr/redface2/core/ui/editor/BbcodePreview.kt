@@ -7,11 +7,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.ui.R
+import fr.forumhfr.redface2.core.ui.post.LocalPostMediaDiskCachePolicy
+import fr.forumhfr.redface2.core.ui.post.PostMediaDiskCachePolicy
 import fr.forumhfr.redface2.core.ui.post.PostRenderer
 
 /**
@@ -22,11 +25,15 @@ import fr.forumhfr.redface2.core.ui.post.PostRenderer
  * is the boundary that Konsist enforces and that ADR-011 documents. Callers feed
  * the already-parsed AST in; the actual BBCode parsing lives in `:core:parser`,
  * exposed to features via `BbcodePreviewParser` in `:core:domain`.
+ *
+ * [mediaDiskCachePolicy] defaults to the public-post behaviour. MP editors override it so URLs
+ * typed or quoted in a private draft never populate Coil's shared disk cache (#1096).
  */
 @Composable
 fun BbcodePreview(
     content: PostContent,
     modifier: Modifier = Modifier,
+    mediaDiskCachePolicy: PostMediaDiskCachePolicy = PostMediaDiskCachePolicy.ENABLED,
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -41,7 +48,11 @@ fun BbcodePreview(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else {
-                PostRenderer(content = content)
+                CompositionLocalProvider(
+                    LocalPostMediaDiskCachePolicy provides mediaDiskCachePolicy,
+                ) {
+                    PostRenderer(content = content)
+                }
             }
         }
     }

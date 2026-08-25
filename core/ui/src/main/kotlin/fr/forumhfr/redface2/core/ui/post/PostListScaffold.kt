@@ -20,21 +20,27 @@ import fr.forumhfr.redface2.core.ui.list.LazyListScrollbar
  *
  * Deliberately thin (ADR-013 — share the components, not the screens):
  *  - [contentPadding] and [verticalArrangement] have **no defaults**: the two screens use different
- *    densities (the topic reads 8/16/8/88-style insets from its display-metrics preset, the MP a flat
- *    16.dp with a 12.dp gap), so forcing every call-site to pass them keeps c1 from silently changing
- *    either screen's spacing.
- *  - the page-swipe machinery stays in the feature (it differs by lifecycle: the topic is route-driven,
- *    the MP paginates in place — see `PageSwipe.kt`/ADR-013) and is injected through [listModifier],
+ *    feature-owned geometries (both mode-switched: `TopicListLayout.kt`, and the MP's
+ *    `ThreadListLayout.kt` since #1046/#1050), so forcing every call-site to pass them keeps c1
+ *    from silently changing either screen's spacing.
+ *  - the page-swipe machinery stays in the feature (both hosts paginate in place since #895 étape 4,
+ *    but the couplings differ: the topic always slides before switching; the MP slides only for a
+ *    session-cache-warm target and otherwise returns to readable rest before its keep-content load.
+ *    Its gate also composes refresh, zoom mutation, scrollbar drag and landing alignment; see
+ *    `PageSwipe.kt` / ADR-013 amendée) and is injected through [listModifier],
  *    applied to the **`LazyColumn`** (so the list follows the finger) and never to the outer [Box] (so
- *    the scrollbar overlay stays fixed). `PullToRefreshBox` is NOT absorbed here — it stays the
- *    feature's wrapper, since its refresh state belongs to the screen's ViewModel.
+ *    the scrollbar overlay stays fixed). The pull-to-refresh modifier and indicator are NOT absorbed
+ *    here — they stay in each feature, since their refresh state belongs to the screen's ViewModel.
  *  - [showScrollbar] gates the scrollbar overlay off entirely. The scrollbar ALSO self-hides on the
  *    « afficher l'ascenseur » preference (`LazyListScrollbar` reads `LocalShowScrollbar`), so this flag
  *    is only for a call-site that wants no scrollbar at all regardless of that preference; both
  *    consumers leave it `true`.
+ *  - [onScrollbarDragStateChanged] exposes the fast-scroll producer to feature-owned position
+ *    persistence. It stays true through the final programmatic seek's idle frame, so that seek is
+ *    never mistaken for a user list-scroll settle.
  */
 @Composable
-@Suppress("LongParameterList") // List host: list state + density (padding/arrangement) + 2 modifiers + flag.
+@Suppress("LongParameterList") // Shared list host: state, geometry, modifiers and behavior hooks.
 fun PostListScaffold(
     listState: LazyListState,
     contentPadding: PaddingValues,
@@ -42,9 +48,10 @@ fun PostListScaffold(
     modifier: Modifier = Modifier,
     listModifier: Modifier = Modifier,
     showScrollbar: Boolean = true,
-    // #182 — the topic magnifier suspends native list scrolling while zoomed (the vertical axis is
-    // then driven programmatically via dispatchRawDelta). Default keeps both consumers unchanged.
+    // #182/#1040 — either reader's magnifier suspends native list scrolling while zoomed (the
+    // vertical axis is then driven programmatically via dispatchRawDelta).
     userScrollEnabled: Boolean = true,
+    onScrollbarDragStateChanged: (Boolean) -> Unit = {},
     content: LazyListScope.() -> Unit,
 ) {
     Box(modifier = modifier.fillMaxSize()) {
@@ -62,6 +69,7 @@ fun PostListScaffold(
             LazyListScrollbar(
                 listState = listState,
                 modifier = Modifier.align(Alignment.CenterEnd),
+                onDragStateChanged = onScrollbarDragStateChanged,
             )
         }
     }

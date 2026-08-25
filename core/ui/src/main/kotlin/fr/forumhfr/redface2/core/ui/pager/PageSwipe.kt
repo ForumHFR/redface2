@@ -17,11 +17,14 @@ import kotlin.math.tanh
  * These pure functions carry the entire *feel* of the swipe — commit thresholds (distance + fling),
  * drag-follow shaping (1:1 then bounded overpull, damped wall at a blocked edge) and the edge-hint
  * opacity ramp — so both consumers share the exact same thresholds and feedback. What is NOT shared
- * (ADR-013): the gesture *machinery*. The topic gesture is route-driven (its re-entrance latch is
- * reset by the route change destroying the composition — `topicPageSwipe` in `:feature:topic`);
- * the private-message thread paginates in place (same composition, latch re-armed locally).
- * Generalising one pointer-input pipeline over both lifecycles was rejected as speculative
- * complexity for two consumers.
+ * (ADR-013): the gesture *machinery*. Both hosts paginate in place since #895 étape 4 (pre-#895 the
+ * topic was route-driven), but the couplings differ. The topic always slides out before its
+ * in-ViewModel switch and re-arms on the `pointerInput(currentPage)` re-key. The private-message
+ * thread chooses between slide-out for a generation/account-sealed RAM-cache hit and return-to-rest
+ * before a cold keep-content load; its pointer block re-keys on rendered page and `isRefreshing` so
+ * a failed in-place load also re-arms. Both adopt [inStartGestureDeadZone], while their pointer event
+ * loops remain feature-owned. Generalising one pipeline over two cache/landing protocols was
+ * rejected as speculative complexity.
  */
 
 /**

@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.data.write
 
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.model.write.PrivateMessageQuote
 import fr.forumhfr.redface2.core.model.write.PrivateMessageReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
@@ -37,6 +38,7 @@ class DefaultPrivateMessageWriteRepositoryTest {
     private lateinit var server: MockWebServer
     private lateinit var client: HfrClient
     private lateinit var repository: DefaultPrivateMessageWriteRepository
+    private lateinit var diagnostics: DiagnosticsLog
 
     @Before
     fun setUp() {
@@ -48,12 +50,13 @@ class DefaultPrivateMessageWriteRepositoryTest {
             baseUrl = server.url("/"),
             ioDispatcher = Dispatchers.Unconfined,
         )
+        diagnostics = DiagnosticsLog()
         repository = DefaultPrivateMessageWriteRepository(
             hfrClient = client,
             replyFormParser = ReplyFormParser(),
             replyLinkParser = PrivateMessageReplyLinkParser(),
             replySubmitResponseParser = ReplySubmitResponseParser(),
-            diagnostics = DiagnosticsLog(),
+            diagnostics = diagnostics,
             ioDispatcher = Dispatchers.Unconfined,
         )
     }
@@ -64,6 +67,12 @@ class DefaultPrivateMessageWriteRepositoryTest {
     }
 
     private val context = PrivateMessageReplyContext(threadId = 3195237, page = 1)
+
+    private val quoteContext = PrivateMessageReplyContext(
+        threadId = 3_000_001,
+        page = 1,
+        quote = PrivateMessageQuote(numreponse = 1_980_000_004, ref = 4),
+    )
 
     @Test
     fun `fetchReplyForm GETs the conversation page then follows its message_php reply link`() = runTest {
@@ -90,6 +99,117 @@ class DefaultPrivateMessageWriteRepositoryTest {
         assertEquals("message.php", second.pathSegments.last())
         assertEquals("prive", second.queryParameter("cat"))
         assertEquals("3195237", second.queryParameter("post"))
+    }
+
+    @Test
+    fun `private quote uses the typed GET and POSTs the measured body without ref`() = runTest {
+        // The GET response is the real #1041 quote fixture. The POST response stays local: this test
+        // proves the body emitted by the client, never that HFR accepted a live private message.
+        server.enqueue(MockResponse().setBody(fixture("private_message_quote_form.html")))
+        server.enqueue(MockResponse().setBody(fixture("write_reply_success_response.html")))
+
+        val form = repository.fetchReplyForm(quoteContext)
+        val result = repository.submitReply(
+            context = quoteContext,
+            form = form,
+            bbcodeContent = form.initialContent,
+            options = form.options,
+        )
+
+        assertTrue("Expected locally parsed success, got $result", result is ReplySubmitResult.Success)
+
+        // Exactly one GET: a quote never fetches forum2.php and never follows its private href.
+        val get = server.takeRequest()
+        assertEquals("GET", get.method)
+        val getUrl = requireNotNull(get.requestUrl)
+        assertEquals("message.php", getUrl.pathSegments.first())
+        assertEquals("hfr.inc", getUrl.queryParameter("config"))
+        assertEquals("prive", getUrl.queryParameter("cat"))
+        assertEquals("3000001", getUrl.queryParameter("post"))
+        assertEquals("1980000004", getUrl.queryParameter("numrep"))
+        assertEquals("4", getUrl.queryParameter("ref"))
+        assertEquals("1", getUrl.queryParameter("page"))
+        assertEquals("1", getUrl.queryParameter("p"))
+        assertEquals("0", getUrl.queryParameter("subcat"))
+        assertEquals("0", getUrl.queryParameter("sondage"))
+        assertEquals("0", getUrl.queryParameter("owntopic"))
+        assertEquals("0", getUrl.queryParameter("new"))
+
+        val posted = server.takeRequest()
+        assertEquals("POST", posted.method)
+        assertEquals("the quote flow must contain one GET and one POST only", 2, server.requestCount)
+        val body = parseFormBody(posted.body.readUtf8())
+        assertEquals("prive", body["cat"])
+        assertEquals("3000001", body["post"])
+        assertEquals("1980000004", body["numrep"])
+        assertEquals("", body["numreponse"])
+        assertFalse("ref belongs to the GET/BBCode, never the POST body", body.containsKey("ref"))
+        assertEquals(form.initialContent, body["content_form"])
+        assertEquals("1", body["signature"])
+
+        val log = diagnostics.entries.value.joinToString("\n") { it.message }
+        assertFalse("diagnostics must not expose the private URL", log.contains("message.php"))
+        assertFalse("diagnostics must not expose threadId", log.contains("3000001"))
+        assertFalse("diagnostics must not expose numreponse", log.contains("1980000004"))
+        assertFalse("diagnostics must not expose ref", log.contains("ref="))
+        assertFalse("diagnostics must not expose quoted content", log.contains("Message prive de test"))
+    }
+
+    @Test
+    fun `private multi quote POST keeps the first form routing and forwards every block`() = runTest {
+        // Client-only proof: the first form comes from the real capture, while the second block is
+        // synthetic BBCode. MockWebServer records serialization; it cannot prove HFR accepts it.
+        server.enqueue(MockResponse().setBody(fixture("private_message_quote_form.html")))
+        server.enqueue(MockResponse().setBody(fixture("write_reply_success_response.html")))
+        val form = repository.fetchReplyForm(quoteContext)
+        val secondPrefill = "[quotemsg=1980000005,5,990003]Deuxième citation[/quotemsg]\n"
+        val combinedPrefill = form.initialContent + "\n" + secondPrefill
+
+        repository.submitReply(
+            context = quoteContext,
+            form = form.copy(initialContent = combinedPrefill),
+            bbcodeContent = combinedPrefill,
+            options = form.options,
+        )
+
+        server.takeRequest() // typed quote GET
+        val body = parseFormBody(server.takeRequest().body.readUtf8())
+        assertEquals("the first quote keeps POST routing", "1980000004", body["numrep"])
+        assertEquals(combinedPrefill, body["content_form"])
+        assertEquals(2, Regex("\\[quotemsg=").findAll(body.getValue("content_form")).count())
+        assertFalse("ref remains GET/BBCode-only", body.containsKey("ref"))
+    }
+
+    @Test
+    fun `private quote fails closed when HFR serves the simple reply form`() = runTest {
+        server.enqueue(MockResponse().setBody(fixture("private_message_reply_form.html")))
+
+        val error = runCatching { repository.fetchReplyForm(quoteContext) }.exceptionOrNull()
+
+        assertTrue("a quote must reject a non-quote form, got $error", error is IllegalArgumentException)
+        assertEquals("the quote path must never retry through forum2.php", 1, server.requestCount)
+    }
+
+    @Test
+    fun `simple reply still forwards its server-provided ref field`() = runTest {
+        server.enqueue(MockResponse().setBody(fixture("write_reply_success_response.html")))
+        val replyForm = ReplyForm(
+            hashCheck = "h",
+            sujet = "s",
+            hiddenFields = mapOf(
+                "cat" to "prive",
+                "post" to "4242424",
+                "numrep" to "1990000111",
+                "numreponse" to "",
+                "ref" to "0",
+            ),
+            isAnonymous = false,
+        )
+
+        repository.submitReply(context, replyForm, bbcodeContent = "Réponse simple")
+
+        val body = parseFormBody(server.takeRequest().body.readUtf8())
+        assertEquals("the no-ref rule is quote-only", "0", body["ref"])
     }
 
     @Test

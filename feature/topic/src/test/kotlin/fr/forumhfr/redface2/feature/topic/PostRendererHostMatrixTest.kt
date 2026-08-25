@@ -1,7 +1,9 @@
 package fr.forumhfr.redface2.feature.topic
 
 import android.content.Context
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
@@ -109,6 +111,7 @@ class PostRendererHostMatrixTest {
         setCard(onImageLongPress = { received = it })
 
         composeTestRule.onNodeWithContentDescription("corps")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Image))
             .assert(SemanticsMatcher.keyIsDefined(SemanticsActions.OnClick))
             .assert(SemanticsMatcher.keyIsDefined(SemanticsActions.OnLongClick))
             .performTouchInput { longClick() }

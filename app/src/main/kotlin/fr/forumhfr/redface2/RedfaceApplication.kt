@@ -61,10 +61,9 @@ class RedfaceApplication : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
-        // Wires the auth-state listener that wipes per-user caches on logout /
-        // account switch (cf. [CacheInvalidator]). Started here so the listener
-        // is alive for the full process lifetime — there is no point trying to
-        // stop it before the process dies.
+        // Wires the startup owner of private-content purge reconciliation and the auth-state
+        // listener that wipes per-user caches on logout/account switch (cf. [CacheInvalidator]).
+        // Started here so both jobs live for the full process lifetime.
         cacheInvalidator.start()
         // One-shot retention sweep dropping editor drafts older than the TTL (#405). Independent
         // of the auth state, so it runs alongside the invalidator rather than inside it.

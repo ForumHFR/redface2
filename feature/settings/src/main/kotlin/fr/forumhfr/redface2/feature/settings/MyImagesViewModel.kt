@@ -4,10 +4,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.coroutines.ApplicationScope
+import fr.forumhfr.redface2.core.domain.coroutines.awaitDetached
 import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadedImageRecord
 import fr.forumhfr.redface2.core.model.AuthState
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -35,6 +39,10 @@ import kotlinx.coroutines.launch
 class MyImagesViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val uploadRepository: UploadRepository,
+    // #1144 — process-lifetime scope for [confirmDelete], the one server mutation of this screen.
+    // Same shape as the topic-screen deletion: the user confirmed a destructive host call, so a back
+    // press must not cut the socket half-way. Reads stay on `viewModelScope`.
+    @param:ApplicationScope private val externalScope: CoroutineScope,
 ) : ViewModel() {
 
     // The active lowercased pseudo (= upload `userId`) ; null when anonymous. Captured from the
@@ -109,7 +117,18 @@ class MyImagesViewModel @Inject constructor(
         pendingDeletionUserId = null
         _state.update { it.copy(pendingDeletion = null) }
         viewModelScope.launch {
-            val confirmed = runCatching { uploadRepository.delete(record, userId) }.getOrDefault(false)
+            // #1144 — detached: leaving « Mes images » right after confirming must not abort the
+            // host DELETE (it would leave the picture on Imgur/Diberie with its local trace already
+            // evicted — an orphan nothing can reach). The snackbar below stays on this coroutine.
+            val confirmed = runCatching {
+                externalScope.awaitDetached { uploadRepository.delete(record, userId) }
+            }.getOrElse { raised ->
+                // #1144 — cancellation is control flow, not a « best-effort » outcome: re-throw it
+                // instead of folding it to `false`, otherwise a destroyed ViewModel would still run
+                // the state update below and mislabel a detached, still-running delete.
+                if (raised is CancellationException) throw raised
+                false
+            }
             _state.update {
                 it.copy(
                     deletionMessage = if (confirmed) {

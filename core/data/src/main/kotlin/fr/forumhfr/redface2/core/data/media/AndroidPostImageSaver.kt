@@ -32,7 +32,9 @@ import okio.buffer
  *     JPEG keeps its original compression. The loader is resolved lazily via
  *     [SingletonImageLoader.get], same no-`:app`-dependency seam as `DefaultImageCacheMaintenance`;
  *  2. fallback: a network re-fetch on the [AnonymousClient] OkHttp client (the same client the
- *     image pipeline uses — no HFR auth cookies leaked to external image hosts).
+ *     image pipeline uses — no HFR auth cookies leaked to external image hosts). This is the
+ *     expected path for MP media since #1096: their render and probe requests deliberately never
+ *     populate Coil's disk cache, but « Enregistrer l'image » remains available at one extra fetch.
  *
  * The decoded bitmap is NEVER re-encoded. Write protocol: the row is inserted `IS_PENDING = 1`
  * (invisible to galleries), the bytes streamed, then the row flipped to `IS_PENDING = 0`; a write

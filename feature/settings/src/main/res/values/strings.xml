@@ -30,6 +30,15 @@
     <string name="settings_mp_sync_write_title">Sync DT en écriture (expérimental)</string>
     <string name="settings_mp_sync_write_description">Écrit vos positions de lecture DT dans le document MPStorage partagé avec les autres outils (DTCloud…). Expérimental : désactivé par défaut, le contrat d\'écriture n\'a pas été validé sur le serveur.</string>
     <string name="settings_mp_sync_write_persist_failed">Impossible d\'enregistrer ce réglage pour le moment.</string>
+    <string name="settings_mp_content_cache_title">Cache disque des messages privés (tous les comptes)</string>
+    <string name="settings_mp_content_cache_description">Activé pour tous les comptes utilisés sur cet appareil. Conserve jusqu\'à 5 pages par compte ; chaque page est revalidée par le réseau, sans mode hors ligne.</string>
+    <string name="settings_mp_content_cache_persist_failed">Impossible d\'enregistrer ce réglage. Le cache reste dans son état précédent.</string>
+    <string name="settings_mp_content_cache_purge_failed">Le cache reste désactivé, mais la suppression n\'a pas abouti. Les lectures et écritures disque restent bloquées.</string>
+    <string name="settings_mp_content_cache_retry">Réessayer la suppression</string>
+    <string name="settings_mp_content_cache_disable_title">Désactiver le cache disque privé ?</string>
+    <string name="settings_mp_content_cache_disable_body">Les messages privés mis en cache seront immédiatement supprimés pour tous les comptes utilisés sur cet appareil. Cette action n\'efface aucun message sur HFR.</string>
+    <string name="settings_mp_content_cache_disable_action">Désactiver et supprimer</string>
+    <string name="settings_mp_content_cache_disable_cancel">Annuler</string>
     <string name="settings_section_hfr_account">Compte HFR</string>
     <string name="settings_section_notifications">Notifications</string>
     <string name="settings_section_accessibility">Accessibilité</string>
@@ -53,7 +62,7 @@
     <string name="settings_category_subtitle_display">Thème, AMOLED, densité, police</string>
     <string name="settings_category_subtitle_flags">Regroupement, masquer lus, auto-refresh</string>
     <string name="settings_category_subtitle_topic">Barre, sondages, navigation</string>
-    <string name="settings_category_subtitle_mp">Badge de non-lus</string>
+    <string name="settings_category_subtitle_mp">Badge de non-lus, cache disque global</string>
     <string name="settings_category_subtitle_editing">Confirmation avant envoi</string>
     <string name="settings_category_subtitle_images">Hébergeur, Client-ID, insertion</string>
     <string name="settings_category_subtitle_start">Écran ouvert au lancement</string>
@@ -338,10 +347,10 @@
     <string name="settings_topic_topbar_auto_hide_description">La barre du haut disparaît en défilant vers le bas, réapparaît en remontant.</string>
     <string name="settings_topic_topbar_auto_hide_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
 
-    <!-- #383 — Boutons flottants ‹/› de changement de page (#283). Le swipe (#282) couvre déjà le
-         changement de page ; ce réglage est l'opt-out demandé en bêta. « Répondre » reste affiché. -->
+    <!-- #383/#1040 — opt-out commun des boutons flottants ‹/› sur les deux surfaces de lecture.
+         La clé DataStore et le nom d'API historiques topic_page_fabs restent inchangés. -->
     <string name="settings_topic_page_fabs_title">Boutons de changement de page</string>
-    <string name="settings_topic_page_fabs_description">Boutons flottants ‹ et › en bas du sujet ; le bouton Répondre reste affiché.</string>
+    <string name="settings_topic_page_fabs_description">Boutons flottants ‹ et › en bas des sujets et conversations privées ; le bouton Répondre reste affiché.</string>
     <string name="settings_topic_page_fabs_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
     <!-- #456 — sondages dépliés par défaut dans la lecture de sujet. -->
     <string name="settings_topic_polls_expanded_title">Déplier les sondages</string>

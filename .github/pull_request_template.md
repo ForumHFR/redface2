@@ -25,6 +25,15 @@
 - [ ] Aucun
 - [ ] Oui, docs/specs mises à jour
 
+<!-- Garde parité de lecture (#1045) : si la PR touche `feature/topic|messages` `src/main` ou
+     `core/ui` `post|list|pager` SANS toucher `docs/specs/reading-parity.md`, le job repo-guards
+     la bloque. Pas d'impact sur la parité de lecture Topic<->MP ? Ajouter au corps de la PR, seule
+     en début de ligne (hors de ce commentaire) :
+     « Parity-Impact: none — <raison, 20 caractères minimum> » (sans les guillemets).
+     Le job relit le corps EN DIRECT : éditer le corps puis relancer repo-guards suffit, pas besoin
+     de nouveau commit. -->
+
+
 ## Review
 
 - [ ] Review Codex jointe (cadrage si non-trivial + relecture du diff) — label `codex-reviewed`

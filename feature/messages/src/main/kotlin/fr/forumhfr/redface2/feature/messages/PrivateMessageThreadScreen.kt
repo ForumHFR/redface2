@@ -1,67 +1,132 @@
 package fr.forumhfr.redface2.feature.messages
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.systemGestures
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.pullToRefresh
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.currentStateAsState
+import fr.forumhfr.redface2.core.domain.author.isRf2Creator
+import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
+import fr.forumhfr.redface2.core.domain.ego.deriveEgoCanonicalPseudo
+import fr.forumhfr.redface2.core.domain.ego.isEgoPost
+import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
 import fr.forumhfr.redface2.core.model.Post
+import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
+import fr.forumhfr.redface2.core.model.postContentExcerpt
+import fr.forumhfr.redface2.core.model.write.PrivateMessageQuote
+import fr.forumhfr.redface2.core.model.write.QuoteLocator
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
-import fr.forumhfr.redface2.core.ui.list.ScrollToTopOnPageChange
+import fr.forumhfr.redface2.core.ui.pager.PageFab
+import fr.forumhfr.redface2.core.ui.pager.PageFabDefaults
+import fr.forumhfr.redface2.core.ui.pager.PageNavigation
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
-import fr.forumhfr.redface2.core.ui.post.PostCardShell
+import fr.forumhfr.redface2.core.ui.post.CreatorPseudoText
+import fr.forumhfr.redface2.core.ui.post.HiddenPostCard
+import fr.forumhfr.redface2.core.ui.post.PostCardShellFlatBottomEdge
+import fr.forumhfr.redface2.core.ui.post.PostIdentityBand
 import fr.forumhfr.redface2.core.ui.post.PostIdentityHeader
+import fr.forumhfr.redface2.core.ui.post.PostImageActions
+import fr.forumhfr.redface2.core.ui.post.PostImageMenuSheet
+import fr.forumhfr.redface2.core.ui.post.PostImageTarget
 import fr.forumhfr.redface2.core.ui.post.PostListScaffold
-import fr.forumhfr.redface2.core.ui.post.PostRenderer
+import fr.forumhfr.redface2.core.ui.post.PostMediaDiskCachePolicy
+import fr.forumhfr.redface2.core.ui.post.ReadingPostCard
+import fr.forumhfr.redface2.core.ui.post.ReadingPostCardPresentation
+import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
+import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
+import fr.forumhfr.redface2.core.ui.zoom.PinchZoomState
+import fr.forumhfr.redface2.core.ui.zoom.pinchZoom
+import fr.forumhfr.redface2.core.ui.zoom.pinchZoomTransform
+import fr.forumhfr.redface2.core.ui.zoom.rememberPinchZoomState
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filter
 
 /**
  * One private-message conversation (#298): renders the messages of a `cat=prive` thread,
- * reusing the shared [PostRenderer]. Read-only for the MVP — replying is a follow-up. The
+ * reusing the shared [ReadingPostCard]; replying rides the [ThreadReplyFab] (#301). The
  * ViewModel receives its arguments via Hilt assisted injection ([PrivateMessageThreadRequest]).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-@Suppress("LongParameterList") // Screen host: route request + 3 nav callbacks + multi-recipient hint + actions slot.
+@Suppress("LongParameterList") // Screen host: request + nav callbacks + multi-recipient hint + actions slot.
 fun PrivateMessageThreadScreen(
     request: PrivateMessageThreadRequest,
     // Ephemeral UI hint from the inbox row (the route stays opaque, carrying only threadId/page).
@@ -70,10 +135,26 @@ fun PrivateMessageThreadScreen(
     isMultiRecipientHint: Boolean,
     onLoaded: () -> Unit,
     onBack: () -> Unit,
+    pendingSubmitResult: PrivateMessageSubmitResult? = null,
+    onSubmitResultConsumed: (PrivateMessageSubmitResult) -> Unit = {},
     onReply: (threadId: Int, page: Int) -> Unit,
+    // #1074 — per-message footer action. The quote target is typed before navigation; no private
+    // href or BBCode enters the route.
+    onQuote: (threadId: Int, page: Int, quote: PrivateMessageQuote) -> Unit,
+    // #1074 — scope-filtered basket state is owned by :app; this feature only renders and mutates
+    // the current conversation's selections. Complete locators stay inside each QuoteSelection.
+    multiQuoteSelections: List<QuoteSelection> = emptyList(),
+    onToggleMultiQuote: (QuoteSelection) -> Unit = {},
+    onMultiQuote: (threadId: Int, page: Int) -> Unit = { _, _ -> },
+    onClearMultiQuote: () -> Unit = {},
+    onRemoveMultiQuotes: (Set<Int>) -> Unit = {},
     // #618 — owner-only entry to the recipient editor, from the « Participants » sheet. Navigates to
     // the reply composer with the recipient-manager sheet auto-opened (member changes ship as a reply).
     onManageRecipients: (threadId: Int, page: Int) -> Unit = { _, _ -> },
+    // #1042 — tapping a message's avatar or pseudo opens the profile surface. Same contract as the
+    // topic's onOpenProfile: the host owns the navigation (the app-level profile sheet), the screen
+    // only supplies the identity of the tapped author. Default no-op mirrors the topic screen.
+    onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
     topBarActions: @Composable (() -> Unit)? = null,
 ) {
     val viewModel = hiltViewModel<PrivateMessageThreadViewModel, PrivateMessageThreadViewModel.Factory>(
@@ -81,11 +162,20 @@ fun PrivateMessageThreadScreen(
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
     val mode = state.mode
-    val listState = rememberLazyListState()
+    val networkLoadedThread = mode.networkLoadedThreadOrNull()
 
-    LaunchedEffect(mode) {
-        if (mode is PrivateMessageThreadUiState.Mode.Content) {
-            onLoaded()
+    PrivateMessageThreadPrefetchLifecycleGate(viewModel::setPrefetchActive)
+
+    LaunchedEffect(networkLoadedThread) {
+        if (networkLoadedThread != null) onLoaded()
+    }
+
+    // #1040 lot 6 — editor→retained-ViewModel handoff. The event id keys one consumption even when
+    // the editor payload is identical to the previous one; :app clears its slot after this call.
+    LaunchedEffect(pendingSubmitResult?.eventId) {
+        pendingSubmitResult?.let { result ->
+            viewModel.applySubmitResult(result)
+            onSubmitResultConsumed(result)
         }
     }
 
@@ -103,47 +193,394 @@ fun PrivateMessageThreadScreen(
                         android.widget.Toast.LENGTH_LONG,
                     ).show()
                 }
+                PrivateMessageThreadEffect.ImageSaved -> {
+                    android.widget.Toast.makeText(
+                        context,
+                        R.string.messages_image_menu_saved,
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+                PrivateMessageThreadEffect.ImageSaveFailedFetch -> {
+                    android.widget.Toast.makeText(
+                        context,
+                        R.string.messages_image_menu_save_failed_fetch,
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+                PrivateMessageThreadEffect.ImageSaveFailedStorage -> {
+                    android.widget.Toast.makeText(
+                        context,
+                        R.string.messages_image_menu_save_failed_storage,
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+                PrivateMessageThreadEffect.ImageSaveFailedTooLarge -> {
+                    android.widget.Toast.makeText(
+                        context,
+                        R.string.messages_image_menu_save_failed_too_large,
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
             }
         }
+    }
+
+    PrivateMessageThreadContent(
+        state = state,
+        isMultiRecipientHint = isMultiRecipientHint,
+        callbacks = PrivateMessageThreadCallbacks(
+            onBack = onBack,
+            onReply = { onReply(request.threadId, state.page) },
+            onQuote = { message ->
+                message.quoteRef?.let { ref ->
+                    onQuote(
+                        request.threadId,
+                        state.page,
+                        PrivateMessageQuote(numreponse = message.numreponse, ref = ref),
+                    )
+                }
+            },
+            onToggleMultiQuote = onToggleMultiQuote,
+            onMultiQuote = { onMultiQuote(request.threadId, state.page) },
+            onClearMultiQuote = onClearMultiQuote,
+            onRemoveMultiQuotes = onRemoveMultiQuotes,
+            onRetry = viewModel::retry,
+            onRefresh = viewModel::refresh,
+            onSelectPage = viewModel::selectPage,
+            isPageWarm = viewModel::isPageWarm,
+            onGoToCitedPost = viewModel::goToCitedMessage,
+            onAnchorSettled = viewModel::reportPageAnchor,
+            onPageLandingConsumed = viewModel::acknowledgePageLanding,
+            onOpenRoster = viewModel::openRoster,
+            onDismissRoster = viewModel::dismissRoster,
+            onRetryRoster = viewModel::retryRoster,
+            onManageRecipients = {
+                viewModel.dismissRoster()
+                onManageRecipients(request.threadId, state.page)
+            },
+            onOpenProfile = onOpenProfile,
+            onSetAuthorBlocked = viewModel::setAuthorBlocked,
+            onSaveImage = viewModel::saveImage,
+        ),
+        presentation = PrivateMessageThreadPresentation(
+            multiQuoteSelections = multiQuoteSelections,
+        ),
+        topBarActions = topBarActions,
+    )
+}
+
+/**
+ * ADR-013 foreground gate. The ViewModel may outlive this composition in the navigation back stack,
+ * so authenticated prefetch is enabled only while the owning entry is composed and RESUMED.
+ */
+@Composable
+internal fun PrivateMessageThreadPrefetchLifecycleGate(onActiveChanged: (Boolean) -> Unit) {
+    val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
+    val currentOnActiveChanged by rememberUpdatedState(onActiveChanged)
+    val active = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
+    DisposableEffect(active) {
+        if (active) currentOnActiveChanged(true)
+        onDispose {
+            if (active) currentOnActiveChanged(false)
+        }
+    }
+}
+
+/** Cache content is display-only; navigation/badge callbacks belong to the network revalidation. */
+internal fun PrivateMessageThreadUiState.Mode.networkLoadedThreadOrNull() =
+    (this as? PrivateMessageThreadUiState.Mode.Content)
+        ?.takeIf { it.source == PrivateMessageThreadPage.Source.NETWORK }
+        ?.thread
+
+/**
+ * Host-owned transient presentation inputs for [PrivateMessageThreadContent]. The multi-quote
+ * selection snapshot shares the screen composition's lifetime; user actions remain in callbacks.
+ */
+internal data class PrivateMessageThreadPresentation(
+    val multiQuoteSelections: List<QuoteSelection> = emptyList(),
+)
+
+/** Landing value + its compare-and-clear callback travel as one screen-owned protocol. */
+internal data class PrivateMessageLandingPresentation(
+    val landing: PrivateMessagePageLanding? = null,
+    val onConsumed: (PrivateMessagePageLanding) -> Unit = {},
+)
+
+private sealed interface PrivateMessageLandingAction {
+    data object None : PrivateMessageLandingAction
+    data object Top : PrivateMessageLandingAction
+    data class Anchor(val value: PrivateMessageScrollAnchor) : PrivateMessageLandingAction
+    data class CitedMessage(val index: Int) : PrivateMessageLandingAction
+}
+
+private data class PrivateMessageLandingDecision(
+    val action: PrivateMessageLandingAction,
+    val acknowledge: Boolean = false,
+    val alignWithoutScroll: Boolean = false,
+)
+
+/** Data-only snapshot consumed by the pure landing arbitration. */
+private data class PrivateMessageLandingDecisionInputs(
+    val landing: PrivateMessagePageLanding?,
+    val connectedPseudo: String?,
+    val renderedPage: Int,
+    val citedTargetIndex: Int?,
+    val isRefreshing: Boolean,
+    val lastRenderedPage: Int?,
+)
+
+/** Pure landing arbitration; kept outside Compose to bound the effect's complexity. */
+private fun decidePrivateMessageLanding(
+    inputs: PrivateMessageLandingDecisionInputs,
+): PrivateMessageLandingDecision {
+    val landing = inputs.landing
+    val citedTargetIndex = inputs.citedTargetIndex
+    if (landing == null) {
+        return when {
+            inputs.lastRenderedPage == null -> PrivateMessageLandingDecision(
+                action = PrivateMessageLandingAction.None,
+                alignWithoutScroll = true,
+            )
+            inputs.lastRenderedPage != inputs.renderedPage -> PrivateMessageLandingDecision(
+                action = PrivateMessageLandingAction.Top,
+            )
+            else -> PrivateMessageLandingDecision(PrivateMessageLandingAction.None)
+        }
+    }
+    val landingOwnedHere =
+        landing.account == inputs.connectedPseudo && landing.page == inputs.renderedPage
+    return when {
+        !landingOwnedHere -> PrivateMessageLandingDecision(
+            action = PrivateMessageLandingAction.None,
+            acknowledge = true,
+        )
+        landing is PrivateMessagePageLanding.CitedMessage && citedTargetIndex != null ->
+            PrivateMessageLandingDecision(
+                action = PrivateMessageLandingAction.CitedMessage(citedTargetIndex),
+                acknowledge = true,
+            )
+        landing is PrivateMessagePageLanding.CitedMessage && inputs.isRefreshing ->
+            PrivateMessageLandingDecision(PrivateMessageLandingAction.None)
+        landing is PrivateMessagePageLanding.CitedMessage -> PrivateMessageLandingDecision(
+            action = PrivateMessageLandingAction.Top,
+            acknowledge = true,
+        )
+        landing is PrivateMessagePageLanding.Anchor -> PrivateMessageLandingDecision(
+            action = PrivateMessageLandingAction.Anchor(landing.anchor),
+            acknowledge = true,
+        )
+        else -> PrivateMessageLandingDecision(
+            action = PrivateMessageLandingAction.Top,
+            acknowledge = true,
+        )
+    }
+}
+
+/** Compose-owned objects and rendered values needed to apply one landing decision. */
+internal data class PrivateMessageLandingRenderContext(
+    val listState: LazyListState,
+    val thread: PrivateMessageThread,
+    val connectedPseudo: String?,
+    val isRefreshing: Boolean,
+    val alignment: PrivateMessageListAlignment,
+)
+
+/**
+ * #351/#1074/#1040 — unique MP landing authority. The ViewModel resolves one candidate per page:
+ * cited message (explicit, highest priority), saved session anchor, or default top. Cache content
+ * and that candidate arrive atomically; the network revalidation retains the same value, so an
+ * anchor/top landing is never restarted. A cited target missing from cache waits while refresh is
+ * active, then resolves against the terminal page (top fallback only for an actual missing target).
+ *
+ * [PrivateMessageListAlignment.onLandingApplied] runs only AFTER the scroll, closing the content /
+ * position mismatch window. The acknowledgement is compare-and-clear in the ViewModel; a stale
+ * completion may acknowledge only its exact generation/account/page value.
+ */
+@Composable
+internal fun PrivateMessagePageLandingEffect(
+    context: PrivateMessageLandingRenderContext,
+    presentation: PrivateMessageLandingPresentation,
+) {
+    val lastRenderedPage = remember { mutableStateOf<Int?>(null) }
+    val currentOnConsumed by rememberUpdatedState(presentation.onConsumed)
+    val landing = presentation.landing
+    val renderedPage = context.thread.page
+    val citedTargetIndex = (landing as? PrivateMessagePageLanding.CitedMessage)?.let { cited ->
+        context.thread.messages.indexOfFirst { message -> message.numreponse == cited.numreponse }
+            .takeIf { index -> index >= 0 }
+    }
+    // The decision, rather than raw refresh/messages, keys the effect. Anchor/top decisions remain
+    // equal across cache→network; a cited target absent from cache changes exactly once at terminal.
+    val decision = decidePrivateMessageLanding(
+        PrivateMessageLandingDecisionInputs(
+            landing = landing,
+            connectedPseudo = context.connectedPseudo,
+            renderedPage = renderedPage,
+            citedTargetIndex = citedTargetIndex,
+            isRefreshing = context.isRefreshing,
+            lastRenderedPage = lastRenderedPage.value,
+        ),
+    )
+    LaunchedEffect(renderedPage, landing, decision) {
+        val scrolled = when (val action = decision.action) {
+            is PrivateMessageLandingAction.Anchor -> {
+                context.listState.scrollToItem(action.value.index, action.value.offset)
+                true
+            }
+            is PrivateMessageLandingAction.CitedMessage -> {
+                context.listState.scrollToItem(action.index)
+                true
+            }
+            PrivateMessageLandingAction.Top -> {
+                context.listState.scrollToItem(0)
+                true
+            }
+            PrivateMessageLandingAction.None -> false
+        }
+
+        if (scrolled || decision.alignWithoutScroll) {
+            context.alignment.onLandingApplied(renderedPage)
+            lastRenderedPage.value = renderedPage
+        }
+        if (landing != null && decision.acknowledge) {
+            currentOnConsumed(landing)
+        }
+    }
+}
+
+/**
+ * State-hoisted callbacks for [PrivateMessageThreadContent]. Keeping this seam free of Hilt makes
+ * the complete thread surface characterizable in JVM Compose tests while the public screen remains
+ * the sole owner of the ViewModel and route arguments.
+ */
+internal typealias CitedPostWithDepartureAnchor = (
+    page: Int,
+    numreponse: Int,
+    departureAnchor: PrivateMessageScrollAnchor?,
+) -> Unit
+
+@Suppress("LongParameterList") // One state-hoisted action per independent control on the complete surface.
+internal data class PrivateMessageThreadCallbacks(
+    val onBack: () -> Unit,
+    val onReply: () -> Unit,
+    val onRetry: () -> Unit,
+    val onRefresh: () -> Unit,
+    val onSelectPage: (page: Int, departureAnchor: PrivateMessageScrollAnchor?) -> Unit,
+    /** Generation/account-sealed RAM availability probe used only to choose the swipe release. */
+    val isPageWarm: (page: Int) -> Boolean = { false },
+    val onOpenRoster: () -> Unit,
+    val onDismissRoster: () -> Unit,
+    val onRetryRoster: () -> Unit,
+    val onManageRecipients: () -> Unit,
+    /** Parsed quote-header target; production routes it to the page-scoped ViewModel landing. */
+    val onGoToCitedPost: CitedPostWithDepartureAnchor? = null,
+    /** Scroll-settle report; the content host applies alignment/scrollbar/zoom guards first. */
+    val onAnchorSettled: (PrivateMessageScrollAnchor) -> Unit = {},
+    /** Exact page landing applied; the ViewModel performs the compare-and-clear. */
+    val onPageLandingConsumed: (PrivateMessagePageLanding) -> Unit = {},
+    /** Null only in isolated hosts; production supplies it and the list applies reply/ref gates. */
+    val onQuote: ((Post) -> Unit)? = null,
+    val onToggleMultiQuote: (QuoteSelection) -> Unit = {},
+    val onMultiQuote: () -> Unit = {},
+    val onClearMultiQuote: () -> Unit = {},
+    val onRemoveMultiQuotes: (Set<Int>) -> Unit = {},
+    // #1042 — defaulted (unlike its siblings) so the pre-#1042 characterization mounts compile
+    // unchanged; a host that does not navigate keeps the tap a no-op, like the topic screen default.
+    val onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
+    // #1051 — block/unblock is repository-owned; the live blacklist collector re-renders locally.
+    val onSetAuthorBlocked: (author: String, blocked: Boolean) -> Unit = { _, _ -> },
+    // #831/#1051 — the ViewModel-owned save survives dismissal of the local image sheet.
+    val onSaveImage: (url: String) -> Unit = {},
+)
+
+/**
+ * Complete private-thread surface driven by immutable UI state. This is the MP counterpart of the
+ * topic feature's state-hoisted `TopicContent`: screen chrome, message list, pager, auth/error modes
+ * and participant sheet stay in one composition; only ViewModel collection/effects live outside.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun PrivateMessageThreadContent(
+    state: PrivateMessageThreadUiState,
+    isMultiRecipientHint: Boolean,
+    callbacks: PrivateMessageThreadCallbacks,
+    presentation: PrivateMessageThreadPresentation = PrivateMessageThreadPresentation(),
+    topBarActions: @Composable (() -> Unit)? = null,
+) {
+    val mode = state.mode
+    val multiQuoteSelections = presentation.multiQuoteSelections
+    val listState = rememberLazyListState()
+    // Account is part of the alignment owner even when the numeric page stays identical across an
+    // A -> B switch. Recreating the lock prevents B's first Content frame from accepting A's old
+    // list coordinates before B's Top landing runs.
+    val alignment = remember(state.connectedPseudo) { PrivateMessageListAlignment() }
+    var isScrollbarDragging by remember { mutableStateOf(false) }
+    // #1051/#1117 — private message whose feature-owned menu is open, plus whether a blocked body
+    // was explicitly revealed at the originating target. Kept local like the image menu: ephemeral
+    // UI state contains no route/private-data persistence across process death.
+    var messageMenuTarget by remember { mutableStateOf<MessageMenuTarget?>(null) }
+    // #831/#1051 — post image whose contextual menu is open (null = closed). Deliberately not
+    // rememberSaveable: losing an ephemeral menu across process death is acceptable.
+    var imageMenuTarget by remember { mutableStateOf<PostImageTarget?>(null) }
+    // One stable handler instance is threaded through MessageCard to LocalPostImageActions;
+    // remembered so providing it never invalidates the cards. Opening either menu closes the other.
+    val postImageActions = remember {
+        PostImageActions(
+            onLongPress = {
+                messageMenuTarget = null
+                imageMenuTarget = it
+            },
+        )
+    }
+    val openMessageMenu = remember<(Post, Boolean) -> Unit> {
+        { message, contentRevealed ->
+            imageMenuTarget = null
+            messageMenuTarget = MessageMenuTarget(message, contentRevealed)
+        }
+    }
+    val content = mode as? PrivateMessageThreadUiState.Mode.Content
+    val zoomAnimationScope = rememberCoroutineScope()
+    val zoomState = rememberPinchZoomState(
+        pageKey = state.request.threadId to (content?.thread?.page ?: state.page),
+        animationScope = zoomAnimationScope,
+    )
+    val readerSession = PrivateMessageReaderSession(
+        listState = listState,
+        alignment = alignment,
+        isScrollbarDragging = { isScrollbarDragging },
+        onScrollbarDragStateChanged = { dragging -> isScrollbarDragging = dragging },
+    )
+    val pageInteraction = rememberPrivateMessagePageInteraction(
+        state = state,
+        callbacks = callbacks,
+        session = readerSession,
+        zoomState = zoomState,
+    )
+    // Keep-content loading is the observable switch state and disarms every chrome control. Other
+    // producers can start between composition and the tap, so the action rechecks the live gate.
+    val pageControlsEnabled = content != null && !state.isRefreshing
+    val canReply = content?.thread?.canReply == true
+    var pagePickerOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(content) {
+        if (content == null) pagePickerOpen = false
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
-                    val content = mode as? PrivateMessageThreadUiState.Mode.Content
-                    Column {
-                        Text(
-                            text = content?.thread?.subject
-                                ?.ifBlank { stringResource(R.string.messages_thread_title) }
-                                ?: stringResource(R.string.messages_thread_title),
-                            style = MaterialTheme.typography.titleMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        // Multi-recipient if the page proved it OR the inbox hinted it; then show
-                        // the localized "Interlocuteurs multiples" label rather than a single
-                        // derived participant (which would misrepresent a group conversation).
-                        val isMulti = content?.thread?.isMultiRecipient == true || isMultiRecipientHint
-                        val subtitle = when {
-                            isMulti -> stringResource(R.string.messages_multi_recipient)
-                            else -> content?.thread?.correspondent?.takeIf { it.isNotBlank() }
-                        }
-                        subtitle?.let { subtitleText ->
-                            Text(
-                                text = subtitleText,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
+                    ThreadTopBarTitle(
+                        content = content,
+                        isMultiRecipientHint = isMultiRecipientHint,
+                        isRefreshing = state.isRefreshing,
+                        pagePickerEnabled = pageControlsEnabled,
+                        onOpenPagePicker = { pagePickerOpen = true },
+                    )
                 },
                 navigationIcon = {
                     val backLabel = stringResource(R.string.messages_back)
                     IconButton(
-                        onClick = onBack,
+                        onClick = callbacks.onBack,
                         modifier = Modifier.semantics { contentDescription = backLabel },
                     ) {
                         // #360 / ADR-015 — vector stroke unifié, dimensionné en dp (indépendant de la
@@ -160,17 +597,37 @@ fun PrivateMessageThreadScreen(
                     ThreadTopBarActions(
                         isMultiRecipient = (mode as? PrivateMessageThreadUiState.Mode.Content)
                             ?.thread?.isMultiRecipient == true || isMultiRecipientHint,
-                        onOpenRoster = viewModel::openRoster,
+                        onOpenRoster = callbacks.onOpenRoster,
                         topBarActions = topBarActions,
                     )
                 },
+                // The title owns two lines. At large font scale the stock 64.dp bar clips them;
+                // titleMedium (24.sp line) + labelMedium (16.sp) need this scalable minimum.
+                expandedHeight = maxOf(
+                    TopAppBarDefaults.TopAppBarExpandedHeight,
+                    8.dp + 40.dp * LocalDensity.current.fontScale,
+                ),
             )
         },
         floatingActionButton = {
-            ThreadReplyFab(
-                // #301 — reply affordance, shown only once the page proved a reply form is available.
-                canReply = (mode as? PrivateMessageThreadUiState.Mode.Content)?.thread?.canReply == true,
-                onReply = { onReply(request.threadId, state.page) },
+            ThreadBottomActions(
+                canReply = canReply,
+                multiQuoteCount = if (canReply) {
+                    multiQuoteSelections.size
+                } else {
+                    0
+                },
+                pageChrome = threadPageFabChrome(
+                    showPageFabs = state.showPageFabs,
+                    content = content,
+                    enabled = pageControlsEnabled,
+                    pageInteraction = pageInteraction,
+                ),
+                callbacks = ThreadBottomActionCallbacks(
+                    onReply = callbacks.onReply,
+                    onMultiQuote = callbacks.onMultiQuote,
+                    onClearMultiQuote = callbacks.onClearMultiQuote,
+                ),
             )
         },
     ) { innerPadding ->
@@ -217,64 +674,602 @@ fun PrivateMessageThreadScreen(
                     )
                     // No raw error detail on screen (#316): it can embed the private conversation
                     // URL. Kind-resolved message + retry only.
-                    Button(onClick = viewModel::retry) {
+                    Button(onClick = callbacks.onRetry) {
                         Text(text = stringResource(R.string.messages_retry))
                     }
                 }
 
-                is PrivateMessageThreadUiState.Mode.Content -> {
-                    // #351c — moved to :core:ui (was a local copy here). Lands at the top when a NEW
-                    // page replaces the kept-on-screen one; the null guard on the first render keeps a
-                    // restored position on rotation/recreation.
-                    ScrollToTopOnPageChange(listState = listState, renderedPage = mode.thread.page)
-                    // #335/#351 — pull-to-refresh re-fetches the displayed page; the indicator also
-                    // covers the keep-content page changes (same isRefreshing flag).
-                    PullToRefreshBox(
-                        isRefreshing = state.isRefreshing,
-                        onRefresh = viewModel::refresh,
-                        modifier = Modifier.fillMaxSize(),
-                    ) {
-                        // #300/#351c — the list overlay (LazyColumn + auto-hiding scrollbar) is now the
-                        // shared PostListScaffold; the swipe chain rides the inner list via listModifier
-                        // (so the scrollbar stays fixed while the page follows the finger) and the MP
-                        // density (16.dp padding, 12.dp gap) is passed unchanged.
-                        ThreadMessages(
-                            messages = mode.thread.messages,
-                            page = state.page,
-                            totalPages = state.totalPages,
-                            onSelectPage = viewModel::selectPage,
-                            // Codex review — gate the pager buttons with the same condition as
-                            // the swipe: re-tapping during a keep-content load would only cancel
-                            // and restart the round-trip (supersede), never advance faster.
-                            pagerEnabled = !state.isRefreshing,
-                            listState = listState,
-                            // #351b — horizontal swipe changes page in place (same thresholds
-                            // and feel as the topic via the shared :core:ui geometry).
-                            swipeModifier = rememberThreadSwipeModifier(
-                                renderedPage = mode.thread.page,
-                                totalPages = state.totalPages,
-                                isRefreshing = state.isRefreshing,
-                                onSelectPage = viewModel::selectPage,
-                            ),
-                        )
-                    }
-                }
+                is PrivateMessageThreadUiState.Mode.Content -> PrivateMessageThreadReader(
+                    state = state,
+                    callbacks = callbacks,
+                    session = readerSession,
+                    runtime = PrivateMessageReaderRuntime(
+                        zoomState = zoomState,
+                        pageInteraction = pageInteraction,
+                    ),
+                    presentation = PrivateMessageReaderPresentation(
+                        multiQuoteSelections = multiQuoteSelections,
+                        onOpenMessageMenu = openMessageMenu,
+                        onImageLongPress = postImageActions.onLongPress,
+                    ),
+                )
             }
         }
     }
+
+    ThreadPagePickerHost(
+        open = pagePickerOpen,
+        content = content,
+        enabled = pageControlsEnabled,
+        pageInteraction = pageInteraction,
+        onDismiss = { pagePickerOpen = false },
+    )
 
     // #612 — participant roster sheet. Renders nothing while Hidden; the ViewModel drives the
     // open / loading / loaded / unavailable / error states (lazy fetch + memory cache).
     ParticipantRosterSheet(
         roster = state.roster,
-        onDismiss = viewModel::dismissRoster,
-        onRetry = viewModel::retryRoster,
+        onDismiss = callbacks.onDismissRoster,
+        onRetry = callbacks.onRetryRoster,
         // #618 — close the roster sheet BEFORE navigating (Codex framing) so it does not reappear when
         // the composer pops back, then open the composer with the recipient manager auto-opened.
-        onManageRecipients = {
-            viewModel.dismissRoster()
-            onManageRecipients(request.threadId, state.page)
+        onManageRecipients = callbacks.onManageRecipients,
+    )
+
+    ThreadMessageMenuHost(
+        mode = mode,
+        connectedPseudo = state.connectedPseudo,
+        target = messageMenuTarget,
+        onOpenProfile = callbacks.onOpenProfile,
+        multiQuoteSelections = multiQuoteSelections,
+        onToggleMultiQuote = callbacks.onToggleMultiQuote,
+        onSetAuthorBlocked = callbacks.onSetAuthorBlocked,
+        onClear = { messageMenuTarget = null },
+    )
+
+    ThreadImageMenuHost(
+        mode = mode,
+        target = imageMenuTarget,
+        onSave = callbacks.onSaveImage,
+        onClear = { imageMenuTarget = null },
+    )
+}
+
+/**
+ * Long-lived list coordination retained by [PrivateMessageThreadContent] across its UI modes.
+ * Module visibility lets the production gate be tested without a shadow test-only session DTO.
+ */
+internal data class PrivateMessageReaderSession(
+    val listState: LazyListState,
+    val alignment: PrivateMessageListAlignment,
+    val isScrollbarDragging: () -> Boolean,
+    val onScrollbarDragStateChanged: (Boolean) -> Unit,
+)
+
+/** Reader-only presentation inputs owned locally by [PrivateMessageThreadContent]. */
+private data class PrivateMessageReaderPresentation(
+    val multiQuoteSelections: List<QuoteSelection>,
+    val onOpenMessageMenu: (message: Post, contentRevealed: Boolean) -> Unit,
+    val onImageLongPress: (PostImageTarget) -> Unit,
+)
+
+/** Ephemeral menu target; explicit reveal prevents a hidden body from escaping through copy. */
+private data class MessageMenuTarget(
+    val message: Post,
+    val contentRevealed: Boolean,
+)
+
+/** Chrome selection plus departure-anchor capture also reused by the committed swipe path. */
+private data class PrivateMessagePageInteraction(
+    val alignedDepartureAnchor: () -> PrivateMessageScrollAnchor?,
+    val onSelectPage: (Int) -> Boolean,
+)
+
+/**
+ * Builds the tap-time page authority used by the picker and page FABs. Bounds and the rendered page
+ * come from the latest parsed state; a concurrent list producer rejects those chrome actions. The
+ * swipe machine consumes the same producer gate before commit, then reuses only
+ * [PrivateMessagePageInteraction.alignedDepartureAnchor] when its irrevocable release completes.
+ */
+@Composable
+private fun rememberPrivateMessagePageInteraction(
+    state: PrivateMessageThreadUiState,
+    callbacks: PrivateMessageThreadCallbacks,
+    session: PrivateMessageReaderSession,
+    zoomState: PinchZoomState,
+): PrivateMessagePageInteraction {
+    val currentState = rememberUpdatedState(state)
+    val currentCallbacks = rememberUpdatedState(callbacks)
+    val alignedDepartureAnchor = {
+        val current = currentState.value
+        PrivateMessageScrollAnchor(
+            index = session.listState.firstVisibleItemIndex,
+            offset = session.listState.firstVisibleItemScrollOffset,
+        ).takeIf {
+            shouldPersistPrivateMessageAnchor(
+                alignment = session.alignment,
+                canonicalPage = current.page,
+                isLoaded = current.mode is PrivateMessageThreadUiState.Mode.Content,
+                isScrollbarDragging = session.isScrollbarDragging(),
+                isZoomPositionMutationInProgress = zoomState.isListPositionMutationInProgress,
+            )
+        }
+    }
+    return PrivateMessagePageInteraction(
+        alignedDepartureAnchor = alignedDepartureAnchor,
+        onSelectPage = { target ->
+            val current = currentState.value
+            val valid = target in 1..current.totalPages &&
+                target != current.page &&
+                !current.isRefreshing &&
+                !hasCompetingThreadListProducer(current, session, zoomState)
+            if (valid) {
+                currentCallbacks.value.onSelectPage(target, alignedDepartureAnchor())
+            }
+            valid
         },
+    )
+}
+
+/** Feature-owned sheet host: the shared picker primitive contains no lifecycle or placement policy. */
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun ThreadPagePickerHost(
+    open: Boolean,
+    content: PrivateMessageThreadUiState.Mode.Content?,
+    enabled: Boolean,
+    pageInteraction: PrivateMessagePageInteraction,
+    onDismiss: () -> Unit,
+) {
+    if (!open || content == null) return
+    val thread = content.thread
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .navigationBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.messages_page_picker_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            PageNavigation(
+                currentPage = thread.page,
+                availablePages = remember(thread.totalPages) {
+                    (1..thread.totalPages.coerceAtLeast(1)).toList()
+                },
+                canGoPrevious = thread.page > 1,
+                canGoNext = thread.page < thread.totalPages,
+                enabled = enabled,
+                onOpenPage = { target ->
+                    if (pageInteraction.onSelectPage(target)) onDismiss()
+                },
+            )
+        }
+    }
+}
+
+/** Compose runtime shared by reader gestures and the feature-owned pagination chrome. */
+private data class PrivateMessageReaderRuntime(
+    val zoomState: PinchZoomState,
+    val pageInteraction: PrivateMessagePageInteraction,
+)
+
+/** Loaded reading mode: landing, anchor persistence, zoom, refresh and message-list rendering. */
+@Composable
+private fun PrivateMessageThreadReader(
+    state: PrivateMessageThreadUiState,
+    callbacks: PrivateMessageThreadCallbacks,
+    session: PrivateMessageReaderSession,
+    runtime: PrivateMessageReaderRuntime,
+    presentation: PrivateMessageReaderPresentation,
+) {
+    val mode = state.mode as PrivateMessageThreadUiState.Mode.Content
+    val latestState by rememberUpdatedState(state)
+    val latestCallbacks by rememberUpdatedState(callbacks)
+    val zoomState = runtime.zoomState
+    val pageInteraction = runtime.pageInteraction
+    val isZoomed by remember(zoomState) { derivedStateOf { zoomState.zoomed } }
+    val haptics = LocalHapticFeedback.current
+    // #382/#1103 — one refresh authority for the single list-level detector. PinchZoom already
+    // consumes the first down on Initial while zoomed; the explicit zoom guard is defense in depth,
+    // matching the topic contract even if the modifier order changes later.
+    val onDoubleTapRefresh = remember(haptics, zoomState) {
+        {
+            if (!zoomState.zoomed) {
+                haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+                latestCallbacks.onRefresh()
+            }
+        }
+    }
+    val currentAnchor = {
+        PrivateMessageScrollAnchor(
+            index = session.listState.firstVisibleItemIndex,
+            offset = session.listState.firstVisibleItemScrollOffset,
+        )
+    }
+    val swipeInteraction = ThreadSwipeInteraction(
+        // Competing producers are consumed by the swipe machine up to lift-off. Once it has
+        // committed, a producer appearing during the release animation must not revoke the page
+        // switch; only its now-unaligned departure anchor is discarded.
+        onSelectPage = { page ->
+            callbacks.onSelectPage(page, pageInteraction.alignedDepartureAnchor())
+        },
+        isTargetPageWarm = callbacks.isPageWarm,
+        hasCompetingListProducer = {
+            hasCompetingThreadListProducer(latestState, session, zoomState)
+        },
+    )
+    // #1074/#1040 — cited > saved anchor > top, one scroll authority. The effect closes the
+    // alignment window only after the selected scroll completes.
+    PrivateMessagePageLandingEffect(
+        context = PrivateMessageLandingRenderContext(
+            listState = session.listState,
+            thread = mode.thread,
+            connectedPseudo = state.connectedPseudo,
+            isRefreshing = state.isRefreshing,
+            alignment = session.alignment,
+        ),
+        presentation = PrivateMessageLandingPresentation(
+            landing = state.pageLanding,
+            onConsumed = callbacks.onPageLandingConsumed,
+        ),
+    )
+    // Same shape as TopicScreen: observe the STOP transition, not every index/offset mutation. The
+    // initial idle value is skipped so a pending restore cannot be clobbered by (0, 0). Scrollbar drag
+    // and zoom gesture/settle are producers, not reading intent, and remain excluded through their
+    // final programmatic scroll.
+    LaunchedEffect(session.listState, zoomState) {
+        snapshotFlow { session.listState.isScrollInProgress }
+            .drop(1)
+            .filter { scrolling -> !scrolling }
+            .collect {
+                val current = latestState
+                val canPersist = shouldPersistPrivateMessageAnchor(
+                    alignment = session.alignment,
+                    canonicalPage = current.page,
+                    isLoaded = current.mode is PrivateMessageThreadUiState.Mode.Content,
+                    isScrollbarDragging = session.isScrollbarDragging(),
+                    isZoomPositionMutationInProgress = zoomState.isListPositionMutationInProgress,
+                )
+                if (canPersist) callbacks.onAnchorSettled(currentAnchor())
+            }
+    }
+    // #335/#351/#1040 — PullToRefreshBox cannot disable its gesture. The low-level modifier prevents
+    // nested-scroll pull consumption and indicator arming while zoomed; gating only
+    // callbacks.onRefresh would be too late.
+    val pullToRefreshState = rememberPullToRefreshState()
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .testTag(PRIVATE_MESSAGE_THREAD_READER_TAG)
+            .pullToRefresh(
+                isRefreshing = state.isRefreshing,
+                state = pullToRefreshState,
+                enabled = !isZoomed,
+                onRefresh = callbacks.onRefresh,
+            ),
+    ) {
+        // #300/#351c — the list overlay (LazyColumn + auto-hiding scrollbar) is now the shared
+        // PostListScaffold; the swipe chain rides the inner list via listModifier (so the scrollbar
+        // stays fixed while the page follows the finger) and the MP list chrome is the feature-owned
+        // ThreadListLayout.kt geometry (#1046).
+        // #785/#1050 — the same snapshot that selects hidden message placeholders also reaches
+        // PostRenderer, so a third party quoting a blocked author cannot leak that author's body.
+        // Scoped to the reading list only.
+        CompositionLocalProvider(
+            LocalBlockedQuoteAuthors provides mode.blockedQuoteAuthors,
+        ) {
+            ThreadMessages(
+                messages = mode.thread.messages,
+                hiddenNumreponses = mode.hiddenNumreponses,
+                blockedQuoteAuthors = mode.blockedQuoteAuthors,
+                page = state.page,
+                fullWidthPosts = state.fullWidthPosts,
+                showSignatures = state.showSignatures,
+                egoQuoteEnabled = state.egoQuoteEnabled,
+                egoPostEnabled = state.egoPostEnabled,
+                connectedPseudo = state.connectedPseudo,
+                canReply = mode.thread.canReply,
+                multiQuoteSelections = presentation.multiQuoteSelections,
+                quoteCallbacks = MessageQuoteCallbacks(
+                    onQuote = callbacks.onQuote,
+                    onToggleMultiQuote = callbacks.onToggleMultiQuote,
+                ),
+                onRemoveMultiQuotes = callbacks.onRemoveMultiQuotes,
+                onGoToCitedPost = callbacks.onGoToCitedPost?.let { onGoToCitedPost ->
+                    { page, numreponse ->
+                        onGoToCitedPost(page, numreponse, pageInteraction.alignedDepartureAnchor())
+                    }
+                },
+                onOpenProfile = callbacks.onOpenProfile,
+                onOpenMessageMenu = presentation.onOpenMessageMenu,
+                onImageLongPress = presentation.onImageLongPress,
+                scrollSession = ThreadScrollSession(
+                    listState = session.listState,
+                    zoomState = zoomState,
+                    onDoubleTapRefresh = onDoubleTapRefresh,
+                    onScrollbarDragStateChanged = session.onScrollbarDragStateChanged,
+                    // #351b — horizontal swipe changes page in place (same thresholds and feel as
+                    // topic via the shared geometry).
+                    swipeModifier = rememberThreadSwipeModifier(
+                        renderedPage = mode.thread.page,
+                        totalPages = state.totalPages,
+                        isRefreshing = state.isRefreshing,
+                        interaction = swipeInteraction,
+                    ),
+                ),
+            )
+        }
+        PullToRefreshDefaults.Indicator(
+            state = pullToRefreshState,
+            isRefreshing = state.isRefreshing,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .testTag(PRIVATE_MESSAGE_THREAD_REFRESH_INDICATOR_TAG),
+        )
+        if (isZoomed) {
+            ThreadZoomResetChip(
+                zoomState = zoomState,
+                listState = session.listState,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(12.dp),
+            )
+        }
+    }
+}
+
+/**
+ * Live page-position producers that must settle before a swipe may capture an anchor and commit.
+ * A pending same-page cited landing is explicit because its numeric page remains aligned until its
+ * programmatic scroll starts; [PrivateMessageListAlignment] covers the cross-page content/position
+ * mismatch window. Module visibility keeps the regression proof on this exact predicate.
+ */
+internal fun hasCompetingThreadListProducer(
+    state: PrivateMessageThreadUiState,
+    session: PrivateMessageReaderSession,
+    zoomState: PinchZoomState,
+): Boolean = when {
+    zoomState.zoomed -> true
+    zoomState.isListPositionMutationInProgress -> true
+    session.isScrollbarDragging() -> true
+    session.listState.isScrollInProgress -> true
+    state.pageLanding != null -> true
+    else -> !session.alignment.shouldPersist(
+        canonicalPage = state.page,
+        isLoaded = state.mode is PrivateMessageThreadUiState.Mode.Content,
+    )
+}
+
+/** Feature-owned reset chrome; the shared zoom API deliberately contains no labels or surfaces. */
+@Composable
+private fun ThreadZoomResetChip(
+    zoomState: PinchZoomState,
+    listState: LazyListState,
+    modifier: Modifier = Modifier,
+) {
+    val zoomResetDescription = stringResource(R.string.messages_zoom_reset)
+    Surface(
+        onClick = {
+            zoomState.settleAnchoredTo(
+                targetScale = 1f,
+                anchorX = zoomState.viewportWidthPx / 2f,
+                anchorY = zoomState.viewportHeightPx / 2f,
+                listState = listState,
+            )
+        },
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        shadowElevation = 3.dp,
+        modifier = modifier
+            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+            .semantics {
+                contentDescription = zoomResetDescription
+                role = Role.Button
+            },
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.messages_zoom_reset_chip),
+                style = MaterialTheme.typography.labelLarge,
+            )
+        }
+    }
+}
+
+/**
+ * #1051 — owns the feature-local message sheet and forgets private targets on logout/account switch
+ * or when a page landing replaces the target message. The current blacklist snapshot drives both
+ * the label and the desired write, so a revealed blocked message offers « Ne plus masquer » without
+ * asking the repository a second time.
+ */
+@Composable
+@Suppress("LongParameterList") // Host seam: mode/session/target plus three independent callbacks.
+private fun ThreadMessageMenuHost(
+    mode: PrivateMessageThreadUiState.Mode,
+    connectedPseudo: String?,
+    target: MessageMenuTarget?,
+    onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit,
+    multiQuoteSelections: List<QuoteSelection>,
+    onToggleMultiQuote: (QuoteSelection) -> Unit,
+    onSetAuthorBlocked: (author: String, blocked: Boolean) -> Unit,
+    onClear: () -> Unit,
+) {
+    val targetStillOnPage = mode is PrivateMessageThreadUiState.Mode.Content &&
+        target != null &&
+        mode.thread.messages.any { message -> message.numreponse == target.message.numreponse }
+
+    LaunchedEffect(mode, target) {
+        if (!targetStillOnPage) onClear()
+    }
+
+    if (mode is PrivateMessageThreadUiState.Mode.Content && target != null && targetStillOnPage) {
+        val message = target.message
+        val authorCanonical = remember(message.author) { canonicalizePseudo(message.author) }
+        val connectedCanonical = remember(connectedPseudo) {
+            connectedPseudo?.let(::canonicalizePseudo)
+        }
+        val authorBlocked = authorCanonical in mode.blockedQuoteAuthors
+        val contentVisible = message.numreponse !in mode.hiddenNumreponses || target.contentRevealed
+        val quoteSelection = message.toPrivateMessageQuoteSelectionOrNull(mode.thread.page)
+        MessageMenuSheet(
+            message = message,
+            authorBlocked = authorBlocked,
+            contentVisible = contentVisible,
+            onDismiss = onClear,
+            onOpenProfile = message.profileId?.let { profileId ->
+                { onOpenProfile(profileId, message.author, message.avatarUrl) }
+            },
+            // Same self-block gate as the topic, based on the live session pseudo rather than
+            // Post.isOwnPost (HFR can omit ownership tools for affichoutils=0 profiles).
+            onToggleBlockAuthor = if (
+                connectedCanonical != null && authorCanonical == connectedCanonical
+            ) {
+                null
+            } else {
+                { onSetAuthorBlocked(message.author, !authorBlocked) }
+            },
+            multiQuoteSelected = multiQuoteSelections.any { selection ->
+                selection.numreponse == message.numreponse
+            },
+            // A blocked-but-explicitly-revealed message remains outside the basket until its
+            // author is unblocked; otherwise changing page would silently re-hide a selected MP.
+            onToggleMultiQuote = quoteSelection
+                ?.takeIf { mode.thread.canReply && !authorBlocked }
+                ?.let { selection -> { onToggleMultiQuote(selection) } },
+        )
+    }
+}
+
+/**
+ * #831/#1051 — per-image contextual menu, opened from either renderer image path. The thread screen
+ * remains mounted across auth modes, so a private target is cleared as soon as content leaves the
+ * current frame. Extracted to keep [PrivateMessageThreadContent] under detekt's complexity threshold.
+ */
+@Composable
+private fun ThreadImageMenuHost(
+    mode: PrivateMessageThreadUiState.Mode,
+    target: PostImageTarget?,
+    onSave: (String) -> Unit,
+    onClear: () -> Unit,
+) {
+    // Unlike TopicLoadedContent, this host must explicitly forget the private target when its content
+    // branch disappears. This also prevents the sheet from reopening when the user logs back in.
+    LaunchedEffect(mode) {
+        if (mode !is PrivateMessageThreadUiState.Mode.Content) onClear()
+    }
+
+    // The mode gate closes the sheet in the current frame; the effect above then purges its target.
+    if (mode is PrivateMessageThreadUiState.Mode.Content) {
+        target?.let { imageTarget ->
+            PostImageMenuSheet(
+                target = imageTarget,
+                onSave = onSave,
+                onDismiss = onClear,
+                // The thumbnail is a second request for the same private PostContent URL and
+                // lives outside ReadingPostCard's provider, so carry the policy explicitly.
+                mediaDiskCachePolicy = PostMediaDiskCachePolicy.DISABLED,
+            )
+        }
+    }
+}
+
+/** Two-line MP title: parsed subject first, weighted/ellipsized correspondent and page pill second. */
+@Composable
+private fun ThreadTopBarTitle(
+    content: PrivateMessageThreadUiState.Mode.Content?,
+    isMultiRecipientHint: Boolean,
+    isRefreshing: Boolean,
+    pagePickerEnabled: Boolean,
+    onOpenPagePicker: () -> Unit,
+) {
+    val fallbackTitle = stringResource(R.string.messages_thread_title)
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = content?.thread?.subject?.ifBlank { fallbackTitle } ?: fallbackTitle,
+            style = MaterialTheme.typography.titleMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (content != null) {
+            val isMulti = content.thread.isMultiRecipient || isMultiRecipientHint
+            val subtitle = if (isMulti) {
+                stringResource(R.string.messages_multi_recipient)
+            } else {
+                content.thread.correspondent
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = true),
+                )
+                ThreadBarPagePill(
+                    page = content.thread.page,
+                    totalPages = content.thread.totalPages,
+                    isRefreshing = isRefreshing,
+                    enabled = pagePickerEnabled,
+                    onOpenPagePicker = onOpenPagePicker,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * MP-owned page pill. Unlike the topic pill it has no provisional-cache semantics: its values are
+ * the parsed [PrivateMessageThread] kept on screen, and the keep-content refresh gate only disarms
+ * the click while announcing that an update is in progress.
+ */
+@Composable
+private fun ThreadBarPagePill(
+    page: Int,
+    totalPages: Int,
+    isRefreshing: Boolean,
+    enabled: Boolean,
+    onOpenPagePicker: () -> Unit,
+) {
+    val openLabel = stringResource(R.string.messages_page_picker_open)
+    val a11yLabel = stringResource(
+        if (isRefreshing) {
+            R.string.messages_pager_position_refreshing_a11y
+        } else {
+            R.string.messages_pager_position_a11y
+        },
+        page,
+        totalPages,
+    )
+    Text(
+        text = stringResource(R.string.messages_pager_position, page, totalPages),
+        style = MaterialTheme.typography.labelMedium,
+        color = if (enabled) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
+        maxLines = 1,
+        modifier = Modifier
+            .semantics { contentDescription = a11yLabel }
+            .clickable(
+                enabled = enabled,
+                onClickLabel = openLabel,
+                role = Role.Button,
+                onClick = onOpenPagePicker,
+            ),
     )
 }
 
@@ -304,15 +1299,161 @@ private fun ThreadTopBarActions(
     topBarActions?.invoke()
 }
 
+/** Page-FAB policy and target mapping owned by the MP feature, not by the shared primitive. */
+private data class ThreadPageFabChrome(
+    val show: Boolean,
+    val canGoPrevious: Boolean,
+    val canGoNext: Boolean,
+    val enabled: Boolean,
+    val actions: ThreadPageFabActions,
+)
+
+/** Page targets stay cohesive while the feature owns their mapping to the current reader state. */
+private data class ThreadPageFabActions(
+    val onPreviousPage: () -> Unit,
+    val onNextPage: () -> Unit,
+    val onFirstPage: () -> Unit,
+    val onLastPage: () -> Unit,
+)
+
+/** Derives only MP policy and parsed-page targets; [PageFab] remains a value/callback primitive. */
+private fun threadPageFabChrome(
+    showPageFabs: Boolean,
+    content: PrivateMessageThreadUiState.Mode.Content?,
+    enabled: Boolean,
+    pageInteraction: PrivateMessagePageInteraction,
+): ThreadPageFabChrome {
+    val thread = content?.thread
+    val renderedPage = thread?.page ?: 1
+    val renderedTotalPages = thread?.totalPages ?: 1
+    return ThreadPageFabChrome(
+        show = showPageFabs && thread != null,
+        canGoPrevious = renderedPage > 1,
+        canGoNext = renderedPage < renderedTotalPages,
+        enabled = enabled,
+        actions = ThreadPageFabActions(
+            onPreviousPage = { pageInteraction.onSelectPage(renderedPage - 1) },
+            onNextPage = { pageInteraction.onSelectPage(renderedPage + 1) },
+            onFirstPage = { pageInteraction.onSelectPage(1) },
+            onLastPage = { pageInteraction.onSelectPage(renderedTotalPages) },
+        ),
+    )
+}
+
+/** User-triggered actions for the bottom cluster, separate from its visible state and page chrome. */
+private data class ThreadBottomActionCallbacks(
+    val onReply: () -> Unit,
+    val onMultiQuote: () -> Unit,
+    val onClearMultiQuote: () -> Unit,
+)
+
+/** Bottom cluster: basket first, feature-owned page slots, then the stable reply affordance. */
+@Composable
+private fun ThreadBottomActions(
+    canReply: Boolean,
+    multiQuoteCount: Int,
+    pageChrome: ThreadPageFabChrome,
+    callbacks: ThreadBottomActionCallbacks,
+) {
+    val previousLabel = stringResource(R.string.messages_fab_previous_page)
+    val nextLabel = stringResource(R.string.messages_fab_next_page)
+    val firstPageLabel = stringResource(R.string.messages_fab_first_page)
+    val lastPageLabel = stringResource(R.string.messages_fab_last_page)
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (multiQuoteCount > 0) {
+            MessageMultiQuoteFab(
+                count = multiQuoteCount,
+                onClick = callbacks.onMultiQuote,
+                onClear = callbacks.onClearMultiQuote,
+            )
+        }
+        if (pageChrome.show) {
+            ThreadFabSlot(visible = pageChrome.canGoPrevious) {
+                PageFab(
+                    description = previousLabel,
+                    iconRes = fr.forumhfr.redface2.core.ui.R.drawable.ic_chevron_left,
+                    onClick = pageChrome.actions.onPreviousPage,
+                    onLongClick = pageChrome.actions.onFirstPage,
+                    onLongClickLabel = firstPageLabel,
+                    enabled = pageChrome.enabled,
+                )
+            }
+            ThreadFabSlot(visible = pageChrome.canGoNext) {
+                PageFab(
+                    description = nextLabel,
+                    iconRes = fr.forumhfr.redface2.core.ui.R.drawable.ic_chevron_right,
+                    onClick = pageChrome.actions.onNextPage,
+                    onLongClick = pageChrome.actions.onLastPage,
+                    onLongClickLabel = lastPageLabel,
+                    enabled = pageChrome.enabled,
+                )
+            }
+        }
+        ThreadFabSlot(visible = canReply) {
+            ThreadReplyFab(onReply = callbacks.onReply)
+        }
+    }
+}
+
+/** Fixed action slot: a disappearing page or reply affordance must not move its siblings. */
+@Composable
+private fun ThreadFabSlot(visible: Boolean, content: @Composable () -> Unit) {
+    Box(
+        modifier = Modifier.sizeIn(
+            minWidth = PageFabDefaults.Size,
+            minHeight = PageFabDefaults.Size,
+        ),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (visible) content()
+    }
+}
+
 /**
- * #301 — reply FAB, extracted from the screen host (with [ThreadTopBarActions]) to keep it under
- * detekt's cyclomatic-complexity threshold. Shown only once the page proved a writable reply form
- * ([canReply]); [onReply] carries the page the user is viewing so HFR's prefilled `numrep` matches
- * what is on screen.
+ * #1074 — visible « Citer N » entry to the MP editor. A long press mirrors the topic affordance and
+ * clears the complete scoped basket without navigating; the semantics exposes both gestures.
  */
 @Composable
-private fun ThreadReplyFab(canReply: Boolean, onReply: () -> Unit) {
-    if (!canReply) return
+internal fun MessageMultiQuoteFab(count: Int, onClick: () -> Unit, onClear: () -> Unit) {
+    val label = pluralStringResource(R.plurals.messages_multi_quote_count, count, count)
+    val shortLabel = stringResource(R.string.messages_multi_quote_short, count)
+    val clearLabel = stringResource(R.string.messages_multi_quote_clear)
+    Surface(
+        modifier = Modifier
+            .semantics { contentDescription = label }
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onClear,
+                onLongClickLabel = clearLabel,
+                role = Role.Button,
+            ),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        shadowElevation = 6.dp,
+    ) {
+        Box(
+            modifier = Modifier
+                .sizeIn(minHeight = 56.dp)
+                .padding(horizontal = 16.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(text = shortLabel, style = MaterialTheme.typography.labelLarge)
+        }
+    }
+}
+
+/**
+ * #301 — reply FAB, extracted from the screen host (with [ThreadTopBarActions]) to keep it under
+ * detekt's cyclomatic-complexity threshold. [ThreadBottomActions] mounts it only once the page
+ * proved a writable reply form; [onReply] carries the page the user is viewing so HFR's prefilled
+ * `numrep` matches what is on screen.
+ */
+@Composable
+private fun ThreadReplyFab(onReply: () -> Unit) {
     val replyLabel = stringResource(R.string.messages_reply)
     ExtendedFloatingActionButton(
         text = { Text(replyLabel) },
@@ -328,32 +1469,41 @@ private fun ThreadReplyFab(canReply: Boolean, onReply: () -> Unit) {
  * #351b — builds the swipe modifier chain for the message list: shared edge glow
  * ([pageSwipeEdgeHint]) + in-place page-change gesture ([threadPageSwipe]).
  *
- * Every input the gesture needs later is wrapped in [rememberUpdatedState] and read through
- * stable lambdas: [threadPageSwipe]'s `pointerInput` is keyed on `Unit` and NEVER re-keyed (the
- * in-place pager changes pages under a live composition), so the lambdas captured by its initial
- * block must keep reading live values for the whole life of the composition. The gesture is gated
- * off while a load is in flight ([isRefreshing]) and re-arms when it settles.
+ * The load started by selection publishes `isRefreshing=true` while the outgoing page is still
+ * rendered; a later cache/network emission alone may change that page. Both values re-key the
+ * pointer block, but the fresh block remains disabled while refresh is true. Terminal
+ * `isRefreshing=true→false` is the usable re-arm, including after a cold failure whose rendered page
+ * never changed. Counts, callbacks, cache warmth, competing producers and gesture insets stay live
+ * through [rememberUpdatedState] without making a page-count/inset change cancel an in-flight release.
  */
+internal data class ThreadSwipeInteraction(
+    val onSelectPage: (Int) -> Unit,
+    val isTargetPageWarm: (Int) -> Boolean = { false },
+    val hasCompetingListProducer: () -> Boolean = { false },
+)
+
 @Composable
-private fun rememberThreadSwipeModifier(
+internal fun rememberThreadSwipeModifier(
     renderedPage: Int,
     totalPages: Int,
     isRefreshing: Boolean,
-    onSelectPage: (Int) -> Unit,
+    interaction: ThreadSwipeInteraction,
 ): Modifier {
     val dragOffset = remember { mutableFloatStateOf(0f) }
     val haptics = LocalHapticFeedback.current
-    val currentPage = rememberUpdatedState(renderedPage)
     val currentTotal = rememberUpdatedState(totalPages)
-    val swipeEnabled = rememberUpdatedState(!isRefreshing)
-    val currentOnSelectPage = rememberUpdatedState(onSelectPage)
-    // Codex review — dragOffset SURVIVES the in-place page change (no composition teardown, unlike
-    // the topic's route-driven model where the offset state dies with the screen). Drop any residual
-    // translation when a new page lands so the incoming content never inherits the old offset. An
-    // in-flight spring-back may stream a few frames after this reset; it converges to 0 by
-    // construction, so the transient is negligible. A drag still under the finger keeps following it
-    // (rare: the page swapped under an active drag) — coherent with the finger, assumed.
-    LaunchedEffect(renderedPage) {
+    val currentRefreshing = rememberUpdatedState(isRefreshing)
+    val currentInteraction = rememberUpdatedState(interaction)
+    val gestureDensity = rememberUpdatedState(LocalDensity.current)
+    val gestureLayoutDirection = rememberUpdatedState(LocalLayoutDirection.current)
+    val systemGestureInsets = rememberUpdatedState(WindowInsets.systemGestures)
+    val swipeEnabled: () -> Boolean = {
+        !currentRefreshing.value && !currentInteraction.value.hasCompetingListProducer()
+    }
+    // The release owner already parks zero after handing off a warm selection. Repeat the reset on
+    // both pointer-input keys as a composition-level belt: a page emission, a failed load or an
+    // external refresh that cancels a release can never leave retained content translated.
+    LaunchedEffect(renderedPage, isRefreshing) {
         dragOffset.floatValue = 0f
     }
     // Same desaturated accent as the topic edge glow (#282): mostly neutral with a touch of primary.
@@ -362,15 +1512,20 @@ private fun rememberThreadSwipeModifier(
         MaterialTheme.colorScheme.primary,
         ACCENT_PRIMARY_BLEND,
     )
-    // Captured ONCE by threadPageSwipe's pointerInput(Unit) block — deliberately remember-ed without
-    // keys so the code does not pretend a recreation would reach the gesture (it would not: the
-    // initial block keeps its first capture). The callback and the gate stay live through the
-    // rememberUpdatedState-backed lambdas; haptics (LocalHapticFeedback) is stable per Activity.
-    val handlers = remember {
+    val handlers = remember(haptics) {
         ThreadSwipeHandlers(
             haptics = haptics,
-            onSelectPage = { page -> currentOnSelectPage.value(page) },
-            enabled = { swipeEnabled.value },
+            onSelectPage = { page -> currentInteraction.value.onSelectPage(page) },
+            enabled = swipeEnabled,
+            isTargetPageWarm = { page -> currentInteraction.value.isTargetPageWarm(page) },
+            leftGestureInsetPx = {
+                systemGestureInsets.value
+                    .getLeft(gestureDensity.value, gestureLayoutDirection.value)
+            },
+            rightGestureInsetPx = {
+                systemGestureInsets.value
+                    .getRight(gestureDensity.value, gestureLayoutDirection.value)
+            },
         )
     }
     return Modifier
@@ -379,110 +1534,549 @@ private fun rememberThreadSwipeModifier(
             totalPages = { currentTotal.value },
             dragOffset = dragOffset,
             accent = accent,
-            enabled = { swipeEnabled.value },
+            enabled = swipeEnabled,
         )
         .threadPageSwipe(
-            currentPage = { currentPage.value },
+            currentPage = renderedPage,
             totalPages = { currentTotal.value },
+            isRefreshing = isRefreshing,
             dragOffset = dragOffset,
             handlers = handlers,
         )
 }
 
+/** Scroll-position producers grouped so the already-large list host keeps one coherent input. */
+private data class ThreadScrollSession(
+    val listState: LazyListState,
+    val zoomState: PinchZoomState,
+    val swipeModifier: Modifier,
+    val onDoubleTapRefresh: () -> Unit,
+    val onScrollbarDragStateChanged: (Boolean) -> Unit,
+)
+
+/**
+ * #382/#1103 — the topic detector reused as the single MP double-tap arbiter on the LazyColumn.
+ * Since #1117 removed the card-wide long press, free card surfaces and list interstices reach this
+ * one owner. Explicit child targets consume their up, which cancels the detector; drags beyond
+ * touch slop cancel through [detectTapGestures].
+ */
+private fun Modifier.privateMessageDoubleTapRefresh(onDoubleTapRefresh: () -> Unit): Modifier =
+    pointerInput(Unit) {
+        detectTapGestures(onDoubleTap = { onDoubleTapRefresh() })
+    }
+
+/** Quote callbacks travel together so the hot list cannot grow a third independent capability. */
+private data class MessageQuoteCallbacks(
+    val onQuote: ((Post) -> Unit)?,
+    val onToggleMultiQuote: (QuoteSelection) -> Unit,
+)
+
+/** Both footer actions are either derived from one MP quote gate or absent together. */
+internal data class MessageQuoteAffordances(
+    val onQuote: () -> Unit,
+    val onToggleMultiQuote: () -> Unit,
+)
+
 @Composable
-@Suppress("LongParameterList") // List host: pager state + hoisted list state + swipe chain, all distinct.
+@Suppress("LongParameterList") // List host: message presentation/actions remain independent inputs.
 private fun ThreadMessages(
     messages: List<Post>,
+    hiddenNumreponses: Set<Int>,
+    blockedQuoteAuthors: Set<String>,
     page: Int,
-    totalPages: Int,
-    onSelectPage: (Int) -> Unit,
-    pagerEnabled: Boolean = true,
-    listState: LazyListState,
-    swipeModifier: Modifier = Modifier,
+    fullWidthPosts: Boolean,
+    showSignatures: Boolean,
+    egoQuoteEnabled: Boolean,
+    egoPostEnabled: Boolean,
+    connectedPseudo: String?,
+    canReply: Boolean,
+    multiQuoteSelections: List<QuoteSelection>,
+    quoteCallbacks: MessageQuoteCallbacks,
+    onRemoveMultiQuotes: (Set<Int>) -> Unit,
+    onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)?,
+    onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit,
+    onOpenMessageMenu: (message: Post, contentRevealed: Boolean) -> Unit,
+    onImageLongPress: (PostImageTarget) -> Unit,
+    scrollSession: ThreadScrollSession,
 ) {
-    // #351c — the shared list overlay (LazyColumn + auto-hiding scrollbar). The MP density stays
-    // feature-owned (16.dp padding, 12.dp gap, distinct from the topic's display-metrics preset) so
-    // it is passed explicitly. The swipe chain (edge glow + gesture + graphicsLayer follow) goes on
-    // the inner LazyColumn via [PostListScaffold.listModifier], like the topic's LazyColumn: the
-    // scrollbar overlay outside stays fixed on screen. [LocalShowScrollbar] (#105) is honoured by the
-    // scaffold's scrollbar, so the call leaves showScrollbar at its default.
-    PostListScaffold(
-        listState = listState,
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-        listModifier = swipeModifier,
-    ) {
-        items(messages, key = { it.numreponse }) { message ->
-            MessageCard(message = message)
+    // #509/#1050 — reveal is deliberately page-local and non-saveable. In-place pagination keeps
+    // this composition alive, so keying on the landed page is what re-collapses every placeholder.
+    var revealedHiddenMessages by remember(page) { mutableStateOf(emptySet<Int>()) }
+    // #1074 — :feature:messages observes the live blacklist while :app owns the scoped basket.
+    // Remove any selected message that becomes hidden, including after a settings-side change.
+    // revealedHiddenMessages deliberately does not weaken this rule: « Afficher » is temporary,
+    // while the basket could otherwise survive the next page change that hides the message again.
+    PruneHiddenMultiQuotesEffect(
+        hiddenNumreponses = hiddenNumreponses,
+        blockedQuoteAuthors = blockedQuoteAuthors,
+        selections = multiQuoteSelections,
+        onRemoveMultiQuotes = onRemoveMultiQuotes,
+    )
+    // #1050 — the MP mirror of the topic list's #874 derivation: canonicalize the live session
+    // pseudo ONCE for the rendered page, then match the page's message authors once while building
+    // the set below. Lazy cards only consume the resulting pseudo/set. `Post.isOwnPost` is
+    // deliberately not consulted (see core.domain.ego.isEgoPost): the session-bound author
+    // comparison is the source of truth, in a 1:1 conversation as in a DT — the MP list renders
+    // uniform cards with no positional alignment, so EgoPost is what tells your messages apart.
+    // Both settings off and anonymous sessions collapse to the safe null/empty values.
+    val egoCanonicalPseudo = remember(egoQuoteEnabled, egoPostEnabled, connectedPseudo) {
+        deriveEgoCanonicalPseudo(
+            enabled = egoQuoteEnabled || egoPostEnabled,
+            isAuthenticated = connectedPseudo != null,
+            connectedPseudo = connectedPseudo,
+        )
+    }
+    val egoQuoteCanonicalPseudo = egoCanonicalPseudo.takeIf { egoQuoteEnabled }
+    val egoPostNumreponses = remember(egoPostEnabled, egoCanonicalPseudo, messages) {
+        if (!egoPostEnabled || egoCanonicalPseudo == null) {
+            emptySet()
+        } else {
+            messages
+                .asSequence()
+                .filter { message -> isEgoPost(message, egoCanonicalPseudo) }
+                .mapTo(mutableSetOf()) { message -> message.numreponse }
         }
-        if (totalPages > 1) {
-            item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    OutlinedButton(
-                        onClick = { onSelectPage(page - 1) },
-                        enabled = pagerEnabled && page > 1,
-                    ) {
-                        Text(text = stringResource(R.string.messages_pager_previous))
-                    }
-                    Text(
-                        text = stringResource(R.string.messages_pager_position, page, totalPages),
-                        style = MaterialTheme.typography.labelLarge,
-                    )
-                    OutlinedButton(
-                        onClick = { onSelectPage(page + 1) },
-                        enabled = pagerEnabled && page < totalPages,
-                    ) {
-                        Text(text = stringResource(R.string.messages_pager_next))
-                    }
-                }
+    }
+    // #351c/#1042 — the shared list overlay (LazyColumn + auto-hiding scrollbar). Card-INTERNAL
+    // density now follows the reader's display-metrics preset through [ReadingPostCard] (#1042);
+    // the LIST chrome below stays feature-owned in ThreadListLayout.kt: #1050 switches it only on
+    // the global full-width preference, independently of the density preset. This is the same stance
+    // as the topic, whose list gutters/insets live in TopicListLayout.kt; DisplayMetrics deliberately
+    // scopes out absolute chrome dimensions.
+    // The swipe chain (edge glow + gesture + graphicsLayer follow) goes on the inner LazyColumn via
+    // [PostListScaffold.listModifier], like the topic's LazyColumn: the scrollbar overlay outside
+    // stays fixed on screen. [LocalShowScrollbar] (#105) is honoured by the scaffold's scrollbar,
+    // so the call leaves showScrollbar at its default.
+    val zoomSuspendsScroll by remember(scrollSession.zoomState) {
+        derivedStateOf { scrollSession.zoomState.zoomed }
+    }
+    PostListScaffold(
+        listState = scrollSession.listState,
+        userScrollEnabled = !zoomSuspendsScroll,
+        contentPadding = threadListContentPadding(fullWidthPosts),
+        verticalArrangement = threadListArrangement(fullWidthPosts),
+        onScrollbarDragStateChanged = scrollSession.onScrollbarDragStateChanged,
+        listModifier = Modifier
+            .pinchZoom(scrollSession.zoomState, scrollSession.listState)
+            .then(scrollSession.swipeModifier)
+            // One owner covers free card surfaces and interstices; child clickables consume their up.
+            .privateMessageDoubleTapRefresh(scrollSession.onDoubleTapRefresh)
+            .pinchZoomTransform(scrollSession.zoomState),
+    ) {
+        itemsIndexed(
+            items = messages,
+            key = { _, message -> message.numreponse },
+        ) { index, message ->
+            if (isHiddenMessage(message, hiddenNumreponses, revealedHiddenMessages)) {
+                HiddenPostCard(
+                    author = message.author,
+                    onReveal = {
+                        revealedHiddenMessages = revealedHiddenMessages + message.numreponse
+                    },
+                    // Removing the card-wide long press must not strand a blocked author without
+                    // access to the unblock menu newly exposed here. The placeholder still exposes
+                    // no quote affordance or body access: reveal and menu are its only explicit
+                    // targets, and the menu knows that the content remains hidden.
+                    trailing = {
+                        MessageMenuTrigger(
+                            onOpenMenu = { onOpenMessageMenu(message, false) },
+                        )
+                    },
+                    modifier = Modifier.threadIslandPadding(fullWidthPosts),
+                )
+            } else {
+                val nextMessage = messages.getOrNull(index + 1)
+                val hasFollowingVisibleMessage = nextMessage != null && !isHiddenMessage(
+                    nextMessage,
+                    hiddenNumreponses,
+                    revealedHiddenMessages,
+                )
+                // #1074/#1102 — derive simple quote and direct basket toggle ONCE, under the same
+                // writable + unblocked + positive-ref + quote-callback gate. Keeping both callbacks
+                // in one nullable value makes a future #1110 relaxation a one-site change.
+                val quoteAffordances = messageQuoteAffordances(
+                    canReply = canReply,
+                    authorBlocked = message.numreponse in hiddenNumreponses,
+                    message = message,
+                    page = page,
+                    callbacks = quoteCallbacks,
+                )
+                MessageCard(
+                    message = message,
+                    multiQuoteSelected = multiQuoteSelections.any { selection ->
+                        selection.numreponse == message.numreponse
+                    },
+                    presentation = ReadingPostCardPresentation(
+                        showSignature = showSignatures,
+                        flat = fullWidthPosts,
+                        flatBottomEdge = threadMessageFlatBottomEdge(
+                            fullWidthPosts = fullWidthPosts,
+                            hasFollowingMessage = hasFollowingVisibleMessage,
+                        ),
+                        egoQuoteCanonicalPseudo = egoQuoteCanonicalPseudo,
+                        egoPostHighlighted = message.numreponse in egoPostNumreponses,
+                    ),
+                    // #1042 — same gate as the topic card (#208): a message whose page row carried no
+                    // profile link ([Post.profileId] null) keeps its identity line inert.
+                    onOpenProfile = message.profileId?.let { profileId ->
+                        { onOpenProfile(profileId, message.author, message.avatarUrl) }
+                    },
+                    onOpenMenu = {
+                        onOpenMessageMenu(
+                            message,
+                            message.numreponse in revealedHiddenMessages,
+                        )
+                    },
+                    onImageLongPress = onImageLongPress,
+                    onGoToCitedPost = onGoToCitedPost,
+                    quoteAffordances = quoteAffordances,
+                )
             }
         }
     }
 }
 
+/** Fail-closed MP quote gate shared structurally by « Citer » and the direct basket toggle. */
+private fun messageQuoteAffordances(
+    canReply: Boolean,
+    authorBlocked: Boolean,
+    message: Post,
+    page: Int,
+    callbacks: MessageQuoteCallbacks,
+): MessageQuoteAffordances? {
+    val selection = message.toPrivateMessageQuoteSelectionOrNull(page)
+    val quote = callbacks.onQuote
+    return when {
+        !canReply -> null
+        authorBlocked -> null
+        selection == null -> null
+        quote == null -> null
+        else -> MessageQuoteAffordances(
+            onQuote = { quote(message) },
+            onToggleMultiQuote = { callbacks.onToggleMultiQuote(selection) },
+        )
+    }
+}
+
+/** Builds the complete locator only when the measured MP contract can be represented. */
+internal fun Post.toPrivateMessageQuoteSelectionOrNull(page: Int): QuoteSelection? {
+    val ref = quoteRef?.takeIf { it >= 1 } ?: return null
+    return QuoteSelection(
+        locator = QuoteLocator(page = page, numreponse = numreponse, ref = ref),
+        author = author,
+        excerpt = postContentExcerpt(content),
+    )
+}
+
+/** Selected messages hidden by the current blacklist, including snapshots made on older pages. */
+internal fun hiddenMultiQuoteNumreponses(
+    selections: List<QuoteSelection>,
+    hiddenNumreponses: Set<Int>,
+    blockedQuoteAuthors: Set<String>,
+): Set<Int> = selections
+    .asSequence()
+    .filter { selection ->
+        selection.numreponse in hiddenNumreponses ||
+            canonicalizePseudo(selection.author) in blockedQuoteAuthors
+    }
+    .mapTo(mutableSetOf()) { selection -> selection.numreponse }
+
+/** Prunes selections after any live blacklist change, including changes made outside this screen. */
+@Composable
+private fun PruneHiddenMultiQuotesEffect(
+    hiddenNumreponses: Set<Int>,
+    blockedQuoteAuthors: Set<String>,
+    selections: List<QuoteSelection>,
+    onRemoveMultiQuotes: (Set<Int>) -> Unit,
+) {
+    LaunchedEffect(hiddenNumreponses, blockedQuoteAuthors, selections) {
+        val hiddenSelections = hiddenMultiQuoteNumreponses(
+            selections = selections,
+            hiddenNumreponses = hiddenNumreponses,
+            blockedQuoteAuthors = blockedQuoteAuthors,
+        )
+        if (hiddenSelections.isNotEmpty()) onRemoveMultiQuotes(hiddenSelections)
+    }
+}
+
+/** The message stays in the keyed list; this helper selects only which card represents it. */
+internal fun isHiddenMessage(message: Post, hidden: Set<Int>, revealed: Set<Int>): Boolean =
+    message.numreponse in hidden && message.numreponse !in revealed
+
 /**
- * #351c — one private-message rendered onto the shared [PostCardShell]. Unlike the topic card it has
- * no tinted [PostIdentityBand] (MP has no anchor/category tint), no badges, no footer (the « Répondre »
- * affordance is the screen FAB #301, not a per-card action) and no multi-quote border. The MP density
- * (16.dp around the card content, 8.dp between the identity header and the body) is feature-owned and
- * reinjected via the slots' own padding — the shell adds none. The body stays NON-selectable (#281
- * is a topic affordance; PostRenderer defaults selection OFF, the MP keeps it).
+ * #1042 — the MP thread's thin feature adapter over the shared [ReadingPostCard], the same pattern
+ * as the topic's `TopicPostCard`: it maps one private [message] onto the card's data and supplies
+ * the MP identity header, its labels and its callbacks. Capabilities are modelled by presence — a
+ * callback or slot this adapter does not pass simply leaves the corresponding affordance out of
+ * the composition, never a surface flag on the shared card.
+ *
+ * Through the shared card the MP inherits the stable reading body: structural spacing read from
+ * [LocalDisplayMetrics] (the conversation follows the reader's density preset, like the topic) and
+ * a selectable body (#1041 réarbitrage). Per #946 that selection capability is structurally
+ * CONSTANT for the whole life of the card — the shared card never swaps its SelectionContainer at
+ * runtime, so `rememberSaveable` state nested in the body (an unfolded long quote, a revealed
+ * spoiler) survives recomposition, density-preset flips included.
+ *
+ * [onOpenProfile] — tapping the avatar or the author pseudo opens the profile surface (parity with
+ * the topic card, #208); the MP page proves [Post.profileId] for its messages (#1042 fixture).
+ * `null` (no profile link on the row) keeps the identity line inert.
+ * [onOpenMenu] adds the explicit `⋯` trigger to the identity header. The card surface owns no
+ * long-press menu gesture: text selection remains pure, and image long presses retain their own
+ * contextual-menu contract.
+ * [onImageLongPress] is likewise a capability by presence: the MP screen supplies it, while direct
+ * hosts that omit it keep every content image inert (editor previews and signatures stay unchanged).
+ * [onGoToCitedPost] wires parsed quote-header targets to the thread ViewModel's page/account-scoped
+ * landing. A null host keeps the shared quote header inert.
+ * [quoteAffordances] supplies the footer « Citer » and direct basket-toggle actions as one nullable
+ * capability. The list passes both only for a writable thread and a message carrying a positive
+ * server-provided `quoteRef`; hidden messages never mount this card.
+ * [multiQuoteSelected] reuses the shared selected border/semantics without adding a dynamic badge.
+ * [presentation] is the shared render-only state bundle. The list derives its values from reader
+ * preferences, the session pseudo (#1050 Ego markers) and message position, while this adapter
+ * forwards the bundle unchanged — its only addition is the EgoPost StateDescription on the
+ * identity band (#874 P1 parity). The band itself stays `secondaryContainer`: EgoPost colours the
+ * card below it, never the identity strip. Neutral defaults keep direct test/preview mounts unmarked.
  */
 @Composable
-internal fun MessageCard(message: Post) {
-    PostCardShell(
-        header = {
-            PostIdentityHeader(
-                author = message.author,
-                avatarUrl = message.avatarUrl,
-                dateText = message.date.asMessageDate(),
-                // MP density (#351c): 16.dp around the card content; the 8.dp gap to the body rides on
-                // the body slot's top padding so the header↔body spacing matches the pre-shell layout.
-                modifier = Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp),
-            )
+@Suppress("LongParameterList") // Thin card adapter: render state plus independent host capabilities.
+internal fun MessageCard(
+    message: Post,
+    presentation: ReadingPostCardPresentation = ReadingPostCardPresentation(),
+    multiQuoteSelected: Boolean = false,
+    onOpenProfile: (() -> Unit)? = null,
+    onOpenMenu: (() -> Unit)? = null,
+    onImageLongPress: ((PostImageTarget) -> Unit)? = null,
+    onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
+    quoteAffordances: MessageQuoteAffordances? = null,
+) {
+    // #287/#1042 — structural spacing from the active density preset, like the shared card's body.
+    val m = LocalDisplayMetrics.current
+    val openProfileLabel = if (onOpenProfile != null) {
+        stringResource(R.string.messages_open_profile_action)
+    } else {
+        null
+    }
+    // #1050 — same #874 P1 gesture as the topic card: the EgoPost a11y marker is a StateDescription
+    // on the identity node (TalkBack traverses it first), never a heading. The fallback pseudo or
+    // creator slot stays the card's exactly-one heading (#884, pinned by MessageCardShellSmokeTest).
+    val egoPostStateDescription = stringResource(R.string.messages_post_ego_state_description)
+    val citedCount = message.citedCount ?: 0
+    // #221 — canonical creator detection (case / format-char / NBSP insensitive) runs once per
+    // author, not on every recomposition of this hot list row. Only creators need a pseudo slot;
+    // everyone else keeps PostIdentityHeader's neutral fallback and its built-in interaction/a11y.
+    val isCreator = remember(message.author) { isRf2Creator(message.author) }
+    ReadingPostCard(
+        post = message,
+        presentation = presentation.copy(selected = multiQuoteSelected),
+        // #1096 — the singleton Coil loader has no caller identity. Mark the whole MP
+        // PostContent at this host boundary so painters and intrinsic probes cannot persist its
+        // media URLs or bytes to Coil's shared disk cache.
+        mediaDiskCachePolicy = PostMediaDiskCachePolicy.DISABLED,
+        onGoToCitedPost = onGoToCitedPost,
+        onImageLongPress = onImageLongPress,
+        identity = {
+            // An MP has no anchor/category tint, but still carries the same full-width identity band
+            // as a normal topic post. Its secondaryContainer colour is therefore FIXED and independent
+            // from EgoPost: the highlight belongs to the enclosing card container below the band.
+            // PostIdentityBand adds no padding, so the shared band rhythm is reinjected on the
+            // header — MP-owned gutters at cardBodyHorizontal, shared symmetric vertical inset at
+            // cardHeaderVertical; the header↔body gap remains the body slot's own cardBodyTop.
+            PostIdentityBand(
+                modifier = Modifier.semantics {
+                    if (presentation.egoPostHighlighted) {
+                        stateDescription = egoPostStateDescription
+                    }
+                },
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            ) {
+                // A creator supplies the shared gold pseudo leaf; everyone else uses the neutral
+                // fallback. Per the slot contract, the creator branch owns both the profile tap and
+                // the exactly-one heading on its real text node. The band adds no heading of its own.
+                PostIdentityHeader(
+                    author = message.author,
+                    avatarUrl = message.avatarUrl,
+                    dateText = message.date.asMessageDate(),
+                    modifier = Modifier.padding(
+                        horizontal = m.cardBodyHorizontal,
+                        vertical = m.cardHeaderVertical,
+                    ),
+                    onAvatarClick = onOpenProfile,
+                    onAvatarClickLabel = openProfileLabel,
+                    onAuthorClick = onOpenProfile,
+                    onAuthorClickLabel = openProfileLabel,
+                    pseudo = if (isCreator) {
+                        {
+                            val pseudoModifier = (
+                                if (onOpenProfile != null) {
+                                    Modifier.clickable(
+                                        onClick = onOpenProfile,
+                                        role = Role.Button,
+                                        onClickLabel = openProfileLabel,
+                                    )
+                                } else {
+                                    Modifier
+                                }
+                                ).semantics { heading() }
+                            CreatorPseudoText(
+                                author = message.author,
+                                modifier = pseudoModifier,
+                            )
+                        }
+                    } else {
+                        null
+                    },
+                    // #1117 — strict topic parity: one explicit 48.dp menu target in the header,
+                    // and no competing card-wide long press that can collide with text selection.
+                    trailing = onOpenMenu?.let { openMenu ->
+                        { MessageMenuTrigger(onOpenMenu = openMenu) }
+                    },
+                    // #483/#1051 — same compact data-driven marker as the topic; null emits no slot.
+                    dateTrailing = if (message.editedAt != null) {
+                        {
+                            val editedLabel = stringResource(R.string.messages_message_edited_inline)
+                            Text(
+                                text = "· $editedLabel",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.semantics { contentDescription = editedLabel },
+                            )
+                        }
+                    } else {
+                        null
+                    },
+                )
+            }
         },
-        body = {
-            // Body slot owns the side + bottom gutters (16.dp) and the 8.dp gap below the header, so the
-            // overall card padding/spacing is byte-identical to the pre-shell MessageCard.
-            PostRenderer(
-                content = message.content,
-                modifier = Modifier.padding(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 16.dp),
-            )
+        // #239/#1051 — the server counter is optional; a null/zero value emits no badges strip.
+        badges = if (citedCount > 0) {
+            {
+                MessageCitedCountBadge(
+                    citedCount = citedCount,
+                    horizontalPadding = m.cardBodyHorizontal,
+                )
+            }
+        } else {
+            null
+        },
+        footer = quoteAffordances?.let { actions ->
+            {
+                MessageQuoteActions(
+                    actions = actions,
+                    multiQuoteSelected = multiQuoteSelected,
+                    horizontalPadding = m.cardBodyHorizontal,
+                )
+            }
         },
     )
 }
 
+/** #1074/#1102 — direct MP quote actions, aligned with the topic card's per-post actions row. */
+@Composable
+private fun MessageQuoteActions(
+    actions: MessageQuoteAffordances,
+    multiQuoteSelected: Boolean,
+    horizontalPadding: Dp,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .padding(horizontal = horizontalPadding),
+        horizontalArrangement = Arrangement.End,
+    ) {
+        val toggleDescription = stringResource(
+            if (multiQuoteSelected) {
+                R.string.messages_multi_quote_remove
+            } else {
+                R.string.messages_multi_quote_add
+            },
+        )
+        TextButton(
+            onClick = actions.onToggleMultiQuote,
+            colors = if (multiQuoteSelected) {
+                ButtonDefaults.textButtonColors()
+            } else {
+                ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            },
+            modifier = Modifier.semantics {
+                contentDescription = toggleDescription
+                selected = multiQuoteSelected
+            },
+        ) {
+            Text(
+                text = stringResource(
+                    if (multiQuoteSelected) {
+                        R.string.messages_multi_quote_remove_short
+                    } else {
+                        R.string.messages_multi_quote_add_short
+                    },
+                ),
+            )
+        }
+        TextButton(onClick = actions.onQuote) {
+            Text(text = stringResource(R.string.messages_quote))
+        }
+    }
+}
+
+/** Topic-parity menu glyph reused by visible and hidden MP cards. */
+@Composable
+private fun MessageMenuTrigger(onOpenMenu: () -> Unit) {
+    val menuLabel = stringResource(R.string.messages_message_menu_action)
+    Text(
+        text = "⋯",
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .minimumInteractiveComponentSize()
+            .clickable(
+                onClick = onOpenMenu,
+                role = Role.Button,
+                onClickLabel = menuLabel,
+            )
+            .semantics { contentDescription = menuLabel },
+    )
+}
+
+/** Citation-count pill for the MP card, supplied through [ReadingPostCard]'s badges slot. */
+@Composable
+private fun MessageCitedCountBadge(citedCount: Int, horizontalPadding: Dp) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = horizontalPadding, end = horizontalPadding, top = 6.dp, bottom = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+            shape = MaterialTheme.shapes.small,
+        ) {
+            Text(
+                text = pluralStringResource(
+                    R.plurals.messages_message_cited_count,
+                    citedCount,
+                    citedCount,
+                ),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+            )
+        }
+    }
+}
+
 // #351b — same blend as the topic edge glow (#282): a full-primary glow read as an imposing panel.
 private const val ACCENT_PRIMARY_BLEND = 0.3f
+internal const val PRIVATE_MESSAGE_THREAD_READER_TAG = "private_message_thread_reader"
+internal const val PRIVATE_MESSAGE_THREAD_REFRESH_INDICATOR_TAG =
+    "private_message_thread_refresh_indicator"
 
 private val messageDateFormatter = DateTimeFormatter
     .ofPattern("dd/MM/yyyy HH:mm:ss", Locale.FRANCE)
     .withZone(ZoneId.of("Europe/Paris"))
 
-private fun Instant.asMessageDate(): String = messageDateFormatter.format(this)
+internal fun Instant.asMessageDate(): String = messageDateFormatter.format(this)

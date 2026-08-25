@@ -11,6 +11,8 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.blacklist.BlacklistRepository
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
+import fr.forumhfr.redface2.core.domain.coroutines.ApplicationScope
+import fr.forumhfr.redface2.core.domain.coroutines.awaitDetached
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
@@ -30,6 +32,7 @@ import fr.forumhfr.redface2.core.model.TopicSearchRequest
 import fr.forumhfr.redface2.core.model.write.EditPostContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.Channel
@@ -58,8 +61,8 @@ import kotlinx.coroutines.withTimeoutOrNull
  * owner generation bumped (latest-wins), in-flight work cancelled, LRU memory snapshot activated
  * atomically when available (no Loading flash), landing resolved by priority (explicit post >
  * post-submit bottom > saved anchor > `page - 1` bottom step (#412) > top) and dispatched on the
- * first matching Loaded. Until the navigation switch-over lands (PR 2), `RedfaceNavigation` still
- * replaces the `TopicRoute` in place — the engine is exercised by tests only.
+ * first matching Loaded. Since PR 2 (`4248c22d`), `RedfaceNavigation` routes every in-topic page
+ * change through this engine — the `TopicRoute` is frozen at entry (single nav entry).
  */
 @HiltViewModel(assistedFactory = TopicViewModel.Factory::class)
 // LongParameterList: the ViewModel aggregates its injected repositories, one per concern.
@@ -89,6 +92,12 @@ class TopicViewModel @AssistedInject constructor(
     // #809 — plain Hilt dependency (the assisted Factory is unchanged): resolves + removes THIS
     // topic's drapeau for the top-bar long-press.
     private val flagRepository: FlagRepository,
+    // #1144 — process-lifetime scope for the three HFR MUTATIONS this ViewModel owns (delete a post,
+    // remove the topic's drapeau, add a favourite). Since #1083 every HfrClient call is genuinely
+    // cancellable, so those writes would be aborted mid-socket by a back press; [awaitDetached]
+    // re-parents them here. READS stay on `viewModelScope` — leaving the screen must still cancel
+    // them. Plain Hilt dependency, the assisted Factory is unchanged.
+    @param:ApplicationScope private val externalScope: CoroutineScope,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(TopicUiState.initial(request))
@@ -306,6 +315,11 @@ class TopicViewModel @AssistedInject constructor(
                 if (!_state.value.connectedPseudo.equals(connectedPseudo, ignoreCase = true)) {
                     favoriteAuthGeneration++
                     favoriteResolveJob?.cancel()
+                    // #1144 — this still drops the UI half of an in-flight add (state + effect are
+                    // owned by the cancelled job), but the addflag GET itself now runs detached and
+                    // completes. That is the intended trade: the request was already on the wire
+                    // under the previous session, and `DefaultFlagRepository.addFlag` has its own
+                    // ownership fence (it only reconciles caches when the user id still matches).
                     favoriteAddJob?.cancel()
                     _favoriteAtPostState.value = FavoriteAtPostState.Unknown
                 }
@@ -549,7 +563,8 @@ class TopicViewModel @AssistedInject constructor(
      * the page becomes the real target everywhere (loads, retry, page indicator, highlight) — not a
      * presentational patch. On timeout / failure the untrusted page loads as-is: the pre-#750
      * behaviour, never worse. Runs at most once (init-only branch); a config change keeps the
-     * ViewModel, a route replace builds a fresh one without the flag.
+     * ViewModel, a new topic nav entry builds a fresh one without the flag (in-topic page changes
+     * keep this ViewModel — #895 étape 4).
      */
     private fun resolveScrollToPageThenLoad(
         entryLanding: PendingLanding?,
@@ -1229,7 +1244,11 @@ class TopicViewModel @AssistedInject constructor(
         )
         _state.update { it.copy(deletingNumreponse = numreponse) }
         viewModelScope.launch {
-            val result = deletePostRepository.deletePost(context)
+            // #1144 — the POST runs on [externalScope], so a back press mid-request no longer aborts
+            // a deletion the user explicitly confirmed. Everything BELOW still belongs to this
+            // (cancellable) coroutine: if the screen is gone there is no state to update and no
+            // snackbar to show. The outcome trail lives in DiagnosticsLog, written by the repository.
+            val result = externalScope.awaitDetached { deletePostRepository.deletePost(context) }
             _state.update { it.copy(deletingNumreponse = null) }
             when (result) {
                 is DeletePostResult.Success -> {
@@ -1352,8 +1371,12 @@ class TopicViewModel @AssistedInject constructor(
                 // Review #809 — removeFlag CAN throw outside its Result (evictFlagFromCaches runs in
                 // `.onSuccess`, past the internal runCatching) : fold a raw throw to Failure so the
                 // user still gets feedback instead of a crash. Cancellation propagates untouched
-                // (the finally below releases the lock either way).
-                val result = runCatching { flagRepository.removeFlag(flag) }
+                // (the finally below releases the lock either way) — and since #1144 that branch is
+                // no longer dead code: the repository re-throws cancellation instead of folding it
+                // into a failed Result.
+                // #1144 — the delflag GET runs on [externalScope]: leaving the topic mid-request no
+                // longer aborts a removal the user confirmed in the dialog.
+                val result = runCatching { externalScope.awaitDetached { flagRepository.removeFlag(flag) } }
                     .getOrElse { raised ->
                         if (raised is CancellationException) throw raised
                         Result.failure(raised)
@@ -1448,7 +1471,12 @@ class TopicViewModel @AssistedInject constructor(
         favoriteAddJob = viewModelScope.launch {
             try {
                 val result = runCatching {
-                    flagRepository.addFlag(request.toContext()).getOrThrow()
+                    // [FlagAddContext]'s `require`s stay on THIS coroutine (a malformed tuple must
+                    // fail here, not on the process-lifetime scope). #1144 — only the addflag GET is
+                    // detached, so « Ajouter aux favoris » followed by an immediate back press still
+                    // creates the favourite instead of dying with the socket.
+                    val context = request.toContext()
+                    externalScope.awaitDetached { flagRepository.addFlag(context) }.getOrThrow()
                 }
                 (result.exceptionOrNull() as? CancellationException)?.let { throw it }
                 val stillOwned = authGeneration == favoriteAuthGeneration &&

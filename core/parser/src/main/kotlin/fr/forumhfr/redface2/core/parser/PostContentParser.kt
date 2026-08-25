@@ -374,10 +374,11 @@ class PostContentParser {
             ?.trim()
             ?.takeIf(String::isNotEmpty)
 
-        // The citation header anchor links to the cited post:
-        // .../sujet_<topicPost>_<page>.htm#t<numreponse>
-        // Both page and numreponse are extractable from rendered HTML when present.
-        val match = authorAnchor?.attr("href")?.let(CITATION_HREF_REGEX::find)
+        // Anonymous pages use a static permalink, while authenticated pages use forum2.php with
+        // the page in the query string. In both forms the fragment is the cited post target.
+        val match = authorAnchor?.attr("href")?.let { href ->
+            CITATION_HREF_REGEX.find(href) ?: DYNAMIC_CITATION_HREF_REGEX.find(href)
+        }
         val page = match?.groupValues?.getOrNull(1)?.toIntOrNull()
         val numreponse = match?.groupValues?.getOrNull(2)?.toIntOrNull()
 
@@ -711,12 +712,15 @@ class PostContentParser {
         // HFR custom smileys are wrapped as alt="[:name]" — name may contain spaces and punctuation.
         val PERSO_SMILEY_REGEX = Regex("""^\[:[^]]+]$""")
 
-        // Citation header href: https://forum.hardware.fr/hfr/.../sujet_<post>_<page>.htm#t<numreponse>
-        // Known limitation (tracked by #625): this only matches the static permalink form. In logged-in mode HFR
-        // serves the dynamic `forum2.php?...&page=N...#t<numreponse>` form instead, which this
-        // regex misses → Quote.page / Quote.numreponse stay null and scroll-to-cited-post is
-        // inactive for authenticated users. Pinned by `logged-in oldcitation table …` test.
+        // Static citation permalink: .../sujet_<topicPost>_<page>.htm#t<numreponse>
         val CITATION_HREF_REGEX = Regex("""sujet_\d+_(\d+)\.htm#t(\d+)""")
+
+        // Authenticated citation href, shared by topics and private-message threads. The query's
+        // numreponse is not the target on every surface (topics can serve 0), so group 2 reads the
+        // authoritative in-document target from the fragment instead.
+        val DYNAMIC_CITATION_HREF_REGEX = Regex(
+            """(?:^|/)forum2\.php\?(?:[^#&]+&)*page=(\d+)(?:&[^#]*)?#t(\d+)""",
+        )
     }
 }
 

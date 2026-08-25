@@ -8,10 +8,18 @@ android {
 
     testOptions {
         unitTests {
-            // #958 — PostRendererHostMatrixTest mounts MessageCard via `createComposeRule()` and
-            // reads `stringResource`, so the host activity needs the merged Android resources at
-            // JVM unit-test time. Same convention as :core:ui / :feature:topic (Compose UI tests).
+            // #958/#1040 — PostRendererHostMatrixTest and MessageCardRoborazziTest mount
+            // MessageCard via `createComposeRule()` and read `stringResource`, so the host activity
+            // needs the merged Android resources at JVM unit-test time. Same convention as
+            // :core:ui / :feature:topic (Compose UI tests).
             isIncludeAndroidResources = true
+            all {
+                // Record-only Roborazzi harness, identical to :core:ui: hardware PixelCopy keeps
+                // Compose drawing faithful and the plain test task writes the diagnostic PNG.
+                // The Gradle plugin stays unapplied because it is incompatible with AGP 9.
+                it.systemProperties["robolectric.pixelCopyRenderMode"] = "hardware"
+                it.systemProperties["roborazzi.test.record"] = "true"
+            }
         }
     }
 }
@@ -39,5 +47,9 @@ dependencies {
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.coil.core)
     testImplementation(libs.coil.test)
+    // #1040 — record-only visual control of the real MP card. No Roborazzi Gradle plugin under
+    // AGP 9: captureRoboImage writes under build/outputs/roborazzi from testDebugUnitTest.
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 }

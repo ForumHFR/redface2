@@ -53,7 +53,7 @@ android {
         // versionName is also surfaced in the app footer via BuildConfig.VERSION_NAME so
         // dogfood builds advertise their lineage to the user.
         versionCode = cliVersionCode ?: 72
-        versionName = "0.41.0"
+        versionName = "0.43.0"
 
         // Manifest placeholder so a side-by-side install (dogfood/preview overlay)
         // can override the launcher label without touching tracked manifest/strings.
@@ -251,4 +251,14 @@ dependencies {
     // expected AST (`:app` is the only place Konsist allows feature/parser
     // crossover in tests).
     testImplementation(project(":core:parser"))
+}
+
+// Guard B (#1045): DocsConsistencyTest reads docs/specs/reading-parity.md at runtime, so the page
+// must be a declared input of the test tasks. Without it, both the local UP-TO-DATE check and the
+// CI-restored build cache (setup-gradle) could serve a stale green result to a docs-only PR that
+// breaks a symbol citation.
+tasks.withType<Test>().configureEach {
+    inputs.file(rootProject.layout.projectDirectory.file("docs/specs/reading-parity.md"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+        .withPropertyName("readingParityMatrix")
 }

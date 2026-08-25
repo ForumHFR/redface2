@@ -290,8 +290,8 @@ data class Post(
     val isEditable: Boolean,             // Phase 2D (#147) : `true` quand la toolbar HFR du post expose un lien `<a href="…message.php?…&numreponse={post.numreponse}…">`. HFR ne le rend que pour les posts du compte authentifié sur un topic non verrouillé — on ne compare pas l'auteur localement. Persisté en Room depuis v1.
     val isOwnPost: Boolean,              // Phase 2D : équivalent à `isEditable` faute de signal HFR distinct au niveau topic page. Les deux champs restent séparés pour un futur raffinement (modo-can-edit, locked-but-own-post). Persisté en Room depuis v1.
     val quotedAuthors: List<String>,     // dérivé de PostContent pour recherche, filtres et décorateurs
-    val postIndex: Int?,                 // (page-1) * postsPerPage + position — null quand le parser n'a pas le contexte page/postsPerPage (preview, fixtures isolées). postsPerPage vient des préférences HFR de l'utilisateur, PAS une constante (voir UserSettings)
-    val quoteRef: Int? = null,           // Phase 2C (#146/#227) : `ref` opaque parsé depuis le href du lien quote HFR (`message.php?…&numrep=…&ref=N`) quand il est en clair. Null = ref absent/obfusqué/locked/anonyme. Persisté en Room v5 (`MIGRATION_4_5`) pour préserver le `ref` best-effort ; le bouton « Citer » dépend de `Topic.canReply`, pas de ce champ.
+    val postIndex: Int?,                 // Champ historique réservé (#1055), toujours null en production : aucun index global stable n'est établi depuis les pages HFR réelles. Conservé pour compatibilité avec la colonne Room v1, sans consommateur UI. Ne pas peupler sans caractériser la pagination et le cache sur fixtures réelles.
+    val quoteRef: Int? = null,           // Phase 2C (#146/#227/#986) : rang 1-based du post dans sa page (`0` pour le récapitulatif de page 2+), parsé depuis le href quote et jamais recalculé depuis l'index local. Null = ref absent/obfusqué/verrouillé/anonyme. Persisté en Room v5. Topic peut citer sans ref (#227) ; MP masque « Citer » quand il manque (#1074).
     val profileId: Int? = null,          // Phase 2 finish (#208) : id numérique HFR du lien profil toolbar (cf. note en tête de page). Persisté en Room v6 (`MIGRATION_5_6`).
     val editedAt: Instant? = null,       // #362 : date de dernière édition parsée depuis le trailer `div.edited` (« Message édité par <auteur> le DD-MM-YYYY à HH:MM:SS »). Null = jamais édité — y compris un div.edited ne portant que le lien « Message cité N fois » (post cité jamais édité). Persisté en Room v8 (`MIGRATION_7_8`). Affiché dans le menu contextuel de post (« Édité le … »).
 )
@@ -304,8 +304,8 @@ sealed interface PostBlock {
     data class Paragraph(val inlines: List<PostInline>) : PostBlock
     data class Quote(
         val author: String?,
-        val numreponse: Int?,            // depuis [quotemsg=N,P,auteur], null si la source HTML ne l'expose pas
-        val page: Int?,                  // idem, sert à reconstruire un lien vers le post cité quand disponible
+        val numreponse: Int?,            // lu dans le href de l'ancre auteur de la citation (PostContentParser.parseQuote, CITATION_HREF_REGEX ou DYNAMIC_CITATION_HREF_REGEX) : c'est le fragment #t<num> qui est autoritaire, PAS le paramètre numreponse= (il vaut 0 sur les sujets authentifiés). Jamais dérivé du tag [quotemsg=…] du BBCode source, que le HTML rendu n'expose pas. Null si l'ancre manque (table.quote / table.oldquote d'un [quote] nu) ou si le href n'a aucune des deux formes
+        val page: Int?,                  // même source : 1er groupe de la même regex (segment sujet_<id>_<page>.htm en anonyme, paramètre page= en authentifié). Sert à reconstruire un lien vers le post cité et à router le saut #625/#1093
         val content: PostContent,
     ) : PostBlock
     data class Spoiler(val label: String?, val content: PostContent) : PostBlock
@@ -464,10 +464,21 @@ data class ReplyContext(
     val topicId: Int,
     val page: Int,                   // page topic depuis laquelle l'utilisateur a cliqué "Répondre"
     val quotedNumreponse: Int? = null, // Phase 2C (#146) : numreponse cité ; null = reply simple, non-null = quote (HFR `numrep` query param + POST field)
-    val quoteRef: Int? = null,         // Phase 2C (#146/#227) : ref opaque parsé depuis le href quote HFR quand disponible ; null = reply simple ou quote sans ref (lien obfusqué), HFR cite via `numrep`
+    val quoteRef: Int? = null,         // Phase 2C (#146/#227/#986) : rang 1-based dans la page (`0` pour le récapitulatif), transmis sans recalcul ; null = réponse simple ou citation topic sans ref (lien obfusqué), HFR cite alors via `numrep`
 ) {
     val isQuote: Boolean get() = quotedNumreponse != null
 }
+
+data class PrivateMessageQuote(
+    val numreponse: Int,              // message privé cité, strictement positif
+    val ref: Int,                     // rang 1-based dans la page source, obligatoire en MP (#1074)
+)
+
+data class PrivateMessageReplyContext(
+    val threadId: Int,
+    val page: Int,
+    val quote: PrivateMessageQuote? = null, // null = réponse simple qui suit le lien réel ; non-null = GET citation typé
+)
 
 data class ReplyForm(
     val hashCheck: String,           // CSRF token HFR, jamais loggué
@@ -579,7 +590,9 @@ data class NewMultiMP(
 Le MVP Phase 3 #298 ne couvrait que la **lecture** des MPs classiques
 (`PrivateMessageSummary`, `PrivateMessageListPage`, `PrivateMessageThread`). La suite
 Phase 3 est **désormais livrée** (Phase 3 close) : `NewMP` et `NewMultiMP` (composition),
-reply/quote MP (#301), gestion des membres MultiMP via `newdest` (#606/#612), et
+reply MP (#301), citation simple par message (#1074, contrat GET mesuré en 1:1 par #1041 puis en DT
+le 2026-08-17, mais aucun POST live), gestion des membres MultiMP via
+`newdest` (#606/#612), et
 MPStorage (lecture + seed des positions DT + écriture opt-in #593/#597, cf. § MPStorage
 ci-dessous). Le seul reste hors clôture est la synchronisation MPStorage bidirectionnelle
 complète + cache Room (→ #6, Phase 4).
@@ -645,7 +658,7 @@ Règles non négociables (exploration #6) :
 - **Découverte** = **scan client-side de la boîte de réception MP**, PAS une recherche serveur. C'est le mécanisme réel de `MPStorage.user.js` (`findStorageMPOnPage`), confirmé au niveau du source le 2026-06-14 : l'index de titres HFR ne renvoie **jamais** le hash 32-hex (la recherche par titre du #406 d'origine renvoyait `NotFound` sur tout compte réel). On pagine `forum1.php?cat=prive&page=N` et on matche une conversation dont le **sujet** == hash (parser `PrivateMessageListParser`), jusqu'à `MAX_DISCOVERY_PAGES`. L'absence de MP storage (compte n'ayant jamais utilisé DTCloud) reste le **cas nominal premier**.
 - **Cache par compte** (`mp_storage_locations`, Room, purgé au logout par `CacheInvalidator` — pas DataStore, pour aligner la purge sur `mp_read_positions`/`uploaded_images`) : `threadId` + `numreponse` du premier post sont mémorisés après la première découverte → les fetches suivants lisent directement le formulaire d'édition sans rescanner l'inbox. C'est exactement l'optimisation de l'userscript (cache de `mpId`/`mpRepId`). Un cache périmé (formulaire d'édition introuvable) → purge + rescan.
 - **Lecture** = GET du formulaire d'édition du premier post (`message.php?cat=prive&post=<mpId>&numreponse=<repId>`), textarea `content_form` (contenu brut, pas le HTML rendu). `numreponse` du premier post = `name.split('t')[1]` du premier `a[name]` de la page de conversation (`forum2.php`).
-- **Application des positions DT** (livré) : `mpFlags.list[]` → `PrivateMessageReadPositionStore` (table `mp_read_positions`, ADR-013 étage 1), **seed local-prioritaire** : on n'écrit la position que si la conversation n'a pas de position locale ou si la page stockée est **plus avancée** — MPStorage ne fait jamais reculer une page déjà dépassée localement. Déclenché une fois par session sur l'écran liste MP, gated par le réglage « section DT ».
+- **Application des positions DT** (livré) : `mpFlags.list[]` → `PrivateMessageReadPositionStore` (table `mp_read_positions`, ADR-018 décision 2), **seed local-prioritaire** : on n'écrit la position que si la conversation n'a pas de position locale ou si la page stockée est **plus avancée** — MPStorage ne fait jamais reculer une page déjà dépassée localement. Déclenché une fois par session sur l'écran liste MP, gated par le réglage « section DT ».
 - **Écriture** (différée, opt-in) = POST `bdd.php?config=hfr.inc` `cat=prive` (édition) en read-modify-write juste avant le POST, jamais une édition par page vue. Champs observés dans le source : `content_form`, `post`, `numreponse`, `pseudo`, `cat=prive`, `verifrequet=1100`, `sujet=<hash>`, `hash_check`. Création (si jamais nécessaire) = POST `bddpost.php` avec en plus `dest=MultiMP`. Validité = `data && lastUpdate` (sinon la lib reset au défaut — à NE PAS reproduire).
 
 ---

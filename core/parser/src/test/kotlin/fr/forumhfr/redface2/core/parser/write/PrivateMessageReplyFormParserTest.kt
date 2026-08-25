@@ -10,8 +10,25 @@ import org.junit.Test
  * `bddpost.php` form embedded in a `cat=prive` conversation page) without any topic-specific
  * assumption. Pinned against the real, scrubbed fixture `private_message_thread.html` captured for
  * #298. The two contract bits that make a private reply different from a topic reply are asserted
- * explicitly: `cat=prive` (a String, not a numeric id) and the server-prefilled `numrep` (the last
- * post of the page — NOT a quote reference) must be carried verbatim in the hidden fields.
+ * explicitly: `cat=prive` (a String, not a numeric id) and the server-prefilled `numrep` must be
+ * carried verbatim in the hidden fields.
+ *
+ * #1041 — `numrep` has THREE distinct meanings depending on which form HFR serves, each pinned here
+ * on a live capture (see each fixture's `.source.txt`):
+ *
+ * - `forum2.php` embedded quick-reply form → the page's LAST post id (a prefill, not a quote ref);
+ * - `message.php` plain reply form (`private_message_reply_form.html`) → EMPTY;
+ * - `message.php` quote form (`private_message_quote_form.html`) → the CITED message id, with the
+ *   `[quotemsg=…]` prefill in the textarea.
+ *
+ * The two `message.php` fixtures come from the same conversation in the same session, so their delta
+ * IS the quote contract: `numrep` plus the prefilled textarea, nothing else.
+ *
+ * Both are **reduced** captures — the `form[name=hop]` subtree only, with the page chrome, toolbar,
+ * cryptlinks and message recaps stripped at capture time. #1041 — the reduction keeps the subtree
+ * selected by [ReplyFormParser] plus the in-form `find_smilies_timer(…)` marker:
+ * [SmileyUserIdExtractor] still receives the whole fixture and takes its first marker. This keeps a
+ * real private conversation from riding along in the repository (see their `.source.txt`).
  */
 class PrivateMessageReplyFormParserTest {
 
@@ -29,7 +46,9 @@ class PrivateMessageReplyFormParserTest {
         // Private-message routing lives entirely in the hidden fields, forwarded verbatim on POST.
         assertEquals("prive", form.hiddenFields["cat"])
         assertEquals("3195237", form.hiddenFields["post"])
-        // numrep is the conversation's last-post id HFR prefilled — must be preserved as-is.
+        // On THIS form — the quick-reply embedded in forum2.php — numrep is the page's last-post id
+        // HFR prefilled. Must be preserved as-is. The message.php forms below prove it is not the
+        // meaning of numrep everywhere.
         assertEquals("1980677227", form.hiddenFields["numrep"])
         assertEquals("0", form.hiddenFields["subcat"])
         assertEquals("1", form.hiddenFields["page"])
@@ -107,6 +126,91 @@ class PrivateMessageReplyFormParserTest {
         val form = parser.parse(fixture("private_message_thread.html")).getOrThrow()
 
         assertEquals(null, form.recipientsRoster)
+    }
+
+    @Test
+    fun `the message_php quote form carries the CITED message in numrep and a quotemsg prefill`() {
+        // #1041 spike (lot 0 of #1040) — THE unknown of the file: is a private-message quote a real
+        // per-message reference, or just the reply prefill? Measured live on 2026-08-12: HFR fills
+        // numrep with the CITED message (the 4th of a 5-message page, so provably not the last one)
+        // and prefills the textarea with the same [quotemsg=…] block as a topic quote.
+        val form = parser.parse(fixture("private_message_quote_form.html")).getOrThrow()
+
+        assertFalse("authenticated quote form is never anonymous", form.isAnonymous)
+        assertEquals("1980000004", form.hiddenFields["numrep"])
+        // The middle parameter is the server-served rank (ref=4 in the followed href) and the third is
+        // the cited author's userId — both server-controlled, never recomputed client-side. The
+        // trailing newline is HFR's own; wholeText() forwards the BBCode verbatim.
+        assertEquals(
+            "[quotemsg=1980000004,4,990001]Message prive de test (contenu remplace).[/quotemsg]\n",
+            form.initialContent,
+        )
+        // Sanitisation lock, NOT a server contract: the scrubbed ids must stay consistent with
+        // private_message_thread.html (#298) — current user 990002, correspondent (here the cited
+        // author) 990001 — so the two fixtures never describe the same person with two identities.
+        assertEquals(990002, form.userId)
+        // `ref` travels in the GET href and inside the BBCode tag, but HFR serves NO hidden ref field
+        // on this form — a quote POST must not invent one.
+        assertFalse("no hidden ref field is served", form.hiddenFields.containsKey("ref"))
+        // numreponse stays the EDIT target: quoting never repurposes it.
+        assertEquals("", form.hiddenFields["numreponse"])
+        // Private routing, forwarded verbatim on POST.
+        assertEquals("prive", form.hiddenFields["cat"])
+        assertEquals("3000001", form.hiddenFields["post"])
+        assertEquals("0", form.hiddenFields["subcat"])
+        assertEquals("1", form.hiddenFields["page"])
+        assertEquals("TESTHASH", form.hashCheck)
+        assertEquals("Sujet prive de test", form.sujet)
+        assertEquals("TestUser", form.hiddenFields["pseudo"])
+        assertFalse("password must never be collected", form.hiddenFields.containsKey("password"))
+        // message.php renders the options as real checkboxes (unlike the quick-reply's hidden inputs).
+        assertTrue("signature is the checked default", form.options.signatureEnabled)
+        assertEquals("1", form.msgIcon)
+        // A one-to-one MP labels the row « Destinataire » (singular) and serves no newdest: no roster,
+        // no member editor — the DT-only contract of #612/#618 is untouched by quoting.
+        assertEquals(null, form.recipientsRoster)
+        assertFalse("a one-to-one MP exposes no member editor", form.canManageRecipients)
+    }
+
+    @Test
+    fun `the message_php reply form of a one-to-one MP carries an empty numrep`() {
+        // #1041 — the control capture, same conversation and session as the quote form above. This is
+        // the form production actually parses for a 1:1 MP (PrivateMessageReplyLinkParser follows
+        // form#repondre_form). Its numrep is EMPTY: the « last post of the page » prefill belongs to
+        // the forum2.php quick-reply form, not to message.php.
+        val form = parser.parse(fixture("private_message_reply_form.html")).getOrThrow()
+
+        assertEquals("", form.hiddenFields["numrep"])
+        assertEquals("", form.hiddenFields["numreponse"])
+        assertEquals("", form.initialContent)
+        assertEquals("prive", form.hiddenFields["cat"])
+        assertEquals("3000001", form.hiddenFields["post"])
+        assertEquals("TESTHASH", form.hashCheck)
+        assertEquals(null, form.recipientsRoster)
+        assertFalse("a one-to-one MP exposes no member editor", form.canManageRecipients)
+    }
+
+    @Test
+    fun `quoting changes exactly two fields of the message_php form`() {
+        // #1041 — both fixtures come from the same conversation, same page, same session, minutes
+        // apart. The claim is scoped to what the POST forwards (the parsed hidden fields of
+        // `form[name=hop]`, which is all these reduced fixtures contain): identical except numrep,
+        // plus the quote's textarea prefill. That is the whole citation contract — no new field, no new
+        // parser (lot 4 of #1040). It says nothing about the surrounding page, which is not captured.
+        val reply = parser.parse(fixture("private_message_reply_form.html")).getOrThrow()
+        val quote = parser.parse(fixture("private_message_quote_form.html")).getOrThrow()
+
+        // Compare the WHOLE parsed form, not just the hidden map: hashCheck, sujet, isAnonymous,
+        // options, msgIcon, userId and the roster fields must be identical too. Only `numrep` and the
+        // prefill are normalised away — anything else that differed would fail here.
+        assertEquals(
+            reply.copy(hiddenFields = reply.hiddenFields - "numrep", initialContent = ""),
+            quote.copy(hiddenFields = quote.hiddenFields - "numrep", initialContent = ""),
+        )
+        assertEquals("", reply.hiddenFields["numrep"])
+        assertEquals("1980000004", quote.hiddenFields["numrep"])
+        assertEquals("", reply.initialContent)
+        assertTrue("only the quote form is prefilled", quote.initialContent.startsWith("[quotemsg="))
     }
 
     private fun fixture(name: String): String {

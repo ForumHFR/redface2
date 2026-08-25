@@ -1,4 +1,6 @@
 <resources>
+    <string name="messages_zoom_reset_chip">1×</string>
+    <string name="messages_zoom_reset">Revenir au zoom normal</string>
     <string name="messages_title">Messages</string>
     <string name="messages_empty">Aucun message privé.</string>
     <string name="messages_multi_recipient">Interlocuteurs multiples</string>
@@ -13,12 +15,33 @@
     <string name="messages_state_read">Lu</string>
     <string name="messages_state_unread">Non lu</string>
     <string name="messages_back">Retour</string>
+    <!-- Pager de la liste d'inbox ; le thread utilise désormais le picker partagé. -->
     <string name="messages_pager_previous">Précédent</string>
     <string name="messages_pager_next">Suivant</string>
     <string name="messages_pager_position">Page %1$d / %2$d</string>
+    <string name="messages_pager_position_a11y">Page %1$d sur %2$d</string>
+    <string name="messages_pager_position_refreshing_a11y">Page %1$d sur %2$d, actualisation en cours</string>
+    <string name="messages_page_picker_open">Changer de page</string>
+    <string name="messages_page_picker_title">Aller à une page</string>
+    <string name="messages_fab_previous_page">Page précédente</string>
+    <string name="messages_fab_next_page">Page suivante</string>
+    <string name="messages_fab_first_page">Aller à la première page</string>
+    <string name="messages_fab_last_page">Aller à la dernière page</string>
 
     <!-- #301 — réponse à une conversation privée (écriture MP). -->
     <string name="messages_reply">Répondre</string>
+    <string name="messages_quote">Citer</string>
+    <plurals name="messages_multi_quote_count">
+        <item quantity="one">Citer %1$d message sélectionné</item>
+        <item quantity="other">Citer %1$d messages sélectionnés</item>
+    </plurals>
+    <string name="messages_multi_quote_short">Citer %1$d</string>
+    <string name="messages_multi_quote_clear">Vider la sélection de citations</string>
+    <string name="messages_multi_quote_add">Ajouter à la citation multiple</string>
+    <string name="messages_multi_quote_remove">Retirer de la citation multiple</string>
+    <!-- Labels visuels courts ; les libellés longs ci-dessus portent l'action TalkBack. -->
+    <string name="messages_multi_quote_add_short">+ Citer</string>
+    <string name="messages_multi_quote_remove_short">✓ Cité</string>
     <string name="messages_reply_title">Répondre</string>
     <string name="messages_compose_title">Nouveau message</string>
     <string name="messages_compose_new">Nouveau</string>
@@ -86,4 +109,37 @@
     <!-- #618 — bouton compact « Destinataires : N — Gérer » au-dessus du corps du composer (créateur). -->
     <string name="messages_recipients_summary">Destinataires : %1$d</string>
     <string name="messages_recipients_manage">Gérer</string>
+
+    <!-- #1042 — tap avatar/pseudo d'un message privé : ouvre le profil (parité topic #208). -->
+    <string name="messages_open_profile_action">Voir le profil</string>
+
+    <!-- #1051/#1074/#1102 — menu contextuel propre aux messages privés. Le permalien reste absent ;
+         citation simple et sélection multiple ont aussi leurs affordances directes au pied. -->
+    <string name="messages_message_menu_action">Options du message</string>
+    <string name="messages_message_menu_number">Message n°%1$d</string>
+    <string name="messages_message_menu_copy_text">Copier le texte</string>
+    <string name="messages_message_menu_text_copied">Texte copié</string>
+    <string name="messages_message_menu_block_author">Masquer cet utilisateur</string>
+    <string name="messages_message_menu_unblock_author">Ne plus masquer cet utilisateur</string>
+    <string name="messages_message_menu_edited">Édité le %1$s</string>
+    <string name="messages_message_edited_inline">édité</string>
+    <plurals name="messages_message_menu_cited">
+        <item quantity="one">Cité %1$d fois</item>
+        <item quantity="other">Cité %1$d fois</item>
+    </plurals>
+    <plurals name="messages_message_cited_count">
+        <item quantity="one">cité %1$d fois</item>
+        <item quantity="other">cité %1$d fois</item>
+    </plurals>
+
+    <!-- #831/#1051 — retours d'effet de sauvegarde possédés par l'hôte MP. Le sheet et ses
+         libellés synchrones restent partagés dans :core:ui. -->
+    <string name="messages_image_menu_saved">Image enregistrée dans Pictures/Redface2</string>
+    <string name="messages_image_menu_save_failed_fetch">Téléchargement de l\'image impossible</string>
+    <string name="messages_image_menu_save_failed_storage">Enregistrement de l\'image impossible</string>
+    <string name="messages_image_menu_save_failed_too_large">Image trop volumineuse pour être enregistrée</string>
+
+    <!-- #1050 — marqueur a11y EgoPost (#874 P1) : StateDescription du nœud d'identité, même
+         libellé que le topic (topic_post_ego_state_description), possédé par chaque feature. -->
+    <string name="messages_post_ego_state_description">Votre message</string>
 </resources>

@@ -1,6 +1,10 @@
-Redface 2 v0.41.0 — beta.
+Redface 2 v0.43.0 — beta.
 
-- Direct quotes of your messages are now highlighted.
-- Your own posts also get a distinct background.
-- Both options are enabled by default and can be adjusted separately in the topic reading settings.
-- Colors adapt to light, dark, and AMOLED themes, including full-width posts.
+Private conversations finally read like topics.
+
+- Pinch zoom, page swipe, double-tap to refresh.
+- The topic pagination chrome: page picker, floating buttons, long press for the first or last page.
+- The reading position of each page is restored when you come back to it.
+- Quote several messages at once, with a button on every card.
+- A message's menu opens from the header "...".
+- New: keep conversations cached on the device, off by default.

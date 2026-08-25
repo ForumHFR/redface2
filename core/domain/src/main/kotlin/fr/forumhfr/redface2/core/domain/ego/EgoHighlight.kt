@@ -1,4 +1,4 @@
-package fr.forumhfr.redface2.feature.topic
+package fr.forumhfr.redface2.core.domain.ego
 
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.model.Post
@@ -9,7 +9,7 @@ import fr.forumhfr.redface2.core.model.Post
  * The feature gate is checked before the session data so disabled highlights, anonymous sessions,
  * missing pseudos and pseudos that canonicalize to an empty string all share the same safe `null`.
  */
-internal fun deriveEgoCanonicalPseudo(
+fun deriveEgoCanonicalPseudo(
     enabled: Boolean,
     isAuthenticated: Boolean,
     connectedPseudo: String?,
@@ -28,7 +28,7 @@ internal fun deriveEgoCanonicalPseudo(
  * session-bound source of truth and also covers profiles whose HFR toolbar is disabled.
  * [egoCanonicalPseudo] is derived once for the loaded page by [deriveEgoCanonicalPseudo].
  */
-internal fun isEgoPost(
+fun isEgoPost(
     post: Post,
     egoCanonicalPseudo: String?,
 ): Boolean = egoCanonicalPseudo != null && canonicalizePseudo(post.author) == egoCanonicalPseudo

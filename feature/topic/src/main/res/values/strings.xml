@@ -17,9 +17,6 @@
     <!-- #291 — entrée du menu contextuel : ajoute/retire le post du panier de citation multiple. -->
     <string name="topic_post_menu_multi_quote_add">Ajouter à la citation multiple</string>
     <string name="topic_post_menu_multi_quote_remove">Retirer de la citation multiple</string>
-    <!-- #509 — placeholder replié à la place d'un post d'auteur masqué (blacklist). %1$s = pseudo. -->
-    <string name="topic_post_hidden_by_author">Post de %1$s masqué</string>
-    <string name="topic_post_hidden_reveal">Afficher</string>
     <string name="topic_loading">Chargement…</string>
     <!-- #604 — libellé du skeleton de chargement (mockup « Chargement A »), sous le loader centré. -->
     <string name="topic_loading_body">Chargement de la page demandée</string>
@@ -61,7 +58,6 @@
     <string name="topic_page_indicator_refreshing_a11y">Page %1$d sur %2$d, actualisation en cours</string>
     <string name="topic_error_title">Erreur de chargement</string>
     <string name="topic_error_body">Impossible d’ouvrir la page %1$d.\n\n%2$s</string>
-    <string name="topic_post_index_prefix">#%1$d • </string>
     <string name="topic_post_ego_state_description">Votre message</string>
     <!-- #362 — per-post contextual menu (post number, permalink copy, edit marker, citations). -->
     <!-- #436 — libellés courts du bouton « + » en pied de carte (parité web quote+/quote-). Le
@@ -71,10 +67,10 @@
     <string name="topic_post_multiquote_remove_short">✓ Cité</string>
     <string name="topic_post_menu_action">Options du post</string>
     <string name="topic_post_menu_number">Post n°%1$d</string>
+    <string name="topic_post_menu_copy_text">Copier le texte</string>
+    <string name="topic_post_menu_text_copied">Texte copié</string>
     <string name="topic_post_menu_copy_link">Copier le lien de ce post</string>
     <string name="topic_post_menu_link_copied">Lien copié</string>
-    <string name="topic_post_menu_open_in_browser">Ouvrir dans le navigateur</string>
-    <string name="topic_post_menu_no_browser">Aucun navigateur disponible</string>
     <string name="topic_post_menu_report_soon">Alerter (à venir)</string>
     <!-- #792 — entrée « Envoyer un MP » du menu contextuel de post (composeur MP pré-rempli). -->
     <string name="topic_post_menu_send_private_message">Envoyer un MP</string>
@@ -90,17 +86,12 @@
         <item quantity="one">Cité %1$d fois dans le sujet</item>
         <item quantity="other">Cité %1$d fois dans le sujet</item>
     </plurals>
-    <!-- #831 — menu contextuel d'appui long sur les images de post (PostImageMenuSheet).
-         « Ouvrir dans le navigateur » et son échec réutilisent topic_post_menu_open_in_browser /
-         topic_post_menu_no_browser. -->
-    <string name="topic_image_menu_save">Enregistrer l\'image</string>
+    <!-- #831/#1040 — retours d'effet de sauvegarde possédés par le host topic. Le sheet et ses
+         libellés synchrones vivent dans :core:ui ; le ViewModel de sauvegarde reste ici. -->
     <string name="topic_image_menu_saved">Image enregistrée dans Pictures/Redface2</string>
     <string name="topic_image_menu_save_failed_fetch">Téléchargement de l\'image impossible</string>
     <string name="topic_image_menu_save_failed_storage">Enregistrement de l\'image impossible</string>
     <string name="topic_image_menu_save_failed_too_large">Image trop volumineuse pour être enregistrée</string>
-    <string name="topic_image_menu_copy_url">Copier l\'URL de l\'image</string>
-    <string name="topic_image_menu_url_copied">URL copiée</string>
-    <string name="topic_image_menu_full_size_soon">Afficher en taille réelle (à venir)</string>
     <!-- #239/#863 — badge : le compteur de citations SERVEUR (toutes pages du sujet). -->
     <plurals name="topic_post_cited_count">
         <item quantity="one">cité %1$d fois</item>
@@ -118,11 +109,7 @@
     <string name="topic_retry">Réessayer</string>
     <string name="topic_zoom_reset_chip">1×</string>
     <string name="topic_zoom_reset">Revenir au zoom normal</string>
-    <string name="topic_page_previous">Précédent</string>
-    <string name="topic_page_next">Suivant</string>
     <string name="topic_page_indicator">page %1$d / %2$d</string>
-    <string name="topic_page_jump_label">Aller à la page</string>
-    <string name="topic_page_jump_action">Y aller</string>
     <string name="topic_post_quote">Citer</string>
     <!-- #823 — appui long sur « Citer » : ouvre directement l'éditeur plein écran, sans passer
          par le preset de surface d'écriture (#806). onLongClickLabel TalkBack. -->

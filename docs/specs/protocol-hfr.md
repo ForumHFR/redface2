@@ -603,7 +603,7 @@ Le contrat se ramène à un **flag de booléen** côté caller : `useAuth = true
 
 Confirmé par Corran Horn sur le topic HFR Redface 2 : *« en utilisant un cookie d'un compte anonyme pour pas péter les drapeaux »*.
 
-> **Acté — [ADR-013]({{ site.baseurl }}/adr/013-mp-lecture-cache-prefetch) (accepté 2026-06-12)** : exception **bornée aux MP** — prefetch authentifié limité aux pages adjacentes (N−1/N+1) de la conversation `cat=prive` actuellement ouverte ; prefetch depuis la liste interdit. Justification mesurée live dans [#361](https://github.com/ForumHFR/redface2/issues/361#issuecomment-4663312132) : l'état lu/non-lu MP est un dot **binaire par conversation**, effacé par le GET d'ouverture (le prefetch intra-conversation n'a donc pas d'effet supplémentaire dans le cas nominal ; reste une race nouveau-message documentée et assumée dans l'ADR) ; le GET de la liste est inerte ; aucune position de lecture serveur n'existe pour les MP. La règle générale ci-dessus reste en vigueur partout ailleurs.
+> **Acté — [ADR-018]({{ site.baseurl }}/adr/018-mp-cache-disque-opt-in) décision 7 (accepté 2026-08-25, reprise de l'ADR-013 supersédée)** : exception **bornée aux MP** — prefetch authentifié limité aux pages adjacentes (N−1/N+1) de la conversation `cat=prive` actuellement ouverte ; prefetch depuis la liste interdit. Justification mesurée live dans [#361](https://github.com/ForumHFR/redface2/issues/361#issuecomment-4663312132) : l'état lu/non-lu MP est un dot **binaire par conversation**, effacé par le GET d'ouverture (le prefetch intra-conversation n'a donc pas d'effet supplémentaire dans le cas nominal ; reste une race nouveau-message documentée et assumée dans l'ADR) ; le GET de la liste est inerte ; aucune position de lecture serveur n'existe pour les MP. La règle générale ci-dessus reste en vigueur partout ailleurs.
 
 ### Marquer un MP comme non lu — `nonlu.php` (vérifié live 2026-06-11, #361)
 
@@ -614,7 +614,7 @@ GET /user/nonlu.php?config=hfr.inc&cat=prive&subcat=0&post={threadId}&page={N}&p
 - Lien unique dans l'en-tête de chaque page de conversation (icône œil) ; mutation par **GET simple, sans `hash_check`**.
 - **Granularité binaire, conversation entière** : le paramètre `page` n'encode aucune position — nonlu posé depuis la page 3 puis lecture de la seule page 2 → conversation entièrement « lue ». Pas d'état intermédiaire.
 - Séquence exercée live (post=3161381) : `nonlu` → NON-LU ; GET page 1 → lu ; `nonlu` → NON-LU ; GET page 3 → lu. État final identique à l'état initial : la compensation est **sans perte** précisément parce que l'état est binaire.
-- Conséquence ADR-013 : un « marquer comme non lu » manuel **suspend le prefetch** de la conversation jusqu'à sa réouverture (sinon le prefetch adjacent effacerait le non-lu que l'utilisateur vient de poser).
+- Conséquence ADR-018 décision 7 : un « marquer comme non lu » manuel **suspend le prefetch** de la conversation jusqu'à sa réouverture (sinon le prefetch adjacent effacerait le non-lu que l'utilisateur vient de poser).
 
 ### MP/DT — ajout/retrait de membres (`newdest`)
 
@@ -625,6 +625,71 @@ Gestion des destinataires d'une conversation MultiMP / DT par son **owner** (#60
 - Règles de validation (vérifiées) : au moins **1** membre conservé, **ordre et casse** préservés, le champ n'est honoré que si l'utilisateur courant est l'owner de la conversation (guard côté repo).
 - La mutation produit un **message système « Modération »** dans le fil (trace serveur de l'ajout/retrait).
 - Un non-owner ne voit pas `newdest` préempli : pour lui le POST de réponse ne touche pas la composition de la conversation.
+
+### MP/DT — citer un message (1:1 vérifié le 2026-08-12, DT le 2026-08-17)
+
+Seul inconnu serveur du chantier [#1040](https://github.com/ForumHFR/redface2/issues/1040) (partage
+de la surface de lecture Topic → MP), d'abord tranché en 1:1 par deux captures authentifiées de la
+**même** conversation `cat=prive` dans la **même** session : `private_message_quote_form.html` et son
+témoin `private_message_reply_form.html`. Le contrat a ensuite été reproduit en DT par
+`private_message_dt_quote_form.html` (#1074). Aucun POST n'a été émis.
+
+Chaque message d'une page `cat=prive` porte son lien « citer » :
+
+```text
+GET /message.php?config=hfr.inc&cat=prive&post={threadId}&numrep={numreponse cité}&ref={rang dans la page}&page={N}&p=1&subcat=0&sondage=0&owntopic=0&new=0#formulaire
+```
+
+Le formulaire renvoyé est un `form[name=hop]` vers `bddpost.php?config=hfr.inc` — **le même endpoint
+et la même forme qu'une citation de topic**. Ce qui le distingue :
+
+- `numrep` = le **message cité**. Capture faite sur le 4ᵉ message d'une page qui en comptait 5 : ce
+  n'est donc pas un préremplissage « dernier message ».
+- `content_form` est prérempli par HFR avec `[quotemsg={numrep},{ref},{userId de l'auteur cité}]…[/quotemsg]`
+  — même forme que le topic, à réutiliser verbatim (jamais reconstruire le tag localement, cf.
+  § Quote ci-dessus).
+- **aucun champ caché `ref`** n'est servi : le rang ne voyage que dans l'URL et dans le tag BBCode.
+  (Le formulaire de réponse d'un DT owner, lui, en porte un — `ref=0`.)
+- `numreponse` reste vide : la citation ne détourne pas le champ de l'édition.
+- options en vraies cases à cocher (`signature` cochée par défaut) et `MsgIcon=1` pré-coché, comme
+  tout formulaire `message.php`.
+
+La capture DT sert exactement les mêmes **20 champs cachés** que la citation 1:1, avec
+`cat=prive`, `numreponse=""`, `numrep` = message cité, aucun champ caché `ref` et aucun `newdest`.
+Elle ne rend pas non plus de ligne « Destinataires ». Le `ref=0` et l'absence de `numreponse`
+observés auparavant appartiennent au formulaire de **réponse** DT owner : ils ne se transportent pas
+au formulaire de citation. Sur appareil, « Citer » dans un DT ouvre l'éditeur prérempli par HFR sans
+erreur ; aucun envoi live n'a été tenté.
+
+**`numrep` a trois sens selon le formulaire servi** — ne jamais en déduire une sémantique unique :
+
+| Formulaire | Origine | `numrep` | `content_form` |
+|---|---|---|---|
+| Réponse rapide embarquée | `forum2.php?cat=prive` | **dernier message de la page** (préremplissage) | vide |
+| Réponse simple | `message.php` suivi depuis `form#repondre_form` | **vide** | vide |
+| Citation | `message.php` suivi depuis le lien « citer » | **message cité** | `[quotemsg=…]` |
+
+**Le premier « message » d'une page N > 1 est une « Reprise du message précédent », servie avec
+`ref=0` — mesuré, plus supposé.** La capture `thread_multipage` du 2026-08-25
+([#1107](https://github.com/ForumHFR/redface2/issues/1107)) a lu, dans une seule session
+authentifiée, trois pages adjacentes de la même conversation `cat=prive` : sur N comme sur N+1, la
+première ancre est bien le récapitulatif du dernier message de la page précédente — jeux d'ancres
+réelles disjoints entre les trois pages — et son lien « citer » porte `ref=0`. Ce n'est donc pas un
+rang **manquant** mais un rang **nul déclaré par HFR** ; le message réel existe sur la page N−1 —
+l'égalité d'ancres entre pages le mesure — **vraisemblablement** avec son vrai rang, que la sonde
+n'y extrait pas. Le fail-closed MP (`ref >= 1`) masque « Citer » sur ce récapitulatif, en 1:1 comme en
+DT — trou de couverture suivi par [#1110](https://github.com/ForumHFR/redface2/issues/1110). La même
+capture a mesuré le **rabattement serveur** : une demande de page au-delà de la dernière est servie
+comme la dernière, l'URL effective en fait foi.
+
+Conséquence pour le lot 4 de #1040 : la citation MP/DT ne demande **aucun** nouveau parser ni champ
+supplémentaire — `ReplyFormParser` transporte déjà tous les champs cachés verbatim et le
+`content_form` prérempli. La citation simple et le panier multiple sont livrés avec un scope MP typé.
+Pour plusieurs citations, le client rejoue séquentiellement le contrat unitaire avec la page et le
+`ref` propres à chaque sélection, puis concatène les préremplissages ; il n'applique pas le fallback
+topic sans `ref`. Les captures ci-dessus prouvent seulement chaque formulaire pris isolément : aucune
+capture live n'a encore observé cette séquence de GET ni l'acceptation d'un POST portant plusieurs
+blocs `[quotemsg]`.
 
 ### Écriture MPStorage — read-modify-write `bdd.php cat=prive` (#593/#597)
 
@@ -646,6 +711,43 @@ Gestion des destinataires d'une conversation MultiMP / DT par son **owner** (#60
 ### Posts édités
 
 Marqueur dans le HTML des posts : un `div.edited` en fin de contenu, ex. `<div class="edited"><a …>Message cité 1 fois</a><br />Message édité par jubjub le 14-03-2016&nbsp;à&nbsp;12:09:00</div>`. Le lien « Message cité N fois » est optionnel et peut exister **sans** ligne « Message édité » (post cité jamais édité) — et inversement. Extrait côté parser (#362) en champ `Post.editedAt: Instant?` via `HfrDateParser.parseEditedAtOrNull` (regex non ancrée, le préfixe citation est toléré ; null si pas de marqueur d'édition). Le `div.edited` reste par ailleurs retiré du contenu rendu (`PostContentParser`).
+
+### En-tête d'une citation rendue — deux formes de lien, `#t{numreponse}` autoritaire
+
+Le bandeau « *Pseudo* a écrit : » d'une citation rendue (`table.citation b.s1 a.Topic`, ou
+`table.oldcitation` pour un profil au style classique) porte le **permalien du message cité**. HFR en
+sert **deux formes selon la session**, et un client qui n'en connaît qu'une casse le saut vers le
+message cité pour l'autre moitié des lecteurs ([#625](https://github.com/ForumHFR/redface2/issues/625),
+corrigé par #1092) :
+
+| Session | Forme du href | Page | Message cité |
+|---|---|---|---|
+| **Anonyme** | `…/{slug}-sujet_{topicId}_{page}.htm#t{numreponse}` (permalien statique) | 2ᵉ entier du segment `sujet_…` | fragment `#t{…}` |
+| **Authentifiée** | `…/forum2.php?config=hfr.inc&cat={cat}&…&page={N}&…&numreponse={M}&…#t{numreponse}` | paramètre `page=` | fragment `#t{…}` |
+
+La forme authentifiée est la **même sur les sujets et sur les MP** (`cat=prive`) : ce n'était pas un
+défaut propre aux MP.
+
+> **Piège mesuré : `numreponse=` en query n'est pas le message cité.** Sur les pages de sujet
+> authentifiées, le paramètre `numreponse=` de ce href vaut **`0`** — seul le **fragment `#t{num}`**
+> identifie le message cité. Lire le paramètre donne un correctif *vert* en MP (où il porte bien la
+> même valeur que le fragment) et **cassé sur les sujets**. Le fragment est donc la source unique
+> pour les deux formes et les deux surfaces.
+>
+> Preuves dans l'arbre, ancres `a.Topic` d'un `table.citation` / `table.oldcitation` :
+> `write_ia_topic_page.html` — **sujet authentifié**, `…&cat=32&post=7&page=1&…&numreponse=0&…#t29892`
+> (page réelle dans `page=`, cible dans le fragment, `numreponse=0`) ; le fragment de HTML brut
+> authentifié épinglé par `PostContentParserTest` (topic RF2 page 25) porte de même
+> `…&page=25&…&numreponse=0&…#t2785311`. `private_message_thread_with_quote.html` — **MP authentifié**,
+> `…&cat=prive&page=1&…&numreponse=1980000101&…#t1980000101` (les deux coïncident : c'est ce qui rend
+> un correctif fondé sur la query vert en MP et faux sur les sujets).
+> `topic_loisirs_chutes_p4344.html` — **permalien anonyme**, `…sujet_27848_4344.htm#t74598425`.
+
+Côté implémentation, `PostContentParser.parseQuote` essaie la forme statique puis la forme
+authentifiée (`CITATION_HREF_REGEX`, sinon `DYNAMIC_CITATION_HREF_REGEX`) et alimente
+`PostBlock.Quote.page` / `.numreponse` (cf. [models.md]({{ site.baseurl }}/specs/models)). Les deux
+formes sont épinglées par `PostContentParserTest`. Un `[quote]` nu (`table.quote` / `table.oldquote`)
+n'a pas d'ancre auteur : auteur, page et `numreponse` restent `null`, sans erreur.
 
 ### Posts supprimés / modérés
 
@@ -745,6 +847,8 @@ Les fixtures de test du parser vivent dans `core/parser/src/test/resources/fixtu
 Catalogue complet : voir [`contributing.md#fixtures-html-pour-le-parser`](contributing.md#fixtures-html-pour-le-parser).
 
 Pour capturer une fixture : utiliser le MCP `hfr-mcp` avec `hfr_read output=path/to/fixture.html` (écrit le HTML brut), puis appliquer le skill [`/parse-fixture`](https://github.com/ForumHFR/redface2/blob/main/.agents/skills/parse-fixture/SKILL.md) pour générer l'analyse structurée.
+
+**Exception `cat=prive`** : `hfr_read` et `hfr_quote` exigent une catégorie **entière**, donc `hfr-mcp` ne peut pas capturer une page de MP. Le chemin HTTP authentifié, la sanitisation exigée et le sidecar de provenance sont décrits dans [`capture-fixture-citation-mp.md`]({{ site.baseurl }}/guides/capture-fixture-citation-mp).
 
 ## Fixtures REST
 

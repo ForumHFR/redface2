@@ -11,8 +11,13 @@ import org.jsoup.Jsoup
  * `bddpost.php` and which carries **no** `newdest` field. HFR only serves the owner-only `newdest`
  * (the full member list of a DT / MultiMP) on the standalone `message.php` reply form — reachable
  * via the « Ajouter une réponse » button. That button (and its sibling `repondre_form`) carries
- * the real `message.php` href, with the server-controlled `numrep` / `ref` / `page` already filled
- * in. We never invent those params : we forward the href HFR rendered, verbatim.
+ * the real `message.php` href with whatever params HFR chose to fill in. We never invent them : we
+ * forward the href HFR rendered, verbatim.
+ *
+ * #1041 — which params HFR fills in VARIES, so no caller may assume any of them: the DT owner
+ * capture carries `numrep` / `ref` / `page` (`private_message_dt_owner_thread.html`), while a live
+ * one-to-one MP capture (2026-08-12) carries only `page` — no `numrep`, no `ref`. Following it then
+ * yields a form whose `numrep` is empty (`private_message_reply_form.html`).
  *
  * Two equivalent sources on the page, in priority order :
  *  1. `<form id="repondre_form" action="/message.php?…">` — the most stable anchor.
@@ -21,8 +26,9 @@ import org.jsoup.Jsoup
  * The returned value is the href EXACTLY as HFR wrote it (an HTML-entity-decoded relative path such
  * as `/message.php?config=hfr.inc&cat=prive&post=3195237&page=1&p=1&subcat=0&sondage=0&owntopic=0&new=0`).
  * The network layer resolves it against the base URL and guards it (`message.php`, `cat=prive`).
- * Returns `null` when no such link is present — a one-to-one MP, a session that lost the writable
- * form, or a page shape HFR reshaped — and the caller falls back to the embedded quick-reply form.
+ * Returns `null` when no such link is present — a session that lost the writable form, or a page
+ * shape HFR reshaped — and the caller falls back to the embedded quick-reply form. A one-to-one MP
+ * is NOT such a case: the live capture of #1041 shows it serving `form#repondre_form` like a DT.
  */
 class PrivateMessageReplyLinkParser {
 

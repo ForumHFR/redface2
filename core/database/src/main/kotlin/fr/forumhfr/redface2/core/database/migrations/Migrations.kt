@@ -429,3 +429,64 @@ val MIGRATION_15_16: Migration = object : Migration(15, 16) {
         db.execSQL("ALTER TABLE flag_topics ADD COLUMN postsPerPage INTEGER NOT NULL DEFAULT 40")
     }
 }
+
+/**
+ * v16 → v17 (#1040/#1097) — adds the dormant, account-scoped private-message content cache.
+ * The semantic [fr.forumhfr.redface2.core.model.PostContent] AST and signatures are stored through
+ * the existing converters; raw HTML, request URLs, reply forms and authentication secrets are not.
+ * Child rows cascade with their page, and the `(parent, ordinal)` index serves ordered rendering.
+ */
+val MIGRATION_16_17: Migration = object : Migration(16, 17) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `mp_thread_pages` (
+                `userId` TEXT NOT NULL,
+                `threadId` INTEGER NOT NULL,
+                `page` INTEGER NOT NULL,
+                `subject` TEXT NOT NULL,
+                `correspondent` TEXT NOT NULL,
+                `totalPages` INTEGER NOT NULL,
+                `canReply` INTEGER NOT NULL,
+                `isMultiRecipient` INTEGER NOT NULL,
+                `fetchedAt` INTEGER NOT NULL,
+                PRIMARY KEY(`userId`, `threadId`, `page`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `mp_messages` (
+                `userId` TEXT NOT NULL,
+                `threadId` INTEGER NOT NULL,
+                `page` INTEGER NOT NULL,
+                `numreponse` INTEGER NOT NULL,
+                `ordinal` INTEGER NOT NULL,
+                `author` TEXT NOT NULL,
+                `date` INTEGER NOT NULL,
+                `content` TEXT NOT NULL,
+                `avatarUrl` TEXT,
+                `isEditable` INTEGER NOT NULL,
+                `isOwnPost` INTEGER NOT NULL,
+                `quotedAuthors` TEXT NOT NULL,
+                `postIndex` INTEGER,
+                `quoteRef` INTEGER,
+                `profileId` INTEGER,
+                `editedAt` INTEGER,
+                `citedCount` INTEGER,
+                `signature` TEXT,
+                PRIMARY KEY(`userId`, `threadId`, `page`, `numreponse`),
+                FOREIGN KEY(`userId`, `threadId`, `page`)
+                    REFERENCES `mp_thread_pages`(`userId`, `threadId`, `page`)
+                    ON UPDATE NO ACTION ON DELETE CASCADE
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            CREATE INDEX IF NOT EXISTS `index_mp_messages_userId_threadId_page_ordinal`
+            ON `mp_messages` (`userId`, `threadId`, `page`, `ordinal`)
+            """.trimIndent(),
+        )
+    }
+}

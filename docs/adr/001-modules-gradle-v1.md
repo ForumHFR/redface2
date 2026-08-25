@@ -6,7 +6,7 @@ nav_order: 1
 permalink: /adr/001-modules-gradle-v1
 ---
 
-# ADR-001 — Découpage Gradle v1 : 16 modules avant les extensions
+# ADR-001 — Découpage Gradle v1 : 17 modules avant les extensions
 
 ## Statut
 
@@ -20,7 +20,7 @@ Un monolithe unique `:app` simplifie le bootstrap, mais ne protège pas les fron
 
 ## Décision
 
-La v1 de Redface 2 adopte un découpage en **16 modules** pour les Phases 0 à 3 :
+La v1 de Redface 2 adopte un découpage en **16 modules** pour les Phases 0 à 3 (décompte d'origine ; réel **17**, cf. amendement 2026-07-05 en fin de section) :
 
 - **8 modules core**
   - `:core:model`

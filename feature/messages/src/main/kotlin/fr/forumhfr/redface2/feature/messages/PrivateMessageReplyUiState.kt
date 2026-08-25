@@ -22,6 +22,11 @@ data class PrivateMessageReplyUiState(
     /** True when the form GET failed (network / session / parse / anonymous) → show retry. */
     val formError: Boolean = false,
     val draft: TextFieldValue = TextFieldValue(),
+    /**
+     * True after the first successful form load has consumed `ReplyForm.initialContent`. It prevents
+     * a retry or InvalidHashCheck refetch from duplicating the server-provided quote around edits.
+     */
+    val draftHydratedFromForm: Boolean = false,
     val isPreviewVisible: Boolean = false,
     val preview: PostContent = PostContent(blocks = emptyList()),
     val signatureEnabled: Boolean = false,

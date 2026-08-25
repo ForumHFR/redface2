@@ -6,7 +6,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
 import fr.forumhfr.redface2.core.domain.editor.validateBbcodeDraft
 import fr.forumhfr.redface2.core.model.PostContent
-import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 
 /**
@@ -30,9 +30,9 @@ data class PostEditorState(
      * [PostEditorRequest.initialQuotes], reorderable / removable / clearable from the UI
      * (#436 « Tout vider »). The field never contains their BBCode : the `[quotemsg]`
      * blocks are materialised fresh at submit, exactly like the quick-reply sheet
-     * (one implementation, `ReplyQuoteMaterializer`). Always empty in [PostEditorMode.Edit].
+     * (one implementation, `TopicReplyQuoteMaterializer`). Always empty in [PostEditorMode.Edit].
      */
-    val quotes: List<QuotedPostPreview> = emptyList(),
+    val quotes: List<QuoteSelection> = emptyList(),
     val draft: TextFieldValue = TextFieldValue(),
     val preview: PostContent = PostContent(blocks = emptyList()),
     val isPreviewVisible: Boolean = false,

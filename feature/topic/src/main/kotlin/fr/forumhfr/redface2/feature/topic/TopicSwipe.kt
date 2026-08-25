@@ -37,10 +37,12 @@ import kotlinx.coroutines.launch
 
 // The swipe *geometry* (thresholds, drag-follow shaping, edge-hint alpha) lives in
 // `:core:ui` (`core.ui.pager.PageSwipe`), shared with the private-message thread (#351,
-// ADR-013). This file keeps only the topic-specific gesture MACHINERY, which is
-// intrinsically coupled to the route-driven pagination model: the re-entrance latch and
-// the slide-out below are reset by the route change destroying this composition — an
-// in-place pager (the MP thread) must re-arm its own latch instead.
+// ADR-013). This file keeps only the topic-specific gesture MACHINERY, coupled to the
+// in-ViewModel pagination engine (#895 étape 4 — the route is frozen at entry, pages
+// change inside the retained TopicViewModel): the re-entrance latch and the slide-out
+// below are reset by the `pointerInput(currentPage)` re-key when the engine renders the
+// target page. (Pre-#895 the reset came from the route change destroying the composition.)
+// The MP thread's in-place pager re-arms its own gate differently (`isRefreshing`).
 
 private const val COMMIT_SLIDE_OUT_MILLIS = 200 // page slide-out before navigation on commit (decelerated)
 
@@ -58,8 +60,9 @@ private val SPRING_BACK = spring<Float>(
 
 /**
  * Horizontal swipe → change topic page (#282, Option A) with drag-follow feedback (b). A committed
- * left/right swipe slides the current page off-screen then calls [onOpenPage] (the existing
- * route-driven navigation: pop+push of `TopicRoute`), reusing the whole pagination/prefetch
+ * left/right swipe slides the current page off-screen then calls [onOpenPage] (which feeds
+ * `TopicViewModel.switchToPage` since #895 étape 4 — an in-VM page switch on a frozen route,
+ * formerly a route-driven pop+push of `TopicRoute`), reusing the whole pagination/prefetch
  * machinery — no neighbour page is composed, so the « prefetch non authentifié » invariant is never
  * touched.
  *
@@ -71,11 +74,12 @@ private val SPRING_BACK = spring<Float>(
  * launched per drag event.
  *
  * On commit the page first animates off-screen (translationX → ±width, a short [tween]) and only then
- * navigates, softening the **departure**. The incoming page then appears via an instant
- * `TopicRoute → TopicRoute` NavDisplay transition wired in `:app` navigation (see #282), which also
- * collapses the swipe dead-zone — not a generic slide-in. Otherwise (no-commit, edge, or a child taking
- * the drag) it springs back to rest. Haptics: a tick when the swipe arms (crosses the commit distance,
- * once per rising edge) and a confirm on commit.
+ * switches page, softening the **departure**. The incoming page renders in the SAME composition when
+ * the engine emits it (#895 étape 4 — instantly when a RAM snapshot is available; the historical
+ * instant `TopicRoute → TopicRoute` NavDisplay transition died with the frozen route, étape 5), and
+ * the call site's `LaunchedEffect(topic.page)` drops the residual offset. Otherwise (no-commit, edge,
+ * or a child taking the drag) it springs back to rest. Haptics: a tick when the swipe arms (crosses
+ * the commit distance, once per rising edge) and a confirm on commit.
  *
  * Coexistence (unchanged from the discrete version, validated with Codex gpt-5.5):
  * - it engages only on **horizontal** touch slop, so the vertical `LazyColumn` scroll is never stolen;
@@ -83,8 +87,9 @@ private val SPRING_BACK = spring<Float>(
  *   slop detection / `horizontalDrag`, so it keeps its own gesture and the page springs back;
  * - at the edges (target is `null`) the gesture is a damped no-op (no navigation, no flash);
  * - exactly one [onOpenPage] per committing gesture: once a commit starts its slide-out, a
- *   re-entrance latch ignores any further gesture until the route change tears this modifier down,
- *   so a second swipe landing inside the slide-out window can never fire a duplicate navigation.
+ *   re-entrance latch ignores any further gesture until the engine's page change re-keys this
+ *   `pointerInput` (#895 étape 4), so a second swipe landing inside the slide-out window can never
+ *   fire a duplicate page switch.
  *
  * Direction is **geometric**, not layout-direction aware: a physical leftward drag always opens the
  * next page (rightward = previous), regardless of `LayoutDirection`. The forum content is LTR
@@ -126,12 +131,11 @@ internal fun Modifier.topicPageSwipe(
             val animationScope = this
             // Re-entrance latch: a committed swipe defers `onOpenPage` by COMMIT_SLIDE_OUT_MILLIS (the
             // slide-out), during which `awaitEachGesture` has already rebooted and is armed for a new
-            // `down` while the outgoing composition is NOT yet replaced. Without this guard, a second
-            // commit landing in that window could fire a second `onOpenPage` on the stale composition
-            // (currentPage unchanged) → a duplicate pop+push / phantom back-stack entry, or silently
-            // drop the first navigation. Once any commit starts the slide-out we ignore further
-            // gestures until this pointerInput is torn down by the route change — so `onOpenPage` fires
-            // exactly once.
+            // `down` while the target page has NOT yet rendered. Without this guard, a second commit
+            // landing in that window could fire a second `onOpenPage` computed from the stale
+            // `currentPage` → a duplicate page switch on the engine, or silently drop the first one.
+            // Once any commit starts the slide-out we ignore further gestures until the engine's page
+            // change re-keys this pointerInput (#895 étape 4) — so `onOpenPage` fires exactly once.
             var committed = false
             // Tracks the in-flight release transition (spring-back / slide-out) so a new drag can
             // cancel it DETERMINISTICALLY and SYNCHRONOUSLY (see the slop branch below). Replaces the
@@ -145,14 +149,14 @@ internal fun Modifier.topicPageSwipe(
                 val down = awaitFirstDown(requireUnconsumed = false)
                 if (committed) return@awaitEachGesture
                 // Ignore the gesture while this nav entry is NOT settled (lifecycle < RESUMED), i.e.
-                // mid NavDisplay transition. A freshly-Loaded incoming page (served from cache) would
-                // otherwise accept a swipe DURING the transition and commit a SECOND `onOpenPage`
-                // mid-flight, interrupting the transition and freezing the screen — the per-composition
-                // `committed` latch cannot span the inter-page transition (the incoming page is a fresh
-                // composition with its own latch). Gating at `down`, before the gesture arms/follows, is
-                // required: merely dropping `onOpenPage` after the slide-out would still park the page
-                // off-screen (the very freeze). See #282. (A `down` that lands while still RESUMED but
-                // whose slop is crossed mid-transition is safe: the `committed` latch blocks a 2nd fire.)
+                // mid NavDisplay transition INTO the topic (since #895 étape 4 page changes stay in
+                // the retained entry, so only entry/exit transitions remain). A freshly-Loaded page
+                // (served from cache) would otherwise accept a swipe DURING the transition and commit
+                // an `onOpenPage` mid-flight, interrupting the transition and freezing the screen.
+                // Gating at `down`, before the gesture arms/follows, is required: merely dropping
+                // `onOpenPage` after the slide-out would still park the page off-screen (the very
+                // freeze). See #282. (A `down` that lands while still RESUMED but whose slop is
+                // crossed mid-transition is safe: the `committed` latch blocks a 2nd fire.)
                 if (!handlers.enabled()) return@awaitEachGesture
                 // #752 — same start dead-zone as the flags tab swipe: never start the page swipe
                 // from the system gesture bands (system back owns the real edge; a near-miss just
@@ -246,7 +250,8 @@ internal fun Modifier.topicPageSwipe(
  * The non-per-frame inputs of [topicPageSwipe], bundled so the gesture's parameter list stays within
  * the project's limit. [enabled] is read once per gesture (at `down`) and gates the whole gesture off
  * while this nav entry is mid-transition (lifecycle < RESUMED, see #282); [haptics] fires on arm and
- * commit; [onOpenPage] performs the route-driven page change exactly once per committed swipe.
+ * commit; [onOpenPage] performs the in-VM page change (`TopicViewModel.switchToPage`, #895 étape 4)
+ * exactly once per committed swipe.
  */
 internal class TopicSwipeHandlers(
     val haptics: HapticFeedback,
@@ -313,9 +318,10 @@ private fun springBackTo(
 
 /**
  * Slide the committed page fully off-screen to [targetX] (±width, chosen by the commit direction) over
- * [COMMIT_SLIDE_OUT_MILLIS], then navigate exactly once via [onCommitted]. The navigation replaces the
- * screen (the offset state is discarded with it), so there is nothing to reset afterwards. Streaming
- * into [dragOffset] keeps the draw phase agnostic of what drives the offset.
+ * [COMMIT_SLIDE_OUT_MILLIS], then switch page exactly once via [onCommitted]. The composition survives
+ * the in-VM page switch (#895 étape 4): the call site's `LaunchedEffect(topic.page)` zeroes the offset
+ * when the target page renders. Streaming into [dragOffset] keeps the draw phase agnostic of what
+ * drives the offset.
  */
 private fun commitSlideOut(
     scope: CoroutineScope,

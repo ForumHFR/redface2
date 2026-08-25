@@ -11,6 +11,13 @@ data class Post(
     val isEditable: Boolean,
     val isOwnPost: Boolean,
     val quotedAuthors: List<String>,
+    /**
+     * Reserved legacy field (#1055). The topic parser has never derived a stable global index from a
+     * topic page, so production parsing leaves this `null` and no UI consumes it. The property is
+     * retained only because its Room column has existed since schema v1; removing that inert column
+     * alone does not justify a user-data migration. Do not populate or display it without first
+     * establishing the cross-page semantics from real HFR fixtures.
+     */
     val postIndex: Int?,
     /**
      * `ref` parameter parsed from HFR's quote link href
@@ -29,7 +36,9 @@ data class Post(
      * `md_*cryptlink` toolbar, locked topic, anonymous read, future server-side
      * change). Forwarded as-is when non-null; when `null` the quote GET omits `&ref=`
      * (HFR identifies the cited post by `numrep={numreponse}` alone — #227, proven
-     * live). « Citer » visibility is driven by `Topic.canReply`, NOT by this field.
+     * live) **for a topic**. Topic « Citer » visibility is driven by `Topic.canReply`, not this
+     * field. The measured MP contract is stricter (#1074): a private message with `quoteRef=null`
+     * hides « Citer » because omission of `ref` has not been proven for `cat=prive`.
      *
      * Persisted in Room v5 (cf. `MIGRATION_4_5`) so cache hits preserve HFR's
      * positional `ref` when it was parseable. Pre-v5 rows backfill to `NULL` and

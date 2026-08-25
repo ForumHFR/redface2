@@ -295,8 +295,10 @@ fun PostRenderer(
     content: PostContent,
     modifier: Modifier = Modifier,
     // #281 — opt-in, default OFF so callers make the choice explicitly and we never silently change
-    // surfaces outside scope (the editor BBCode preview and private-message thread keep their prior
-    // non-selectable behaviour). Topic posts pass `selectable = true`.
+    // surfaces outside scope (the editor BBCode preview and signatures keep their non-selectable
+    // rendering). Both reading surfaces — topic AND private messages since #1042 — pass
+    // `selectable = true` through ReadingPostCard, which keeps the capability structurally
+    // constant over the card's lifetime (#946).
     selectable: Boolean = false,
     // #699 — invoked with the cited post's `(page, numreponse)` when the reader taps a sourced
     // quote's header. Null (default) keeps the header inert — only the topic reading surface wires
@@ -418,17 +420,26 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
     }
 
     // Measure the not-yet-known URLs. Coil's execute() is a main-safe suspend call (it dispatches its
-    // own I/O), and reuses the shared SingletonImageLoader caches the rendering AsyncImage hits — so no
-    // double network fetch. A dead URL settles a PROBE failure on the ledger (TTL) so it is not
+    // own I/O). Public posts reuse the singleton loader's disk bytes for the subsequent painter; MP
+    // media deliberately disables disk caching, so a cold measurable URL costs a header probe plus
+    // the render fetch (#1096). A dead URL settles a PROBE failure on the ledger (TTL) so it is not
     // re-fetched. #813/#960 — the urls' ledger GENERATIONS key the effect (tracked reads): a
     // re-parsed page yields a structurally EQUAL `inlines` (remember keeps the same set instance),
     // so without them the effect never relaunched after a scoped retry bumped a failed url.
     val platformContext = LocalPlatformContext.current
+    val mediaDiskCachePolicy = LocalPostMediaDiskCachePolicy.current
     val mediaGenerations = measurableUrls.map { ledger.generationOf(it) }
-    LaunchedEffect(measurableUrls, mediaGenerations) {
+    LaunchedEffect(measurableUrls, mediaGenerations, mediaDiskCachePolicy) {
         val loader = SingletonImageLoader.get(platformContext)
         measurableUrls.forEach { url ->
-            measureAndCacheIntrinsicMediaSize(url, sizeCache, ledger, platformContext, loader)
+            measureAndCacheIntrinsicMediaSize(
+                url = url,
+                cache = sizeCache,
+                ledger = ledger,
+                context = platformContext,
+                imageLoader = loader,
+                diskCachePolicy = mediaDiskCachePolicy,
+            )
         }
     }
 
@@ -903,8 +914,8 @@ private fun CollapsedQuoteBlock(
 
 /**
  * #785 — placeholder for a quote whose author is black-listed, mirroring the [CollapsedQuoteBlock]
- * interaction (one-line label + « Afficher »/« Masquer », the whole frame toggles) and the topic
- * screen's `HiddenPostCard` copy (the pseudo stays visible, consistent with the post-level mask).
+ * interaction (one-line label + « Afficher »/« Masquer », the whole frame toggles) and the shared
+ * [HiddenPostCard] (the pseudo stays visible, consistent with the post-level mask).
  * The reveal is per-quote and transient (`rememberSaveable`, same lifetime as the other folds).
  * Unlike [CollapsedQuoteBlock] the reveal keeps the REAL depth (`quoteDepth + 1`, like the expanded
  * render): revealing a blocked quote must not grant extra nesting levels, and a blocked citation
@@ -1058,19 +1069,21 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
     // paragraph effect uses; the SnapshotStateMap write then recomposes this block onto the exact-box
     // path.
     val platformContext = LocalPlatformContext.current
+    val mediaDiskCachePolicy = LocalPostMediaDiskCachePolicy.current
     // #813/#960 parity (gate #957 r1, bloquant) : a structurally-promoted image renders here, so
     // the block path must honour the ledger exactly like the inline path — the measure effect
     // re-keys on the url's GENERATION (tracked read) and the painter attempt below is recreated
     // on a scoped retry.
     val ledger = LocalMediaAttemptLedger.current
     val mediaGeneration = ledger.generationOf(url)
-    LaunchedEffect(url, sizeCache, platformContext, mediaGeneration) {
+    LaunchedEffect(url, sizeCache, platformContext, mediaGeneration, mediaDiskCachePolicy) {
         measureAndCacheIntrinsicMediaSize(
             url = url,
             cache = sizeCache,
             ledger = ledger,
             context = platformContext,
             imageLoader = SingletonImageLoader.get(platformContext),
+            diskCachePolicy = mediaDiskCachePolicy,
         )
     }
 
@@ -1129,12 +1142,14 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
         // #831/#958 (Lot 2, §5) — contextual image menu on long-press + linked-image tap, BOTH gated
         // by the host capability below. A linked image (#257) gains its tap-through (opens linkUrl)
         // AND the long-press menu through ONE combinedClickable; an unlinked eligible image gets a
-        // long-press-ONLY handler. When the surface provides no actions (MP threads, editor preview,
-        // signatures: default null) the image is TOTALLY inert (no tap even if linked) — the Lot 2
-        // §5 target. data:/blob:/empty URLs are never menu-eligible.
+        // long-press-ONLY handler. When the surface provides no actions (editor preview, signatures
+        // and any host omitting the callback: default null) the image is TOTALLY inert — even when
+        // linked — the Lot 2 §5 target. data:/blob:/empty URLs are never menu-eligible.
         // #958 Lot 2 (§5) — the HOST capability (LocalPostImageActions != null) gates ALL image
-        // interaction. On the three null hosts (MP, editor preview, signature) the block image is
-        // TOTALLY inert — no tap (even linked), no long-press, no interactive role (matrice §5).
+        // interaction. On a null host (including editor preview and signature) the block image is
+        // TOTALLY inert — no tap (even linked), no long-press. Its image composable still exposes
+        // the content Role.Image from its non-null contentDescription on both active and inert
+        // hosts; only OnClick / OnLongClick discriminate the host's interactive capability.
         // Two independent gates (Sol reserve): the TAP-to-open-link depends on `linkUrl != null`
         // (NOT on the image URL's menu-eligibility) ; the long-press MENU depends on the image URL
         // being eligible. Role.Image + onClickLabel « Ouvrir l'image » ([AMENDEMENT-Lot2-2] : Role.Link
@@ -1190,9 +1205,10 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
         // cold→measured recreates request + painter (exactly one new decode). Cold: constraint-
         // driven as before (the §6 slot is fixed until the measurement lands).
         val decodeSize = measured?.let { decodeSizePx(displayPx!!.width, it) }
-        val request = remember(url, animationsEnabled, platformContext, decodeSize) {
+        val request = remember(url, animationsEnabled, platformContext, decodeSize, mediaDiskCachePolicy) {
             ImageRequest.Builder(platformContext)
                 .data(url)
+                .diskCachePolicy(mediaDiskCachePolicy.coilPolicy)
                 // #249 — fondu natif Coil dans la box déjà dimensionnée → zéro saut. Désactivé quand le
                 // système demande de réduire les animations (apparition directe, §4 de l'issue).
                 .crossfade(animationsEnabled)
@@ -2026,15 +2042,17 @@ internal fun imageInlineContent(
         // painted the previous tiny bitmap upscaled → pixelated). Smileys keep their own (much
         // smaller) path.
         val context = LocalPlatformContext.current
+        val mediaDiskCachePolicy = LocalPostMediaDiskCachePolicy.current
         // #959 (§7) — the decode size is the calculator's output carried by the box (bucketed
         // width, common-factor caps, height derived from the final width). It KEYS the remember:
         // cold→measured flips the key and recreates request + painter = exactly one new decode
         // (Sol r1 blocker #4 — no reliance on the refresh generation alone). The cold/cc slots
         // (decodeSize == null) decode at one 256 bucket — the slot is a one-line square, and the
         // measured request takes over as soon as the header-only probe lands.
-        val request = remember(image.url, context, box.decodeSize) {
+        val request = remember(image.url, context, box.decodeSize, mediaDiskCachePolicy) {
             ImageRequest.Builder(context)
                 .data(image.url)
+                .diskCachePolicy(mediaDiskCachePolicy.coilPolicy)
                 .size(
                     box.decodeSize?.width ?: DECODE_BUCKET_PX,
                     box.decodeSize?.height ?: DECODE_BUCKET_PX,
@@ -2046,10 +2064,12 @@ internal fun imageInlineContent(
         // #831/#958 (Lot 2, §5) — the lambda of an InlineTextContent is @Composable, so the
         // CompositionLocals are read HERE, without touching the invariant AnnotatedString (#175)
         // nor the remember keys of ParagraphBlock. The HOST capability (LocalPostImageActions
-        // != null) gates ALL interaction of a content image: on the three null hosts (MP, editor
-        // preview, signature) the image is TOTALLY inert — no tap even when [linkUrl] is set, no
-        // long-press, no interactive role. Two independent gates (Sol reserve): the TAP-to-open-
-        // link depends on `linkUrl != null` (threaded from the LinkAnnotation split), the
+        // != null) gates ALL interaction of a content image: on a null host (including editor
+        // preview and signature) the image is TOTALLY inert — no tap even when [linkUrl] is set, no
+        // long-press. Its image composable still exposes the content Role.Image from its non-null
+        // contentDescription on both active and inert hosts; only OnClick / OnLongClick
+        // discriminate the host's capability. Two independent gates (Sol reserve): the TAP-to-
+        // open-link depends on `linkUrl != null` (threaded from the LinkAnnotation split), the
         // long-press MENU on the image URL's eligibility; both live in ONE combinedClickable, so
         // tap and long-press are mutually exclusive by construction. Role.Image + onClickLabel
         // « Ouvrir l'image » ([AMENDEMENT-Lot2-2] : Role.Link does not exist in Compose 1.11.x).
@@ -2266,6 +2286,14 @@ internal fun smileyInlineContent(
             TransientSmileyToken(description)
             return@InlineTextContent
         }
+        val context = LocalPlatformContext.current
+        val mediaDiskCachePolicy = LocalPostMediaDiskCachePolicy.current
+        val request = remember(url, context, mediaDiskCachePolicy) {
+            ImageRequest.Builder(context)
+                .data(url)
+                .diskCachePolicy(mediaDiskCachePolicy.coilPolicy)
+                .build()
+        }
         // #960 (§6, Sol P1 blocker 2) — the smiley painter obeys V2 like every media: ONE painter
         // attempt per (url, generation), the concurrent occurrences of a sprite hold an empty
         // box for the frame(s) until the winner settles. A granted failure settles through
@@ -2276,7 +2304,7 @@ internal fun smileyInlineContent(
             attempt.failedFresh -> TransientSmileyToken(description)
 
             attempt.renderPainter -> SubcomposeAsyncImage(
-                model = url,
+                model = request,
                 contentDescription = description,
                 contentScale = PostMediaDisplayPolicy.smileyContentScale,
                 modifier = Modifier.fillMaxSize(),

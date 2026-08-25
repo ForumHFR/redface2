@@ -30,20 +30,21 @@ import androidx.compose.ui.semantics.semantics
  *
  * A `Card` over [MaterialTheme.colorScheme.surfaceContainer] (the neutral card colour both screens
  * already used) with the slots stacked top to bottom:
- *  - [header] (mandatory) — the poster identity. The topic wraps it in a tinted [PostIdentityBand]
- *    (full-width identity strip, anchor tint for #104); the MP passes a plain [PostIdentityHeader].
- *    The shell does NOT draw the band itself: a band is a topic affordance, and baking it here would
- *    force the band-less MP into a tinted-strip model it does not want.
- *  - [badges] (optional) — citation/multi-quote pills on the topic (#239/#436); `null` on the MP.
- *  - [body] (mandatory) — the rendered post (the call-site supplies its own [PostRenderer], choosing
- *    `selectable` itself — selection is a topic affordance #281, off for the MP, so it is NOT decided
- *    here).
- *  - [footer] (optional) — the actions row (Citer/Modifier/multi-quote) on the topic; `null` on the MP.
+ *  - [header] (mandatory) — the poster identity. Both reading hosts wrap their
+ *    [PostIdentityHeader] in a full-width [PostIdentityBand]: the topic owns its variable anchor tint
+ *    (#104), while the MP owns a fixed identity tint. The shell does NOT draw the band itself because
+ *    its colour remains a feature decision.
+ *  - [badges] (optional) — citation/multi-quote pills on the topic (#239/#436), or the
+ *    data-driven citation-count pill on a private message (#1051).
+ *  - [body] (mandatory) — the rendered post (the call-site supplies its own [PostRenderer] and owns
+ *    its `selectable` choice — the shell decides nothing here; since #1042 both reading surfaces
+ *    mount their body through `ReadingPostCard`, whose selection is constant by construction #946).
+ *  - [footer] (optional) — the feature-owned actions row: topic actions or MP « Citer » (#1074).
  *
  * [border] is the topic's multi-quote outline (#436), `null` for the MP. Body/header padding is the
- * slot's own job (the densities differ: the topic reads its gutters from the display-metrics preset,
- * the MP uses a fixed 16.dp) so the shell adds no padding of its own — it is purely the vertical
- * stack inside a `Card`. `selectable`/highlight tinting are deliberately NOT handled here.
+ * slot's own job (both reading hosts read their gutters from the display-metrics preset since #1042,
+ * each reinjecting them on its own slots) so the shell adds no padding of its own — it is purely the
+ * vertical stack inside a `Card`. `selectable`/highlight tinting are deliberately NOT handled here.
  *
  * [flat] is the full-width mode (#884 — « posts en pleine largeur ») : the SAME `Card` (the node
  * structure never changes, so slot memoization stays positional — the #946 guarantee) rendered
@@ -139,15 +140,15 @@ val PostCardShellContainerColorKey = SemanticsPropertyKey<Color>("PostCardShellC
 /**
  * #351/#104 — a tinted identity strip: a full-width [Surface] across the top of the card that hosts
  * the [content] (a [PostIdentityHeader]). Extracted as its own primitive (per the Codex framing)
- * instead of a flag on [PostCardShell], so the band-less private-message card never inherits a strip
- * it does not use.
+ * instead of a flag on [PostCardShell], so each reading host opts into the strip and owns its tint.
  *
  * The tint is the call-site's decision, not `:core:ui`'s: [containerColor] is passed in (the topic
  * supplies `tertiaryContainer` for the scroll-anchor post #104 — quote link / deep link / last-read
- * landing — and `secondaryContainer` otherwise; that semantics lives in the feature, not here). The
- * `Surface` derives `LocalContentColor` from [containerColor] for the header's pseudo, and the
- * enclosing `Card` clips the strip to its rounded corners. The strip's inner padding is the call-site's
- * job (the topic reads it from its density preset), so the band adds none.
+ * landing — and `secondaryContainer` otherwise; the MP always supplies `secondaryContainer`). That
+ * semantics lives in the feature, not here. The `Surface` derives `LocalContentColor` from
+ * [containerColor] for the header's pseudo, and the enclosing `Card` clips the strip to its shape
+ * (rounded inset card or rectangle in full-width mode). The strip's inner padding is the call-site's
+ * job, so the band adds none.
  */
 @Composable
 fun PostIdentityBand(

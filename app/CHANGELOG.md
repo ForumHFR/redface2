@@ -16,6 +16,205 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.43.0` — `open` (bêta) — 2026-08-25
+
+Promotion bêta du chantier de **parité de lecture Sujet ↔ Conversations privées** ([#1040](https://github.com/ForumHFR/redface2/issues/1040)), livré en dev de `0.42.0` à `0.42.8`.
+
+Les conversations privées lisent désormais avec la même surface que les sujets : même carte, mêmes gestes, même chrome de pagination, mêmes affordances.
+
+### Ajouté
+
+- **Zoom pincé, balayage de page, double-tap pour rafraîchir, tirer-pour-rafraîchir** dans les conversations privées, sur les moteurs partagés avec les sujets. Pendant un zoom, les autres gestes sont **désarmés**, pas seulement leur effet.
+
+- **Le chrome de pagination des sujets** : sélecteur de page en barre, cluster de boutons flottants dont l'appui long saute à la première ou à la dernière page.
+
+- **La position de lecture de chaque page est retrouvée** en revenant dessus. L'atterrissage est arbitré : message cité explicite, puis position mémorisée, puis haut de page.
+
+- **Citer plusieurs messages d'un coup**, avec un panier et une affordance directe au pied de chaque carte — comme dans les sujets.
+
+- **Le menu d'un message s'ouvre par le `⋯` de l'en-tête.** L'appui long sur la carte ne fait plus rien : il levait deux gestes à la fois, la sélection de texte et le menu.
+
+- **Liste noire, EgoQuote/EgoPost, pleine largeur, densité, signatures, marqueur d'édition** : les préférences de lecture des sujets s'appliquent aux messages privés.
+
+- **Cache disque des conversations privées**, opt-in, **désactivé par défaut** — la seule fonction qui écrit vos messages privés sur le disque. Désactiver efface immédiatement, et les octets sont réellement écrasés.
+
+### Corrigé
+
+- **Les images des conversations privées ne sont plus écrites sur le disque** et ne survivent plus à la déconnexion.
+- **Le saut vers un message cité fonctionne en authentifié**, sujets compris.
+- Le préchargement des pages voisines est **borné** : jamais depuis la liste, jamais sur disque.
+
+### Interne
+
+- Migration de schéma 16 → 17, **irréversible sans désinstallation**, sans écriture de données.
+- Matrice de parité : **29 fonctions livrées sur 32**, 2 impossibles côté serveur, 1 en attente de preuve.
+
+---
+
+## `0.42.8` — `internal` (dev) — 2026-08-25
+
+Lot 7 du chantier de parité de lecture Sujet ↔ Conversations privées ([#1040](https://github.com/ForumHFR/redface2/issues/1040), lot [#1097](https://github.com/ForumHFR/redface2/issues/1097)) : le cache disque des conversations privées, **désactivé par défaut**.
+
+### Ajouté
+
+- **Garder les conversations privées en cache sur l'appareil** ([#1097](https://github.com/ForumHFR/redface2/issues/1097)), nouveau réglage dans « Messages privés », **désactivé par défaut**. Activé, il permet d'afficher immédiatement une page déjà lue, même après avoir fermé l'application — la page s'affiche à titre **provisoire** et le rechargement réseau reste obligatoire.
+
+  **C'est la seule fonction de l'application qui écrit le contenu de vos messages privés sur le disque de l'appareil**, d'où le défaut à « désactivé » et la confirmation explicite avant activation. Le réglage vaut pour **tous les comptes** utilisés sur l'appareil.
+
+  **Désactiver efface immédiatement.** La déconnexion et le changement de compte effacent aussi les données du compte sortant. L'effacement ne se contente pas de supprimer les lignes : les octets sont réellement écrasés dans le fichier de base de données — décision documentée en [ADR-018](https://forumhfr.github.io/redface2/adr/018-mp-cache-disque-opt-in). Si un effacement échoue, la fonction se verrouille en lecture comme en écriture et réessaie au démarrage suivant, plutôt que de se réactiver silencieusement.
+
+  Le préchargement des pages voisines n'écrit **jamais** sur le disque, réglage activé ou non.
+
+### Interne
+
+- **Migration de schéma de base de données 16 → 17** ([#1135](https://github.com/ForumHFR/redface2/issues/1135)). Elle est **irréversible sans désinstallation** : une fois la base migrée, revenir à un binaire antérieur demande de réinstaller l'application. **Aucune donnée n'est écrite** par cette migration — les tables ajoutées restent vides tant que le réglage ci-dessus n'est pas activé.
+
+- Outillage de capture des preuves serveur manquantes du chantier ([#1107](https://github.com/ForumHFR/redface2/issues/1107)) : quatre cas ajoutés au script de capture, dont un contrôle positif qui était structurellement inopérant depuis sa livraison.
+
+---
+
+## `0.42.7` — `internal` (dev) — 2026-08-25
+
+Lot 6 du chantier de parité de lecture Sujet ↔ Conversations privées ([#1040](https://github.com/ForumHFR/redface2/issues/1040), lot [#1103](https://github.com/ForumHFR/redface2/issues/1103)) : les conversations privées reçoivent les affordances de lecture qui leur manquaient encore.
+
+### Ajouté
+
+- **Les conversations privées retrouvent la position de lecture de chaque page** ([#1103](https://github.com/ForumHFR/redface2/issues/1103)). Revenir sur une page déjà lue reprend là où on s'était arrêté, au lieu de remonter en haut. L'atterrissage est arbitré : un message cité explicite l'emporte sur la position mémorisée, qui l'emporte sur le haut de page. La position vit uniquement en mémoire, le temps de la session d'affichage — rien sur disque, tout purgé à la déconnexion.
+
+- **Les conversations privées ont le chrome de pagination des sujets** ([#1103](https://github.com/ForumHFR/redface2/issues/1103)) : sélecteur de page en barre, et cluster de boutons flottants dont l'appui long saute à la première ou à la dernière page. Les rangées de boutons inline disparaissent.
+
+- **La carte d'un message privé a les affordances de la carte de sujet** ([#1117](https://github.com/ForumHFR/redface2/issues/1117), [#1102](https://github.com/ForumHFR/redface2/issues/1102)) : le menu s'ouvre par le `⋯` de l'en-tête, et l'ajout au panier de citations est une affordance directe au pied de la carte.
+
+  **L'appui long sur la carte ne fait plus rien**, par parité stricte avec les sujets. Il levait jusqu'ici deux gestes d'un coup — la barre de sélection Android *et* la feuille de menu.
+
+- **Le double-tap rafraîchit une conversation privée**, comme dans les sujets ([#1103](https://github.com/ForumHFR/redface2/issues/1103)).
+
+### Corrigé
+
+- **Le balayage horizontal de page des conversations privées est durci au niveau de celui des sujets** ([#1103](https://github.com/ForumHFR/redface2/issues/1103), [#936](https://github.com/ForumHFR/redface2/issues/936), [#752](https://github.com/ForumHFR/redface2/issues/752)) : glissement de la page sortante, annulation dès qu'un second doigt se pose, et zone morte le long des bandes système. Quand la page visée n'est pas en cache, la page courante reste lisible sous l'indicateur au lieu de glisser dans le vide, et un échec réseau laisse le geste réarmable.
+
+### Interne
+
+- Correction des affirmations périmées des pages de specs et câblage aux issues correspondantes ([#1115](https://github.com/ForumHFR/redface2/issues/1115)).
+
+---
+
+## `0.42.6` — `internal` (dev) — 2026-08-18
+
+### Ajouté
+
+- **Citer plusieurs messages d'une conversation privée à la fois** ([#1074](https://github.com/ForumHFR/redface2/issues/1074), chantier de parité [#1040](https://github.com/ForumHFR/redface2/issues/1040)). Le menu d'un message permet de l'ajouter à un panier de citations, et un bouton « Citer N » ouvre l'éditeur avec toutes les citations. Appui long pour vider le panier. Un message masqué par la liste noire quitte le panier automatiquement.
+
+- **Le zoom pincé fonctionne dans les conversations privées** ([#1040](https://github.com/ForumHFR/redface2/issues/1040) lot 6). Le moteur est désormais partagé avec les sujets, à rendu identique au pixel près. Pendant un zoom, le défilement, le balayage de page et le tirer-pour-rafraîchir sont suspendus — le geste lui-même est désarmé, pas seulement son effet.
+
+- **Appuyer sur l'en-tête d'une citation amène au message cité**, dans les conversations privées ([#1074](https://github.com/ForumHFR/redface2/issues/1074)). La page se charge si nécessaire, puis l'atterrissage se fait sur le bon message.
+
+### Corrigé
+
+- **Les images des conversations privées ne sont plus écrites sur le disque de l'appareil** ([#1096](https://github.com/ForumHFR/redface2/issues/1096)). Elles l'étaient jusqu'ici par défaut, et **survivaient à la déconnexion**. La déconnexion et le changement de compte vident désormais le cache d'images — celui des sujets publics aussi, faute de pouvoir distinguer les entrées déjà écrites.
+
+  Conséquence visible : enregistrer une image d'un message privé la retélécharge au lieu de la lire sur le disque.
+
+- **Le saut vers un message cité fonctionnait pour personne de connecté**, sujets compris ([#625](https://github.com/ForumHFR/redface2/issues/625)). Le lien servi en mode authentifié n'a pas la forme du lien public, et il n'était pas reconnu.
+
+- Un chargement de conversation qui n'aboutissait ni en contenu ni en erreur laissait un indicateur sans issue ; il propose maintenant de réessayer ([#1086](https://github.com/ForumHFR/redface2/issues/1086)).
+
+---
+
+## `0.42.5` — `internal` (dev) — 2026-08-16
+
+### Ajouté
+
+- **Les conversations privées gardent leurs pages en mémoire et préchargent les pages voisines** ([#1080](https://github.com/ForumHFR/redface2/issues/1080), chantier de parité [#1040](https://github.com/ForumHFR/redface2/issues/1040)). Revenir sur une page déjà lue l'affiche immédiatement au lieu de repartir en réseau, et la page suivante ou précédente est chargée d'avance pendant la lecture. Le cache vit uniquement en mémoire : rien sur disque, rien qui survive à la fermeture de l'app, et tout est purgé à la déconnexion comme au changement de compte.
+
+  Le préchargement est **borné** : uniquement les pages adjacentes de la conversation ouverte et affichée, jamais depuis la liste. Prélire une conversation non ouverte effacerait un non-lu que personne n'a vu, et retirerait l'utilisateur de la liste « pas lu par » des autres participants d'un MultiMP.
+
+### Corrigé
+
+- **Quitter un écran interrompt réellement ses requêtes réseau en cours** ([#1079](https://github.com/ForumHFR/redface2/issues/1079)). L'annulation s'arrêtait jusqu'ici à la coroutine sans atteindre la requête elle-même, qui continuait jusqu'à la réponse du serveur. Sans conséquence visible sur les sujets publics, mais c'est la condition qui borne le préchargement des conversations privées.
+
+### Interne
+
+- Outillage de capture des preuves serveur manquantes du lot 4 ([#1082](https://github.com/ForumHFR/redface2/issues/1082), [#1084](https://github.com/ForumHFR/redface2/issues/1084)).
+
+---
+
+## `0.42.4` — `internal` (dev) — 2026-08-16
+
+### Ajouté
+
+- **Citer un message dans une conversation privée** : l'action « Citer » apparaît dans le pied de chaque message et ouvre l'éditeur avec la citation déjà en place ([#1074](https://github.com/ForumHFR/redface2/issues/1074), chantier de parité [#1040](https://github.com/ForumHFR/redface2/issues/1040)). Le serveur exposait ce lien sur les pages `cat=prive` depuis toujours ; c'est l'app qui n'en faisait rien. Le contrat a été mesuré avant d'être implémenté (spike [#1041](https://github.com/ForumHFR/redface2/issues/1041)) et le texte de citation renvoyé par HFR est réutilisé verbatim, jamais reconstruit localement.
+
+  **Limitation en MultiMP (DT)** : les deux formulaires de réponse DT capturés portent un champ que la validation de citation rejette. En DT, l'action est donc masquée ou échoue explicitement, tant que le formulaire de citation DT n'a pas été capturé. La citation multiple reste absente des deux.
+
+### Interne
+
+- La carte de message MP a désormais un **contrôle visuel** (capture Roborazzi record-only à 360 dp), que la surface de lecture privée n'avait pas — c'est ce trou qui avait laissé partir en `0.42.2` un bandeau d'identité décalé vers le bas.
+
+---
+
+## `0.42.3` — `internal` (dev) — 2026-08-16
+
+### Ajouté
+
+- **Les pseudos de la poignée de créateurs de Redface 2 recensés dans la liste statique embarquée sont désormais dorés dans les conversations privées**, comme dans les sujets ([#1060](https://github.com/ForumHFR/redface2/issues/1060), chantier de parité [#1040](https://github.com/ForumHFR/redface2/issues/1040)).
+
+### Corrigé
+
+- **Le contenu du bandeau d'identité des cartes MP était décalé vers le bas depuis son arrivée en 0.42.2 ; il est désormais recentré verticalement.** Ce défaut a été constaté par **XaTriX** sur son téléphone, alors que ni les tests ni les relectures ne l'avaient vu.
+
+### Interne
+
+- `CreatorPseudoText` est promu dans `:core:ui` en feuille de rendu doré constante, partagée entre Topic et MP ; la détection des créateurs reste à la charge de l'appelant.
+- Contrat d'accessibilité du slot de pseudo : lorsqu'il est fourni, le pseudo porte lui-même le `heading` du message ; l'en-tête n'en ajoute aucun autour afin d'éviter un doublon.
+
+## `0.42.2` — `internal` (dev) — 2026-08-16
+
+### Ajouté
+
+- **Un appui long sur un message privé ouvre désormais un menu** ([#1051](https://github.com/ForumHFR/redface2/issues/1051)) : copier le texte, ouvrir le profil de l'auteur, ou le bloquer et le débloquer. La réserve de la 0.42.1 est donc levée : il n'est plus nécessaire de passer par un sujet pour bloquer un auteur depuis une conversation privée.
+- **Les cartes de messages privés affichent désormais le même bandeau d'identité teinté que les posts de sujet**, en tête de carte.
+- **Le menu contextuel d'un message de sujet propose désormais « Copier le texte »** ([#1051](https://github.com/ForumHFR/redface2/issues/1051)).
+
+### Interne
+
+- Un audit slot par slot a confirmé que le bandeau d'identité était le seul écart visuel non tracé entre les cartes Topic et MP : la matrice de parité suit les capacités, pas la composition de la carte. Sa teinte reste fixe et indépendante d'EgoPost, comme côté sujet.
+- Le marqueur d'édition et le compteur de citations sont câblés dans la carte et le menu MP, mais restent invisibles : les pages MP observées ne fournissent pas ces données.
+
+## `0.42.1` — `internal` (dev) — 2026-08-15
+
+### Ajouté
+
+- **Les conversations privées suivent désormais le mode pleine largeur quand il est activé** ([#1050](https://github.com/ForumHFR/redface2/issues/1050)). Ce réglage reste désactivé par défaut : la présentation ne change donc pas tant que vous ne l'activez pas.
+- **EgoPost donne désormais un fond distinct à vos propres messages privés, et EgoQuote met en évidence les citations qui vous reprennent** ([#1050](https://github.com/ForumHFR/redface2/issues/1050)). Ces deux réglages, indépendants et déjà activés par défaut, s'appliquent maintenant aussi aux MP.
+- **Les auteurs inscrits dans votre liste noire sont désormais masqués dans les conversations privées, y compris lorsqu'un tiers les cite** ([#1050](https://github.com/ForumHFR/redface2/issues/1050)). Pour bloquer un auteur depuis un message, il faut encore passer par un sujet : le menu de message n'existe pas encore côté MP.
+
+### Interne
+
+- Une bascule directe de compte purge désormais l'état privé de la conversation avant de charger le nouveau compte. Auparavant, si ce chargement échouait, le contenu du compte précédent pouvait rester affiché.
+- Le rendu des signatures est câblé dans la carte MP, mais les pages HFR observées ne fournissent aucune signature : aucun affichage en conditions réelles n'est donc revendiqué.
+- La matrice de parité [#1040](https://github.com/ForumHFR/redface2/issues/1040) rattache quatre lignes jusque-là orphelines aux composants qui les portent réellement.
+
+## `0.42.0` — `internal` (dev) — 2026-08-15
+
+### Ajouté
+
+- **Un appui long sur une image d'un message privé ouvre désormais le menu contextuel** ([#1051](https://github.com/ForumHFR/redface2/issues/1051)) : enregistrer l'image, copier son URL ou l'ouvrir dans le navigateur, alors qu'aucune action n'était proposée auparavant.
+- **Les conversations privées suivent désormais le préréglage de densité du lecteur** ([#1042](https://github.com/ForumHFR/redface2/issues/1042)) : leurs gouttières et leur inset haut ne restent plus figés à 16 dp ; la gouttière du corps mesure 12 dp avec le préréglage Comfort.
+- **Le texte d'un message privé est sélectionnable et copiable**, comme dans un sujet ([#1042](https://github.com/ForumHFR/redface2/issues/1042)).
+- **Un tap sur l'avatar ou le pseudo d'un message privé ouvre le profil**, quand la page expose le lien ([#1042](https://github.com/ForumHFR/redface2/issues/1042)).
+
+### Corrigé
+
+- **Le dernier message d'une conversation et sa rangée de pagination passaient sous le bouton flottant « Répondre »** ([#1046](https://github.com/ForumHFR/redface2/issues/1046)). La liste réserve désormais le dégagement nécessaire.
+
+### Interne
+
+- Le chantier de parité de lecture [#1040](https://github.com/ForumHFR/redface2/issues/1040) rend explicite une dette jusque-là invisible : entre le 20 juin et le 12 août, 74 commits ont touché la surface Topic contre 7 pour les MP, sans document pour tracer l'écart. Une matrice ancrée au code et à des fixtures réelles suit désormais chaque fonction.
+- La carte `ReadingPostCard` et le menu d'image ont été promus dans `:core:ui` pour servir Topic et MP ; les contrats de citation MP reposent sur des fixtures réduites, et le modèle expose une projection texte complète du contenu des posts.
+
+---
+
 ## `0.41.0` — `open` (beta) — 2026-08-11
 
 Promue en bêta le 11/08 sans changement de `versionName` : le lot dev 0.41.0 du 10/08 part tel quel

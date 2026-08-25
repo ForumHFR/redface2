@@ -95,9 +95,12 @@ import androidx.navigation3.scene.Scene
 import androidx.navigation3.ui.NavDisplay
 import fr.forumhfr.redface2.BuildConfig
 import fr.forumhfr.redface2.R
+import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.ui.R as CoreUiR
 import fr.forumhfr.redface2.core.model.AuthState
-import fr.forumhfr.redface2.core.model.write.QuotedPostPreview
+import fr.forumhfr.redface2.core.model.write.PrivateMessageQuote
+import fr.forumhfr.redface2.core.model.write.QuoteScope
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageSummary
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.shouldRevealNavBar
@@ -122,6 +125,7 @@ import fr.forumhfr.redface2.feature.messages.MessagesScreen
 import fr.forumhfr.redface2.feature.messages.PrivateMessageComposeScreen
 import fr.forumhfr.redface2.feature.messages.PrivateMessageReplyRequest
 import fr.forumhfr.redface2.feature.messages.PrivateMessageReplyScreen
+import fr.forumhfr.redface2.feature.messages.PrivateMessageSubmitResult
 import fr.forumhfr.redface2.feature.messages.PrivateMessageThreadRequest
 import fr.forumhfr.redface2.feature.messages.PrivateMessageThreadScreen
 import fr.forumhfr.redface2.feature.profile.ProfilePreviewSheet
@@ -176,11 +180,9 @@ data class PrivateMessageThreadRoute(
     val threadId: Int,
     val page: Int = 1,
     /**
-     * #301 — bumped to `System.currentTimeMillis()` by the navigation host when the private-message
-     * reply editor pops back after a successful send. The new value invalidates the route key so a
-     * fresh [PrivateMessageThreadViewModel] is created and re-fetches the conversation (there is no MP
-     * cache, so a new entry always hits the network) — without it, returning to the retained entry
-     * would show the conversation as it was before the reply. `null` on every normal nav path.
+     * DEAD since #1040 lot 6 (PR 2) — the editor outcome now reaches the retained conversation
+     * ViewModel through an in-memory, account/thread-scoped handoff. Kept unread for navigation
+     * serialization compatibility: removing a route field is outside this PR.
      */
     val submitSignal: Long? = null,
 ) : RedfaceNavKey
@@ -197,7 +199,22 @@ data class PrivateMessageReplyRoute(
      * no custom NavType.
      */
     val openRecipientManager: Boolean = false,
-) : RedfaceNavKey
+    /** #1074 — cited message id; null together with [quoteRef] for a simple reply. */
+    val quotedNumreponse: Int? = null,
+    /** #1074 — server-provided 1-based rank in the source page; never guessed or omitted. */
+    val quoteRef: Int? = null,
+) : RedfaceNavKey {
+    init {
+        require((quotedNumreponse == null) == (quoteRef == null)) {
+            "Private-message quote target and ref must be present together"
+        }
+        require(!openRecipientManager || quotedNumreponse == null) {
+            "Private-message quote cannot open the recipient manager"
+        }
+        quotedNumreponse?.let { require(it > 0) { "Private-message quote target must be positive" } }
+        quoteRef?.let { require(it >= 1) { "Private-message quote ref must be 1-based" } }
+    }
+}
 
 /**
  * #301 follow-up — standalone new-conversation composer, pushed from the MP list's « Nouveau »
@@ -1029,6 +1046,9 @@ fun RedfaceApp(intent: Intent?) {
         // every tab (Hilt hands back the same scoped instance for an identical owner).
         val accountViewModel: AppAccountViewModel = hiltViewModel()
         val authState by accountViewModel.authState.collectAsStateWithLifecycle()
+        val authenticatedCanonicalPseudo = (authState as? AuthState.Authenticated)
+            ?.pseudo
+            ?.let(::canonicalizePseudo)
         // #479 — avatar of the connected user for the top-bar account badge (null → pseudo initial).
         val accountAvatarUrl by accountViewModel.avatarUrl.collectAsStateWithLifecycle()
         // #718 — GLOBAL avatar appearance (border + background) for the top-bar account badge.
@@ -1083,12 +1103,20 @@ fun RedfaceApp(intent: Intent?) {
         // appears at the top (its thread id is unknown — the bddpost success response of a new MP
         // is not topic-shaped). In-memory only, like the other private-message hints above.
         var privateMessageSentSignal by remember { mutableStateOf<Long?>(null) }
+        // #1040 lot 6 — successful reply outcome owed to the RETAINED conversation ViewModel.
+        // Keyed by canonical account + thread, never serialized; the event counter prevents replay.
+        var privateMessagePendingSubmit by remember {
+            mutableStateOf<PrivateMessagePendingSubmit?>(null)
+        }
+        var privateMessageSubmitEventId by remember { mutableStateOf(0L) }
 
-        // Bug fix (build 89) — per-topic title cache keyed by (cat, post). A page change replaces the
-        // TopicRoute (new nav entry → new ViewModel → Loading with no topic), which used to flash the
-        // generic « Sujet » title in the top bar. The topic screen reports its loaded title here; the
-        // next page reads it back via TopicRequest.titleHint. Hoisted above NavDisplay so it survives
-        // the entry recreation; keyed by (cat, post) so titles never bleed across categories.
+        // Bug fix (build 89) — per-topic title cache keyed by (cat, post). Historical trigger: a page
+        // change used to replace the TopicRoute (new nav entry → new ViewModel → Loading with no
+        // topic), flashing the generic « Sujet » title in the top bar. Since #895 étape 4 in-topic
+        // page changes keep the entry; the cache still serves FRESH entries on an already-visited
+        // topic (TopicRequest.titleHint — reopening from a list, a deep link, back navigation).
+        // Hoisted above NavDisplay so it survives the entry recreation; keyed by (cat, post) so
+        // titles never bleed across categories.
         var topicTitleCache by remember { mutableStateOf(emptyMap<TopicTitleKey, String>()) }
 
         // #307 — per-page scroll anchors keyed by (cat, post, page), twin of topicTitleCache. The
@@ -1105,25 +1133,28 @@ fun RedfaceApp(intent: Intent?) {
         // shows the cached page until a manual refresh (same stance as the other transient slots).
         var topicPendingSubmit by remember { mutableStateOf<TopicPendingSubmit?>(null) }
         var topicSubmitEventId by remember { mutableStateOf(0L) }
-        // #291 — multi-quote basket: numreponses selected for quoting, in tap order, keyed by
-        // (cat, post) so a page change (which destroys the topic nav entry, cf. titles above)
-        // keeps the cross-page selection while a different topic never sees it. One basket at a
-        // time (selecting in another topic resets it — quoting is a single-topic act). Plain
-        // remember: losing it on process death just means re-selecting, like the markers above.
+        // #291/#1074 — multi-quote basket: selections retained in tap order, keyed by a typed
+        // scope so the selection survives the editor round-trip and re-entering the topic
+        // (and, pre-#895 étape 4, the per-page entry swap — the original trigger for hoisting it
+        // here) while another topic or private conversation never sees it. One basket at a time
+        // (selecting in another scope resets it — quoting is a single-target act). Plain remember:
+        // losing it on process death just means re-selecting, like the markers above.
         var multiQuoteBasket by remember { mutableStateOf<MultiQuoteBasket?>(null) }
-        // #604 lot 3 — quote cards handed to the NEXT full-screen editor (mockup P3) : set right
-        // before pushing a PostEditorRoute (« Citer N » or a sheet escalation), consumed ONCE by
+        // #604/#1074 — scoped quote selections handed to the NEXT full-screen editor (mockup P3):
+        // set immediately before pushing a topic or MP editor (« Citer N » or a sheet escalation),
+        // consumed ONCE by
         // the editor entry (read into the request, then cleared) so a later editor can never
         // resurrect a stale citation set. In-memory on purpose — the cards are transient by
         // decision (lot 2) : a process death keeps the #405 draft text but drops the cards.
         // #868-#870 — carries `consumesBasket` too (cf. EditorQuotesHandoff).
         var pendingEditorQuotes by remember { mutableStateOf<EditorQuotesHandoff?>(null) }
         // #465 — per-topic MANUAL poll-expansion choice, keyed by (cat, post) (one poll per topic),
-        // twin of topicTitleCache / topicScrollAnchorCache: a page change replaces the TopicRoute
-        // (new nav entry → new ViewModel), so a `rememberSaveable` toggle inside the poll card was
-        // re-seeded to the global default on every page. Hoisted above NavDisplay so collapsing /
-        // expanding a poll survives navigation between the topic's pages. Absence of a key = follow
-        // the `topicPollsExpanded` default; the toggle records the manual choice here. RAM/session
+        // twin of topicTitleCache / topicScrollAnchorCache. Historical trigger: a page change
+        // replaced the TopicRoute (new nav entry → new ViewModel), re-seeding a `rememberSaveable`
+        // toggle inside the poll card to the global default on every page. Since #895 étape 4 the
+        // entry survives page changes; hoisting still makes the choice survive leaving and
+        // reopening the topic within the session. Absence of a key = follow the
+        // `topicPollsExpanded` default; the toggle records the manual choice here. RAM/session
         // only, never serialized into a route.
         var topicPollExpansionCache by remember { mutableStateOf(emptyMap<TopicPollKey, Boolean>()) }
 
@@ -1150,6 +1181,7 @@ fun RedfaceApp(intent: Intent?) {
             // logout ; reload from generation 1 on a fresh authentication).
             lastReconciledGeneration = 0
             privateMessageSentSignal = null
+            privateMessagePendingSubmit = null
             // #291 — a write intention armed under another session must not survive the
             // transition (Codex review: stale « Citer N » after logout/login).
             multiQuoteBasket = null
@@ -1319,6 +1351,35 @@ fun RedfaceApp(intent: Intent?) {
                                 privateMessageSentSignal = System.currentTimeMillis()
                             },
                         ),
+                        privateMessageSubmitNavState = PrivateMessageSubmitNavState(
+                            account = authenticatedCanonicalPseudo,
+                            pending = privateMessagePendingSubmit,
+                            onPublish = { threadId, page ->
+                                authenticatedCanonicalPseudo?.let { account ->
+                                    // A retained nav-entry ViewModel survives activity recreation,
+                                    // while this plain remember counter does not. Seed from wall time
+                                    // so the first post-recreation event cannot reuse the last small
+                                    // id remembered by that ViewModel; maxOf keeps rapid sends strict.
+                                    privateMessageSubmitEventId = maxOf(
+                                        privateMessageSubmitEventId + 1,
+                                        System.currentTimeMillis(),
+                                    )
+                                    privateMessagePendingSubmit = PrivateMessagePendingSubmit(
+                                        account = account,
+                                        threadId = threadId,
+                                        result = PrivateMessageSubmitResult(
+                                            eventId = privateMessageSubmitEventId,
+                                            page = page,
+                                        ),
+                                    )
+                                }
+                            },
+                            onConsumed = { eventId ->
+                                if (privateMessagePendingSubmit?.result?.eventId == eventId) {
+                                    privateMessagePendingSubmit = null
+                                }
+                            },
+                        ),
                         topicTitleNavState = TopicTitleNavState(
                             titles = topicTitleCache,
                             onTitleLoaded = { cat, post, title ->
@@ -1352,8 +1413,11 @@ fun RedfaceApp(intent: Intent?) {
                         ),
                         multiQuoteNavState = MultiQuoteNavState(
                             basket = multiQuoteBasket,
-                            onToggle = { cat, post, preview ->
-                                multiQuoteBasket = multiQuoteBasket.toggled(cat, post, preview)
+                            onToggle = { scope, selection ->
+                                multiQuoteBasket = multiQuoteBasket.toggled(scope, selection)
+                            },
+                            onRemove = { scope, numreponses ->
+                                multiQuoteBasket = multiQuoteBasket.withoutSelections(scope, numreponses)
                             },
                             onClear = { multiQuoteBasket = null },
                             pendingEditorQuotes = pendingEditorQuotes,
@@ -1697,13 +1761,15 @@ internal fun Map<Int, Instant>.withReadMark(
     this + (threadId to (openDates[threadId] ?: this[threadId] ?: NO_RECONCILE_BASELINE))
 
 /**
- * Bug fix (build 89) — per-topic title cache plumbed into [RedfaceNavHost]. A topic page change
- * replaces the TopicRoute (new nav entry → new ViewModel → Loading with no topic yet), which used to
- * flash the generic « Sujet » title in the top app bar. The `var` backing [titles] lives in
- * [RedfaceApp] so it survives the entry recreation; [onTitleLoaded] writes the freshly-loaded title
- * back and the next page reads it via TopicRequest.titleHint. Keyed by `(cat, post)` ([TopicTitleKey])
- * — a topic id is unique only per HFR category — so titles never bleed across categories. Same
- * read-map + onLoaded-callback shape as [PrivateMessageNavState].
+ * Bug fix (build 89) — per-topic title cache plumbed into [RedfaceNavHost]. Historical trigger: a
+ * topic page change replaced the TopicRoute (new nav entry → new ViewModel → Loading with no topic
+ * yet), flashing the generic « Sujet » title in the top app bar. Since #895 étape 4 in-topic page
+ * changes keep the entry — the cache serves fresh ENTRIES on an already-visited topic. The `var`
+ * backing [titles] lives in [RedfaceApp] so it survives the entry recreation; [onTitleLoaded]
+ * writes the freshly-loaded title back and the next entry reads it via TopicRequest.titleHint.
+ * Keyed by `(cat, post)` ([TopicTitleKey]) — a topic id is unique only per HFR category — so titles
+ * never bleed across categories. Same read-map + onLoaded-callback shape as
+ * [PrivateMessageNavState].
  *
  * @property titles last known title per topic, fed into TopicRequest.titleHint.
  * @property onTitleLoaded records a topic's title once its page has loaded.
@@ -1776,13 +1842,42 @@ private data class TopicSubmitNavState(
 )
 
 /**
+ * #1040 lot 6 — one successful MP-reply outcome, scoped to the canonical authenticated pseudo and
+ * conversation. The payload stays opaque (event id + page); no private subject/correspondent enters
+ * navigation state. Plain memory only and purged on every authentication transition.
+ */
+internal data class PrivateMessagePendingSubmit(
+    val account: String,
+    val threadId: Int,
+    val result: PrivateMessageSubmitResult,
+) {
+    fun matches(account: String?, threadId: Int): Boolean =
+        account != null && this.account == account && this.threadId == threadId
+}
+
+/** The entry below an MP editor must be the exact conversation that accepted the reply. */
+internal fun isPrivateMessageThreadEntryFor(below: Any?, threadId: Int): Boolean =
+    (below as? PrivateMessageThreadRoute)?.threadId == threadId
+
+/**
+ * Editor→retained-conversation handoff. [onPublish] runs before the guarded editor pop and stamps a
+ * monotonic event id; [onConsumed] compare-and-clears the single slot after the ViewModel applies it.
+ */
+private data class PrivateMessageSubmitNavState(
+    val account: String?,
+    val pending: PrivateMessagePendingSubmit?,
+    val onPublish: (threadId: Int, page: Int) -> Unit,
+    val onConsumed: (eventId: Long) -> Unit,
+)
+
+/**
  * #291 — multi-quote nav bundle threaded into [RedfaceNavHost], same shape as the other
  * hoisted-state bundles ([TopicScrollNavState], `TopicTitleNavState`).
  *
  * #604 lot 3 — also carries the editor quote HANDOFF : [pendingEditorQuotes] is set (via
- * [onEditorQuotesHandoff]) right before a PostEditorRoute is pushed with citations (« Citer N »
- * or a sheet escalation), read once by the editor entry into `PostEditorRequest.initialQuotes`,
- * then cleared (null). Never serialised into the route — the cards are transient by decision.
+ * [onEditorQuotesHandoff]) right before a topic or MP editor is pushed with citations (« Citer N »
+ * or a sheet escalation), read once by that editor entry into its assisted request, then cleared
+ * (null). Never serialised into the route — the selections are transient by decision.
  *
  * #868/#869/#870 — the handoff also says whether the editor session CONSUMED the hoisted basket
  * ([EditorQuotesHandoff.consumesBasket]): only a « Citer N » launch (or a sheet escalation of one)
@@ -1792,28 +1887,39 @@ private data class TopicSubmitNavState(
  */
 private data class MultiQuoteNavState(
     val basket: MultiQuoteBasket?,
-    val onToggle: (cat: Int, post: Int, preview: QuotedPostPreview) -> Unit,
+    val onToggle: (scope: QuoteScope, selection: QuoteSelection) -> Unit,
+    val onRemove: (scope: QuoteScope, numreponses: Set<Int>) -> Unit,
     val onClear: () -> Unit,
     val pendingEditorQuotes: EditorQuotesHandoff? = null,
     val onEditorQuotesHandoff: (EditorQuotesHandoff?) -> Unit = {},
 )
 
 /**
- * #868-#870 — what a full-screen editor opening receives : the quote previews (cards), and whether
+ * #868-#870/#1074 — what a full-screen editor opening receives: its scoped quote selections, and
+ * whether
  * a successful submit of THAT session must empty the hoisted multi-quote basket. `consumesBasket`
  * is decided by the OPEN PATH (« Citer N » / escalation of a basket-armed sheet = true ; « Citer »
- * simple, #823 long-press and plain replies = false) — never inferred from the quote count.
+ * simple, #823 long-press and plain replies = false) — never inferred from the quote count. The
+ * [scope] is checked by the receiving editor before exposing the selections, so a handoff for one
+ * topic or private conversation cannot bleed into another writing target.
  */
 internal data class EditorQuotesHandoff(
-    val quotes: List<QuotedPostPreview>,
+    val scope: QuoteScope,
+    val quotes: List<QuoteSelection>,
     val consumesBasket: Boolean,
 )
 
+/** Returns this handoff only when it belongs to the editor's exact [scope]. */
+internal fun EditorQuotesHandoff?.forScope(scope: QuoteScope?): EditorQuotesHandoff? =
+    this?.takeIf { scope != null && it.scope == scope }
+
 /**
  * #465 — per-topic poll-expansion bundle threaded into [RedfaceNavHost], same shape and survival
- * rationale as the other hoisted-state bundles ([TopicScrollNavState], [TopicTitleNavState]): a page
- * change replaces the TopicRoute entry, so any expansion state owned by the topic screen would die
- * with it. The `var` backing [expansions] lives in [RedfaceApp]. A `null` lookup (no entry for the
+ * rationale as the other hoisted-state bundles ([TopicScrollNavState], [TopicTitleNavState]):
+ * state owned by the topic screen dies when its entry leaves the back stack, so hoisting makes the
+ * choice survive leaving and reopening the topic (and survived the per-page entry swap back when
+ * page changes replaced the route, pre-#895 étape 4 — the original trigger). The `var` backing
+ * [expansions] lives in [RedfaceApp]. A `null` lookup (no entry for the
  * topic) means « follow the global default »; [onExpansionChanged] records the user's manual toggle.
  *
  * @property expansions the manual collapse/expand choice per topic the user has toggled.
@@ -1881,38 +1987,51 @@ private fun ResetNavBarScrollOffTopic(topRoute: NavKey?, onReset: () -> Unit) {
 
 /**
  * #291 — multi-quote selection, hoisted to RedfaceApp (same survival rationale as
- * [TopicScrollNavState]: a page change replaces the TopicRoute entry, so any state owned by the
- * topic screen dies with it). [selections] keeps SELECTION ORDER — the quotes are concatenated
+ * [TopicScrollNavState]: state owned by the topic screen dies when its entry leaves the back stack
+ * — the editor round-trip, reopening the topic ; and, pre-#895 étape 4, every page change swapped
+ * the entry). [selections] keeps SELECTION ORDER — the quotes are concatenated
  * in the order the user tapped them, not post order. #604 lot 2 enriched the entries from bare
- * numreponses to [QuotedPostPreview]s (author + excerpt captured at selection time) so the quote
- * cards never re-parse a post ; uniqueness stays keyed on the numreponse alone.
+ * numreponses to card snapshots captured at selection time so the quote cards never re-parse a
+ * post. #1074 types both the owning [scope] and every selection's locator; uniqueness is the
+ * `(scope, numreponse)` pair because HFR only guarantees `numreponse` inside one category.
  */
 internal data class MultiQuoteBasket(
-    val cat: Int,
-    val post: Int,
-    val selections: List<QuotedPostPreview>,
+    val scope: QuoteScope,
+    val selections: List<QuoteSelection>,
 ) {
     val numreponses: List<Int> get() = selections.map { it.numreponse }
 
-    fun matches(cat: Int, post: Int): Boolean = this.cat == cat && this.post == post
+    fun matches(scope: QuoteScope): Boolean = this.scope == scope
 }
 
 /**
- * Toggles [preview] in the basket for topic ([cat], [post]) — presence is keyed on the
- * numreponse, so re-tapping a selected post removes it whatever snapshot the caller rebuilt.
- * Selecting in a DIFFERENT topic replaces the basket (one quoting act at a time); removing the
- * last entry clears it to null so the « Citer N » affordance disappears instead of advertising
- * an empty selection.
+ * Toggles [selection] in the basket for [scope] — presence is keyed on the numreponse inside that
+ * scope, so re-tapping a selected post removes it whatever snapshot/locator the caller rebuilt.
+ * Selecting in a DIFFERENT scope replaces the basket (one quoting act at a time); removing the last
+ * entry clears it to null so the « Citer N » affordance disappears instead of advertising an empty
+ * selection.
  */
-internal fun MultiQuoteBasket?.toggled(cat: Int, post: Int, preview: QuotedPostPreview): MultiQuoteBasket? {
-    val current = this?.takeIf { it.matches(cat, post) }
-        ?: return MultiQuoteBasket(cat, post, listOf(preview))
-    val next = if (current.selections.any { it.numreponse == preview.numreponse }) {
-        current.selections.filterNot { it.numreponse == preview.numreponse }
+internal fun MultiQuoteBasket?.toggled(scope: QuoteScope, selection: QuoteSelection): MultiQuoteBasket? {
+    val current = this?.takeIf { it.matches(scope) }
+        ?: return MultiQuoteBasket(scope, listOf(selection))
+    val next = if (current.selections.any { it.numreponse == selection.numreponse }) {
+        current.selections.filterNot { it.numreponse == selection.numreponse }
     } else {
-        current.selections + preview
+        current.selections + selection
     }
     return if (next.isEmpty()) null else current.copy(selections = next)
+}
+
+/** Removes selected ids from one exact scope; a different active basket is left untouched. */
+internal fun MultiQuoteBasket?.withoutSelections(
+    scope: QuoteScope,
+    numreponses: Set<Int>,
+): MultiQuoteBasket? {
+    val current = this?.takeIf { it.matches(scope) } ?: return this
+    val remaining = current.selections.filterNot { selection ->
+        selection.numreponse in numreponses
+    }
+    return remaining.takeIf { it.isNotEmpty() }?.let { current.copy(selections = it) }
 }
 
 /**
@@ -1968,16 +2087,20 @@ private fun RedfaceNavHost(
     // report-email flow as the account menu (which owns `context` + the report strings).
     onReportContent: () -> Unit,
     privateMessageNavState: PrivateMessageNavState,
-    // Bug fix (build 89) — per-topic title cache threaded down from RedfaceApp (where the `var` lives
-    // so it survives entry recreation across page changes). Bundled to keep the param count in check.
+    // #1040 lot 6 — successful reply handoff to the retained conversation ViewModel.
+    privateMessageSubmitNavState: PrivateMessageSubmitNavState,
+    // Bug fix (build 89) — per-topic title cache threaded down from RedfaceApp (where the `var`
+    // lives so it survives entry recreation — reopening a topic; in-topic page changes stopped
+    // recreating the entry with #895 étape 4). Bundled to keep the param count in check.
     topicTitleNavState: TopicTitleNavState,
     // #307 — per-page scroll-anchor cache, same hoisting rationale as topicTitleNavState.
     topicScrollNavState: TopicScrollNavState,
     // #895 étape 4 (PR 2) — post-submit handoff (editor → retained topic ViewModel), same rationale.
     topicSubmitNavState: TopicSubmitNavState,
-    // #291 — multi-quote basket, same hoisting rationale (survives the per-page entry swap).
+    // #291 — multi-quote basket, same hoisting rationale (survives the editor round-trip and
+    // topic re-entry).
     multiQuoteNavState: MultiQuoteNavState,
-    // #465 — per-topic poll-expansion cache, same hoisting rationale (survives the per-page swap).
+    // #465 — per-topic poll-expansion cache, same hoisting rationale (survives topic re-entry).
     topicPollNavState: TopicPollNavState,
     // #518 follow-up — immersive nav-bar reveal: the topic reports scroll facts up through this bundle.
     immersiveNavBarNavState: ImmersiveNavBarNavState,
@@ -2208,6 +2331,7 @@ private fun RedfaceNavHost(
                 )
             }
             entry<PrivateMessageThreadRoute> { route ->
+                val privateMessageQuoteScope = QuoteScope.PrivateMessage(route.threadId)
                 PrivateMessageThreadScreen(
                     request = PrivateMessageThreadRequest(
                         threadId = route.threadId,
@@ -2222,8 +2346,53 @@ private fun RedfaceNavHost(
                             backStack.removeAt(backStack.lastIndex)
                         }
                     },
+                    pendingSubmitResult = privateMessageSubmitNavState.pending
+                        ?.takeIf { pending ->
+                            pending.matches(privateMessageSubmitNavState.account, route.threadId)
+                        }
+                        ?.result,
+                    onSubmitResultConsumed = { result ->
+                        privateMessageSubmitNavState.onConsumed(result.eventId)
+                    },
                     onReply = { threadId, page ->
                         backStack.add(PrivateMessageReplyRoute(threadId = threadId, page = page))
+                    },
+                    onQuote = { threadId, page, quote ->
+                        backStack.add(
+                            PrivateMessageReplyRoute(
+                                threadId = threadId,
+                                page = page,
+                                quotedNumreponse = quote.numreponse,
+                                quoteRef = quote.ref,
+                            ),
+                        )
+                    },
+                    multiQuoteSelections = multiQuoteNavState.basket
+                        ?.takeIf { it.matches(privateMessageQuoteScope) }
+                        ?.selections
+                        .orEmpty(),
+                    onToggleMultiQuote = { selection ->
+                        multiQuoteNavState.onToggle(privateMessageQuoteScope, selection)
+                    },
+                    onMultiQuote = { threadId, page ->
+                        val selections = multiQuoteNavState.basket
+                            ?.takeIf { it.matches(privateMessageQuoteScope) }
+                            ?.selections
+                            .orEmpty()
+                        if (selections.isNotEmpty()) {
+                            multiQuoteNavState.onEditorQuotesHandoff(
+                                EditorQuotesHandoff(
+                                    scope = privateMessageQuoteScope,
+                                    quotes = selections,
+                                    consumesBasket = true,
+                                ),
+                            )
+                            backStack.add(PrivateMessageReplyRoute(threadId = threadId, page = page))
+                        }
+                    },
+                    onClearMultiQuote = multiQuoteNavState.onClear,
+                    onRemoveMultiQuotes = { numreponses ->
+                        multiQuoteNavState.onRemove(privateMessageQuoteScope, numreponses)
                     },
                     // #618 — owner-only « Gérer les destinataires » entry from the Participants sheet:
                     // open the reply composer with its recipient-manager sheet auto-opened.
@@ -2236,32 +2405,47 @@ private fun RedfaceNavHost(
                             ),
                         )
                     },
+                    // #1042 — same app-level profile sheet as the topic (#208): tapping a message's
+                    // avatar/pseudo opens ProfilePreviewSheet as an overlay on the current tab.
+                    onOpenProfile = onOpenProfile,
                     topBarActions = accountMenu,
                 )
             }
             entry<PrivateMessageReplyRoute> { route ->
+                val privateMessageQuoteScope = QuoteScope.PrivateMessage(route.threadId)
+                val editorQuotesHandoff = remember(route) {
+                    multiQuoteNavState.pendingEditorQuotes.forScope(privateMessageQuoteScope)
+                }
+                LaunchedEffect(Unit) { multiQuoteNavState.onEditorQuotesHandoff(null) }
                 PrivateMessageReplyScreen(
                     request = PrivateMessageReplyRequest(
                         threadId = route.threadId,
                         page = route.page,
                         openRecipientManager = route.openRecipientManager,
+                        quote = route.quotedNumreponse?.let { numreponse ->
+                            PrivateMessageQuote(
+                                numreponse = numreponse,
+                                ref = requireNotNull(route.quoteRef),
+                            )
+                        },
+                        initialQuotes = editorQuotesHandoff?.quotes.orEmpty(),
                     ),
                     onSubmitSucceeded = { threadId, page ->
-                        // Pop the editor, then replace the conversation entry with a fresh key
-                        // (bumped submitSignal) so the thread re-fetches and shows the sent message.
-                        // Mirrors PostEditorRoute.onSubmitSucceeded. Never collapse below the tab root.
+                        // #1040 lot 6 — arm the opaque result BEFORE popping, and only when the
+                        // entry directly below is this conversation. The revealed entry therefore
+                        // retains its ViewModel/anchor map and force-refetches exactly once.
+                        val below = backStack.getOrNull(backStack.lastIndex - 1)
+                        if (isPrivateMessageThreadEntryFor(below, threadId)) {
+                            privateMessageSubmitNavState.onPublish(threadId, page)
+                        }
+                        if (editorQuotesHandoff?.consumesBasket == true &&
+                            multiQuoteNavState.basket?.matches(privateMessageQuoteScope) == true
+                        ) {
+                            multiQuoteNavState.onClear()
+                        }
+                        // One guarded pop only: the conversation route/key and its ViewModel stay.
                         if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)
-                        }
-                        val threadEntry = backStack.lastOrNull() as? PrivateMessageThreadRoute
-                        if (threadEntry != null) {
-                            backStack.removeAt(backStack.lastIndex)
-                            backStack.add(
-                                threadEntry.copy(
-                                    page = page,
-                                    submitSignal = System.currentTimeMillis(),
-                                ),
-                            )
                         }
                     },
                     // #803 pattern (state-hygiene audit 2026-07-05) — invoked only on
@@ -2461,6 +2645,7 @@ private fun RedfaceNavHost(
                 )
             }
             entry<TopicRoute> { route ->
+                val topicQuoteScope = QuoteScope.Topic(cat = route.cat, topicId = route.post)
                 // #895 étape 4 (PR 2) — the route is FROZEN at entry : every in-topic page change,
                 // quote jump, jump return and post-submit landing now lives inside the retained
                 // TopicViewModel (single nav entry, single LazyListState — no more per-page entry
@@ -2515,8 +2700,13 @@ private fun RedfaceNavHost(
                         // #868-#870 — « Citer » simple / #823 long-press / plain reply : these
                         // quotes never came from the basket, a submit must not empty it.
                         multiQuoteNavState.onEditorQuotesHandoff(
-                            quotes.takeIf { it.isNotEmpty() }
-                                ?.let { EditorQuotesHandoff(it, consumesBasket = false) },
+                            quotes.takeIf { it.isNotEmpty() }?.let {
+                                EditorQuotesHandoff(
+                                    scope = topicQuoteScope,
+                                    quotes = it,
+                                    consumesBasket = false,
+                                )
+                            },
                         )
                         backStack.add(
                             PostEditorRoute(
@@ -2540,7 +2730,11 @@ private fun RedfaceNavHost(
                         // removed before escalating still consumes the basket — the flag follows
                         // the OPEN PATH, never the quote count.
                         multiQuoteNavState.onEditorQuotesHandoff(
-                            EditorQuotesHandoff(quotes, consumesBasket = consumesBasket),
+                            EditorQuotesHandoff(
+                                scope = topicQuoteScope,
+                                quotes = quotes,
+                                consumesBasket = consumesBasket,
+                            ),
                         )
                         backStack.add(
                             PostEditorRoute(
@@ -2558,18 +2752,19 @@ private fun RedfaceNavHost(
                     // the « Citer N » FAB) ; under the full-screen threshold the screen pre-arms
                     // the sheet's cards from them and consumes the basket via onClearMultiQuote.
                     multiQuoteSelections = multiQuoteNavState.basket
-                        ?.takeIf { it.matches(route.cat, route.post) }
+                        ?.takeIf { it.matches(topicQuoteScope) }
                         ?.selections
                         .orEmpty(),
-                    onToggleMultiQuote = { preview ->
-                        multiQuoteNavState.onToggle(route.cat, route.post, preview)
+                    onToggleMultiQuote = { selection ->
+                        multiQuoteNavState.onToggle(topicQuoteScope, selection)
                     },
                     // #436 — « Tout vider » : a long press on the « Citer N » FAB empties the
                     // whole hoisted basket (same reset path as the post-editor launch / logout).
                     onClearMultiQuote = multiQuoteNavState.onClear,
                     // #465 — the topic's saved manual poll choice (null = follow the global
                     // default), and the callback recording a tap on the poll card. Hoisted to
-                    // :app so it survives the per-page TopicRoute swap, keyed by (cat, post).
+                    // :app so it survives leaving and reopening the topic (pre-#895 étape 4:
+                    // the per-page TopicRoute swap), keyed by (cat, post).
                     pollManualExpanded = topicPollNavState.expansions[
                         TopicPollKey(route.cat, route.post),
                     ],
@@ -2589,12 +2784,16 @@ private fun RedfaceNavHost(
                         // restore banner (cards are independent of it), instead of the silent append
                         // the escalation flag used to force here (pre-#843 Codex fork 4).
                         val selection = multiQuoteNavState.basket
-                            ?.takeIf { it.matches(route.cat, route.post) }
+                            ?.takeIf { it.matches(topicQuoteScope) }
                             ?.selections
                             .orEmpty()
                         if (selection.isNotEmpty()) {
                             multiQuoteNavState.onEditorQuotesHandoff(
-                                EditorQuotesHandoff(selection, consumesBasket = true),
+                                EditorQuotesHandoff(
+                                    scope = topicQuoteScope,
+                                    quotes = selection,
+                                    consumesBasket = true,
+                                ),
                             )
                             backStack.add(
                                 PostEditorRoute(
@@ -2659,7 +2858,8 @@ private fun RedfaceNavHost(
                 )
             }
             entry<PostEditorRoute> { route ->
-                // #604 lot 3 — consume the quote handoff ONCE : the previews reach the ViewModel
+                // #604/#1074 — consume the quote handoff ONCE: only selections whose typed scope
+                // matches this editor reach the ViewModel
                 // through the assisted request (used only at first creation — a recomposition or
                 // configuration change reuses the existing VM, so the cleared handoff is moot),
                 // and the LaunchedEffect clears the slot so a LATER editor can never resurrect a
@@ -2671,7 +2871,10 @@ private fun RedfaceNavHost(
                 // succeeding each other at the same Compose position can never share a capture.
                 // An activity recreation loses the capture together with the hoisted basket
                 // itself (both plain remember) — consistent, nothing to clear.
-                val editorQuotesHandoff = remember(route) { multiQuoteNavState.pendingEditorQuotes }
+                val editorQuoteScope = route.topicId?.let { QuoteScope.Topic(route.cat, it) }
+                val editorQuotesHandoff = remember(route) {
+                    multiQuoteNavState.pendingEditorQuotes.forScope(editorQuoteScope)
+                }
                 LaunchedEffect(Unit) { multiQuoteNavState.onEditorQuotesHandoff(null) }
                 PostEditorScreen(
                     request = PostEditorRequest(
@@ -2714,8 +2917,8 @@ private fun RedfaceNavHost(
                         // basket is keyed (cat, post), so if it was re-armed on another topic
                         // while this editor lived, the submit must not wipe that newer selection.
                         if (editorQuotesHandoff?.consumesBasket == true &&
-                            topicId != null &&
-                            multiQuoteNavState.basket?.matches(route.cat, topicId) == true
+                            editorQuoteScope != null &&
+                            multiQuoteNavState.basket?.matches(editorQuoteScope) == true
                         ) {
                             multiQuoteNavState.onClear()
                         }
@@ -2978,4 +3181,3 @@ private fun navForwardTransform(from: Scene<NavKey>, to: Scene<NavKey>): Content
     from.isForwardDrillDownTo(to) -> navSharedAxisXForward()
     else -> navTabFadeThrough()
 }
-

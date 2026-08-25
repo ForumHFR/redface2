@@ -18,6 +18,13 @@ android {
             // reads `stringResource`, so the host activity needs the merged Android resources at
             // JVM unit-test time. Same convention as :core:ui (Compose UI tests).
             isIncludeAndroidResources = true
+            all {
+                // #1040 lot 6 — record-only before/after extraction captures. Same AGP 9 setup
+                // as :core:ui and :feature:messages: no Roborazzi Gradle plugin, the plain unit
+                // test task writes the diagnostic PNGs.
+                it.systemProperties["robolectric.pixelCopyRenderMode"] = "hardware"
+                it.systemProperties["roborazzi.test.record"] = "true"
+            }
         }
     }
 }
@@ -46,11 +53,9 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.turbine)
     // #436 — Robolectric hosts `createComposeRule()` on the JVM so TopicPostCardMultiQuoteTest
-    // can exercise the per-post « + » affordance (gating, label flip, tap callback) without a
-    // device. Non-roborazzi (no screenshot baseline), so the AGP-9 roborazzi plugin gap does not
-    // apply. The BOM aligns the ui-test artifacts with the production Compose versions; the
-    // ui-test-manifest (debug-only) pulls the Activity surrogate the rule mounts internally.
-    // Same harness as :core:ui.
+    // can exercise the per-post « + » affordance without a device. #1040 adds a record-only
+    // Roborazzi extraction proof on the same harness (no plugin under AGP 9). The BOM aligns the
+    // UI-test artifacts; the debug manifest pulls the Activity surrogate mounted by the rule.
     testImplementation(platform(libs.androidx.compose.bom))
     testImplementation(libs.androidx.compose.ui.test.junit4)
     testImplementation(libs.robolectric)
@@ -60,5 +65,7 @@ dependencies {
     // the test classpath needs its own coil artifacts).
     testImplementation(libs.coil.core)
     testImplementation(libs.coil.test)
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 }

@@ -23,6 +23,7 @@ import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.write.PrivateMessageReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.model.write.PrivateMessageReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
@@ -49,9 +50,10 @@ import kotlinx.coroutines.launch
 
 /**
  * ViewModel for replying to a private-message conversation (#301). Receives its route arguments via
- * Hilt assisted injection ([PrivateMessageReplyRequest]). On creation it GETs the conversation page
- * to parse the embedded `bddpost.php` reply form (fresh `hash_check` + hidden fields), then lets the
- * user compose a BBCode reply with the shared toolbar/preview and submit it.
+ * Hilt assisted injection ([PrivateMessageReplyRequest]). On creation it GETs either the normal MP
+ * reply form, one typed quote form, or one typed form per multi-quote selection (fresh `hash_check`
+ * + hidden fields from the first), then lets the user edit the server-provided BBCode with the
+ * shared toolbar/preview and submit it.
  *
  * Two private-message specifics drive the design (cf. the #301 design notes / independent review):
  *  - The HFR POST success sentence for a private reply is not pinned by a live fixture, so an
@@ -85,9 +87,12 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     private val context = PrivateMessageReplyContext(
         threadId = request.threadId,
         page = request.page.coerceAtLeast(1),
+        quote = request.quote,
     )
+    private val quoteMaterializer = PrivateMessageReplyQuoteMaterializer(repository)
 
     private var loadedForm: ReplyForm? = null
+    private var loadedSubmitContext: PrivateMessageReplyContext? = null
     private var formJob: Job? = null
     private var submitJob: Job? = null
 
@@ -263,20 +268,29 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                 // message.php one carrying `newdest` (owner) ; refuse the forum2.php quick-reply
                 // fallback (no newdest → no member editor → silently lands on a plain composer). A
                 // failed message.php GET then surfaces as a form error (retry) rather than a dead end.
-                val form = repository.fetchReplyForm(
-                    context,
+                val materialized = quoteMaterializer.fetchFormWithQuotes(
+                    context = context,
+                    selections = request.initialQuotes,
                     allowEmbeddedFallback = !request.openRecipientManager,
                 )
+                val form = materialized.form
                 if (form.isAnonymous) {
                     // Session vanished between opening the thread and replying — treat like a form
                     // error so the user re-authenticates (the reply route is only reachable while
                     // authenticated, so this is rare).
                     loadedForm = null
+                    loadedSubmitContext = null
                     _state.update { it.copy(isLoadingForm = false, formAvailable = false, formError = true) }
                     return@launch
                 }
                 loadedForm = form
+                loadedSubmitContext = materialized.submitContext
                 _state.update { current ->
+                    // #1074 — consume HFR's quote BBCode exactly once. If the user typed while the
+                    // GET was in flight, keep that text below the verbatim server prefill. A silent
+                    // InvalidHashCheck refetch sees draftHydratedFromForm=true and cannot duplicate
+                    // the block or clobber later edits.
+                    val hydrated = current.withFormInitialContent(form)
                     // HFR's private "quick reply" form carries the per-post options as plain hidden
                     // inputs (e.g. `signature=1`), not checkboxes — so `ReplyForm.options` (read from
                     // `checked` attributes) is all-false here. Hydrate from the hidden fields too,
@@ -285,25 +299,25 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                     // Hydrate ONLY on the first successful load: a silent refetch after an expired
                     // `hash_check` (InvalidHashCheck) must not reset a toggle the user changed in
                     // between — mirror the post editor's `optionsHydratedFromForm` guard.
-                    val hydrateOptions = !current.optionsHydratedFromForm
-                    current.copy(
+                    val hydrateOptions = !hydrated.optionsHydratedFromForm
+                    hydrated.copy(
                         isLoadingForm = false,
                         formAvailable = true,
                         formError = false,
                         signatureEnabled = if (hydrateOptions) {
                             form.options.signatureEnabled || form.hiddenFields["signature"] == "1"
                         } else {
-                            current.signatureEnabled
+                            hydrated.signatureEnabled
                         },
                         smileyDisabled = if (hydrateOptions) {
                             form.options.smileyDisabled || form.hiddenFields["smiley"] == "1"
                         } else {
-                            current.smileyDisabled
+                            hydrated.smileyDisabled
                         },
                         emailNotificationEnabled = if (hydrateOptions) {
                             form.options.emailNotificationEnabled || form.hiddenFields["emaill"] == "1"
                         } else {
-                            current.emailNotificationEnabled
+                            hydrated.emailNotificationEnabled
                         },
                         optionsHydratedFromForm = true,
                         // #606 — owner-only member editor. Hydrate the working list from HFR's
@@ -317,10 +331,10 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                         // non-dirty submit sends `recipientsOverride = null` — the original `newdest`
                         // is still forwarded verbatim. Only an in-progress edit (`recipientsDirty`)
                         // is preserved across the refetch.
-                        recipients = if (hydrateOptions || !current.recipientsDirty) {
+                        recipients = if (hydrateOptions || !hydrated.recipientsDirty) {
                             RecipientCsv.parse(form.manageableRecipients)
                         } else {
-                            current.recipients
+                            hydrated.recipients
                         },
                     )
                 }
@@ -331,6 +345,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             ) {
                 // No raw message reaches the UI (#316): a private form GET can embed the private URL.
                 loadedForm = null
+                loadedSubmitContext = null
                 _state.update { it.copy(isLoadingForm = false, formAvailable = false, formError = true) }
             }
         }
@@ -474,6 +489,10 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             loadForm()
             return
         }
+        val submitContext = loadedSubmitContext ?: run {
+            loadForm()
+            return
+        }
         if (form.isAnonymous) {
             _state.update { it.copy(submitError = PrivateMessageReplyError.LoginRequired) }
             return
@@ -506,7 +525,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         submitJob = viewModelScope.launch {
             val outcome = runCatching {
                 repository.submitReply(
-                    context = context,
+                    context = submitContext,
                     form = form,
                     bbcodeContent = snapshot.draft.text,
                     options = options,
@@ -580,6 +599,28 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             uploadError = if (updated.text != draft.text) null else uploadError,
         )
 
+    /**
+     * Applies a server prefill once without reconstructing it. A late form prefixes the untouched
+     * prefill to text already entered while loading; an explicit #405 restore may replace it later.
+     */
+    private fun PrivateMessageReplyUiState.withFormInitialContent(form: ReplyForm): PrivateMessageReplyUiState {
+        if (draftHydratedFromForm) return this
+        val initial = form.initialContent
+        return if (initial.isEmpty()) {
+            copy(draftHydratedFromForm = true)
+        } else {
+            val existing = draft.text
+            val combined = if (existing.isEmpty()) {
+                initial
+            } else {
+                val separator = if (initial.endsWith('\n')) "\n" else "\n\n"
+                initial + separator + existing
+            }
+            withDraftPreview(
+                TextFieldValue(text = combined, selection = TextRange(combined.length)),
+            ).copy(draftHydratedFromForm = true)
+        }
+    }
 
     /**
      * #459 — pick→read→upload→insert for this MP composer, same proven contract as

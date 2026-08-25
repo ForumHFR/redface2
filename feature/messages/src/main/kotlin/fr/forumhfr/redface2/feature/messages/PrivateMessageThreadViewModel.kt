@@ -7,12 +7,21 @@ import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.blacklist.BlacklistRepository
+import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
+import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
+import fr.forumhfr.redface2.core.domain.media.ImageSaveException
+import fr.forumhfr.redface2.core.domain.media.PostImageSaver
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageReadPositionStore
+import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
+import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.Post
+import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
 import fr.forumhfr.redface2.core.model.mpstorage.MpStorageFlagEntry
 import fr.forumhfr.redface2.core.model.write.PrivateMessageReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyForm
@@ -23,25 +32,36 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
 
 /**
  * ViewModel for one private-message conversation. Receives its route arguments via Hilt
  * assisted injection ([PrivateMessageThreadRequest]), mirroring [TopicViewModel]. Loads the
- * requested page once (no cache in the #298 MVP). Route arguments deliberately exclude
+ * requested page through the session-cache-then-network stream. Route arguments deliberately exclude
  * subject/correspondent so stale Navigation state cannot expose private metadata after logout.
  */
 @HiltViewModel(assistedFactory = PrivateMessageThreadViewModel.Factory::class)
+// Assisted route + one injected collaborator per independent thread concern; the image saver reuses
+// this existing lifecycle/effect owner instead of introducing the duplicate ViewModel rejected for #1051.
+@Suppress("LongParameterList")
 class PrivateMessageThreadViewModel @AssistedInject constructor(
     @Assisted private val request: PrivateMessageThreadRequest,
     private val repository: MessagesRepository,
     private val authRepository: AuthRepository,
+    private val userPreferencesRepository: UserPreferencesRepository,
+    private val blacklistRepository: BlacklistRepository,
     private val readPositionStore: PrivateMessageReadPositionStore,
     private val mpStorageRepository: MpStorageRepository,
     private val writeRepository: PrivateMessageWriteRepository,
+    private val postImageSaver: PostImageSaver,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(PrivateMessageThreadUiState.initial(request))
@@ -53,9 +73,62 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     // A new page load (or retry) cancels the previous in-flight one so a stale result cannot
     // overwrite the page the user is actually on.
     private var loadJob: Job? = null
+    // ADR-013 decision 3 — one structured group owns both adjacent authenticated prefetches. The
+    // Compose lifecycle gate controls [prefetchActive]; the ViewModel remains retained off-screen.
+    private var prefetchJob: Job? = null
+    private var prefetchedGroup: PrivateMessagePrefetchGroup? = null
+    private var prefetchActive = false
     // #430 — single in-flight position write, latest-wins (cf. savePosition).
     private var saveJob: Job? = null
     private var authenticatedPseudo: String? = null
+    // #509/#1050 — unlike the global render preferences, the blacklist snapshot is session-owned.
+    // Its collector is restarted after login/account switch so the new session obtains a fresh
+    // repository snapshot instead of reusing the previous session's last in-memory set.
+    private var blacklistJob: Job? = null
+    private var blockedCanonicals: Set<String> = emptySet()
+
+    /**
+     * #1040 lot 6 — reading anchors belong to the retained DISPLAY session, never to the shared
+     * cache. Only [reportPageAnchor] / explicit departure captures write this map; prefetch has no
+     * path to it. Logout and direct account switches clear the whole map in [clearPrivateState].
+     */
+    private val pageAnchors = mutableMapOf<Int, PrivateMessageScrollAnchor>()
+
+    /**
+     * One landing owner for cited messages, restored anchors and default-top arrivals. The owner is
+     * sealed to `(generation, account, requested page)`; a newer load replaces it before the old
+     * coroutine can publish. The public [PrivateMessagePageLanding] uses the PARSED page and is
+     * published atomically with Content, then compare-and-cleared by [acknowledgePageLanding].
+     */
+    private var landingGeneration: Int = 0
+    private var pendingPageLanding: ArmedPageLanding? = null
+    private var activeLoadOwner: PageLandingOwner? = null
+
+    private data class PageLandingOwner(
+        val generation: Int,
+        val account: String,
+        val page: Int,
+    )
+
+    private data class ArmedPageLanding(
+        val landing: PendingPageLanding,
+        val owner: PageLandingOwner,
+    )
+
+    private sealed interface PendingPageLanding {
+        data class CitedMessage(val numreponse: Int) : PendingPageLanding
+        data class Anchor(val anchor: PrivateMessageScrollAnchor) : PendingPageLanding
+        data object Top : PendingPageLanding
+    }
+
+    private sealed interface LandingRequest {
+        data object None : LandingRequest
+        data object RestoreOrTop : LandingRequest
+        data class CitedMessage(val numreponse: Int) : LandingRequest
+    }
+
+    /** Last opaque editor event consumed by this retained ViewModel; prevents recomposition replay. */
+    private var lastSubmitEventId: Long? = null
 
     // #612 — participant roster. Single in-flight fetch (dedup on rapid taps / recomposition) and a
     // memory cache for the life of the screen: re-opening the sheet reuses the parsed list without a
@@ -71,21 +144,93 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
                     when (authState) {
                         AuthState.Anonymous -> clearPrivateState()
                         is AuthState.Authenticated -> {
+                            // Architecture contract (architecture.md): private state is purged on
+                            // anonymous, logout AND session change. A DIRECT A → B switch must
+                            // therefore reset through the same path as the logout — A's kept-on-
+                            // screen conversation, roster job and cached roster form must never
+                            // survive into B's session (with B's fetch free to fail without
+                            // resurfacing them). Only the landing mode differs: B's load is known
+                            // to follow, so the screen shows Loading, not the login placeholder.
+                            if (authenticatedPseudo != null && authenticatedPseudo != authState.pseudo) {
+                                clearPrivateState(nextMode = PrivateMessageThreadUiState.Mode.Loading)
+                            }
                             authenticatedPseudo = authState.pseudo
+                            // #1050 — expose the session pseudo for the Ego markers. The list
+                            // derives both markers from this session-bound value (never from the
+                            // cached Post.isOwnPost bit), so an A → B switch re-resolves them.
+                            _state.update { it.copy(connectedPseudo = authState.pseudo) }
+                            observeBlockedCanonicals()
                             loadInitial()
                         }
                     }
                 }
         }
+        // #1050 — the two global reading preferences are render-only flows. Keeping them separate
+        // from page loading guarantees a hot toggle cannot trigger a private network request.
+        userPreferencesRepository.observeTopicFullWidthPosts()
+            .onEach { fullWidth -> _state.update { it.copy(fullWidthPosts = fullWidth) } }
+            .launchIn(viewModelScope)
+        userPreferencesRepository.observeTopicSignatures()
+            .onEach { show -> _state.update { it.copy(showSignatures = show) } }
+            .launchIn(viewModelScope)
+        // #1050 — the two #874 Ego preferences are deliberately independent flows (a message can
+        // keep its EgoPost background while an auto-quote inside keeps its own EgoQuote marker).
+        userPreferencesRepository.observeTopicEgoQuoteEnabled()
+            .onEach { enabled -> _state.update { it.copy(egoQuoteEnabled = enabled) } }
+            .launchIn(viewModelScope)
+        userPreferencesRepository.observeTopicEgoPostEnabled()
+            .onEach { enabled -> _state.update { it.copy(egoPostEnabled = enabled) } }
+            .launchIn(viewModelScope)
+        // #383/#1040 — keep the historical repository API/DataStore key, but apply the preference
+        // to the MP page-FAB cluster as well as the topic cluster. Render-only: never refetch.
+        userPreferencesRepository.observeTopicPageFabs()
+            .onEach { enabled -> _state.update { it.copy(showPageFabs = enabled) } }
+            .launchIn(viewModelScope)
     }
 
-    fun selectPage(page: Int) {
-        if (page < 1) return
-        load(page)
+    fun selectPage(page: Int, departureAnchor: PrivateMessageScrollAnchor? = null) {
+        val current = _state.value
+        if (page !in 1..current.totalPages || page == current.page) return
+        departureAnchor?.let(::reportPageAnchor)
+        load(page, LandingRequest.RestoreOrTop)
+    }
+
+    /**
+     * Gesture-time cache probe for the conditional slide-out. The repository captures and validates
+     * its current generation inside this call; retaining a page number in UI state would reopen the
+     * stale-generation race closed by the session cache.
+     */
+    fun isPageWarm(page: Int): Boolean {
+        val account = authenticatedPseudo
+        return when {
+            account == null -> false
+            page < 1 -> false
+            else -> repository.isPrivateMessageThreadPageWarm(account, request.threadId, page)
+        }
+    }
+
+    /**
+     * #1074 — jumps to the message referenced by a parsed quote header. A target already on the
+     * rendered page is published immediately without a load. A cross-page target is armed before
+     * the cache-aside request starts; the first rendered target emission owns the visual landing.
+     */
+    fun goToCitedMessage(
+        targetPage: Int,
+        numreponse: Int,
+        departureAnchor: PrivateMessageScrollAnchor? = null,
+    ) {
+        if (targetPage < 1 || numreponse < 1) return
+        val content = _state.value.mode as? PrivateMessageThreadUiState.Mode.Content ?: return
+        departureAnchor?.let(::reportPageAnchor)
+        if (content.thread.page == targetPage) {
+            landOnDisplayedMessage(content.thread, numreponse)
+        } else {
+            load(targetPage, LandingRequest.CitedMessage(numreponse))
+        }
     }
 
     fun retry() {
-        load(_state.value.page)
+        load(_state.value.page, LandingRequest.None)
     }
 
     /**
@@ -96,7 +241,96 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     fun refresh() {
         val current = _state.value
         if (current.mode !is PrivateMessageThreadUiState.Mode.Content || current.isRefreshing) return
-        load(current.page)
+        load(current.page, LandingRequest.None)
+    }
+
+    /** Records raw coordinates for the canonical page currently rendered by this ViewModel. */
+    fun reportPageAnchor(anchor: PrivateMessageScrollAnchor) {
+        val current = _state.value
+        val content = current.mode as? PrivateMessageThreadUiState.Mode.Content ?: return
+        if (content.thread.page != current.page) return
+        pageAnchors[current.page] = anchor
+    }
+
+    /**
+     * Applies one successful editor handoff to this retained ViewModel. Repeated delivery of the
+     * same [PrivateMessageSubmitResult.eventId] is inert; a fresh event force-refetches its page
+     * without replacing the navigation entry (and therefore without losing [pageAnchors]).
+     */
+    fun applySubmitResult(result: PrivateMessageSubmitResult) {
+        if (result.eventId == lastSubmitEventId) return
+        lastSubmitEventId = result.eventId
+        val landing = if (result.page == _state.value.page) {
+            LandingRequest.None
+        } else {
+            LandingRequest.RestoreOrTop
+        }
+        load(result.page, landing)
+    }
+
+    /** Clears exactly the landing the screen applied; a newer owner/value is never erased. */
+    fun acknowledgePageLanding(landing: PrivateMessagePageLanding) {
+        if (_state.value.pageLanding != landing) return
+        val armed = pendingPageLanding
+        if (
+            armed != null &&
+            armed.owner.generation == landing.generation &&
+            armed.owner.account == landing.account
+        ) {
+            pendingPageLanding = null
+        }
+        _state.update { current ->
+            if (current.pageLanding == landing) current.copy(pageLanding = null) else current
+        }
+    }
+
+    /**
+     * Called only by [PrivateMessageThreadPrefetchLifecycleGate]. A retained ViewModel is not enough:
+     * authenticated warmups are allowed only while the conversation composition is RESUMED. The
+     * completed/cancelled group marker stays set so pause/resume or recomposition cannot retry the
+     * same center-page group; a genuine page/account change produces a distinct group.
+     */
+    fun setPrefetchActive(active: Boolean) {
+        if (prefetchActive == active) return
+        prefetchActive = active
+        if (active) {
+            maybeSchedulePrivateMessagePrefetch()
+        } else {
+            prefetchJob?.cancel()
+        }
+    }
+
+    /**
+     * #831/#1051 — saves a post image outside the sheet composition. The sheet closes immediately
+     * after routing the URL here; [viewModelScope] keeps the write alive and the typed effect is
+     * rendered by [PrivateMessageThreadScreen] when it completes.
+     */
+    fun saveImage(url: String) {
+        viewModelScope.launch {
+            val effect = try {
+                postImageSaver.save(url)
+                PrivateMessageThreadEffect.ImageSaved
+            } catch (e: ImageSaveException) {
+                when (e) {
+                    is ImageSaveException.Fetch -> PrivateMessageThreadEffect.ImageSaveFailedFetch
+                    is ImageSaveException.Storage -> PrivateMessageThreadEffect.ImageSaveFailedStorage
+                    is ImageSaveException.TooLarge -> PrivateMessageThreadEffect.ImageSaveFailedTooLarge
+                }
+            }
+            _effects.send(effect)
+        }
+    }
+
+    /**
+     * #1051 — block/unblock an author from the private-message menu. The independent blacklist
+     * collector rebuilds [PrivateMessageThreadUiState.Mode.Content] through [contentMode], so the
+     * author's messages and quotes disappear/reappear together from the page already in memory.
+     * No conversation fetch is involved.
+     */
+    fun setAuthorBlocked(author: String, blocked: Boolean) {
+        viewModelScope.launch {
+            if (blocked) blacklistRepository.block(author) else blacklistRepository.unblock(author)
+        }
     }
 
     /**
@@ -197,14 +431,52 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
         )
     }
 
-    private fun clearPrivateState() {
+    /**
+     * Purges everything owned by the previous session: the in-flight jobs, the cached roster form
+     * and the whole UI state — only the five render-only preferences survive the reset (they are
+     * not session data); the blacklist collector and its cached snapshot do not. This is the single
+     * purge path for the three session exits of the architecture contract (anonymous, logout,
+     * session change): the anonymous/logout callers keep
+     * the default [nextMode] (the login placeholder), while a direct A → B account switch passes
+     * [PrivateMessageThreadUiState.Mode.Loading] because B's load is already known to follow — the
+     * reader must see neither A's conversation nor a spurious login screen in between.
+     */
+    private fun clearPrivateState(
+        nextMode: PrivateMessageThreadUiState.Mode = PrivateMessageThreadUiState.Mode.RequiresLogin,
+    ) {
+        val fullWidthPosts = _state.value.fullWidthPosts
+        val showSignatures = _state.value.showSignatures
+        val egoQuoteEnabled = _state.value.egoQuoteEnabled
+        val egoPostEnabled = _state.value.egoPostEnabled
+        val showPageFabs = _state.value.showPageFabs
         authenticatedPseudo = null
+        landingGeneration++
+        pendingPageLanding = null
+        activeLoadOwner = null
+        pageAnchors.clear()
+        lastSubmitEventId = null
         loadJob?.cancel()
+        prefetchJob?.cancel()
+        prefetchedGroup = null
         saveJob?.cancel()
         rosterJob?.cancel()
+        blacklistJob?.cancel()
+        blacklistJob = null
+        blockedCanonicals = emptySet()
         cachedRosterForm = null
+        // The render-only preferences survive the reset (they are not session data); the session
+        // pseudo does NOT — falling back to initial()'s null connectedPseudo purges it on every
+        // session exit (logout AND account switch), so no former identity leaks past this line
+        // and both Ego markers go dark until the next session re-exposes its own pseudo.
         _state.value = PrivateMessageThreadUiState.initial(request)
-            .copy(mode = PrivateMessageThreadUiState.Mode.RequiresLogin)
+            .copy(
+                mode = nextMode,
+                fullWidthPosts = fullWidthPosts,
+                showSignatures = showSignatures,
+                egoQuoteEnabled = egoQuoteEnabled,
+                egoPostEnabled = egoPostEnabled,
+                showPageFabs = showPageFabs,
+            )
     }
 
     /**
@@ -233,58 +505,174 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
      * under B's userId (review Codex PR #462).
      */
     private fun loadInitial() {
+        val account = authenticatedPseudo ?: return
+        val generation = ++landingGeneration
+        pendingPageLanding = null
+        _state.update { it.copy(pageLanding = null) }
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
-            val owner = authenticatedPseudo ?: return@launch
-            fetchPage(openingPage(owner))
+            val page = openingPage(account)
+            val owner = PageLandingOwner(generation, account, page)
+            if (!isCurrentLandingOwner(owner)) return@launch
+            pendingPageLanding = ArmedPageLanding(
+                landing = pageAnchors[page]
+                    ?.let { anchor -> PendingPageLanding.Anchor(anchor) }
+                    ?: PendingPageLanding.Top,
+                owner = owner,
+            )
+            activeLoadOwner = owner
+            try {
+                fetchPage(owner)
+            } finally {
+                if (activeLoadOwner == owner) activeLoadOwner = null
+            }
         }
     }
 
-    private fun load(page: Int) {
-        if (authenticatedPseudo == null) {
+    private fun load(page: Int, landingRequest: LandingRequest) {
+        val account = authenticatedPseudo
+        if (account == null) {
             clearPrivateState()
             return
         }
+        // Changing the center page invalidates both N-1/N+1 children immediately, before the new
+        // visible-page request suspends. A same-page refresh keeps its best-effort group intact.
+        if (page != _state.value.page) prefetchJob?.cancel()
         loadJob?.cancel()
+        val owner = PageLandingOwner(++landingGeneration, account, page)
+        val pending = when (landingRequest) {
+            LandingRequest.None -> null
+            LandingRequest.RestoreOrTop -> pageAnchors[page]
+                ?.let { anchor -> PendingPageLanding.Anchor(anchor) }
+                ?: PendingPageLanding.Top
+            is LandingRequest.CitedMessage -> PendingPageLanding.CitedMessage(
+                landingRequest.numreponse,
+            )
+        }
+        pendingPageLanding = pending?.let { ArmedPageLanding(it, owner) }
+        // Cancels any suspending landing for the previous owner immediately. The current content
+        // may remain visible during the fetch; its aligned page is still safe to capture until a
+        // target emission atomically changes both `page` and `pageLanding`.
+        _state.update { it.copy(pageLanding = null) }
+        activeLoadOwner = owner
         loadJob = viewModelScope.launch {
-            fetchPage(page)
+            try {
+                fetchPage(owner)
+            } finally {
+                if (activeLoadOwner == owner) activeLoadOwner = null
+            }
         }
     }
 
-    private suspend fun fetchPage(page: Int) {
+    /**
+     * #509/#1050 — session-bound, load-independent blacklist collector. It is never a child of
+     * [loadJob], so block/unblock updates the page already on screen without a refetch. Every
+     * authenticated session gets a fresh subscription (the repository contract emits its current
+     * set immediately); [clearPrivateState] cancels it and drops the cached snapshot on logout or a
+     * direct account switch.
+     */
+    private fun observeBlockedCanonicals() {
+        blacklistJob?.cancel()
+        blacklistJob = blacklistRepository.observeBlockedCanonicals()
+            .onEach { blocked ->
+                blockedCanonicals = blocked
+                _state.update { current ->
+                    val content = current.mode as? PrivateMessageThreadUiState.Mode.Content
+                        ?: return@update current
+                    current.copy(mode = contentMode(content.thread, content.source))
+                }
+            }
+            .catch { error ->
+                android.util.Log.w("PrivateMessageThreadVM", "Blacklist observe failed", error)
+            }
+            .launchIn(viewModelScope)
+    }
+
+    /**
+     * Single construction seam for a loaded page: post-level and quote-level masking always use the
+     * same blacklist snapshot, on initial load, page change and live blacklist re-filter alike.
+     */
+    private fun contentMode(
+        thread: PrivateMessageThread,
+        source: PrivateMessageThreadPage.Source,
+    ) =
+        PrivateMessageThreadUiState.Mode.Content(
+            thread = thread,
+            source = source,
+            hiddenNumreponses = computeHiddenNumreponses(thread.messages),
+            blockedQuoteAuthors = blockedCanonicals,
+        )
+
+    private fun computeHiddenNumreponses(messages: List<Post>): Set<Int> {
+        if (blockedCanonicals.isEmpty()) return emptySet()
+        return messages.asSequence()
+            .filter { message -> canonicalizePseudo(message.author) in blockedCanonicals }
+            .mapTo(mutableSetOf()) { message -> message.numreponse }
+    }
+
+    private suspend fun fetchPage(owner: PageLandingOwner) {
         // Snapshot of the session that issued this fetch — savePosition is sealed to it (#462).
-        val owner = authenticatedPseudo ?: return
-        // #351 — keep the displayed conversation on screen while (re)loading. There is no MP
-        // cache (ADR-013: nothing persisted), so a page change or a pull-to-refresh from a
-        // loaded page is a full network round-trip; wiping to Mode.Loading would flash a
-        // full-screen spinner on every page turn. `page` is NOT advanced optimistically: the
-        // pager keeps describing the page on screen until the new one actually lands.
-        val keepContent = _state.value.mode is PrivateMessageThreadUiState.Mode.Content
+        if (!isCurrentLandingOwner(owner)) return
+        val page = owner.page
+        // Keep the displayed conversation on screen while (re)loading. A hit for the target page
+        // replaces it immediately, still under the refresh indicator until mandatory network
+        // revalidation completes. `page` is never advanced before an actual cache/network emission.
+        var hasContent = _state.value.mode is PrivateMessageThreadUiState.Mode.Content
+        var hasEmittedPage = false
         _state.update {
-            if (keepContent) {
+            if (hasContent) {
                 it.copy(isRefreshing = true)
             } else {
                 it.copy(mode = PrivateMessageThreadUiState.Mode.Loading, page = page)
             }
         }
         try {
-            val thread = repository.getPrivateMessageThread(
+            repository.getPrivateMessageThread(
                 threadId = request.threadId,
                 page = page,
                 fallbackCorrespondent = null,
-            )
-            _state.update {
-                it.copy(
-                    mode = PrivateMessageThreadUiState.Mode.Content(thread),
-                    page = thread.page,
-                    totalPages = thread.totalPages,
-                    isRefreshing = false,
-                )
+            ).collect { loadedPage ->
+                if (!isCurrentLandingOwner(owner)) return@collect
+                val thread = loadedPage.thread
+                val pageLanding = pageLandingFor(thread, owner)
+                hasEmittedPage = true
+                hasContent = true
+                _state.update {
+                    it.copy(
+                        mode = contentMode(thread, loadedPage.source),
+                        page = thread.page,
+                        totalPages = thread.totalPages,
+                        isRefreshing = loadedPage.source != PrivateMessageThreadPage.Source.NETWORK,
+                        // The landing and the first target Content emission are one atomic state
+                        // publication. Cache and network reuse this same value until the screen
+                        // acknowledges it, so revalidation can never produce a second scroll.
+                        pageLanding = pageLanding,
+                    )
+                }
+                if (loadedPage.source == PrivateMessageThreadPage.Source.NETWORK) {
+                    // Cache emissions are render-only: no badge callback (screen), no local position,
+                    // and no MPStorage write. Only the terminal revalidation owns those side effects.
+                    savePosition(
+                        thread.page,
+                        owner.account,
+                        lastPostNumreponse = thread.messages.lastOrNull()?.numreponse,
+                    )
+                    maybeSchedulePrivateMessagePrefetch()
+                }
             }
-            // The anchor of the LAST post on the landed page — the furthest the reader can have reached
-            // on it. Null when the page has no posts (defensive); the auto MPStorage update then keeps
-            // any existing anchor rather than nulling it.
-            savePosition(thread.page, owner, lastPostNumreponse = thread.messages.lastOrNull()?.numreponse)
+            // The repository intentionally completes without an emission when its session stamp is
+            // refused. If the SAME account still owns this load, the refusal is the invalidator race
+            // from #1086: expose the existing generic retry path instead of leaving Loading (or the
+            // refresh indicator) forever. If the owner changed, the auth collector owns the reset and
+            // the replacement load; never turn that genuine cross-account refusal into a fake error.
+            if (
+                !hasEmittedPage &&
+                isCurrentLandingOwner(owner) &&
+                isCurrentLoadOwner(owner.account)
+            ) {
+                clearPageLanding(owner)
+                surfaceLoadFailure(hasContent, HfrErrorKind.Other)
+            }
         } catch (cancellation: CancellationException) {
             // Deliberately does NOT clear isRefreshing: a cancellation only comes from a
             // superseding load() (which owns the flag from its own start) or from
@@ -299,17 +687,180 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
             // (classifyHfrError) so the screen can tell an HFR 5xx outage from a network cut.
             @Suppress("TooGenericExceptionCaught") error: Exception,
         ) {
-            if (keepContent) {
-                // #351 — the page on screen stays put (it is still valid); the screen surfaces
-                // a one-shot Toast instead of swapping a readable conversation for an Error
-                // placeholder. Initial loads (nothing on screen) keep the Error + Retry path.
-                _state.update { it.copy(isRefreshing = false) }
-                _effects.send(PrivateMessageThreadEffect.RefreshFailed)
+            if (isCurrentLandingOwner(owner)) {
+                // A rendered cache page already owns the VISUAL landing even if mandatory network
+                // revalidation fails. Clear only when the target produced no Content at all.
+                if (!hasEmittedPage) clearPageLanding(owner)
+                surfaceLoadFailure(hasContent, classifyHfrError(error))
+            }
+        }
+    }
+
+    private fun landOnDisplayedMessage(thread: PrivateMessageThread, numreponse: Int) {
+        val account = authenticatedPseudo ?: return
+        val activeOwner = activeLoadOwner
+        val supersedesCrossPageLoad = activeOwner != null && activeOwner.page != thread.page
+        // Preserve mandatory network revalidation when the displayed page came from cache. Only a
+        // load aimed at ANOTHER page is superseded by this newer, explicitly local jump.
+        val owner = if (supersedesCrossPageLoad) {
+            loadJob?.cancel()
+            activeLoadOwner = null
+            _state.update { current -> current.copy(isRefreshing = false) }
+            PageLandingOwner(++landingGeneration, account, thread.page)
+        } else {
+            activeOwner
+                ?.takeIf { candidate -> candidate.account == account }
+                ?: PageLandingOwner(landingGeneration, account, thread.page)
+        }
+        pendingPageLanding = ArmedPageLanding(PendingPageLanding.CitedMessage(numreponse), owner)
+        val landing = pageLandingFor(thread, owner) ?: return
+        _state.update { current -> current.copy(pageLanding = landing) }
+    }
+
+    /**
+     * Resolves the one armed landing against the page HFR actually rendered. This runs BEFORE the
+     * Content state update for both cache and network emissions. A parsed out-of-bounds fallback
+     * cannot receive an anchor saved for the requested page; it falls back to top. A cited target
+     * stays explicit even when absent from a cache snapshot, so the screen can wait for terminal
+     * revalidation without applying an intermediate top scroll.
+     */
+    private fun pageLandingFor(
+        thread: PrivateMessageThread,
+        loadOwner: PageLandingOwner,
+    ): PrivateMessagePageLanding? {
+        val armed = pendingPageLanding
+            ?.takeIf { landing -> landing.owner == loadOwner }
+            ?: return null
+        val parsedPage = thread.page
+        return when (val landing = armed.landing) {
+            is PendingPageLanding.CitedMessage -> PrivateMessagePageLanding.CitedMessage(
+                generation = loadOwner.generation,
+                account = loadOwner.account,
+                page = parsedPage,
+                numreponse = landing.numreponse,
+            )
+            is PendingPageLanding.Anchor -> if (parsedPage == loadOwner.page) {
+                PrivateMessagePageLanding.Anchor(
+                    generation = loadOwner.generation,
+                    account = loadOwner.account,
+                    page = parsedPage,
+                    anchor = landing.anchor,
+                )
             } else {
-                _state.update {
-                    it.copy(mode = PrivateMessageThreadUiState.Mode.Error(classifyHfrError(error)))
+                PrivateMessagePageLanding.Top(
+                    generation = loadOwner.generation,
+                    account = loadOwner.account,
+                    page = parsedPage,
+                )
+            }
+            PendingPageLanding.Top -> PrivateMessagePageLanding.Top(
+                generation = loadOwner.generation,
+                account = loadOwner.account,
+                page = parsedPage,
+            )
+        }
+    }
+
+    private fun clearPageLanding(owner: PageLandingOwner) {
+        val armed = pendingPageLanding ?: return
+        if (armed.owner == owner) pendingPageLanding = null
+        _state.update { current ->
+            val landing = current.pageLanding
+            if (
+                landing != null &&
+                landing.generation == owner.generation &&
+                landing.account == owner.account
+            ) {
+                current.copy(pageLanding = null)
+            } else {
+                current
+            }
+        }
+    }
+
+    private fun isCurrentLandingOwner(owner: PageLandingOwner): Boolean =
+        owner.generation == landingGeneration && owner.account == authenticatedPseudo
+
+    private suspend fun isCurrentLoadOwner(owner: String): Boolean =
+        (authRepository.observeAuthState().first() as? AuthState.Authenticated)
+            ?.pseudo
+            ?.let(::canonicalizePseudo) == canonicalizePseudo(owner)
+
+    private suspend fun surfaceLoadFailure(hasContent: Boolean, kind: HfrErrorKind) {
+        if (hasContent) {
+            // #351 — the page on screen stays put (it is still valid); the screen surfaces
+            // a one-shot Toast instead of swapping a readable conversation for an Error
+            // placeholder. Initial loads (nothing on screen) keep the Error + Retry path.
+            _state.update { it.copy(isRefreshing = false) }
+            _effects.send(PrivateMessageThreadEffect.RefreshFailed)
+        } else {
+            _state.update {
+                it.copy(
+                    mode = PrivateMessageThreadUiState.Mode.Error(kind),
+                    isRefreshing = false,
+                )
+            }
+        }
+    }
+
+    /**
+     * The unique ADR-013 scheduler. Its group contains only the valid adjacent pages around the
+     * terminal network page currently displayed; both children share one cancellable parent.
+     *
+     * #1087 — if production gains « Marquer comme non lu », gate this scheduler after that action
+     * until the conversation is reopened: a deliberate `nonlu.php` restores the unread dot, so the
+     * nominal « already consumed » rationale no longer applies. No dormant state before the action
+     * exists.
+     */
+    private fun maybeSchedulePrivateMessagePrefetch() {
+        val group = currentPrivateMessagePrefetchGroup() ?: return
+        if (group == prefetchedGroup) return
+        prefetchJob?.cancel()
+        prefetchedGroup = group
+        prefetchJob = viewModelScope.launch {
+            supervisorScope {
+                group.pages.forEach { targetPage ->
+                    launch {
+                        repository.prefetchPrivateMessageThread(
+                            threadId = group.threadId,
+                            page = targetPage,
+                        )
+                    }
                 }
             }
+        }
+    }
+
+    private fun currentPrivateMessagePrefetchGroup(): PrivateMessagePrefetchGroup? {
+        val content = _state.value.mode as? PrivateMessageThreadUiState.Mode.Content
+        val owner = authenticatedPseudo?.let(::canonicalizePseudo)
+        val thread = content?.thread
+        val pages = thread?.let { adjacentPages(it.page, it.totalPages) }.orEmpty()
+
+        val isScreenActive = prefetchActive
+        val isTerminalNetworkPage = content?.source == PrivateMessageThreadPage.Source.NETWORK
+        val hasAuthenticatedOwner = owner != null
+        val isRequestedThread = thread?.threadId == request.threadId
+        val hasAdjacentPages = pages.isNotEmpty()
+        val candidateGroup =
+            owner?.let { sealedOwner ->
+                thread?.let { sealedThread ->
+                    PrivateMessagePrefetchGroup(
+                        sealedOwner,
+                        request.threadId,
+                        sealedThread.page,
+                        pages,
+                    )
+                }
+            }
+
+        return when {
+            !isScreenActive -> null
+            !isTerminalNetworkPage -> null
+            !hasAuthenticatedOwner -> null
+            !isRequestedThread -> null
+            !hasAdjacentPages -> null
+            else -> candidateGroup
         }
     }
 
@@ -388,6 +939,19 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     interface Factory {
         fun create(request: PrivateMessageThreadRequest): PrivateMessageThreadViewModel
     }
+
+    private data class PrivateMessagePrefetchGroup(
+        val owner: String,
+        val threadId: Int,
+        val centerPage: Int,
+        val pages: List<Int>,
+    )
+}
+
+/** Returns only N-1/N+1 inside the server-reported page bounds, in deterministic order. */
+internal fun adjacentPages(page: Int, totalPages: Int): List<Int> = buildList {
+    if (page in 2..totalPages) add(page - 1)
+    if (page in 1 until totalPages) add(page + 1)
 }
 
 /**

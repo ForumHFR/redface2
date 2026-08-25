@@ -1,12 +1,15 @@
 package fr.forumhfr.redface2.core.data.cache
 
 import android.util.Log
+import fr.forumhfr.redface2.core.data.messages.PrivateMessageThreadSessionCache
+import fr.forumhfr.redface2.core.data.messages.PrivateMessageContentCacheMaintenance
 import fr.forumhfr.redface2.core.database.dao.EditorDraftDao
 import fr.forumhfr.redface2.core.database.dao.FlagDao
 import fr.forumhfr.redface2.core.database.dao.MpReadPositionDao
 import fr.forumhfr.redface2.core.database.dao.MpStorageLocationDao
 import fr.forumhfr.redface2.core.database.dao.UploadedImageDao
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.cache.ImageCacheMaintenance
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.model.AuthState
@@ -20,6 +23,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.scan
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
 
 /**
@@ -52,10 +56,24 @@ import kotlinx.coroutines.plus
  * transition too: the row reveals the account owns a cross-userscript storage MP and at which
  * conversation, so it must not survive the session that discovered it.
  *
+ * Opted-in private-message content follows the same transition through its dedicated persistence
+ * façade. That façade applies the existing Room `lowercase()` account convention to reads, writes
+ * and purges alike. Purge failures carry no identifier in logs and leave a durable pending marker;
+ * [start] owns the startup reconciliation, which retries the global purge only while that marker is
+ * set — startup is not a privacy event, so a default-OFF install with nothing pending scrubs
+ * nothing. The access gate refuses every content-table read and write until a pending purge has
+ * completed.
+ *
+ * Coil's global image cache is wiped too (#1096). Entries created before MP requests disabled
+ * their disk cache carry no public-topic/private-message marker, so a selective purge is
+ * impossible. The safe transition therefore clears both memory and disk globally; public-topic
+ * images disappear as collateral and are downloaded again on demand.
+ *
  * On a `Authenticated(A) → Authenticated(B)` switch (login, then logout, then
  * login as someone else), we wipe rows owned by A explicitly. The session
  * cache held in [FlagRepository.clearSessionCache] is also flushed so that the
- * new account does not inherit the previous in-memory results.
+ * new account does not inherit the previous in-memory results. The private-message page cache is
+ * cleared first and its generation advanced synchronously, before any suspending database purge.
  *
  * Topic page caches are *not* per-user — the HTML is the same for every
  * authenticated reader. We do **not** purge `topic_pages`/`posts` on logout to
@@ -65,8 +83,8 @@ import kotlinx.coroutines.plus
  * anonymous prefetch from clobbering authenticated rows.
  */
 @Singleton
-@Suppress("LongParameterList") // All constructor args are injected per-user caches the invalidator aggregates.
-class CacheInvalidator @Inject constructor(
+@Suppress("LongParameterList") // Injected cache seams aggregated behind the auth transition.
+class CacheInvalidator @Inject internal constructor(
     private val authRepository: AuthRepository,
     private val flagDao: FlagDao,
     private val mpReadPositionDao: MpReadPositionDao,
@@ -74,6 +92,9 @@ class CacheInvalidator @Inject constructor(
     private val uploadedImageDao: UploadedImageDao,
     private val mpStorageLocationDao: MpStorageLocationDao,
     private val flagRepository: FlagRepository,
+    private val privateMessageThreadSessionCache: PrivateMessageThreadSessionCache,
+    private val privateMessageContentCacheMaintenance: PrivateMessageContentCacheMaintenance,
+    private val imageCacheMaintenance: ImageCacheMaintenance,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) {
 
@@ -90,12 +111,22 @@ class CacheInvalidator @Inject constructor(
      */
     fun start(parent: Job? = null): Job {
         val scope = CoroutineScope(ioDispatcher + (parent ?: SupervisorJob()))
+        scope.launch {
+            runCatching { privateMessageContentCacheMaintenance.reconcileOnStartup() }
+                .onFailure { Log.w(LOG_TAG, "Failed to reconcile private content purge") }
+        }
         return authRepository.observeAuthState()
             .distinctUntilChanged()
             .scan(InvalidatorState(previous = null)) { state, current -> state.transition(current) }
             .onEach { state ->
                 val previousPseudo = state.previousPseudo ?: return@onEach
                 if (state.shouldPurge) {
+                    // Synchronous and deliberately first: DAO purges suspend. Any MP response that
+                    // lands while they run must already carry an obsolete generation and be unable
+                    // to refill the RAM cache or reach the UI under the next account (#1080).
+                    privateMessageThreadSessionCache.clearAndAdvanceGeneration()
+                    runCatching { imageCacheMaintenance.clearImageCache() }
+                        .onFailure { Log.w(LOG_TAG, "Failed to purge global image cache", it) }
                     runCatching { flagDao.deleteAllForUser(previousPseudo) }
                         .onFailure { Log.w(LOG_TAG, "Failed to purge flag cache for $previousPseudo", it) }
                     runCatching { mpReadPositionDao.deleteAllForUser(previousPseudo) }
@@ -106,6 +137,11 @@ class CacheInvalidator @Inject constructor(
                         .onFailure { Log.w(LOG_TAG, "Failed to purge uploaded images for $previousPseudo", it) }
                     runCatching { mpStorageLocationDao.deleteAllForUser(previousPseudo) }
                         .onFailure { Log.w(LOG_TAG, "Failed to purge MPStorage location for $previousPseudo", it) }
+                    // Deliberately last among Room deletions: this façade finishes with a WAL
+                    // checkpoint, a VACUUM and a second checkpoint, so every private row deleted
+                    // above is scrubbed too.
+                    runCatching { privateMessageContentCacheMaintenance.purgeForUser(previousPseudo) }
+                        .onFailure { Log.w(LOG_TAG, "Failed to purge private message content") }
                     flagRepository.clearSessionCache()
                 }
             }

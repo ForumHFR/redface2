@@ -1,0 +1,61 @@
+Provenance — private_message_dt_quote_form.html (#1074, citation simple MultiMP / DT)
+
+FIXTURE RÉDUITE. Capture authentifiée live du 2026-08-17, compte du mainteneur en LECTURE SEULE,
+sur une conversation DT réelle. Le titulaire du compte a explicitement autorisé la capture et la
+publication de sa seule forme structurelle assainie. Aucun pseudo ni contenu des autres participants
+n'est conservé. Recette : docs/guides/capture-fixture-citation-mp.md.
+
+Séquence : POST login_validation.php (cookie jar sous /tmp, jamais -L), GET authentifié de la page de
+conversation pour relever le href de citation RÉELLEMENT servi, puis GET authentifié de ce href.
+AUCUN POST bddpost.php : le formulaire n'a jamais été soumis, aucun message n'a été envoyé.
+
+URL capturée (identifiants déjà remplacés par leurs valeurs fictives) :
+  /message.php?config=hfr.inc&cat=prive&post=3000002&numrep=1980000202&ref=2&page=1&p=1&subcat=0
+  &sondage=0&owntopic=0&new=0
+Le fragment #formulaire du href servi a été retiré (jamais envoyé au serveur). Le message cité est le
+2e de la page (ref=2).
+
+Pourquoi HTTP et pas hfr-mcp : hfr_read et hfr_quote exigent une catégorie ENTIÈRE, or les MP
+utilisent cat=prive (une chaîne) ; hfr_mp ne sait que créer un nouveau MP.
+
+RÉDUCTION : seul le sous-arbre `form[name=hop]` est conservé, enveloppé dans un squelette HTML
+minimal. Ont été RETIRÉS à la capture :
+- le chrome de page, la barre d'onglets, la recherche rapide et le pied de page ;
+- les récapitulatifs et vues rapides des messages, donc tous les pseudos, corps, sujets, dates,
+  signatures, avatars et éventuels attributs d'ignore-list des participants DT ;
+- les toolbars par message et tous leurs `md_*cryptlink` ;
+- les favoris de smileys et toute donnée de compte située hors du formulaire.
+
+Les quatre cryptlinks du brut ont TOUS été décodés avec l'algorithme de `CryptlinkDecoder` avant
+réduction : #1 portail www.hardware.fr, #2 `/unlog.php?config&codehex` (jeton de déconnexion lié à la
+session), #3 `/user/editprofil.php?config`, #4 `/online.php?config`. Ils vivaient tous dans le chrome
+hors formulaire et ont tous été retirés ; aucun cryptlink encodé ou décodé ne subsiste.
+
+CE QUE LA FIXTURE PROUVE (contrat serveur DT mesuré) :
+- `form[name=hop] method=post action=/bddpost.php?config=hfr.inc` ;
+- exactement les mêmes 20 champs cachés que la fixture 1:1 `private_message_quote_form.html` :
+  hash_check, subcat, parents, post, stickold, new, cat, numreponse, numrep, page, verifrequet, p,
+  sondage, sond, cache, owntopic, config, sujet, ColorUsedMem, wysiwyg ;
+- `cat=prive`, `numreponse=""`, `numrep` = message cité et `content_form` prérempli par HFR avec
+  `[quotemsg={numrep},2,{userId auteur cité}]…[/quotemsg]` ;
+- AUCUN champ caché `ref` : le rang ne voyage que dans le GET et le BBCode ;
+- AUCUN `newdest` et aucune ligne « Destinataires » sur ce formulaire de citation — contrairement au
+  formulaire de RÉPONSE DT owner, ce qui interdit de transporter son contrat vers la citation ;
+- l'userId du compte courant reste lisible via `find_smilies_timer`.
+
+SANITISATION (mapping fictif stable, relations préservées) :
+- compte courant / auteur cité -> TestUser, userId 990002, conformément aux fixtures MP existantes ;
+- identifiant de conversation DT -> post=3000002 ; message cité -> numrep=1980000202 ;
+- sujet réel -> « Sujet prive collectif fictif » ; corps cité -> « Message prive collectif fictif
+  (contenu remplace). » ;
+- hash_check -> TESTHASH ; tout smiley personnel éventuel -> nom fictif `testsmileydtN` ;
+- les autres participants DT n'apparaissent pas dans `form[name=hop]` et tout le reste de la page a
+  été retiré : aucun pseudo, userId, title ou texte d'ignore-list réel n'entre dans la fixture ;
+- conservés car non sensibles : structure et ordre du formulaire, noms de champs, valeurs de routage
+  non identifiantes, options, MsgIcon, smileys builtin, textes d'aide BBCode et URLs statiques HFR.
+
+Le brut de la capture n'est PAS conservé dans le dépôt.
+
+NORMALISATION NON SÉMANTIQUE : un espace de fin de ligne interne à l'attribut `onsubmit` du
+formulaire a été retiré pour `git diff --check`. Aucun autre octet du sous-arbre conservé n'a été
+reformaté hors substitutions de sanitisation.

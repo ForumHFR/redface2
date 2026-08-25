@@ -1,12 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- #1040 lot 6 — primitive de sélection de page partagée, sans politique de feature. -->
+    <string name="pager_previous">Précédent</string>
+    <string name="pager_next">Suivant</string>
+    <string name="pager_position">page %1$d / %2$d</string>
+    <string name="pager_jump_label">Aller à la page</string>
+    <string name="pager_jump_action">Y aller</string>
     <string name="post_quote_author">Citation de %1$s</string>
     <string name="post_quote_bare">Citation</string>
     <string name="post_quote_ego_state_description">Citation de votre message</string>
     <!-- #699 : libellé a11y du tap sur l'en-tête d'une citation sourcée (aller au message cité). -->
     <string name="post_quote_go_to">Aller au message cité</string>
+    <!-- #509/#1050 : placeholder partagé d'un post/message dont l'auteur est black-listé. Noms
+         neutres : :core:ui ne dépend d'aucune ressource de feature. -->
+    <string name="post_hidden_by_author">Post de %1$s masqué</string>
+    <string name="post_hidden_reveal">Afficher</string>
     <!-- #785 : placeholder d'une citation dont l'auteur est black-listé. Le pseudo reste visible,
-         cohérent avec topic_post_hidden_by_author côté posts (le lecteur sait QUI est masqué). -->
+         cohérent avec post_hidden_by_author au niveau post/message (le lecteur sait QUI est masqué). -->
     <string name="post_quote_blocked_author">Citation de %1$s masquée</string>
     <string name="post_quote_collapsed">Citation imbriquée repliée</string>
     <string name="post_quote_collapsed_revealed">Citations imbriquées</string>
@@ -29,6 +39,15 @@
     <string name="post_image_retry_action">Réessayer</string>
     <!-- #831 : libellé a11y de l'appui long sur une image de post (menu contextuel image). -->
     <string name="post_image_options_action">Options de l\'image</string>
+    <!-- #831/#1040 : menu image partagé entre les surfaces de lecture. Les valeurs restent celles
+         livrées côté topic ; les noms neutres permettent leur réemploi côté MP sans host flag. -->
+    <string name="post_image_menu_save">Enregistrer l\'image</string>
+    <string name="post_image_menu_copy_url">Copier l\'URL de l\'image</string>
+    <string name="post_image_menu_url_copied">URL copiée</string>
+    <string name="post_image_menu_full_size_soon">Afficher en taille réelle (à venir)</string>
+    <!-- Action navigateur neutre, partagée par le menu image et les menus propres aux features. -->
+    <string name="browser_open_action">Ouvrir dans le navigateur</string>
+    <string name="browser_no_handler">Aucun navigateur disponible</string>
     <string name="bbcode_action_bold">Gras</string>
     <string name="bbcode_action_italic">Italique</string>
     <string name="bbcode_action_underline">Souligné</string>

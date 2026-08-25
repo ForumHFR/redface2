@@ -29,11 +29,11 @@ import org.robolectric.annotation.Config
  * `subline` slots appear only when supplied; the avatar and author-pseudo clicks fire their
  * callbacks.
  *
- * #884 — a11y contract: the fallback pseudo [Text] carries heading semantics itself (the MP case);
- * a caller-supplied `pseudo` slot OWNS its heading (the topic marks its real pseudo text node) and
- * the header adds none around it — one heading per post, TalkBack never announces it twice. Both
- * directions of the slot contract are pinned here (review Sol r4): a slot WITH its own heading()
- * yields exactly one, a slot WITHOUT yields zero — by design, not by accident.
+ * #884 — a11y contract: the fallback pseudo [Text] carries heading semantics itself (the plain MP
+ * case); a caller-supplied `pseudo` slot OWNS its heading (the topic and creator-MP branches mark
+ * their real pseudo text node) and the header adds none around it — one heading per post, TalkBack
+ * never announces it twice. Both directions of the slot contract are pinned here (review Sol r4):
+ * a slot WITH its own heading() yields exactly one, a slot WITHOUT yields zero — by design.
  */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -130,8 +130,8 @@ class PostIdentityHeaderTest {
         // author text IS the announcement, so nothing is spoken twice)…
         composeTestRule.onNodeWithText("MonPseudo")
             .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading))
-        // …and it is the ONLY heading the header emits (review Sol r4) — the fallback variant is
-        // the MP production case, one heading per message.
+        // …and it is the ONLY heading the header emits (review Sol r4) — this is the plain-pseudo
+        // MP production path, one heading per message.
         composeTestRule
             .onAllNodes(
                 SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading),

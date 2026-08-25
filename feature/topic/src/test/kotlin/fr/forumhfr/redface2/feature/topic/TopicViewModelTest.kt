@@ -1,6 +1,9 @@
 package fr.forumhfr.redface2.feature.topic
 
 import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStore
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.blacklist.BlacklistRepository
@@ -52,9 +55,11 @@ import fr.forumhfr.redface2.core.model.Topic
 import java.io.IOException
 import java.net.UnknownHostException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -3011,6 +3016,130 @@ class TopicViewModelTest {
     private fun searchableRepo(form: TopicSearchForm): FakeTopicRepository =
         FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 5, searchForm = form)) }))
 
+    // ──────────────────────────────────────────────────────────────────────
+    // #1144 — HFR mutations must outlive the ViewModel that started them
+    //
+    // Since #1083 every HfrClient call is genuinely cancellable, so a write left on
+    // `viewModelScope` has its socket cut the moment the screen is popped. Each test below holds the
+    // repository call in flight, DESTROYS the ViewModel through `ViewModelStore.clear()` (the very
+    // path the framework takes on screen leave), and only THEN releases the call — asserting it ran
+    // to completion. `…Calls` alone would prove nothing here: it is already incremented before the
+    // gate, i.e. by an aborted request too. The `…Completions` counters are what carry the proof.
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `a confirmed post deletion outlives the ViewModel destroyed mid-request (#1144)`() = runTest {
+        val appScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        val gate = CompletableDeferred<Unit>()
+        val deleteRepo = FakeDeletePostRepository().apply { this.gate = gate }
+        val loaded = fakeTopic(
+            page = 2,
+            totalPages = 3,
+            posts = listOf(fakePost(numreponse = 777, isEditable = true)),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(loaded) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            deletePostRepository = deleteRepo,
+            externalScope = appScope,
+        )
+        advanceUntilIdle()
+
+        viewModel.send(TopicIntent.DeletePost(777))
+        advanceUntilIdle()
+        assertEquals("the POST is in flight, held by the gate", 1, deleteRepo.calls.size)
+        assertTrue("nothing has reached HFR yet", deleteRepo.completedCalls.isEmpty())
+
+        // The user presses back : the entry leaves the back stack and the ViewModel is cleared.
+        destroyViewModel(viewModel)
+        advanceUntilIdle()
+
+        // Only now does the server answer — with no ViewModel left to receive it.
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        assertEquals(
+            "the deletion the user confirmed must still reach HFR after the screen is gone",
+            listOf(777),
+            deleteRepo.completedCalls.map { it.numreponse },
+        )
+    }
+
+    @Test
+    fun `a confirmed topic-flag removal outlives the ViewModel destroyed mid-request (#1144)`() = runTest {
+        val appScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        val gate = CompletableDeferred<Unit>()
+        val flag = fakeFlag(title = "Redface 2")
+        val flagRepo = FakeFlagRepository(flagToFind = flag).apply { removeFlagGate = gate }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(2, 3)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            flagRepository = flagRepo,
+            externalScope = appScope,
+        )
+        advanceUntilIdle()
+
+        viewModel.send(TopicIntent.RequestRemoveTopicFlag)
+        advanceUntilIdle()
+        viewModel.confirmRemoveTopicFlag()
+        advanceUntilIdle()
+        assertEquals("the delflag GET is in flight", 1, flagRepo.removeFlagCalls)
+        assertEquals("and has not landed yet", 0, flagRepo.removeFlagCompletions)
+
+        destroyViewModel(viewModel)
+        advanceUntilIdle()
+
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        assertEquals(
+            "the removal the user confirmed in the dialog must still reach HFR",
+            1,
+            flagRepo.removeFlagCompletions,
+        )
+    }
+
+    @Test
+    fun `an added favourite outlives the ViewModel destroyed mid-request (#1144)`() = runTest {
+        // The reported scenario: post menu → « Ajouter aux favoris » → immediate back press.
+        val appScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        val gate = CompletableDeferred<Unit>()
+        val flagRepo = FakeFlagRepository().apply { addFlagGate = gate }
+        val anchoredPost = fakePost(numreponse = 4242).copy(quoteRef = 24)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 7),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(flow { emit(fakeTopic(7, 9, posts = listOf(anchoredPost))) }),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            flagRepository = flagRepo,
+            externalScope = appScope,
+        )
+        advanceUntilIdle()
+
+        viewModel.resolveFavoriteAtPostState()
+        advanceUntilIdle()
+        viewModel.requestAddFavoriteAtPost(anchoredPost)
+        advanceUntilIdle()
+        assertEquals("the addflag GET is in flight", 1, flagRepo.addFlagCalls)
+        assertEquals("and has not landed yet", 0, flagRepo.addFlagCompletions)
+
+        destroyViewModel(viewModel)
+        advanceUntilIdle()
+
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        assertEquals(
+            "the favourite must be created even though the user left immediately",
+            1,
+            flagRepo.addFlagCompletions,
+        )
+        assertEquals(4242, flagRepo.lastAddContext?.numreponse)
+    }
+
     @Suppress("LongParameterList") // test factory mirroring the ViewModel's injected dependencies.
     private fun topicViewModel(
         request: TopicRequest,
@@ -3022,6 +3151,10 @@ class TopicViewModelTest {
         topicSearchRepository: TopicSearchRepository = FakeTopicSearchRepository(),
         searchRepository: SearchRepository = FakeSearchRepository(),
         flagRepository: FlagRepository = FakeFlagRepository(),
+        // #1144 — stands in for the @ApplicationScope singleton. Its own SupervisorJob is NEVER
+        // cancelled by the tests, exactly like the process-lifetime scope it mirrors, so a test that
+        // destroys the ViewModel really does leave the detached mutation running.
+        externalScope: CoroutineScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher()),
         // #895 étape 4 — a fresh handle per test ; the process-restore tests pass the SAME handle
         // to a second ViewModel to simulate death + recreation.
         savedStateHandle: SavedStateHandle = SavedStateHandle(),
@@ -3036,7 +3169,25 @@ class TopicViewModelTest {
         topicSearchRepository = topicSearchRepository,
         searchRepository = searchRepository,
         flagRepository = flagRepository,
+        externalScope = externalScope,
     )
+
+    /**
+     * #1144 — destroys [viewModel] the way the framework does when the screen leaves for good:
+     * `ViewModelStore.clear()` is the public entry point that cancels `viewModelScope` and calls
+     * `onCleared()`. Same technique as `CategoryViewModelTest`'s prefetch-cancellation test.
+     */
+    private fun destroyViewModel(viewModel: ViewModel) {
+        val store = ViewModelStore()
+        ViewModelProvider(
+            store,
+            object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(modelClass: Class<T>): T = viewModel as T
+            },
+        ).get(viewModel::class.java)
+        store.clear()
+    }
 
     private fun topicRequest(
         page: Int,
@@ -3981,8 +4132,20 @@ private class FakeDeletePostRepository(
 ) : DeletePostRepository {
     val calls = mutableListOf<EditPostContext>()
 
+    /** #1144 — when set, holds the POST in flight so a test can destroy the ViewModel mid-request. */
+    var gate: CompletableDeferred<Unit>? = null
+
+    /**
+     * #1144 — contexts whose deletion ran PAST [gate], i.e. reached HFR instead of being aborted.
+     * [calls] only says the call STARTED; this says it finished. That difference is the whole point:
+     * a cancelled caller records an entry in [calls] and none here.
+     */
+    val completedCalls = mutableListOf<EditPostContext>()
+
     override suspend fun deletePost(context: EditPostContext): DeletePostResult {
         calls += context
+        gate?.await()
+        completedCalls += context
         return result
     }
 }
@@ -4010,6 +4173,14 @@ private class FakeFlagRepository(
     var removeFlagGate: CompletableDeferred<Unit>? = null
     var resolveFavoriteGate: CompletableDeferred<Unit>? = null
     var addFlagGate: CompletableDeferred<Unit>? = null
+
+    /**
+     * #1144 — how many add / remove calls ran PAST their gate, i.e. actually reached HFR. The
+     * `…Calls` counters above only prove the call STARTED; these prove it was not aborted mid-flight
+     * when the ViewModel died.
+     */
+    var addFlagCompletions = 0
+    var removeFlagCompletions = 0
 
     /** Gate #809 — when set, [findFlag] throws instead of returning (resolve failure path). */
     var findFlagError: Throwable? = null
@@ -4044,6 +4215,7 @@ private class FakeFlagRepository(
         addFlagCalls++
         lastAddContext = context
         addFlagGate?.await()
+        addFlagCompletions++
         return addResult
     }
 
@@ -4051,6 +4223,7 @@ private class FakeFlagRepository(
         removeFlagCalls++
         lastRemovedFlag = flag
         removeFlagGate?.await()
+        removeFlagCompletions++
         removeFlagError?.let { throw it }
         return removeResult
     }

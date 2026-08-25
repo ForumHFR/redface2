@@ -2,14 +2,18 @@ package fr.forumhfr.redface2.core.data.messages
 
 import android.util.Log
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
+import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
+import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageListPage
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.parser.messages.PrivateMessageListParser
 import fr.forumhfr.redface2.core.parser.messages.PrivateMessageThreadParser
+import java.time.Instant
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
@@ -44,11 +48,14 @@ import kotlinx.coroutines.withContext
  * (newest-first ordering) — sufficient for "is there anything new?" UX.
  */
 @Singleton
-class DefaultMessagesRepository @Inject constructor(
+@Suppress("LongParameterList") // Auth/network/parser plus the two deliberately separate cache tiers.
+class DefaultMessagesRepository @Inject internal constructor(
     private val authRepository: AuthRepository,
     private val hfrClient: HfrClient,
     private val parser: PrivateMessageListParser,
     private val threadParser: PrivateMessageThreadParser,
+    private val threadSessionCache: PrivateMessageThreadSessionCache,
+    private val privateMessageContentAccess: PrivateMessageContentAccess,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : MessagesRepository {
 
@@ -150,8 +157,8 @@ class DefaultMessagesRepository @Inject constructor(
     // Unlike observeUnreadMpCount (a best-effort footer signal that swallows failures into
     // null), the inbox list / thread reads PROPAGATE their errors: the Messages tab owns a real
     // error state with a retry, so a network or session failure must reach the ViewModel rather
-    // than being hidden behind an empty screen. withContext(ioDispatcher) wraps the HfrClient
-    // call per the repository contract (cf. NetworkOnMainThreadException regression, PR #162).
+    // than being hidden behind an empty screen. withContext/flowOn(ioDispatcher) wrap HfrClient
+    // calls per the repository contract (cf. NetworkOnMainThreadException regression, PR #162).
     override suspend fun getPrivateMessageList(page: Int): PrivateMessageListPage =
         withContext(ioDispatcher) {
             // Session snapshot at call-time, BEFORE the network call (same pattern as the flags
@@ -171,16 +178,140 @@ class DefaultMessagesRepository @Inject constructor(
     private suspend fun currentPseudo(): String? =
         (authRepository.observeAuthState().first() as? AuthState.Authenticated)?.pseudo
 
-    override suspend fun getPrivateMessageThread(
+    override fun getPrivateMessageThread(
         threadId: Int,
         page: Int,
         fallbackCorrespondent: String?,
-    ): PrivateMessageThread = withContext(ioDispatcher) {
-        threadParser.parse(
+    ): Flow<PrivateMessageThreadPage> = flow {
+        val owner = currentPseudo()
+            ?: throw SessionExpiredException(REDACTED_PRIVATE_MESSAGE_URL)
+        val stamp = threadSessionCache.capture(owner)
+        var sessionCacheHit = false
+        if (isCurrentSession(stamp)) {
+            threadSessionCache.read(stamp, threadId, page)?.let { cached ->
+                if (isCurrentSession(stamp)) {
+                    sessionCacheHit = true
+                    emit(PrivateMessageThreadPage(cached, PrivateMessageThreadPage.Source.SESSION_CACHE))
+                }
+            }
+        }
+        if (!sessionCacheHit) {
+            readDiskPageOrNull(owner, threadId, page)?.let { cached ->
+                if (isCurrentSession(stamp)) {
+                    emit(PrivateMessageThreadPage(cached, PrivateMessageThreadPage.Source.DISK))
+                }
+            }
+        }
+
+        fetchAndCacheThreadPage(
+            threadId = threadId,
+            page = page,
+            fallbackCorrespondent = fallbackCorrespondent,
+            stamp = stamp,
+            diskUserId = owner,
+            persistToDisk = true,
+        )?.let { parsed ->
+            emit(PrivateMessageThreadPage(parsed, PrivateMessageThreadPage.Source.NETWORK))
+        }
+        // A stale stamp deliberately produces no terminal emission: turning the refusal into data
+        // here would let a response owned by a previous generation cross the repository boundary.
+        // The conversation ViewModel owns the empty-collection UI fallback and scopes it to the
+        // account that started the load, so a real account switch stays a refusal.
+    }.flowOn(ioDispatcher)
+
+    override fun isPrivateMessageThreadPageWarm(account: String, threadId: Int, page: Int): Boolean {
+        val stamp = threadSessionCache.capture(account)
+        return threadSessionCache.contains(stamp, threadId, page)
+    }
+
+    override suspend fun prefetchPrivateMessageThread(threadId: Int, page: Int) =
+        withContext(ioDispatcher) {
+            try {
+                val owner = currentPseudo()
+                if (owner != null) {
+                    val stamp = threadSessionCache.capture(owner)
+                    if (isCurrentSession(stamp) && threadSessionCache.read(stamp, threadId, page) == null) {
+                        fetchAndCacheThreadPage(
+                            threadId = threadId,
+                            page = page,
+                            fallbackCorrespondent = null,
+                            stamp = stamp,
+                            diskUserId = owner,
+                            persistToDisk = false,
+                        )
+                    }
+                }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (@Suppress("TooGenericExceptionCaught") _: Exception) {
+                // Best-effort and deliberately silent (#316): HfrServerException carries the
+                // private forum2.php URL. Never hand the raw throwable to Log or DiagnosticsLog.
+            }
+        }
+
+    /**
+     * Shared terminal-network path for visible reads and prefetch. The parsed target is validated
+     * once, immediately before the cache write; the account/generation stamp is then rechecked
+     * again before the caller may use the response.
+     */
+    private suspend fun fetchAndCacheThreadPage(
+        threadId: Int,
+        page: Int,
+        fallbackCorrespondent: String?,
+        stamp: PrivateMessageThreadSessionCache.Stamp,
+        diskUserId: String,
+        persistToDisk: Boolean,
+    ): PrivateMessageThread? {
+        val parsed = threadParser.parse(
             html = hfrClient.getPrivateMessageThreadPage(threadId = threadId, page = page),
             fallbackCorrespondent = fallbackCorrespondent,
         )
+        if (parsed.matchesTarget(threadId, page) && isCurrentSession(stamp)) {
+            threadSessionCache.write(stamp, threadId, page, parsed)
+            if (persistToDisk) persistTerminalPage(diskUserId, parsed, stamp)
+        }
+        return parsed.takeIf { isCurrentSession(stamp) }
     }
+
+    private suspend fun readDiskPageOrNull(
+        userId: String,
+        threadId: Int,
+        page: Int,
+    ): PrivateMessageThread? = try {
+        privateMessageContentAccess.readIfEnabled(userId, threadId, page)
+    } catch (cancellation: CancellationException) {
+        throw cancellation
+    } catch (@Suppress("TooGenericExceptionCaught") _: Exception) {
+        // Optional private storage is best-effort and deliberately silent (#316).
+        null
+    }
+
+    /** Preference and session seal are both re-read immediately before the Room transaction. */
+    private suspend fun persistTerminalPage(
+        userId: String,
+        thread: PrivateMessageThread,
+        stamp: PrivateMessageThreadSessionCache.Stamp,
+    ) {
+        try {
+            privateMessageContentAccess.replaceIfEnabled(
+                userId = userId,
+                thread = thread,
+                fetchedAt = Instant.now(),
+                isSessionCurrent = { isCurrentSession(stamp) },
+            )
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (@Suppress("TooGenericExceptionCaught") _: Exception) {
+            // Optional private storage is best-effort and deliberately silent (#316).
+        }
+    }
+
+    private suspend fun isCurrentSession(stamp: PrivateMessageThreadSessionCache.Stamp): Boolean =
+        threadSessionCache.isCurrent(stamp) &&
+            currentPseudo()?.let(::canonicalizePseudo) == stamp.account
+
+    private fun PrivateMessageThread.matchesTarget(threadId: Int, page: Int): Boolean =
+        this.threadId == threadId && this.page == page
 
     /** #453 — events folded by the unread-count [scan]. */
     private sealed interface UnreadEvent
@@ -231,5 +362,6 @@ class DefaultMessagesRepository @Inject constructor(
     private companion object {
         const val LOG_TAG = "MessagesRepository"
         const val FIRST_PAGE = 1
+        const val REDACTED_PRIVATE_MESSAGE_URL = "private-message-session"
     }
 }

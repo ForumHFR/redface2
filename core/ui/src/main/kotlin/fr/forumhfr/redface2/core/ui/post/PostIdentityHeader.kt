@@ -23,14 +23,15 @@ import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
 /**
  * #351 — the poster-identity line shared by the topic post card and the private-message thread card:
  * an avatar, an author pseudo and a date, optionally with a contextual-menu trigger and an extra
- * sub-line. The neutral half of the identity; the tinted strip behind it is [PostIdentityBand] (a
- * separate primitive so the band-less MP can use this header on its own).
+ * sub-line. The neutral half of the identity; the tinted strip behind it is [PostIdentityBand], a
+ * separate primitive so each reading host can own its colour independently from this layout.
  *
  * Layout: `Row[ avatar, Column(weight 1f){ pseudo ; date + subline }, trailing ]`, centred so the
  * avatar reads against the name+date block as one tidy unit. Slots, so each feature supplies its own
  * labels/icons without `:core:ui` reaching a feature string or a material-icon:
- *  - [pseudo] (optional) — overrides the default pseudo text; the topic passes its gold-sheen
- *    `CreatorPseudoText` (#221). When `null`, a plain ellipsised [Text] of [author] is drawn. Note:
+ *  - [pseudo] (optional) — overrides the default pseudo text; the topic and MP pass the gold-sheen
+ *    [CreatorPseudoText] for an RF2 creator (#221). When `null`, a plain ellipsised [Text] of [author]
+ *    is drawn. Note:
  *    [onAuthorClick] is applied to that fallback text only — a supplied [pseudo] owns its own
  *    interaction. CONTRACT (#884): the provided slot also OWNS the post heading semantics — exactly
  *    one node inside it must set `semantics { heading() }`, on the real pseudo text node (the best
@@ -40,9 +41,10 @@ import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
  *    `PostIdentityHeaderTest` (contract, both directions) plus one exactly-one-heading assert per
  *    production variant (`TopicPostCardFullWidthTest`, `MessageCardShellSmokeTest`).
  *  - [dateTrailing] (optional) — a marker on the SAME row as the date, to its right (the topic's
- *    `· édité` #483); `null` on the MP keeps the date as a plain single line.
+ *    and MP's data-driven `· édité`, #483/#1051); `null` keeps the date as a plain single line.
  *  - [subline] (optional) — extra line under the date; unused by the topic now, available for MP.
- *  - [trailing] (optional) — the `⋯` per-post menu glyph (topic); `null` on the MP.
+ *  - [trailing] (optional) — the `⋯` per-post menu glyph supplied by topic and MP cards; `null` for
+ *    hosts without a contextual menu.
  *
  * Clicks: [RedfaceUserAvatar] carries no `onClick` of its own, so the avatar tap is a
  * `Modifier.clickable` this header wraps around it (with `role = Role.Button` and a
@@ -87,12 +89,14 @@ fun PostIdentityHeader(
     ) {
         val avatarModifier = if (onAvatarClick != null) {
             Modifier
-                .minimumInteractiveComponentSize()
                 .clickable(
                     onClick = onAvatarClick,
                     role = Role.Button,
                     onClickLabel = onAvatarClickLabel,
                 )
+                // Keep the clickable semantics outside the 40.dp avatar so its own bounds expose
+                // the complete Material 48.dp target, not only touch-target expansion around it.
+                .minimumInteractiveComponentSize()
         } else {
             Modifier
         }
@@ -107,8 +111,9 @@ fun PostIdentityHeader(
             verticalArrangement = Arrangement.spacedBy(lineSpacing),
         ) {
             if (pseudo != null) {
-                // #884 a11y — a caller-supplied pseudo owns its heading semantics (the topic marks
-                // its real pseudo text node); wrapping the slot here would double the heading.
+                // #884 a11y — a caller-supplied pseudo owns its heading semantics (the topic and
+                // creator-MP branches mark their real pseudo text node); wrapping the slot here
+                // would double the heading.
                 pseudo()
             } else {
                 val pseudoModifier = if (onAuthorClick != null) {

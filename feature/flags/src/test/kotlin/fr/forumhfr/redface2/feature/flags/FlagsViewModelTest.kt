@@ -1,5 +1,8 @@
 package fr.forumhfr.redface2.feature.flags
 
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStore
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.LoginError
@@ -13,6 +16,7 @@ import fr.forumhfr.redface2.core.domain.forum.FlagFilterBucket
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
+import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
@@ -52,8 +56,11 @@ import java.time.Clock
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZoneOffset
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -842,6 +849,56 @@ class FlagsViewModelTest {
 
         assertEquals(listOf(flag), flags.removeFlagCalls)
         assertEquals(RemoveFlagEvent.Success(flag.title), vm.removeFlagEvent.value)
+    }
+
+    @Test
+    fun `a confirmed flag removal outlives the ViewModel destroyed mid-request (#1144)`() = runTest {
+        // Since #1083 the delflag GET is genuinely cancellable, so leaving the Drapeaux screen right
+        // after confirming used to cut the socket with nothing to tell the user. The removal now runs
+        // on the process-lifetime scope: destroying the ViewModel must not abort it.
+        val appScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = viewModel(auth, flags, forum, externalScope = appScope)
+        val flag = stubFlag(1, FlagType.CYAN)
+
+        flags.removeFlagResult = CompletableDeferred()
+        vm.requestRemoveFlag(flag)
+        vm.confirmRemoveFlag()
+        advanceUntilIdle()
+        assertEquals("the delflag GET is in flight", listOf(flag), flags.removeFlagCalls)
+        assertTrue("and has not landed yet", flags.removeFlagCompletions.isEmpty())
+
+        // `ViewModelStore.clear()` is the path the framework takes when the screen leaves for good:
+        // it cancels `viewModelScope` and calls `onCleared()`.
+        destroyViewModel(vm)
+        advanceUntilIdle()
+
+        flags.removeFlagResult.complete(Result.success(Unit))
+        advanceUntilIdle()
+
+        assertEquals(
+            "the removal the user confirmed must still reach HFR after the screen is gone",
+            listOf(flag),
+            flags.removeFlagCompletions,
+        )
+    }
+
+    /**
+     * #1144 — destroys [target] exactly as the framework does on screen leave: `ViewModelStore.clear()`
+     * is the public entry point that cancels `viewModelScope` and calls `onCleared()`.
+     */
+    private fun destroyViewModel(target: ViewModel) {
+        val store = ViewModelStore()
+        ViewModelProvider(
+            store,
+            object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(modelClass: Class<T>): T = target as T
+            },
+        ).get(target::class.java)
+        store.clear()
     }
 
     @Test
@@ -2254,7 +2311,11 @@ class FlagsViewModelTest {
         messages: FakeMessagesRepository = FakeMessagesRepository(),
         mpStorage: FakeMpStorageRepository = FakeMpStorageRepository(),
         superFavorite: SuperFavoriteRepository = FakeSuperFavoriteRepository(),
-    ): FlagsViewModel = FlagsViewModel(auth, flags, forum, prefs, superFavorite, messages, mpStorage, fixedClock)
+        // #1144 — stands in for the @ApplicationScope singleton; never cancelled by the tests, like
+        // the process-lifetime scope it mirrors.
+        externalScope: CoroutineScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher()),
+    ): FlagsViewModel =
+        FlagsViewModel(auth, flags, forum, prefs, superFavorite, messages, mpStorage, fixedClock, externalScope)
 
     /** Builds a ViewModel with a custom [clock] for the #378 throttle tests; everything else is a
      * fresh default fake. */
@@ -2271,6 +2332,7 @@ class FlagsViewModelTest {
         FakeMessagesRepository(),
         FakeMpStorageRepository(),
         clock,
+        CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher()),
     )
 
     /** In-memory [SuperFavoriteRepository] (#603 PR5) — the local super-favorite set. */
@@ -2397,9 +2459,19 @@ class FlagsViewModelTest {
         override suspend fun resolveFavorite(cat: Int, topicId: Int): Result<Boolean> =
             error("FlagsViewModel must not resolve a topic favourite")
 
+        /**
+         * #1144 — flags whose removal ran PAST [removeFlagResult], i.e. actually reached HFR.
+         * [removeFlagCalls] is recorded BEFORE the suspension, so it counts aborted requests too;
+         * only this list proves a removal was not cut off with the ViewModel.
+         */
+        var removeFlagCompletions: List<Flag> = emptyList()
+            private set
+
         override suspend fun removeFlag(flag: Flag): Result<Unit> {
             removeFlagCalls = removeFlagCalls + flag
-            return removeFlagResult.await()
+            val result = removeFlagResult.await()
+            removeFlagCompletions = removeFlagCompletions + flag
+            return result
         }
 
         override suspend fun findFlag(cat: Int, topicId: Int): Flag? {
@@ -2816,6 +2888,7 @@ class FlagsViewModelTest {
         override fun observeUnreadMpCount(): Flow<Int?> = MutableStateFlow(null)
         override fun requestUnreadRefresh() = Unit
         override fun markThreadRead(threadId: Int) = Unit
+        override suspend fun prefetchPrivateMessageThread(threadId: Int, page: Int) = Unit
 
         override suspend fun getPrivateMessageList(page: Int): PrivateMessageListPage {
             getListCalls += 1
@@ -2824,18 +2897,24 @@ class FlagsViewModelTest {
             return inboxResult.getOrThrow()
         }
 
-        override suspend fun getPrivateMessageThread(
+        override fun getPrivateMessageThread(
             threadId: Int,
             page: Int,
             fallbackCorrespondent: String?,
-        ): PrivateMessageThread = PrivateMessageThread(
-            threadId = threadId,
-            subject = "",
-            correspondent = "",
-            messages = emptyList(),
-            page = page,
-            totalPages = 1,
-        )
+        ): Flow<PrivateMessageThreadPage> =
+            flowOf(
+                PrivateMessageThreadPage(
+                    thread = PrivateMessageThread(
+                        threadId = threadId,
+                        subject = "",
+                        correspondent = "",
+                        messages = emptyList(),
+                        page = page,
+                        totalPages = 1,
+                    ),
+                    source = PrivateMessageThreadPage.Source.NETWORK,
+                ),
+            )
     }
 
     /**

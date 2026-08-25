@@ -23,10 +23,10 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.SheetState
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,9 +38,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import fr.forumhfr.redface2.core.model.Post
+import fr.forumhfr.redface2.core.model.postContentPlainText
 import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.launch
+import fr.forumhfr.redface2.core.ui.post.hideThenDismiss
+import fr.forumhfr.redface2.core.ui.R as CoreUiR
 
 /**
  * #362 — per-post contextual menu, opened from the `⋯` trigger in the post header
@@ -53,8 +54,9 @@ import kotlinx.coroutines.launch
  *   « Cité N fois dans le sujet » when [citedCount] > 0 (hidden at 0) — #863 : the SERVER
  *   counter, cross-page, same value as the card's badge;
  * - stacked full-width actions, profile-sheet style: a filled « Copier le lien de ce
- *   post » (primary), an outlined « Ouvrir dans le navigateur » (debug-friendly: the
- *   canonical permalink opens in the default browser), and a DISABLED « Alerter »
+ *   post » (primary), « Copier le texte » (disabled when an image-only post projects to
+ *   blank), an outlined « Ouvrir dans le navigateur » (debug-friendly: the canonical
+ *   permalink opens in the default browser), and a DISABLED « Alerter »
  *   placeholder — the report flow is not implemented yet, the greyed button shows the
  *   roadmap like the Settings « menu vitrine » (#288).
  *
@@ -133,9 +135,11 @@ internal fun PostMenuSheet(
     val sheetState = rememberModalBottomSheetState()
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
+    val plainText = remember(post.content) { postContentPlainText(post.content) }
     // Resolved at composition time — the action callbacks run outside composition.
     val copiedFeedback = stringResource(R.string.topic_post_menu_link_copied)
-    val browserFailedFeedback = stringResource(R.string.topic_post_menu_no_browser)
+    val copiedTextFeedback = stringResource(R.string.topic_post_menu_text_copied)
+    val browserFailedFeedback = stringResource(CoreUiR.string.browser_no_handler)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -206,12 +210,25 @@ internal fun PostMenuSheet(
 
             OutlinedButton(
                 onClick = {
+                    copyPostTextToClipboard(context, plainText, copiedTextFeedback)
+                    hideThenDismiss(coroutineScope, sheetState, onDismiss)
+                },
+                enabled = plainText.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.topic_post_menu_copy_text))
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            OutlinedButton(
+                onClick = {
                     openPermalinkInBrowser(context, permalink, browserFailedFeedback)
                     hideThenDismiss(coroutineScope, sheetState, onDismiss)
                 },
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text(stringResource(R.string.topic_post_menu_open_in_browser))
+                Text(stringResource(CoreUiR.string.browser_open_action))
             }
 
             PostFavoriteButton(
@@ -430,6 +447,15 @@ private fun copyPermalinkToClipboard(context: Context, permalink: String, feedba
     }
 }
 
+/** Copies the complete locale-neutral [postContentPlainText] projection of the post. */
+private fun copyPostTextToClipboard(context: Context, text: String, feedback: String) {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    clipboard.setPrimaryClip(ClipData.newPlainText("redface2 post text", text))
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+        Toast.makeText(context, feedback, Toast.LENGTH_SHORT).show()
+    }
+}
+
 /**
  * Fires an `ACTION_VIEW` on the canonical permalink — lands in the default browser (or
  * the user's link-handling app). A device without any handler is vanishingly rare but
@@ -441,23 +467,4 @@ private fun openPermalinkInBrowser(context: Context, permalink: String, failureF
     } catch (ignored: ActivityNotFoundException) {
         Toast.makeText(context, failureFeedback, Toast.LENGTH_SHORT).show()
     }
-}
-
-/**
- * Plays the sheet's hide animation, then invokes [onDismiss] once the sheet is actually
- * off-screen — same Material 3 « animated dismiss » idiom as ProfilePreviewSheet's
- * `hideThenNavigate`. `internal` (#831): shared with [PostImageMenuSheet].
- */
-@OptIn(ExperimentalMaterial3Api::class)
-internal fun hideThenDismiss(
-    coroutineScope: CoroutineScope,
-    sheetState: SheetState,
-    onDismiss: () -> Unit,
-) {
-    coroutineScope.launch { sheetState.hide() }
-        .invokeOnCompletion {
-            if (!sheetState.isVisible) {
-                onDismiss()
-            }
-        }
 }

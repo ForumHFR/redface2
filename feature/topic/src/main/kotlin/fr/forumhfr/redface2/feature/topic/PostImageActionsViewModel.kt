@@ -12,7 +12,8 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 
 /**
- * #831 — the THIN ViewModel behind [PostImageMenuSheet]'s « Enregistrer l'image » action.
+ * #831 — the THIN ViewModel behind
+ * [fr.forumhfr.redface2.core.ui.post.PostImageMenuSheet]'s « Enregistrer l'image » action.
  * Deliberately its own small `@HiltViewModel` (precedent: [QuickReplyViewModel]) instead of a new
  * member on the `@AssistedInject` TopicViewModel: the save needs exactly one injected seam
  * ([PostImageSaver], `:core:domain`) and one feedback channel, nothing of the topic state.

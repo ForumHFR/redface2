@@ -78,7 +78,7 @@ class PostCardShellTest {
     }
 
     @Test
-    fun `null badges and footer are absent (MP case)`() {
+    fun `null badges and footer add no placeholder nodes`() {
         composeTestRule.setContent {
             RedfaceTheme {
                 PostCardShell(

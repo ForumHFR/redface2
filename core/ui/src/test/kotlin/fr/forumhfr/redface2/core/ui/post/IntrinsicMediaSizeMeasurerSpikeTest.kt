@@ -5,6 +5,9 @@ import androidx.compose.ui.unit.IntSize
 import androidx.test.core.app.ApplicationProvider
 import coil3.ColorImage
 import coil3.ImageLoader
+import coil3.intercept.Interceptor
+import coil3.request.CachePolicy
+import coil3.request.ImageResult
 import coil3.test.FakeImageLoaderEngine
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -42,5 +45,34 @@ class IntrinsicMediaSizeMeasurerSpikeTest {
         assertEquals(IntSize(70, 50), measureIntrinsicMediaSize("https://hfr/perso70x50.gif", context, loader)?.size)
         assertEquals(IntSize(15, 15), measureIntrinsicMediaSize("https://hfr/micro15x15.gif", context, loader)?.size)
         assertEquals(IntSize(16, 16), measureIntrinsicMediaSize("https://hfr/builtin16.gif", context, loader)?.size)
+    }
+
+    @Test
+    fun `private-media probe disables disk reads and writes without disabling measurement`() = runTest {
+        val url = "https://private-media.invalid/photo.png"
+        var observedPolicy: CachePolicy? = null
+        val recorder = object : Interceptor {
+            override suspend fun intercept(chain: Interceptor.Chain): ImageResult {
+                observedPolicy = chain.request.diskCachePolicy
+                return chain.proceed()
+            }
+        }
+        val engine = FakeImageLoaderEngine.Builder()
+            .intercept(url, ColorImage(width = 640, height = 480))
+            .build()
+        val loader = ImageLoader.Builder(context).components {
+            add(recorder)
+            add(engine)
+        }.build()
+
+        val measured = measureIntrinsicMediaSize(
+            url = url,
+            context = context,
+            imageLoader = loader,
+            diskCachePolicy = PostMediaDiskCachePolicy.DISABLED,
+        )
+
+        assertEquals(IntSize(640, 480), measured?.size)
+        assertEquals(CachePolicy.DISABLED, observedPolicy)
     }
 }

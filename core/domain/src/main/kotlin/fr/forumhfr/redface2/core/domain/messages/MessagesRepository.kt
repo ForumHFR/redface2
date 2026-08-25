@@ -1,7 +1,6 @@
 package fr.forumhfr.redface2.core.domain.messages
 
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageListPage
-import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -56,16 +55,44 @@ interface MessagesRepository {
     suspend fun getPrivateMessageList(page: Int = 1): PrivateMessageListPage
 
     /**
-     * Fetches one page of a private-message conversation (`forum2.php?cat=prive&post={threadId}`).
+     * Reads one page of a private-message conversation (`forum2.php?cat=prive&post={threadId}`).
+     * A session-cache hit is emitted first with [PrivateMessageThreadPage.Source.SESSION_CACHE].
+     * Otherwise an enabled persistent-cache hit may be emitted with
+     * [PrivateMessageThreadPage.Source.DISK]. The page is then always revalidated and emitted from
+     * [PrivateMessageThreadPage.Source.NETWORK]. No TTL skips that network request.
      *
      * @param fallbackCorrespondent optional caller-provided correspondent label, used only when
      *   the page alone cannot reveal it (the user is the only sender so far). UI Navigation routes
      *   must not carry it because it is private metadata that can outlive the session.
      *   Throws on network / session errors, like [getPrivateMessageList].
      */
-    suspend fun getPrivateMessageThread(
+    fun getPrivateMessageThread(
         threadId: Int,
         page: Int = 1,
         fallbackCorrespondent: String? = null,
-    ): PrivateMessageThread
+    ): Flow<PrivateMessageThreadPage>
+
+    /**
+     * Whether [page] of [threadId] is immediately available in the process-memory cache for
+     * [account]. This is a synchronous hint for choosing the page-swipe release transition, not a
+     * substitute for [getPrivateMessageThread]: selection still performs mandatory network
+     * revalidation.
+     *
+     * Implementations must seal the probe to the same canonical account and invalidation generation
+     * as the cached content. A false negative only selects the conservative keep-content transition;
+     * a default implementation therefore safely reports cold for repositories without a RAM cache.
+     */
+    fun isPrivateMessageThreadPageWarm(account: String, threadId: Int, page: Int): Boolean = false
+
+    /**
+     * Authenticated, bounded prefetch of one private-conversation page (ADR-013 decision 3).
+     * This is the sole exception to the project's anonymous-prefetch rule: callers may request
+     * only an adjacent page of the conversation currently open in the foreground. Inbox/list
+     * callers are forbidden because this GET clears the conversation's unread/read-receipt state.
+     *
+     * A page already present in the process-memory session cache is a no-op. A successful response
+     * enters that same account/thread/page cache only after its parsed target and session stamp are
+     * validated. Failures are best-effort and silent; caller cancellation always propagates.
+     */
+    suspend fun prefetchPrivateMessageThread(threadId: Int, page: Int)
 }

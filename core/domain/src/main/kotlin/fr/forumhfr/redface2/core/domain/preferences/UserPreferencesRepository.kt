@@ -303,11 +303,12 @@ interface UserPreferencesRepository {
     suspend fun setFlagsAutoRefresh(enabled: Boolean)
 
     /**
-     * Floating previous/next page buttons at the bottom of a topic (#283): when `false`, the
-     * ‹/› mini-FABs are hidden — the page swipe (#282) and the header pager already cover
-     * page-change, and some readers find the cluster intrusive (#383). The « Répondre » FAB
-     * is NOT governed by this preference and stays visible. Default `true` (historical
-     * behaviour). Observed by `:feature:topic`, toggled in Settings.
+     * Floating previous/next page buttons on topic and private-message reading surfaces (#383,
+     * #1040). When `false`, the ‹/› mini-FABs are hidden; swipe and the top-bar picker still cover
+     * page changes. Reply/write FABs are not governed by this preference. Default `true`.
+     *
+     * The API keeps its historical topic-specific name so the existing DataStore key and every
+     * caller remain source-compatible; both `:feature:topic` and `:feature:messages` observe it.
      */
     fun observeTopicPageFabs(): Flow<Boolean>
 

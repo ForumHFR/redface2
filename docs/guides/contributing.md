@@ -178,6 +178,8 @@ La méthode canonique du projet est documentée dans [Méthodologie]({{ site.bas
 
 Cette page décrit **comment** contribuer ; elle ne redéfinit pas la méthode du projet. Pour une contribution structurante, lire `docs/specs/methodology.md` puis `AGENTS.md`.
 
+Cas particulier : toute contribution qui ajoute ou modifie une fonction de la **surface de lecture** (rendu d'un post, gestes de page, préférences de lecture) met à jour sa ligne dans la [matrice de parité Topic ↔ MP]({{ site.baseurl }}/specs/reading-parity) — la règle d'entretien et les verdicts possibles vivent sur cette page.
+
 ### Style de code
 
 - **Kotlin** : suivre les [conventions officielles](https://kotlinlang.org/docs/coding-conventions.html)
@@ -230,6 +232,7 @@ Cette page décrit **comment** contribuer ; elle ne redéfinit pas la méthode d
 - **Konsist** — règles d'architecture (imports inter-modules, `:core:extension` limité à `topic/editor`, tokens M3 centralisés dans `:core:ui`). Voir [architecture.md]({{ site.baseurl }}/specs/architecture) pour les règles. La règle `@AnonymousClient` sur prefetch sera activée dès que le code réseau/prefetch existera réellement.
 - **Detekt** — style Kotlin + imports interdits (`ForbiddenImport` : `GlobalScope`, `LiveData`, `material.*`). NB : `runBlocking` n'est **pas** attrapé par Detekt aujourd'hui. L'interdiction de **nouveaux** `runBlocking` en prod (allow-list des 2 sites existants : `DataStoreUserPreferencesRepository.kt`, `PersistentCookieJar.kt`) est une garde dédiée à ajouter, pas un défaut Detekt.
 - **Android Lint** — a11y + i18n + correctness. Lint tourne avec `abortOnError = true` (convention plugin dans `build-logic/`). NB : `MissingContentDescription`/`TouchTargetSizeCheck`/`HardcodedText` restent à leur **sévérité par défaut (warning)** — ils ne font pas échouer le build tant qu'ils ne sont pas promus en `error` (`lint { error += listOf(...) }`), ce qui n'est pas le cas actuellement.
+- **Parité de lecture** — deux gardes ([#1045](https://github.com/ForumHFR/redface2/issues/1045)) rendent `[enforced]` la règle d'entretien de [reading-parity.md]({{ site.baseurl }}/specs/reading-parity) : **garde A** par chemins (`scripts/check-reading-parity-touch.sh`, job `repo-guards`, PRs uniquement — échappatoire `Parity-Impact: none — <raison>` dans le corps de la PR, relu **en direct** au re-run du job) ; **garde B** par symboles (cas de `DocsConsistencyTest`, exécuté par `test` en CI et par `/validate` en local — index de **définitions** réelles : commentaires, littéraux d'annotation et attestations de fichiers de test exclus ; aucun compteur de lignes, la matrice est faite pour grandir).
 
 **CI Phase 0 :**
 - workflow GitHub Actions sur push `main` et PR
@@ -254,7 +257,7 @@ Screenshot testing **JVM** (sur Robolectric, sans device) via Roborazzi 1.63, co
 - **Mode `record`** (par défaut ici) : un test `captureRoboImage` génère un PNG dans `<module>/build/outputs/roborazzi/` (non versionné) → **inspection visuelle** rapide (~40 s). Lancer via l'env Docker, ex. `./scripts/docker-dev.sh ./gradlew :core:ui:testDebugUnitTest`. (Il n'existe **pas** de tâche `recordRoborazzi` : le plugin Gradle Roborazzi n'est pas appliqué — record forcé via `roborazzi.test.record=true`.)
 - **Quand l'utiliser** : `record` est réservé aux **changements de rendu intentionnels** (PostRenderer, écrans refondus) — on régénère puis on regarde l'image. `verifyRoborazzi` (compare) existe mais les **baselines ne sont pas versionnées** en V1 (elles bougeraient à chaque itération des refontes #603/#604).
 - **Statut** : **recommandé** pour tout changement de rendu UI structurant, **pas encore un gate CI dur**. Le passage en `verify` + baselines committées + gate fera l'objet d'une décision dédiée une fois les refontes UI stabilisées.
-- **Couverture actuelle** : `:core:ui` uniquement (PostRenderer — code, smiley, citation ; `FlagItem` refonte #603 ; vitrine réglages `SettingsHomeShowcase`). Aucun test Roborazzi dans les modules `feature/` à ce jour. Elle s'étend au cas par cas — **pas** d'obligation « tout écran doit avoir un snapshot ».
+- **Couverture actuelle** : `:core:ui` (PostRenderer — code, smiley, citation ; `FlagItem` refonte #603 ; vitrine réglages `SettingsHomeShowcase`) et quelques surfaces ciblées dans `:feature:topic` (extraction zoom) / `:feature:messages` (`MessageCard`, chrome de conversation). Elle s'étend au cas par cas — **pas** d'obligation « tout écran doit avoir un snapshot ».
 - Décision et rationale : [ADR-016]({{ site.baseurl }}/adr/016-roborazzi-screenshot-testing).
 
 **Smoke test mensuel HFR (fin de phase de lecture) :**
@@ -341,6 +344,8 @@ core/parser/src/test/resources/fixtures/
 | `modo_not_flagged.html` | modo.php — formulaire d'alerte | logué uniquement | Redflag : post pas encore alerté | `modo.php?numreponse=X` |
 | `modo_flagged.html` | modo.php — déjà alerté | logué uniquement | Redflag : post alerté | `modo.php?numreponse=X` (déjà alerté) |
 | `modo_join.html` | modo.php — rejoindre une alerte | logué uniquement | Redflag : alerte en cours | `modo.php?numreponse=X` (alerte ouverte) |
+| `private_message_quote_form.html` | `message.php` — citation MP | logué uniquement | Contrat de la citation MP : `numrep` = message cité, `[quotemsg=…]` prérempli (#1041) | lien « citer » d'une page `cat=prive` — **fixture réduite au `form[name=hop]`**, cf. [recette]({{ site.baseurl }}/guides/capture-fixture-citation-mp) |
+| `private_message_reply_form.html` | `message.php` — réponse simple MP | logué uniquement | Témoin de la précédente : `numrep` **vide**, textarea vide — leur delta EST le contrat (#1041) | `form#repondre_form` de la même conversation, même session — **fixture réduite** |
 
 **Profil et paramètres** (pages `editprofil.php`, loguées uniquement) :
 
@@ -356,7 +361,11 @@ core/parser/src/test/resources/fixtures/
 | `contact_list.html` | `contactlist.php` | Liste de contacts : ajout/suppression, statut en ligne, liens MP | idem |
 | `modo_history.html` | `modo/historique.php` | Historique des sanctions : modérateur, catégorie, date, raison | modérateur test |
 
-**Total : ~61 fixtures** (13 reprises testées de v1 + 39 nouvelles + 9 profil/paramètres).
+**Ces tableaux sont un plan de capture, pas un inventaire.** Le décompte fait foi côté disque, pas ici :
+au 2026-08-14, `core/parser/src/test/resources/fixtures/` porte **70 fixtures HTML** et l'arbre entier
+en compte 106 (plus 11 fixtures REST JSON dans `:core:data`). Le plan initial en annonçait ~61
+(13 reprises de v1 + 39 nouvelles + 9 profil/paramètres) : ne pas propager ce chiffre comme un état
+courant — un décompte recopié pourrit (constat #1041). `ls` sur le dossier répond mieux que cette page.
 
 ### Fixtures REST JSON (Phase 1C-A)
 

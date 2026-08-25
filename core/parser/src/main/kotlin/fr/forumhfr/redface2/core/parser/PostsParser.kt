@@ -78,6 +78,7 @@ class PostsParser(
             isEditable = hasEditLink,
             isOwnPost = hasEditLink,
             quotedAuthors = content.quotedAuthors,
+            // #1055 — reserved legacy field: HFR exposes no proven stable global index here.
             postIndex = null,
             quoteRef = parseQuoteRef(postTable),
             profileId = parseProfileId(postTable),
@@ -160,8 +161,8 @@ class PostsParser(
     // `<a href="…message.php?…&numrep=…&ref=N…">`. The body of a post may legitimately
     // contain links to other posts, so scoping the lookup to the toolbar is what makes
     // « Citer » mean « cite this post » and not « cite whichever post this one mentions ».
-    // `ref` is opaque (correlates with the post's position on the current page); we forward
-    // whatever HFR provided and never compute it client-side. `null` when absent/obfuscated.
+    // `ref` is the 1-based rank inside the current page (`0` for the page-2+ recap row). We forward
+    // whatever HFR provided and never recompute it from the parsed list. `null` when absent/obfuscated.
     private fun parseQuoteRef(postTable: Element): Int? =
         postTable.selectFirst(HfrSelectors.POST_TOOLBAR_LEFT)
             ?.select("a[href*=numrep=]")

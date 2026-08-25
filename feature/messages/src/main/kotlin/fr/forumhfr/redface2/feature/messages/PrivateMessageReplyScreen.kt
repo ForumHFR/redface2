@@ -43,6 +43,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
+import fr.forumhfr.redface2.core.ui.post.PostMediaDiskCachePolicy
 
 /**
  * Reply editor for a private-message conversation (#301). Reuses the shared `:core:ui` BBCode
@@ -313,7 +314,10 @@ private fun ReplyEditorBody(
                     .weight(1f)
                     .verticalScroll(rememberScrollState()),
             ) {
-                BbcodePreview(content = state.preview)
+                BbcodePreview(
+                    content = state.preview,
+                    mediaDiskCachePolicy = PostMediaDiskCachePolicy.DISABLED,
+                )
             }
         }
 

@@ -24,10 +24,11 @@ internal const val TOPIC_POLL_EXPANSION_CACHE_MAX = 128
  * so a redundant toggle never reallocates the map nor recomposes `RedfaceApp`.
  *
  * Only topics the user has manually toggled appear here; absence of a key means « follow the global
- * `topicPollsExpanded` default ». The map survives the per-page TopicRoute entry swap because it is
- * hoisted into `RedfaceApp` (above `NavDisplay`), exactly like the title / scroll-anchor caches — so
- * collapsing or expanding a poll persists across page navigation within the same topic. In-memory
- * only (session-scoped), reset naturally when the app process dies.
+ * `topicPollsExpanded` default ». The map is hoisted into `RedfaceApp` (above `NavDisplay`), exactly
+ * like the title / scroll-anchor caches — so collapsing or expanding a poll survives leaving and
+ * reopening the topic within the session (and survived the per-page `TopicRoute` entry swap back
+ * when page changes replaced the route, pre-#895 étape 4). In-memory only (session-scoped), reset
+ * naturally when the app process dies.
  */
 internal fun Map<TopicPollKey, Boolean>.withPollExpansion(
     key: TopicPollKey,
