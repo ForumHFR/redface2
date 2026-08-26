@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.scan
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
@@ -70,7 +71,13 @@ class CategoryViewModel @AssistedInject constructor(
 
     private val selectedSubcat: MutableStateFlow<Int?> = MutableStateFlow(request.initialSubcat)
     private val page: MutableStateFlow<Int> = MutableStateFlow(request.initialPage.coerceAtLeast(1))
-    private val searchQuery: MutableStateFlow<String> = MutableStateFlow("")
+    // #1130 — the query AND its open/closed mode live in ONE flow so closeSearch (empty + close)
+    // is a SINGLE emission and thus truly atomic: `combine` offers no multi-flow transaction, so
+    // two separate MutableStateFlows could surface an intermediate (query="", active=true) before
+    // the final state. Hosted here (not in the Composable) so the open/clear/close logic is
+    // unit-testable without a Compose harness. `active` is NOT derived from the query — an open,
+    // empty field is a valid state.
+    private val search: MutableStateFlow<SearchSlice> = MutableStateFlow(SearchSlice(query = "", active = false))
     private val isRefreshing: MutableStateFlow<Boolean> = MutableStateFlow(false)
 
     // #455 — « Mes drapeaux » filter. Pushed state (not flatMapLatest) so refresh() can
@@ -152,13 +159,15 @@ class CategoryViewModel @AssistedInject constructor(
         FilterSlice(filter, topics)
     }
 
+    // #1130 — [search] is already a single combined flow (query + active), so it feeds the final
+    // `combine` directly and keeps the same 5 typed sources.
     val uiState: StateFlow<CategoryUiState> = combine(
         coreState,
         filterSlice,
-        searchQuery,
+        search,
         isRefreshing,
         isAuthenticated,
-    ) { core, filter, query, refreshing, authenticated ->
+    ) { core, filter, searchState, refreshing, authenticated ->
         val filterActive = filter.flagFilter != CategoryFlagFilter.ALL
         CategoryUiState(
             cat = request.cat,
@@ -170,12 +179,13 @@ class CategoryViewModel @AssistedInject constructor(
             pageCount = if (filterActive) 1 else core.topics.pageCount(),
             subcategories = core.subcategories,
             topics = core.topics,
-            searchQuery = query,
+            searchQuery = searchState.query,
+            searchActive = searchState.active,
             // The text search applies to whichever listing is active (bucket or normal).
             filteredTopics = if (filterActive) {
-                filter.flagFilterTopics.filterTopics(query)
+                filter.flagFilterTopics.filterTopics(searchState.query)
             } else {
-                core.topics.filterTopics(query)
+                core.topics.filterTopics(searchState.query)
             },
             isRefreshing = refreshing,
             canCreateTopic = authenticated,
@@ -295,7 +305,22 @@ class CategoryViewModel @AssistedInject constructor(
     }
 
     fun updateSearchQuery(query: String) {
-        searchQuery.value = query
+        search.update { it.copy(query = query) }
+    }
+
+    /** #1130 — opens the in-page search (autofocus is driven by the field entering composition). */
+    fun openSearch() {
+        search.update { it.copy(active = true) }
+    }
+
+    /**
+     * #1130 — leaves the search mode atomically: empties the query AND closes the field in a SINGLE
+     * write to the combined [search] flow, so no intermediate (empty, still-open) state can surface.
+     * Target of both the leading back arrow and the system/gesture back. Distinct from the clear
+     * cross, which only empties the query via [updateSearchQuery] and keeps the mode open.
+     */
+    fun closeSearch() {
+        search.value = SearchSlice(query = "", active = false)
     }
 
     /**
@@ -437,6 +462,11 @@ class CategoryViewModel @AssistedInject constructor(
     private data class FilterSlice(
         val flagFilter: CategoryFlagFilter,
         val flagFilterTopics: TopicsUiState,
+    )
+
+    private data class SearchSlice(
+        val query: String,
+        val active: Boolean,
     )
 
     private companion object {

@@ -73,6 +73,13 @@ data class CategoryUiState(
      * 0 matches the screen renders an explicit empty state.
      */
     val searchQuery: String,
+    /**
+     * `true` when the in-page search is open (#1130). Drives the search affordance's
+     * open/closed rendering and the `BackHandler` that leaves the mode on system back.
+     * Independent of [searchQuery]: an open, empty field is a valid state, so this is
+     * NOT derived from the query being non-blank.
+     */
+    val searchActive: Boolean = false,
     /** Filtered view over `topics.page.topics` per [searchQuery]. */
     val filteredTopics: List<TopicSummary>,
     /**
