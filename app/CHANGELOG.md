@@ -16,6 +16,26 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.44.0` — `internal` (dev) — 2026-08-27
+
+Polish de la Vue Forum (liste des sujets d'une catégorie) : recherche, pagination, sujets épinglés et mémorisation du filtre. Demandé sur le fil TU (Tronklou, kikou2419).
+
+### Ajouté
+
+- **Mémoriser le dernier filtre de la Vue Forum** ([#1132](https://github.com/ForumHFR/redface2/issues/1132)) : le choix Tout / Participé / Lus / Favoris est conservé et réappliqué en changeant de catégorie, sans réglage à configurer. Rétabli à « Tout » à la déconnexion, sans effacer la préférence mémorisée.
+
+- **Effacer et quitter la recherche** ([#1130](https://github.com/ForumHFR/redface2/issues/1130)) : le champ de recherche d'une catégorie a maintenant une croix d'effacement du texte et une flèche de sortie (le retour système quitte aussi la recherche), au lieu de devoir vider le champ caractère par caractère.
+
+### Modifié
+
+- **Sujets épinglés distincts** ([#1129](https://github.com/ForumHFR/redface2/issues/1129)) : les sujets épinglés sont regroupés en tête et séparés des sujets normaux par un séparateur « Autres sujets », avec un badge de statut plus lisible (fond tonal) placé avant le titre. La liste des vues « Mes drapeaux » (Participé/Lus/Favoris) reste plate.
+
+### Corrigé
+
+- **Le bouton « + » ne recouvre plus « Suivant »** ([#1131](https://github.com/ForumHFR/redface2/issues/1131)) : la liste réserve la place du bouton flottant de création de sujet, de sorte que le bouton « Suivant » de la pagination reste atteignable — en résultats de recherche comme sur la dernière page d'une catégorie.
+
+---
+
 ## `0.42.8` — `internal` (dev) — 2026-08-25
 
 Lot 7 du chantier de parité de lecture Sujet ↔ Conversations privées ([#1040](https://github.com/ForumHFR/redface2/issues/1040), lot [#1097](https://github.com/ForumHFR/redface2/issues/1097)) : le cache disque des conversations privées, **désactivé par défaut**.

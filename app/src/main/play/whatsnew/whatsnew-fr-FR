@@ -1,6 +1,6 @@
-Redface 2 v0.42.8 — dev.
+Redface 2 v0.44.0 — dev.
 
-- Nouveau réglage « garder les conversations privées en cache sur l'appareil », dans Messages privés. Désactivé par défaut.
-- C'est la seule fonction qui écrit vos messages privés sur le disque, d'où la confirmation avant activation.
-- Le désactiver efface immédiatement, et les octets sont réellement écrasés — pas seulement les lignes supprimées.
-- La déconnexion et le changement de compte effacent aussi les données du compte sortant.
+- Le filtre Tout / Participé / Lus / Favoris de la Vue Forum est mémorisé d'une catégorie à l'autre.
+- La recherche d'une catégorie a enfin une croix pour effacer le texte et une flèche pour sortir.
+- Les sujets épinglés sont regroupés en tête, séparés des autres, avec un badge plus lisible.
+- Le bouton « + » ne recouvre plus le bouton « Suivant » de la pagination.
