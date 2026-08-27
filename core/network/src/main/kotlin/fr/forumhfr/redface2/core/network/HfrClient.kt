@@ -755,6 +755,37 @@ class HfrClient @Inject constructor(
     }
 
     /**
+     * #1112 / #221 — GET the GLOBAL staff directory (« Contacter un responsable »), the primary
+     * source of the author-role badge.
+     *
+     * Wire shape (cf. `docs/specs/protocol-hfr.md` § Annuaire staff) — no authentication required :
+     * `GET /message-smi-mp-aj.php?config=hfr.inc&user_id=0&responsable=1` (no `cat`). The response
+     * is a small AJAX HTML fragment (a `<table class="main">` of `a.s1Topic` anchors) parsed by
+     * [fr.forumhfr.redface2.core.parser.staff.StaffParser].
+     *
+     * Uses the [anonymous] client : the directory is public and global (indexed by pseudo, no
+     * profileId), and a read must never mark drapeaux as read (prefetch-non-authentifié rule).
+     *
+     * No `withContext(ioDispatcher)` here : [executeCancellable] already runs the call off the
+     * caller thread (same stance as [getProfile]).
+     */
+    suspend fun getStaffResponsables(): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("message-smi-mp-aj.php")
+            .addQueryParameter("config", "hfr.inc")
+            .addQueryParameter("user_id", "0")
+            .addQueryParameter("responsable", "1")
+            .build()
+        val request = Request.Builder().url(url).get().build()
+        return anonymous.newCall(request).executeCancellable { response ->
+            if (!response.isSuccessful) {
+                throw HfrServerException(response.code, url.toString())
+            }
+            response.body.string()
+        }
+    }
+
+    /**
      * Issue #277 — resolves the real topic page of a post by letting HFR's server-side
      * redirect answer for us.
      *

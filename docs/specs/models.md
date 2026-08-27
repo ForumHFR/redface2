@@ -48,6 +48,51 @@ data class UserProfile(
 
 `Post.profileId: Int?` (Phase 2 finish #208) — id numérique HFR extrait depuis `<a href="/hfr/profil-{N}.htm">` dans le toolbar de chaque post. Null pour les posts « Publicité » ou les reads anonymes sans lien profil. Persisté en Room v6 (`MIGRATION_5_6`). Clé canonique pour la navigation vers le profil — `post.author` et `post.avatarUrl` sont des hints d'affichage.
 
+### Rôle de l'auteur — `AuthorRole` (#1112, #221)
+
+Rôle forum d'un auteur (badge). Le rôle **n'est pas** dans le HTML du post ; il est **hybride**, à
+deux sources publiques anonymes (cf. `protocol-hfr.md` § Rôle de l'auteur). Aucun champ n'est ajouté
+à `Post` ni à `UserProfile`.
+
+```kotlin
+enum class AuthorRole {
+    MEMBER,      // « Membre »
+    MODERATOR,   // « Modérateur »
+    ADMIN,       // « Administrateur » ET « Super Administrateur »
+    DEVELOPER,   // « Développeur » ET « Architecte / Développeur principal »
+}
+```
+
+**Deux sources, deux clés** :
+
+- **Primaire — annuaire staff GLOBAL, clé = pseudo.** Un seul GET (`message-smi-mp-aj.php?responsable=1`)
+  donne la liste complète des responsables indexée par **pseudo**. C'est ce qui alimente le badge d'une
+  liste de posts : 1 GET + lookups locaux par pseudo (pas de N+1). L'annuaire n'expose **aucun**
+  `profileId`. Les pseudos HFR étant uniques, aucune confirmation par `profileId` n'est nécessaire.
+- **Secondaire — page profil, clé = `Post.profileId`.** La page profil (`/hfr/profil-{id}.htm`, champ
+  « Statut ») donne le rôle d'**un** auteur. Réservée à une demande explicite mono-utilisateur (écran
+  profil, PR C) — **jamais** un fallback « requêter tous les `profileId` » si l'annuaire échoue.
+
+Le mapping `libellé → AuthorRole` est **partagé** entre les deux sources (`authorRoleFromLabel` dans
+`:core:parser`) : `Administrateur`/`Super Administrateur` → `ADMIN`, `Développeur`/`Architecte /
+Développeur principal` → `DEVELOPER`. Tout libellé absent ou non reconnu → l'entrée staff est ignorée,
+le profil rend `null`.
+
+Résolu par `AuthorRoleRepository` (interface dans `:core:domain/author`, impl
+`DefaultAuthorRoleRepository` dans `:core:data/author`) :
+
+- **`suspend fun getStaff(): Map<String, AuthorRole>`** — clés = pseudos **canonicalisés**
+  (`canonicalizePseudo`). Cache mémoire **unique** + TTL 24h ; single-flight unique. Échec réseau →
+  **cache périmé** s'il existe (sans avancer son timestamp), sinon `emptyMap()` ; un parse vide
+  n'écrase pas un cache valide.
+- **`suspend fun getRole(profileId: Int): AuthorRole?`** — GET anonyme de la page profil ; cache LRU
+  borné (~512) + TTL 24h, `null` (cache négatif) inclus ; single-flight par id ; échec réseau → `null`
+  non caché.
+
+Les deux partagent une **borne de parallélisme globale** (4 GET concurrents) et un scope propriétaire ;
+`CancellationException` et erreurs inattendues remontent. Donnée **décorative / publique / best-effort**
+(pas de badge si rôle indéterminé). **Pas de Room.**
+
 ---
 
 ## Vue d'ensemble

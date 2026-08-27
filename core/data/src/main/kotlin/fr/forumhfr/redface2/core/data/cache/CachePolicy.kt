@@ -27,6 +27,11 @@ import java.time.Instant
  *   `cachedCategories` against multi-day uptime sessions.
  * - `subcategories` (6h) — slightly more dynamic than categories but still rare
  *   enough that 6h is a generous upper bound.
+ * - `authorRole` (24h) — le rôle HFR d'UN profil (#1112, source secondaire) ne change qu'à un
+ *   événement de modération, très rare. Donnée décorative memory-only ; 24h borne une
+ *   entrée ancienne contre des sessions d'uptime de plusieurs jours.
+ * - `staffDirectory` (24h) — l'annuaire staff GLOBAL (#1112, source primaire du badge) est stable
+ *   (même cadence de changement que les rôles) ; un seul GET par jour suffit.
  *
  * Manual refresh paths bypass these TTLs by design — they call the network
  * fetch directly without consulting [isFresh].
@@ -38,6 +43,8 @@ internal object CachePolicy {
     val flags: Duration = Duration.ofSeconds(30)
     val categories: Duration = Duration.ofHours(24)
     val subcategories: Duration = Duration.ofHours(6)
+    val authorRole: Duration = Duration.ofHours(24)
+    val staffDirectory: Duration = Duration.ofHours(24)
 
     /**
      * Returns true iff [fetchedAt] is within [ttl] of [now]. Negative deltas
