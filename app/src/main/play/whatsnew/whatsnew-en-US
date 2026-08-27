@@ -1,6 +1,6 @@
-Redface 2 v0.42.8 — dev.
+Redface 2 v0.44.0 — dev.
 
-- New setting "keep private conversations cached on the device", under Private messages. Off by default.
-- It is the only feature that writes your private messages to disk, hence the confirmation before enabling it.
-- Turning it off erases immediately, and the bytes are actually overwritten — not merely the rows deleted.
-- Signing out and switching accounts also erase the outgoing account's data.
+- The Forum view's All / Participated / Read / Favorites filter is now remembered across categories.
+- A category's search field finally has a cross to clear the text and a way to exit search.
+- Pinned topics are grouped at the top, set apart from the rest, with a clearer badge.
+- The "+" button no longer covers the pagination "Next" button.
