@@ -10,6 +10,7 @@ import fr.forumhfr.redface2.core.domain.coroutines.ApplicationScope
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
+import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
@@ -37,12 +38,17 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 // LargeClass — this is THE single DataStore-backed implementation of [UserPreferencesRepository]: every
@@ -76,6 +82,19 @@ class DataStoreUserPreferencesRepository @Inject constructor(
     private suspend fun persist(block: suspend () -> Unit) {
         externalScope.async { block() }.await()
     }
+
+    // #1132 — in-memory source of truth for the Forum flag-filter (#455). `null` = not yet loaded
+    // from disk. This repository is an app-scoped @Singleton, so the cache is SHARED across every
+    // [fr.forumhfr.redface2.feature.forum.CategoryViewModel]: a filter chosen in one category is
+    // visible to the next category's ViewModel synchronously, WITHOUT waiting for the async
+    // DataStore commit — closing the cross-category read/write race (a plain `dataStore.data` read
+    // could otherwise return the pre-write disk value).
+    private val forumCategoryFlagFilterCache = MutableStateFlow<CategoryFlagFilter?>(null)
+
+    // #1132 — serialises the disk writes of THIS key so two rapid choices cannot interleave; combined
+    // with persisting the LATEST cache value inside the lock (below), the stored value converges to
+    // the last choice (strict last-wins) regardless of the order the async commits execute.
+    private val forumCategoryFlagFilterWriteMutex = Mutex()
 
     override fun observeProxyConfig(): Flow<ProxyConfig> =
         dataStore.data
@@ -837,6 +856,39 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeForumCategoryFlagFilter(): Flow<CategoryFlagFilter> =
+        forumCategoryFlagFilterCache
+            // Seed the cache from disk on the FIRST collect only (defensive read: corrupt / empty →
+            // ALL). `compareAndSet` makes a set() that already populated the cache in-session win, so
+            // a stale disk value can never clobber the last choice (#1132).
+            .onStart {
+                if (forumCategoryFlagFilterCache.value == null) {
+                    val fromDisk = runCatching { readForumCategoryFlagFilter(dataStore.data.first()) }
+                        .getOrDefault(CategoryFlagFilter.ALL)
+                    forumCategoryFlagFilterCache.compareAndSet(null, fromDisk)
+                }
+            }
+            .filterNotNull()
+            .distinctUntilChanged()
+            .catch { emit(CategoryFlagFilter.ALL) }
+
+    override suspend fun setForumCategoryFlagFilter(filter: CategoryFlagFilter) {
+        // Cache-first: update the in-memory source of truth SYNCHRONOUSLY so the next category's
+        // ViewModel reads the last choice immediately, independent of the async disk commit (#1132).
+        forumCategoryFlagFilterCache.value = filter
+        persist {
+            // Serialise this key's disk writes and persist the LATEST cache value, so two rapid
+            // choices converge to the last one on disk (strict last-wins) even if the async commits
+            // reorder — a stale write still lands the newest value, not its own captured one.
+            forumCategoryFlagFilterWriteMutex.withLock {
+                dataStore.edit { prefs ->
+                    prefs[KEY_FORUM_CATEGORY_FLAG_FILTER] =
+                        (forumCategoryFlagFilterCache.value ?: filter).name
+                }
+            }
+        }
+    }
+
     /**
      * Reads [KEY_UPLOAD_PROVIDER] defensively: an unknown / corrupt stored value (older build with a
      * renamed enum, manual edit) falls back to [UploadProviderId.DIBERIE] instead of crashing on
@@ -898,6 +950,16 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         prefs[KEY_IMMERSIVE_NAV_BAR_REVEAL]
             ?.let { stored -> runCatching { ImmersiveNavBarReveal.valueOf(stored) }.getOrNull() }
             ?: ImmersiveNavBarReveal.MANUAL
+
+    /**
+     * Reads [KEY_FORUM_CATEGORY_FLAG_FILTER] defensively (#1132): an unknown / corrupt stored value
+     * falls back to [CategoryFlagFilter.ALL] instead of crashing on `CategoryFlagFilter.valueOf` —
+     * same stance as [readDisplayDensity].
+     */
+    private fun readForumCategoryFlagFilter(prefs: Preferences): CategoryFlagFilter =
+        prefs[KEY_FORUM_CATEGORY_FLAG_FILTER]
+            ?.let { stored -> runCatching { CategoryFlagFilter.valueOf(stored) }.getOrNull() }
+            ?: CategoryFlagFilter.ALL
 
     /**
      * Reads [KEY_ACCENT_COLOR] defensively (TU 2788511): an unknown / corrupt stored value falls back
@@ -1164,5 +1226,8 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val KEY_HIDE_SYSTEM_NAV_BAR = booleanPreferencesKey("hide_system_nav_bar")
         val KEY_IMMERSIVE_BACK_BUTTON = booleanPreferencesKey("immersive_back_button")
         val KEY_IMMERSIVE_NAV_BAR_REVEAL = stringPreferencesKey("immersive_nav_bar_reveal")
+
+        // #1132 — last « Mes drapeaux » Forum filter (CategoryFlagFilter.name, defensively parsed).
+        val KEY_FORUM_CATEGORY_FLAG_FILTER = stringPreferencesKey("forum_category_flag_filter")
     }
 }
