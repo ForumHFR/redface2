@@ -52,6 +52,7 @@ La documentation HTML est issue de la rétro-ingénierie du code de [Redface v1]
 | Ajouter aux drapeaux | GET | `/user/addflag.php?config=hfr.inc&cat={cat}&post={post}&numreponse={numreponse}` | **oui** |
 | Retirer un drapeau | GET | `/user/delflag.php?config=hfr.inc&cat={cat}&subcat={subcat}&post={topicId}&page={page}&p=1&sondage=0&owntopic={1,2,3}&new=0` | **oui** |
 | Profil public | GET | `/hfr/profil-{user_id}.htm` | non |
+| Annuaire staff (responsables) | GET | `/message-smi-mp-aj.php?config=hfr.inc&user_id=0&responsable=1` | non |
 | Paramètres utilisateur | GET | `/editprofil.php?config=hfr.inc&page={1..7}` | **oui** |
 | Modération (alerte) | GET/POST | `/modo.php?config=hfr.inc&cat={cat}&post={post}&numreponse={numreponse}` | **oui** |
 | Recherche (form) | GET | `/search.php?config=hfr.inc` | non |
@@ -123,7 +124,14 @@ GET /hfr/profil-{userId}.htm
 | `Ville` | `location: String?` | Null si vide |
 | `Signature des messages` | `signatureText: String?` | Texte plat (`Jsoup.text()` côté parser — voir limites) |
 
-**Champs HFR non promus** : Email (obfusqué par HFR → `"Vous n'avez pas accès à cette information"`), Date de naissance, Sexe, Profession, Loisirs, Citation personnelle, Statut. Ces champs sont conservés dans `rawFields` pour forward-compatibility.
+**Champs HFR non promus dans `UserProfile`** : Email (obfusqué par HFR → `"Vous n'avez pas accès à cette information"`), Date de naissance, Sexe, Profession, Loisirs, Citation personnelle. Ces champs sont conservés dans `rawFields` pour forward-compatibility.
+
+**Rôle de l'auteur — source SECONDAIRE, champ « Statut »** (#1112, #221) : le champ « Statut »
+(`td.profilCase3` de la `tr.profil` dont le label vaut « Statut ») porte le rôle d'**un** auteur.
+Extrait par `HfrParser.parseAuthorRole(html): AuthorRole?` (≠ `parseUserProfile`, qui le laisse dans
+`rawFields`) via le mapping **partagé** `authorRoleFromLabel` (le même que l'annuaire staff). Indexé
+sur `Post.profileId`, réservé à une demande explicite mono-utilisateur (écran profil, PR C). Libellé
+absent, vide ou non reconnu → `null`. La **source primaire** du badge est l'annuaire staff (ci-dessous).
 
 **Limites connues** :
 - Emails obfusqués : ne jamais tenter de déobfusquer (cf. AGENTS.md § "Emails obfusqués").
@@ -133,7 +141,36 @@ GET /hfr/profil-{userId}.htm
 
 **Fixtures** :
 - `core/parser/src/test/resources/fixtures/profile/profile_xatrix_authenticated.html` — userId=54596, session auth, fixture complète avec signature.
-- `core/parser/src/test/resources/fixtures/profile/profile_ezzz_anonymous.html` — userId=15867, session anonyme, pas de localisation.
+- `core/parser/src/test/resources/fixtures/profile/profile_ezzz_anonymous.html` — userId=15867, session anonyme, pas de localisation (cas `Statut = Membre`).
+- `core/parser/src/test/resources/fixtures/profile/profile_moderator_anonymous.html` — userId=15461 (Ernestor), session anonyme, cas `Statut = Modérateur` (#1112, capture curl assainie).
+
+### Annuaire staff (responsables) — source PRIMAIRE du rôle (#1112, #221)
+
+**GET anonyme** (pas de session requise). URL exacte, **globale** (pas de `cat`) :
+
+```
+GET /message-smi-mp-aj.php?config=hfr.inc&user_id=0&responsable=1
+```
+
+- Réponse = fragment AJAX HTML (« Contacter un responsable ») : une `<table class="main">` d'ancres
+  `<a class="s1Topic" onclick="fillfield_private('pseudo')">pseudo <i>(Rôle)</i></a>`.
+- **Clé = pseudo**, jamais un `profileId` : l'endpoint n'expose aucun id numérique. Les pseudos HFR
+  étant uniques, aucune confirmation par `profileId` n'est nécessaire (pas de N+1).
+- **Caractère global** : un seul GET donne TOUS les responsables du forum → source idéale du badge
+  d'une liste de posts (1 GET + lookups locaux par pseudo).
+- Client **anonyme** (règle prefetch-non-authentifié : un read ne doit pas marquer de drapeaux lus).
+- Extrait par `HfrParser.parseStaffList(html): Map<String, AuthorRole>` (`StaffParser`) : pseudo =
+  argument de `fillfield_private('…')` (dé-échappé ; repli défensif `anchor.ownText()`), rôle = texte
+  du `<i>` mappé via `authorRoleFromLabel` (**libellé inconnu → entrée ignorée**). Pseudos **bruts** en
+  sortie ; la **canonicalisation** (`canonicalizePseudo`) est faite par le repository.
+
+**Libellés observés (capture 2026-08-27, 64 entrées)** : `Modérateur` (55) → `MODERATOR` ;
+`Administrateur` (2) et `Super Administrateur` (3) → `ADMIN` ; `Développeur` (1) et
+`Architecte / Développeur principal` (3) → `DEVELOPER`.
+
+**Fixture** :
+- `core/parser/src/test/resources/fixtures/staff/staff_responsables_anonymous.html` — annuaire global
+  anonyme (#1112, capture curl, 64 entrées, aucune PII).
 
 ---
 

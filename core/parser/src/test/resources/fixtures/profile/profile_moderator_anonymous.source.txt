@@ -1,0 +1,20 @@
+Source : GET https://forum.hardware.fr/hfr/profil-15461.htm (Ernestor, modérateur)
+Capture : 2026-08-27, session ANONYME (curl -L, sans cookie ni auth ; HFR sert le profil public en anon).
+
+Rôle de cette fixture : cas MODERATOR de ProfileParser.parseAuthorRole (source SECONDAIRE du rôle).
+Seule la cellule « Statut » est lue par le test.
+
+RÉDUCTION AU SOUS-ARBRE STRICTEMENT UTILE (par énumération, pas par regex) :
+Ce fichier est un EXTRAIT RÉEL de la capture, réduit à la <table class="main"> contenant l'unique
+`tr.profil` « Statut : Modérateur » — le minimum structurel que ProfileParser exige (il fait
+`select("tr.profil")` puis lit td.profilCase2 / td.profilCase3). RIEN n'est fabriqué à la main.
+Blocs RETIRÉS de la capture (le test ne les lit pas) : avatar (img CDN), signature personnelle du
+modérateur, citation personnelle, dates d'activité (arrivée / dernier message), nombre de messages,
+smileys persos, configuration matérielle, transactions, liens MP/couleurs, pseudo en <title>, id de
+body, feuilles de style / scripts. => Aucune PII, aucun contenu personnel, aucun identifiant.
+
+Provenance curl vs hfr-mcp (AGENTS.md § Fixtures) : `hfr_read` ne rend qu'un DIGEST TEXTE d'un
+post/topic, pas le HTML brut d'une page profil — or le test a besoin de la structure HTML exacte de
+la cellule `td.profilCase3` du champ « Statut ». La capture a donc été faite en curl anonyme, puis
+réduite au sous-arbre utile + scrubbée par énumération (ci-dessus), conformément à l'esprit de la
+règle (fixture réelle, données sensibles retirées avant commit).

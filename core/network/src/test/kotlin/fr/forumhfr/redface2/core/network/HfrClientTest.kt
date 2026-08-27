@@ -618,6 +618,53 @@ class HfrClientTest {
         assertEquals(500, typed.code)
     }
 
+    @Test
+    fun `getStaffResponsables GETs the exact staff endpoint on the anonymous client`() = runTest {
+        // #1112 / #221 — l'annuaire staff global est la source primaire du badge. Le GET doit viser
+        // message-smi-mp-aj.php avec responsable=1 (sans cat) et partir sur le client ANONYME.
+        server.enqueue(MockResponse().setResponseCode(200).setBody("<table class=\"main\"></table>"))
+
+        val html = client.getStaffResponsables()
+
+        assertEquals("<table class=\"main\"></table>", html)
+        val request = server.takeRequest()
+        val url = requireNotNull(request.requestUrl)
+        assertEquals("GET", request.method)
+        assertEquals("anonymous", request.headers["X-RF2-Client"])
+        assertEquals("/message-smi-mp-aj.php", url.encodedPath)
+        assertEquals("hfr.inc", url.queryParameter("config"))
+        assertEquals("0", url.queryParameter("user_id"))
+        assertEquals("1", url.queryParameter("responsable"))
+        assertNull("l'annuaire staff est global, sans paramètre cat", url.queryParameter("cat"))
+    }
+
+    @Test
+    fun `getStaffResponsables surfaces a 500 as HfrServerException carrying the code`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(500).setBody("<html>boom</html>"))
+
+        val error = runCatching { client.getStaffResponsables() }.exceptionOrNull()
+
+        val typed = error as? HfrServerException
+            ?: throw AssertionError("expected HfrServerException, got $error")
+        assertEquals(500, typed.code)
+    }
+
+    @Test
+    fun `getProfile GETs the exact profile path on the anonymous client`() = runTest {
+        // #1112 / #221 — le rôle HFR est lu sur la page profil publique. Le GET doit viser
+        // `/hfr/profil-{id}.htm` exact et partir sur le client ANONYME (lire un profil ne
+        // doit jamais marquer de drapeaux comme lus — règle prefetch-non-authentifié).
+        server.enqueue(MockResponse().setResponseCode(200).setBody("<html><body>profil</body></html>"))
+
+        val html = client.getProfile(userId = 15461)
+
+        assertEquals("<html><body>profil</body></html>", html)
+        val request = server.takeRequest()
+        assertEquals("GET", request.method)
+        assertEquals("anonymous", request.headers["X-RF2-Client"])
+        assertEquals("/hfr/profil-15461.htm", requireNotNull(request.requestUrl).encodedPath)
+    }
+
     /**
      * Decodes an `application/x-www-form-urlencoded` POST body into a field map. A field absent from
      * the body (e.g. an unchecked checkbox) is simply not a key — `map["filter"]` is then `null`.

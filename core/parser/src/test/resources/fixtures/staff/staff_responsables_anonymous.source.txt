@@ -1,0 +1,25 @@
+https://forum.hardware.fr/message-smi-mp-aj.php?config=hfr.inc&user_id=0&responsable=1
+Saved: 2026-08-27 (session anonyme, sans cookie)
+Commande : curl -L sans cookie ni auth (HFR sert l'annuaire staff en anonyme), UA Firefox.
+Réponse : fragment AJAX HTML (une <table class="main"> d'ancres a.s1Topic).
+
+Annuaire GLOBAL des responsables (#1112/#221) : source PRIMAIRE du badge (1 GET + lookups par pseudo).
+Comptes EXACTS de la capture (64 ancres a.s1Topic[onclick*=fillfield_private]) :
+  - 55 (Modérateur)                          -> AuthorRole.MODERATOR
+  -  2 (Administrateur)                       -> AuthorRole.ADMIN
+  -  3 (Super Administrateur)                 -> AuthorRole.ADMIN
+  -  1 (Développeur)                          -> AuthorRole.DEVELOPER
+  -  3 (Architecte / Développeur principal)   -> AuthorRole.DEVELOPER
+  => 64 entrées : MODERATOR 55, ADMIN 5, DEVELOPER 4.
+
+Assainissement : AUCUNE PII. Le fragment ne contient que des pseudos staff PUBLICS + leur rôle ;
+aucun cookie, token, hash_check, email, IP ni id numérique. Aucun profileId n'est exposé par cet
+endpoint (la clé est le PSEUDO). Corps conservé VERBATIM (aucune fabrication ni troncature) : la
+réponse AJAX est déjà minimale (une seule <table>), il n'y a rien à réduire.
+Note : le pseudo « o'gure » est échappé « fillfield_private('o\'gure') » dans le onclick (JS) —
+le parser dé-échappe l'argument ; repli défensif sur anchor.ownText() si l'argument manque.
+
+Provenance curl vs hfr-mcp (AGENTS.md § Fixtures) : `hfr_read` ne rend qu'un DIGEST TEXTE d'un
+post/topic, pas ce fragment HTML AJAX brut (ancres a.s1Topic + onclick fillfield_private + <i>rôle</i>)
+dont le parser a besoin. La capture a donc été faite en curl anonyme (endpoint public global), sans
+aucune donnée sensible à retirer.
