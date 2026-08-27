@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.data.messages
 
 import fr.forumhfr.redface2.core.database.dao.PrivateMessageContentDao
+import fr.forumhfr.redface2.core.database.dao.StoredPrivateMessageThreadPage
 import fr.forumhfr.redface2.core.database.entities.PrivateMessageEntity
 import fr.forumhfr.redface2.core.database.entities.PrivateMessageThreadPageEntity
 import fr.forumhfr.redface2.core.model.Post
@@ -14,6 +15,7 @@ import io.mockk.slot
 import java.time.Instant
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RoomPrivateMessageThreadDiskCacheTest {
@@ -53,7 +55,27 @@ class RoomPrivateMessageThreadDiskCacheTest {
         }
     }
 
-    private fun thread() = PrivateMessageThread(
+    @Test
+    fun `moderation marker survives both private message cache mapper directions`() = runTest {
+        val dao = mockk<PrivateMessageContentDao>(relaxed = true)
+        val pageSlot = slot<PrivateMessageThreadPageEntity>()
+        val messagesSlot = slot<List<PrivateMessageEntity>>()
+        val scrubber = mockk<PrivateContentDatabaseScrubber>(relaxed = true)
+        coEvery { dao.replacePage(capture(pageSlot), capture(messagesSlot), 5) } returns Unit
+        val cache = RoomPrivateMessageThreadDiskCache(dao, scrubber)
+
+        cache.replace("Alice", thread(isModerationPost = true), FETCHED_AT)
+
+        assertTrue(messagesSlot.captured.single().isModerationPost)
+        coEvery { dao.getPage("alice", 42, 1) } returns StoredPrivateMessageThreadPage(
+            page = pageSlot.captured,
+            messages = messagesSlot.captured,
+        )
+
+        assertTrue(requireNotNull(cache.read("Alice", 42, 1)).messages.single().isModerationPost)
+    }
+
+    private fun thread(isModerationPost: Boolean = false) = PrivateMessageThread(
         threadId = 42,
         subject = "subject",
         correspondent = "correspondent",
@@ -68,6 +90,7 @@ class RoomPrivateMessageThreadDiskCacheTest {
                 isOwnPost = false,
                 quotedAuthors = emptyList(),
                 postIndex = null,
+                isModerationPost = isModerationPost,
             ),
         ),
         page = 1,

@@ -59,6 +59,7 @@
     <string name="topic_error_title">Erreur de chargement</string>
     <string name="topic_error_body">Impossible d’ouvrir la page %1$d.\n\n%2$s</string>
     <string name="topic_post_ego_state_description">Votre message</string>
+    <string name="topic_post_moderation_state_description">Message de la modération</string>
     <!-- #362 — per-post contextual menu (post number, permalink copy, edit marker, citations). -->
     <!-- #436 — libellés courts du bouton « + » en pied de carte (parité web quote+/quote-). Le
          glyphe et le mot basculent avec l'appartenance au panier ; le contentDescription long

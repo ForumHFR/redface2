@@ -67,6 +67,36 @@ class TopicEgoHighlightRenderTest {
     }
 
     @Test
+    fun `moderation post tints both the inset card and the identity band pink`() {
+        setCard(post = samplePost(isModerationPost = true))
+
+        assertShellColor(MODERATION_LIGHT)
+        assertIdentityBandColor(MODERATION_LIGHT)
+        assertStateCount(MODERATION_STATE, 1)
+        assertStateCount(OWN_POST_STATE, 0)
+    }
+
+    @Test
+    fun `the transient scroll anchor keeps the band tertiary above the moderation pink`() {
+        setCard(post = samplePost(isModerationPost = true), highlighted = true)
+
+        // The card stays pink (persistent marker); the band's transient anchor tint wins over it.
+        assertShellColor(MODERATION_LIGHT)
+        assertIdentityBandColor(RedfaceLightColorScheme.tertiaryContainer)
+        assertStateCount(MODERATION_STATE, 1)
+    }
+
+    @Test
+    fun `an EgoPost that is also moderation stays blue on the card and neutral on the band`() {
+        setCard(post = samplePost(isModerationPost = true), egoPostHighlighted = true)
+
+        assertShellColor(EGO_POST_LIGHT)
+        assertIdentityBandColor(RedfaceLightColorScheme.secondaryContainer)
+        assertStateCount(OWN_POST_STATE, 1)
+        assertStateCount(MODERATION_STATE, 0)
+    }
+
+    @Test
     fun `EgoPost and EgoQuote accumulate on an own post with an auto-citation`() {
         setCard(
             post = samplePost(content = autoQuoteContent()),
@@ -265,6 +295,7 @@ class TopicEgoHighlightRenderTest {
     private fun samplePost(
         content: PostContent = PostContent(emptyList()),
         signature: PostContent? = null,
+        isModerationPost: Boolean = false,
     ): Post = Post(
         numreponse = 874,
         author = EGO_PSEUDO,
@@ -278,6 +309,7 @@ class TopicEgoHighlightRenderTest {
         quoteRef = 1,
         profileId = null,
         signature = signature,
+        isModerationPost = isModerationPost,
     )
 
     private fun autoQuoteContent(): PostContent = PostContent(
@@ -321,6 +353,9 @@ class TopicEgoHighlightRenderTest {
         const val EGO_CANONICAL = "xatrix"
         const val OWN_POST_STATE = "Votre message"
         const val OWN_QUOTE_STATE = "Citation de votre message"
+        const val MODERATION_STATE = "Message de la modération"
         val EGO_POST_LIGHT = Color(0xFFE4EDFF)
+        // Light moderation container from ModerationHighlightColors; the token test pins its value.
+        val MODERATION_LIGHT = Color(0xFFF5DDE2)
     }
 }

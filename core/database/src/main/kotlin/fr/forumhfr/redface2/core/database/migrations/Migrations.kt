@@ -490,3 +490,19 @@ val MIGRATION_16_17: Migration = object : Migration(16, 17) {
         )
     }
 }
+
+/**
+ * v17 → v18 (#1112) — persists HFR's structural `messageModo` marker in both Post-backed caches.
+ * The default keeps every pre-v18 topic post and private message neutral until its next live fetch;
+ * no author-name heuristic is applied during migration.
+ */
+val MIGRATION_17_18: Migration = object : Migration(17, 18) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "ALTER TABLE posts ADD COLUMN isModerationPost INTEGER NOT NULL DEFAULT 0",
+        )
+        db.execSQL(
+            "ALTER TABLE mp_messages ADD COLUMN isModerationPost INTEGER NOT NULL DEFAULT 0",
+        )
+    }
+}

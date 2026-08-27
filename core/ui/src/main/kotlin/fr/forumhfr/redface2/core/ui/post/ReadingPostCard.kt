@@ -26,7 +26,10 @@ import fr.forumhfr.redface2.core.ui.theme.egoHighlightColors
  *
  * The card owns the stable reading body: density-aware gutters, selectable rich content, optional
  * signature and the body-scoped image/EgoQuote providers. [identity] stays mandatory because every
- * reading post has an author header, but its text, icons, tint and semantics belong to the host.
+ * reading post has an author header, but its text, icons, tint and semantics belong to the host. It
+ * receives the resolved moderation colour when the intrinsic post marker is present AND the post is
+ * not an EgoPost, otherwise `null`, so each host can tint its opaque identity band without
+ * duplicating detection and the band follows the card (#874 EgoPost wins on both).
  * [badges] and [footer] are optional feature slots; their absence adds no placeholder node. The
  * body owns the card's bottom padding exactly when [footer] is absent.
  *
@@ -44,7 +47,7 @@ import fr.forumhfr.redface2.core.ui.theme.egoHighlightColors
 @Suppress("LongParameterList")
 fun ReadingPostCard(
     post: Post,
-    identity: @Composable () -> Unit,
+    identity: @Composable (moderationContainerColor: Color?) -> Unit,
     modifier: Modifier = Modifier,
     presentation: ReadingPostCardPresentation = ReadingPostCardPresentation(),
     mediaDiskCachePolicy: PostMediaDiskCachePolicy = PostMediaDiskCachePolicy.ENABLED,
@@ -59,8 +62,17 @@ fun ReadingPostCard(
     // the card with m.cardBodyBottom; with it, the footer owns everything below the body.
     val hasFooter = footer != null
     val egoColors = egoHighlightColors()
+    // Resolve the structural moderation token once here. Feature hosts only receive the colour
+    // override for their opaque identity band; they never repeat the Post/HTML detection.
+    val moderationContainerColor = moderationHighlightColor().takeIf { post.isModerationPost }
+    // #874 is the stronger invariant on BOTH surfaces: an own post that HFR also marks as a
+    // moderation row stays blue on the card AND keeps a neutral band. The band override is
+    // therefore suppressed under EgoPost so the identity strip follows the card, never diverges.
+    val moderationBandColor = moderationContainerColor?.takeIf { !presentation.egoPostHighlighted }
     val postContainerColor = when {
+        // Moderation then wins over the transparent full-width presentation, below EgoPost.
         presentation.egoPostHighlighted -> egoColors.postContainer
+        moderationContainerColor != null -> moderationContainerColor
         presentation.flat -> Color.Transparent
         else -> MaterialTheme.colorScheme.surfaceContainer
     }
@@ -74,7 +86,7 @@ fun ReadingPostCard(
         } else {
             null
         },
-        header = identity,
+        header = { identity(moderationBandColor) },
         badges = badges,
         body = {
             CompositionLocalProvider(LocalPostMediaDiskCachePolicy provides mediaDiskCachePolicy) {

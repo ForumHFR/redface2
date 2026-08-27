@@ -101,4 +101,9 @@ data class PostEntity(
      * - most posts legitimately carry no signature.
      */
     val signature: PostContent? = null,
+    /**
+     * #1112 — structural HFR `messageModo` marker, persisted since schema v18 so the topic cache
+     * keeps the whole-post moderation highlight. Pre-v18 rows backfill to `false`.
+     */
+    val isModerationPost: Boolean = false,
 )

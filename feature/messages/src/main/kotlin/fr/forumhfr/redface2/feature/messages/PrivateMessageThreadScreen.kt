@@ -1834,8 +1834,9 @@ internal fun isHiddenMessage(message: Post, hidden: Set<Int>, revealed: Set<Int>
  * [presentation] is the shared render-only state bundle. The list derives its values from reader
  * preferences, the session pseudo (#1050 Ego markers) and message position, while this adapter
  * forwards the bundle unchanged — its only addition is the EgoPost StateDescription on the
- * identity band (#874 P1 parity). The band itself stays `secondaryContainer`: EgoPost colours the
- * card below it, never the identity strip. Neutral defaults keep direct test/preview mounts unmarked.
+ * identity band (#874 P1 parity). EgoPost colours the card below the neutral band; a moderation
+ * post instead receives the shared pink override on both card and band. Neutral defaults keep
+ * direct test/preview mounts unmarked.
  */
 @Composable
 @Suppress("LongParameterList") // Thin card adapter: render state plus independent host capabilities.
@@ -1860,6 +1861,8 @@ internal fun MessageCard(
     // on the identity node (TalkBack traverses it first), never a heading. The fallback pseudo or
     // creator slot stays the card's exactly-one heading (#884, pinned by MessageCardShellSmokeTest).
     val egoPostStateDescription = stringResource(R.string.messages_post_ego_state_description)
+    val moderationPostStateDescription =
+        stringResource(R.string.messages_post_moderation_state_description)
     val citedCount = message.citedCount ?: 0
     // #221 — canonical creator detection (case / format-char / NBSP insensitive) runs once per
     // author, not on every recomposition of this hot list row. Only creators need a pseudo slot;
@@ -1874,20 +1877,26 @@ internal fun MessageCard(
         mediaDiskCachePolicy = PostMediaDiskCachePolicy.DISABLED,
         onGoToCitedPost = onGoToCitedPost,
         onImageLongPress = onImageLongPress,
-        identity = {
+        identity = { moderationOverride ->
             // An MP has no anchor/category tint, but still carries the same full-width identity band
-            // as a normal topic post. Its secondaryContainer colour is therefore FIXED and independent
-            // from EgoPost: the highlight belongs to the enclosing card container below the band.
+            // as a normal topic post. Its neutral secondaryContainer colour is independent from
+            // EgoPost; a moderation row explicitly overrides it so the pink covers the whole post.
             // PostIdentityBand adds no padding, so the shared band rhythm is reinjected on the
             // header — MP-owned gutters at cardBodyHorizontal, shared symmetric vertical inset at
             // cardHeaderVertical; the header↔body gap remains the body slot's own cardBodyTop.
             PostIdentityBand(
                 modifier = Modifier.semantics {
-                    if (presentation.egoPostHighlighted) {
-                        stateDescription = egoPostStateDescription
+                    when {
+                        presentation.egoPostHighlighted -> {
+                            stateDescription = egoPostStateDescription
+                        }
+                        moderationOverride != null -> {
+                            stateDescription = moderationPostStateDescription
+                        }
                     }
                 },
-                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                containerColor = moderationOverride
+                    ?: MaterialTheme.colorScheme.secondaryContainer,
             ) {
                 // A creator supplies the shared gold pseudo leaf; everyone else uses the neutral
                 // fallback. Per the slot contract, the creator branch owns both the profile tap and
