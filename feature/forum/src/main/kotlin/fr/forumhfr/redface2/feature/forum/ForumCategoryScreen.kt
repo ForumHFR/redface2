@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -190,6 +191,9 @@ fun ForumCategoryScreen(
                     currentPage = state.page,
                     pageCount = state.pageCount,
                     showPager = !filterActive,
+                    // #1129 — the sticky partition + « Autres sujets » separator only apply to a
+                    // real category listing; flag-filter buckets stay flat (see TopicsBody).
+                    filterActive = filterActive,
                     // #1131 — reserve the FAB clearance so the pager clears the « + » button.
                     // The FAB is rendered only when the user can create a topic.
                     contentPadding = forumListContentPadding(reserveFabSpace = state.canCreateTopic),
@@ -438,6 +442,7 @@ private fun TopicsBody(
     currentPage: Int,
     pageCount: Int,
     showPager: Boolean,
+    filterActive: Boolean,
     contentPadding: PaddingValues,
     highlightTitle: String?,
 ) {
@@ -482,6 +487,13 @@ private fun TopicsBody(
             // The PagerRow always shows the underlying `state.page` total — a search
             // filter only narrows the visible rows in the current page; switching
             // page or subcat is what actually re-fetches.
+            val sections = remember(filteredTopics) { filteredTopics.toTopicSections() }
+            // #1129 — the sticky partition + « Autres sujets » separator only make sense on a
+            // real, recency-agnostic category listing. Flag-filter buckets (Participé/Lus/
+            // Favoris) are recency-sorted cross-category views, so a pinned topic must NOT jump
+            // to the top with a separator there: in filter mode the list stays flat, exactly as
+            // before #1129. The per-row status badge still shows in both modes (it is in TopicRow).
+            val showStickyBoundary = sections.shouldShowStickyBoundary(filterActive)
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxWidth(),
@@ -489,8 +501,37 @@ private fun TopicsBody(
             ) {
                 if (filteredTopics.isEmpty()) {
                     item { TopicsEmpty(searchQuery = searchQuery) }
-                } else {
+                } else if (filterActive) {
                     items(filteredTopics, key = TopicSummary::topicId) { topic ->
+                        TopicRow(
+                            topic = topic,
+                            highlighted = matchesHighlightedTitle(topic, highlightTitle),
+                            onClick = { onOpenTopic(topic) },
+                        )
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    }
+                } else {
+                    itemsIndexed(
+                        items = sections.sticky,
+                        key = { _, topic -> topic.topicId },
+                    ) { index, topic ->
+                        TopicRow(
+                            topic = topic,
+                            highlighted = matchesHighlightedTitle(topic, highlightTitle),
+                            onClick = { onOpenTopic(topic) },
+                        )
+                        // The boundary owns its two 2.dp rules, so the last sticky row must not
+                        // add the ordinary hairline immediately before it.
+                        if (index < sections.sticky.lastIndex || !showStickyBoundary) {
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        }
+                    }
+                    if (showStickyBoundary) {
+                        item(key = "sticky_boundary") {
+                            StickyTopicsSeparator()
+                        }
+                    }
+                    items(sections.regular, key = TopicSummary::topicId) { topic ->
                         TopicRow(
                             topic = topic,
                             highlighted = matchesHighlightedTitle(topic, highlightTitle),
@@ -512,6 +553,47 @@ private fun TopicsBody(
         }
     }
 }
+
+/**
+ * #1129 — boundary between sticky topics and the regular topics of the loaded, filtered page.
+ * Mirrors the Topic screen's « Dernier message lu » grammar: traversing primary rules around a
+ * compact central pill.
+ */
+@Composable
+private fun StickyTopicsSeparator() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        val ruleColor = MaterialTheme.colorScheme.primary.copy(alpha = STICKY_TOPICS_RULE_ALPHA)
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            thickness = 2.dp,
+            color = ruleColor,
+        )
+        Text(
+            text = stringResource(R.string.category_regular_topics_separator),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onPrimary,
+            modifier = Modifier
+                .background(
+                    color = MaterialTheme.colorScheme.primary,
+                    shape = MaterialTheme.shapes.extraLarge,
+                )
+                .padding(horizontal = 10.dp, vertical = 3.dp),
+        )
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            thickness = 2.dp,
+            color = ruleColor,
+        )
+    }
+}
+
+private const val STICKY_TOPICS_RULE_ALPHA = 0.55f
 
 @Composable
 private fun TopicsEmpty(searchQuery: String) {
@@ -583,6 +665,10 @@ private fun TopicRow(
     ) {
         FlagIndicator(flagType = topic.flagType, hasUnread = topic.hasUnread)
         Column(modifier = Modifier.fillMaxWidth()) {
+            if (topic.isSticky || topic.isLocked) {
+                TopicStatusBadge(text = topicBadgeText(topic))
+                Spacer(modifier = Modifier.height(4.dp))
+            }
             Text(
                 text = topic.title,
                 style = MaterialTheme.typography.titleSmall,
@@ -606,14 +692,23 @@ private fun TopicRow(
                 style = MaterialTheme.typography.labelSmall,
                 color = metadataColor,
             )
-            if (topic.isSticky || topic.isLocked) {
-                Text(
-                    text = topicBadgeText(topic),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.tertiary,
-                )
-            }
         }
+    }
+}
+
+/** #1129 — tonal status badge shown before a sticky and/or locked topic title. */
+@Composable
+private fun TopicStatusBadge(text: String) {
+    Surface(
+        shape = MaterialTheme.shapes.extraLarge,
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+        )
     }
 }
 
