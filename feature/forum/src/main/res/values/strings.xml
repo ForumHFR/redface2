@@ -25,6 +25,10 @@
 
     <string name="category_search_label">Rechercher dans cette page</string>
     <string name="category_search_placeholder">Titre, auteur, dernier réponseur</string>
+    <!-- #1130 — descriptions a11y du champ de recherche (ouvrir / effacer / fermer). -->
+    <string name="category_search_open">Ouvrir la recherche</string>
+    <string name="category_search_clear">Effacer la recherche</string>
+    <string name="category_search_close">Fermer la recherche</string>
     <string name="category_topics_empty">Aucun topic à afficher.</string>
     <string name="category_topics_empty_search">Aucun topic ne contient « %1$s » dans cette page.</string>
 

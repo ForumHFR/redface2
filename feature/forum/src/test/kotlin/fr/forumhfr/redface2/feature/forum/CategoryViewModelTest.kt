@@ -442,6 +442,79 @@ class CategoryViewModelTest {
     }
 
     @Test
+    fun `search is closed by default and openSearch activates it`() = runTest {
+        val repo = FakeForumRepository()
+        val vm = categoryVm(repo)
+
+        vm.uiState.test {
+            val initial = awaitContent { !it.searchActive }
+            assertFalse("search must start closed", initial.searchActive)
+
+            vm.openSearch()
+            val opened = awaitContent { it.searchActive }
+            assertTrue("openSearch must activate the search", opened.searchActive)
+            // Opening does not seed a query — an open, empty field is a valid state.
+            assertEquals("", opened.searchQuery)
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `clearing the query keeps the search open`() = runTest {
+        // #1130 — the clear cross calls updateSearchQuery("") only; it must NOT leave the mode.
+        val repo = FakeForumRepository()
+        val vm = categoryVm(repo)
+
+        vm.uiState.test {
+            awaitContent { !it.searchActive }
+            vm.openSearch()
+            vm.updateSearchQuery("usb")
+            awaitContent { it.searchActive && it.searchQuery == "usb" }
+
+            vm.updateSearchQuery("")
+            val cleared = awaitContent { it.searchQuery == "" }
+            assertTrue("clearing the query must not close the search", cleared.searchActive)
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `closeSearch atomically empties and exits with no intermediate open-empty item`() = runTest {
+        // #1130 — closeSearch writes ONE combined flow, so uiState must jump straight from
+        // (open, "android") to (closed, "") with NO (open, "") item in between. The pre-fix
+        // implementation wrote two separate MutableStateFlows joined by `combine` and DID surface
+        // that intermediate; this test refutes it by draining every item emitted after closeSearch
+        // and asserting none is the forbidden (active && empty) state before the atomic final one.
+        val repo = FakeForumRepository()
+        val vm = categoryVm(repo)
+
+        vm.uiState.test {
+            awaitContent { !it.searchActive }
+            vm.openSearch()
+            vm.updateSearchQuery("android")
+            awaitContent { it.searchActive && it.searchQuery == "android" }
+
+            vm.closeSearch()
+            // Drain until the atomic final state (closed AND empty). Any item seen on the way that
+            // is (open, empty) is the non-atomic leak the fix removes — it would arrive first.
+            var item = awaitItem()
+            while (item.searchActive || item.searchQuery.isNotEmpty()) {
+                assertFalse(
+                    "closeSearch leaked an intermediate (open, empty) state — not atomic",
+                    item.searchActive && item.searchQuery.isEmpty(),
+                )
+                item = awaitItem()
+            }
+            assertFalse("closeSearch must leave the search mode", item.searchActive)
+            assertEquals("closeSearch must empty the query", "", item.searchQuery)
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `failure from observeSubcategories surfaces as SubcategoriesUiState Error`() = runTest {
         val repo = FakeForumRepository()
         val vm = CategoryViewModel(

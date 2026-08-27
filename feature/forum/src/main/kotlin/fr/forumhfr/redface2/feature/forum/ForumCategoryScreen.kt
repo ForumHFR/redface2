@@ -1,14 +1,17 @@
 package fr.forumhfr.redface2.feature.forum
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -19,6 +22,8 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -26,6 +31,8 @@ import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -37,17 +44,23 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -94,6 +107,12 @@ fun ForumCategoryScreen(
             listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
         }
     }
+
+    // #1130 — system/gesture back leaves the search mode first (clearing the query) instead of
+    // popping the category route, mirroring the settings search shell. Disabled when the search
+    // is closed so normal back navigation proceeds. The active state lives in the ViewModel so
+    // the close/clear logic stays unit-testable without a Compose harness.
+    BackHandler(enabled = state.searchActive) { viewModel.closeSearch() }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -144,8 +163,11 @@ fun ForumCategoryScreen(
             }
 
             SearchField(
+                searchActive = state.searchActive,
                 query = state.searchQuery,
                 onQueryChange = viewModel::updateSearchQuery,
+                onOpenSearch = viewModel::openSearch,
+                onCloseSearch = viewModel::closeSearch,
             )
 
             // In flag-filter mode the bucket listing is the source (and the pager is hidden,
@@ -168,6 +190,9 @@ fun ForumCategoryScreen(
                     currentPage = state.page,
                     pageCount = state.pageCount,
                     showPager = !filterActive,
+                    // #1131 — reserve the FAB clearance so the pager clears the « + » button.
+                    // The FAB is rendered only when the user can create a topic.
+                    contentPadding = forumListContentPadding(reserveFabSpace = state.canCreateTopic),
                     // #206 workaround — highlight only on the listing page/subcat reached
                     // immediately after create. If the user changes page or subcat, the route
                     // hint is ignored so an unrelated same-title topic is not highlighted there.
@@ -182,20 +207,124 @@ fun ForumCategoryScreen(
     }
 }
 
+/**
+ * #1130 — the in-page search affordance with an explicit open/closed mode, mirroring the
+ * settings search shell (`RedfaceSettingsSearchTopBar` / `RedfaceSearchAppBar`).
+ *
+ * - Closed ([searchActive] false): a full-width pill inviting the user to search. Tapping it
+ *   opens the search.
+ * - Open ([searchActive] true): an [OutlinedTextField] with a back arrow (leading) that closes
+ *   the search, a clear cross (trailing, only while the query is non-empty) that empties the
+ *   query WITHOUT leaving the mode, autofocus, and an `ImeAction.Search` that just dismisses
+ *   the keyboard (filtering is live).
+ *
+ * Opening is not derived from a non-empty query — an open, empty field is a valid state.
+ */
 @Composable
 private fun SearchField(
+    searchActive: Boolean,
     query: String,
     onQueryChange: (String) -> Unit,
+    onOpenSearch: () -> Unit,
+    onCloseSearch: () -> Unit,
 ) {
+    if (searchActive) {
+        ActiveSearchField(
+            query = query,
+            onQueryChange = onQueryChange,
+            onCloseSearch = onCloseSearch,
+        )
+    } else {
+        SearchPill(onOpenSearch = onOpenSearch)
+    }
+}
+
+/** Closed-state affordance: a pill that opens the search, styled like the settings search bar. */
+@Composable
+private fun SearchPill(onOpenSearch: () -> Unit) {
+    val openLabel = stringResource(R.string.category_search_open)
+    Surface(
+        onClick = onOpenSearch,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .height(56.dp)
+            .semantics { contentDescription = openLabel },
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Icon(
+                painter = painterResource(fr.forumhfr.redface2.core.ui.R.drawable.ic_search),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = stringResource(R.string.category_search_label),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** Open-state field: back arrow closes, clear cross empties the query, autofocus + IME Search. */
+@Composable
+private fun ActiveSearchField(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onCloseSearch: () -> Unit,
+) {
+    val focusManager = LocalFocusManager.current
+    // Auto-focus + open the keyboard as soon as the field enters composition (i.e. when the
+    // search is activated): without this the field shows but stays unfocused.
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
     OutlinedTextField(
         value = query,
         onValueChange = onQueryChange,
         singleLine = true,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .focusRequester(focusRequester),
         label = { Text(stringResource(R.string.category_search_label)) },
         placeholder = { Text(stringResource(R.string.category_search_placeholder)) },
+        leadingIcon = {
+            val closeLabel = stringResource(R.string.category_search_close)
+            IconButton(
+                onClick = onCloseSearch,
+                modifier = Modifier.semantics { contentDescription = closeLabel },
+            ) {
+                Icon(
+                    painter = painterResource(fr.forumhfr.redface2.core.ui.R.drawable.ic_arrow_back),
+                    contentDescription = null,
+                )
+            }
+        },
+        trailingIcon = {
+            // Clear is offered only when there is something to clear; it empties the query but
+            // leaves the search open (an open, empty field is a valid state).
+            if (query.isNotEmpty()) {
+                val clearLabel = stringResource(R.string.category_search_clear)
+                IconButton(
+                    onClick = { onQueryChange("") },
+                    modifier = Modifier.semantics { contentDescription = clearLabel },
+                ) {
+                    Icon(
+                        painter = painterResource(fr.forumhfr.redface2.core.ui.R.drawable.ic_close),
+                        contentDescription = null,
+                    )
+                }
+            }
+        },
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        // Filtering is live; the IME "Search" action just dismisses the keyboard (no close).
+        keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
     )
 }
 
@@ -309,6 +438,7 @@ private fun TopicsBody(
     currentPage: Int,
     pageCount: Int,
     showPager: Boolean,
+    contentPadding: PaddingValues,
     highlightTitle: String?,
 ) {
     when (state) {
@@ -352,7 +482,11 @@ private fun TopicsBody(
             // The PagerRow always shows the underlying `state.page` total — a search
             // filter only narrows the visible rows in the current page; switching
             // page or subcat is what actually re-fetches.
-            LazyColumn(state = listState, modifier = Modifier.fillMaxWidth()) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = contentPadding,
+            ) {
                 if (filteredTopics.isEmpty()) {
                     item { TopicsEmpty(searchQuery = searchQuery) }
                 } else {
