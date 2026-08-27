@@ -10,6 +10,7 @@ import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
+import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
@@ -2716,6 +2717,16 @@ class SettingsViewModelTest {
 
         fun emitAccentColor(value: AccentColor) {
             accentColor.value = value
+        }
+
+        // #1132 — Forum flag-filter preference has no Settings UI; a plain in-memory seam keeps the
+        // interface satisfied (SettingsViewModel never reads or writes it).
+        private val forumCategoryFlagFilter = MutableStateFlow(CategoryFlagFilter.ALL)
+
+        override fun observeForumCategoryFlagFilter(): Flow<CategoryFlagFilter> = forumCategoryFlagFilter
+
+        override suspend fun setForumCategoryFlagFilter(filter: CategoryFlagFilter) {
+            forumCategoryFlagFilter.value = filter
         }
     }
 

@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import app.cash.turbine.test
+import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
@@ -1365,5 +1366,104 @@ class DataStoreUserPreferencesRepositoryTest {
             assertEquals(FontScalePreference.M, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `observeForumCategoryFlagFilter defaults to ALL on an empty store`() = runTest(dispatcher) {
+        // #1132 — ALL is the default (the normal listing), never the enum's first ordinal by chance.
+        repository.observeForumCategoryFlagFilter().test {
+            assertEquals(CategoryFlagFilter.ALL, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setForumCategoryFlagFilter persists and round-trips all four values`() = runTest(dispatcher) {
+        // #1132 — every value must round-trip, FAVORITES included (treated like the other three).
+        for (filter in CategoryFlagFilter.entries) {
+            repository.setForumCategoryFlagFilter(filter)
+            repository.observeForumCategoryFlagFilter().test {
+                assertEquals(filter, awaitItem())
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+    }
+
+    @Test
+    fun `corrupt forum_category_flag_filter value falls back to ALL instead of crashing`() = runTest(dispatcher) {
+        // An unknown value (older build / manual edit) must degrade to ALL, not crash valueOf.
+        dataStore.edit { prefs -> prefs[stringPreferencesKey("forum_category_flag_filter")] = "STARRED" }
+
+        repository.observeForumCategoryFlagFilter().test {
+            assertEquals(CategoryFlagFilter.ALL, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `forum flag-filter reads come from the in-memory cache, not a divergent disk value`() = runTest(dispatcher) {
+        // #1132 bug A — the cache is the in-memory source of truth. Once a value is set in-session, a
+        // later reader (the next category's ViewModel) sees THAT value, even if the disk holds a
+        // different one (e.g. an older value not yet overwritten by the async commit). Pre-fix, observe
+        // mapped `dataStore.data` live and would return the disk value — this test would fail.
+        repository.setForumCategoryFlagFilter(CategoryFlagFilter.READ)
+        assertEquals(CategoryFlagFilter.READ, repository.observeForumCategoryFlagFilter().first())
+
+        // Mutate the DISK directly to a different value behind the cache's back.
+        dataStore.edit { prefs ->
+            prefs[stringPreferencesKey("forum_category_flag_filter")] = CategoryFlagFilter.FAVORITES.name
+        }
+
+        // A fresh collector still returns the cached READ — the disk change is not re-read.
+        assertEquals(CategoryFlagFilter.READ, repository.observeForumCategoryFlagFilter().first())
+    }
+
+    @Test
+    fun `two rapid forum flag-filter writes are cache-visible before commit and persist last-wins`() = runTest {
+        // #1132 bugs A+B — cache-first decouples the in-session read from the async disk commit, and
+        // the last choice wins both in the cache and on disk. Built on a StandardTestDispatcher so the
+        // disk commits are provably only STARTED (dispatched onto the app scope) — not committed —
+        // after `runCurrent`, mirroring the #507 survival test's harness.
+        val ioDispatcher = StandardTestDispatcher(testScheduler)
+        val dataStoreScope = CoroutineScope(ioDispatcher + Job())
+        val appScope = CoroutineScope(ioDispatcher + SupervisorJob())
+        val store = PreferenceDataStoreFactory.create(
+            scope = dataStoreScope,
+            produceFile = { tempFolder.newFile("forum_filter_ordering.preferences_pb") },
+        )
+        val repo = DataStoreUserPreferencesRepository(
+            dataStore = store,
+            themeBootstrapStore = themeBootstrapStore,
+            startScreenBootstrapStore = startScreenBootstrapStore,
+            ioDispatcher = ioDispatcher,
+            externalScope = appScope,
+        )
+
+        // Two rapid choices, each on its own caller (mirrors two quick selectFlagFilter taps, each on
+        // its own viewModelScope.launch). Their async disk commits stay queued on appScope.
+        val callers = CoroutineScope(ioDispatcher + Job())
+        callers.launch { repo.setForumCategoryFlagFilter(CategoryFlagFilter.READ) }
+        callers.launch { repo.setForumCategoryFlagFilter(CategoryFlagFilter.FAVORITES) }
+        runCurrent() // runs the SYNCHRONOUS cache updates; the disk commits are dispatched, not committed
+
+        // In-session: a fresh collector already sees the last choice from the cache, with NO disk
+        // commit yet. Pre-fix (observe mapped `dataStore.data`) this would read the empty disk → ALL.
+        assertEquals(CategoryFlagFilter.FAVORITES, repo.observeForumCategoryFlagFilter().first())
+
+        advanceUntilIdle() // let both queued disk commits run
+
+        // Cross-restart: a fresh repository reading the same file cold sees the last choice on disk.
+        val fresh = DataStoreUserPreferencesRepository(
+            dataStore = store,
+            themeBootstrapStore = themeBootstrapStore,
+            startScreenBootstrapStore = startScreenBootstrapStore,
+            ioDispatcher = ioDispatcher,
+            externalScope = appScope,
+        )
+        assertEquals(CategoryFlagFilter.FAVORITES, fresh.observeForumCategoryFlagFilter().first())
+
+        callers.cancel()
+        appScope.cancel()
+        dataStoreScope.cancel()
     }
 }

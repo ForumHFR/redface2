@@ -564,4 +564,22 @@ interface UserPreferencesRepository {
 
     /** Persists [observeImmersiveNavBarReveal]. Default [ImmersiveNavBarReveal.MANUAL] until the first call. */
     suspend fun setImmersiveNavBarReveal(mode: ImmersiveNavBarReveal)
+
+    /**
+     * #1132 — the last « Mes drapeaux » filter the user picked on the Forum category screen (#455).
+     * Re-applied as the seed when the user enters the NEXT category instead of always starting from
+     * [CategoryFlagFilter.ALL]. There is deliberately no Settings UI: the preference is remembered
+     * implicitly from the on-screen selector. Observed by `:feature:forum`
+     * ([fr.forumhfr.redface2.feature.forum.CategoryViewModel]). A corrupt / unknown stored value
+     * degrades to [CategoryFlagFilter.ALL].
+     */
+    fun observeForumCategoryFlagFilter(): Flow<CategoryFlagFilter>
+
+    /**
+     * Persists [observeForumCategoryFlagFilter]. Default [CategoryFlagFilter.ALL] until the first
+     * call. Only written when the user explicitly picks a filter on an authenticated session — an
+     * anonymous seed and a logout reset must NOT touch this key (a logout is a UI safety measure,
+     * not a user choice).
+     */
+    suspend fun setForumCategoryFlagFilter(filter: CategoryFlagFilter)
 }

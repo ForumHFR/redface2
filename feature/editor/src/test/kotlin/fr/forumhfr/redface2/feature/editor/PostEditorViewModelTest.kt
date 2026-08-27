@@ -17,6 +17,7 @@ import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
+import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
@@ -2384,6 +2385,12 @@ class PostEditorViewModelTest {
         override suspend fun setImmersiveNavBarReveal(mode: ImmersiveNavBarReveal) = Unit
         override fun observeAccentColor(): Flow<AccentColor> = MutableStateFlow(AccentColor.ROSE)
         override suspend fun setAccentColor(color: AccentColor) = Unit
+
+        // #1132 — Forum flag-filter preference is irrelevant to the editor; default ALL stub.
+        override fun observeForumCategoryFlagFilter(): Flow<CategoryFlagFilter> =
+            MutableStateFlow(CategoryFlagFilter.ALL)
+
+        override suspend fun setForumCategoryFlagFilter(filter: CategoryFlagFilter) = Unit
     }
 
     /**
