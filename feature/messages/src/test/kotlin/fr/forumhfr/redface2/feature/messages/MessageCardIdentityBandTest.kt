@@ -134,6 +134,23 @@ class MessageCardIdentityBandTest {
         assertEgoPostBandContract(expectedShellColor = expectedEgoPostColor)
     }
 
+    @Test
+    fun `a moderation message tints both the card and the identity band pink`() {
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                MessageCard(message = sampleMessage(isModerationPost = true))
+            }
+        }
+
+        shellNode(MODERATION_LIGHT).assertExists()
+        compose.onNode(
+            SemanticsMatcher.expectValue(PostIdentityBandContainerColorKey, MODERATION_LIGHT),
+            useUnmergedTree = true,
+        ).assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, MODERATION_STATE),
+        )
+    }
+
     private fun setCard(
         metrics: DisplayMetrics = DisplayMetrics.Comfort,
         flat: Boolean = false,
@@ -219,7 +236,7 @@ class MessageCardIdentityBandTest {
         useUnmergedTree = true,
     )
 
-    private fun sampleMessage(): Post = Post(
+    private fun sampleMessage(isModerationPost: Boolean = false): Post = Post(
         numreponse = 1,
         author = "XaTriX",
         date = Instant.EPOCH,
@@ -233,11 +250,15 @@ class MessageCardIdentityBandTest {
         isOwnPost = false,
         quotedAuthors = emptyList(),
         postIndex = null,
+        isModerationPost = isModerationPost,
     )
 
     private companion object {
         const val BODY_TEXT = "bonjour"
         const val OWN_POST_STATE = "Votre message"
+        const val MODERATION_STATE = "Message de la modération"
         const val DP_TOLERANCE = 0.01f
+        // Light moderation container from ModerationHighlightColors; the token test pins its value.
+        val MODERATION_LIGHT = Color(0xFFF5DDE2)
     }
 }

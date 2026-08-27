@@ -2746,6 +2746,8 @@ internal fun TopicPostCard(
     // « Ajouté à la citation » pill is gone, so multi-quote selection never grows the card.
     val hasBadges = citedCount > 0
     val egoPostStateDescription = stringResource(R.string.topic_post_ego_state_description)
+    val moderationPostStateDescription =
+        stringResource(R.string.topic_post_moderation_state_description)
     ReadingPostCard(
         post = post,
         presentation = ReadingPostCardPresentation(
@@ -2765,21 +2767,25 @@ internal fun TopicPostCard(
         // PostIdentityBand (#351) sets LocalContentColor from its containerColor for the pseudo; the
         // enclosing Card clips the strip to its rounded corners. The #104 tint logic is UNCHANGED — it
         // stays the topic's decision, passed in as containerColor.
-        identity = {
+        identity = { moderationOverride ->
             PostIdentityBand(
-                // #874 P1 — the EgoPost a11y marker sits on the identity node, which is present in
-                // both display modes and is what TalkBack traverses first on a post.
+                // #874/#1112 — colour is not the sole signal: the active intrinsic marker sits on
+                // the identity node, present in both display modes and traversed first by TalkBack.
                 modifier = Modifier
                     .testTag(TOPIC_POST_IDENTITY_BAND_TAG)
                     .semantics {
-                        if (egoPostHighlighted) {
-                            stateDescription = egoPostStateDescription
+                        when {
+                            egoPostHighlighted -> stateDescription = egoPostStateDescription
+                            moderationOverride != null -> {
+                                stateDescription = moderationPostStateDescription
+                            }
                         }
                     },
-                containerColor = if (highlighted) {
-                    MaterialTheme.colorScheme.tertiaryContainer
-                } else {
-                    MaterialTheme.colorScheme.secondaryContainer
+                containerColor = when {
+                    // The transient scroll anchor remains above the persistent moderation tint.
+                    highlighted -> MaterialTheme.colorScheme.tertiaryContainer
+                    moderationOverride != null -> moderationOverride
+                    else -> MaterialTheme.colorScheme.secondaryContainer
                 },
             ) {
                 TopicPostIdentityHeader(

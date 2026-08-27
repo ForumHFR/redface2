@@ -1,0 +1,20 @@
+Source : GET https://forum.hardware.fr/hfr/Discussions/Societe/combien-vivre-convenablement-sujet_21512_31227.htm
+Post conservé : n°75210915, compte « Modération ».
+Capture : 2026-08-27, session ANONYME (curl -L, sans cookie ni authentification).
+
+RÉDUCTION AU SOUS-ARBRE STRICTEMENT UTILE (par énumération, pas par regex) :
+Ce fichier est un EXTRAIT RÉEL de la capture, réduit à l'unique `table.messagetable` du post,
+son `tr.message`, les deux cellules `td.messCase1.messageModo` / `td.messCase2.messageModo`,
+l'ancre `t75210915`, le pseudo structurel, la date de la toolbar et le `div#para75210915` vide.
+Cette structure est le minimum que PostsParser exige pour construire un Post et prouver la classe
+`messageModo`. Les noms de classes, attributs structurels, numéro de post et horodatage sont repris
+de la réponse réelle ; aucun n'a été inventé.
+
+ASSAINISSEMENT : le texte réel de modération, la citation et son auteur, le compteur de citations,
+les images/icônes, le cryptlink de réponse et tout le reste de la page ont été retirés. Aucun cookie,
+hash_check, e-mail, identifiant de profil, contenu utilisateur ou donnée d'authentification ne reste.
+
+Provenance curl vs hfr-mcp (AGENTS.md § Fixtures) : `hfr_read` ne rend qu'un DIGEST TEXTE d'un
+topic/post et ne conserve pas les classes HTML des cellules. Le test a précisément besoin de la
+structure `td.messCase1.messageModo`, donc la page publique a été capturée par curl anonyme puis
+réduite et assainie comme décrit ci-dessus.

@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.ui.post
 
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -30,6 +31,8 @@ import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.theme.DisplayMetrics
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
+import fr.forumhfr.redface2.core.ui.theme.RedfaceLightColorScheme
+import fr.forumhfr.redface2.core.ui.theme.egoHighlightColors
 import java.time.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -184,6 +187,82 @@ class ReadingPostCardTest {
             .assert(SemanticsMatcher.keyNotDefined(SemanticsActions.OnLongClick))
     }
 
+    // #1112 — the card resolves the moderation token and forwards it to the host band. This mounts
+    // a real PostIdentityBand in the identity slot (as every feature host does) and asserts BOTH
+    // the shell (PostCardShell) and the band carry the pink, driven only by post.isModerationPost.
+    @Test
+    fun `moderation post tints both the card and the forwarded identity band`() {
+        var expectedPink = Color.Unspecified
+        composeTestRule.setContent {
+            TestTheme {
+                expectedPink = moderationHighlightColor()
+                ReadingPostCard(
+                    post = samplePost(content = paragraph(BODY_TEXT), isModerationPost = true),
+                    identity = { moderationOverride -> ModerationTestBand(moderationOverride) },
+                )
+            }
+        }
+
+        assertShellColor(expectedPink)
+        assertBandColor(expectedPink)
+    }
+
+    @Test
+    fun `a normal post leaves the card and band free of the moderation tint`() {
+        composeTestRule.setContent {
+            TestTheme {
+                ReadingPostCard(
+                    post = samplePost(content = paragraph(BODY_TEXT), isModerationPost = false),
+                    identity = { moderationOverride -> ModerationTestBand(moderationOverride) },
+                )
+            }
+        }
+
+        assertShellColor(RedfaceLightColorScheme.surfaceContainer)
+        assertBandColor(RedfaceLightColorScheme.secondaryContainer)
+    }
+
+    // #874/#1112 R3 — a post that is somehow both EgoPost and a moderation row must not diverge:
+    // EgoPost wins on the card AND the band override is suppressed, so the strip stays neutral.
+    @Test
+    fun `an EgoPost that is also a moderation row keeps blue on the card and a neutral band`() {
+        var expectedEgoBlue = Color.Unspecified
+        composeTestRule.setContent {
+            TestTheme {
+                expectedEgoBlue = egoHighlightColors().postContainer
+                ReadingPostCard(
+                    post = samplePost(content = paragraph(BODY_TEXT), isModerationPost = true),
+                    presentation = ReadingPostCardPresentation(egoPostHighlighted = true),
+                    identity = { moderationOverride -> ModerationTestBand(moderationOverride) },
+                )
+            }
+        }
+
+        assertShellColor(expectedEgoBlue)
+        assertBandColor(RedfaceLightColorScheme.secondaryContainer)
+    }
+
+    @Composable
+    private fun ModerationTestBand(moderationOverride: Color?) {
+        PostIdentityBand(
+            containerColor = moderationOverride ?: MaterialTheme.colorScheme.secondaryContainer,
+        ) { Text(IDENTITY_TEXT) }
+    }
+
+    private fun assertShellColor(expected: Color) {
+        composeTestRule.onNode(
+            SemanticsMatcher.expectValue(PostCardShellContainerColorKey, expected),
+            useUnmergedTree = true,
+        ).assertExists()
+    }
+
+    private fun assertBandColor(expected: Color) {
+        composeTestRule.onNode(
+            SemanticsMatcher.expectValue(PostIdentityBandContainerColorKey, expected),
+            useUnmergedTree = true,
+        ).assertExists()
+    }
+
     @Composable
     private fun TestTheme(content: @Composable () -> Unit) {
         RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false, content = content)
@@ -192,6 +271,7 @@ class ReadingPostCardTest {
     private fun samplePost(
         content: PostContent,
         signature: PostContent? = null,
+        isModerationPost: Boolean = false,
     ): Post = Post(
         numreponse = 1042,
         author = "Lecteur",
@@ -203,6 +283,7 @@ class ReadingPostCardTest {
         quotedAuthors = emptyList(),
         postIndex = null,
         signature = signature,
+        isModerationPost = isModerationPost,
     )
 
     private fun paragraph(text: String): PostContent = PostContent(

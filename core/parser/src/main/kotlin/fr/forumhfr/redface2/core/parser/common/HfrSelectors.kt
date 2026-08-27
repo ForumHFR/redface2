@@ -13,6 +13,7 @@ object HfrSelectors {
     const val POST_TABLE = "table.messagetable"
     const val POST_ANCHOR = "td.messCase1 a[name^=t]"
     const val POST_AUTHOR = "td.messCase1 b.s2"
+    const val POST_MODERATION_CELL = "td.messCase1.messageModo"
     const val POST_AVATAR = ".avatar_center img[src]"
     const val POST_TOOLBAR_LEFT = ".toolbar .left"
     const val POST_CONTENT = "div[id^=para]"

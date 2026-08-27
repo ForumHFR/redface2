@@ -34,8 +34,9 @@ import org.robolectric.annotation.Config
  * `MIGRATION_11_12` (#459 added the `uploaded_images` table in v12),
  * `MIGRATION_12_13` (#6/ADR-014 added the `mp_storage_locations` table in v13),
  * `MIGRATION_13_14` (#330 added `Post.signature` in v14), `MIGRATION_14_15` (#863 added
- * `Post.citedCount` in v15), `MIGRATION_15_16` (#638 added flag position metadata in v16), and
- * `MIGRATION_16_17` (#1040/#1097 added the dormant private-message content tables in v17).
+ * `Post.citedCount` in v15), `MIGRATION_15_16` (#638 added flag position metadata in v16),
+ * `MIGRATION_16_17` (#1040/#1097 added the dormant private-message content tables in v17), and
+ * `MIGRATION_17_18` (#1112 persisted the moderation marker in both Post-backed caches).
  * Without these tests a typo (missing column, wrong index name, wrong default)
  * would only crash on a real upgrade-in-place install, where the diagnostic loop is
  * days long. The tests take seconds.
@@ -137,6 +138,7 @@ class MigrationTest {
                 MIGRATION_14_15,
                 MIGRATION_15_16,
                 MIGRATION_16_17,
+                MIGRATION_17_18,
             )
             .build()
 
@@ -284,6 +286,7 @@ class MigrationTest {
                 MIGRATION_14_15,
                 MIGRATION_15_16,
                 MIGRATION_16_17,
+                MIGRATION_17_18,
             )
             .build()
 
@@ -391,6 +394,7 @@ class MigrationTest {
                 MIGRATION_14_15,
                 MIGRATION_15_16,
                 MIGRATION_16_17,
+                MIGRATION_17_18,
             )
             .build()
 
@@ -470,6 +474,7 @@ class MigrationTest {
                 MIGRATION_14_15,
                 MIGRATION_15_16,
                 MIGRATION_16_17,
+                MIGRATION_17_18,
             )
             .build()
 
@@ -545,6 +550,7 @@ class MigrationTest {
                 MIGRATION_14_15,
                 MIGRATION_15_16,
                 MIGRATION_16_17,
+                MIGRATION_17_18,
             )
             .build()
 
@@ -611,6 +617,7 @@ class MigrationTest {
                 MIGRATION_14_15,
                 MIGRATION_15_16,
                 MIGRATION_16_17,
+                MIGRATION_17_18,
             )
             .build()
 
@@ -691,6 +698,7 @@ class MigrationTest {
                 MIGRATION_14_15,
                 MIGRATION_15_16,
                 MIGRATION_16_17,
+                MIGRATION_17_18,
             )
             .build()
 
@@ -758,6 +766,7 @@ class MigrationTest {
                 MIGRATION_14_15,
                 MIGRATION_15_16,
                 MIGRATION_16_17,
+                MIGRATION_17_18,
             )
             .build()
 
@@ -815,6 +824,7 @@ class MigrationTest {
                 MIGRATION_14_15,
                 MIGRATION_15_16,
                 MIGRATION_16_17,
+                MIGRATION_17_18,
             )
             .build()
 
@@ -876,6 +886,7 @@ class MigrationTest {
                 MIGRATION_14_15,
                 MIGRATION_15_16,
                 MIGRATION_16_17,
+                MIGRATION_17_18,
             )
             .build()
 
@@ -942,6 +953,7 @@ class MigrationTest {
                 MIGRATION_14_15,
                 MIGRATION_15_16,
                 MIGRATION_16_17,
+                MIGRATION_17_18,
             )
             .build()
 
@@ -1008,6 +1020,7 @@ class MigrationTest {
                 MIGRATION_14_15,
                 MIGRATION_15_16,
                 MIGRATION_16_17,
+                MIGRATION_17_18,
             )
             .build()
 
@@ -1084,6 +1097,7 @@ class MigrationTest {
                 MIGRATION_14_15,
                 MIGRATION_15_16,
                 MIGRATION_16_17,
+                MIGRATION_17_18,
             )
             .build()
 
@@ -1157,6 +1171,7 @@ class MigrationTest {
                 MIGRATION_14_15,
                 MIGRATION_15_16,
                 MIGRATION_16_17,
+                MIGRATION_17_18,
             )
             .build()
 
@@ -1225,6 +1240,7 @@ class MigrationTest {
                 MIGRATION_14_15,
                 MIGRATION_15_16,
                 MIGRATION_16_17,
+                MIGRATION_17_18,
             )
             .build()
 
@@ -1350,6 +1366,7 @@ class MigrationTest {
                 MIGRATION_14_15,
                 MIGRATION_15_16,
                 MIGRATION_16_17,
+                MIGRATION_17_18,
             )
             .build()
 
@@ -1392,6 +1409,65 @@ class MigrationTest {
             assertEquals(listOf(7), stored?.messages?.map { it.numreponse })
         } finally {
             migrated.close()
+        }
+    }
+
+    /** v17 → v18 (#1112) — both existing Post-backed caches backfill the marker to false. */
+    @Test
+    fun migrate_17_to_18_adds_moderation_marker_to_topic_and_private_message_posts() {
+        val dbName = "migration_17_18_test"
+
+        helper.createDatabase(dbName, 17).use { v17 ->
+            v17.execSQL(
+                """
+                INSERT INTO posts (
+                    cat, numreponse, post, author, date, content, isEditable, isOwnPost,
+                    quotedAuthors, fetchedAt, authMode
+                ) VALUES (
+                    13, 75210915, 21512, 'Modération', 0, '{"blocks":[]}', 0, 0,
+                    '[]', 0, 'ANONYMOUS'
+                )
+                """.trimIndent(),
+            )
+            v17.execSQL(
+                """
+                INSERT INTO mp_thread_pages (
+                    userId, threadId, page, subject, correspondent, totalPages, canReply,
+                    isMultiRecipient, fetchedAt
+                ) VALUES ('alice', 42, 1, 'subject', 'correspondent', 1, 0, 0, 0)
+                """.trimIndent(),
+            )
+            v17.execSQL(
+                """
+                INSERT INTO mp_messages (
+                    userId, threadId, page, numreponse, ordinal, author, date, content,
+                    isEditable, isOwnPost, quotedAuthors
+                ) VALUES (
+                    'alice', 42, 1, 75210915, 0, 'Modération', 0, '{"blocks":[]}',
+                    0, 0, '[]'
+                )
+                """.trimIndent(),
+            )
+        }
+
+        helper.runMigrationsAndValidate(dbName, 18, true, MIGRATION_17_18).use { v18 ->
+            assertTrue("posts must expose the new column", "isModerationPost" in v18.columnNames("posts"))
+            assertTrue(
+                "mp_messages must expose the new column",
+                "isModerationPost" in v18.columnNames("mp_messages"),
+            )
+            v18.query(
+                "SELECT isModerationPost FROM posts WHERE numreponse = 75210915",
+            ).use { cursor ->
+                assertTrue("the pre-v18 topic post must survive", cursor.moveToFirst())
+                assertEquals(0, cursor.getInt(0))
+            }
+            v18.query(
+                "SELECT isModerationPost FROM mp_messages WHERE numreponse = 75210915",
+            ).use { cursor ->
+                assertTrue("the pre-v18 private message must survive", cursor.moveToFirst())
+                assertEquals(0, cursor.getInt(0))
+            }
         }
     }
 

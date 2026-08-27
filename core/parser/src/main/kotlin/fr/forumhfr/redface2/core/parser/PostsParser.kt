@@ -87,6 +87,9 @@ class PostsParser(
             // #330 — parsed from the same content element as `content` (the signature span is a
             // descendant of `div[id^=para]`, stripped from the body but surfaced here).
             signature = content.signature,
+            // #1112 — structural marker, scoped to THIS post table. The combined class selector is
+            // token-based in Jsoup and deliberately requires both `messCase1` and `messageModo`.
+            isModerationPost = postTable.selectFirst(HfrSelectors.POST_MODERATION_CELL) != null,
         )
     }
 
