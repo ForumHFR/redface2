@@ -7,6 +7,7 @@ import fr.forumhfr.redface2.core.model.Topic
 import java.time.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -73,5 +74,50 @@ class TopicMappersPollTest {
         val restored = TopicMappers.toDomain(legacyEntity, posts)
 
         assertTrue(requireNotNull(restored.poll).resultsAvailable)
+    }
+
+    @Test
+    fun `maxSelections survives the cache round-trip (#779)`() {
+        val poll = Poll(
+            question = "Space X en bourse ?",
+            options = listOf("monter", "crasher").map { PollOption(it, votes = 0, percentage = 0f) },
+            multipleChoice = true,
+            totalVotes = 0,
+            hasVoted = false,
+            resultsAvailable = false,
+            maxSelections = 2,
+        )
+
+        val (entity, posts) = TopicMappers.toEntities(topicWith(poll), Instant.EPOCH, FetchMode.ANONYMOUS)
+        val restored = TopicMappers.toDomain(entity, posts)
+
+        assertEquals(2, requireNotNull(restored.poll).maxSelections)
+    }
+
+    @Test
+    fun `legacy cache row without maxSelections decodes as null, not an invented 1 (#779)`() {
+        // A pollJson written BEFORE #779 : no `maxSelections` key at all. The DTO default (null)
+        // must keep the limit unknown — coercing to 1 would falsely cap a cached multi-choice poll.
+        val (entity, posts) = TopicMappers.toEntities(
+            topicWith(
+                Poll(
+                    question = "q",
+                    options = listOf(PollOption("a", votes = 0, percentage = 0f)),
+                    multipleChoice = true,
+                    totalVotes = 0,
+                    hasVoted = false,
+                    maxSelections = 3,
+                ),
+            ),
+            Instant.EPOCH,
+            FetchMode.ANONYMOUS,
+        )
+        val legacyEntity = entity.copy(
+            pollJson = entity.pollJson!!.replace(Regex(""","maxSelections":(\d+|null)"""), ""),
+        )
+
+        val restored = TopicMappers.toDomain(legacyEntity, posts)
+
+        assertNull(requireNotNull(restored.poll).maxSelections)
     }
 }

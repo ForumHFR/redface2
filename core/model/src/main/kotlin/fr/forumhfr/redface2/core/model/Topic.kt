@@ -67,6 +67,19 @@ data class Poll(
      * `true` on the RESULTS shape (.sondageLeft bars), the only shape parsed before #697.
      */
     val resultsAvailable: Boolean = true,
+    /**
+     * #779 (PR 1) — the maximum number of options a voter may pick, read from HFR's
+     * « Sondage à N choix possibles » caption (present on both the vote FORM's `div.sondage`
+     * and the results card). A single-choice poll (radio inputs / no caption) resolves to `1`,
+     * a factual property of a radio group — not an invented value.
+     *
+     * `null` means the limit is genuinely unknown : a legacy cache row written before this field
+     * existed, or a multiple-choice poll whose caption could not be read. Callers must treat
+     * `null` as « unknown legacy limit », never silently coerce it to `1` — that would falsely
+     * cap a multi-choice poll at a single vote. HFR's real vote endpoint stays untouched here
+     * (#779 PR 1 is parse-only) ; the future submit path (PR 2/PR 3) consumes this.
+     */
+    val maxSelections: Int? = null,
 )
 
 data class PollOption(

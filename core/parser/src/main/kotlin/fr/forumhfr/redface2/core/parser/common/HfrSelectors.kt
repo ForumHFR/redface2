@@ -58,7 +58,21 @@ object HfrSelectors {
     // masquerade as an option.
     const val POLL_FORM_OPTION = "ol > li:has(input[name^=reponse])"
     const val POLL_FORM_OPTION_LABEL = "label"
+    const val POLL_FORM_OPTION_INPUT = "input[name^=reponse]"
     const val POLL_FORM_MULTI_INPUT = "input[type=checkbox][name^=reponse]"
+
+    // #779 (PR 1) — HFR's poll VOTE form, served inside a topic page as `<form method="post"
+    // action="/user/vote.php?config=hfr.inc">`. It wraps the same `div.sondage` FORM shape parsed
+    // for read (POLL_FORM_* above) plus the hidden ids HFR needs to record a vote (`cat`, `p`,
+    // `page`, `sondage`, `owntopic`, `subcat`, `numeropost`) and an anti-CSRF `hash_check` that is
+    // EMPTY on an anonymous capture (the only shape we have). No vote is submitted in PR 1 : this
+    // is parsed into an internal wire model so PR 2/PR 3 can build the POST once an authenticated
+    // capture exists. `hash_check` is read separately (see PollVoteFormParser) ; the hidden-field
+    // sweep below deliberately grabs `input[type=hidden]` only, so the `reponse*` radios/checkboxes
+    // (the choices) and the `sondage_submit` buttons never leak into the hidden map.
+    const val POLL_VOTE_FORM = "form[method=post][action*=vote.php]"
+    const val POLL_VOTE_HIDDEN_INPUT = "input[type=hidden]"
+    const val POLL_VOTE_HASH_CHECK = "input[name=hash_check]"
 
     // Private-message inbox listing (forum1.php?cat=prive). Each conversation is a
     // `tr.sujet` row whose cells carry the read/unread icon, the subject link (which embeds
