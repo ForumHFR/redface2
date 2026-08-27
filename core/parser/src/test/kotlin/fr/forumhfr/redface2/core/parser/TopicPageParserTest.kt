@@ -102,6 +102,8 @@ class TopicPageParserTest {
             assertEquals("Aimez-vous l'odeur de vos excréments?", poll.question)
             assertEquals(9, poll.options.size)
             assertTrue(poll.multipleChoice)
+            // #779 (PR 1) — « Sondage à 5 choix possibles » on the results card.
+            assertEquals(5, poll.maxSelections)
             assertEquals(176, poll.totalVotes)
             assertEquals("1. Non, c'est dégueu!", poll.options.first().text)
             assertEquals(34, poll.options.first().votes)
@@ -125,6 +127,8 @@ class TopicPageParserTest {
             assertFalse(poll.hasVoted)
             assertEquals(0, poll.totalVotes)
             assertTrue(poll.options.all { it.votes == 0 })
+            // #779 (PR 1) — a mono form (radios, no caption) allows exactly one pick.
+            assertEquals(1, poll.maxSelections)
         }
     }
 
@@ -136,6 +140,8 @@ class TopicPageParserTest {
             assertEquals(5, poll.options.size)
             assertTrue("checkbox inputs = multiple choice", poll.multipleChoice)
             assertFalse(poll.resultsAvailable)
+            // #779 (PR 1) — « Sondage à 2 choix possibles » on the multi FORM shape (cap 2 of 5).
+            assertEquals(2, poll.maxSelections)
         }
     }
 

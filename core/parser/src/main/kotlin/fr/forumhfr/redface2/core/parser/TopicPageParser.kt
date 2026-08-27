@@ -4,6 +4,7 @@ import fr.forumhfr.redface2.core.model.Poll
 import fr.forumhfr.redface2.core.model.PollOption
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.parser.common.HfrSelectors
+import fr.forumhfr.redface2.core.parser.common.PollChoiceCaption
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
@@ -141,10 +142,15 @@ class TopicPageParser(
                 append(trailingText)
             }
 
+            // #779 (PR 1) — the vote cap comes from « Sondage à N choix possibles » on the results
+            // card. A mono results poll carries no caption : it allows exactly one pick, so `1` is
+            // factual, not invented. `multipleChoice` is derived from the same figure to stay in
+            // lockstep with the persisted `maxSelections`.
+            val maxSelections = PollChoiceCaption.maxSelections(summaryText) ?: 1
             Poll(
                 question = question,
                 options = options,
-                multipleChoice = choiceCount(summaryText) > 1,
+                multipleChoice = maxSelections > 1,
                 totalVotes = firstInt(
                     Regex("""Total\s*[:\s]\s*(\d+)\s+votes?""", RegexOption.IGNORE_CASE)
                         .find(summaryText)
@@ -153,6 +159,7 @@ class TopicPageParser(
                         .orEmpty(),
                 ),
                 hasVoted = false,
+                maxSelections = maxSelections,
             )
         }
     }
@@ -161,8 +168,10 @@ class TopicPageParser(
      * #697 — builds a read-only [Poll] from the FORM shape: `<ol><li><input name=reponse><label>`.
      * No votes/percentages exist in this shape (fields are 0, [Poll.resultsAvailable] = false).
      * Multiple-choice detection reads the INPUT TYPE (checkbox = multi, radio = single — proven on
-     * live fixtures 44713 mono / 16022 multi) : the results-shape « Sondage à N choix » caption
-     * does not exist here, so [choiceCount] must not be used.
+     * live fixtures 44713 mono / 16022 multi), the robust signal : it does not depend on the
+     * caption being present. #779 (PR 1) additionally reads the « Sondage à N choix possibles »
+     * caption — which IS present on the multi FORM shape (`topic_poll_form_multi_bourse`) — for
+     * [Poll.maxSelections] only, never to decide [Poll.multipleChoice].
      */
     private fun parseFormPoll(pollElement: Element, question: String): Poll? {
         val formOptions = pollElement.select(HfrSelectors.POLL_FORM_OPTION)
@@ -170,13 +179,19 @@ class TopicPageParser(
             option.selectFirst(HfrSelectors.POLL_FORM_OPTION_LABEL)?.text()?.trim()?.takeIf(String::isNotEmpty)
         }
         if (labels.isEmpty() || labels.size != formOptions.size) return null
+        val multipleChoice = pollElement.selectFirst(HfrSelectors.POLL_FORM_MULTI_INPUT) != null
         return Poll(
             question = question,
             options = labels.map { PollOption(text = it, votes = 0, percentage = 0f) },
-            multipleChoice = pollElement.selectFirst(HfrSelectors.POLL_FORM_MULTI_INPUT) != null,
+            multipleChoice = multipleChoice,
             totalVotes = 0,
             hasVoted = false,
             resultsAvailable = false,
+            // #779 (PR 1) — a mono (radio) poll allows exactly one pick → 1. A multi (checkbox)
+            // poll reads « Sondage à N choix possibles » from the `div.sondage` FORM shape (present
+            // on the live `topic_poll_form_multi_bourse` capture) ; a missing caption leaves the cap
+            // unknown (null), never an invented number.
+            maxSelections = if (multipleChoice) PollChoiceCaption.maxSelections(pollElement.text()) else 1,
         )
     }
 
@@ -188,14 +203,6 @@ class TopicPageParser(
             ?.replace(',', '.')
             ?.toFloatOrNull()
             ?: 0f
-
-    private fun choiceCount(text: String): Int =
-        Regex("""Sondage à\s+(\d+)\s+choix""", RegexOption.IGNORE_CASE)
-            .find(text)
-            ?.groupValues
-            ?.getOrNull(1)
-            ?.toIntOrNull()
-            ?: 1
 }
 
 // #213 — the reply form posts to `/bddpost.php` (possibly with query params, e.g.
