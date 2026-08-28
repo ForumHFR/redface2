@@ -16,6 +16,23 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.45.0` — `internal` (dev) — 2026-08-28
+
+Modération et rôles du staff dans la lecture des posts (topic et messages privés). Demandé par XaTriX.
+
+### Ajouté
+
+- **Fond rosé sur les posts du compte « Modération »** ([#1112](https://github.com/ForumHFR/redface2/issues/1112)) : les messages postés par le compte partagé « Modération » sont surlignés en rosé sur tout le post, comme sur HFR web / Redface 1, détecté structurellement (classe HTML `messageModo`). Actif par défaut, sans réglage. Coexiste avec la surbrillance EgoQuote (le ego reste bleuté). Topic et MP.
+
+- **Pastilles de rôle du staff** ([#221](https://github.com/ForumHFR/redface2/issues/221)) : une pastille (Modérateur, Admin, SupAdmin, Dev, Architecte) s'affiche à côté du pseudo des membres du staff HFR qui s'expriment sous leur propre nom, distincte du fond rosé « Modération ». Alimentée par l'annuaire staff (1 requête, best-effort, cache 24 h). Topic et MP.
+
+### Interne
+
+- Socle hybride du rôle d'auteur ([#1158](https://github.com/ForumHFR/redface2/issues/1158), PR A de #1112/#221) : annuaire staff par pseudo + rôle par profil, sans UI.
+- Parser du formulaire de vote de sondage ([#779](https://github.com/ForumHFR/redface2/issues/779), lot 1/3), sans écriture live.
+
+---
+
 ## `0.44.0` — `internal` (dev) — 2026-08-27
 
 Polish de la Vue Forum (liste des sujets d'une catégorie) : recherche, pagination, sujets épinglés et mémorisation du filtre. Demandé sur le fil TU (Tronklou, kikou2419).

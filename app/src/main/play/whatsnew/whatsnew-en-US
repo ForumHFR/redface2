@@ -1,6 +1,5 @@
-Redface 2 v0.44.0 — dev.
+Redface 2 v0.45.0 — dev.
 
-- The Forum view's All / Participated / Read / Favorites filter is now remembered across categories.
-- A category's search field finally has a cross to clear the text and a way to exit search.
-- Pinned topics are grouped at the top, set apart from the rest, with a clearer badge.
-- The "+" button no longer covers the pagination "Next" button.
+- Posts from the "Modération" account now have a pink background across the whole message, like on HFR web.
+- A role pill (Moderator, Admin, SupAdmin, Dev, Architect) shows next to the pseudo of staff members posting under their own name.
+- The pink background and the pill also work in private messages.
