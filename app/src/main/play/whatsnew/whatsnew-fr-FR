@@ -1,6 +1,5 @@
-Redface 2 v0.44.0 — dev.
+Redface 2 v0.45.0 — dev.
 
-- Le filtre Tout / Participé / Lus / Favoris de la Vue Forum est mémorisé d'une catégorie à l'autre.
-- La recherche d'une catégorie a enfin une croix pour effacer le texte et une flèche pour sortir.
-- Les sujets épinglés sont regroupés en tête, séparés des autres, avec un badge plus lisible.
-- Le bouton « + » ne recouvre plus le bouton « Suivant » de la pagination.
+- Les posts du compte « Modération » ont maintenant un fond rosé sur tout le message, comme sur HFR web.
+- Une pastille de rôle (Modérateur, Admin, SupAdmin, Dev, Architecte) s'affiche à côté du pseudo des membres du staff qui postent sous leur propre nom.
+- Le fond rosé et la pastille fonctionnent aussi dans les messages privés.
