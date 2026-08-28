@@ -9,8 +9,11 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.text.TextLayoutResult
+import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
@@ -19,6 +22,7 @@ import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.post.CREATOR_PSEUDO_TEXT_TAG
 import fr.forumhfr.redface2.core.ui.post.POST_CARD_SHELL_DIVIDER_TAG
 import java.time.Instant
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -69,11 +73,15 @@ class MessageCardShellSmokeTest {
     fun `creator pseudo uses the gold-sheen leaf and stays the card's single heading`() {
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                MessageCard(message = sampleMessage())
+                MessageCard(
+                    message = sampleMessage(),
+                    staffByPseudo = mapOf("xatrix" to AuthorRole.ADMIN),
+                )
             }
         }
 
         composeTestRule.onNodeWithTag(CREATOR_PSEUDO_TEXT_TAG).assertIsDisplayed()
+        composeTestRule.onNodeWithContentDescription("Rôle : Administrateur").assertIsDisplayed()
         assertPseudoBrush("XaTriX", expectedGold = true)
         assertSingleHeadingOnPseudo("XaTriX")
     }
@@ -89,6 +97,27 @@ class MessageCardShellSmokeTest {
         composeTestRule.onNodeWithTag(CREATOR_PSEUDO_TEXT_TAG).assertDoesNotExist()
         assertPseudoBrush("Lt Ripley", expectedGold = false)
         assertSingleHeadingOnPseudo("Lt Ripley")
+    }
+
+    @Test
+    fun `non creator staff gets an inline pill and keeps exactly one heading`() {
+        var profileTaps = 0
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                MessageCard(
+                    message = sampleMessage(author = "Lt Ripley"),
+                    staffByPseudo = mapOf("lt ripley" to AuthorRole.SUPER_ADMIN),
+                    onOpenProfile = { profileTaps++ },
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag(CREATOR_PSEUDO_TEXT_TAG).assertDoesNotExist()
+        composeTestRule.onNodeWithContentDescription("Rôle : Super Administrateur").assertIsDisplayed()
+        assertPseudoBrush("Lt Ripley", expectedGold = false)
+        assertSingleHeadingOnPseudo("Lt Ripley")
+        composeTestRule.onNodeWithText("Lt Ripley").performClick()
+        assertEquals(1, profileTaps)
     }
 
     @Test

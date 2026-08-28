@@ -78,10 +78,12 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.currentStateAsState
 import fr.forumhfr.redface2.core.domain.author.isRf2Creator
+import fr.forumhfr.redface2.core.domain.author.resolveAuthorRolePill
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.ego.deriveEgoCanonicalPseudo
 import fr.forumhfr.redface2.core.domain.ego.isEgoPost
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
+import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
 import fr.forumhfr.redface2.core.model.postContentExcerpt
@@ -94,6 +96,7 @@ import fr.forumhfr.redface2.core.ui.pager.PageFab
 import fr.forumhfr.redface2.core.ui.pager.PageFabDefaults
 import fr.forumhfr.redface2.core.ui.pager.PageNavigation
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
+import fr.forumhfr.redface2.core.ui.post.AuthorRolePill
 import fr.forumhfr.redface2.core.ui.post.CreatorPseudoText
 import fr.forumhfr.redface2.core.ui.post.HiddenPostCard
 import fr.forumhfr.redface2.core.ui.post.PostCardShellFlatBottomEdge
@@ -967,6 +970,7 @@ private fun PrivateMessageThreadReader(
                 messages = mode.thread.messages,
                 hiddenNumreponses = mode.hiddenNumreponses,
                 blockedQuoteAuthors = mode.blockedQuoteAuthors,
+                staffByPseudo = mode.staffByPseudo,
                 page = state.page,
                 fullWidthPosts = state.fullWidthPosts,
                 showSignatures = state.showSignatures,
@@ -1583,6 +1587,7 @@ private fun ThreadMessages(
     messages: List<Post>,
     hiddenNumreponses: Set<Int>,
     blockedQuoteAuthors: Set<String>,
+    staffByPseudo: Map<String, AuthorRole>,
     page: Int,
     fullWidthPosts: Boolean,
     showSignatures: Boolean,
@@ -1703,6 +1708,7 @@ private fun ThreadMessages(
                 )
                 MessageCard(
                     message = message,
+                    staffByPseudo = staffByPseudo,
                     multiQuoteSelected = multiQuoteSelections.any { selection ->
                         selection.numreponse == message.numreponse
                     },
@@ -1839,9 +1845,14 @@ internal fun isHiddenMessage(message: Post, hidden: Set<Int>, revealed: Set<Int>
  * direct test/preview mounts unmarked.
  */
 @Composable
-@Suppress("LongParameterList") // Thin card adapter: render state plus independent host capabilities.
+// Thin card adapter: render state plus independent host capabilities. #221 — the creator/staff
+// pseudo slot (gold leaf | neutral label + role pill) tipped the branch count to the topic parity
+// level ; same suppression posture as the topic post card composables in TopicScreen.
+@Suppress("LongParameterList", "CyclomaticComplexMethod")
 internal fun MessageCard(
     message: Post,
+    /** #221 — global canonical staff directory; empty keeps direct tests/previews neutral. */
+    staffByPseudo: Map<String, AuthorRole> = emptyMap(),
     presentation: ReadingPostCardPresentation = ReadingPostCardPresentation(),
     multiQuoteSelected: Boolean = false,
     onOpenProfile: (() -> Unit)? = null,
@@ -1865,9 +1876,16 @@ internal fun MessageCard(
         stringResource(R.string.messages_post_moderation_state_description)
     val citedCount = message.citedCount ?: 0
     // #221 — canonical creator detection (case / format-char / NBSP insensitive) runs once per
-    // author, not on every recomposition of this hot list row. Only creators need a pseudo slot;
-    // everyone else keeps PostIdentityHeader's neutral fallback and its built-in interaction/a11y.
+    // author, not on every recomposition of this hot list row. Creators and staff need a pseudo
+    // slot (gold leaf or neutral Text + role pill); everyone else keeps the neutral fallback.
     val isCreator = remember(message.author) { isRf2Creator(message.author) }
+    val authorRole = remember(message.author, message.isModerationPost, staffByPseudo) {
+        resolveAuthorRolePill(
+            author = message.author,
+            isModerationPost = message.isModerationPost,
+            staffByPseudo = staffByPseudo,
+        )
+    }
     ReadingPostCard(
         post = message,
         presentation = presentation.copy(selected = multiQuoteSelected),
@@ -1898,9 +1916,9 @@ internal fun MessageCard(
                 containerColor = moderationOverride
                     ?: MaterialTheme.colorScheme.secondaryContainer,
             ) {
-                // A creator supplies the shared gold pseudo leaf; everyone else uses the neutral
-                // fallback. Per the slot contract, the creator branch owns both the profile tap and
-                // the exactly-one heading on its real text node. The band adds no heading of its own.
+                // A creator supplies the shared gold pseudo leaf; a non-creator staff supplies a
+                // neutral Text beside its pill; everyone else uses the neutral fallback. Per the
+                // slot contract, the real pseudo node owns the profile tap and exactly one heading.
                 PostIdentityHeader(
                     author = message.author,
                     avatarUrl = message.avatarUrl,
@@ -1913,23 +1931,43 @@ internal fun MessageCard(
                     onAvatarClickLabel = openProfileLabel,
                     onAuthorClick = onOpenProfile,
                     onAuthorClickLabel = openProfileLabel,
-                    pseudo = if (isCreator) {
+                    pseudo = if (isCreator || authorRole != null) {
                         {
-                            val pseudoModifier = (
-                                if (onOpenProfile != null) {
-                                    Modifier.clickable(
-                                        onClick = onOpenProfile,
-                                        role = Role.Button,
-                                        onClickLabel = openProfileLabel,
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                val pseudoModifier = (
+                                    if (onOpenProfile != null) {
+                                        Modifier
+                                            .weight(weight = 1f, fill = false)
+                                            .clickable(
+                                                onClick = onOpenProfile,
+                                                role = Role.Button,
+                                                onClickLabel = openProfileLabel,
+                                            )
+                                    } else {
+                                        Modifier.weight(weight = 1f, fill = false)
+                                    }
+                                    ).semantics { heading() }
+                                if (isCreator) {
+                                    CreatorPseudoText(
+                                        author = message.author,
+                                        modifier = pseudoModifier,
                                     )
                                 } else {
-                                    Modifier
+                                    Text(
+                                        text = message.author,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = pseudoModifier,
+                                    )
                                 }
-                                ).semantics { heading() }
-                            CreatorPseudoText(
-                                author = message.author,
-                                modifier = pseudoModifier,
-                            )
+                                authorRole?.let { AuthorRolePill(role = it) }
+                            }
                         }
                     } else {
                         null

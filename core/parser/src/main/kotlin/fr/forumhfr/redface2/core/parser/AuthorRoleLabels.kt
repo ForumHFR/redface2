@@ -10,8 +10,10 @@ import fr.forumhfr.redface2.core.model.AuthorRole
  * Mapping **exact** (aucune heuristique), sur libellé déjà trimmé :
  * - `Membre` → [AuthorRole.MEMBER] ;
  * - `Modérateur` → [AuthorRole.MODERATOR] ;
- * - `Administrateur`, `Super Administrateur` → [AuthorRole.ADMIN] ;
- * - `Développeur`, `Architecte / Développeur principal` → [AuthorRole.DEVELOPER] ;
+ * - `Administrateur` → [AuthorRole.ADMIN] ;
+ * - `Super Administrateur` → [AuthorRole.SUPER_ADMIN] ;
+ * - `Développeur` → [AuthorRole.DEVELOPER] ;
+ * - `Architecte / Développeur principal` → [AuthorRole.ARCHITECT] ;
  * - tout autre libellé (ou vide) → `null` (rôle indéterminé — l'appelant ignore/dégrade).
  *
  * `internal` : détail de parsing propre à `:core:parser`, jamais exposé hors module.
@@ -19,8 +21,10 @@ import fr.forumhfr.redface2.core.model.AuthorRole
 internal fun authorRoleFromLabel(label: String): AuthorRole? = when (label.trim()) {
     LABEL_MEMBER -> AuthorRole.MEMBER
     LABEL_MODERATOR -> AuthorRole.MODERATOR
-    LABEL_ADMIN, LABEL_SUPER_ADMIN -> AuthorRole.ADMIN
-    LABEL_DEVELOPER, LABEL_LEAD_DEVELOPER -> AuthorRole.DEVELOPER
+    LABEL_ADMIN -> AuthorRole.ADMIN
+    LABEL_SUPER_ADMIN -> AuthorRole.SUPER_ADMIN
+    LABEL_DEVELOPER -> AuthorRole.DEVELOPER
+    LABEL_LEAD_DEVELOPER -> AuthorRole.ARCHITECT
     else -> null
 }
 

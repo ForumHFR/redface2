@@ -15,6 +15,18 @@
          neutres : :core:ui ne dépend d'aucune ressource de feature. -->
     <string name="post_hidden_by_author">Post de %1$s masqué</string>
     <string name="post_hidden_reveal">Afficher</string>
+    <!-- #221 — pill décoratif partagé Topic/MP. Les formes courtes sont visibles ; TalkBack reçoit
+         les intitulés développés par author_role_content_description. -->
+    <string name="author_role_moderator">Modérateur</string>
+    <string name="author_role_admin">Admin</string>
+    <string name="author_role_super_admin">SupAdmin</string>
+    <string name="author_role_developer">Dev</string>
+    <string name="author_role_architect">Architecte</string>
+    <string name="author_role_admin_long">Administrateur</string>
+    <string name="author_role_super_admin_long">Super Administrateur</string>
+    <string name="author_role_developer_long">Développeur</string>
+    <string name="author_role_architect_long">Architecte / Développeur principal</string>
+    <string name="author_role_content_description">Rôle : %1$s</string>
     <!-- #785 : placeholder d'une citation dont l'auteur est black-listé. Le pseudo reste visible,
          cohérent avec post_hidden_by_author au niveau post/message (le lecteur sait QUI est masqué). -->
     <string name="post_quote_blocked_author">Citation de %1$s masquée</string>

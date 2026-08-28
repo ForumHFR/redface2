@@ -14,11 +14,13 @@ package fr.forumhfr.redface2.core.model
  * Un même libellé HFR peut se mapper depuis les deux sources ; le mapping `libellé → AuthorRole`
  * est **partagé** (voir `authorRoleFromLabel` dans `:core:parser`) pour rester cohérent.
  *
- * Regroupements (le badge n'a pas besoin de plus de granularité) :
+ * Rôles exposés par HFR :
  * - `Membre` → [MEMBER] ;
  * - `Modérateur` → [MODERATOR] ;
- * - `Administrateur` **et** `Super Administrateur` → [ADMIN] ;
- * - `Développeur` **et** `Architecte / Développeur principal` → [DEVELOPER].
+ * - `Administrateur` → [ADMIN] ;
+ * - `Super Administrateur` → [SUPER_ADMIN] ;
+ * - `Développeur` → [DEVELOPER] ;
+ * - `Architecte / Développeur principal` → [ARCHITECT].
  *
  * Tout libellé absent, vide ou non reconnu se mappe à `null` (rôle indéterminé) côté parser :
  * l'entrée staff est ignorée, et le profil rend `null`. Donnée **décorative, publique et
@@ -32,9 +34,15 @@ enum class AuthorRole {
     /** Modérateur — libellé HFR « Modérateur ». */
     MODERATOR,
 
-    /** Administration — libellés HFR « Administrateur » et « Super Administrateur ». */
+    /** Administrateur — libellé HFR « Administrateur ». */
     ADMIN,
 
-    /** Équipe technique — libellés HFR « Développeur » et « Architecte / Développeur principal ». */
+    /** Super administrateur — libellé HFR « Super Administrateur ». */
+    SUPER_ADMIN,
+
+    /** Développeur — libellé HFR « Développeur ». */
     DEVELOPER,
+
+    /** Architecte — libellé HFR « Architecte / Développeur principal ». */
+    ARCHITECT,
 }

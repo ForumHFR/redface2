@@ -21,6 +21,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
@@ -138,7 +139,10 @@ class MessageCardIdentityBandTest {
     fun `a moderation message tints both the card and the identity band pink`() {
         compose.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                MessageCard(message = sampleMessage(isModerationPost = true))
+                MessageCard(
+                    message = sampleMessage(isModerationPost = true),
+                    staffByPseudo = mapOf("xatrix" to AuthorRole.MODERATOR),
+                )
             }
         }
 
@@ -149,6 +153,7 @@ class MessageCardIdentityBandTest {
         ).assert(
             SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, MODERATION_STATE),
         )
+        compose.onNodeWithContentDescription("Rôle : Modérateur").assertDoesNotExist()
     }
 
     private fun setCard(

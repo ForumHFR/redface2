@@ -165,8 +165,8 @@ GET /message-smi-mp-aj.php?config=hfr.inc&user_id=0&responsable=1
   sortie ; la **canonicalisation** (`canonicalizePseudo`) est faite par le repository.
 
 **Libellés observés (capture 2026-08-27, 64 entrées)** : `Modérateur` (55) → `MODERATOR` ;
-`Administrateur` (2) et `Super Administrateur` (3) → `ADMIN` ; `Développeur` (1) et
-`Architecte / Développeur principal` (3) → `DEVELOPER`.
+`Administrateur` (2) → `ADMIN` ; `Super Administrateur` (3) → `SUPER_ADMIN` ; `Développeur` (1) →
+`DEVELOPER` ; `Architecte / Développeur principal` (3) → `ARCHITECT`.
 
 **Fixture** :
 - `core/parser/src/test/resources/fixtures/staff/staff_responsables_anonymous.html` — annuaire global

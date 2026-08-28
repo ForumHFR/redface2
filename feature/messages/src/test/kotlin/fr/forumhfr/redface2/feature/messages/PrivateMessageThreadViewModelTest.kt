@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.messages
 
 import app.cash.turbine.test
+import fr.forumhfr.redface2.core.domain.author.AuthorRoleRepository
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.blacklist.BlacklistRepository
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
@@ -18,6 +19,7 @@ import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.blacklist.BlacklistEntry
@@ -80,6 +82,7 @@ class PrivateMessageThreadViewModelTest {
         authRepository: AuthRepository = FakeAuthRepository(),
         userPreferencesRepository: UserPreferencesRepository = userPreferences(),
         blacklistRepository: BlacklistRepository = FakeBlacklistRepository(),
+        authorRoleRepository: AuthorRoleRepository = FakeAuthorRoleRepository(),
         readPositionStore: PrivateMessageReadPositionStore = FakeReadPositionStore(),
         mpStorageRepository: MpStorageRepository = FakeMpStorageRepository(),
         writeRepository: PrivateMessageWriteRepository = mockk(relaxed = true),
@@ -90,6 +93,7 @@ class PrivateMessageThreadViewModelTest {
         authRepository = authRepository,
         userPreferencesRepository = userPreferencesRepository,
         blacklistRepository = blacklistRepository,
+        authorRoleRepository = authorRoleRepository,
         readPositionStore = readPositionStore,
         mpStorageRepository = mpStorageRepository,
         writeRepository = writeRepository,
@@ -131,6 +135,98 @@ class PrivateMessageThreadViewModelTest {
     }
 
     @Test
+    fun `staff directory is requested once and merged into loaded content`() = runTest {
+        val staffRepository = FakeAuthorRoleRepository(
+            staff = mapOf("antp" to AuthorRole.SUPER_ADMIN),
+        )
+        val viewModel = threadViewModel(
+            repository = loadedRepository(),
+            authorRoleRepository = staffRepository,
+        )
+
+        val content = viewModel.state.value.mode as PrivateMessageThreadUiState.Mode.Content
+        assertEquals(mapOf("antp" to AuthorRole.SUPER_ADMIN), content.staffByPseudo)
+        assertEquals(1, staffRepository.calls)
+    }
+
+    @Test
+    fun `a suspended staff lookup never blocks the private thread load`() = runTest {
+        val gate = CompletableDeferred<Map<String, AuthorRole>>()
+        val viewModel = threadViewModel(
+            repository = loadedRepository(),
+            authorRoleRepository = FakeAuthorRoleRepository(gate = gate),
+        )
+
+        val contentBeforeStaff = viewModel.state.value.mode as PrivateMessageThreadUiState.Mode.Content
+        assertEquals(emptyMap<String, AuthorRole>(), contentBeforeStaff.staffByPseudo)
+
+        gate.complete(emptyMap())
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `a late staff success is fused into content without reloading the thread`() = runTest {
+        val repository = loadedRepository()
+        val gate = CompletableDeferred<Map<String, AuthorRole>>()
+        val viewModel = threadViewModel(
+            repository = repository,
+            authorRoleRepository = FakeAuthorRoleRepository(gate = gate),
+        )
+
+        gate.complete(mapOf("joce" to AuthorRole.ARCHITECT))
+        advanceUntilIdle()
+
+        val content = viewModel.state.value.mode as PrivateMessageThreadUiState.Mode.Content
+        assertEquals(mapOf("joce" to AuthorRole.ARCHITECT), content.staffByPseudo)
+        coVerify(exactly = 1) {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        }
+    }
+
+    @Test
+    fun `a staff lookup failure is silent and leaves content loaded`() = runTest {
+        val viewModel = threadViewModel(
+            repository = loadedRepository(),
+            authorRoleRepository = FakeAuthorRoleRepository(error = IOException("staff offline")),
+        )
+
+        val content = viewModel.state.value.mode as PrivateMessageThreadUiState.Mode.Content
+        assertEquals(emptyMap<String, AuthorRole>(), content.staffByPseudo)
+    }
+
+    @Test
+    fun `an account switch does not refetch the global staff directory`() = runTest {
+        val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
+        val staffRepository = FakeAuthorRoleRepository(
+            staff = mapOf("ernestor" to AuthorRole.MODERATOR),
+        )
+        threadViewModel(
+            repository = loadedRepository(),
+            authRepository = authRepository,
+            authorRoleRepository = staffRepository,
+        )
+
+        authRepository.emit(AuthState.Authenticated("bob"))
+        advanceUntilIdle()
+
+        assertEquals(1, staffRepository.calls)
+    }
+
+    @Test
+    fun `manual refresh retries the best effort staff lookup`() = runTest {
+        val staffRepository = FakeAuthorRoleRepository()
+        val viewModel = threadViewModel(
+            repository = loadedRepository(),
+            authorRoleRepository = staffRepository,
+        )
+
+        viewModel.refresh()
+        advanceUntilIdle()
+
+        assertEquals(2, staffRepository.calls)
+    }
+
+    @Test
     fun `anonymous state does not fetch the private thread`() = runTest {
         val repository = mockk<MessagesRepository>()
 
@@ -140,6 +236,7 @@ class PrivateMessageThreadViewModelTest {
             authRepository = FakeAuthRepository(AuthState.Anonymous),
             userPreferencesRepository = userPreferences(),
             blacklistRepository = FakeBlacklistRepository(),
+            authorRoleRepository = FakeAuthorRoleRepository(),
             readPositionStore = FakeReadPositionStore(),
             mpStorageRepository = FakeMpStorageRepository(),
             writeRepository = mockk(relaxed = true),
@@ -1418,6 +1515,7 @@ class PrivateMessageThreadViewModelTest {
             authRepository = FakeAuthRepository(),
             userPreferencesRepository = userPreferences(),
             blacklistRepository = FakeBlacklistRepository(),
+            authorRoleRepository = FakeAuthorRoleRepository(),
             readPositionStore = FakeReadPositionStore(initial = mapOf(42 to 7)),
             mpStorageRepository = FakeMpStorageRepository(),
             writeRepository = mockk(relaxed = true),
@@ -1444,6 +1542,7 @@ class PrivateMessageThreadViewModelTest {
             authRepository = FakeAuthRepository(),
             userPreferencesRepository = userPreferences(),
             blacklistRepository = FakeBlacklistRepository(),
+            authorRoleRepository = FakeAuthorRoleRepository(),
             readPositionStore = FakeReadPositionStore(initial = mapOf(42 to 3)),
             mpStorageRepository = FakeMpStorageRepository(),
             writeRepository = mockk(relaxed = true),
@@ -1473,6 +1572,7 @@ class PrivateMessageThreadViewModelTest {
                 authRepository = FakeAuthRepository(),
                 userPreferencesRepository = userPreferences(),
                 blacklistRepository = FakeBlacklistRepository(),
+                authorRoleRepository = FakeAuthorRoleRepository(),
                 readPositionStore = store,
                 mpStorageRepository = FakeMpStorageRepository(),
                 writeRepository = mockk(relaxed = true),
@@ -1895,6 +1995,23 @@ class PrivateMessageThreadViewModelTest {
         suspend fun emit(authState: AuthState) {
             state.emit(authState)
         }
+    }
+
+    private class FakeAuthorRoleRepository(
+        private val staff: Map<String, AuthorRole> = emptyMap(),
+        private val gate: CompletableDeferred<Map<String, AuthorRole>>? = null,
+        private val error: Throwable? = null,
+    ) : AuthorRoleRepository {
+        var calls: Int = 0
+            private set
+
+        override suspend fun getStaff(): Map<String, AuthorRole> {
+            calls++
+            error?.let { throw it }
+            return gate?.await() ?: staff
+        }
+
+        override suspend fun getRole(profileId: Int): AuthorRole? = null
     }
 
     private class FakeBlacklistRepository(

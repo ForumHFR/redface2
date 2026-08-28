@@ -7,10 +7,10 @@ Annuaire GLOBAL des responsables (#1112/#221) : source PRIMAIRE du badge (1 GET 
 Comptes EXACTS de la capture (64 ancres a.s1Topic[onclick*=fillfield_private]) :
   - 55 (Modérateur)                          -> AuthorRole.MODERATOR
   -  2 (Administrateur)                       -> AuthorRole.ADMIN
-  -  3 (Super Administrateur)                 -> AuthorRole.ADMIN
+  -  3 (Super Administrateur)                 -> AuthorRole.SUPER_ADMIN
   -  1 (Développeur)                          -> AuthorRole.DEVELOPER
-  -  3 (Architecte / Développeur principal)   -> AuthorRole.DEVELOPER
-  => 64 entrées : MODERATOR 55, ADMIN 5, DEVELOPER 4.
+  -  3 (Architecte / Développeur principal)   -> AuthorRole.ARCHITECT
+  => 64 entrées : MODERATOR 55, ADMIN 2, SUPER_ADMIN 3, DEVELOPER 1, ARCHITECT 3.
 
 Assainissement : AUCUNE PII. Le fragment ne contient que des pseudos staff PUBLICS + leur rôle ;
 aucun cookie, token, hash_check, email, IP ni id numérique. Aucun profileId n'est exposé par cet

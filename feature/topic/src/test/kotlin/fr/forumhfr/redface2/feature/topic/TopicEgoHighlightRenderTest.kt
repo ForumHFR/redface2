@@ -11,11 +11,13 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import fr.forumhfr.redface2.core.domain.ego.deriveEgoCanonicalPseudo
 import fr.forumhfr.redface2.core.domain.ego.isEgoPost
+import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
@@ -107,6 +109,32 @@ class TopicEgoHighlightRenderTest {
         assertShellColor(EGO_POST_LIGHT)
         assertStateCount(OWN_POST_STATE, 1)
         assertStateCount(OWN_QUOTE_STATE, 1)
+    }
+
+    @Test
+    fun `staff pill coexists with the scroll anchor and EgoPost markers`() {
+        setCard(
+            egoPostHighlighted = true,
+            highlighted = true,
+            staffByPseudo = mapOf(EGO_CANONICAL to AuthorRole.ARCHITECT),
+        )
+
+        composeTestRule
+            .onNodeWithContentDescription("Rôle : Architecte / Développeur principal")
+            .assertExists()
+        assertIdentityBandColor(RedfaceLightColorScheme.tertiaryContainer)
+        assertStateCount(OWN_POST_STATE, 1)
+    }
+
+    @Test
+    fun `moderation post suppresses the staff pill`() {
+        setCard(
+            post = samplePost(isModerationPost = true),
+            staffByPseudo = mapOf(EGO_CANONICAL to AuthorRole.MODERATOR),
+        )
+
+        composeTestRule.onNodeWithContentDescription("Rôle : Modérateur").assertDoesNotExist()
+        assertStateCount(MODERATION_STATE, 1)
     }
 
     @Test
@@ -248,18 +276,21 @@ class TopicEgoHighlightRenderTest {
         assertStateCount(OWN_QUOTE_STATE, 0)
     }
 
+    @Suppress("LongParameterList") // Render harness: each argument controls one independent card knob, all defaulted.
     private fun setCard(
         post: Post = samplePost(),
         egoPostHighlighted: Boolean = false,
         egoQuoteCanonicalPseudo: String? = null,
         highlighted: Boolean = false,
         flat: Boolean = false,
+        staffByPseudo: Map<String, AuthorRole> = emptyMap(),
     ) {
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 Surface(color = MaterialTheme.colorScheme.surface) {
                     TopicPostCard(
                         post = post,
+                        staffByPseudo = staffByPseudo,
                         highlighted = highlighted,
                         citedCount = 0,
                         flat = flat,

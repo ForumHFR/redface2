@@ -16,9 +16,9 @@ class AuthorRoleLabelsTest {
         assertEquals(AuthorRole.MEMBER, authorRoleFromLabel("Membre"))
         assertEquals(AuthorRole.MODERATOR, authorRoleFromLabel("Modérateur"))
         assertEquals(AuthorRole.ADMIN, authorRoleFromLabel("Administrateur"))
-        assertEquals(AuthorRole.ADMIN, authorRoleFromLabel("Super Administrateur"))
+        assertEquals(AuthorRole.SUPER_ADMIN, authorRoleFromLabel("Super Administrateur"))
         assertEquals(AuthorRole.DEVELOPER, authorRoleFromLabel("Développeur"))
-        assertEquals(AuthorRole.DEVELOPER, authorRoleFromLabel("Architecte / Développeur principal"))
+        assertEquals(AuthorRole.ARCHITECT, authorRoleFromLabel("Architecte / Développeur principal"))
     }
 
     @Test
