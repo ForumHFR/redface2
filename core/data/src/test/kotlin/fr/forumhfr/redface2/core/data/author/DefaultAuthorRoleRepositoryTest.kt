@@ -98,7 +98,7 @@ class DefaultAuthorRoleRepositoryTest {
         every { parser.parseStaffList(html) } returns mapOf(
             "Ernestor" to AuthorRole.MODERATOR,
             "La Monne" to AuthorRole.ADMIN,
-            "antp" to AuthorRole.ADMIN,
+            "antp" to AuthorRole.SUPER_ADMIN,
         )
 
         val staff = repository().getStaff()
@@ -108,7 +108,7 @@ class DefaultAuthorRoleRepositoryTest {
             mapOf(
                 "ernestor" to AuthorRole.MODERATOR,
                 "la monne" to AuthorRole.ADMIN,
-                "antp" to AuthorRole.ADMIN,
+                "antp" to AuthorRole.SUPER_ADMIN,
             ),
             staff,
         )

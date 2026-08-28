@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.feature.messages
 
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
+import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
 
 /**
@@ -121,6 +122,11 @@ data class PrivateMessageThreadUiState(
              * message-level mask. Both sets are built together by the ViewModel.
              */
             val blockedQuoteAuthors: Set<String> = emptySet(),
+            /**
+             * #221 — annuaire staff global décoratif, indexé par pseudo canonique. Son chargement
+             * best-effort est indépendant de la conversation et ne bloque jamais son affichage.
+             */
+            val staffByPseudo: Map<String, AuthorRole> = emptyMap(),
         ) : Mode
 
         /**

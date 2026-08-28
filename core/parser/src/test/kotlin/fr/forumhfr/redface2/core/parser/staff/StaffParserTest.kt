@@ -24,13 +24,14 @@ class StaffParserTest {
             .values
             .groupingBy { it }
             .eachCount()
-        // 55 Modérateur ; 2 Administrateur + 3 Super Administrateur = 5 ADMIN ;
-        // 1 Développeur + 3 Architecte/Développeur principal = 4 DEVELOPER.
+        // Les cinq libellés staff restent distincts jusqu'à l'UI (#221).
         assertEquals(
             mapOf(
                 AuthorRole.MODERATOR to 55,
-                AuthorRole.ADMIN to 5,
-                AuthorRole.DEVELOPER to 4,
+                AuthorRole.ADMIN to 2,
+                AuthorRole.SUPER_ADMIN to 3,
+                AuthorRole.DEVELOPER to 1,
+                AuthorRole.ARCHITECT to 3,
             ),
             counts,
         )
@@ -41,9 +42,9 @@ class StaffParserTest {
         val staff = parser.parse(fixture("staff/staff_responsables_anonymous.html"))
         assertEquals(AuthorRole.MODERATOR, staff["Ernestor"]) // (Modérateur)
         assertEquals(AuthorRole.ADMIN, staff["La Monne"]) // (Administrateur)
-        assertEquals(AuthorRole.ADMIN, staff["antp"]) // (Super Administrateur)
+        assertEquals(AuthorRole.SUPER_ADMIN, staff["antp"]) // (Super Administrateur)
         assertEquals(AuthorRole.DEVELOPER, staff["The-Shadow"]) // (Développeur)
-        assertEquals(AuthorRole.DEVELOPER, staff["joce"]) // (Architecte / Développeur principal)
+        assertEquals(AuthorRole.ARCHITECT, staff["joce"]) // (Architecte / Développeur principal)
     }
 
     @Test

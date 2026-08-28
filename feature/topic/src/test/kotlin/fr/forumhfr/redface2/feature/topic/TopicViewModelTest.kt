@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import app.cash.turbine.test
+import fr.forumhfr.redface2.core.domain.author.AuthorRoleRepository
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.blacklist.BlacklistRepository
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
@@ -45,6 +46,7 @@ import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostResult
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.blacklist.BlacklistEntry
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
@@ -121,6 +123,97 @@ class TopicViewModelTest {
             listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 3)),
             repository.prefetches,
         )
+    }
+
+    @Test
+    fun `staff directory is requested once and merged into the loaded mode`() = runTest {
+        val staffRepository = FakeAuthorRoleRepository(
+            staff = mapOf("ernestor" to AuthorRole.MODERATOR),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(listOf(flowOf(fakeTopic(1, 1)))),
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+            authorRoleRepository = staffRepository,
+        )
+
+        val loaded = viewModel.state.value.mode as TopicUiState.Mode.Loaded
+        assertEquals(mapOf("ernestor" to AuthorRole.MODERATOR), loaded.staffByPseudo)
+        assertEquals(1, staffRepository.calls)
+    }
+
+    @Test
+    fun `a suspended staff lookup never blocks the topic load`() = runTest {
+        val gate = CompletableDeferred<Map<String, AuthorRole>>()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(listOf(flowOf(fakeTopic(1, 1)))),
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+            authorRoleRepository = FakeAuthorRoleRepository(gate = gate),
+        )
+
+        val loadedBeforeStaff = viewModel.state.value.mode as TopicUiState.Mode.Loaded
+        assertEquals(emptyMap<String, AuthorRole>(), loadedBeforeStaff.staffByPseudo)
+
+        gate.complete(emptyMap())
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `a late staff success is fused into the loaded page without losing provenance`() = runTest {
+        val gate = CompletableDeferred<Map<String, AuthorRole>>()
+        val emissions = MutableSharedFlow<TopicPageEmission>(replay = 1).apply {
+            tryEmit(TopicPageEmission(fakeTopic(1, 1), provisional = true))
+        }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeStreamingEmissionTopicRepository(emissions),
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+            authorRoleRepository = FakeAuthorRoleRepository(gate = gate),
+        )
+
+        val beforeStaff = viewModel.state.value.mode as TopicUiState.Mode.Loaded
+        assertTrue(beforeStaff.provisional)
+        gate.complete(mapOf("antp" to AuthorRole.SUPER_ADMIN))
+        advanceUntilIdle()
+
+        val afterStaff = viewModel.state.value.mode as TopicUiState.Mode.Loaded
+        assertEquals(mapOf("antp" to AuthorRole.SUPER_ADMIN), afterStaff.staffByPseudo)
+        assertTrue("staff fusion must preserve the cache provenance", afterStaff.provisional)
+    }
+
+    @Test
+    fun `a staff lookup failure is silent and leaves the loaded topic untouched`() = runTest {
+        val topic = fakeTopic(1, 1)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(listOf(flowOf(topic))),
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+            authorRoleRepository = FakeAuthorRoleRepository(error = IOException("staff offline")),
+        )
+
+        val loaded = viewModel.state.value.mode as TopicUiState.Mode.Loaded
+        assertEquals(topic, loaded.topic)
+        assertEquals(emptyMap<String, AuthorRole>(), loaded.staffByPseudo)
+    }
+
+    @Test
+    fun `manual refresh retries the best effort staff lookup`() = runTest {
+        val staffRepository = FakeAuthorRoleRepository()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(flowOf(fakeTopic(1, 1))),
+                refreshTopicsToReturn = listOf(fakeTopic(1, 1)),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+            authorRoleRepository = staffRepository,
+        )
+
+        viewModel.send(TopicIntent.Refresh)
+        advanceUntilIdle()
+
+        assertEquals(2, staffRepository.calls)
     }
 
     @Test
@@ -3149,6 +3242,7 @@ class TopicViewModelTest {
         userPreferencesRepository: UserPreferencesRepository = FakeUserPreferencesRepository(),
         deletePostRepository: DeletePostRepository = FakeDeletePostRepository(),
         blacklistRepository: BlacklistRepository = FakeBlacklistRepository(),
+        authorRoleRepository: AuthorRoleRepository = FakeAuthorRoleRepository(),
         topicSearchRepository: TopicSearchRepository = FakeTopicSearchRepository(),
         searchRepository: SearchRepository = FakeSearchRepository(),
         flagRepository: FlagRepository = FakeFlagRepository(),
@@ -3167,6 +3261,7 @@ class TopicViewModelTest {
         userPreferencesRepository = userPreferencesRepository,
         deletePostRepository = deletePostRepository,
         blacklistRepository = blacklistRepository,
+        authorRoleRepository = authorRoleRepository,
         topicSearchRepository = topicSearchRepository,
         searchRepository = searchRepository,
         flagRepository = flagRepository,
@@ -4072,6 +4167,23 @@ private class FakeAuthRepository(initial: AuthState) : AuthRepository {
         error("login is not exercised by TopicViewModelTest")
 
     override suspend fun logout() = error("logout is not exercised by TopicViewModelTest")
+}
+
+private class FakeAuthorRoleRepository(
+    private val staff: Map<String, AuthorRole> = emptyMap(),
+    private val gate: CompletableDeferred<Map<String, AuthorRole>>? = null,
+    private val error: Throwable? = null,
+) : AuthorRoleRepository {
+    var calls: Int = 0
+        private set
+
+    override suspend fun getStaff(): Map<String, AuthorRole> {
+        calls++
+        error?.let { throw it }
+        return gate?.await() ?: staff
+    }
+
+    override suspend fun getRole(profileId: Int): AuthorRole? = null
 }
 
 private class FakeTopicRepository(

@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.topic
 
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
+import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.Topic
@@ -148,6 +149,12 @@ data class TopicUiState(
              * force-refresh / post-delete / search / live-refilter paths.
              */
             val blockedQuoteAuthors: Set<String> = emptySet(),
+            /**
+             * #221 — snapshot décoratif de l'annuaire staff global, indexé par pseudo canonique.
+             * Chargé indépendamment de la page : un échec laisse la map vide et ne bloque jamais
+             * les posts. Le rôle reste hors de [Post] car ce référentiel global est soumis à TTL.
+             */
+            val staffByPseudo: Map<String, AuthorRole> = emptyMap(),
             /**
              * #877 — `true` while this page is the instant cache emission that a network refresh
              * will supersede on the same load (cf. `TopicPageEmission.provisional`). The posts

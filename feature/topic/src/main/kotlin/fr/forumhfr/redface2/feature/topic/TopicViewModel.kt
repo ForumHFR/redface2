@@ -8,6 +8,7 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
+import fr.forumhfr.redface2.core.domain.author.AuthorRoleRepository
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.blacklist.BlacklistRepository
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
@@ -23,8 +24,9 @@ import fr.forumhfr.redface2.core.domain.topic.TopicRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicSearchRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostResult
-import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.AuthorRole
+import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.write.FlagAddContext
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.model.TopicSearchForm
@@ -87,6 +89,7 @@ class TopicViewModel @AssistedInject constructor(
     private val userPreferencesRepository: UserPreferencesRepository,
     private val deletePostRepository: DeletePostRepository,
     private val blacklistRepository: BlacklistRepository,
+    private val authorRoleRepository: AuthorRoleRepository,
     private val topicSearchRepository: TopicSearchRepository,
     private val searchRepository: SearchRepository,
     // #809 — plain Hilt dependency (the assisted Factory is unchanged): resolves + removes THIS
@@ -110,6 +113,9 @@ class TopicViewModel @AssistedInject constructor(
      * refresh, post-delete refetch, intra-topic search) — re-filters live when the blacklist changes.
      */
     private var blockedCanonicals: Set<String> = emptySet()
+
+    /** #221 — latest non-empty global staff directory, independent from every page load job. */
+    private var staffByPseudo: Map<String, AuthorRole> = emptyMap()
 
     private val _effects: Channel<TopicEffect> = Channel(capacity = Channel.BUFFERED)
     val effects: Flow<TopicEffect> = _effects.receiveAsFlow()
@@ -263,6 +269,9 @@ class TopicViewModel @AssistedInject constructor(
         // contract) seeds [blockedCanonicals] before the load below computes the initial hidden set —
         // a blocked post therefore never flashes before it is hidden, even on the force-refresh path.
         observeBlockedCanonicals()
+        // #221 — decorative and best-effort: starts once without joining loadJob, so posts never
+        // wait for the staff directory and leaving the screen still cancels the read with the VM.
+        loadStaff()
         // #895 F1 — the canonical current page survives process death : the SavedState page
         // (written by every switch and at init) or an already-resolved #750 page wins over the
         // route's initial page. A config change never reaches this code (the ViewModel survives).
@@ -476,6 +485,29 @@ class TopicViewModel @AssistedInject constructor(
     }
 
     /**
+     * #221 — refreshes the global staff snapshot without touching the page load lifecycle. Empty or
+     * identical results are inert; a late success rebuilds the sole Loaded instance in place and
+     * preserves its #877 provisional provenance.
+     */
+    private fun loadStaff() {
+        viewModelScope.launch {
+            val staff = try {
+                authorRoleRepository.getStaff()
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (@Suppress("TooGenericExceptionCaught") _: Exception) {
+                return@launch
+            }
+            if (staff.isEmpty() || staff == staffByPseudo) return@launch
+            staffByPseudo = staff
+            _state.update { current ->
+                val loaded = current.mode as? TopicUiState.Mode.Loaded ?: return@update current
+                current.copy(mode = loadedMode(loaded.topic, provisional = loaded.provisional))
+            }
+        }
+    }
+
+    /**
      * #335 — manual pull-to-refresh of the current page. Re-fetches over the network and replaces the
      * loaded page in place, WITHOUT the post-submit overflow redirect (#226) or any scroll effect, so
      * the user keeps their reading position. NO-OP unless a page is already loaded and no refresh is
@@ -493,6 +525,9 @@ class TopicViewModel @AssistedInject constructor(
         // canonical page is already the target : a pull here would refresh a page the user is
         // leaving (and fight the in-flight switch load). The switch resolves within the grace.
         if (displayed.topic.page != request.page || _state.value.isRefreshing) return
+        // #221 — explicit refresh also retries a cold-start offline miss. Repository TTL and
+        // single-flight keep this effectively free while the directory is fresh/in flight.
+        loadStaff()
         becomePageOwner()
         _state.update { it.copy(isRefreshing = true) }
         // Gate Sol PR1 r2 (bloquant 1) — same ownership guard as every other async producer :
@@ -828,6 +863,7 @@ class TopicViewModel @AssistedInject constructor(
             topic = topic,
             hiddenNumreponses = computeHiddenNumreponses(topic, blockedCanonicals),
             blockedQuoteAuthors = blockedCanonicals,
+            staffByPseudo = staffByPseudo,
             // #877 — default false : every other caller (refresh, force-refresh, post-delete,
             // search, live re-filter) renders a settled network page ; only the cache-aside
             // collect above forwards the repository's provenance.

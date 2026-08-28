@@ -30,8 +30,8 @@ import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
  * avatar reads against the name+date block as one tidy unit. Slots, so each feature supplies its own
  * labels/icons without `:core:ui` reaching a feature string or a material-icon:
  *  - [pseudo] (optional) — overrides the default pseudo text; the topic and MP pass the gold-sheen
- *    [CreatorPseudoText] for an RF2 creator (#221). When `null`, a plain ellipsised [Text] of [author]
- *    is drawn. Note:
+ *    [CreatorPseudoText] for an RF2 creator, and can use the slot to juxtapose a staff-role pill
+ *    (#221). When `null`, a plain ellipsised [Text] of [author] is drawn. Note:
  *    [onAuthorClick] is applied to that fallback text only — a supplied [pseudo] owns its own
  *    interaction. CONTRACT (#884): the provided slot also OWNS the post heading semantics — exactly
  *    one node inside it must set `semantics { heading() }`, on the real pseudo text node (the best
@@ -112,7 +112,7 @@ fun PostIdentityHeader(
         ) {
             if (pseudo != null) {
                 // #884 a11y — a caller-supplied pseudo owns its heading semantics (the topic and
-                // creator-MP branches mark their real pseudo text node); wrapping the slot here
+                // feature branches mark their real pseudo text node); wrapping the slot here
                 // would double the heading.
                 pseudo()
             } else {

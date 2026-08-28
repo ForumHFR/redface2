@@ -6,6 +6,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertLeftPositionInRootIsEqualTo
 import androidx.compose.ui.test.assertWidthIsEqualTo
 import androidx.compose.ui.test.hasText
@@ -15,6 +16,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
@@ -25,6 +27,7 @@ import fr.forumhfr.redface2.core.ui.post.POST_CARD_SHELL_DIVIDER_TAG
 import fr.forumhfr.redface2.core.ui.post.PostCardShellFlatBottomEdge
 import fr.forumhfr.redface2.core.ui.theme.LocalFoldLongQuotes
 import org.junit.Rule
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -221,6 +224,36 @@ class TopicPostCardFullWidthTest {
 
         composeTestRule.onNodeWithTag(CREATOR_PSEUDO_TEXT_TAG).assertExists()
         assertSingleHeadingOnPseudo("XaTriX")
+    }
+
+    @Test
+    fun `long staff pseudo keeps the pill inline and visible at 360 dp with one heading`() {
+        val author = "Un pseudo staff particulièrement long à afficher"
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                TopicPostCard(
+                    post = samplePost(author = author),
+                    staffByPseudo = mapOf(author.lowercase() to AuthorRole.MODERATOR),
+                    citedCount = 0,
+                    onQuote = null,
+                    onEdit = null,
+                )
+            }
+        }
+
+        val pseudo = composeTestRule.onNodeWithText(author, useUnmergedTree = true)
+            .assertIsDisplayed()
+            .fetchSemanticsNode().boundsInRoot
+        val pill = composeTestRule.onNodeWithContentDescription("Rôle : Modérateur")
+            .assertIsDisplayed()
+            .fetchSemanticsNode().boundsInRoot
+
+        assertTrue("the pill must stay to the right of the weighted pseudo", pill.left >= pseudo.right)
+        assertTrue(
+            "the pill and pseudo must overlap vertically on the same identity row",
+            pill.top < pseudo.bottom && pill.bottom > pseudo.top,
+        )
+        assertSingleHeadingOnPseudo(author)
     }
 
     private fun assertSingleHeadingOnPseudo(author: String) {

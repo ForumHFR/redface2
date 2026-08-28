@@ -103,8 +103,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.domain.author.isRf2Creator
+import fr.forumhfr.redface2.core.domain.author.resolveAuthorRolePill
 import fr.forumhfr.redface2.core.domain.ego.deriveEgoCanonicalPseudo
 import fr.forumhfr.redface2.core.domain.ego.isEgoPost
+import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.Poll
 import fr.forumhfr.redface2.core.model.Post
@@ -120,6 +122,7 @@ import fr.forumhfr.redface2.core.ui.pager.PageFab
 import fr.forumhfr.redface2.core.ui.pager.PageFabDefaults
 import fr.forumhfr.redface2.core.ui.pager.PageNavigation
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
+import fr.forumhfr.redface2.core.ui.post.AuthorRolePill
 import fr.forumhfr.redface2.core.ui.post.CreatorPseudoText
 import fr.forumhfr.redface2.core.ui.post.HiddenPostCard
 import fr.forumhfr.redface2.core.ui.post.PostCardShellFlatBottomEdge
@@ -1241,6 +1244,7 @@ internal fun TopicContent(
                                 state = state,
                                 topic = mode.topic,
                                 hiddenNumreponses = mode.hiddenNumreponses,
+                                staffByPseudo = mode.staffByPseudo,
                                 zoomState = zoomState,
                                 // #604 lot 2 / #806 — « Citer » opens the quick-reply sheet with the
                                 // card pre-armed (1-citation session), unless the preset routes any
@@ -1796,6 +1800,8 @@ private fun TopicLoadedContent(
     // #509 — `numreponse` of posts whose author is blacklisted; rendered as a collapsed
     // "post masqué" placeholder instead of the full card (the post stays in the list).
     hiddenNumreponses: Set<Int> = emptySet(),
+    // #221 — global staff snapshot, independent from the loaded topic page.
+    staffByPseudo: Map<String, AuthorRole> = emptyMap(),
     // Vague 3 (#604) — onReply dropped: the dissolved header card was its only consumer here
     // (the bottom FAB cluster replies from TopicContent's own callback).
     onQuoteRequested: (selection: QuoteSelection) -> Unit,
@@ -2177,6 +2183,7 @@ private fun TopicLoadedContent(
                 } else {
                     TopicPostCard(
                         post = post,
+                        staffByPseudo = staffByPseudo,
                         highlighted = highlight == post.numreponse,
                         // #863 — the SERVER count (« Message cité N fois », cross-page), parsed
                         // from div.edited ; null = never cited. The page-scoped client scan is gone.
@@ -2644,6 +2651,8 @@ private fun TopicPollCard(
 // « + » affordance (gating, label flip, tap). Same visibility relaxation as other tested internals.
 internal fun TopicPostCard(
     post: Post,
+    /** #221 — global canonical staff directory; empty keeps direct tests/previews neutral. */
+    staffByPseudo: Map<String, AuthorRole> = emptyMap(),
     /**
      * #104 follow-up — true for the scroll-anchor post (quote link / deep link / last-read landing).
      * Tints this post's identity band with tertiaryContainer so the anchored post is findable, without
@@ -2738,6 +2747,13 @@ internal fun TopicPostCard(
 ) {
     // #287 — structural spacing from the active density preset (Comfort = the historical rhythm).
     val m = LocalDisplayMetrics.current
+    val authorRole = remember(post.author, post.isModerationPost, staffByPseudo) {
+        resolveAuthorRolePill(
+            author = post.author,
+            isModerationPost = post.isModerationPost,
+            staffByPseudo = staffByPseudo,
+        )
+    }
     // #436 — the per-post actions row (Citer / Modifier / multi-quote) is gated as a unit. Computed
     // once so the shared card receives either the whole footer or null; its body then owns the card's
     // bottom padding only in the null branch, keeping the body↔card gap at m.cardBodyBottom.
@@ -2790,6 +2806,7 @@ internal fun TopicPostCard(
             ) {
                 TopicPostIdentityHeader(
                     post = post,
+                    authorRole = authorRole,
                     onOpenProfile = onOpenProfile,
                     onOpenMenu = onOpenMenu,
                     // #287 — the band's header padding (12.dp horizontal, m.cardHeaderVertical vertical)
@@ -2851,6 +2868,7 @@ internal const val TOPIC_POST_IDENTITY_BAND_TAG = "TopicPostIdentityBand"
 @Composable
 private fun TopicPostIdentityHeader(
     post: Post,
+    authorRole: AuthorRole?,
     onOpenProfile: (() -> Unit)?,
     onOpenMenu: () -> Unit,
     modifier: Modifier = Modifier,
@@ -2876,6 +2894,7 @@ private fun TopicPostIdentityHeader(
         pseudo = {
             Row(
                 modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // #884 a11y (vague 3) — heading() rides on the REAL pseudo text node (both variants
@@ -2911,6 +2930,7 @@ private fun TopicPostIdentityHeader(
                         modifier = pseudoModifier,
                     )
                 }
+                authorRole?.let { AuthorRolePill(role = it) }
             }
         },
         // #483 — the compact « · édité » marker (beta feedback Azgor). The exact edit time stays in the

@@ -56,10 +56,12 @@ deux sources publiques anonymes (cf. `protocol-hfr.md` § Rôle de l'auteur). Au
 
 ```kotlin
 enum class AuthorRole {
-    MEMBER,      // « Membre »
-    MODERATOR,   // « Modérateur »
-    ADMIN,       // « Administrateur » ET « Super Administrateur »
-    DEVELOPER,   // « Développeur » ET « Architecte / Développeur principal »
+    MEMBER,       // « Membre »
+    MODERATOR,    // « Modérateur »
+    ADMIN,        // « Administrateur »
+    SUPER_ADMIN,  // « Super Administrateur »
+    DEVELOPER,    // « Développeur »
+    ARCHITECT,    // « Architecte / Développeur principal »
 }
 ```
 
@@ -74,9 +76,10 @@ enum class AuthorRole {
   profil, PR C) — **jamais** un fallback « requêter tous les `profileId` » si l'annuaire échoue.
 
 Le mapping `libellé → AuthorRole` est **partagé** entre les deux sources (`authorRoleFromLabel` dans
-`:core:parser`) : `Administrateur`/`Super Administrateur` → `ADMIN`, `Développeur`/`Architecte /
-Développeur principal` → `DEVELOPER`. Tout libellé absent ou non reconnu → l'entrée staff est ignorée,
-le profil rend `null`.
+`:core:parser`) et conserve les six rôles distincts : `Membre` → `MEMBER`, `Modérateur` →
+`MODERATOR`, `Administrateur` → `ADMIN`, `Super Administrateur` → `SUPER_ADMIN`, `Développeur` →
+`DEVELOPER`, `Architecte / Développeur principal` → `ARCHITECT`. Tout libellé absent ou non reconnu
+→ l'entrée staff est ignorée, le profil rend `null`.
 
 Résolu par `AuthorRoleRepository` (interface dans `:core:domain/author`, impl
 `DefaultAuthorRoleRepository` dans `:core:data/author`) :
