@@ -16,6 +16,16 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.45.1` — `internal` (dev) — 2026-08-29
+
+Renforcement du rendu des posts « Modération » (retour dogfood XaTriX) : le fond rosé était trop discret pour un message de modération.
+
+### Modifié
+
+- **Posts « Modération » en rouge, façon RF1** ([#1112](https://github.com/ForumHFR/redface2/issues/1112)) : le fond rosé pâle est remplacé par le rendu de Redface 1 — **tout le post en rouge, texte blanc** (header rouge soutenu, corps rouge, citations/spoiler/code en rouge médian, liseré rouge autour du post). Beaucoup plus visible. Coexiste avec la surbrillance de vos propres citations (qui reste bleutée quand le post est le vôtre). Topic et MP, thèmes clair / sombre / AMOLED.
+
+---
+
 ## `0.45.0` — `internal` (dev) — 2026-08-28
 
 Modération et rôles du staff dans la lecture des posts (topic et messages privés). Demandé par XaTriX.

@@ -1,5 +1,4 @@
-Redface 2 v0.45.0 — dev.
+Redface 2 v0.45.1 — dev.
 
-- Posts from the "Modération" account now have a pink background across the whole message, like on HFR web.
-- A role pill (Moderator, Admin, SupAdmin, Dev, Architect) shows next to the pseudo of staff members posting under their own name.
-- The pink background and the pill also work in private messages.
+- Posts from the "Modération" account go from pale pink to red, Redface 1 style: the whole post in red, white text, with an outline. Much more visible.
+- Light, dark and AMOLED; also works in private messages.
