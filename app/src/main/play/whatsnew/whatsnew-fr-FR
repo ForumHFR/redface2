@@ -1,5 +1,4 @@
-Redface 2 v0.45.0 — dev.
+Redface 2 v0.45.1 — dev.
 
-- Les posts du compte « Modération » ont maintenant un fond rosé sur tout le message, comme sur HFR web.
-- Une pastille de rôle (Modérateur, Admin, SupAdmin, Dev, Architecte) s'affiche à côté du pseudo des membres du staff qui postent sous leur propre nom.
-- Le fond rosé et la pastille fonctionnent aussi dans les messages privés.
+- Les posts du compte « Modération » passent du rosé pâle au rouge, façon Redface 1 : tout le post en rouge, texte blanc, avec un liseré. Bien plus visible.
+- Clair, sombre et AMOLED ; fonctionne aussi dans les messages privés.
