@@ -21,6 +21,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.core.ui.theme.RedfaceLightColorScheme
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -281,10 +282,12 @@ class PostCardShellTest {
                 // content slot whatever colour it is given — the structural contract a non-pixel test pins.
                 PostIdentityBand(
                     containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
                     content = { Text("anchor band") },
                 )
                 PostIdentityBand(
                     containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                     content = { Text("normal band") },
                 )
             }
@@ -292,6 +295,18 @@ class PostCardShellTest {
 
         composeTestRule.onNodeWithText("anchor band").assertIsDisplayed()
         composeTestRule.onNodeWithText("normal band").assertIsDisplayed()
+        composeTestRule.onNode(
+            SemanticsMatcher.expectValue(
+                PostIdentityBandContainerColorKey,
+                RedfaceLightColorScheme.tertiaryContainer,
+            ),
+            useUnmergedTree = true,
+        ).assert(
+            SemanticsMatcher.expectValue(
+                PostIdentityBandContentColorKey,
+                RedfaceLightColorScheme.onTertiaryContainer,
+            ),
+        )
     }
 
     private companion object {

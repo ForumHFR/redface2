@@ -11,6 +11,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.testTag
@@ -41,10 +42,11 @@ import androidx.compose.ui.semantics.semantics
  *    mount their body through `ReadingPostCard`, whose selection is constant by construction #946).
  *  - [footer] (optional) — the feature-owned actions row: topic actions or MP « Citer » (#1074).
  *
- * [border] is the topic's multi-quote outline (#436), `null` for the MP. Body/header padding is the
- * slot's own job (both reading hosts read their gutters from the display-metrics preset since #1042,
- * each reinjecting them on its own slots) so the shell adds no padding of its own — it is purely the
- * vertical stack inside a `Card`. `selectable`/highlight tinting are deliberately NOT handled here.
+ * [border] is an optional resolved outline (multi-quote selection or a structural moderation
+ * marker). Body/header padding is the slot's own job (both reading hosts read their gutters from the
+ * display-metrics preset since #1042, each reinjecting them on its own slots) so the shell adds no
+ * padding of its own — it is purely the vertical stack inside a `Card`.
+ * `selectable`/highlight tinting are deliberately NOT handled here.
  *
  * [flat] is the full-width mode (#884 — « posts en pleine largeur ») : the SAME `Card` (the node
  * structure never changes, so slot memoization stays positional — the #946 guarantee) rendered
@@ -95,6 +97,10 @@ fun PostCardShell(
         modifier = modifier.semantics {
             isTraversalGroup = true
             this[PostCardShellContainerColorKey] = effectiveContainerColor
+            border?.let {
+                this[PostCardShellBorderWidthKey] = it.width.value
+                this[PostCardShellBorderColorKey] = it.brush
+            }
         },
         border = border,
         shape = if (flat) RectangleShape else CardDefaults.shape,
@@ -137,6 +143,14 @@ const val POST_CARD_SHELL_DIVIDER_TAG = "PostCardShellDivider"
 @VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)
 val PostCardShellContainerColorKey = SemanticsPropertyKey<Color>("PostCardShellContainerColor")
 
+/** Test-only diagnostics for the single resolved shell border. */
+@VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)
+val PostCardShellBorderWidthKey = SemanticsPropertyKey<Float>("PostCardShellBorderWidth")
+
+@VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)
+val PostCardShellBorderColorKey =
+    SemanticsPropertyKey<Brush>("PostCardShellBorderColor")
+
 /**
  * #351/#104 — a tinted identity strip: a full-width [Surface] across the top of the card that hosts
  * the [content] (a [PostIdentityHeader]). Extracted as its own primitive (per the Codex framing)
@@ -145,22 +159,28 @@ val PostCardShellContainerColorKey = SemanticsPropertyKey<Color>("PostCardShellC
  * The tint is the call-site's decision, not `:core:ui`'s: [containerColor] is passed in (the topic
  * supplies `tertiaryContainer` for the scroll-anchor post #104 — quote link / deep link / last-read
  * landing — and `secondaryContainer` otherwise; the MP always supplies `secondaryContainer`). That
- * semantics lives in the feature, not here. The `Surface` derives `LocalContentColor` from
- * [containerColor] for the header's pseudo, and the enclosing `Card` clips the strip to its shape
- * (rounded inset card or rectangle in full-width mode). The strip's inner padding is the call-site's
- * job, so the band adds none.
+ * semantics lives in the feature, not here. Both [containerColor] and [contentColor] are explicit:
+ * moderation uses RF1 red + white while neutral/anchor hosts pass Material's
+ * `contentColorFor(containerColor)`. The enclosing `Card` clips the strip to its shape (rounded
+ * inset card or rectangle in full-width mode). The strip's inner padding is the call-site's job, so
+ * the band adds none.
  */
 @Composable
 fun PostIdentityBand(
     containerColor: Color,
+    contentColor: Color,
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .semantics { this[PostIdentityBandContainerColorKey] = containerColor },
+            .semantics {
+                this[PostIdentityBandContainerColorKey] = containerColor
+                this[PostIdentityBandContentColorKey] = contentColor
+            },
         color = containerColor,
+        contentColor = contentColor,
     ) {
         content()
     }
@@ -174,3 +194,7 @@ fun PostIdentityBand(
  */
 @VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)
 val PostIdentityBandContainerColorKey = SemanticsPropertyKey<Color>("PostIdentityBandContainerColor")
+
+/** Test-only diagnostic counterpart of [PostIdentityBandContainerColorKey]. */
+@VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)
+val PostIdentityBandContentColorKey = SemanticsPropertyKey<Color>("PostIdentityBandContentColor")

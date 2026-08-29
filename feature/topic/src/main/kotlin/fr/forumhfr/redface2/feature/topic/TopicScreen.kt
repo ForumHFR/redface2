@@ -51,6 +51,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.contentColorFor
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.pullToRefresh
@@ -77,6 +78,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -135,6 +137,7 @@ import fr.forumhfr.redface2.core.ui.post.PostListScaffold
 import fr.forumhfr.redface2.core.ui.post.ReadingPostCard
 import fr.forumhfr.redface2.core.ui.post.ReadingPostCardPresentation
 import fr.forumhfr.redface2.core.ui.post.collectPostMediaUrls
+import fr.forumhfr.redface2.core.ui.post.readingContentColors
 import fr.forumhfr.redface2.core.ui.post.retryFailedPostMedia
 import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
@@ -2780,10 +2783,20 @@ internal fun TopicPostCard(
         // width (forum idiom, dogfooding v109): secondaryContainer over the neutral card. #104 follow-up
         // (XaTriX): the scroll-anchor post tints ONLY this band with tertiaryContainer (the left rail was
         // dropped as ugly) — a single tertiary band, not the old card+band double tint. The shared
-        // PostIdentityBand (#351) sets LocalContentColor from its containerColor for the pseudo; the
-        // enclosing Card clips the strip to its rounded corners. The #104 tint logic is UNCHANGED — it
-        // stays the topic's decision, passed in as containerColor.
+        // PostIdentityBand (#351) receives both roles explicitly; the enclosing Card clips the strip
+        // to its rounded corners. The #104 tint logic stays the topic's decision.
         identity = { moderationOverride ->
+            val bandContainerColor = when {
+                // The transient scroll anchor remains above the persistent moderation tint.
+                highlighted -> MaterialTheme.colorScheme.tertiaryContainer
+                moderationOverride != null -> moderationOverride.containerColor
+                else -> MaterialTheme.colorScheme.secondaryContainer
+            }
+            val bandContentColor = when {
+                highlighted -> contentColorFor(bandContainerColor)
+                moderationOverride != null -> moderationOverride.contentColor
+                else -> contentColorFor(bandContainerColor)
+            }
             PostIdentityBand(
                 // #874/#1112 — colour is not the sole signal: the active intrinsic marker sits on
                 // the identity node, present in both display modes and traversed first by TalkBack.
@@ -2797,18 +2810,15 @@ internal fun TopicPostCard(
                             }
                         }
                     },
-                containerColor = when {
-                    // The transient scroll anchor remains above the persistent moderation tint.
-                    highlighted -> MaterialTheme.colorScheme.tertiaryContainer
-                    moderationOverride != null -> moderationOverride
-                    else -> MaterialTheme.colorScheme.secondaryContainer
-                },
+                containerColor = bandContainerColor,
+                contentColor = bandContentColor,
             ) {
                 TopicPostIdentityHeader(
                     post = post,
                     authorRole = authorRole,
                     onOpenProfile = onOpenProfile,
                     onOpenMenu = onOpenMenu,
+                    supportingContentColorOverride = moderationOverride?.let { bandContentColor },
                     // #287 — the band's header padding (12.dp horizontal, m.cardHeaderVertical vertical)
                     // is reinjected on the header slot's modifier (densities stay feature-owned, #351).
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = m.cardHeaderVertical),
@@ -2866,12 +2876,15 @@ internal const val TOPIC_POST_IDENTITY_BAND_TAG = "TopicPostIdentityBand"
  * Profile-tap labels/min-size and the pseudo's no-min-size convention come from the primitive.
  */
 @Composable
+// #1112 — post/role/profile/menu data + modifier + the moderation supporting-colour override.
+@Suppress("LongParameterList")
 private fun TopicPostIdentityHeader(
     post: Post,
     authorRole: AuthorRole?,
     onOpenProfile: (() -> Unit)?,
     onOpenMenu: () -> Unit,
     modifier: Modifier = Modifier,
+    supportingContentColorOverride: Color? = null,
 ) {
     // Phase 2 finish (#208) — tapping the avatar OR the author pseudo opens the profile bottom sheet
     // when `onOpenProfile` is non-null (the date stays inert: review feedback I6). The min-size on the
@@ -2889,6 +2902,7 @@ private fun TopicPostIdentityHeader(
         modifier = modifier,
         onAvatarClick = onOpenProfile,
         onAvatarClickLabel = openProfileLabel,
+        supportingContentColorOverride = supportingContentColorOverride,
         // #208 — the avatar carries the 48dp-compliant tap target; the pseudo is a convenience tap at
         // its natural text height (the primitive omits the min-size box on the supplied pseudo slot).
         pseudo = {
@@ -2919,7 +2933,11 @@ private fun TopicPostIdentityHeader(
                 // recomposition of this hot list row — same off-the-render-path stance as #509.
                 val isCreator = remember(post.author) { isRf2Creator(post.author) }
                 if (isCreator) {
-                    CreatorPseudoText(author = post.author, modifier = pseudoModifier)
+                    CreatorPseudoText(
+                        author = post.author,
+                        modifier = pseudoModifier,
+                        colorOverride = supportingContentColorOverride,
+                    )
                 } else {
                     Text(
                         text = post.author,
@@ -2944,7 +2962,8 @@ private fun TopicPostIdentityHeader(
                     // (« édité »), so the dot is never vocalised.
                     text = "· $editedLabel",
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = supportingContentColorOverride
+                        ?: MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.semantics { contentDescription = editedLabel },
                 )
             }
@@ -2959,7 +2978,8 @@ private fun TopicPostIdentityHeader(
                 text = "⋯",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = supportingContentColorOverride
+                    ?: MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
                     .minimumInteractiveComponentSize()
                     .clickable(
@@ -3043,6 +3063,7 @@ private fun TopicPostActions(
     multiQuoteSelected: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val readingColors = readingContentColors()
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -3051,7 +3072,10 @@ private fun TopicPostActions(
         horizontalArrangement = Arrangement.End,
     ) {
         if (onEdit != null) {
-            TextButton(onClick = onEdit) {
+            TextButton(
+                onClick = onEdit,
+                colors = ButtonDefaults.textButtonColors(contentColor = readingColors.linkColor),
+            ) {
                 Text(text = stringResource(R.string.topic_post_edit))
             }
         }
@@ -3071,10 +3095,10 @@ private fun TopicPostActions(
             TextButton(
                 onClick = onToggleMultiQuote,
                 colors = if (multiQuoteSelected) {
-                    ButtonDefaults.textButtonColors()
+                    ButtonDefaults.textButtonColors(contentColor = readingColors.linkColor)
                 } else {
                     ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        contentColor = readingColors.onBodyVariant,
                     )
                 },
                 // #436 — the contentDescription carries the ACTION (« Ajouter/Retirer de la citation
@@ -3117,6 +3141,7 @@ private fun TopicPostActions(
  */
 @Composable
 private fun QuoteTextButton(onQuote: () -> Unit, onQuoteLongPress: (() -> Unit)?) {
+    val readingColors = readingContentColors()
     val longPressLabel = stringResource(R.string.topic_post_quote_full_editor)
     val interaction = if (onQuoteLongPress != null) {
         Modifier.combinedClickable(
@@ -3139,7 +3164,7 @@ private fun QuoteTextButton(onQuote: () -> Unit, onQuoteLongPress: (() -> Unit)?
     ) {
         Text(
             text = stringResource(R.string.topic_post_quote),
-            color = MaterialTheme.colorScheme.primary,
+            color = readingColors.linkColor,
             style = MaterialTheme.typography.labelLarge,
         )
     }

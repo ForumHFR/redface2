@@ -7,6 +7,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -187,24 +188,26 @@ class ReadingPostCardTest {
             .assert(SemanticsMatcher.keyNotDefined(SemanticsActions.OnLongClick))
     }
 
-    // #1112 — the card resolves the moderation token and forwards it to the host band. This mounts
-    // a real PostIdentityBand in the identity slot (as every feature host does) and asserts BOTH
-    // the shell (PostCardShell) and the band carry the pink, driven only by post.isModerationPost.
+    // #1112 — one resolved palette drives the RF1 three-tone card, header and quote surface.
     @Test
-    fun `moderation post tints both the card and the forwarded identity band`() {
-        var expectedPink = Color.Unspecified
+    fun `moderation post uses the RF1 body header sub-surface and one-dp outline`() {
+        var expected = moderationHighlightColors(Color.White)
         composeTestRule.setContent {
             TestTheme {
-                expectedPink = moderationHighlightColor()
+                expected = moderationHighlightColors()
                 ReadingPostCard(
-                    post = samplePost(content = paragraph(BODY_TEXT), isModerationPost = true),
+                    post = samplePost(content = quoteContent(), isModerationPost = true),
                     identity = { moderationOverride -> ModerationTestBand(moderationOverride) },
                 )
             }
         }
 
-        assertShellColor(expectedPink)
-        assertBandColor(expectedPink)
+        assertShellColor(expected.bodyContainer)
+        assertBandColor(expected.headerContainer)
+        assertBandContentColor(expected.onModeration)
+        assertBorder(width = 1f, color = expected.outline)
+        composeTestRule.onNodeWithTag(POST_RENDERER_QUOTE_CONTAINER_TAG, useUnmergedTree = true)
+            .assert(SemanticsMatcher.expectValue(PostRendererContainerColorKey, expected.subSurfaceContainer))
     }
 
     @Test
@@ -220,6 +223,13 @@ class ReadingPostCardTest {
 
         assertShellColor(RedfaceLightColorScheme.surfaceContainer)
         assertBandColor(RedfaceLightColorScheme.secondaryContainer)
+        composeTestRule.onNode(
+            SemanticsMatcher.expectValue(
+                PostCardShellContainerColorKey,
+                RedfaceLightColorScheme.surfaceContainer,
+            ),
+            useUnmergedTree = true,
+        ).assert(SemanticsMatcher.keyNotDefined(PostCardShellBorderWidthKey))
     }
 
     // #874/#1112 R3 — a post that is somehow both EgoPost and a moderation row must not diverge:
@@ -240,12 +250,89 @@ class ReadingPostCardTest {
 
         assertShellColor(expectedEgoBlue)
         assertBandColor(RedfaceLightColorScheme.secondaryContainer)
+        composeTestRule.onNode(
+            SemanticsMatcher.expectValue(PostCardShellContainerColorKey, expectedEgoBlue),
+            useUnmergedTree = true,
+        ).assert(SemanticsMatcher.keyNotDefined(PostCardShellBorderWidthKey))
+    }
+
+    @Test
+    fun `multi-quote selection replaces the moderation outline`() {
+        var expectedPrimary = Color.Unspecified
+        composeTestRule.setContent {
+            TestTheme {
+                expectedPrimary = MaterialTheme.colorScheme.primary
+                ReadingPostCard(
+                    post = samplePost(content = paragraph(BODY_TEXT), isModerationPost = true),
+                    presentation = ReadingPostCardPresentation(selected = true),
+                    identity = { moderationOverride -> ModerationTestBand(moderationOverride) },
+                )
+            }
+        }
+
+        assertBorder(width = 2f, color = expectedPrimary)
+    }
+
+    @Test
+    fun `flat moderation outline suppresses the closing hairline`() {
+        composeTestRule.setContent {
+            TestTheme {
+                ReadingPostCard(
+                    post = samplePost(content = paragraph(BODY_TEXT), isModerationPost = true),
+                    presentation = ReadingPostCardPresentation(flat = true),
+                    identity = { moderationOverride -> ModerationTestBand(moderationOverride) },
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag(POST_CARD_SHELL_DIVIDER_TAG, useUnmergedTree = true)
+            .assertDoesNotExist()
+    }
+
+    @Test
+    fun `moderation signature is opaque while a normal signature stays subdued`() {
+        assertEquals(1f, readingPostSignatureAlpha(isModeration = true), 0f)
+        assertEquals(0.7f, readingPostSignatureAlpha(isModeration = false), 0f)
+    }
+
+    @Test
+    fun `badges and footer receive the same nullable reading local without changing slot structure`() {
+        var badgeColors: ReadingContentColors? = null
+        var footerColors: ReadingContentColors? = null
+        val expected = moderationHighlightColors(Color.White)
+        composeTestRule.setContent {
+            TestTheme {
+                ReadingPostCard(
+                    post = samplePost(content = paragraph(BODY_TEXT), isModerationPost = true),
+                    identity = { moderationOverride -> ModerationTestBand(moderationOverride) },
+                    badges = {
+                        badgeColors = LocalReadingContentColors.current
+                        Text("badge")
+                    },
+                    footer = {
+                        footerColors = LocalReadingContentColors.current
+                        Text("footer")
+                    },
+                )
+            }
+        }
+
+        val expectedReading = ReadingContentColors(
+            onBody = expected.onModeration,
+            onBodyVariant = expected.onModerationVariant,
+            linkColor = expected.linkColor,
+        )
+        assertEquals(expectedReading, badgeColors)
+        assertEquals(expectedReading, footerColors)
     }
 
     @Composable
-    private fun ModerationTestBand(moderationOverride: Color?) {
+    private fun ModerationTestBand(moderationOverride: ReadingPostHeaderColors?) {
         PostIdentityBand(
-            containerColor = moderationOverride ?: MaterialTheme.colorScheme.secondaryContainer,
+            containerColor = moderationOverride?.containerColor
+                ?: MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = moderationOverride?.contentColor
+                ?: MaterialTheme.colorScheme.onSecondaryContainer,
         ) { Text(IDENTITY_TEXT) }
     }
 
@@ -261,6 +348,20 @@ class ReadingPostCardTest {
             SemanticsMatcher.expectValue(PostIdentityBandContainerColorKey, expected),
             useUnmergedTree = true,
         ).assertExists()
+    }
+
+    private fun assertBandContentColor(expected: Color) {
+        composeTestRule.onNode(
+            SemanticsMatcher.expectValue(PostIdentityBandContentColorKey, expected),
+            useUnmergedTree = true,
+        ).assertExists()
+    }
+
+    private fun assertBorder(width: Float, color: Color) {
+        composeTestRule.onNode(
+            SemanticsMatcher.expectValue(PostCardShellBorderWidthKey, width),
+            useUnmergedTree = true,
+        ).assert(SemanticsMatcher.expectValue(PostCardShellBorderColorKey, SolidColor(color)))
     }
 
     @Composable
@@ -299,6 +400,17 @@ class ReadingPostCardTest {
                         children = listOf(PostInline.Text(text)),
                     ),
                 ),
+            ),
+        ),
+    )
+
+    private fun quoteContent(): PostContent = PostContent(
+        blocks = listOf(
+            PostBlock.Quote(
+                author = "Citation",
+                numreponse = 1,
+                page = 1,
+                content = paragraph(BODY_TEXT),
             ),
         ),
     )

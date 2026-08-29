@@ -5,6 +5,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
@@ -15,6 +16,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.text.TextLayoutResult
 import fr.forumhfr.redface2.core.domain.ego.deriveEgoCanonicalPseudo
 import fr.forumhfr.redface2.core.domain.ego.isEgoPost
 import fr.forumhfr.redface2.core.model.AuthorRole
@@ -27,6 +29,7 @@ import fr.forumhfr.redface2.core.ui.post.HiddenPostCard
 import fr.forumhfr.redface2.core.ui.post.POST_CARD_SHELL_DIVIDER_TAG
 import fr.forumhfr.redface2.core.ui.post.PostCardShellContainerColorKey
 import fr.forumhfr.redface2.core.ui.post.PostIdentityBandContainerColorKey
+import fr.forumhfr.redface2.core.ui.post.PostIdentityBandContentColorKey
 import fr.forumhfr.redface2.core.ui.theme.RedfaceLightColorScheme
 import java.time.Instant
 import org.junit.Assert.assertTrue
@@ -52,6 +55,10 @@ class TopicEgoHighlightRenderTest {
 
         assertShellColor(EGO_POST_LIGHT)
         assertIdentityBandColor(RedfaceLightColorScheme.secondaryContainer)
+        // C6 — a normal band forwards contentColorFor(secondaryContainer). This theme reuses #FFDAD9
+        // for BOTH primaryContainer and secondaryContainer, so M3 contentColorFor matches the
+        // earlier-listed primaryContainer role and resolves onPrimaryContainer, not onSecondaryContainer.
+        assertIdentityBandContentColor(RedfaceLightColorScheme.onPrimaryContainer)
         assertStateCount(OWN_POST_STATE, 1)
         composeTestRule.onNodeWithTag(POST_CARD_SHELL_DIVIDER_TAG, useUnmergedTree = true)
             .assertDoesNotExist()
@@ -63,28 +70,37 @@ class TopicEgoHighlightRenderTest {
 
         assertShellColor(EGO_POST_LIGHT)
         assertIdentityBandColor(RedfaceLightColorScheme.tertiaryContainer)
+        assertIdentityBandContentColor(RedfaceLightColorScheme.onTertiaryContainer)
         assertStateCount(OWN_POST_STATE, 1)
         composeTestRule.onNodeWithTag(POST_CARD_SHELL_DIVIDER_TAG, useUnmergedTree = true)
             .assertExists()
     }
 
     @Test
-    fun `moderation post tints both the inset card and the identity band pink`() {
-        setCard(post = samplePost(isModerationPost = true))
+    fun `moderation post renders an RF1 red body and darker identity band`() {
+        val post = samplePost(isModerationPost = true).copy(editedAt = Instant.EPOCH)
+        setCard(post = post)
 
-        assertShellColor(MODERATION_LIGHT)
-        assertIdentityBandColor(MODERATION_LIGHT)
+        assertShellColor(MODERATION_BODY_LIGHT)
+        assertIdentityBandColor(MODERATION_HEADER_LIGHT)
+        assertIdentityBandContentColor(Color.White)
+        assertTextColor(post.date.asTopicDate(), Color.White)
+        assertTextColor("· édité", Color.White)
+        assertTextColor("⋯", Color.White)
         assertStateCount(MODERATION_STATE, 1)
         assertStateCount(OWN_POST_STATE, 0)
     }
 
     @Test
-    fun `the transient scroll anchor keeps the band tertiary above the moderation pink`() {
-        setCard(post = samplePost(isModerationPost = true), highlighted = true)
+    fun `the transient scroll anchor keeps its band and content above moderation`() {
+        val post = samplePost(isModerationPost = true)
+        setCard(post = post, highlighted = true)
 
-        // The card stays pink (persistent marker); the band's transient anchor tint wins over it.
-        assertShellColor(MODERATION_LIGHT)
+        // The card stays red (persistent marker); both transient anchor band roles win above it.
+        assertShellColor(MODERATION_BODY_LIGHT)
         assertIdentityBandColor(RedfaceLightColorScheme.tertiaryContainer)
+        assertIdentityBandContentColor(RedfaceLightColorScheme.onTertiaryContainer)
+        assertTextColor(post.date.asTopicDate(), RedfaceLightColorScheme.onTertiaryContainer)
         assertStateCount(MODERATION_STATE, 1)
     }
 
@@ -316,6 +332,21 @@ class TopicEgoHighlightRenderTest {
             .assert(SemanticsMatcher.expectValue(PostIdentityBandContainerColorKey, expected))
     }
 
+    private fun assertIdentityBandContentColor(expected: Color) {
+        composeTestRule.onNodeWithTag(TOPIC_POST_IDENTITY_BAND_TAG, useUnmergedTree = true)
+            .assert(SemanticsMatcher.expectValue(PostIdentityBandContentColorKey, expected))
+    }
+
+    private fun assertTextColor(text: String, expected: Color) {
+        val layouts = mutableListOf<TextLayoutResult>()
+        val action = requireNotNull(
+            composeTestRule.onNodeWithText(text, useUnmergedTree = true)
+                .fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action,
+        )
+        assertTrue(action(layouts))
+        org.junit.Assert.assertEquals(expected, layouts.single().layoutInput.style.color)
+    }
+
     private fun assertStateCount(description: String, expected: Int) {
         composeTestRule.onAllNodes(
             SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, description),
@@ -386,7 +417,7 @@ class TopicEgoHighlightRenderTest {
         const val OWN_QUOTE_STATE = "Citation de votre message"
         const val MODERATION_STATE = "Message de la modération"
         val EGO_POST_LIGHT = Color(0xFFE4EDFF)
-        // Light moderation container from ModerationHighlightColors; the token test pins its value.
-        val MODERATION_LIGHT = Color(0xFFF5DDE2)
+        val MODERATION_HEADER_LIGHT = Color(0xFFB71C1C)
+        val MODERATION_BODY_LIGHT = Color(0xFFD32F2F)
     }
 }

@@ -32,6 +32,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.contentColorFor
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.pullToRefresh
@@ -51,6 +52,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -109,6 +111,7 @@ import fr.forumhfr.redface2.core.ui.post.PostListScaffold
 import fr.forumhfr.redface2.core.ui.post.PostMediaDiskCachePolicy
 import fr.forumhfr.redface2.core.ui.post.ReadingPostCard
 import fr.forumhfr.redface2.core.ui.post.ReadingPostCardPresentation
+import fr.forumhfr.redface2.core.ui.post.readingContentColors
 import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 import fr.forumhfr.redface2.core.ui.zoom.PinchZoomState
@@ -1841,8 +1844,8 @@ internal fun isHiddenMessage(message: Post, hidden: Set<Int>, revealed: Set<Int>
  * preferences, the session pseudo (#1050 Ego markers) and message position, while this adapter
  * forwards the bundle unchanged — its only addition is the EgoPost StateDescription on the
  * identity band (#874 P1 parity). EgoPost colours the card below the neutral band; a moderation
- * post instead receives the shared pink override on both card and band. Neutral defaults keep
- * direct test/preview mounts unmarked.
+ * post instead receives the shared RF1 red body and darker red identity band. Neutral defaults
+ * keep direct test/preview mounts unmarked.
  */
 @Composable
 // Thin card adapter: render state plus independent host capabilities. #221 — the creator/staff
@@ -1898,10 +1901,15 @@ internal fun MessageCard(
         identity = { moderationOverride ->
             // An MP has no anchor/category tint, but still carries the same full-width identity band
             // as a normal topic post. Its neutral secondaryContainer colour is independent from
-            // EgoPost; a moderation row explicitly overrides it so the pink covers the whole post.
+            // EgoPost; a moderation row explicitly overrides it with the RF1 two-tone red header.
             // PostIdentityBand adds no padding, so the shared band rhythm is reinjected on the
             // header — MP-owned gutters at cardBodyHorizontal, shared symmetric vertical inset at
             // cardHeaderVertical; the header↔body gap remains the body slot's own cardBodyTop.
+            val bandContainerColor = moderationOverride?.containerColor
+                ?: MaterialTheme.colorScheme.secondaryContainer
+            val bandContentColor = moderationOverride?.contentColor
+                ?: contentColorFor(bandContainerColor)
+            val supportingContentColorOverride = moderationOverride?.let { bandContentColor }
             PostIdentityBand(
                 modifier = Modifier.semantics {
                     when {
@@ -1913,8 +1921,8 @@ internal fun MessageCard(
                         }
                     }
                 },
-                containerColor = moderationOverride
-                    ?: MaterialTheme.colorScheme.secondaryContainer,
+                containerColor = bandContainerColor,
+                contentColor = bandContentColor,
             ) {
                 // A creator supplies the shared gold pseudo leaf; a non-creator staff supplies a
                 // neutral Text beside its pill; everyone else uses the neutral fallback. Per the
@@ -1931,6 +1939,7 @@ internal fun MessageCard(
                     onAvatarClickLabel = openProfileLabel,
                     onAuthorClick = onOpenProfile,
                     onAuthorClickLabel = openProfileLabel,
+                    supportingContentColorOverride = supportingContentColorOverride,
                     pseudo = if (isCreator || authorRole != null) {
                         {
                             Row(
@@ -1955,6 +1964,7 @@ internal fun MessageCard(
                                     CreatorPseudoText(
                                         author = message.author,
                                         modifier = pseudoModifier,
+                                        colorOverride = supportingContentColorOverride,
                                     )
                                 } else {
                                     Text(
@@ -1975,7 +1985,12 @@ internal fun MessageCard(
                     // #1117 — strict topic parity: one explicit 48.dp menu target in the header,
                     // and no competing card-wide long press that can collide with text selection.
                     trailing = onOpenMenu?.let { openMenu ->
-                        { MessageMenuTrigger(onOpenMenu = openMenu) }
+                        {
+                            MessageMenuTrigger(
+                                onOpenMenu = openMenu,
+                                colorOverride = supportingContentColorOverride,
+                            )
+                        }
                     },
                     // #483/#1051 — same compact data-driven marker as the topic; null emits no slot.
                     dateTrailing = if (message.editedAt != null) {
@@ -1984,7 +1999,8 @@ internal fun MessageCard(
                             Text(
                                 text = "· $editedLabel",
                                 style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = supportingContentColorOverride
+                                    ?: MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.semantics { contentDescription = editedLabel },
                             )
                         }
@@ -2024,6 +2040,7 @@ private fun MessageQuoteActions(
     multiQuoteSelected: Boolean,
     horizontalPadding: Dp,
 ) {
+    val readingColors = readingContentColors()
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -2041,10 +2058,10 @@ private fun MessageQuoteActions(
         TextButton(
             onClick = actions.onToggleMultiQuote,
             colors = if (multiQuoteSelected) {
-                ButtonDefaults.textButtonColors()
+                ButtonDefaults.textButtonColors(contentColor = readingColors.linkColor)
             } else {
                 ButtonDefaults.textButtonColors(
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    contentColor = readingColors.onBodyVariant,
                 )
             },
             modifier = Modifier.semantics {
@@ -2062,7 +2079,10 @@ private fun MessageQuoteActions(
                 ),
             )
         }
-        TextButton(onClick = actions.onQuote) {
+        TextButton(
+            onClick = actions.onQuote,
+            colors = ButtonDefaults.textButtonColors(contentColor = readingColors.linkColor),
+        ) {
             Text(text = stringResource(R.string.messages_quote))
         }
     }
@@ -2070,13 +2090,16 @@ private fun MessageQuoteActions(
 
 /** Topic-parity menu glyph reused by visible and hidden MP cards. */
 @Composable
-private fun MessageMenuTrigger(onOpenMenu: () -> Unit) {
+private fun MessageMenuTrigger(
+    onOpenMenu: () -> Unit,
+    colorOverride: Color? = null,
+) {
     val menuLabel = stringResource(R.string.messages_message_menu_action)
     Text(
         text = "⋯",
         style = MaterialTheme.typography.titleMedium,
         fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = colorOverride ?: MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier
             .minimumInteractiveComponentSize()
             .clickable(

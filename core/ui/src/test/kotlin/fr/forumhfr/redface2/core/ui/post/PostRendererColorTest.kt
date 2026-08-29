@@ -1,15 +1,233 @@
 package fr.forumhfr.redface2.core.ui.post
 
+import androidx.compose.foundation.layout.Column
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextLinkStyles
+import fr.forumhfr.redface2.core.model.PostBlock
+import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
+import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.core.ui.theme.LocalEgoQuotePseudo
+import fr.forumhfr.redface2.core.ui.theme.RedfaceLightColorScheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34], qualifiers = "w360dp-h780dp-xxhdpi")
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+@OptIn(ExperimentalTestApi::class)
 class PostRendererColorTest {
+
+    @get:Rule
+    val composeTestRule = createComposeRule()
+
+    @Test
+    fun `moderation routes body link and variant colours and neutralises author color`() {
+        val palette = moderationHighlightColors(Color.White)
+        val content = PostContent(
+            blocks = listOf(
+                PostBlock.Paragraph(
+                    inlines = listOf(
+                        PostInline.Text("corps "),
+                        PostInline.Link(
+                            url = "https://forum.hardware.fr",
+                            children = listOf(PostInline.Text("lien ")),
+                        ),
+                        PostInline.Color(
+                            colorHex = "#000000",
+                            children = listOf(PostInline.Text("couleur auteur")),
+                        ),
+                    ),
+                ),
+                PostBlock.Quote(
+                    author = "Lecteur",
+                    numreponse = null,
+                    page = null,
+                    content = paragraph("texte cité"),
+                ),
+            ),
+        )
+        setModerationContent(palette) { PostRenderer(content) }
+
+        val paragraphNode = composeTestRule.onNodeWithText("corps", substring = true, useUnmergedTree = true)
+        paragraphNode
+            .assert(SemanticsMatcher.expectValue(PostRendererBodyColorKey, palette.onModeration))
+            .assert(SemanticsMatcher.expectValue(PostRendererLinkColorKey, palette.linkColor))
+        val annotated = paragraphNode.fetchSemanticsNode().config[SemanticsProperties.Text].single()
+        // The author `[color]` is neutralised under moderation, so no span carries it; the link is
+        // the only legitimately coloured span and it follows the moderation linkColor.
+        val colouredSpans = annotated.spanStyles.map { it.item.color }.filter { it != Color.Unspecified }
+        assertTrue(
+            "author [color] must be dropped under the moderation local, link keeps its colour",
+            colouredSpans.all { it == palette.linkColor },
+        )
+        assertEquals(palette.onModerationVariant, textColor("Citation de Lecteur"))
+        assertEquals(palette.onModeration, textColor("texte cité"))
+    }
+
+    @Test
+    fun `normal post keeps author color and neutral Material reading roles`() {
+        composeTestRule.setContent {
+            TestTheme {
+                PostRenderer(
+                    content = PostContent(
+                        blocks = listOf(
+                            PostBlock.Paragraph(
+                                inlines = listOf(
+                                    PostInline.Color(
+                                        colorHex = "#123456",
+                                        children = listOf(PostInline.Text("couleur normale")),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                )
+            }
+        }
+
+        val node = composeTestRule.onNodeWithText("couleur normale", useUnmergedTree = true)
+        val annotated = node.fetchSemanticsNode().config[SemanticsProperties.Text].single()
+        assertTrue(annotated.spanStyles.any { it.item.color == Color(0xFF123456) })
+        node
+            .assert(
+                SemanticsMatcher.expectValue(
+                    PostRendererBodyColorKey,
+                    RedfaceLightColorScheme.onSurface,
+                ),
+            )
+            .assert(
+                SemanticsMatcher.expectValue(
+                    PostRendererLinkColorKey,
+                    RedfaceLightColorScheme.primary,
+                ),
+            )
+    }
+
+    @Test
+    fun `quote spoiler and code use the RF1 red sub-surface under moderation`() {
+        val palette = moderationHighlightColors(Color.White)
+        val content = PostContent(
+            blocks = listOf(
+                PostBlock.Quote(
+                    author = "Modération",
+                    numreponse = 42,
+                    page = 1,
+                    content = paragraph("citation"),
+                ),
+                PostBlock.Spoiler(label = "secret", content = paragraph("masqué")),
+                PostBlock.CodeBlock(text = "println(42)", language = "kotlin"),
+            ),
+        )
+        setModerationContent(palette) {
+            CompositionLocalProvider(LocalEgoQuotePseudo provides "modération") {
+                PostRenderer(content)
+            }
+        }
+
+        listOf(
+            POST_RENDERER_QUOTE_CONTAINER_TAG,
+            POST_RENDERER_SPOILER_CONTAINER_TAG,
+            POST_RENDERER_MONOSPACE_CONTAINER_TAG,
+        ).forEach { tag ->
+            composeTestRule.onNodeWithTag(tag, useUnmergedTree = true)
+                .assert(
+                    SemanticsMatcher.expectValue(
+                        PostRendererContainerColorKey,
+                        palette.subSurfaceContainer,
+                    ),
+                )
+        }
+        assertEquals(palette.onModerationVariant, textColor("secret"))
+        assertEquals(palette.onModerationVariant, textColor("kotlin"))
+        assertEquals(palette.onModeration, textColor("println(42)"))
+    }
+
+    @Test
+    fun `EgoQuote turns red under the moderation local`() {
+        val quote = PostBlock.Quote(
+            author = "Moi",
+            numreponse = 42,
+            page = 1,
+            content = paragraph("ego quote"),
+        )
+        val moderation = moderationHighlightColors(Color.White)
+        setModerationContent(moderation) {
+            CompositionLocalProvider(LocalEgoQuotePseudo provides "moi") {
+                PostRenderer(PostContent(listOf(quote)))
+            }
+        }
+        composeTestRule.onNodeWithTag(POST_RENDERER_QUOTE_CONTAINER_TAG, useUnmergedTree = true)
+            .assert(
+                SemanticsMatcher.expectValue(
+                    PostRendererContainerColorKey,
+                    moderation.subSurfaceContainer,
+                ),
+            )
+    }
+
+    @Test
+    fun `EgoQuote keeps its violet container without the moderation local`() {
+        val quote = PostBlock.Quote(
+            author = "Moi",
+            numreponse = 42,
+            page = 1,
+            content = paragraph("ego quote"),
+        )
+        composeTestRule.setContent {
+            TestTheme {
+                CompositionLocalProvider(LocalEgoQuotePseudo provides "moi") {
+                    PostRenderer(PostContent(listOf(quote)))
+                }
+            }
+        }
+        composeTestRule.onNodeWithTag(POST_RENDERER_QUOTE_CONTAINER_TAG, useUnmergedTree = true)
+            .assert(
+                SemanticsMatcher.expectValue(
+                    PostRendererContainerColorKey,
+                    Color(0xFFEDE7FF),
+                ),
+            )
+    }
+
+    @Test
+    fun `block and inline image errors inherit moderation variant white`() {
+        val palette = moderationHighlightColors(Color.White)
+        setModerationContent(palette) {
+            Column {
+                ImageBlockError(description = "bloc")
+                InlineImageErrorSlot(url = "https://invalid.example/image.png", description = "inline")
+            }
+        }
+
+        composeTestRule.onNodeWithTag(POST_RENDERER_BLOCK_IMAGE_ERROR_TAG, useUnmergedTree = true)
+            .assert(SemanticsMatcher.expectValue(PostRendererContainerColorKey, palette.subSurfaceContainer))
+            .assert(SemanticsMatcher.expectValue(PostRendererContentColorKey, palette.onModerationVariant))
+        composeTestRule.onNodeWithTag(POST_RENDERER_INLINE_IMAGE_ERROR_TAG, useUnmergedTree = true)
+            .assert(SemanticsMatcher.expectValue(PostRendererContentColorKey, palette.onModerationVariant))
+    }
 
     @Test
     fun `parses six-digit hex with hash prefix`() {
@@ -134,6 +352,48 @@ class PostRendererColorTest {
         val span = annotated.spanStyles.single().item as SpanStyle
         assertEquals("a dark hue is fine on a light surface", parseColor("#000080"), span.color)
     }
+
+    private fun setModerationContent(
+        palette: ModerationHighlightColors,
+        content: @Composable () -> Unit,
+    ) {
+        composeTestRule.setContent {
+            TestTheme {
+                val reading = ReadingContentColors(
+                    onBody = palette.onModeration,
+                    onBodyVariant = palette.onModerationVariant,
+                    linkColor = palette.linkColor,
+                )
+                CompositionLocalProvider(
+                    LocalModerationHighlightColors provides palette,
+                    LocalReadingContentColors provides reading,
+                    LocalContentColor provides reading.onBody,
+                    content = content,
+                )
+            }
+        }
+    }
+
+    @Composable
+    private fun TestTheme(content: @Composable () -> Unit) {
+        RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+            Surface(color = MaterialTheme.colorScheme.surface, content = content)
+        }
+    }
+
+    private fun textColor(text: String): Color {
+        val layouts = mutableListOf<TextLayoutResult>()
+        val action = requireNotNull(
+            composeTestRule.onNodeWithText(text, useUnmergedTree = true)
+                .fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action,
+        )
+        assertTrue(action(layouts))
+        return layouts.single().layoutInput.style.color
+    }
+
+    private fun paragraph(text: String): PostContent = PostContent(
+        blocks = listOf(PostBlock.Paragraph(inlines = listOf(PostInline.Text(text)))),
+    )
 
     /** Plain HSV hue in degrees — enough to pin "still a blue / still a yellow" after the clamp. */
     private fun hueOf(color: Color): Double {

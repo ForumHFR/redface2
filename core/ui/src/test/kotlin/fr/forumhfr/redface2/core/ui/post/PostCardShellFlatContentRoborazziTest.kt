@@ -119,7 +119,10 @@ class PostCardShellFlatContentRoborazziTest {
         PostCardShell(
             flat = true,
             header = {
-                PostIdentityBand(containerColor = MaterialTheme.colorScheme.secondaryContainer) {
+                PostIdentityBand(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                ) {
                     Text(
                         text = "$pseudo — 26/07/2026 10:00:00",
                         style = MaterialTheme.typography.titleSmall,
