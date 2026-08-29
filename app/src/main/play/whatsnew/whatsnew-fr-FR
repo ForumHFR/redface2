@@ -1,4 +1,3 @@
-Redface 2 v0.45.1 — dev.
+Redface 2 v0.45.2 — dev.
 
-- Les posts du compte « Modération » passent du rosé pâle au rouge, façon Redface 1 : tout le post en rouge, texte blanc, avec un liseré. Bien plus visible.
-- Clair, sombre et AMOLED ; fonctionne aussi dans les messages privés.
+- Correctif : la barre de titre d'un post « Modération » restait bleue quand c'était le dernier message lu. Elle reste maintenant rouge, comme le reste du post.
