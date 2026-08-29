@@ -188,9 +188,10 @@ class ReadingPostCardTest {
             .assert(SemanticsMatcher.keyNotDefined(SemanticsActions.OnLongClick))
     }
 
-    // #1112 — one resolved palette drives the RF1 three-tone card, header and quote surface.
+    // #1112 — one resolved palette drives the RF1 three-tone card, header and quote surface; the
+    // red moderation outline was dropped (invisible on the red card, redundant with the header).
     @Test
-    fun `moderation post uses the RF1 body header sub-surface and one-dp outline`() {
+    fun `moderation post uses the RF1 body header sub-surface and draws no border`() {
         var expected = moderationHighlightColors(Color.White)
         composeTestRule.setContent {
             TestTheme {
@@ -205,7 +206,10 @@ class ReadingPostCardTest {
         assertShellColor(expected.bodyContainer)
         assertBandColor(expected.headerContainer)
         assertBandContentColor(expected.onModeration)
-        assertBorder(width = 1f, color = expected.outline)
+        composeTestRule.onNode(
+            SemanticsMatcher.expectValue(PostCardShellContainerColorKey, expected.bodyContainer),
+            useUnmergedTree = true,
+        ).assert(SemanticsMatcher.keyNotDefined(PostCardShellBorderWidthKey))
         composeTestRule.onNodeWithTag(POST_RENDERER_QUOTE_CONTAINER_TAG, useUnmergedTree = true)
             .assert(SemanticsMatcher.expectValue(PostRendererContainerColorKey, expected.subSurfaceContainer))
     }
@@ -257,7 +261,7 @@ class ReadingPostCardTest {
     }
 
     @Test
-    fun `multi-quote selection replaces the moderation outline`() {
+    fun `multi-quote selection still draws its 2dp primary border on a moderation post`() {
         var expectedPrimary = Color.Unspecified
         composeTestRule.setContent {
             TestTheme {
@@ -273,8 +277,10 @@ class ReadingPostCardTest {
         assertBorder(width = 2f, color = expectedPrimary)
     }
 
+    // #1112 — with the moderation outline gone, a flat moderation post has no border to close it,
+    // so the flat hairline draws exactly like any other flat post.
     @Test
-    fun `flat moderation outline suppresses the closing hairline`() {
+    fun `flat moderation post draws the closing hairline now that it has no outline`() {
         composeTestRule.setContent {
             TestTheme {
                 ReadingPostCard(
@@ -286,7 +292,7 @@ class ReadingPostCardTest {
         }
 
         composeTestRule.onNodeWithTag(POST_CARD_SHELL_DIVIDER_TAG, useUnmergedTree = true)
-            .assertDoesNotExist()
+            .assertExists()
     }
 
     @Test
