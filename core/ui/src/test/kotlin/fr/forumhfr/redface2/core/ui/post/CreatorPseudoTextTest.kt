@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.ui.post
 
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -9,6 +10,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.text.TextLayoutResult
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -44,5 +47,25 @@ class CreatorPseudoTextTest {
             "the shared creator leaf must apply the gold-sheen brush",
             layouts.single().layoutInput.style.brush,
         )
+    }
+
+    @Test
+    fun `colour override is opaque and removes the gold brush`() {
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                CreatorPseudoText(author = "XaTriX", colorOverride = Color.White)
+            }
+        }
+
+        val layouts = mutableListOf<TextLayoutResult>()
+        val readLayout = requireNotNull(
+            composeTestRule.onNodeWithText("XaTriX")
+                .fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action,
+        )
+        assertTrue("the Text layout must be readable", readLayout(layouts))
+        val style = layouts.single().layoutInput.style
+        assertEquals(Color.White, style.color)
+        assertEquals(1f, style.color.alpha, 0f)
+        assertNull("a brush would override the requested moderation colour", style.brush)
     }
 }
