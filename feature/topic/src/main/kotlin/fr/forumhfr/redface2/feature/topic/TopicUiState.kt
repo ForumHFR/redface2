@@ -6,6 +6,8 @@ import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
+import fr.forumhfr.redface2.core.model.write.PollVoteChoice
+import fr.forumhfr.redface2.core.model.write.PollVoteForm
 
 data class TopicUiState(
     val request: TopicRequest,
@@ -164,6 +166,12 @@ data class TopicUiState(
              * refresh), so this can never strand the pill.
              */
             val provisional: Boolean = false,
+            /**
+             * #779 — transient voting slice rebuilt from [Topic.pollVoteForm] on every page
+             * emission. `null` means results/no poll/cache-only content; the anti-CSRF form is
+             * never persisted or copied into SavedStateHandle.
+             */
+            val pollVote: PollVoteUiState? = null,
         ) : Mode
 
         data class Error(
@@ -206,6 +214,34 @@ data class TopicUiState(
                 availablePages = emptyList(),
             )
     }
+}
+
+/** #779 — state of the Topic-only poll vote interaction. Never log this type: [form] is secret. */
+data class PollVoteUiState(
+    val form: PollVoteForm,
+    val selectedChoices: Set<PollVoteChoice> = emptySet(),
+    val phase: PollVotePhase = PollVotePhase.Idle,
+    val error: PollVoteUiError? = null,
+)
+
+enum class PollVotePhase {
+    Idle,
+    Submitting,
+    Refreshing,
+}
+
+/** UI-facing, localisable classification of repository and post-vote refresh failures. */
+enum class PollVoteUiError {
+    InvalidHashCheck,
+    EmptySelection,
+    InvalidSelection,
+    TooManySelections,
+    MalformedForm,
+    UnexpectedResponse,
+    Network,
+
+    /** HFR accepted the vote; only the subsequent results refresh failed. */
+    RefreshFailedAfterAccepted,
 }
 
 /**
@@ -307,6 +343,15 @@ sealed interface TopicIntent {
      * scroll effect, so the user keeps their reading position.
      */
     data object Refresh : TopicIntent
+
+    /** #779 — select/unselect one option of the currently displayed poll form. */
+    data class UpdatePollSelection(
+        val choice: PollVoteChoice,
+        val selected: Boolean,
+    ) : TopicIntent
+
+    /** #779 — submit the current selection once; terminal outcomes only refresh the page. */
+    data object SubmitPollVote : TopicIntent
 
     /** #879 — filtered search : fetch the next page of the result list (footer card). */
     data object SearchNextResultsPage : TopicIntent
