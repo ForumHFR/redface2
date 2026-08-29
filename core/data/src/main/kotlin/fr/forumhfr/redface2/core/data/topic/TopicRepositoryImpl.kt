@@ -43,9 +43,13 @@ class TopicRepositoryImpl @Inject constructor(
      *   fresh AUTHENTICATED fetch. The result is still persisted so toggling back OFF
      *   later finds a parser-coherent cache. Network failures propagate as a flow
      *   exception (no silent fallback to a potentially stale cache row).
-     * - Cache hit, **AUTHENTICATED** + fresh → emit and stop. No network. This is the
+     * - Cache hit, **AUTHENTICATED** + fresh → normally emit and stop. No network. This is the
      *   snappy back-nav case: returning to a page within `CachePolicy.topicPage` does
-     *   not refetch and does not silently mark drapeaux as read.
+     *   not refetch and does not silently mark drapeaux as read. **Exception:** an open poll
+     *   (`poll.resultsAvailable == false`) disables this TTL skip because its transient vote form
+     *   and `hash_check` are never stored in Room. Every observation then emits the cached poll
+     *   provisionally and performs one authenticated GET to rehydrate the form. This is the same
+     *   finite cache-then-network shape as an ANONYMOUS row, not a refresh loop.
      * - Cache hit, **ANONYMOUS** (warmed by [prefetch]) → always emit cache
      *   then re-fetch authenticated, regardless of TTL. The anon row is missing
      *   per-user fields (`isOwnPost`, `isEditable`, …) and reading without re-fetching
@@ -83,7 +87,11 @@ class TopicRepositoryImpl @Inject constructor(
             // remains for ordinary back-nav (forceRefresh = false).
             val canSkipRefresh = !forceRefresh &&
                 cached.authMode == FetchMode.AUTHENTICATED &&
-                CachePolicy.isFresh(cached.fetchedAt, CachePolicy.topicPage, clock)
+                CachePolicy.isFresh(cached.fetchedAt, CachePolicy.topicPage, clock) &&
+                // #779 — Room intentionally drops PollVoteForm (especially hash_check). A cached
+                // FORM-shape poll therefore needs one live authenticated GET on every observation
+                // even inside the 60s TTL, otherwise the vote capability could never rehydrate.
+                cached.topic.poll?.resultsAvailable != false
             // #877 — the cache page is provisional ONLY when a refresh follows on this very
             // flow. On the TTL-skip path it IS the settled page: flagging it provisional
             // would strand the pill on « Chargement… » with nothing left to confirm it.
