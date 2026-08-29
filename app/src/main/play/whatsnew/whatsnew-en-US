@@ -1,4 +1,3 @@
-Redface 2 v0.45.1 — dev.
+Redface 2 v0.45.2 — dev.
 
-- Posts from the "Modération" account go from pale pink to red, Redface 1 style: the whole post in red, white text, with an outline. Much more visible.
-- Light, dark and AMOLED; also works in private messages.
+- Fix: a "Modération" post's title bar stayed blue when it was the last read message. It now stays red, like the rest of the post.

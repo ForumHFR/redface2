@@ -16,6 +16,16 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.45.2` — `internal` (dev) — 2026-08-29
+
+Correctif du rendu « Modération » (retour device XaTriX).
+
+### Corrigé
+
+- **Header « Modération » resté bleu sur le dernier message lu** ([#1112](https://github.com/ForumHFR/redface2/issues/1112)) : un post du compte « Modération » qui est aussi le dernier message lu affichait sa barre de titre en bleu (surbrillance de position) au lieu du rouge. Le rouge de modération prime désormais sur la surbrillance de position — le header reste rouge.
+
+---
+
 ## `0.45.1` — `internal` (dev) — 2026-08-29
 
 Renforcement du rendu des posts « Modération » (retour dogfood XaTriX) : le fond rosé était trop discret pour un message de modération.
