@@ -6,20 +6,16 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * #779 (PR 1) — parse-only coverage of the poll VOTE form. Fixtures are the REAL logged-out captures
- * shipped for #697 : `topic_poll_form_meteo` (single-choice, 4 radios) and
- * `topic_poll_form_multi_bourse` (multiple-choice, 5 checkboxes, « à 2 choix »). No vote is
- * submitted anywhere ; this only proves the wire model is extracted correctly.
- */
+/** Exhaustive transformer coverage against real authenticated and logged-out HFR poll forms. */
 class PollVoteFormParserTest {
     private val parser = PollVoteFormParser()
 
     @Test
-    fun `parses the single-choice vote form (radios name=reponse)`() {
+    fun `logged-out form is preserved when hash_check is blank`() {
         val form = requireNotNull(parser.parse(fixture("topic_poll_form_meteo.html")))
 
-        // hash_check is EXPECTED empty : every poll fixture is logged-out. Not a failure.
+        // Parser invariant: capability is preserved while the downstream repository owns the
+        // blank-token guard. Dropping this form would also let a fresh open-poll cache row skip GET.
         assertEquals("", form.hashCheck)
         assertFalse("4 radios = single choice", form.multipleChoice)
         assertEquals(1, form.maxSelections)
@@ -46,6 +42,60 @@ class PollVoteFormParserTest {
             listOf("Thoulisse", "Wurst", "Tuxerman", "Autre"),
             form.choices.map { it.label },
         )
+    }
+
+    @Test
+    fun `parses authenticated single-choice form with exact token fields and choices`() {
+        val form = requireNotNull(parser.parse(fixture("topic_poll_form_authenticated_mono.html")))
+
+        assertEquals("0".repeat(32), form.hashCheck)
+        assertFalse(form.multipleChoice)
+        assertEquals(1, form.maxSelections)
+        assertEquals(
+            listOf(
+                "cat" to "13",
+                "p" to "1",
+                "page" to "1",
+                "sondage" to "1",
+                "owntopic" to "0",
+                "subcat" to "557",
+                "numeropost" to "96127",
+            ),
+            form.hiddenFields.entries.map { it.key to it.value },
+        )
+        assertEquals(5, form.choices.size)
+        assertTrue(form.choices.all { it.name == "reponse" })
+        assertEquals(listOf("1", "2", "3", "4", "5"), form.choices.map { it.value })
+        assertEquals(listOf("sond1", "sond2", "sond3", "sond4", "sond5"), form.choices.map { it.id })
+        assertEquals(
+            "J'ai tout annulé et je me bunkerise avec 100kg de bouffe",
+            form.choices.first().label,
+        )
+    }
+
+    @Test
+    fun `parses authenticated multiple-choice form with exact token fields choices and cap`() {
+        val form = requireNotNull(parser.parse(fixture("topic_poll_form_authenticated_multi.html")))
+
+        assertEquals("0".repeat(32), form.hashCheck)
+        assertTrue(form.multipleChoice)
+        assertEquals(7, form.maxSelections)
+        assertEquals(
+            listOf(
+                "cat" to "13",
+                "p" to "1",
+                "page" to "1",
+                "sondage" to "1",
+                "owntopic" to "0",
+                "subcat" to "426",
+                "numeropost" to "181",
+            ),
+            form.hiddenFields.entries.map { it.key to it.value },
+        )
+        assertEquals(10, form.choices.size)
+        assertEquals((1..10).map { "reponse$it" }, form.choices.map { it.name })
+        assertTrue(form.choices.all { it.value == "1" })
+        assertEquals("Une bonne dose d'humour", form.choices[6].label)
     }
 
     @Test

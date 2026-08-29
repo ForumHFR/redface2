@@ -3,8 +3,10 @@ package fr.forumhfr.redface2.core.parser
 import fr.forumhfr.redface2.core.model.Poll
 import fr.forumhfr.redface2.core.model.PollOption
 import fr.forumhfr.redface2.core.model.Topic
+import fr.forumhfr.redface2.core.model.write.PollVoteForm
 import fr.forumhfr.redface2.core.parser.common.HfrSelectors
 import fr.forumhfr.redface2.core.parser.common.PollChoiceCaption
+import fr.forumhfr.redface2.core.parser.write.poll.PollVoteFormParser
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
@@ -13,6 +15,7 @@ import org.jsoup.nodes.TextNode
 class TopicPageParser(
     private val postsParser: PostsParser = PostsParser(),
     private val searchFormParser: TopicSearchFormParser = TopicSearchFormParser(),
+    private val pollVoteFormParser: PollVoteFormParser = PollVoteFormParser(),
 ) {
     fun parse(html: String): Topic {
         val document = Jsoup.parse(html)
@@ -27,6 +30,8 @@ class TopicPageParser(
         val pageInfo = postsParser.parsePageInfo(document)
         val posts = postsParser.parsePosts(document)
         val replyForm = document.selectFirst(REPLY_FORM_SELECTOR)
+        val pollVoteForm = pollVoteFormParser.parse(document)
+        val poll = parsePoll(document, pollVoteForm)
 
         return Topic(
             cat = requireInputValue(document, HfrSelectors.CATEGORY_ID_INPUT),
@@ -58,7 +63,10 @@ class TopicPageParser(
             // pre-#148 captures keep their stored value because Room ships the
             // column since v1.
             isFirstPostOwner = pageInfo.current == 1 && posts.firstOrNull()?.isEditable == true,
-            poll = parsePoll(document),
+            poll = poll,
+            // A vote form is a transient capability, not a durable poll property. Surface it only
+            // for the FORM shape; results pages must never retain a stray vote form.
+            pollVoteForm = pollVoteForm.takeIf { poll?.resultsAvailable == false },
             // Chantier C (#546) — the intra-topic search form is part of THIS page ; parse it here so
             // the ViewModel gets it for free on every live load. Null when absent ; not persisted.
             searchForm = searchFormParser.parse(document),
@@ -94,7 +102,7 @@ class TopicPageParser(
             ?: error("Required input not found for $selector")
     }
 
-    private fun parsePoll(document: Document): Poll? {
+    private fun parsePoll(document: Document, pollVoteForm: PollVoteForm?): Poll? {
         val pollElement = document.selectFirst(HfrSelectors.POLL) ?: return null
         val question = pollElement
             .selectFirst(HfrSelectors.POLL_QUESTION)
@@ -110,7 +118,7 @@ class TopicPageParser(
         // (radio/checkbox inputs), which this parser used to drop silently (optionBars empty →
         // null → « aucun sondage ne s'affiche », CharLee's report).
         return if (question != null && optionBars.isEmpty()) {
-            parseFormPoll(pollElement, question)
+            parseFormPoll(question, pollVoteForm)
         } else if (question == null || optionBars.isEmpty() || optionBars.size != optionLabels.size) {
             null
         } else {
@@ -165,33 +173,21 @@ class TopicPageParser(
     }
 
     /**
-     * #697 — builds a read-only [Poll] from the FORM shape: `<ol><li><input name=reponse><label>`.
+     * #697 — builds a read-only [Poll] from the already parsed [PollVoteForm].
      * No votes/percentages exist in this shape (fields are 0, [Poll.resultsAvailable] = false).
-     * Multiple-choice detection reads the INPUT TYPE (checkbox = multi, radio = single — proven on
-     * live fixtures 44713 mono / 16022 multi), the robust signal : it does not depend on the
-     * caption being present. #779 (PR 1) additionally reads the « Sondage à N choix possibles »
-     * caption — which IS present on the multi FORM shape (`topic_poll_form_multi_bourse`) — for
-     * [Poll.maxSelections] only, never to decide [Poll.multipleChoice].
+     * Options, input type and maximum selection count all come from that single transformer so the
+     * read model and submit contract cannot diverge on the same DOM.
      */
-    private fun parseFormPoll(pollElement: Element, question: String): Poll? {
-        val formOptions = pollElement.select(HfrSelectors.POLL_FORM_OPTION)
-        val labels = formOptions.mapNotNull { option ->
-            option.selectFirst(HfrSelectors.POLL_FORM_OPTION_LABEL)?.text()?.trim()?.takeIf(String::isNotEmpty)
-        }
-        if (labels.isEmpty() || labels.size != formOptions.size) return null
-        val multipleChoice = pollElement.selectFirst(HfrSelectors.POLL_FORM_MULTI_INPUT) != null
+    private fun parseFormPoll(question: String, pollVoteForm: PollVoteForm?): Poll? {
+        val form = pollVoteForm ?: return null
         return Poll(
             question = question,
-            options = labels.map { PollOption(text = it, votes = 0, percentage = 0f) },
-            multipleChoice = multipleChoice,
+            options = form.choices.map { PollOption(text = it.label, votes = 0, percentage = 0f) },
+            multipleChoice = form.multipleChoice,
             totalVotes = 0,
             hasVoted = false,
             resultsAvailable = false,
-            // #779 (PR 1) — a mono (radio) poll allows exactly one pick → 1. A multi (checkbox)
-            // poll reads « Sondage à N choix possibles » from the `div.sondage` FORM shape (present
-            // on the live `topic_poll_form_multi_bourse` capture) ; a missing caption leaves the cap
-            // unknown (null), never an invented number.
-            maxSelections = if (multipleChoice) PollChoiceCaption.maxSelections(pollElement.text()) else 1,
+            maxSelections = form.maxSelections,
         )
     }
 
