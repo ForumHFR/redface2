@@ -2787,15 +2787,16 @@ internal fun TopicPostCard(
         // to its rounded corners. The #104 tint logic stays the topic's decision.
         identity = { moderationOverride ->
             val bandContainerColor = when {
-                // The transient scroll anchor remains above the persistent moderation tint.
-                highlighted -> MaterialTheme.colorScheme.tertiaryContainer
+                // #1112 (retour device XaTriX) : un post de modération garde son header rouge même
+                // quand il est la cible d'ancrage — le rouge persistant prime sur la teinte d'ancrage transitoire.
                 moderationOverride != null -> moderationOverride.containerColor
+                highlighted -> MaterialTheme.colorScheme.tertiaryContainer
                 else -> MaterialTheme.colorScheme.secondaryContainer
             }
             val bandContentColor = when {
-                highlighted -> contentColorFor(bandContainerColor)
                 moderationOverride != null -> moderationOverride.contentColor
-                else -> contentColorFor(bandContainerColor)
+                highlighted -> contentColorFor(MaterialTheme.colorScheme.tertiaryContainer)
+                else -> contentColorFor(MaterialTheme.colorScheme.secondaryContainer)
             }
             PostIdentityBand(
                 // #874/#1112 — colour is not the sole signal: the active intrinsic marker sits on
