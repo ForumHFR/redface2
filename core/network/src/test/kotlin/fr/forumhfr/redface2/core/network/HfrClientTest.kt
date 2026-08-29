@@ -339,6 +339,39 @@ class HfrClientTest {
     }
 
     @Test
+    fun `submitPollVote POSTs vote_php authenticated without Referer and forwards body`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("<div class=\"hop\">ok</div>"))
+        val formBody = okhttp3.FormBody.Builder(Charsets.UTF_8)
+            .add("hash_check", "00000000000000000000000000000000")
+            .add("cat", "13")
+            .add("page", "1")
+            .add("numeropost", "96127")
+            .add("reponse", "2")
+            .build()
+
+        val html = client.submitPollVote(formBody)
+
+        assertEquals("<div class=\"hop\">ok</div>", html)
+        val request = server.takeRequest()
+        val url = requireNotNull(request.requestUrl)
+        assertEquals("authenticated", request.headers["X-RF2-Client"])
+        assertEquals("POST", request.method)
+        assertEquals("/user/vote.php", url.encodedPath)
+        assertEquals("hfr.inc", url.queryParameter("config"))
+        assertNull("live contract requires no Referer", request.headers["Referer"])
+        assertEquals(
+            mapOf(
+                "hash_check" to "00000000000000000000000000000000",
+                "cat" to "13",
+                "page" to "1",
+                "numeropost" to "96127",
+                "reponse" to "2",
+            ),
+            formFields(request.body.readUtf8()),
+        )
+    }
+
+    @Test
     fun `addFlag builds the addflag URL on the authenticated client without owntopic mapping`() = runTest {
         server.enqueue(MockResponse().setResponseCode(200).setBody("<html><body>Favori positionné</body></html>"))
         val context = FlagAddContext(

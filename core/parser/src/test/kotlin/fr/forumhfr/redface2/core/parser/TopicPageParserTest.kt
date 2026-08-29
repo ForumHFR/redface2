@@ -130,6 +130,17 @@ class TopicPageParserTest {
             // #779 (PR 1) — a mono form (radios, no caption) allows exactly one pick.
             assertEquals(1, poll.maxSelections)
         }
+        requireNotNull(topic.pollVoteForm).also { form ->
+            // Logged-out pages deliberately keep the form/capability. Only submit rejects blank
+            // hash_check; parser-side filtering would also break open-poll cache rehydration.
+            assertEquals("", form.hashCheck)
+            assertFalse(form.multipleChoice)
+            assertEquals(1, form.maxSelections)
+            assertEquals(
+                requireNotNull(topic.poll).options.map { it.text },
+                form.choices.map { it.label },
+            )
+        }
     }
 
     @Test
@@ -143,12 +154,18 @@ class TopicPageParserTest {
             // #779 (PR 1) — « Sondage à 2 choix possibles » on the multi FORM shape (cap 2 of 5).
             assertEquals(2, poll.maxSelections)
         }
+        val poll = requireNotNull(topic.poll)
+        val form = requireNotNull(topic.pollVoteForm)
+        assertEquals(poll.multipleChoice, form.multipleChoice)
+        assertEquals(poll.maxSelections, form.maxSelections)
+        assertEquals(poll.options.map { it.text }, form.choices.map { it.label })
     }
 
     @Test
     fun `results shape still parses with resultsAvailable true (#697)`() {
         val topic = parser.parse(fixture("topic_khakha_page_2.html"))
         assertTrue(requireNotNull(topic.poll).resultsAvailable)
+        assertNull("results pages expose no vote capability", topic.pollVoteForm)
     }
 
     @Test

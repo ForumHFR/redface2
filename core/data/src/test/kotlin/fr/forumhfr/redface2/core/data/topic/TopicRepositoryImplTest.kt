@@ -135,6 +135,36 @@ class TopicRepositoryImplTest {
     }
 
     @Test
+    fun `fresh authenticated open-poll cache forces refresh to rehydrate vote form (#779)`() = runTest {
+        // The fixture is logged-out HTML, but refreshTopicPage deliberately stores it as an
+        // AUTHENTICATED row: this isolates the cache decision from cookies while preserving the
+        // real FORM-shape DOM. The parser surfaces a blank-token form; Room stores only Poll.
+        server.enqueue(MockResponse().setBody(fixtureHtml("topic_poll_form_meteo.html")))
+        server.enqueue(MockResponse().setBody(fixtureHtml("topic_poll_form_meteo.html")))
+        val repo = repository(now = Instant.parse("2026-04-26T18:00:00Z"))
+
+        val warm = repo.refreshTopicPage(13, 44_713, 1)
+        assertFalse(requireNotNull(warm.poll).resultsAvailable)
+        assertNotNull(warm.pollVoteForm)
+        assertEquals(1, server.requestCount)
+
+        // Same fixed clock means the row is fresh by the 60s TTL. The open poll nevertheless
+        // disables the skip: cache is provisional, then one live GET restores PollVoteForm.
+        repo.observeTopicPage(13, 44_713, 1).test {
+            val cached = awaitItem()
+            assertTrue(cached.provisional)
+            assertFalse(requireNotNull(cached.topic.poll).resultsAvailable)
+            assertNull("transient form must be absent from the Room emission", cached.topic.pollVoteForm)
+
+            val refreshed = awaitItem()
+            assertFalse(refreshed.provisional)
+            assertNotNull("authenticated refresh must rehydrate the vote form", refreshed.topic.pollVoteForm)
+            awaitComplete()
+        }
+        assertEquals("fresh open-poll row must issue exactly one rehydration GET", 2, server.requestCount)
+    }
+
+    @Test
     fun `observeTopicPage with forceRefresh re-fetches despite a fresh cache (#231)`() = runTest {
         // Two responses: the warmup + the forced refresh that must fire even though the
         // cache is fresh by TTL — the #231 « open from a flag = catch up on new posts » path.

@@ -8,12 +8,14 @@ import dagger.hilt.components.SingletonComponent
 import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
 import fr.forumhfr.redface2.core.domain.write.EditPostRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
+import fr.forumhfr.redface2.core.domain.write.PollVoteRepository
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
 import fr.forumhfr.redface2.core.parser.messages.PrivateMessageReplyLinkParser
 import fr.forumhfr.redface2.core.parser.write.ReplyFormParser
 import fr.forumhfr.redface2.core.parser.write.ReplySubmitResponseParser
 import fr.forumhfr.redface2.core.parser.write.TopicFormParser
+import fr.forumhfr.redface2.core.parser.write.poll.PollVoteResponseParser
 import javax.inject.Singleton
 
 /**
@@ -49,6 +51,10 @@ abstract class ReplyRepositoryModule {
         impl: DefaultPrivateMessageWriteRepository,
     ): PrivateMessageWriteRepository
 
+    @Binds
+    @Singleton
+    abstract fun bindPollVoteRepository(impl: DefaultPollVoteRepository): PollVoteRepository
+
     companion object {
         @Provides
         @Singleton
@@ -69,5 +75,9 @@ abstract class ReplyRepositoryModule {
         @Provides
         @Singleton
         fun provideTopicFormParser(): TopicFormParser = TopicFormParser()
+
+        @Provides
+        @Singleton
+        fun providePollVoteResponseParser(): PollVoteResponseParser = PollVoteResponseParser()
     }
 }

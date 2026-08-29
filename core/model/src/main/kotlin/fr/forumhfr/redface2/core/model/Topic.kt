@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.core.model
 
+import fr.forumhfr.redface2.core.model.write.PollVoteForm
+
 data class Topic(
     val cat: Int,
     val post: Int,
@@ -24,6 +26,16 @@ data class Topic(
     val totalPages: Int,
     val isFirstPostOwner: Boolean,
     val poll: Poll?,
+    /**
+     * Vote form associated with [poll], or `null` when HFR served results/no poll.
+     *
+     * This capability is **transient** and tied to the exact live page: its `hash_check` is never
+     * persisted, copied to `SavedStateHandle`, or logged. Room deliberately stores only [poll], so
+     * cache rehydration restores this field as `null` until an authenticated GET supplies a fresh
+     * form. Logged-out parsing may still surface a form with a blank token; the submit repository
+     * owns the downstream guard that rejects it before POST.
+     */
+    val pollVoteForm: PollVoteForm? = null,
     /**
      * Whether the user can reply to / quote / edit on this topic. Postability is
      * **driven by the presence of the `bddpost` reply form** in the topic page HTML

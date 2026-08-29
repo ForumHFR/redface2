@@ -4,6 +4,8 @@ import fr.forumhfr.redface2.core.database.entities.FetchMode
 import fr.forumhfr.redface2.core.model.Poll
 import fr.forumhfr.redface2.core.model.PollOption
 import fr.forumhfr.redface2.core.model.Topic
+import fr.forumhfr.redface2.core.model.write.PollVoteChoice
+import fr.forumhfr.redface2.core.model.write.PollVoteForm
 import java.time.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -18,7 +20,10 @@ import org.junit.Test
  */
 class TopicMappersPollTest {
 
-    private fun topicWith(poll: Poll?): Topic = Topic(
+    private fun topicWith(
+        poll: Poll?,
+        pollVoteForm: PollVoteForm? = null,
+    ): Topic = Topic(
         cat = 13,
         post = 44713,
         subcat = 432,
@@ -28,6 +33,7 @@ class TopicMappersPollTest {
         totalPages = 3811,
         isFirstPostOwner = false,
         poll = poll,
+        pollVoteForm = pollVoteForm,
     )
 
     @Test
@@ -92,6 +98,37 @@ class TopicMappersPollTest {
         val restored = TopicMappers.toDomain(entity, posts)
 
         assertEquals(2, requireNotNull(restored.poll).maxSelections)
+    }
+
+    @Test
+    fun `cache round-trip preserves poll but drops transient vote form (#779)`() {
+        val poll = Poll(
+            question = "Qui doit être TT cet été ?",
+            options = listOf(PollOption("Thoulisse", votes = 0, percentage = 0f)),
+            multipleChoice = false,
+            totalVotes = 0,
+            hasVoted = false,
+            resultsAvailable = false,
+            maxSelections = 1,
+        )
+        val choice = PollVoteChoice(id = "sond1", name = "reponse", value = "1", label = "Thoulisse")
+        val form = PollVoteForm(
+            hashCheck = "sensitive-token",
+            hiddenFields = linkedMapOf("cat" to "13", "page" to "1", "numeropost" to "44713"),
+            choices = listOf(choice),
+            multipleChoice = false,
+            maxSelections = 1,
+        )
+
+        val (entity, posts) = TopicMappers.toEntities(
+            topicWith(poll, pollVoteForm = form),
+            Instant.EPOCH,
+            FetchMode.AUTHENTICATED,
+        )
+        val restored = TopicMappers.toDomain(entity, posts)
+
+        assertEquals(poll, restored.poll)
+        assertNull("hash_check-bearing form must never survive Room", restored.pollVoteForm)
     }
 
     @Test

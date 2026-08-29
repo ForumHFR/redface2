@@ -311,6 +311,23 @@ class HfrClient @Inject constructor(
     }
 
     /**
+     * #779 — POST one poll vote to HFR's authenticated `vote.php` endpoint.
+     *
+     * The repository owns the complete browser-style [formBody], including the volatile
+     * `hash_check`. A live authenticated submission proved that no `Referer` header is required:
+     * the token and the form's hidden `(cat, page, numeropost)` tuple are the request protection.
+     * Vote submission is non-idempotent, so this method performs one call and never retries.
+     */
+    suspend fun submitPollVote(formBody: FormBody): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegments("user/vote.php")
+            .addQueryParameter("config", "hfr.inc")
+            .build()
+        val request = Request.Builder().url(url).post(formBody).build()
+        return authenticated.newCall(request).executeAuthenticatedHtml()
+    }
+
+    /**
      * Phase 2D (#147) — GET the HFR edit form for a post the user owns. The URL
      * shape is the same as the reply form, but with a `numreponse={N}` parameter
      * that tells HFR to render the « edit existing post » composer (prefills
