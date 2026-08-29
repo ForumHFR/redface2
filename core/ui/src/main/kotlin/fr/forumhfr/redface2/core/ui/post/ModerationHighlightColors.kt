@@ -18,7 +18,6 @@ data class ModerationHighlightColors(
     val onModeration: Color,
     val onModerationVariant: Color,
     val linkColor: Color,
-    val outline: Color,
 )
 
 /**
@@ -26,7 +25,7 @@ data class ModerationHighlightColors(
  *
  * Dynamic colour must not redefine this structural forum signal through Material's destructive
  * `error` or `primary` roles. Pure black identifies the static Redface AMOLED scheme; every other
- * scheme follows the same surface-luminance split as the reading highlight palettes. All seven
+ * scheme follows the same surface-luminance split as the reading highlight palettes. All six
  * values are opaque so inset and full-width posts render identically over any parent.
  */
 @Composable
@@ -44,7 +43,6 @@ internal fun moderationHighlightColors(surface: Color): ModerationHighlightColor
         onModeration = ModerationOn,
         onModerationVariant = ModerationOnVariant,
         linkColor = ModerationLink,
-        outline = ModerationSubSurfaceAmoled,
     )
     surface.luminance() < DARK_SURFACE_LUMINANCE -> ModerationHighlightColors(
         headerContainer = ModerationHeaderDark,
@@ -53,7 +51,6 @@ internal fun moderationHighlightColors(surface: Color): ModerationHighlightColor
         onModeration = ModerationOn,
         onModerationVariant = ModerationOnVariant,
         linkColor = ModerationLink,
-        outline = ModerationSubSurfaceDark,
     )
     else -> ModerationHighlightColors(
         // RF1 `styles.css`, `.post.moderation` — exact mono-theme values.
@@ -63,7 +60,6 @@ internal fun moderationHighlightColors(surface: Color): ModerationHighlightColor
         onModeration = ModerationOn,
         onModerationVariant = ModerationOnVariant,
         linkColor = ModerationLink,
-        outline = ModerationSubSurfaceLight,
     )
 }
 

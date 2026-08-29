@@ -22,7 +22,6 @@ class ModerationHighlightColorsTest {
                 onModeration = Color.White,
                 onModerationVariant = Color(0xFFFFF8F8),
                 linkColor = Color(0xFFFFF9C4),
-                outline = Color(0xFFC62828),
             ),
             moderationHighlightColors(surface = Color.White),
         )
@@ -38,7 +37,6 @@ class ModerationHighlightColorsTest {
                 onModeration = Color.White,
                 onModerationVariant = Color(0xFFFFF8F8),
                 linkColor = Color(0xFFFFF9C4),
-                outline = Color(0xFF891515),
             ),
             moderationHighlightColors(surface = Color(0xFF121212)),
         )
@@ -54,14 +52,13 @@ class ModerationHighlightColorsTest {
                 onModeration = Color.White,
                 onModerationVariant = Color(0xFFFFF8F8),
                 linkColor = Color(0xFFFFF9C4),
-                outline = Color(0xFF661010),
             ),
             moderationHighlightColors(surface = Color.Black),
         )
     }
 
     @Test
-    fun `all seven roles are opaque in all three regimes`() {
+    fun `all six roles are opaque in all three regimes`() {
         palettes().forEach { (name, colors) ->
             colors.allRoles().forEach { color ->
                 assertEquals("$name role must be opaque", 1f, color.alpha, 0f)
@@ -70,12 +67,11 @@ class ModerationHighlightColorsTest {
     }
 
     @Test
-    fun `header body and sub-surface stay distinct and outline follows the sub-surface`() {
+    fun `header body and sub-surface stay distinct`() {
         palettes().forEach { (name, colors) ->
             assertNotEquals("$name header/body", colors.headerContainer, colors.bodyContainer)
             assertNotEquals("$name header/sub-surface", colors.headerContainer, colors.subSurfaceContainer)
             assertNotEquals("$name body/sub-surface", colors.bodyContainer, colors.subSurfaceContainer)
-            assertEquals("$name RF1 outline", colors.subSurfaceContainer, colors.outline)
         }
     }
 
@@ -136,7 +132,7 @@ class ModerationHighlightColorsTest {
         listOf(headerContainer, bodyContainer, subSurfaceContainer)
 
     private fun ModerationHighlightColors.allRoles(): List<Color> = containers() +
-        listOf(onModeration, onModerationVariant, linkColor, outline)
+        listOf(onModeration, onModerationVariant, linkColor)
 
     private fun contrastRatio(first: Color, second: Color): Float {
         val light = maxOf(first.luminance(), second.luminance())

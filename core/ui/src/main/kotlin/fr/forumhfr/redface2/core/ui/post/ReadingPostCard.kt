@@ -65,7 +65,7 @@ fun ReadingPostCard(
     val egoColors = egoHighlightColors()
     // Resolve the complete structural palette once. #874 is the stronger invariant on every
     // surface: a post that is both EgoPost and `messageModo` stays wholly blue/neutral, without a
-    // red body, red identity override, red sub-surfaces or red outline.
+    // red body, red identity override or red sub-surfaces.
     val moderationColors = moderationHighlightColors().takeIf {
         post.isModerationPost && !presentation.egoPostHighlighted
     }
@@ -83,7 +83,6 @@ fun ReadingPostCard(
     )
     val border = readingPostBorder(
         presentation = presentation,
-        moderationColors = moderationColors,
         selectionColor = MaterialTheme.colorScheme.primary,
     )
     PostCardShell(
@@ -225,16 +224,16 @@ private fun readingPostContainerColor(
 }
 
 /**
- * #436/#1112 — the single resolved outline: multi-quote selection (2 dp primary) wins over the
- * effective moderation marker (1 dp #C62828), otherwise none. No double border. Pure decision so
+ * #436/#1112 — the single resolved outline: only multi-quote selection draws one (2 dp primary),
+ * otherwise none. #1112 dropped the moderation marker's 1 dp #C62828 outline: it was invisible on
+ * the already-red card and redundant with the white « Modération » header. Pure decision so
  * [ReadingPostCard] stays under the cyclomatic-complexity budget.
  */
 private fun readingPostBorder(
     presentation: ReadingPostCardPresentation,
-    moderationColors: ModerationHighlightColors?,
     selectionColor: Color,
-): BorderStroke? = when {
-    presentation.selected -> BorderStroke(width = 2.dp, color = selectionColor)
-    moderationColors != null -> BorderStroke(width = 1.dp, color = moderationColors.outline)
-    else -> null
+): BorderStroke? = if (presentation.selected) {
+    BorderStroke(width = 2.dp, color = selectionColor)
+} else {
+    null
 }
