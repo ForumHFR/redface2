@@ -107,6 +107,23 @@
     <string name="topic_poll_single_choice">choix unique</string>
     <string name="topic_poll_show">(afficher)</string>
     <string name="topic_poll_hide">(masquer)</string>
+    <!-- #779 — vote Topic-only : contrôles, progression et erreurs typées du slice MVI. -->
+    <plurals name="topic_poll_max_choices">
+        <item quantity="one">%1$d choix maximum</item>
+        <item quantity="other">%1$d choix maximum</item>
+    </plurals>
+    <string name="topic_poll_vote">Voter</string>
+    <string name="topic_poll_submitting">Envoi du vote…</string>
+    <string name="topic_poll_refreshing">Actualisation des résultats…</string>
+    <string name="topic_poll_unavailable">Vote indisponible. Actualisez la page ou reconnectez-vous.</string>
+    <string name="topic_poll_error_invalid_hash">La session de vote a expiré. Actualisez la page.</string>
+    <string name="topic_poll_error_empty_selection">Sélectionnez au moins une réponse.</string>
+    <string name="topic_poll_error_invalid_selection">Les réponses du sondage ont changé. Actualisez la page.</string>
+    <string name="topic_poll_error_too_many_selections">Trop de réponses sont sélectionnées.</string>
+    <string name="topic_poll_error_malformed_form">Ce sondage ne peut pas être envoyé depuis l’app.</string>
+    <string name="topic_poll_error_unexpected_response">HFR a renvoyé une réponse inattendue. Réessayez.</string>
+    <string name="topic_poll_error_network">Erreur réseau. Votre sélection est conservée.</string>
+    <string name="topic_poll_error_refresh_after_accepted">Vote enregistré, mais l’actualisation des résultats a échoué. Tirez pour réessayer.</string>
     <string name="topic_retry">Réessayer</string>
     <string name="topic_zoom_reset_chip">1×</string>
     <string name="topic_zoom_reset">Revenir au zoom normal</string>
