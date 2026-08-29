@@ -92,15 +92,16 @@ class TopicEgoHighlightRenderTest {
     }
 
     @Test
-    fun `the transient scroll anchor keeps its band and content above moderation`() {
+    fun `moderation keeps its red band even when it is the scroll anchor`() {
         val post = samplePost(isModerationPost = true)
         setCard(post = post, highlighted = true)
 
-        // The card stays red (persistent marker); both transient anchor band roles win above it.
+        // #1112 — the persistent moderation red wins on the band above the transient scroll-anchor
+        // tint; the card body was already red and stays red.
         assertShellColor(MODERATION_BODY_LIGHT)
-        assertIdentityBandColor(RedfaceLightColorScheme.tertiaryContainer)
-        assertIdentityBandContentColor(RedfaceLightColorScheme.onTertiaryContainer)
-        assertTextColor(post.date.asTopicDate(), RedfaceLightColorScheme.onTertiaryContainer)
+        assertIdentityBandColor(MODERATION_HEADER_LIGHT)
+        assertIdentityBandContentColor(Color.White)
+        assertTextColor(post.date.asTopicDate(), Color.White)
         assertStateCount(MODERATION_STATE, 1)
     }
 

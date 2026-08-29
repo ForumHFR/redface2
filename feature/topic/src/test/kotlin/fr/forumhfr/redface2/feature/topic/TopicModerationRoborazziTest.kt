@@ -30,8 +30,9 @@ import org.robolectric.annotation.GraphicsMode
  *
  * The captures deliberately include every colour-sensitive family: body text + link, quote,
  * spoiler, code, signature, citation pill, edit marker, menu and footer actions. The fourth image
- * pins the transient anchor band above the persistent moderation body. These PNGs are inspection
- * artefacts, not self-validating snapshots.
+ * pins the persistent moderation red on the band even when the card is the scroll anchor — the
+ * moderation header wins above the transient anchor tint. These PNGs are inspection artefacts, not
+ * self-validating snapshots.
  *
  *     ./scripts/docker-dev.sh ./gradlew :feature:topic:testDebugUnitTest \
  *         --tests '*TopicModerationRoborazziTest*' --console=plain --no-daemon
