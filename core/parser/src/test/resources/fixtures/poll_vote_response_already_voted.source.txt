@@ -1,0 +1,3 @@
+Source: réponse HTTP 200 de POST /user/vote.php?config=hfr.inc (2e POST identique, topic 96127), 2026-08-29.
+Contenu: mini-page, message dans div.hop = « Désolé, vous avez déjà voté ! » (PAS de meta-refresh),
+lien « Retour à la page précédente ». Aucun secret. Contrat: réponse DÉJÀ-VOTÉ.

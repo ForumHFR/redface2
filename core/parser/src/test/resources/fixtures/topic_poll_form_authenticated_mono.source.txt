@@ -1,0 +1,8 @@
+Source: https://forum.hardware.fr/hfr/Discussions/Voyages/sujet_96127_1.htm (forum2.php?cat=13&post=96127&page=1)
+Captured: 2026-08-29
+Auth: logged-IN (compte de test XaTelitte)
+Endpoint cible du form: POST /user/vote.php?config=hfr.inc
+Sanitization: réduit au sous-arbre <form action=vote.php>…</form> (par énumération). hash_check RÉEL
+remplacé par 32 zéros (placeholder NON-VIDE, pour prouver que le parser remonte un token non-vide en
+authentifié). Aucun cookie, userId, e-mail ni autre donnée de session. Forme mono : radios name=reponse
+value=1..5. Champs cachés verbatim: hash_check, cat, p, page, sondage, owntopic, subcat, numeropost.

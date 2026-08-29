@@ -1,0 +1,4 @@
+Source: réponse HTTP 200 de POST /user/vote.php?config=hfr.inc (compte de test XaTelitte, topic 96127), 2026-08-29.
+Contenu: mini-page (~1,2 Ko), message dans div.hop = « Votre vote a bien été pris en compte ! » +
+<meta http-equiv="Refresh" content="1; url=…/sujet_96127_1.htm">. Aucun secret (link the_style1.php retiré).
+Contrat: réponse d'ACCEPTATION du vote.
