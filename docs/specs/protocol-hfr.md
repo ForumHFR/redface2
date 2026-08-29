@@ -17,7 +17,7 @@ Endpoints, form fields, constantes et edge cases du protocole HFR utilisés par 
 
 HFR expose deux surfaces consommables côté client :
 
-1. **HTML sur les endpoints `forum*.php`** — le scraping historique, toujours en place pour la lecture des posts, les MPs, le login et toutes les mutations en v1 (`bddpost.php`, `addflag.php`, `delflag.php`).
+1. **HTML sur les endpoints `forum*.php`** — le scraping historique, toujours en place pour la lecture des posts, les MPs, le login et toutes les mutations en v1 (`bddpost.php`, `vote.php`, `addflag.php`, `delflag.php`).
 2. **JSON sur `/webservices/rest_api.php`** — une API REST partielle exposée par MesDiscussions (le moteur du forum), retrouvée et instrumentée fin avril 2026, qui couvre la portion **browsing** : catégories, sous-catégories, listings de topics, drapeaux personnels, metadata d'un topic. Décision de stratégie hybride : [ADR-003]({{ site.baseurl }}/adr/003-api-rest-hfr-hybride).
 
 Cette page documente les invariants des deux surfaces — constantes, form fields, anti-CSRF, anti-bot, optimisations JS inline, contrat REST — que **le LLM qui écrit le parser, le client réseau ou les mappers REST doit respecter**.
@@ -46,6 +46,7 @@ La documentation HTML est issue de la rétro-ingénierie du code de [Redface v1]
 | Edit FP (premier post) | POST | `/bdd.php?config=hfr.inc` avec champs spécifiques | **oui** |
 | Suppression post/topic owned | POST | `/bdd.php?config=hfr.inc` avec `delete=1` | **oui** |
 | Nouveau topic | POST | `/bddpost.php?config=hfr.inc` | **oui** |
+| Vote sondage | POST | `/user/vote.php?config=hfr.inc` | **oui** |
 | MP (envoi) | POST | `/bddpost.php?config=hfr.inc&cat=prive&pseudo={dest}` | **oui** |
 | Conversation MP | GET | `/forum2.php?config=hfr.inc&cat=prive&post={mp_id}&page={page}` | **oui** |
 | Liste des MPs | GET | `/forum1.php?config=hfr.inc&cat=prive&page={page}&subcat=&sondage=0&owntopic=0&trash=0&trash_post=0&moderation=0&new=0&nojs=0&subcatgroup=0` | **oui** |
@@ -175,6 +176,40 @@ GET /message-smi-mp-aj.php?config=hfr.inc&user_id=0&responsable=1
 ---
 
 ## Form fields critiques
+
+### POST `/user/vote.php` — vote sondage (#779)
+
+Contrat vérifié en live avec le compte de test authentifié :
+
+```text
+POST /user/vote.php?config=hfr.inc
+Content-Type: application/x-www-form-urlencoded
+```
+
+Le POST réussit **sans aucun header `Referer`**. La protection CSRF est le `hash_check`; les champs
+`cat`, `page` et `numeropost` nécessaires au routage sont déjà dans le body. Le client ne construit
+donc aucun `Referer` et n'ajoute aucun paramètre de contexte à la signature réseau.
+
+Ordre déterministe du payload, identique au formulaire observé :
+
+1. `hash_check` — token non vide de 32 caractères hexadécimaux en session authentifiée ; la même
+   forme est parsable logged-out avec une valeur vide, mais le repository refuse alors le POST ;
+2. champs cachés, verbatim et dans l'ordre DOM : `cat`, `p`, `page`, `sondage`, `owntopic`,
+   `subcat`, `numeropost` ;
+3. choix cochés dans l'ordre des options du formulaire, jamais dans l'ordre d'un `Set` appelant :
+   - mono (radios) : un seul `reponse=<value>` ;
+   - multi (checkboxes) : un `reponseN=1` par choix.
+
+Les réponses succès et déjà-voté sont toutes deux HTTP 200 `text/html`. Le message se trouve dans
+`div.hop` : « Votre vote a bien été pris en compte ! » (avec meta-refresh) ou « Désolé, vous avez
+déjà voté ! » (sans refresh). Le parser normalise casse, diacritiques et espaces avant de reconnaître
+ces marqueurs ; un `<meta http-equiv="Refresh" content="…; url=…">` reste un fallback succès borné,
+testé après le marqueur déjà-voté.
+
+Le vote est **non idempotent** : exactement un POST, aucun retry automatique. Avant la requête, le
+repository refuse le token vide, une sélection vide/inconnue, plusieurs choix sur un mono, une
+sélection au-delà de `maxSelections`, ou des champs `cat`/`page`/`numeropost` absents ou non
+numériques. `PollVoteForm` et son `hash_check` sont transitoires, jamais persistés ni loggés.
 
 ### POST `bddpost.php` (reply, quote ou nouveau topic)
 
@@ -342,7 +377,7 @@ Pour un post normal, la réponse succès contient un refresh vers la page du top
 Les inconnues restantes sont explicitement limitées aux points suivants :
 
 - succès de création topic : formulaire GET capturé (`write_create_topic_form_android_cat.html`) et réponse POST succès capturée (`write_create_topic_success_response.html`). Contrat connu : refresh vers la liste, aucun id du topic créé. Limite restante : la navigation directe #206 est impossible ; workaround livré = highlight exact du titre dans la liste d'arrivée ;
-- sondage : les champs de formulaire FP sont observés, mais aucun POST avec sondage n'a été envoyé. Impact : création/édition de sondage hors MVP écriture ;
+- création/édition de sondage : les champs de formulaire FP sont observés, mais aucun POST de création ou modification n'a été envoyé. Impact : création/édition de sondage hors MVP écriture. Le POST de **vote** est, lui, vérifié séparément dans la section `/user/vote.php` ;
 - `verifrequet=1100` : valeur observée dans tous les formulaires, pas de variant négatif testé. Impact : envoyer la valeur observée telle quelle ;
 - second paramètre de `[quotemsg=numreponse,X,user_id]` : valeurs observées `768`, `640`, `1`; le sens exact reste opaque. Impact : ne pas reconstruire localement les quotes, réutiliser le `content_form` prérempli par HFR ;
 - edit FP du topic Redface 2 : non testé car `XaTelitte` ne possède pas le FP ; edit FP owned validé sur topic temporaire Programmation.
@@ -401,7 +436,9 @@ require(hashCheck.isNotBlank()) { "hash_check absent — le POST serait silencie
 
 ### `verifrequet = "1100"`
 
-Constante anti-bot statique, présente dans **tous** les POST vers HFR. Valeur littérale `"1100"` (string, pas un nombre dynamique).
+Constante anti-bot statique, présente dans les formulaires d'écriture `bddpost.php` / `bdd.php`
+observés. Valeur littérale `"1100"` (string, pas un nombre dynamique). Le formulaire de vote
+`/user/vote.php` ne la porte pas et ne doit pas l'inventer.
 
 En Kotlin, à constanter dans `:core:network` :
 

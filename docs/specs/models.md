@@ -324,6 +324,7 @@ data class Topic(
     val totalPages: Int,
     val isFirstPostOwner: Boolean,   // Phase 1 : figé à false par TopicPageParser tant que parseEditPage n'est pas livrée (Phase 2). Renseigné côté serveur via la page d'édition du FP.
     val poll: Poll?,
+    val pollVoteForm: PollVoteForm? = null, // #779 : capacité de vote transitoire de CETTE page, présente uniquement avec poll.resultsAvailable=false. Jamais Room/SavedStateHandle/log ; le cache la réhydrate à null et force un GET authentifié pour retrouver le hash_check.
     val canReply: Boolean = false,   // #213 : postabilité = présence du formulaire bddpost dans la page topic (rendu uniquement en session authentifiée sur topic non verrouillé). Remplace l'ancien heuristique hasSubcat (subcat > 0), qui excluait à tort les cats IA postables (subcat=0) et faisait confiance au subcat du widget de recherche capturé logged-out. Persisté en Room v7 (MIGRATION_6_7). Défaut false : rows pré-v7 / prefetch anon en lecture seule jusqu'au prochain fetch authentifié. Gate Répondre/Citer/Modifier/Modifier-1er-message.
 ) {
     companion object { const val SUBCAT_UNKNOWN: Int = -1 }
@@ -415,6 +416,7 @@ data class Poll(
     val totalVotes: Int,
     val hasVoted: Boolean,
     val resultsAvailable: Boolean = true, // #697 — false = forme « formulaire » (pas encore voté)
+    val maxSelections: Int? = null,       // #779 — mono=1 ; multi=caption « Sondage à N choix possibles » ; null=borne multi inconnue/ancien cache, jamais coercée à 1
 )
 
 data class PollOption(
@@ -429,8 +431,11 @@ pourcentages) uniquement après avoir voté ou cliqué « voir les résultats »
 « formulaire » (inputs radio/checkbox `name=reponse`) dans tous les autres cas — donc dans **toutes**
 les lectures anonymes, ce que l'app reçoit. `resultsAvailable = false` marque cette seconde forme :
 seuls `question`, `options[].text` et `multipleChoice` (déduit du type d'input : checkbox = multi)
-sont porteurs de sens. Le vote in-app est un chantier séparé (#779) ; `hasVoted` reste `false` en
-lecture seule.
+sont porteurs de sens. `Poll.maxSelections` porte la borne de sélection du même DOM : `1` pour une
+radio, la valeur de la caption pour un multi, `null` si cette borne est réellement inconnue. Le
+contrat domaine/transport du vote est livré par #779 ; son orchestration MVI et son UI restent un
+chantier séparé. `hasVoted` reste `false` sur la forme résultats et ne décide jamais de la capacité
+de vote : seule la présence de `Topic.pollVoteForm` le fait.
 
 `EditInfo` est retourné par `HfrParser.parseEditPage(html)` (cf. [architecture.md]({{ site.baseurl }}/specs/architecture#core-parser--hfrparser)). Il capture l'état pré-rempli du formulaire d'édition HFR et ce qui doit être renvoyé côté `bdd.php` (cf. [protocol-hfr.md]({{ site.baseurl }}/specs/protocol-hfr#post-bddphp-edit)).
 
@@ -536,6 +541,32 @@ data class ReplyForm(
     val initialContent: String = "",  // Phase 2C (#146) : reply → "" ; quote → bloc `[quotemsg=…]` prérempli par HFR (verbatim, jamais reconstruit côté app)
 )
 
+data class PollVoteForm(              // #779 : extrait du form action*=vote.php de la page topic
+    val hashCheck: String,            // token CSRF volatile ; peut être vide logged-out ; JAMAIS persisté/loggé
+    val hiddenFields: Map<String, String>, // cat,p,page,sondage,owntopic,subcat,numeropost dans l'ordre DOM ; hash_check exclu
+    val choices: List<PollVoteChoice>,
+    val multipleChoice: Boolean,      // checkbox=true ; radio=false
+    val maxSelections: Int?,          // mono=1 ; multi=caption ; null si borne inconnue
+)
+
+data class PollVoteChoice(
+    val id: String,
+    val name: String,                 // mono : reponse ; multi : reponseN
+    val value: String,                // mono : index ; multi : 1
+    val label: String,
+)
+
+sealed interface PollVoteResult {
+    data object Accepted : PollVoteResult
+    data object AlreadyVoted : PollVoteResult
+    data class Failed(val reason: PollVoteFailureReason) : PollVoteResult
+}
+
+enum class PollVoteFailureReason {
+    InvalidHashCheck, EmptySelection, InvalidSelection, TooManySelections,
+    MalformedForm, UnexpectedResponse,
+}
+
 data class EditFirstPostContext(            // Phase 2D (#148) : édition du premier post d'un topic
     val cat: Int,
     val subcat: Int,                         // requis > 0
@@ -589,7 +620,12 @@ sealed interface ReplyFailureReason {
 }
 ```
 
-Le contrat HFR sous-jacent est documenté dans [`protocol-hfr.md` § POST `bddpost.php`]({{ site.baseurl }}/specs/protocol-hfr). Les `ReplyFailureReason` mappent un-à-un sur les fixtures `write_*_error.html` / `write_*_response.html` capturées en Phase 2A.
+Les formulaires d'écriture sont transitoires. En particulier, `PollVoteForm.hashCheck` ne traverse
+jamais Room ni `SavedStateHandle` et n'est jamais loggé ; un round-trip cache conserve `Poll` mais
+remet `Topic.pollVoteForm` à `null`. Les gardes pré-POST produisent tous les
+`PollVoteFailureReason` sauf `UnexpectedResponse`, réservé au parser de réponse.
+
+Les contrats HFR sous-jacents sont documentés dans [`protocol-hfr.md` § Form fields critiques]({{ site.baseurl }}/specs/protocol-hfr#form-fields-critiques). Les `ReplyFailureReason` mappent un-à-un sur les fixtures `write_*_error.html` / `write_*_response.html` capturées en Phase 2A.
 
 ---
 
