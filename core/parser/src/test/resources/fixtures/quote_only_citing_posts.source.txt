@@ -1,0 +1,11 @@
+Capture: forum.hardware.fr live, 2026-08-30 (anonyme, sans cookies)
+Provenance: endpoint natif quote_only=1 (index inverse des citations, #783).
+  URL: forum2.php?config=hfr.inc&cat=13&subcat=423&post=95092&page=1&numreponse=23786379&quote_only=1&new=0&nojs=0
+  Sujet public "Culture générale - Un amusement sérieux" (Discussions, cat 13), cible numreponse=23786379.
+Contenu: page topic filtrée = les posts citant la cible. 45 posts distincts (name="tN"), 46 occurrences
+  de #t23786379 (au moins un post cite deux fois), aucun pager. Vaut aussi de témoin du caveat
+  "liste != citedCount" documenté dans protocol-hfr.md.
+Nettoyage: fetch anonyme -> hash_check value="" (vides), aucun cookie de session, 0 marqueur connecté
+  (Déconnexion/Connecté/favoris/nonlu.php). Cryptlinks anonymes conservés (décodés par le parser, #227).
+  Vérifié par énumération, pas par regex aveugle. Pseudos des citeurs = publics.
+Encodage: UTF-8.
