@@ -1,10 +1,8 @@
 package fr.forumhfr.redface2.core.ui.post
 
-import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.content.Intent
 import android.os.Build
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
@@ -34,6 +32,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import fr.forumhfr.redface2.core.ui.R
+import fr.forumhfr.redface2.core.ui.browser.openUrlInExternalBrowser
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
@@ -185,11 +184,9 @@ private fun copyImageUrlToClipboard(context: Context, url: String, feedback: Str
     }
 }
 
-/** Fires an `ACTION_VIEW` on the direct image URL, surfacing a Toast when no handler exists. */
+/** Opens the direct image URL in an external browser, surfacing a Toast when none exists. */
 private fun openImageUrlInBrowser(context: Context, url: String, failureFeedback: String) {
-    try {
-        context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))
-    } catch (ignored: ActivityNotFoundException) {
+    if (!openUrlInExternalBrowser(context, url.toUri())) {
         Toast.makeText(context, failureFeedback, Toast.LENGTH_SHORT).show()
     }
 }

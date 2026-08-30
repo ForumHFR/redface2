@@ -3,6 +3,10 @@ package fr.forumhfr.redface2.feature.topic
 import android.app.Application
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.content.pm.ActivityInfo
+import android.content.pm.ResolveInfo
+import android.net.Uri
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -21,6 +25,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
@@ -96,12 +101,36 @@ class PostMenuSheetTest {
         compose.onNodeWithText("Alerter (à venir)").assertIsNotEnabled()
     }
 
+    @Test
+    fun `browser entry opens the permalink in the resolved default browser`() {
+        val application = ApplicationProvider.getApplicationContext<Application>()
+        val probe = Intent(Intent.ACTION_VIEW, Uri.parse("https://example.com"))
+            .addCategory(Intent.CATEGORY_BROWSABLE)
+        Shadows.shadowOf(application.packageManager).addResolveInfoForIntent(
+            probe,
+            ResolveInfo().apply {
+                activityInfo = ActivityInfo().apply {
+                    packageName = BROWSER_PACKAGE
+                    name = "$BROWSER_PACKAGE.BrowserActivity"
+                }
+            },
+        )
+        mount(post = samplePost())
+
+        compose.onNodeWithText("Ouvrir dans le navigateur").performClick()
+
+        val started = Shadows.shadowOf(application).nextStartedActivity
+        assertEquals(Intent.ACTION_VIEW, started.action)
+        assertEquals(BROWSER_PACKAGE, started.`package`)
+        assertEquals(PERMALINK, started.data.toString())
+    }
+
     private fun mount(post: Post, withAllActions: Boolean = false) {
         compose.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 PostMenuSheet(
                     post = post,
-                    permalink = "https://forum.hardware.fr/message/42",
+                    permalink = PERMALINK,
                     citedCount = post.citedCount ?: 0,
                     onDismiss = {},
                     onDelete = if (withAllActions) ({}) else null,
@@ -140,4 +169,10 @@ class PostMenuSheetTest {
         postIndex = null,
         profileId = 123,
     )
+
+    private companion object {
+        const val BROWSER_PACKAGE = "com.example.browser"
+        const val PERMALINK =
+            "https://forum.hardware.fr/forum2.php?config=hfr.inc&cat=13&post=35395&page=42#t42"
+    }
 }

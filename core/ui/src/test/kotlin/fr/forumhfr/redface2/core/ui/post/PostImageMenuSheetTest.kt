@@ -124,15 +124,17 @@ class PostImageMenuSheetTest {
     }
 
     @Test
-    fun `the browser entry fires an ACTION_VIEW on the direct image URL`() {
+    fun `the browser entry keeps the direct image URL inside the external chooser`() {
         mount()
 
         composeTestRule.onNodeWithText("Ouvrir dans le navigateur").performClick()
 
         val started = Shadows.shadowOf(ApplicationProvider.getApplicationContext<Application>())
             .nextStartedActivity
-        assertEquals(Intent.ACTION_VIEW, started.action)
-        assertEquals(target.url, started.data.toString())
+        assertEquals(Intent.ACTION_CHOOSER, started.action)
+        val view = requireNotNull(started.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java))
+        assertEquals(Intent.ACTION_VIEW, view.action)
+        assertEquals(target.url, view.data.toString())
     }
 
     @Test
