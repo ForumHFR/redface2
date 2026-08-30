@@ -16,6 +16,12 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.47.0` — `internal` (dev) — 2026-08-30
+
+### Ajouté
+
+- **Ouverture correcte des liens HFR (#1032)** — chantier en trois volets. **Sortant** : « Ouvrir dans le navigateur » (permalien de post, sujet depuis les drapeaux, image) ne reboucle plus sur Redface 2 quand l'app est handler du domaine — ouverture directe du navigateur par défaut (résolu via un probe neutre, jamais l'URL HFR), repli sur un sélecteur excluant les variantes de l'app. **Entrant** : les liens HFR « jolis » partagés (`…-sujet_<post>_<page>.htm#tN`, la forme la plus courante) ouvrent désormais le bon sujet dans l'app (20 catégories mappées) en plus des formes `forumN.php` ; un lien HFR non routable (MP, profil, recherche, catégorie inconnue) part proprement au navigateur au lieu d'échouer en silence. **Réglage** : nouvelle ligne (section Réseau) affichant si Redface 2 est l'app par défaut pour les liens `forum.hardware.fr` (Android 12+), avec un raccourci vers l'écran système « Ouvrir par défaut » — l'association de domaine n'étant pas vérifiable automatiquement (domaine tiers, pas d'`autoVerify`), l'activation reste un opt-in manuel désormais découvrable.
+
 ## `0.46.1` — `internal` (dev) — 2026-08-30
 
 ### Ajouté
