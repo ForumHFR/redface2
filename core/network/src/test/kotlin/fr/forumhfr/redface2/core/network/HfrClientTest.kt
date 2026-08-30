@@ -5,6 +5,7 @@ import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.search.SearchTextScope
 import fr.forumhfr.redface2.core.model.write.FlagAddContext
+import java.io.File
 import java.io.IOException
 import java.time.LocalDate
 import java.util.concurrent.CountDownLatch
@@ -505,6 +506,49 @@ class HfrClientTest {
     }
 
     @Test
+    fun `getCitingPosts follows the redirect and returns the captured quote-only body`() = runTest {
+        val fixture = sharedParserFixture("quote_only_citing_posts.html")
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(301)
+                .addHeader("Location", "/hfr/Discussions/Societe/citations-sujet_95092_1.htm"),
+        )
+        server.enqueue(MockResponse().setResponseCode(200).setBody(fixture))
+
+        val html = client.getCitingPosts(cat = 13, post = 95_092, numreponse = 23_786_379)
+
+        assertEquals(fixture, html)
+        assertEquals("the quote-only read must follow HFR's redirect", 2, server.requestCount)
+        val request = server.takeRequest()
+        val url = requireNotNull(request.requestUrl)
+        assertEquals("/forum2.php", url.encodedPath)
+        assertEquals("anonymous", request.headers["X-RF2-Client"])
+        assertEquals("hfr.inc", url.queryParameter("config"))
+        assertEquals("13", url.queryParameter("cat"))
+        assertEquals("95092", url.queryParameter("post"))
+        assertEquals("1", url.queryParameter("page"))
+        assertEquals("23786379", url.queryParameter("numreponse"))
+        assertEquals("1", url.queryParameter("quote_only"))
+        assertEquals(
+            "/hfr/Discussions/Societe/citations-sujet_95092_1.htm",
+            server.takeRequest().requestUrl?.encodedPath,
+        )
+    }
+
+    @Test
+    fun `getCitingPosts surfaces a server response as typed HfrServerException`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(503).setBody("maintenance"))
+
+        val error = runCatching {
+            client.getCitingPosts(cat = 13, post = 95_092, numreponse = 23_786_379)
+        }.exceptionOrNull()
+
+        val typed = error as? HfrServerException
+            ?: throw AssertionError("expected HfrServerException, got $error")
+        assertEquals(503, typed.code)
+    }
+
+    @Test
     fun `resolveTopicPageUrl returns null on a non-redirect response`() = runTest {
         server.enqueue(MockResponse().setResponseCode(200).setBody("<html>not a redirect</html>"))
 
@@ -750,6 +794,22 @@ class HfrClientTest {
                 chain.proceed(request)
             }
             .build()
+
+    /**
+     * #783 keeps the real anonymous capture in :core:parser, its single source of truth. Gradle
+     * runs a subproject test from that subproject directory while IDE runners commonly use the
+     * repository root, so accept exactly those two deterministic layouts instead of copying the
+     * 150 KB fixture into :core:network.
+     */
+    private fun sharedParserFixture(name: String): String {
+        val candidates = listOf(
+            File("../parser/src/test/resources/fixtures", name),
+            File("core/parser/src/test/resources/fixtures", name),
+        )
+        val file = candidates.firstOrNull { candidate -> candidate.isFile }
+            ?: error("Shared parser fixture not found: $name (tried $candidates)")
+        return file.readText()
+    }
 
     private class CallLifecycleListener : EventListener() {
         @Volatile

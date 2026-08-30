@@ -34,6 +34,7 @@ La documentation HTML est issue de la rétro-ingénierie du code de [Redface v1]
 | Liste de topics d'une sous-catégorie | GET | `/forum2.php?config=hfr.inc&cat={cat}&subcat={subcat}&page={page}` | non (logué ↔ lu/non-lu visible) |
 | Liste topics (rewrite SEO) | GET | `/hfr/{cat_slug}/{subcat_slug}/liste_sujet-{page}.htm` | non |
 | Lecture d'un topic | GET | `/forum2.php?config=hfr.inc&cat={cat}&post={post}&page={page}` | non |
+| Posts citants d'un post (#783) | GET | `/forum2.php?config=hfr.inc&cat={cat}&post={post}&numreponse={numreponse}&quote_only=1` | non |
 | Drapeaux (accueil Redface 2) — REST | GET | `/webservices/rest_api.php?uri=forums/hardwarefr/topics/{participated,read,favorites}/&page={page}&results_per_page={n}` | **oui** |
 | Drapeaux par catégorie — REST | GET | `/webservices/rest_api.php?uri=forums/hardwarefr/categories/{cat}/topics/{participated,read,favorites}/&page={page}&results_per_page={n}` | **oui** |
 | Login | POST | `/login_validation.php?config=hfr.inc&redirect=&url=` | — |
@@ -62,6 +63,8 @@ La documentation HTML est issue de la rétro-ingénierie du code de [Redface v1]
 > **Note sur `PRIVATE_MESSAGE_CAT_ID`** : la catégorie des MPs est la **chaîne** `"prive"` et non un entier. Attention lors du typage côté Kotlin — `cat: String` pour les endpoints MP ou sentinel dédié.
 
 > **Note sur l'URL "Liste des MPs"** : l'endpoint canonique est `forum1.php?config=hfr.inc&cat=prive&...`, **pas** `message.php?config=hfr.inc` (qui ouvre le composer d'un MP isolé). Vérifié dans le legacy v1 (`HFREndpoints.PRIVATE_MESSAGES_URL`, prouvé en prod ~10 ans) et reproduit dans `:core:network HfrClient.getPrivateMessageListPage()` de Phase 1B.1. Toute la chaîne de query params (`subcat=`, `sondage=0`, `owntopic=0`, etc.) est conservée à l'identique du legacy par défensif — HFR pourrait accepter une URL plus courte mais ce n'est pas testé.
+
+> **Note sur `quote_only=1` — liste des posts citants (#783, capturé live 2026-08-30)** : l'endpoint `forum2.php?config=hfr.inc&cat={cat}&post={post}&numreponse={numreponse}&quote_only=1` renvoie une **page topic filtrée** ne contenant que les posts qui **citent** le `numreponse` cible, dans le **DOM `messagetable` standard** (mêmes sélecteurs que la lecture normale — parsé par `HfrParser.parseCitingPosts`). Accessible **anonymement** (aucun cookie requis ; c'est le canal de lecture du badge « cité N fois », un sujet = une source canonique). **Caveat — pas de bijection avec `citedCount`** : la liste renvoyée n'égale pas forcément le compteur serveur affiché (« Message cité N fois »). Le compteur agrège des **occurrences** (un même post peut citer la cible plusieurs fois ; une citation par un post depuis supprimé compte encore), là où la liste expose des **posts distincts** ; HFR **déduplique** côté serveur (observé mais **non contractuel** — d'où la garde `distinctBy { numreponse }` du repo, gate Fable R2). Il n'y a **pas de pagination** de ce filtre : `page=2` **répète** la première page au lieu d'avancer. Le titre de la feuille reste donc le `citedCount` serveur (autorité de comptage) et le corps liste exactement les rows distinctes renvoyées, sans jamais présenter leur nombre comme un second compteur.
 
 ### Retirer un drapeau — `delflag.php` (#99, Phase 2 finish)
 

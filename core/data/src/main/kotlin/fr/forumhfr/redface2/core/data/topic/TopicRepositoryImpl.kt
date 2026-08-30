@@ -12,6 +12,7 @@ import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicPageEmission
 import fr.forumhfr.redface2.core.domain.topic.TopicRepository
+import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.parser.HfrParser
@@ -122,6 +123,30 @@ class TopicRepositoryImpl @Inject constructor(
 
     override suspend fun refreshTopicPage(cat: Int, post: Int, page: Int): Topic =
         fetchAndPersist(cat, post, page, FetchMode.AUTHENTICATED)
+
+    /**
+     * #783 — one-shot, anonymous and intentionally uncached reverse-citation read. The enclosing
+     * IO context covers both the network call and the synchronous Jsoup parse. Cancellation is
+     * rethrown rather than hidden in `Result.failure`, matching the repository's structured-
+     * concurrency contract.
+     */
+    override suspend fun getCitingPosts(
+        cat: Int,
+        post: Int,
+        numreponse: Int,
+    ): Result<List<Post>> = withContext(ioDispatcher) {
+        try {
+            val html = client.getCitingPosts(cat = cat, post = post, numreponse = numreponse)
+            // #783 (gate Fable R2) — the server MAY theoretically repeat a numreponse (dedup is
+            // observed but not contractual). distinctBy keeps the citers a set so the sheet's
+            // LazyColumn key (post.numreponse) stays unique and never crashes on a duplicate.
+            Result.success(parser.parseCitingPosts(html).distinctBy { it.numreponse })
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (@Suppress("TooGenericExceptionCaught") throwable: Throwable) {
+            Result.failure(throwable)
+        }
+    }
 
     /**
      * Phase 1D PR 4 — anonymous prefetch. Issues an unauthenticated fetch (cf.
