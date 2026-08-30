@@ -50,6 +50,21 @@
                     android:host="forum.hardware.fr"
                     android:path="/forum1f.php" />
             </intent-filter>
+
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data
+                    android:scheme="https"
+                    android:host="forum.hardware.fr"
+                    android:pathPrefix="/hfr/" />
+                <data
+                    android:scheme="http"
+                    android:host="forum.hardware.fr"
+                    android:pathPrefix="/hfr/" />
+            </intent-filter>
         </activity>
     </application>
 </manifest>

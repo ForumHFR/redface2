@@ -65,6 +65,10 @@ graph TB
     APP --> FSR[":feature:search"]
     APP --> FPR[":feature:profile"]
     APP --> CDATA[":core:data"]
+    APP --> CDOM[":core:domain"]
+    APP --> CN[":core:network"]
+    APP --> CP[":core:parser"]
+    APP --> CU[":core:ui"]
 
     FFL --> CDOM[":core:domain"]
     FFL --> CU[":core:ui"]
@@ -130,7 +134,7 @@ graph TB
 | `:core:domain` | Interfaces de repositories (`TopicRepository`, `FlagRepository`, `AuthRepository`...) et règles métier partagées. Aucune dépendance framework. | `:core:model` |
 | `:core:data` | Implémentations des repositories. Orchestre réseau (HTML + REST JSON), parser HTML et cache. Porte les DTO `@Serializable` REST et leurs mappers vers `:core:model`. Fournit les bindings Hilt. | `:core:domain`, `:core:network`, `:core:parser`, `:core:database` |
 | `:core:network` | Deux clients : `HfrClient` (HTML brut sur `forum*.php`, login, MPs, mutations) et `HfrApiClient` (JSON REST sur `/webservices/rest_api.php`, browsing). Encapsulent OkHttp. Aucun type domaine exposé — du `String` brut ou des erreurs typées. Le helper de rewrite HATEOAS `HfrApiClient.rewriteHateoasHref(href)` vit ici. Cf. [ADR-003]({{ site.baseurl }}/adr/003-api-rest-hfr-hybride). | `:core:domain` (erreurs typées levées par les clients : `SessionExpiredException`, `HfrServerException` #324) |
-| `:core:parser` | `HfrParser` : transforme le HTML HFR et, à partir de l'éditeur Phase 2, le BBCode HFR en modèles domaine, dont l'AST `PostContent`. Pas de parser JSON REST ici — les DTO REST vivent dans `:core:data`. | `:core:model` |
+| `:core:parser` | `HfrParser` transforme le HTML HFR et, à partir de l'éditeur Phase 2, le BBCode HFR en modèles domaine, dont l'AST `PostContent`. Les parseurs structurels de réponses et d'URLs HFR y restent JVM purs. Pas de parser JSON REST ici — les DTO REST vivent dans `:core:data`. | `:core:model` |
 | `:core:database` | Room DB, DAOs, entities, mappers entity↔model. Cache locale + cache MPStorage. | `:core:model` |
 | `:core:ui` | Thème Material 3 (`theme/`), `PostRenderer` (`post/`, `PostContent` → Compose), libellés d'erreur partagés (`error/`, mapping `HfrErrorKind` → string resource, #324), et composants de lecture partagés topic↔MP (#351, ADR-018 décision 1) : `list/` (`LazyListScrollbar`, ascenseur intra-page #300) et `pager/` (composants interactifs `PageFab` et `PageNavigation`, plus géométrie pure du swipe de page #282 — seuils de commit, drag-follow, edge-hint et prédicat de dead-zone système — partagée par les deux gestes ; seule la machinerie `pointerInput` reste dans chaque feature : les deux surfaces paginent in-place depuis #895 étape 4, mais leurs couplages divergent — le topic slide systématiquement puis re-key par page ; le MP slide si la page cible est chaude dans son cache RAM scellé compte/génération, revient d'abord à offset nul sinon, et re-key par page + état de chargement pour se réarmer après un échec keep-content ; cf. ADR-018 décision 1), et `zoom/` (machine de loupe pincée #182/#1098 partagée depuis le lot 6 de #1040 : `PinchZoomState`, `Modifier.pinchZoom`, `Modifier.pinchZoomTransform` et les calculs purs de `PinchZoomMath` ; chaque feature garde sa clé page/lecteur, son swipe et son pull-to-refresh, tous désarmés pendant le zoom). Le paquet `post/` porte en outre **`ReadingPostCard`** (+ `ReadingPostCardPresentation`), la **carte de lecture commune Topic↔MP** promue au lot 1 de #1040 : elle porte corps, slots d'identité, densité, mode plat et capacités par présence de callbacks — `TopicPostCard` et `MessageCard` n'en sont plus que les hôtes de chaque feature (cf. [reading-parity.md]({{ site.baseurl }}/specs/reading-parity)). D'autres sous-packages (`adaptive/`, `semantics/`, `util/`, `extensions/`) sont prévus mais n'apparaîtront qu'au fur et à mesure de l'arrivée des features qui les justifient — pas de module vide en avance. Seul module autorisé à instancier `ColorScheme`, `Typography`, `Shapes`. | `:core:model`, `:core:domain` (#324 : résolution des libellés partagés depuis `HfrErrorKind`) |
 | `:core:extension` | Interfaces d'extension : `PostDecorator`, `TopicToolbarContributor`, `EditorToolbarContributor`. | `:core:model` |
@@ -172,11 +176,9 @@ Les 8 modules extension arrivent en **Phase 4** uniquement. En Phases 0 à 3, le
 
 ### Module app
 
-`:app` est le point d'entrée. Il :
-- Configure Hilt (DI) — inclut `:core:data` pour le wiring des implémentations
-- Définit la navigation globale (`RedfaceApp` + `NavDisplay`)
-- Contient `MainActivity`
-- Dépend de tous les modules feature (base + extensions)
+| Module | Responsabilité | Dépend de |
+|--------|----------------|-----------|
+| `:app` | Point d'entrée Android : `MainActivity`, configuration Hilt, navigation globale (`RedfaceApp` + `NavDisplay`) et résolution des URLs HFR entrantes. | Les 9 modules feature de base, `:core:data` pour le wiring, `:core:domain`, `:core:network`, `:core:parser` pour les URLs jolies et `:core:ui` |
 
 > **Note Phase 1B.4 → Phase 2 finish (#198) — `:feature:flags` livré** : l'écran d'accueil (Drapeaux) vit dans `:feature:flags` avec `FlagsViewModel` (Hilt) + `FlagRepository` + 3 onglets (`FlagType.CYAN` = mes sujets, `RED` = lus uniquement, `FAVORITE`). `:app` ne fait que la navigation (`FlagsRoute(onOpenFlag, onLoginRequested, topBarActions)` après le polish #154 + #198). Le footer alpha initial (pseudo, logout, version, signalement, Diagnostics) qui vivait dans `FlagsRoute` puis temporairement sur `MessagesScreen` est désormais hoisté dans le menu compte global (`RedfaceAccountMenu` dans `:core:ui` + `AppAccountViewModel` dans `:app/navigation/`). Chaque écran principal accepte un slot `topBarActions: @Composable (() -> Unit)? = null` que le navigation host câble avec le menu — `:app` y injecte toujours `BuildConfig.VERSION_NAME/VERSION_CODE` pour afficher « Redface 2 — vX.Y (build N) ».
 
@@ -282,7 +284,7 @@ Le login HFR est isolé dans `:core:network.auth.AuthRemoteDataSource`, pas dans
 
 ### `:core:parser` — HfrParser
 
-Le parser transforme le HTML HFR et, à partir de l'éditeur Phase 2, le BBCode HFR en modèles domaine. Isolé de toute logique réseau et UI.
+Le parser transforme le HTML HFR et, à partir de l'éditeur Phase 2, le BBCode HFR en modèles domaine. Il parse aussi les formes d'URL HFR nécessaires aux réponses serveur et aux liens entrants, uniquement avec `String`/`Regex`. Il reste isolé de toute logique réseau, Android et UI.
 
 > **Statut Phase 3 MVP #298** : `parseTopicPage` (Phase 1A) reste actif. Les MPs classiques utilisent `PrivateMessageListParser` pour l'inbox et `PrivateMessageThreadParser`, qui réutilise l'extracteur de posts commun (`PostsParser`) pour les messages d'une conversation. Le parser drapeaux HTML `FlagsListParser` (Phase 1B.2) a été retiré avec la migration REST des drapeaux (#110, ADR-003). `PostContentParser` et `TopicPageParser` existent comme classes internes derrière `HfrParser`. Les autres méthodes ci-dessous arrivent feature par feature : `parseEditPage` Phase 2, `parsePostContentFromBbcode` Phase 2 (parser BBCode pour preview éditeur), parsers d'écriture MP / MultiMP Phase 3.
 
