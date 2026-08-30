@@ -16,6 +16,7 @@ import fr.forumhfr.redface2.core.model.PollOption
 import fr.forumhfr.redface2.core.model.write.PollVoteChoice
 import fr.forumhfr.redface2.core.model.write.PollVoteForm
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import java.time.LocalDateTime
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -24,9 +25,9 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
-/** #779 — Compose JVM contract for the real Topic poll card. */
+/** #779/#1170 — Compose JVM contract for the real Topic poll card. */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34], qualifiers = "w360dp-h780dp-xxhdpi")
+@Config(sdk = [34], qualifiers = "fr-rFR-w360dp-h780dp-xxhdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @OptIn(ExperimentalTestApi::class)
 class TopicPollVoteCardTest {
@@ -53,6 +54,22 @@ class TopicPollVoteCardTest {
         assertEquals(form.choices[1] to true, selected)
         assertEquals("the option click must not toggle card expansion", 0, expansionToggles)
         compose.onNodeWithText("Voter").assertIsEnabled()
+        compose.onNodeWithText("Voter blanc").assertIsNotEnabled()
+    }
+
+    @Test
+    fun `tapping the selected single-choice radio routes a deselection`() {
+        val form = pollForm(multipleChoice = false)
+        var selected: Pair<PollVoteChoice, Boolean>? = null
+        setCard(
+            form = form,
+            state = PollVoteUiState(form = form, selectedChoices = setOf(form.choices[0])),
+            onSelectionChanged = { choice, checked -> selected = choice to checked },
+        )
+
+        compose.onNode(roleWithText(Role.RadioButton, "Kotlin")).performClick()
+
+        assertEquals(form.choices[0] to false, selected)
     }
 
     @Test
@@ -83,12 +100,50 @@ class TopicPollVoteCardTest {
     }
 
     @Test
+    fun `results show the blank vote count after the total`() {
+        setResultsCard(blankVotes = 2)
+
+        compose.onNodeWithText("10 votes au total • choix unique").assertIsDisplayed()
+        compose.onNodeWithText("2 votes blancs").assertIsDisplayed()
+    }
+
+    @Test
+    fun `open expiration uses the server state wording`() {
+        val form = pollForm(multipleChoice = false)
+        setCard(
+            form = form,
+            state = PollVoteUiState(form = form),
+            poll = votingPoll(form).copy(expiresAt = EXPIRATION),
+        )
+
+        compose.onNodeWithText("Expire le", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("A expiré le", substring = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun `closed poll shows status and expiration but stays read-only`() {
+        val form = pollForm(multipleChoice = false)
+        setCard(
+            form = form,
+            state = PollVoteUiState(form = form),
+            poll = votingPoll(form).copy(closed = true, expiresAt = EXPIRATION),
+        )
+
+        compose.onNodeWithText("Sondage clos").assertIsDisplayed()
+        compose.onNodeWithText("A expiré le", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Expire le", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Voter").assertDoesNotExist()
+        compose.onNodeWithText("Voter blanc").assertDoesNotExist()
+    }
+
+    @Test
     fun `blank token makes the whole form read-only`() {
         val form = pollForm(multipleChoice = false).copy(hashCheck = "")
         setCard(form = form, state = PollVoteUiState(form = form))
 
         compose.onNode(roleWithText(Role.RadioButton, "Kotlin")).assertIsNotEnabled()
         compose.onNodeWithText("Voter").assertIsNotEnabled()
+        compose.onNodeWithText("Voter blanc").assertIsNotEnabled()
         compose.onNodeWithText("Vote indisponible. Actualisez la page ou reconnectez-vous.")
             .assertIsDisplayed()
     }
@@ -97,6 +152,25 @@ class TopicPollVoteCardTest {
     fun `vote button is disabled without a selection`() {
         val form = pollForm(multipleChoice = false)
         setCard(form = form, state = PollVoteUiState(form = form))
+        compose.onNodeWithText("Voter").assertIsNotEnabled()
+    }
+
+    @Test
+    fun `blank vote button is enabled only for an empty live selection and routes its tap`() {
+        val form = pollForm(multipleChoice = false)
+        var blankVotes = 0
+        setCard(
+            form = form,
+            state = PollVoteUiState(form = form),
+            onBlankVote = { blankVotes++ },
+        )
+
+        compose.onNodeWithText("Voter blanc")
+            .assertIsDisplayed()
+            .assertIsEnabled()
+            .performClick()
+
+        assertEquals(1, blankVotes)
         compose.onNodeWithText("Voter").assertIsNotEnabled()
     }
 
@@ -120,6 +194,7 @@ class TopicPollVoteCardTest {
             }
         }
         compose.onNodeWithText("Voter").assertIsNotEnabled()
+        compose.onNodeWithText("Voter blanc").assertIsNotEnabled()
         compose.onNode(roleWithText(Role.RadioButton, "Kotlin")).assertIsNotEnabled()
         compose.onNodeWithText("Envoi du vote…").assertIsDisplayed()
     }
@@ -139,17 +214,24 @@ class TopicPollVoteCardTest {
         compose.onNodeWithText("Erreur réseau. Votre sélection est conservée.").assertIsDisplayed()
     }
 
+    @Suppress("LongParameterList") // Render harness: each argument controls one card knob, all defaulted.
     private fun setCard(
         form: PollVoteForm,
         state: PollVoteUiState,
         onSelectionChanged: (PollVoteChoice, Boolean) -> Unit = { _, _ -> },
+        onBlankVote: () -> Unit = {},
         onExpansionChanged: (Boolean) -> Unit = {},
+        poll: Poll = votingPoll(form),
     ) {
         compose.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 TopicPollCard(
-                    poll = votingPoll(form),
-                    pollVote = TopicPollVoteUi(state = state, onSelectionChanged = onSelectionChanged),
+                    poll = poll,
+                    pollVote = TopicPollVoteUi(
+                        state = state,
+                        onSelectionChanged = onSelectionChanged,
+                        onBlankVote = onBlankVote,
+                    ),
                     revealed = true,
                     onExpansionChanged = onExpansionChanged,
                 )
@@ -157,7 +239,7 @@ class TopicPollVoteCardTest {
         }
     }
 
-    private fun setResultsCard() {
+    private fun setResultsCard(blankVotes: Int? = null) {
         compose.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 TopicPollCard(
@@ -172,6 +254,7 @@ class TopicPollVoteCardTest {
                         hasVoted = true,
                         resultsAvailable = true,
                         maxSelections = 1,
+                        blankVotes = blankVotes,
                     ),
                     revealed = true,
                     onExpansionChanged = {},
@@ -204,4 +287,8 @@ class TopicPollVoteCardTest {
         resultsAvailable = false,
         maxSelections = form.maxSelections,
     )
+
+    private companion object {
+        val EXPIRATION: LocalDateTime = LocalDateTime.of(2026, 8, 30, 18, 45)
+    }
 }

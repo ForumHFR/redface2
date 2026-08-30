@@ -10,4 +10,6 @@ interface PollVoteRepository {
         form: PollVoteForm,
         selectedChoices: Set<PollVoteChoice>,
     ): PollVoteResult
+
+    suspend fun submitBlankVote(form: PollVoteForm): PollVoteResult
 }

@@ -84,6 +84,35 @@ class DefaultPollVoteRepositoryTest {
     }
 
     @Test
+    fun `blank vote payload adds submit marker and omits every response field`() = runTest {
+        val form = singleChoiceForm()
+        val submittedBody = slot<FormBody>()
+        coEvery { hfrClient.submitPollVote(capture(submittedBody)) } returns ACCEPTED_HTML
+
+        val result = repository.submitBlankVote(form)
+
+        assertEquals(PollVoteResult.Accepted, result)
+        assertEquals(
+            listOf(
+                "hash_check" to HASH_CHECK,
+                "cat" to "13",
+                "p" to "1",
+                "page" to "1",
+                "sondage" to "1",
+                "owntopic" to "0",
+                "subcat" to "557",
+                "numeropost" to "96127",
+                "sondage_submit" to "Voter",
+            ),
+            submittedBody.captured.fields(),
+        )
+        assertTrue(
+            submittedBody.captured.fields().none { (name, _) -> name.startsWith("reponse") },
+        )
+        coVerify(exactly = 1) { hfrClient.submitPollVote(any()) }
+    }
+
+    @Test
     fun `every invalid submission guard returns a typed failure without POST`() = runTest {
         val mono = singleChoiceForm()
         val foreignChoice = PollVoteChoice("foreign", "reponse", "99", "Foreign")
