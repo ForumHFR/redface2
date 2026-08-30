@@ -16,6 +16,12 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.46.0` — `internal` (dev) — 2026-08-30
+
+### Ajouté
+
+- **Vote de sondage depuis l'app (#779)** — voter à un sondage d'un sujet : choix simple (radios) ou multiple (cases, avec borne « N choix maximum ») ; POST authentifié vers `vote.php`, puis rafraîchissement de la page vers les résultats. Réponses « vote pris en compte » / « déjà voté » gérées, sélection préservée en cas d'échec. Contrat capturé live (mono + multi, sans Referer). Couche domaine (`PollVoteForm`/parser de réponse/`HfrClient.submitPollVote`/`PollVoteRepository`/règle cache) + slice MVI + UI `TopicPollCard`. Résultats et sondages sans jeton restent en lecture seule. Preuve visuelle Roborazzi (light/dark/AMOLED).
+
 ## `0.45.2` — `internal` (dev) — 2026-08-29
 
 Correctif du rendu « Modération » (retour device XaTriX).
