@@ -16,6 +16,12 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.48.0` — `internal` (dev) — 2026-08-31
+
+### Ajouté
+
+- **Liste des citations d'un post (#783)** — le badge **« cité N fois »** d'un post devient cliquable : un tap ouvre une feuille listant les messages qui citent ce post (pseudo, date et heure, extrait), et un tap sur un citeur saute directement vers son message (avec la pile de retour existante). L'index inverse est servi nativement par HFR (endpoint `quote_only=1`), interrogé en anonyme (aucun drapeau marqué lu). La feuille gère les états chargement / vide / erreur et les profils supprimés. Note : la liste n'est pas forcément égale au compteur du badge (dédoublonnage côté serveur) — le titre reprend le compteur, le corps liste ce que le serveur renvoie. La pill cliquable ne gonfle pas la hauteur des cartes (densité préservée). Preuve visuelle Roborazzi (carte + feuille, light/dark/AMOLED).
+
 ## `0.47.0` — `internal` (dev) — 2026-08-30
 
 ### Ajouté
