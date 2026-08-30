@@ -44,6 +44,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
@@ -115,6 +116,7 @@ import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.postContentExcerpt
+import fr.forumhfr.redface2.core.model.write.PollVoteChoice
 import fr.forumhfr.redface2.core.model.write.QuoteLocator
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.RedfacePlaceholderScreen
@@ -1297,6 +1299,10 @@ internal fun TopicContent(
                                 onSetAuthorBlocked = { author, blocked ->
                                     onIntent(TopicIntent.SetAuthorBlocked(author, blocked))
                                 },
+                                onPollSelectionChanged = { choice, selected ->
+                                    onIntent(TopicIntent.UpdatePollSelection(choice, selected))
+                                },
+                                onPollVoteSubmit = { onIntent(TopicIntent.SubmitPollVote) },
                                 pollManualExpanded = pollManualExpanded,
                                 onPollExpansionChanged = onPollExpansionChanged,
                             )
@@ -1837,6 +1843,9 @@ private fun TopicLoadedContent(
     onToggleMultiQuote: (selection: QuoteSelection) -> Unit = {},
     // #509 — block/unblock a post's author from the post menu (blacklist).
     onSetAuthorBlocked: (author: String, blocked: Boolean) -> Unit = { _, _ -> },
+    // #779 — Topic-only poll vote intents; the loaded mode owns the transient form/state.
+    onPollSelectionChanged: (choice: PollVoteChoice, selected: Boolean) -> Unit = { _, _ -> },
+    onPollVoteSubmit: () -> Unit = {},
     // #465 — the topic's manual poll choice (owned by :app, null = follow the global default) + the
     // callback recording a tap on the poll card. Threaded down to the header card's poll.
     pollManualExpanded: Boolean? = null,
@@ -2082,8 +2091,14 @@ private fun TopicLoadedContent(
             topic.poll?.let { poll ->
                 TopicPollCard(
                     poll = poll,
-                    expandedDefault = state.pollsExpandedDefault,
-                    manualExpanded = pollManualExpanded,
+                    pollVote = (state.mode as? TopicUiState.Mode.Loaded)?.pollVote?.let { slice ->
+                        TopicPollVoteUi(
+                            state = slice,
+                            onSelectionChanged = onPollSelectionChanged,
+                            onVote = onPollVoteSubmit,
+                        )
+                    },
+                    revealed = pollManualExpanded ?: state.pollsExpandedDefault,
                     onExpansionChanged = onPollExpansionChanged,
                     // #884 — island: keeps its inset when the posts go full-width.
                     modifier = islandModifier,
@@ -2559,26 +2574,35 @@ private fun EndOfSearchResultsCard(modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * #779 — the live poll-vote affordance handed to [TopicPollCard] : the transient slice plus its two
+ * intents. `null` at the call site means « no in-app vote » (results, cache-only form, anonymous
+ * session), so the card keeps its historical read-only rendering. Bundling the slice with its
+ * callbacks keeps the card's parameter list at the reading-surface's contract, not a callback bag.
+ */
+internal data class TopicPollVoteUi(
+    val state: PollVoteUiState,
+    val onSelectionChanged: (PollVoteChoice, Boolean) -> Unit = { _, _ -> },
+    val onVote: () -> Unit = {},
+)
+
 @Composable
-private fun TopicPollCard(
+// `internal` so the Compose JVM and record-only Roborazzi tests exercise the real card.
+internal fun TopicPollCard(
     poll: Poll,
-    expandedDefault: Boolean,
-    // #465 — the user's manual choice for this topic's poll, hoisted to :app so it survives leaving
-    // and reopening the topic (pre-#895: the per-page TopicRoute swap). `null` = no manual choice
-    // yet → follow [expandedDefault] (#456).
-    manualExpanded: Boolean?,
+    pollVote: TopicPollVoteUi? = null,
+    // #456/#465 — the resolved expansion state, computed by the caller (the manual per-topic choice
+    // owned by :app wins over the persisted default). The card is fully controlled : it never holds
+    // the revealed state itself, it only reports a toggle through [onExpansionChanged].
+    revealed: Boolean,
     onExpansionChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // #456 — the preference seeds the initial state; #465 — once the user taps, the manual choice
-    // (owned by :app, keyed by topic) wins and survives navigation between the topic's pages. The
-    // card is fully controlled: it never holds the revealed state itself, it only reports a toggle.
-    val revealed = manualExpanded ?: expandedDefault
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         ),
-        modifier = modifier.clickable { onExpansionChanged(!revealed) },
+        modifier = modifier,
     ) {
         Column(
             modifier = Modifier
@@ -2587,6 +2611,12 @@ private fun TopicPollCard(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .minimumInteractiveComponentSize()
+                    // #779 — only the header toggles expansion. Interactive vote controls below
+                    // never compete with a whole-card clickable modifier.
+                    .clickable(role = Role.Button) { onExpansionChanged(!revealed) },
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -2607,43 +2637,178 @@ private fun TopicPollCard(
                 )
             }
             if (revealed) {
-                poll.options.forEach { option ->
+                if (!poll.resultsAvailable && pollVote != null) {
+                    TopicPollVoteForm(
+                        pollVote = pollVote.state,
+                        onSelectionChanged = pollVote.onSelectionChanged,
+                        onVote = pollVote.onVote,
+                    )
+                } else {
+                    // #697 — results and cache-only form shapes retain their historical read-only
+                    // rendering byte-for-byte; voting controls exist only with a live form slice.
+                    poll.options.forEach { option ->
+                        Text(
+                            // #697 — the FORM shape carries no numbers : render the bare label instead
+                            // of a misleading « 0.0% (0 votes) ».
+                            text = if (poll.resultsAvailable) {
+                                stringResource(
+                                    R.string.topic_poll_option,
+                                    option.text,
+                                    option.percentage,
+                                    option.votes,
+                                )
+                            } else {
+                                option.text
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    val choiceLabel = if (poll.multipleChoice) {
+                        stringResource(R.string.topic_poll_multiple_choices)
+                    } else {
+                        stringResource(R.string.topic_poll_single_choice)
+                    }
                     Text(
-                        // #697 — the FORM shape carries no numbers : render the bare label instead
-                        // of a misleading « 0.0% (0 votes) ».
+                        // #697 — no total on the FORM shape either ; a factual hint replaces it (the
+                        // in-app vote is #779, so no promise about WHERE to vote).
                         text = if (poll.resultsAvailable) {
-                            stringResource(
-                                R.string.topic_poll_option,
-                                option.text,
-                                option.percentage,
-                                option.votes,
-                            )
+                            stringResource(R.string.topic_poll_summary, poll.totalVotes, choiceLabel)
                         } else {
-                            option.text
+                            stringResource(R.string.topic_poll_no_results, choiceLabel)
                         },
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                val choiceLabel = if (poll.multipleChoice) {
-                    stringResource(R.string.topic_poll_multiple_choices)
-                } else {
-                    stringResource(R.string.topic_poll_single_choice)
-                }
-                Text(
-                    // #697 — no total on the FORM shape either ; a factual hint replaces it (the
-                    // in-app vote is #779, so no promise about WHERE to vote).
-                    text = if (poll.resultsAvailable) {
-                        stringResource(R.string.topic_poll_summary, poll.totalVotes, choiceLabel)
-                    } else {
-                        stringResource(R.string.topic_poll_no_results, choiceLabel)
-                    },
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
         }
     }
+}
+
+@Composable
+private fun TopicPollVoteForm(
+    pollVote: PollVoteUiState,
+    onSelectionChanged: (PollVoteChoice, Boolean) -> Unit,
+    onVote: () -> Unit,
+) {
+    val form = pollVote.form
+    val canInteract = form.hashCheck.isNotBlank() && pollVote.phase == PollVotePhase.Idle
+
+    form.choices.forEach { choice ->
+        PollVoteChoiceRow(
+            choice = choice,
+            selected = choice in pollVote.selectedChoices,
+            multipleChoice = form.multipleChoice,
+            enabled = canInteract,
+            onToggle = { checked -> onSelectionChanged(choice, checked) },
+        )
+    }
+
+    if (form.multipleChoice) {
+        form.maxSelections?.let { maximum ->
+            Text(
+                text = pluralStringResource(R.plurals.topic_poll_max_choices, maximum, maximum),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+
+    Button(
+        onClick = onVote,
+        enabled = canInteract && pollVote.selectedChoices.isNotEmpty(),
+    ) {
+        Text(stringResource(R.string.topic_poll_vote))
+    }
+
+    PollVotePhaseNotice(phase = pollVote.phase)
+
+    if (form.hashCheck.isBlank() && pollVote.phase == PollVotePhase.Idle && pollVote.error == null) {
+        Text(
+            text = stringResource(R.string.topic_poll_unavailable),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    pollVote.error?.let { error ->
+        Text(
+            text = stringResource(error.pollVoteMessageRes()),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+    }
+}
+
+/**
+ * #779 — one selectable poll option : a radio (single-choice) or a checkbox (multiple-choice) whose
+ * WHOLE row is the click target. The control is inert (`onClick = null`) : the row's clickable owns
+ * the semantics and the toggle, so TalkBack announces a single node with the correct [Role].
+ */
+@Composable
+private fun PollVoteChoiceRow(
+    choice: PollVoteChoice,
+    selected: Boolean,
+    multipleChoice: Boolean,
+    enabled: Boolean,
+    onToggle: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(
+                enabled = enabled,
+                role = if (multipleChoice) Role.Checkbox else Role.RadioButton,
+                onClick = { onToggle(if (multipleChoice) !selected else true) },
+            )
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (multipleChoice) {
+            Checkbox(checked = selected, onCheckedChange = null, enabled = enabled)
+        } else {
+            RadioButton(selected = selected, onClick = null, enabled = enabled)
+        }
+        Text(
+            text = choice.label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+/**
+ * #779 — the in-flight notice under the vote button : a label + indeterminate bar while a submit or
+ * the post-vote refresh runs, and nothing at all when the slice is idle.
+ */
+@Composable
+private fun PollVotePhaseNotice(phase: PollVotePhase) {
+    val label = when (phase) {
+        PollVotePhase.Submitting -> R.string.topic_poll_submitting
+        PollVotePhase.Refreshing -> R.string.topic_poll_refreshing
+        PollVotePhase.Idle -> null
+    }
+    if (label != null) {
+        Text(
+            text = stringResource(label),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+    }
+}
+
+private fun PollVoteUiError.pollVoteMessageRes(): Int = when (this) {
+    PollVoteUiError.InvalidHashCheck -> R.string.topic_poll_error_invalid_hash
+    PollVoteUiError.EmptySelection -> R.string.topic_poll_error_empty_selection
+    PollVoteUiError.InvalidSelection -> R.string.topic_poll_error_invalid_selection
+    PollVoteUiError.TooManySelections -> R.string.topic_poll_error_too_many_selections
+    PollVoteUiError.MalformedForm -> R.string.topic_poll_error_malformed_form
+    PollVoteUiError.UnexpectedResponse -> R.string.topic_poll_error_unexpected_response
+    PollVoteUiError.Network -> R.string.topic_poll_error_network
+    PollVoteUiError.RefreshFailedAfterAccepted -> R.string.topic_poll_error_refresh_after_accepted
 }
 
 @Composable
