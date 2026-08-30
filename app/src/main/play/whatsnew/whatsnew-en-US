@@ -1,3 +1,3 @@
-Redface 2 v0.46.0 — dev.
+Redface 2 v0.46.1 — dev.
 
-- New: vote in topic polls right from a thread (single or multiple choice); results are shown after you vote.
+- Polls: support for closed polls and expiration dates, blank votes (display and voting), and a new "Expand unanswered polls" option.

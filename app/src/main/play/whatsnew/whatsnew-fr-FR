@@ -1,3 +1,3 @@
-Redface 2 v0.46.0 — dev.
+Redface 2 v0.46.1 — dev.
 
-- Nouveau : voter aux sondages directement depuis un sujet (choix simple ou multiple), avec les résultats affichés après le vote.
+- Sondages : prise en charge des sondages fermés et des dates d'expiration, du vote blanc (affichage et vote), et nouvelle option « Déplier les sondages non répondus ».
