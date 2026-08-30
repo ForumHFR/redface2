@@ -1,3 +1,3 @@
-Redface 2 v0.46.1 — dev.
+Redface 2 v0.47.0 — dev.
 
-- Polls: support for closed polls and expiration dates, blank votes (display and voting), and a new "Expand unanswered polls" option.
+- HFR links (#1032): "open in browser" no longer loops back to the app; shared topic links (…-sujet_x_y.htm) open the right thread, non-routable links go to the browser; new setting showing whether Redface 2 is the default app for forum.hardware.fr.
