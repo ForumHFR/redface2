@@ -9,6 +9,7 @@ import fr.forumhfr.redface2.core.model.PollOption
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.Topic
 import java.time.Instant
+import java.time.LocalDateTime
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -149,6 +150,9 @@ internal object TopicMappers {
         // limit, and coercing it to 1 would falsely cap a cached multi-choice poll at a single
         // vote. `null` reads as « unknown legacy limit » until the next fetch overwrites the row.
         @SerialName("maxSelections") val maxSelections: Int? = null,
+        @SerialName("closed") val closed: Boolean = false,
+        @SerialName("expiresAt") val expiresAt: String? = null,
+        @SerialName("blankVotes") val blankVotes: Int? = null,
     )
 
     @Serializable
@@ -166,6 +170,9 @@ internal object TopicMappers {
         hasVoted = hasVoted,
         resultsAvailable = resultsAvailable,
         maxSelections = maxSelections,
+        closed = closed,
+        expiresAt = expiresAt?.toString(),
+        blankVotes = blankVotes,
     )
 
     private fun PollDto.toDomain(): Poll = Poll(
@@ -176,5 +183,8 @@ internal object TopicMappers {
         hasVoted = hasVoted,
         resultsAvailable = resultsAvailable,
         maxSelections = maxSelections,
+        closed = closed,
+        expiresAt = expiresAt?.let { runCatching { LocalDateTime.parse(it) }.getOrNull() },
+        blankVotes = blankVotes,
     )
 }

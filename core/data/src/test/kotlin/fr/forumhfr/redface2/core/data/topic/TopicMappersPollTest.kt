@@ -7,6 +7,7 @@ import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.model.write.PollVoteChoice
 import fr.forumhfr.redface2.core.model.write.PollVoteForm
 import java.time.Instant
+import java.time.LocalDateTime
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -156,5 +157,88 @@ class TopicMappersPollTest {
         val restored = TopicMappers.toDomain(legacyEntity, posts)
 
         assertNull(requireNotNull(restored.poll).maxSelections)
+    }
+
+    @Test
+    fun `server poll metadata survives the JSON cache round-trip (#1170)`() {
+        val poll = Poll(
+            question = "Harness?",
+            options = listOf(PollOption("Open source", votes = 1, percentage = 100f)),
+            multipleChoice = false,
+            totalVotes = 1,
+            hasVoted = false,
+            closed = true,
+            expiresAt = LocalDateTime.of(2027, 1, 1, 12, 0),
+            blankVotes = 0,
+        )
+
+        val (entity, posts) = TopicMappers.toEntities(
+            topicWith(poll),
+            Instant.EPOCH,
+            FetchMode.AUTHENTICATED,
+        )
+        val restored = TopicMappers.toDomain(entity, posts)
+
+        assertEquals(poll, restored.poll)
+    }
+
+    @Test
+    fun `legacy JSON without server poll metadata uses backward-compatible defaults (#1170)`() {
+        val poll = Poll(
+            question = "Harness?",
+            options = listOf(PollOption("Open source", votes = 1, percentage = 100f)),
+            multipleChoice = false,
+            totalVotes = 1,
+            hasVoted = false,
+            closed = true,
+            expiresAt = LocalDateTime.of(2027, 1, 1, 12, 0),
+            blankVotes = 0,
+        )
+        val (entity, posts) = TopicMappers.toEntities(
+            topicWith(poll),
+            Instant.EPOCH,
+            FetchMode.ANONYMOUS,
+        )
+        val legacyJson = requireNotNull(entity.pollJson)
+            .replace(",\"closed\":true", "")
+            .replace(",\"expiresAt\":\"2027-01-01T12:00\"", "")
+            .replace(",\"blankVotes\":0", "")
+        val restored = TopicMappers.toDomain(entity.copy(pollJson = legacyJson), posts)
+
+        requireNotNull(restored.poll).also { restoredPoll ->
+            assertFalse(restoredPoll.closed)
+            assertNull(restoredPoll.expiresAt)
+            assertNull(restoredPoll.blankVotes)
+        }
+    }
+
+    @Test
+    fun `corrupt cached expiry degrades only that field (#1170)`() {
+        val poll = Poll(
+            question = "Harness?",
+            options = listOf(PollOption("Open source", votes = 1, percentage = 100f)),
+            multipleChoice = false,
+            totalVotes = 1,
+            hasVoted = false,
+            closed = true,
+            expiresAt = LocalDateTime.of(2027, 1, 1, 12, 0),
+            blankVotes = 1,
+        )
+        val (entity, posts) = TopicMappers.toEntities(
+            topicWith(poll),
+            Instant.EPOCH,
+            FetchMode.ANONYMOUS,
+        )
+        val corruptJson = requireNotNull(entity.pollJson)
+            .replace("\"expiresAt\":\"2027-01-01T12:00\"", "\"expiresAt\":\"not-a-date\"")
+        val restored = TopicMappers.toDomain(entity.copy(pollJson = corruptJson), posts)
+
+        requireNotNull(restored.poll).also { restoredPoll ->
+            assertEquals(poll.question, restoredPoll.question)
+            assertEquals(poll.options, restoredPoll.options)
+            assertTrue(restoredPoll.closed)
+            assertEquals(1, restoredPoll.blankVotes)
+            assertNull(restoredPoll.expiresAt)
+        }
     }
 }
