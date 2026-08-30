@@ -1,0 +1,9 @@
+Source: https://forum.hardware.fr/hfr/Discussions/Sports/antiquite-mecanique-bicyclette-sujet_111199_1.htm (post=111199)
+Captured: 2026-08-30
+Auth: logged-IN (compte de test XaTelitte)
+Etat: sondage CLOS (plus de form de vote), rendu résultats.
+Marqueur de clôture: <b class="s1Ext">Ce sondage est clos, vous ne pouvez plus voter</b> (SIBLING juste après </div> de div.sondage).
+PIEGE ROBUSTESSE: la classe s1Ext est AUSSI portée par un <div class="s1Ext"></div> VIDE décoratif AVANT le sondage.
+  => la détection de clôture doit viser b.s1Ext porteur de texte, JAMAIS un simple .s1Ext.
+Compteur vote blanc dans le Total: "Total : 13 votes (0 vote blanc)" (singulier à 0/1).
+Sanitization: réduit au sous-arbre (div.s1Ext vide + div.sondage + b.s1Ext). Aucun hash/cookie/session.

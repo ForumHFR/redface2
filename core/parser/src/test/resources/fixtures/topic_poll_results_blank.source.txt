@@ -1,0 +1,9 @@
+Source: https://forum.hardware.fr/hfr/ia/harness-sujet_16_1.htm (cat=32 post=16)
+Captured: 2026-08-30
+Auth: logged-IN (compte de test XaTelitte), APRÈS un VOTE BLANC live de XaTelitte.
+Etat: sondage OUVERT (non clos), résultats affichés car XaTelitte a voté.
+Compteur vote blanc = "Total : 1 vote (1 vote blanc)" -> le vote blanc PROUVÉ castable en live.
+CONTRAT ÉCRITURE VOTE BLANC (prouvé 2026-08-30): POST /user/vote.php + champs cachés + sondage_submit=Voter
+  et AUCUN champ reponse -> "Votre vote a bien été pris en compte !". (mono, mais mécanisme = omission de reponse.)
+L'expiration réapparaît ICI dans le div Total: "(1 vote blanc)<br />Ce sondage expirera le 01-01-2027 à 12:00".
+Sanitization: sous-arbre div.sondage résultats. Aucun hash/cookie/session.

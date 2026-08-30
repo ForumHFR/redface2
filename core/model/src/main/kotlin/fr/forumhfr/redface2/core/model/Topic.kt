@@ -90,8 +90,16 @@ data class Poll(
      * `null` as « unknown legacy limit », never silently coerce it to `1` — that would falsely
      * cap a multi-choice poll at a single vote. HFR's real vote endpoint stays untouched here
      * (#779 PR 1 is parse-only) ; the future submit path (PR 2/PR 3) consumes this.
-     */
+    */
     val maxSelections: Int? = null,
+    val closed: Boolean = false,
+    /**
+     * HFR wall-clock expiry without a time zone. Never convert it to an `Instant` or infer closure
+     * from the local clock: the server-provided [closed] state is the source of truth.
+     */
+    val expiresAt: java.time.LocalDateTime? = null,
+    /** `0` is a real count; `null` means no results counter or a legacy cache row. */
+    val blankVotes: Int? = null,
 )
 
 data class PollOption(

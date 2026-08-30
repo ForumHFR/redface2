@@ -417,6 +417,9 @@ data class Poll(
     val hasVoted: Boolean,
     val resultsAvailable: Boolean = true, // #697 — false = forme « formulaire » (pas encore voté)
     val maxSelections: Int? = null,       // #779 — mono=1 ; multi=caption « Sondage à N choix possibles » ; null=borne multi inconnue/ancien cache, jamais coercée à 1
+    val closed: Boolean = false,          // état de clôture fourni par HFR ; fait foi pour désactiver l'écriture
+    val expiresAt: LocalDateTime? = null, // heure murale HFR sans fuseau ; ne jamais convertir en Instant ni en déduire la clôture via l'horloge locale
+    val blankVotes: Int? = null,          // 0 est une vraie valeur ; null = formulaire sans résultats, compteur absent ou ancien cache
 )
 
 data class PollOption(
