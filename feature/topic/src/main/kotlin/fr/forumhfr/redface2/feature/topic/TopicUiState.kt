@@ -71,6 +71,12 @@ data class TopicUiState(
      */
     val pollsExpandedDefault: Boolean = false,
     /**
+     * #1170 — mirrors `UserPreferencesRepository.observeTopicUnansweredPollsExpanded()`. When
+     * enabled, an open poll with a live non-blank vote token stays expanded even if
+     * [pollsExpandedDefault] is false. Manual per-topic expansion choices remain authoritative.
+     */
+    val expandUnansweredPolls: Boolean = false,
+    /**
      * #330 — mirrors `UserPreferencesRepository.observeTopicSignatures()`. When `true`, each post
      * card renders the author's signature (`Post.signature`) beneath the body, in a subdued style
      * separated by a divider. Default `false`: signatures are noisy and opt-in. Flips on the first

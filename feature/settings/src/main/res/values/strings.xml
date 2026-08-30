@@ -356,6 +356,10 @@
     <string name="settings_topic_polls_expanded_title">Déplier les sondages</string>
     <string name="settings_topic_polls_expanded_description">Sondages dépliés en haut des sujets ; sinon une ligne repliée.</string>
     <string name="settings_topic_polls_expanded_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
+    <!-- #1170 — opt-in indépendant : garder visibles les sondages ouverts avec un vote disponible. -->
+    <string name="settings_topic_unanswered_polls_expanded_title">Déplier les sondages non répondus</string>
+    <string name="settings_topic_unanswered_polls_expanded_description">Garde dépliés les sondages où vous pouvez encore voter, même si les autres sont repliés.</string>
+    <string name="settings_topic_unanswered_polls_expanded_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
 
     <!-- #330 — Lecture. Afficher la signature de l'auteur sous chaque post (parité web). -->
     <string name="settings_topic_signatures_title">Afficher les signatures</string>

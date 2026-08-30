@@ -328,6 +328,17 @@ interface UserPreferencesRepository {
     suspend fun setTopicPollsExpanded(enabled: Boolean)
 
     /**
+     * #1170 — whether an unanswered topic poll stays expanded when [observeTopicPollsExpanded]
+     * is disabled. Default `false`: the historical global collapsed/expanded preference remains
+     * authoritative until the reader explicitly opts in. A poll is eligible only while its live
+     * vote form carries a non-blank token and the server did not mark it closed.
+     */
+    fun observeTopicUnansweredPollsExpanded(): Flow<Boolean>
+
+    /** Persists [observeTopicUnansweredPollsExpanded]. Default `false` until the first call. */
+    suspend fun setTopicUnansweredPollsExpanded(enabled: Boolean)
+
+    /**
      * #330 — whether each post's author signature (`<span class="signature">`, web parity) is
      * rendered beneath the post body, in a subdued style separated by a divider. Default `false`:
      * signatures are noisy and most readers scroll past them, so they are opt-in. Toggling is a

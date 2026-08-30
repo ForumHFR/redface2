@@ -10,6 +10,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrap
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
@@ -74,6 +75,9 @@ class AppThemeViewModelTest {
             every { observeMediaDisplayProfile() } returns MutableStateFlow(MediaDisplayProfile.M)
             // #989 — nouveau flow de l'interface : à stubber sinon MockK échoue au premier collect.
             every { observeSmileyPickerDecoration() } returns MutableStateFlow(SmileyPickerDecoration.NONE)
+            // #1170 — explicit interface defaults keep this wide repository mock future-proof.
+            every { observeTopicUnansweredPollsExpanded() } returns MutableStateFlow(false)
+            coEvery { setTopicUnansweredPollsExpanded(any()) } returns Unit
         }
 
         val vm = AppThemeViewModel(
@@ -111,6 +115,8 @@ class AppThemeViewModelTest {
             every { observeMediaDisplayProfile() } returns MutableStateFlow(MediaDisplayProfile.M)
             // #989 — nouveau flow de l'interface : à stubber sinon MockK échoue au premier collect.
             every { observeSmileyPickerDecoration() } returns MutableStateFlow(SmileyPickerDecoration.NONE)
+            every { observeTopicUnansweredPollsExpanded() } returns MutableStateFlow(false)
+            coEvery { setTopicUnansweredPollsExpanded(any()) } returns Unit
         }
 
         val vm = AppThemeViewModel(
@@ -143,6 +149,8 @@ class AppThemeViewModelTest {
             every { observeMediaDisplayProfile() } returns MutableStateFlow(MediaDisplayProfile.L)
             // #989 — nouveau flow de l'interface : à stubber sinon MockK échoue au premier collect.
             every { observeSmileyPickerDecoration() } returns MutableStateFlow(SmileyPickerDecoration.NONE)
+            every { observeTopicUnansweredPollsExpanded() } returns MutableStateFlow(false)
+            coEvery { setTopicUnansweredPollsExpanded(any()) } returns Unit
         }
 
         val vm = AppThemeViewModel(

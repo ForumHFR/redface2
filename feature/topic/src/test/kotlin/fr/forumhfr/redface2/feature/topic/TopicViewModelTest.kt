@@ -757,6 +757,31 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `state expandUnansweredPolls reflects its independent user preference (#1170)`() = runTest {
+        val disabled = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            userPreferencesRepository = FakeUserPreferencesRepository(
+                topicPollsExpanded = true,
+                topicUnansweredPollsExpanded = false,
+            ),
+        )
+        assertEquals(false, disabled.state.value.expandUnansweredPolls)
+
+        val enabled = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            userPreferencesRepository = FakeUserPreferencesRepository(
+                topicPollsExpanded = false,
+                topicUnansweredPollsExpanded = true,
+            ),
+        )
+        assertEquals(true, enabled.state.value.expandUnansweredPolls)
+    }
+
+    @Test
     fun `state showSignatures reflects the user preference (#330)`() = runTest {
         val hidden = topicViewModel(
             request = topicRequest(page = 1),
@@ -4984,7 +5009,8 @@ private class FakeStreamingEmissionTopicRepository(
 /**
  * No-op preferences fake for the topic ViewModel tests. Only [observeTopicTopBarAutoHide]
  * (build 89 follow-up), [observeTopicPageFabs] (#383), [observeTopicPollsExpanded] (#456),
- * [observeTopicSignatures] (#330), [observeTopicFullWidthPosts] (#884) and
+ * [observeTopicUnansweredPollsExpanded] (#1170), [observeTopicSignatures] (#330),
+ * [observeTopicFullWidthPosts] (#884) and
  * [observeTopicEgoQuoteEnabled]/[observeTopicEgoPostEnabled] (#874), plus
  * [observeWritingSurfacePreset] (#806) are read by [TopicViewModel] — everything else returns
  * the DataStore default so the fake stays a thin stand-in. The relevant values are
@@ -4996,6 +5022,7 @@ internal class FakeUserPreferencesRepository(
     private val topicTopBarAutoHide: Boolean = false,
     private val topicPageFabs: Boolean = true,
     private val topicPollsExpanded: Boolean = false,
+    private val topicUnansweredPollsExpanded: Boolean = false,
     private val topicSignatures: Boolean = false,
     // #884 — full-width posts; false mirrors the production default (historical card inset).
     private val topicFullWidthPosts: Boolean = false,
@@ -5097,6 +5124,11 @@ internal class FakeUserPreferencesRepository(
     override fun observeTopicPollsExpanded(): Flow<Boolean> = MutableStateFlow(topicPollsExpanded)
 
     override suspend fun setTopicPollsExpanded(enabled: Boolean) = Unit
+
+    override fun observeTopicUnansweredPollsExpanded(): Flow<Boolean> =
+        MutableStateFlow(topicUnansweredPollsExpanded)
+
+    override suspend fun setTopicUnansweredPollsExpanded(enabled: Boolean) = Unit
 
     override fun observeTopicSignatures(): Flow<Boolean> = MutableStateFlow(topicSignatures)
 

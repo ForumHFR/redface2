@@ -118,6 +118,7 @@ import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.postContentExcerpt
 import fr.forumhfr.redface2.core.model.write.PollVoteChoice
+import fr.forumhfr.redface2.core.model.write.PollVoteForm
 import fr.forumhfr.redface2.core.model.write.QuoteLocator
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.RedfacePlaceholderScreen
@@ -303,8 +304,9 @@ fun TopicScreen(
      * #465 — the user's MANUAL poll-expansion choice for THIS topic, owned by `:app` so it survives
      * leaving and reopening the topic (like the multi-quote basket / scroll anchors ; hoisted when
      * page changes still swapped the `TopicRoute`, pre-#895 étape 4). `null` means « no manual
-     * choice yet — follow the [TopicUiState.pollsExpandedDefault] setting »; `true` / `false`
-     * mean the user explicitly expanded / collapsed the poll. The screen only renders it.
+     * choice yet — follow the automatic policy from [TopicUiState.pollsExpandedDefault] and
+     * [TopicUiState.expandUnansweredPolls] »; `true` / `false` mean the user explicitly expanded /
+     * collapsed the poll. The screen only renders it.
      */
     pollManualExpanded: Boolean? = null,
     /**
@@ -1025,8 +1027,8 @@ internal fun TopicContent(
     onMultiQuote: (subcat: Int, page: Int) -> Unit = { _, _ -> },
     // #436 — empties the whole basket (« Tout vider », long-press on the « Citer N » FAB).
     onClearMultiQuote: () -> Unit = {},
-    // #465 — the topic's manual poll choice (owned by :app, null = follow the global default) +
-    // the callback recording a tap on the poll card. Threaded to the header card's poll.
+    // #465/#1170 — the topic's manual poll choice (owned by :app, null = follow the automatic poll
+    // policy) + the callback recording a tap on the poll card. Threaded to the header card's poll.
     pollManualExpanded: Boolean? = null,
     onPollExpansionChanged: (Boolean) -> Unit = {},
     // Vague 4 (#604) lot 1 — HFR accepted a quick-reply POST. Since #895 étape 4 this feeds
@@ -1852,8 +1854,8 @@ private fun TopicLoadedContent(
     onPollSelectionChanged: (choice: PollVoteChoice, selected: Boolean) -> Unit = { _, _ -> },
     onPollVoteSubmit: () -> Unit = {},
     onPollBlankVoteSubmit: () -> Unit = {},
-    // #465 — the topic's manual poll choice (owned by :app, null = follow the global default) + the
-    // callback recording a tap on the poll card. Threaded down to the header card's poll.
+    // #465/#1170 — the topic's manual poll choice (owned by :app, null = follow the automatic poll
+    // policy) + the callback recording a tap on the poll card. Threaded down to the header card.
     pollManualExpanded: Boolean? = null,
     onPollExpansionChanged: (Boolean) -> Unit = {},
 ) {
@@ -2105,7 +2107,13 @@ private fun TopicLoadedContent(
                             onBlankVote = onPollBlankVoteSubmit,
                         )
                     },
-                    revealed = pollManualExpanded ?: state.pollsExpandedDefault,
+                    revealed = resolvePollRevealed(
+                        manualExpanded = pollManualExpanded,
+                        pollsExpandedDefault = state.pollsExpandedDefault,
+                        expandUnansweredPolls = state.expandUnansweredPolls,
+                        pollVoteForm = topic.pollVoteForm,
+                        pollClosed = poll.closed,
+                    ),
                     onExpansionChanged = onPollExpansionChanged,
                     // #884 — island: keeps its inset when the posts go full-width.
                     modifier = islandModifier,
@@ -2594,6 +2602,24 @@ internal data class TopicPollVoteUi(
     val onVote: () -> Unit = {},
     val onBlankVote: () -> Unit = {},
 )
+
+/**
+ * #1170 — resolves the controlled poll-card expansion without consulting `Poll.hasVoted` (not
+ * reliable yet). A non-blank transient token is the same submit-capability gate used by the vote
+ * controls; [pollClosed] additionally prevents an expired/closed poll from auto-expanding. The
+ * nullable manual choice is checked first so an explicit collapse remains sticky across pages.
+ */
+internal fun resolvePollRevealed(
+    manualExpanded: Boolean?,
+    pollsExpandedDefault: Boolean,
+    expandUnansweredPolls: Boolean,
+    pollVoteForm: PollVoteForm?,
+    pollClosed: Boolean,
+): Boolean {
+    val canVote = pollVoteForm?.hashCheck?.isNotBlank() == true && !pollClosed
+    return manualExpanded
+        ?: (pollsExpandedDefault || (expandUnansweredPolls && canVote))
+}
 
 @Composable
 // `internal` so the Compose JVM and record-only Roborazzi tests exercise the real card.

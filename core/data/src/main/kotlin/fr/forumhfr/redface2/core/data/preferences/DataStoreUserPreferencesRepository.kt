@@ -499,6 +499,22 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeTopicUnansweredPollsExpanded(): Flow<Boolean> =
+        dataStore.data
+            // #1170 — opt-in: keep only live, unanswered polls expanded when the global default
+            // remains collapsed. Eligibility is resolved at render time from the transient form.
+            .map { prefs -> prefs[KEY_TOPIC_UNANSWERED_POLLS_EXPANDED] ?: false }
+            .distinctUntilChanged()
+            .catch { emit(false) }
+
+    override suspend fun setTopicUnansweredPollsExpanded(enabled: Boolean) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_TOPIC_UNANSWERED_POLLS_EXPANDED] = enabled
+            }
+        }
+    }
+
     override fun observeTopicSignatures(): Flow<Boolean> =
         dataStore.data
             // Default `false` (#330): signatures are noisy; opt-in so the feed stays compact.
@@ -1180,6 +1196,10 @@ class DataStoreUserPreferencesRepository @Inject constructor(
 
         // #456 — polls expanded by default in topic reading (default false = collapsed).
         val KEY_TOPIC_POLLS_EXPANDED = booleanPreferencesKey("topic_polls_expanded")
+
+        // #1170 — opt-in expansion for open polls carrying a live unanswered vote form.
+        val KEY_TOPIC_UNANSWERED_POLLS_EXPANDED =
+            booleanPreferencesKey("topic_unanswered_polls_expanded")
 
         // #330 — render author signatures beneath posts (default false = hidden, signatures are noisy).
         val KEY_TOPIC_SIGNATURES = booleanPreferencesKey("topic_signatures")

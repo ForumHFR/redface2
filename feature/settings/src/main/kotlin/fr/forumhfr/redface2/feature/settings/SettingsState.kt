@@ -129,6 +129,12 @@ data class SettingsState(
     val isUpdatingTopicPollsExpanded: Boolean = false,
     val topicPollsExpandedError: Boolean = false,
     val topicPollsExpandedTouchedLocally: Boolean = false,
+    // #1170 — déplier uniquement les sondages auxquels le lecteur peut encore répondre, même si
+    // le réglage général ci-dessus reste désactivé. Préférence indépendante, opt-in par défaut.
+    val topicUnansweredPollsExpanded: Boolean = false,
+    val isUpdatingTopicUnansweredPollsExpanded: Boolean = false,
+    val topicUnansweredPollsExpandedError: Boolean = false,
+    val topicUnansweredPollsExpandedTouchedLocally: Boolean = false,
     // #330 — afficher les signatures sous les posts. Même machinerie optimistic-flip + garde de
     // course au démarrage. Default FALSE (masquées) : les signatures sont bruyantes, donc opt-in.
     val topicSignatures: Boolean = false,
@@ -334,6 +340,10 @@ data class SettingsState(
     val canToggleTopicPollsExpanded: Boolean
         get() = !isUpdatingTopicPollsExpanded
 
+    // #1170 — independent from the global poll-expansion write and value.
+    val canToggleTopicUnansweredPollsExpanded: Boolean
+        get() = !isUpdatingTopicUnansweredPollsExpanded
+
     // #330 — the signatures toggle is gated only by its own write.
     val canToggleTopicSignatures: Boolean
         get() = !isUpdatingTopicSignatures
@@ -509,6 +519,9 @@ sealed interface SettingsIntent {
 
     /** #456 — sondages dépliés par défaut dans la lecture de sujet. */
     data class TopicPollsExpandedChanged(val enabled: Boolean) : SettingsIntent
+
+    /** #1170 — déplier les sondages ouverts auxquels le lecteur peut encore répondre. */
+    data class TopicUnansweredPollsExpandedChanged(val enabled: Boolean) : SettingsIntent
 
     /** #330 — afficher les signatures des auteurs sous les posts. */
     data class TopicSignaturesChanged(val enabled: Boolean) : SettingsIntent

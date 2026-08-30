@@ -605,6 +605,8 @@ class DefaultMpStorageRepositoryTest {
     private class FakeWritePreferences : UserPreferencesRepository by mockk(relaxed = true) {
         val enabled = MutableStateFlow(false)
         override fun observeSyncPrivateMessagesWriteEnabled() = enabled
+        override fun observeTopicUnansweredPollsExpanded() = MutableStateFlow(false)
+        override suspend fun setTopicUnansweredPollsExpanded(enabled: Boolean) = Unit
     }
 
     private companion object {
