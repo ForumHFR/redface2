@@ -21,21 +21,30 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
+import fr.forumhfr.redface2.core.ui.browser.HfrLinkHandlingStatus
+import fr.forumhfr.redface2.core.ui.browser.hfrLinkHandlingStatus
+import fr.forumhfr.redface2.core.ui.browser.openAppDefaultLinkSettings
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsListItem
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsSearchTopBar
 import fr.forumhfr.redface2.core.ui.settings.shell.SettingsHomeScreen
@@ -145,6 +154,7 @@ internal fun SettingsRoot(
 
     // The renderable catalogue: each row carries its search metadata AND its Compose renderer. The
     // pure model fed to [filterSettingsSections] is derived from it (so the filter stays Android-free).
+    val context = LocalContext.current
     val sections = buildSettingsCatalogue(
         state = state,
         onIntent = onIntent,
@@ -156,6 +166,8 @@ internal fun SettingsRoot(
         onOpenImages = onOpenImages,
         onOpenAccountAbout = onOpenAccountAbout,
         onOpenBlacklist = onOpenBlacklist,
+        hfrLinkStatus = rememberHfrLinkHandlingStatus(),
+        onOpenHfrLinkSettings = { openAppDefaultLinkSettings(context) },
     )
     val renderers: Map<String, @Composable () -> Unit> = sections
         .flatMap { it.items }
@@ -255,6 +267,29 @@ internal data class SettingsCatalogueSection(
 }
 
 /**
+ * #1032 — resolves whether Redface 2 is the default handler for HFR links, re-read on every ON_RESUME
+ * so the row description reflects a change the user just made in the system « Ouvrir par défaut »
+ * screen (which does not recompose Settings on its own). The Android-bound read stays here in
+ * `:feature:settings`; the pure R3 decision and the settings Intent live in `:core:ui/browser`.
+ */
+@Composable
+internal fun rememberHfrLinkHandlingStatus(): HfrLinkHandlingStatus {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var status by remember { mutableStateOf(hfrLinkHandlingStatus(context)) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                status = hfrLinkHandlingStatus(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    return status
+}
+
+/**
  * Builds the root catalogue from resolved strings + [state]. Keeps the search metadata and the
  * renderer side by side so a row is described once. Toggle rows wire straight to [onIntent]; nav rows
  * route to a sub-page.
@@ -272,6 +307,8 @@ internal fun buildSettingsCatalogue(
     onOpenImages: () -> Unit,
     onOpenAccountAbout: () -> Unit,
     onOpenBlacklist: () -> Unit,
+    hfrLinkStatus: HfrLinkHandlingStatus = HfrLinkHandlingStatus.UNKNOWN,
+    onOpenHfrLinkSettings: () -> Unit = {},
 ): List<SettingsCatalogueSection> = listOf(
     // Réseau et cache.
     SettingsCatalogueSection(
@@ -310,6 +347,22 @@ internal fun buildSettingsCatalogue(
                     if (state.showDtSection) add(stringResource(R.string.settings_mpstorage_inspector_title))
                 },
                 onClick = onOpenMaintenance,
+            ),
+            navRow(
+                id = "hfr_link_default_app",
+                title = stringResource(R.string.settings_nav_hfr_links),
+                // #1032 — description dynamique selon l'état lu, rafraîchie à l'ON_RESUME par l'appelant
+                // (retour de l'écran système « Ouvrir par défaut ») via [rememberHfrLinkHandlingStatus].
+                description = when (hfrLinkStatus) {
+                    HfrLinkHandlingStatus.DEFAULT_HANDLER ->
+                        stringResource(R.string.settings_nav_hfr_links_description_default)
+                    HfrLinkHandlingStatus.NOT_DEFAULT ->
+                        stringResource(R.string.settings_nav_hfr_links_description_not_default)
+                    HfrLinkHandlingStatus.UNKNOWN ->
+                        stringResource(R.string.settings_nav_hfr_links_description_unknown)
+                },
+                keywords = listOf("lien", "defaut", "navigateur", "hfr", "ouvrir", "app"),
+                onClick = onOpenHfrLinkSettings,
             ),
             futureRow(
                 id = "future_prefetch_wifi_only",

@@ -9,9 +9,11 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.ui.browser.openAppDefaultLinkSettings
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsSection
 
 /**
@@ -39,6 +41,7 @@ fun SettingsCategoryDetailScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val startScreenState by startScreenViewModel.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     val sections = buildSettingsCatalogue(
         state = state,
         onIntent = viewModel::submit,
@@ -50,6 +53,8 @@ fun SettingsCategoryDetailScreen(
         onOpenImages = onOpenImages,
         onOpenAccountAbout = onOpenAccountAbout,
         onOpenBlacklist = onOpenBlacklist,
+        hfrLinkStatus = rememberHfrLinkHandlingStatus(),
+        onOpenHfrLinkSettings = { openAppDefaultLinkSettings(context) },
     )
     val wanted = sectionIdsForCategory(categoryId)
     val shown = sections.filter { it.id in wanted }
