@@ -1,3 +1,3 @@
-Redface 2 v0.45.2 — dev.
+Redface 2 v0.46.0 — dev.
 
-- Fix: a "Modération" post's title bar stayed blue when it was the last read message. It now stays red, like the rest of the post.
+- New: vote in topic polls right from a thread (single or multiple choice); results are shown after you vote.
