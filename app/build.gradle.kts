@@ -199,6 +199,7 @@ dependencies {
     implementation(project(":core:data"))
     implementation(project(":core:domain"))
     implementation(project(":core:network"))
+    implementation(project(":core:parser"))
     implementation(project(":core:ui"))
 
     implementation(project(":feature:flags"))
@@ -246,11 +247,6 @@ dependencies {
     testImplementation(libs.konsist)
     testImplementation(libs.robolectric)
     testImplementation(libs.turbine)
-    // :core:parser is reachable transitively but explicit here for the cross-
-    // module round-trip tests that prove toolbar emission parses back into the
-    // expected AST (`:app` is the only place Konsist allows feature/parser
-    // crossover in tests).
-    testImplementation(project(":core:parser"))
 }
 
 // Guard B (#1045): DocsConsistencyTest reads docs/specs/reading-parity.md at runtime, so the page

@@ -5,7 +5,6 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
-import android.net.Uri
 import android.view.View
 import android.view.Window
 import android.widget.Toast
@@ -108,6 +107,7 @@ import fr.forumhfr.redface2.core.domain.preferences.StartScreenChoice
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.account.RedfaceAccountMenu
+import fr.forumhfr.redface2.core.ui.browser.openUrlInExternalBrowser
 import fr.forumhfr.redface2.core.ui.debug.DebugBoundsOverlay
 import fr.forumhfr.redface2.core.ui.theme.ReadingDisplaySettings
 import fr.forumhfr.redface2.feature.auth.LoginScreen
@@ -326,8 +326,8 @@ data class TopicRoute(
      * #750 — `true` when [page] is untrusted: HFR email-notification links always say `page=1`
      * while the real target travels as `numreponse`. Forwarded to `TopicRequest.resolveScrollToPage`
      * so the ViewModel resolves the actual page (server-side redirect probe, #277 mechanism) before
-     * the first load. Only the email deep-link path sets it; defaulted so older serialised back
-     * stacks deserialise without the field.
+     * the first load. Inbound legacy or pretty links set it when they combine an anchor with page 1;
+     * defaulted so older serialised back stacks deserialise without the field.
      */
     val resolveScrollToPage: Boolean = false,
 ) : RedfaceNavKey
@@ -850,6 +850,9 @@ private data class ProfileSheetRequest(
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3AdaptiveApi::class)
+// Root shell composable — aggregates theme resolution, immersive-bar wiring and deep-link dispatch.
+// Stays at detekt's method threshold even after extracting the deep-link `when` (applyDeepLinkResolution).
+@Suppress("CyclomaticComplexMethod")
 @Composable
 fun RedfaceApp(intent: Intent?) {
     // #286 — resolve the persisted theme selection before applying RedfaceTheme. SYSTEM (default)
@@ -1031,14 +1034,18 @@ fun RedfaceApp(intent: Intent?) {
             currentDestination = result.target
         }
 
+        val context = LocalContext.current
+        // #1032 PR2 — the same launch intent is re-published when MainActivity is recreated.
+        // Save the stable action+URI identity and mark it consumed BEFORE side effects so rotation
+        // or process restoration cannot reopen the browser or replay the stack reset.
+        var resolvedDeepLinkIntentId by rememberSaveable { mutableStateOf<String?>(null) }
         LaunchedEffect(intent) {
-            val parsed = intent?.data?.let(::parseHfrDeepLink) ?: return@LaunchedEffect
-            switchTab(parsed.destination)
-            resetStack(
-                backStack = backStacks.getValue(parsed.destination),
-                root = parsed.destination.rootRoute,
-                route = parsed.route,
-            )
+            val incomingIntent = intent ?: return@LaunchedEffect
+            val intentId = "${incomingIntent.action}\u0000${incomingIntent.dataString}"
+            if (intentId == resolvedDeepLinkIntentId) return@LaunchedEffect
+            resolvedDeepLinkIntentId = intentId
+
+            applyDeepLinkResolution(incomingIntent, context, switchTab, backStacks)
         }
 
         // Issue #198 — global account menu hoisted out of `Messages` and re-injected into
@@ -1064,7 +1071,6 @@ fun RedfaceApp(intent: Intent?) {
         }
         val reportEmailSubject = stringResource(fr.forumhfr.redface2.core.ui.R.string.account_menu_report_email_subject)
         val reportNoEmailClient = stringResource(fr.forumhfr.redface2.core.ui.R.string.account_menu_no_email_client)
-        val context = LocalContext.current
         // #531 — optimistic « read » marks of the inbox, now keyed by the conversation DATE seen at
         // open-time (was a bare Set<Int>). Storing the date lets a fresh page-1 network result RECONCILE
         // the mark: HFR re-flagging a thread unread is only honoured when its server date is STRICTLY
@@ -3019,55 +3025,32 @@ private fun RedfaceNavHost(
     )
 }
 
-internal fun parseHfrDeepLink(uri: Uri): ParsedDeepLink? = when (uri.path) {
-    // forum1.php is the topic-list page (per category / subcategory). Required:
-    // `cat`. Optional: `subcat`, `page`. Lands on the Forum tab so the back stack
-    // walks Forum -> Category -> (deeper) instead of Flags.
-    "/forum1.php" -> {
-        val cat = uri.getQueryParameter("cat")?.toIntOrNull() ?: return null
-        val subcat = uri.getQueryParameter("subcat")?.toIntOrNull()
-        // Preserve `page` from the deep link so a shared link to e.g.
-        // forum1.php?cat=23&subcat=550&page=2 lands on page 2 instead of silently
-        // resetting to 1. Out-of-range / malformed values fall back to 1.
-        val page = uri.getQueryParameter("page")?.toIntOrNull()?.coerceAtLeast(1) ?: 1
-        ParsedDeepLink(
-            destination = TopLevelDestination.Forum,
-            route = CategoryRoute(cat = cat, subcat = subcat, page = page),
-        )
+// #1032 PR2 — apply a resolved HFR deep link. Extracted from RedfaceApp's LaunchedEffect so the
+// three-branch resolution `when` does not push the composable over detekt's complexity threshold.
+// Pure dispatch: the intent-identity guard (rememberSaveable) stays in the effect above.
+private fun applyDeepLinkResolution(
+    intent: Intent,
+    context: Context,
+    switchTab: (TopLevelDestination) -> Unit,
+    backStacks: Map<TopLevelDestination, NavBackStack<NavKey>>,
+) {
+    when (val resolution = resolveHfrDeepLink(intent)) {
+        is HfrDeepLinkResolution.Route -> {
+            val parsed = resolution.parsed
+            switchTab(parsed.destination)
+            resetStack(
+                backStack = backStacks.getValue(parsed.destination),
+                root = parsed.destination.rootRoute,
+                route = parsed.route,
+            )
+        }
+
+        is HfrDeepLinkResolution.BrowserFallback -> {
+            openUrlInExternalBrowser(context, resolution.uri)
+        }
+
+        HfrDeepLinkResolution.Ignore -> Unit
     }
-
-    // forum2.php is the topic-content page (the actual posts). Required: `cat`,
-    // `post`. Optional: `page`, fragment `#t<numreponse>` for scroll-to-post.
-    // Lands on the Flags tab — the typical reading surface.
-    "/forum2.php" -> {
-        val cat = uri.getQueryParameter("cat")?.toIntOrNull() ?: return null
-        val post = uri.getQueryParameter("post")?.toIntOrNull() ?: return null
-        val page = uri.getQueryParameter("page")?.toIntOrNull() ?: 1
-        // #750 — the `numreponse` QUERY param is the fallback target: HFR email-notification
-        // links carry it alongside the fragment, and some mail clients strip the fragment.
-        val scrollTo = uri.fragment?.removePrefix("t")?.toIntOrNull()
-            ?: uri.getQueryParameter("numreponse")?.toIntOrNull()
-        ParsedDeepLink(
-            destination = TopLevelDestination.Flags,
-            route = TopicRoute(
-                cat = cat,
-                post = post,
-                page = page,
-                scrollTo = scrollTo,
-                // #750 — email links always serialise `page=1` whatever page the target post
-                // lives on; a page-1 link WITH an anchor is therefore untrusted and the real
-                // page is resolved before the first load. An explicit page > 1 is trusted as-is.
-                resolveScrollToPage = scrollTo != null && page == 1,
-            ),
-        )
-    }
-
-    "/forum1f.php" -> ParsedDeepLink(
-        destination = TopLevelDestination.Flags,
-        route = FlagsListRoute,
-    )
-
-    else -> null
 }
 
 private fun resetStack(

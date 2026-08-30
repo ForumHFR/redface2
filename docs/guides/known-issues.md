@@ -41,7 +41,7 @@ Liste **vivante** des limitations connues de Redface 2 et des compromis **assum�
 ## Réseau
 
 - **Prefetch non authentifié — volontaire.** Le préchargement utilise des requêtes non authentifiées, délibérément, pour **ne pas marquer les drapeaux comme lus** côté serveur.
-- **Deep links HFR — domaine non vérifiable.** Le domaine HFR n'est pas vérifiable côté Play Console ; les fragments d'URI (`#t<id>`) sont parsés dans `RedfaceApp` (Compose Navigation 3 ne gère pas les fragments nativement) (cf. #127).
+- **Deep links HFR — association manuelle au domaine tiers.** Redface 2 ne contrôle pas `hardware.fr` et ne peut donc pas y publier le fichier `assetlinks.json` requis pour `autoVerify` : Android ne peut pas imposer l'ouverture automatique dans l'app. L'utilisateur doit autoriser manuellement Redface 2 pour les liens HFR dans les réglages système (ou choisir l'app dans le sélecteur). Une URL captée mais non routable — profil, listing, slug inconnu, MP — est renvoyée explicitement vers le navigateur, sans échec silencieux ni boucle vers Redface 2. Les fragments (`#t<id>`) restent parsés dans `RedfaceApp`, car Compose Navigation 3 ne les gère pas nativement (cf. #127, #1032).
 
 ## Messages privés &amp; DT (Phase 3 — éléments reportés)
 
