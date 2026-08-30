@@ -353,6 +353,9 @@ sealed interface TopicIntent {
     /** #779 — submit the current selection once; terminal outcomes only refresh the page. */
     data object SubmitPollVote : TopicIntent
 
+    /** #1170 — submit a blank vote only while the current selection is empty. */
+    data object SubmitBlankPollVote : TopicIntent
+
     /** #879 — filtered search : fetch the next page of the result list (footer card). */
     data object SearchNextResultsPage : TopicIntent
 

@@ -84,6 +84,7 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -145,6 +146,7 @@ import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import java.util.Locale
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.drop
@@ -1303,6 +1305,9 @@ internal fun TopicContent(
                                     onIntent(TopicIntent.UpdatePollSelection(choice, selected))
                                 },
                                 onPollVoteSubmit = { onIntent(TopicIntent.SubmitPollVote) },
+                                onPollBlankVoteSubmit = {
+                                    onIntent(TopicIntent.SubmitBlankPollVote)
+                                },
                                 pollManualExpanded = pollManualExpanded,
                                 onPollExpansionChanged = onPollExpansionChanged,
                             )
@@ -1843,9 +1848,10 @@ private fun TopicLoadedContent(
     onToggleMultiQuote: (selection: QuoteSelection) -> Unit = {},
     // #509 — block/unblock a post's author from the post menu (blacklist).
     onSetAuthorBlocked: (author: String, blocked: Boolean) -> Unit = { _, _ -> },
-    // #779 — Topic-only poll vote intents; the loaded mode owns the transient form/state.
+    // #779/#1170 — Topic-only normal/blank vote intents; Loaded owns the transient form/state.
     onPollSelectionChanged: (choice: PollVoteChoice, selected: Boolean) -> Unit = { _, _ -> },
     onPollVoteSubmit: () -> Unit = {},
+    onPollBlankVoteSubmit: () -> Unit = {},
     // #465 — the topic's manual poll choice (owned by :app, null = follow the global default) + the
     // callback recording a tap on the poll card. Threaded down to the header card's poll.
     pollManualExpanded: Boolean? = null,
@@ -2096,6 +2102,7 @@ private fun TopicLoadedContent(
                             state = slice,
                             onSelectionChanged = onPollSelectionChanged,
                             onVote = onPollVoteSubmit,
+                            onBlankVote = onPollBlankVoteSubmit,
                         )
                     },
                     revealed = pollManualExpanded ?: state.pollsExpandedDefault,
@@ -2575,15 +2582,17 @@ private fun EndOfSearchResultsCard(modifier: Modifier = Modifier) {
 }
 
 /**
- * #779 — the live poll-vote affordance handed to [TopicPollCard] : the transient slice plus its two
- * intents. `null` at the call site means « no in-app vote » (results, cache-only form, anonymous
- * session), so the card keeps its historical read-only rendering. Bundling the slice with its
- * callbacks keeps the card's parameter list at the reading-surface's contract, not a callback bag.
+ * #779/#1170 — the live poll-vote affordance handed to [TopicPollCard] : the transient slice plus
+ * its selection, normal-submit and blank-submit callbacks. `null` at the call site means « no
+ * in-app vote » (results, cache-only form, anonymous session), so the card keeps its historical
+ * read-only rendering. Bundling the slice with its callbacks keeps the card's parameter list at the
+ * reading-surface's contract, not a callback bag.
  */
 internal data class TopicPollVoteUi(
     val state: PollVoteUiState,
     val onSelectionChanged: (PollVoteChoice, Boolean) -> Unit = { _, _ -> },
     val onVote: () -> Unit = {},
+    val onBlankVote: () -> Unit = {},
 )
 
 @Composable
@@ -2598,6 +2607,7 @@ internal fun TopicPollCard(
     onExpansionChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val pollDateLocale = LocalConfiguration.current.locales[0]
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -2636,16 +2646,44 @@ internal fun TopicPollCard(
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
+            if (poll.closed) {
+                Surface(
+                    shape = MaterialTheme.shapes.small,
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                ) {
+                    Text(
+                        text = stringResource(R.string.topic_poll_closed),
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                }
+            }
+            poll.expiresAt?.let { expiresAt ->
+                Text(
+                    text = stringResource(
+                        if (poll.closed) {
+                            R.string.topic_poll_expired_at
+                        } else {
+                            R.string.topic_poll_expires_at
+                        },
+                        expiresAt.asPollExpirationDate(pollDateLocale),
+                    ),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             if (revealed) {
-                if (!poll.resultsAvailable && pollVote != null) {
+                if (!poll.closed && !poll.resultsAvailable && pollVote != null) {
                     TopicPollVoteForm(
                         pollVote = pollVote.state,
                         onSelectionChanged = pollVote.onSelectionChanged,
                         onVote = pollVote.onVote,
+                        onBlankVote = pollVote.onBlankVote,
                     )
                 } else {
-                    // #697 — results and cache-only form shapes retain their historical read-only
-                    // rendering byte-for-byte; voting controls exist only with a live form slice.
+                    // #697/#1170 — results, closed polls and cache-only form shapes stay read-only;
+                    // voting controls exist only with a live open form slice.
                     poll.options.forEach { option ->
                         Text(
                             // #697 — the FORM shape carries no numbers : render the bare label instead
@@ -2680,6 +2718,17 @@ internal fun TopicPollCard(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    poll.blankVotes?.let { blankVotes ->
+                        Text(
+                            text = pluralStringResource(
+                                R.plurals.topic_poll_blank_votes,
+                                blankVotes,
+                                blankVotes,
+                            ),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }
@@ -2691,6 +2740,7 @@ private fun TopicPollVoteForm(
     pollVote: PollVoteUiState,
     onSelectionChanged: (PollVoteChoice, Boolean) -> Unit,
     onVote: () -> Unit,
+    onBlankVote: () -> Unit,
 ) {
     val form = pollVote.form
     val canInteract = form.hashCheck.isNotBlank() && pollVote.phase == PollVotePhase.Idle
@@ -2715,11 +2765,21 @@ private fun TopicPollVoteForm(
         }
     }
 
-    Button(
-        onClick = onVote,
-        enabled = canInteract && pollVote.selectedChoices.isNotEmpty(),
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(stringResource(R.string.topic_poll_vote))
+        Button(
+            onClick = onVote,
+            enabled = canInteract && pollVote.selectedChoices.isNotEmpty(),
+        ) {
+            Text(stringResource(R.string.topic_poll_vote))
+        }
+        OutlinedButton(
+            onClick = onBlankVote,
+            enabled = canInteract && pollVote.selectedChoices.isEmpty(),
+        ) {
+            Text(stringResource(R.string.topic_poll_vote_blank))
+        }
     }
 
     PollVotePhaseNotice(phase = pollVote.phase)
@@ -2759,7 +2819,9 @@ private fun PollVoteChoiceRow(
             .clickable(
                 enabled = enabled,
                 role = if (multipleChoice) Role.Checkbox else Role.RadioButton,
-                onClick = { onToggle(if (multipleChoice) !selected else true) },
+                // #1170 — selected radios can be tapped again to clear the single-choice group;
+                // checkboxes retain their historical toggle behaviour through the same expression.
+                onClick = { onToggle(!selected) },
             )
             .padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -2778,6 +2840,12 @@ private fun PollVoteChoiceRow(
         )
     }
 }
+
+private fun java.time.LocalDateTime.asPollExpirationDate(locale: Locale): String =
+    DateTimeFormatter
+        .ofLocalizedDateTime(FormatStyle.MEDIUM, FormatStyle.SHORT)
+        .withLocale(locale)
+        .format(this)
 
 /**
  * #779 — the in-flight notice under the vote button : a label + indeterminate bar while a submit or

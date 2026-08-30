@@ -3261,6 +3261,23 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `single-choice selected option can be deselected for a blank vote`() = runTest {
+        val form = fakePollVoteForm()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                listOf(flowOf(fakeTopic(1, 1, poll = fakeVotingPoll(form), pollVoteForm = form))),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.send(TopicIntent.UpdatePollSelection(form.choices[0], selected = true))
+        viewModel.send(TopicIntent.UpdatePollSelection(form.choices[0], selected = false))
+
+        assertTrue(loadedPollVote(viewModel).selectedChoices.isEmpty())
+    }
+
+    @Test
     fun `multiple-choice selection refuses additions past the known limit`() = runTest {
         val form = fakePollVoteForm(multipleChoice = true, maxSelections = 2)
         val viewModel = topicViewModel(
@@ -3279,6 +3296,75 @@ class TopicViewModelTest {
         viewModel.send(TopicIntent.UpdatePollSelection(form.choices[0], selected = false))
         viewModel.send(TopicIntent.UpdatePollSelection(form.choices[2], selected = true))
         assertEquals(setOf(form.choices[1], form.choices[2]), loadedPollVote(viewModel).selectedChoices)
+    }
+
+    @Test
+    fun `blank vote is refused while a choice remains selected`() = runTest {
+        val form = fakePollVoteForm()
+        val pollRepository = FakePollVoteRepository(PollVoteResult.Accepted)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                listOf(flowOf(fakeTopic(1, 1, poll = fakeVotingPoll(form), pollVoteForm = form))),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            pollVoteRepository = pollRepository,
+        )
+        viewModel.send(TopicIntent.UpdatePollSelection(form.choices[0], selected = true))
+
+        viewModel.send(TopicIntent.SubmitBlankPollVote)
+        advanceUntilIdle()
+
+        assertTrue(pollRepository.blankCalls.isEmpty())
+        assertEquals(setOf(form.choices[0]), loadedPollVote(viewModel).selectedChoices)
+        assertEquals(PollVotePhase.Idle, loadedPollVote(viewModel).phase)
+    }
+
+    @Test
+    fun `blank vote uses the shared submitting refreshing and resync phases`() = runTest {
+        val form = fakePollVoteForm()
+        val submitGate = CompletableDeferred<Unit>()
+        val refreshGate = CompletableDeferred<Unit>()
+        val pollRepository = FakePollVoteRepository(PollVoteResult.Accepted).apply {
+            gate = submitGate
+        }
+        val topicRepository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flowOf(fakeTopic(1, 1, poll = fakeVotingPoll(form), pollVoteForm = form)),
+            ),
+            refreshTopicsToReturn = listOf(fakeTopic(1, 1, poll = fakePollResults())),
+        ).apply {
+            refreshHook = { _, _, _ -> refreshGate.await() }
+        }
+        val appScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = topicRepository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            pollVoteRepository = pollRepository,
+            externalScope = appScope,
+        )
+
+        viewModel.send(TopicIntent.SubmitBlankPollVote)
+        runCurrent()
+
+        assertEquals(1, pollRepository.blankCalls.size)
+        assertTrue(pollRepository.calls.isEmpty())
+        assertEquals(PollVotePhase.Submitting, loadedPollVote(viewModel).phase)
+
+        submitGate.complete(Unit)
+        runCurrent()
+
+        assertEquals(PollVotePhase.Refreshing, loadedPollVote(viewModel).phase)
+        assertEquals(listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 1)), topicRepository.refreshCalls)
+
+        refreshGate.complete(Unit)
+        advanceUntilIdle()
+
+        val loaded = viewModel.state.value.mode as TopicUiState.Mode.Loaded
+        assertEquals(null, loaded.pollVote)
+        assertTrue(loaded.topic.poll?.resultsAvailable == true)
+        assertEquals(1, pollRepository.completedBlankCalls.size)
     }
 
     @Test
@@ -4687,6 +4773,8 @@ private class FakePollVoteRepository(
 ) : PollVoteRepository {
     val calls = mutableListOf<Pair<PollVoteForm, Set<PollVoteChoice>>>()
     val completedCalls = mutableListOf<Pair<PollVoteForm, Set<PollVoteChoice>>>()
+    val blankCalls = mutableListOf<PollVoteForm>()
+    val completedBlankCalls = mutableListOf<PollVoteForm>()
     var gate: CompletableDeferred<Unit>? = null
 
     override suspend fun submitPollVote(
@@ -4698,6 +4786,14 @@ private class FakePollVoteRepository(
         gate?.await()
         error?.let { throw it }
         completedCalls += call
+        return result
+    }
+
+    override suspend fun submitBlankVote(form: PollVoteForm): PollVoteResult {
+        blankCalls += form
+        gate?.await()
+        error?.let { throw it }
+        completedBlankCalls += form
         return result
     }
 }

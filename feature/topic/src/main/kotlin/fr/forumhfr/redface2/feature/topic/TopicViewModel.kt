@@ -453,7 +453,8 @@ class TopicViewModel @AssistedInject constructor(
             is TopicIntent.DeletePost -> deletePost(intent.numreponse)
             TopicIntent.Refresh -> refresh()
             is TopicIntent.UpdatePollSelection -> updatePollSelection(intent.choice, intent.selected)
-            TopicIntent.SubmitPollVote -> submitPollVote()
+            TopicIntent.SubmitPollVote -> submitPollVote(PollVoteSubmissionType.NORMAL)
+            TopicIntent.SubmitBlankPollVote -> submitPollVote(PollVoteSubmissionType.BLANK)
             is TopicIntent.SetAuthorBlocked -> setAuthorBlocked(intent.author, intent.blocked)
             TopicIntent.RequestRemoveTopicFlag -> requestRemoveTopicFlag()
             TopicIntent.OpenSearch -> openSearch()
@@ -506,7 +507,7 @@ class TopicViewModel @AssistedInject constructor(
             }
 
             val selection = if (!pollVote.form.multipleChoice) {
-                if (selected) setOf(choice) else pollVote.selectedChoices
+                if (selected) setOf(choice) else pollVote.selectedChoices - choice
             } else if (selected) {
                 val atLimit = pollVote.form.maxSelections
                     ?.let { pollVote.selectedChoices.size >= it }
@@ -529,12 +530,12 @@ class TopicViewModel @AssistedInject constructor(
     }
 
     /**
-     * Submits exactly one snapshot of the current form/selection. The POST is detached so a back
-     * press cannot cut an already-requested mutation; every UI continuation remains owned by this
-     * ViewModel and is fenced by topic/page/generation/account snapshots.
+     * Submits exactly one normal or blank snapshot of the current form/selection. The POST is
+     * detached so a back press cannot cut an already-requested mutation; every UI continuation
+     * remains owned by this ViewModel and is fenced by topic/page/generation/account snapshots.
      */
-    private fun submitPollVote() {
-        val snapshot = pollVoteSubmissionSnapshot() ?: return
+    private fun submitPollVote(submissionType: PollVoteSubmissionType) {
+        val snapshot = pollVoteSubmissionSnapshot(submissionType) ?: return
         pollVoteMutationGeneration = snapshot.generation
         _state.update { state ->
             val mode = state.mode as? TopicUiState.Mode.Loaded ?: return@update state
@@ -545,21 +546,24 @@ class TopicViewModel @AssistedInject constructor(
     }
 
     /**
-     * Builds the mutation snapshot for the current selection only when a submit is eligible (a live
-     * loaded poll form, an authenticated account, an idle non-empty selection, no in-flight vote).
-     * Returns `null` otherwise, so [submitPollVote] stays a single guard.
+     * Builds the mutation snapshot only when the requested submit matches the selection: non-empty
+     * for a normal vote, empty for a blank vote. Both paths require the same live authenticated
+     * form and idle lifecycle. Returns `null` otherwise, so [submitPollVote] stays a single guard.
      */
-    private fun pollVoteSubmissionSnapshot(): PollVoteMutationSnapshot? {
+    private fun pollVoteSubmissionSnapshot(
+        submissionType: PollVoteSubmissionType,
+    ): PollVoteMutationSnapshot? {
         val current = _state.value
         val pollVote = (current.mode as? TopicUiState.Mode.Loaded)?.pollVote ?: return null
         val account = pollVoteAccount
-        return if (account != null && isReadyToSubmitPollVote(current, pollVote)) {
+        return if (account != null && isReadyToSubmitPollVote(current, pollVote, submissionType)) {
             PollVoteMutationSnapshot(
                 cat = request.cat,
                 post = request.post,
                 page = request.page,
                 form = pollVote.form,
                 selectedChoices = pollVote.selectedChoices,
+                submissionType = submissionType,
                 generation = ownerGeneration,
                 account = account,
             )
@@ -569,11 +573,18 @@ class TopicViewModel @AssistedInject constructor(
     }
 
     /** The pre-submit eligibility gate, decomposed into named clauses to keep each condition flat. */
-    private fun isReadyToSubmitPollVote(state: TopicUiState, pollVote: PollVoteUiState): Boolean {
+    private fun isReadyToSubmitPollVote(
+        state: TopicUiState,
+        pollVote: PollVoteUiState,
+        submissionType: PollVoteSubmissionType,
+    ): Boolean {
         val alreadyRunning = pollVote.phase != PollVotePhase.Idle || pollVoteJob?.isActive == true
-        val hasVotableSelection =
-            pollVote.selectedChoices.isNotEmpty() && pollVote.form.hashCheck.isNotBlank()
-        return !alreadyRunning && hasVotableSelection && state.isAuthenticated
+        val selectionMatchesSubmission = when (submissionType) {
+            PollVoteSubmissionType.NORMAL -> pollVote.selectedChoices.isNotEmpty()
+            PollVoteSubmissionType.BLANK -> pollVote.selectedChoices.isEmpty()
+        }
+        val hasLiveForm = pollVote.form.hashCheck.isNotBlank()
+        return !alreadyRunning && selectionMatchesSubmission && hasLiveForm && state.isAuthenticated
     }
 
     /**
@@ -584,7 +595,11 @@ class TopicViewModel @AssistedInject constructor(
     private suspend fun runPollVoteSubmission(snapshot: PollVoteMutationSnapshot) {
         val result = try {
             externalScope.awaitDetached {
-                pollVoteRepository.submitPollVote(snapshot.form, snapshot.selectedChoices)
+                when (snapshot.submissionType) {
+                    PollVoteSubmissionType.NORMAL ->
+                        pollVoteRepository.submitPollVote(snapshot.form, snapshot.selectedChoices)
+                    PollVoteSubmissionType.BLANK -> pollVoteRepository.submitBlankVote(snapshot.form)
+                }
             }
         } catch (cancellation: CancellationException) {
             throw cancellation
@@ -709,9 +724,12 @@ class TopicViewModel @AssistedInject constructor(
         val page: Int,
         val form: PollVoteForm,
         val selectedChoices: Set<PollVoteChoice>,
+        val submissionType: PollVoteSubmissionType,
         val generation: Int,
         val account: String,
     )
+
+    private enum class PollVoteSubmissionType { NORMAL, BLANK }
 
     private fun PollVoteFailureReason.toPollVoteUiError(): PollVoteUiError = when (this) {
         PollVoteFailureReason.InvalidHashCheck -> PollVoteUiError.InvalidHashCheck

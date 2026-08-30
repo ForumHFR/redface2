@@ -18,6 +18,7 @@ import fr.forumhfr.redface2.core.model.PollOption
 import fr.forumhfr.redface2.core.model.write.PollVoteChoice
 import fr.forumhfr.redface2.core.model.write.PollVoteForm
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import java.time.LocalDateTime
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -26,14 +27,14 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * #779 — record-only visual review of all poll card states in the three static colour schemes.
- * The 15 PNG files are inspection artefacts, not versioned baselines.
+ * #779/#1170 — record-only visual review of poll card states in the three static colour schemes.
+ * The 21 PNG files are inspection artefacts, not versioned baselines.
  *
  *     ./scripts/docker-dev.sh ./gradlew :feature:topic:testDebugUnitTest \
  *         --tests '*TopicPollVoteRoborazziTest*' --console=plain --no-daemon
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34], qualifiers = "w360dp-h780dp-xxhdpi")
+@Config(sdk = [34], qualifiers = "fr-rFR-w360dp-h780dp-xxhdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @OptIn(ExperimentalTestApi::class)
 class TopicPollVoteRoborazziTest {
@@ -89,6 +90,13 @@ class TopicPollVoteRoborazziTest {
                 pollVote = PollVoteUiState(form, selectedChoices = setOf(form.choices[0])),
             )
         }
+        PollScenario.BlankVoteIdle -> {
+            val form = pollForm(multipleChoice = false)
+            PollContent(
+                poll = votingPoll(form).copy(expiresAt = EXPIRATION),
+                pollVote = PollVoteUiState(form),
+            )
+        }
         PollScenario.MultiIdle -> {
             val form = pollForm(multipleChoice = true, maxSelections = 2)
             PollContent(
@@ -120,6 +128,24 @@ class TopicPollVoteRoborazziTest {
                 hasVoted = true,
                 resultsAvailable = true,
                 maxSelections = 1,
+            ),
+            pollVote = null,
+        )
+        PollScenario.ClosedResults -> PollContent(
+            poll = Poll(
+                question = QUESTION,
+                options = listOf(
+                    PollOption("Kotlin", votes = 8, percentage = 61.5f),
+                    PollOption("Java", votes = 4, percentage = 30.8f),
+                ),
+                multipleChoice = false,
+                totalVotes = 13,
+                hasVoted = true,
+                resultsAvailable = true,
+                maxSelections = 1,
+                closed = true,
+                expiresAt = EXPIRATION,
+                blankVotes = 1,
             ),
             pollVote = null,
         )
@@ -164,13 +190,16 @@ class TopicPollVoteRoborazziTest {
 
     private enum class PollScenario(val fileName: String) {
         MonoIdle("mono_idle"),
+        BlankVoteIdle("blank_vote_idle"),
         MultiIdle("multi_idle"),
         Submitting("submitting"),
         Results("results_read_only"),
+        ClosedResults("closed_results"),
         WithoutToken("without_token_read_only"),
     }
 
     private companion object {
         const val QUESTION = "Quel langage préférez-vous ?"
+        val EXPIRATION: LocalDateTime = LocalDateTime.of(2026, 8, 30, 18, 45)
     }
 }

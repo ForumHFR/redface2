@@ -107,12 +107,20 @@
     <string name="topic_poll_single_choice">choix unique</string>
     <string name="topic_poll_show">(afficher)</string>
     <string name="topic_poll_hide">(masquer)</string>
+    <string name="topic_poll_closed">Sondage clos</string>
+    <string name="topic_poll_expires_at">Expire le %1$s</string>
+    <string name="topic_poll_expired_at">A expiré le %1$s</string>
+    <plurals name="topic_poll_blank_votes">
+        <item quantity="one">%1$d vote blanc</item>
+        <item quantity="other">%1$d votes blancs</item>
+    </plurals>
     <!-- #779 — vote Topic-only : contrôles, progression et erreurs typées du slice MVI. -->
     <plurals name="topic_poll_max_choices">
         <item quantity="one">%1$d choix maximum</item>
         <item quantity="other">%1$d choix maximum</item>
     </plurals>
     <string name="topic_poll_vote">Voter</string>
+    <string name="topic_poll_vote_blank">Voter blanc</string>
     <string name="topic_poll_submitting">Envoi du vote…</string>
     <string name="topic_poll_refreshing">Actualisation des résultats…</string>
     <string name="topic_poll_unavailable">Vote indisponible. Actualisez la page ou reconnectez-vous.</string>

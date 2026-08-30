@@ -41,6 +41,20 @@ class DefaultPollVoteRepository @Inject constructor(
         responseParser.parse(hfrClient.submitPollVote(formBody))
     }
 
+    /**
+     * Submits HFR's explicit blank-vote shape without retrying.
+     *
+     * Unlike a normal vote, the proven live contract includes [POLL_SUBMIT] and deliberately omits
+     * every `reponse*` field. The shared response parser handles the otherwise identical outcome.
+     */
+    override suspend fun submitBlankVote(form: PollVoteForm): PollVoteResult = withContext(ioDispatcher) {
+        guardAgainstInvalidBlankSubmission(form)?.let { reason ->
+            return@withContext PollVoteResult.Failed(reason)
+        }
+
+        responseParser.parse(hfrClient.submitPollVote(buildBlankFormBody(form)))
+    }
+
     private fun guardAgainstInvalidSubmission(
         form: PollVoteForm,
         selectedChoices: Set<PollVoteChoice>,
@@ -52,10 +66,19 @@ class DefaultPollVoteRepository @Inject constructor(
         form.multipleChoice &&
             form.maxSelections?.let { selectedChoices.size > it } == true ->
             PollVoteFailureReason.TooManySelections
-        REQUIRED_NUMERIC_FIELDS.any { field -> form.hiddenFields[field]?.toIntOrNull() == null } ->
+        hasMalformedHiddenFields(form) ->
             PollVoteFailureReason.MalformedForm
         else -> null
     }
+
+    private fun guardAgainstInvalidBlankSubmission(form: PollVoteForm): PollVoteFailureReason? = when {
+        form.hashCheck.isBlank() -> PollVoteFailureReason.InvalidHashCheck
+        hasMalformedHiddenFields(form) -> PollVoteFailureReason.MalformedForm
+        else -> null
+    }
+
+    private fun hasMalformedHiddenFields(form: PollVoteForm): Boolean =
+        REQUIRED_NUMERIC_FIELDS.any { field -> form.hiddenFields[field]?.toIntOrNull() == null }
 
     /**
      * Preserves HFR's observed browser order: token, hidden fields, then selected choices in the
@@ -74,8 +97,19 @@ class DefaultPollVoteRepository @Inject constructor(
         }
         .build()
 
+    /** Token + hidden fields + submit marker only: no poll choice is represented for a blank vote. */
+    private fun buildBlankFormBody(form: PollVoteForm): FormBody = FormBody.Builder(Charsets.UTF_8)
+        .add(HASH_CHECK, form.hashCheck)
+        .apply {
+            form.hiddenFields.forEach { (name, value) -> add(name, value) }
+            add(POLL_SUBMIT, POLL_SUBMIT_VALUE)
+        }
+        .build()
+
     private companion object {
         private const val HASH_CHECK = "hash_check"
+        private const val POLL_SUBMIT = "sondage_submit"
+        private const val POLL_SUBMIT_VALUE = "Voter"
         private val REQUIRED_NUMERIC_FIELDS = listOf("cat", "page", "numeropost")
     }
 }
