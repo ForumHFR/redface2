@@ -16,6 +16,12 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.46.1` — `internal` (dev) — 2026-08-30
+
+### Ajouté
+
+- **Sondages : état fermé, expiration, vote blanc et repli intelligent (#1170)** — les sondages **clos** sont reconnus (marqueur « Ce sondage est clos ») et affichent une pillule dédiée ; la **date d'expiration** (« Expire le … » / « A expiré le … ») est parsée et affichée ; le **vote blanc** est pris en charge à l'affichage (compteur « N vote blanc ») comme à l'écriture (bouton « Voter blanc », POST `vote.php` avec `sondage_submit=Voter` sans `reponse` — contrat capturé live). Nouveau réglage opt-in **« Déplier les sondages non répondus »** : quand le repli des sondages est actif, ceux où l'on peut encore voter restent dépliés. Radios mono désormais déselectionnables (le vote blanc reste atteignable). Persistance JSON (sans migration Room), preuve visuelle Roborazzi (clos / expiration / vote blanc, light/dark/AMOLED).
+
 ## `0.46.0` — `internal` (dev) — 2026-08-30
 
 ### Ajouté
