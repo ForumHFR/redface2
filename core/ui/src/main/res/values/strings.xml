@@ -60,6 +60,7 @@
     <!-- Action navigateur neutre, partagée par le menu image et les menus propres aux features. -->
     <string name="browser_open_action">Ouvrir dans le navigateur</string>
     <string name="browser_no_handler">Aucun navigateur disponible</string>
+    <string name="browser_chooser_title">Choisir un navigateur</string>
     <string name="bbcode_action_bold">Gras</string>
     <string name="bbcode_action_italic">Italique</string>
     <string name="bbcode_action_underline">Souligné</string>
