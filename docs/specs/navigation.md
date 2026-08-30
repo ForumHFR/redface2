@@ -271,6 +271,14 @@ Le manifest garde deux filtres distincts, sans `autoVerify` : les chemins legacy
 La sur-capture du second filtre est intentionnelle : `resolveHfrDeepLink` valide l'action, le
 schéma et le host, route les topics reconnus, puis délègue toute URL HFR non routable au navigateur.
 
+Comme `hardware.fr` est un domaine tiers, Redface 2 ne peut pas être *vérifié* comme handler et
+l'utilisateur doit l'activer manuellement. Pour rendre cet opt-in découvrable (#1032 PR3), la ligne
+Réglages → « Réseau et cache » → « Ouverture des liens HFR » affiche l'état courant — lu via
+`DomainVerificationManager` (API 31+ ; « inconnu » sous Android 12, statut non lisible) et décidé par
+la fonction pure `hfrLinkHandlingStatusOf` (`:core:ui/browser`) — et ouvre directement l'écran système
+« Ouvrir par défaut » (`ACTION_APP_OPEN_BY_DEFAULT_SETTINGS`, repli `ACTION_APPLICATION_DETAILS_SETTINGS`).
+La description se rafraîchit à l'`ON_RESUME` pour refléter un changement fait dans les réglages système.
+
 Implémentation via **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026). Les routes sont des types `@Serializable` qui implémentent un sealed interface marqueur `RedfaceNavKey : NavKey` :
 
 ```kotlin
