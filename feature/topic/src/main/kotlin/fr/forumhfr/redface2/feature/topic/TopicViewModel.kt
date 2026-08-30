@@ -405,6 +405,13 @@ class TopicViewModel @AssistedInject constructor(
                 _state.update { it.copy(pollsExpandedDefault = expanded) }
             }
             .launchIn(viewModelScope)
+        // #1170 — independently keep live unanswered polls expanded when the global default is
+        // collapsed. The screen combines this preference with the transient form capability.
+        userPreferencesRepository.observeTopicUnansweredPollsExpanded()
+            .onEach { expanded ->
+                _state.update { it.copy(expandUnansweredPolls = expanded) }
+            }
+            .launchIn(viewModelScope)
         // #330 — mirror the signatures preference so the post cards can show/hide the author
         // signature without a refetch (it is always parsed and cached on the Post).
         userPreferencesRepository.observeTopicSignatures()

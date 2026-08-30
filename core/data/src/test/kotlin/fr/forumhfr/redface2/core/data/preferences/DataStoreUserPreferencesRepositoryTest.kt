@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.data.preferences
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import app.cash.turbine.test
@@ -812,6 +813,29 @@ class DataStoreUserPreferencesRepositoryTest {
             cancelAndIgnoreRemainingEvents()
         }
     }
+
+    @Test
+    fun `unanswered poll expansion defaults false and round-trips the exact key`() =
+        runTest(dispatcher) {
+            val key = booleanPreferencesKey("topic_unanswered_polls_expanded")
+            repository.observeTopicUnansweredPollsExpanded().test {
+                assertFalse(awaitItem())
+                cancelAndIgnoreRemainingEvents()
+            }
+
+            repository.setTopicUnansweredPollsExpanded(true)
+            assertEquals(true, dataStore.data.first()[key])
+            repository.observeTopicUnansweredPollsExpanded().test {
+                assertTrue(awaitItem())
+                cancelAndIgnoreRemainingEvents()
+            }
+
+            dataStore.edit { prefs -> prefs[key] = false }
+            repository.observeTopicUnansweredPollsExpanded().test {
+                assertFalse(awaitItem())
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
 
     @Test
     fun `observeFoldLongQuotes defaults to true then persists false and true`() = runTest(dispatcher) {

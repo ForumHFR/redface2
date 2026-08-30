@@ -1562,6 +1562,10 @@ class TopicFormViewModelTest {
 
         override suspend fun setTopicPollsExpanded(enabled: Boolean) = Unit
 
+        override fun observeTopicUnansweredPollsExpanded(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setTopicUnansweredPollsExpanded(enabled: Boolean) = Unit
+
         override fun observeTopicSignatures(): Flow<Boolean> = MutableStateFlow(false)
 
         override suspend fun setTopicSignatures(enabled: Boolean) = Unit

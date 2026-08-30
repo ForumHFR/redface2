@@ -1179,6 +1179,54 @@ class SettingsViewModelTest {
     }
 
     // ──────────────────────────────────────────────────────────────────────
+    // Unanswered poll expansion (#1170)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `init hydrates topicUnansweredPollsExpanded from a persisted true`() = runTest {
+        repository.emitTopicUnansweredPollsExpanded(true)
+
+        val viewModel = newViewModel()
+
+        assertTrue(viewModel.state.value.topicUnansweredPollsExpanded)
+        assertFalse(viewModel.state.value.topicUnansweredPollsExpandedError)
+    }
+
+    @Test
+    fun `TopicUnansweredPollsExpandedChanged exposes an independent optimistic flip`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        repository.blockTopicUnansweredPollsExpandedSetUntil = gate
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.TopicUnansweredPollsExpandedChanged(true))
+
+        val midFlight = viewModel.state.value
+        assertTrue(midFlight.topicUnansweredPollsExpanded)
+        assertTrue(midFlight.isUpdatingTopicUnansweredPollsExpanded)
+        assertFalse(midFlight.canToggleTopicUnansweredPollsExpanded)
+        assertFalse("the global poll setting remains independent", midFlight.topicPollsExpanded)
+
+        gate.complete(Unit)
+
+        assertTrue(viewModel.state.value.topicUnansweredPollsExpanded)
+        assertFalse(viewModel.state.value.isUpdatingTopicUnansweredPollsExpanded)
+        assertEquals(1, repository.topicUnansweredPollsExpandedSetCalls)
+    }
+
+    @Test
+    fun `TopicUnansweredPollsExpandedChanged reverts and raises its error on persist failure`() = runTest {
+        repository.failOnTopicUnansweredPollsExpandedSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.TopicUnansweredPollsExpandedChanged(true))
+
+        assertFalse(viewModel.state.value.topicUnansweredPollsExpanded)
+        assertFalse(viewModel.state.value.isUpdatingTopicUnansweredPollsExpanded)
+        assertTrue(viewModel.state.value.topicUnansweredPollsExpandedError)
+        assertEquals(1, repository.topicUnansweredPollsExpandedSetCalls)
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
     // Author signatures (#330)
     // ──────────────────────────────────────────────────────────────────────
 
@@ -2282,6 +2330,27 @@ class SettingsViewModelTest {
 
         fun emitTopicPollsExpanded(value: Boolean) {
             topicPollsExpanded.value = value
+        }
+
+        // #1170 — unanswered poll expansion. Independent optimistic-flip seam.
+        private val topicUnansweredPollsExpanded = MutableStateFlow(false)
+        var topicUnansweredPollsExpandedSetCalls: Int = 0
+            private set
+        var failOnTopicUnansweredPollsExpandedSet: Boolean = false
+        var blockTopicUnansweredPollsExpandedSetUntil: CompletableDeferred<Unit>? = null
+
+        override fun observeTopicUnansweredPollsExpanded(): Flow<Boolean> =
+            topicUnansweredPollsExpanded
+
+        override suspend fun setTopicUnansweredPollsExpanded(enabled: Boolean) {
+            topicUnansweredPollsExpandedSetCalls += 1
+            blockTopicUnansweredPollsExpandedSetUntil?.await()
+            check(!failOnTopicUnansweredPollsExpandedSet) { "boom" }
+            topicUnansweredPollsExpanded.value = enabled
+        }
+
+        fun emitTopicUnansweredPollsExpanded(value: Boolean) {
+            topicUnansweredPollsExpanded.value = value
         }
 
         // #330 — afficher les signatures. Même seam optimistic-flip que topicPollsExpanded.

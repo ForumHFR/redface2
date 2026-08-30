@@ -24,11 +24,11 @@ class TopicPollExpansionTest {
     }
 
     @Test
-    fun `absent topic returns null so the screen follows the global default`() {
+    fun `absent topic returns null so the screen follows its automatic policy`() {
         val cache = emptyMap<TopicPollKey, Boolean>().withPollExpansion(key(1, 10), expanded = true)
 
-        // A topic the user never toggled has no entry: the lookup is null, and TopicScreen falls
-        // back to TopicUiState.pollsExpandedDefault (the #456 setting).
+        // A topic the user never toggled has no entry: the lookup is null, and TopicScreen resolves
+        // the #456 global default plus the independent #1170 unanswered-poll opt-in.
         assertNull(cache[key(2, 20)])
     }
 

@@ -1222,5 +1222,9 @@ class CategoryViewModelTest {
             setCalls = setCalls + filter
             stored.value = filter
         }
+
+        override fun observeTopicUnansweredPollsExpanded(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setTopicUnansweredPollsExpanded(enabled: Boolean) = Unit
     }
 }

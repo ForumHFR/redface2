@@ -534,6 +534,16 @@ internal fun buildSettingsCatalogue(
                 onCheckedChange = { onIntent(SettingsIntent.TopicPollsExpandedChanged(it)) },
             ),
             toggleRow(
+                id = "topic_unanswered_polls_expanded",
+                title = stringResource(R.string.settings_topic_unanswered_polls_expanded_title),
+                description = stringResource(R.string.settings_topic_unanswered_polls_expanded_description),
+                checked = state.topicUnansweredPollsExpanded,
+                enabled = state.canToggleTopicUnansweredPollsExpanded,
+                errorRes = R.string.settings_topic_unanswered_polls_expanded_persist_failed
+                    .takeIf { state.topicUnansweredPollsExpandedError },
+                onCheckedChange = { onIntent(SettingsIntent.TopicUnansweredPollsExpandedChanged(it)) },
+            ),
+            toggleRow(
                 id = "topic_signatures",
                 title = stringResource(R.string.settings_topic_signatures_title),
                 description = stringResource(R.string.settings_topic_signatures_description),

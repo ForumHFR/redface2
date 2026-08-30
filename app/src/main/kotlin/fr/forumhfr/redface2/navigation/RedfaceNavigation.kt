@@ -1153,9 +1153,9 @@ fun RedfaceApp(intent: Intent?) {
         // replaced the TopicRoute (new nav entry → new ViewModel), re-seeding a `rememberSaveable`
         // toggle inside the poll card to the global default on every page. Since #895 étape 4 the
         // entry survives page changes; hoisting still makes the choice survive leaving and
-        // reopening the topic within the session. Absence of a key = follow the
-        // `topicPollsExpanded` default; the toggle records the manual choice here. RAM/session
-        // only, never serialized into a route.
+        // reopening the topic within the session. Absence of a key = follow the automatic policy
+        // (`topicPollsExpanded` plus the unanswered-poll opt-in); the toggle records the manual
+        // choice here. RAM/session only, never serialized into a route.
         var topicPollExpansionCache by remember { mutableStateOf(emptyMap<TopicPollKey, Boolean>()) }
 
         // #812 — the session-clearing block below must run on real SESSION TRANSITIONS only
@@ -1919,8 +1919,8 @@ internal fun EditorQuotesHandoff?.forScope(scope: QuoteScope?): EditorQuotesHand
  * state owned by the topic screen dies when its entry leaves the back stack, so hoisting makes the
  * choice survive leaving and reopening the topic (and survived the per-page entry swap back when
  * page changes replaced the route, pre-#895 étape 4 — the original trigger). The `var` backing
- * [expansions] lives in [RedfaceApp]. A `null` lookup (no entry for the
- * topic) means « follow the global default »; [onExpansionChanged] records the user's manual toggle.
+ * [expansions] lives in [RedfaceApp]. A `null` lookup (no entry for the topic) means « follow the
+ * automatic poll policy »; [onExpansionChanged] records the user's manual toggle.
  *
  * @property expansions the manual collapse/expand choice per topic the user has toggled.
  * @property onExpansionChanged records a topic's manual poll choice when the card is tapped.
@@ -2761,8 +2761,8 @@ private fun RedfaceNavHost(
                     // #436 — « Tout vider » : a long press on the « Citer N » FAB empties the
                     // whole hoisted basket (same reset path as the post-editor launch / logout).
                     onClearMultiQuote = multiQuoteNavState.onClear,
-                    // #465 — the topic's saved manual poll choice (null = follow the global
-                    // default), and the callback recording a tap on the poll card. Hoisted to
+                    // #465/#1170 — the topic's saved manual poll choice (null = follow the
+                    // automatic poll policy), and the callback recording a tap on the card. Hoisted to
                     // :app so it survives leaving and reopening the topic (pre-#895 étape 4:
                     // the per-page TopicRoute swap), keyed by (cat, post).
                     pollManualExpanded = topicPollNavState.expansions[
