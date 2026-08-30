@@ -133,6 +133,108 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `cited badge opens Idle then Loading and exposes returned posts without recounting`() = runTest {
+        val target = fakePost(numreponse = 700, citedCount = 4)
+        val citingPosts = listOf(fakePost(801, author = "Alice"), fakePost(802, author = "Bob"))
+        val gate = CompletableDeferred<Unit>()
+        val repository = FakeTopicRepository(listOf(flowOf(fakeTopic(1, 1, posts = listOf(target))))).apply {
+            citingResult = Result.success(citingPosts)
+            citingGate = gate
+        }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+        )
+        assertEquals(
+            CitingPostsSheetContent.Idle,
+            CitingPostsSheetState(numreponse = target.numreponse, citedCount = 4).content,
+        )
+
+        viewModel.send(TopicIntent.OnCitedBadgeClick(target))
+
+        val loading = requireNotNull(viewModel.state.value.citingPostsSheet)
+        assertEquals(target.numreponse, loading.numreponse)
+        assertEquals(4, loading.citedCount)
+        assertEquals(CitingPostsSheetContent.Loading, loading.content)
+        assertEquals(listOf(Triple(SAMPLE_CAT, SAMPLE_POST, target.numreponse)), repository.citingCalls)
+
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        val loaded = requireNotNull(viewModel.state.value.citingPostsSheet)
+        assertEquals(CitingPostsSheetContent.Loaded(citingPosts), loaded.content)
+        assertEquals("the title keeps the badge count, not the distinct row count", 4, loaded.citedCount)
+    }
+
+    @Test
+    fun `citing-post failure maps the typed error and dismiss cancels a pending read`() = runTest {
+        val target = fakePost(numreponse = 700, citedCount = 2)
+        val failureGate = CompletableDeferred<Unit>()
+        val repository = FakeTopicRepository(listOf(flowOf(fakeTopic(1, 1)))).apply {
+            citingResult = Result.failure(HfrServerException(503, "https://forum.hardware.fr"))
+            citingGate = failureGate
+        }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+        )
+
+        viewModel.send(TopicIntent.OnCitedBadgeClick(target))
+        assertEquals(CitingPostsSheetContent.Loading, viewModel.state.value.citingPostsSheet?.content)
+        failureGate.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(
+            CitingPostsSheetContent.Error(HfrErrorKind.ServerDown),
+            viewModel.state.value.citingPostsSheet?.content,
+        )
+
+        val dismissGate = CompletableDeferred<Unit>()
+        repository.citingResult = Result.success(listOf(fakePost(900)))
+        repository.citingGate = dismissGate
+        viewModel.send(TopicIntent.OnCitedBadgeClick(target))
+        viewModel.send(TopicIntent.OnDismissCitingSheet)
+        assertEquals(null, viewModel.state.value.citingPostsSheet)
+        dismissGate.complete(Unit)
+        advanceUntilIdle()
+        assertEquals("a cancelled read must not reopen the sheet", null, viewModel.state.value.citingPostsSheet)
+    }
+
+    @Test
+    fun `citing-post click dismisses resolves its page and reuses the jump landing`() = runTest {
+        val target = fakePost(numreponse = 700, citedCount = 2)
+        val citer = fakePost(numreponse = 801, author = "Alice")
+        val repository = FakeTopicRepository(
+            listOf(flowOf(fakeTopic(1, 1, posts = listOf(target, citer)))),
+        ).apply {
+            citingResult = Result.success(listOf(citer))
+        }
+        val search = FakeSearchRepository(pageToResolve = 1)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+            searchRepository = search,
+        )
+        viewModel.send(TopicIntent.OnCitedBadgeClick(target))
+        advanceUntilIdle()
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.OnCitingPostClick(citer))
+
+            assertEquals(TopicEffect.ScrollToPost(citer.numreponse), awaitItem())
+            assertEquals(null, viewModel.state.value.citingPostsSheet)
+            assertTrue(viewModel.state.value.canReturnFromJump)
+            assertEquals(
+                listOf(Triple(SAMPLE_CAT, SAMPLE_POST, citer.numreponse)),
+                search.resolveCalls,
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `staff directory is requested once and merged into the loaded mode`() = runTest {
         val staffRepository = FakeAuthorRoleRepository(
             staff = mapOf("ernestor" to AuthorRole.MODERATOR),
@@ -4620,7 +4722,12 @@ class TopicViewModelTest {
         maxSelections = 1,
     )
 
-    private fun fakePost(numreponse: Int, isEditable: Boolean = false, author: String = "tester"): Post = Post(
+    private fun fakePost(
+        numreponse: Int,
+        isEditable: Boolean = false,
+        author: String = "tester",
+        citedCount: Int? = null,
+    ): Post = Post(
         numreponse = numreponse,
         author = author,
         date = java.time.Instant.parse("2026-05-04T12:00:00Z"),
@@ -4630,6 +4737,7 @@ class TopicViewModelTest {
         isOwnPost = false,
         quotedAuthors = emptyList(),
         postIndex = null,
+        citedCount = citedCount,
     )
 
     // #809 — a full drapeau for the SAMPLE topic, as FlagRepository.findFlag would resolve it.
@@ -4724,6 +4832,9 @@ private class FakeTopicRepository(
     val calls: MutableList<Triple<Int, Int, Int>> = mutableListOf()
     val refreshCalls: MutableList<Triple<Int, Int, Int>> = mutableListOf()
     val prefetches: MutableList<Triple<Int, Int, Int>> = mutableListOf()
+    val citingCalls: MutableList<Triple<Int, Int, Int>> = mutableListOf()
+    var citingResult: Result<List<Post>> = Result.success(emptyList())
+    var citingGate: CompletableDeferred<Unit>? = null
 
     /**
      * Optional hook to suspend or fail inside `prefetch(...)`. Tests that need to
@@ -4760,6 +4871,12 @@ private class FakeTopicRepository(
         refreshErrorToThrow?.let { throw it }
         return refreshQueue.removeFirstOrNull()
             ?: error("No more refresh topics queued (issue #200 post-submit force fetch path)")
+    }
+
+    override suspend fun getCitingPosts(cat: Int, post: Int, numreponse: Int): Result<List<Post>> {
+        citingCalls += Triple(cat, post, numreponse)
+        citingGate?.await()
+        return citingResult
     }
 
     override suspend fun prefetch(cat: Int, post: Int, page: Int) {
@@ -4977,6 +5094,9 @@ private class FakeStreamingTopicRepository(
         error("refreshTopicPage not used by ViewModel under test")
     }
 
+    override suspend fun getCitingPosts(cat: Int, post: Int, numreponse: Int): Result<List<Post>> =
+        Result.success(emptyList())
+
     override suspend fun prefetch(cat: Int, post: Int, page: Int) {
         // no-op for streaming tests
     }
@@ -5000,6 +5120,9 @@ private class FakeStreamingEmissionTopicRepository(
         refreshCalls += Triple(cat, post, page)
         return refreshQueue.removeFirstOrNull() ?: error("No refresh topic queued (#877 ensureSearchForm)")
     }
+
+    override suspend fun getCitingPosts(cat: Int, post: Int, numreponse: Int): Result<List<Post>> =
+        Result.success(emptyList())
 
     override suspend fun prefetch(cat: Int, post: Int, page: Int) {
         // no-op

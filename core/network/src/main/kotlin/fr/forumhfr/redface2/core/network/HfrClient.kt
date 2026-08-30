@@ -73,6 +73,34 @@ class HfrClient @Inject constructor(
     }
 
     /**
+     * #783 — fetches HFR's native reverse citation index for [numreponse].
+     *
+     * The request deliberately carries the full `(cat, post, numreponse)` tuple because a
+     * `numreponse` is unique only inside its category. Unlike [resolveTopicPageUrl], this read uses
+     * the ordinary redirect-following [anonymous] client: HFR first resolves the target then serves
+     * a filtered topic page whose standard `messagetable` rows are the posts citing the target.
+     * Anonymous access avoids marking any drapeau as read.
+     */
+    suspend fun getCitingPosts(cat: Int, post: Int, numreponse: Int): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("forum2.php")
+            .addQueryParameter("config", "hfr.inc")
+            .addQueryParameter("cat", cat.toString())
+            .addQueryParameter("post", post.toString())
+            .addQueryParameter("page", "1")
+            .addQueryParameter("numreponse", numreponse.toString())
+            .addQueryParameter("quote_only", "1")
+            .build()
+        val request = Request.Builder().url(url).get().build()
+        return anonymous.newCall(request).executeCancellable { response ->
+            if (!response.isSuccessful) {
+                throw HfrServerException(response.code, response.request.url.toString())
+            }
+            response.body.string()
+        }
+    }
+
+    /**
      * Fetches the authenticated MP list page. The endpoint is the legacy v1 URL
      * (`forum1.php?config=hfr.inc&cat=prive&...`), which is structurally a topic listing
      * scoped to the user's private inbox. Always uses the authenticated client — there is

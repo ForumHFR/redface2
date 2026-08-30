@@ -53,6 +53,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.contentColorFor
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.pullToRefresh
@@ -1295,6 +1296,9 @@ internal fun TopicContent(
                                 favoriteAtPostState = favoriteAtPostState,
                                 onFavoriteMenuOpened = onFavoriteMenuOpened,
                                 onFavoriteAction = onFavoriteAction,
+                                onCitedBadgeClick = { post ->
+                                    onIntent(TopicIntent.OnCitedBadgeClick(post))
+                                },
                                 onDoubleTapRefresh = refreshWithMediaRetry,
                                 onSearchNextResults = { onIntent(TopicIntent.SearchNextResultsPage) },
                                 listState = listState,
@@ -1390,6 +1394,13 @@ internal fun TopicContent(
                 quickReplyFor = null
                 onQuickReplySubmitted(targetPage, scrollTo)
             },
+        )
+    }
+    state.citingPostsSheet?.let { sheet ->
+        CitingPostsSheet(
+            state = sheet,
+            onDismiss = { onIntent(TopicIntent.OnDismissCitingSheet) },
+            onPostClick = { post -> onIntent(TopicIntent.OnCitingPostClick(post)) },
         )
     }
 }
@@ -1837,6 +1848,8 @@ private fun TopicLoadedContent(
     favoriteAtPostState: FavoriteAtPostState = FavoriteAtPostState.Unknown,
     onFavoriteMenuOpened: () -> Unit = {},
     onFavoriteAction: (Post) -> Unit = {},
+    /** #783 — opens the server-backed list of posts citing the tapped post. */
+    onCitedBadgeClick: (Post) -> Unit = {},
     /** #382 — double-tap anywhere on the list refreshes the current page (RF1 parity). */
     onDoubleTapRefresh: () -> Unit = {},
     /** #879 — filtered search : « résultats suivants » footer tap. */
@@ -2221,6 +2234,7 @@ private fun TopicLoadedContent(
                         // #863 — the SERVER count (« Message cité N fois », cross-page), parsed
                         // from div.edited ; null = never cited. The page-scoped client scan is gone.
                         citedCount = post.citedCount ?: 0,
+                        onCitedBadgeClick = onCitedBadgeClick,
                         // #699 — makes sourced quote headers tappable (jump to the cited post).
                         onGoToCitedPost = onGoToPost,
                         // #330 — render the author signature beneath the body when the reading preference
@@ -2921,9 +2935,7 @@ internal fun TopicPostCard(
      * the old card+band double highlight (removed in #104) nor a left rail (dropped as ugly). Default false.
      */
     highlighted: Boolean = false,
-    /**
-     * #239 — number of posts on the current page that cite this one. 0 hides the badge.
-     */
+    /** #239/#863 — HFR's server count across the whole topic. 0 hides the badge. */
     citedCount: Int,
     /**
      * #330 — when `true` (the « Afficher les signatures » reading preference is on), the author's
@@ -2979,6 +2991,8 @@ internal fun TopicPostCard(
      * of the header bar), permalink copy, edit marker, citation count.
      */
     onOpenMenu: () -> Unit = {},
+    /** #783 — invoked only from the positive server-count pill. */
+    onCitedBadgeClick: (Post) -> Unit = {},
     /**
      * #436 — true when this post sits in the multi-quote basket (#291). Marks the card with a
      * primary border and flips the footer toggle to « ✓ Cité », so the selection is visible without
@@ -3094,6 +3108,7 @@ internal fun TopicPostCard(
                 TopicPostBadges(
                     citedCount = citedCount,
                     horizontalPadding = m.cardBodyHorizontal,
+                    onClick = { onCitedBadgeClick(post) },
                 )
             }
         } else {
@@ -3268,6 +3283,7 @@ private fun TopicPostIdentityHeader(
 private fun TopicPostBadges(
     citedCount: Int,
     horizontalPadding: Dp,
+    onClick: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -3278,19 +3294,26 @@ private fun TopicPostBadges(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (citedCount > 0) {
-            // #239/#863 — sober pill: HFR's server-side citation count (cross-page,
-            // authoritative). Jumping to the citing posts is a follow-up (#783).
+            // #239/#863/#783 — sober pill: HFR's server-side citation count (cross-page,
+            // authoritative). Its click opens HFR's native reverse index.
             // surfaceContainerHighest : a touch above the surfaceContainer card so the pill reads.
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                shape = MaterialTheme.shapes.small,
-            ) {
-                Text(
-                    text = pluralStringResource(R.plurals.topic_post_cited_count, citedCount, citedCount),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                )
+            // #783 (gate Fable R1) — a Surface(onClick) applies M3's minimumInteractiveComponentSize
+            // (48 dp), which would inflate the whole post card and undo the #882 de-inflation. Neutralize
+            // it for THIS pill only, so it reclaims its labelSmall content size. The tap target then
+            // equals the visual pill — acceptable for a secondary affordance (cf. #603 34 dp bands).
+            CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
+                Surface(
+                    onClick = onClick,
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    shape = MaterialTheme.shapes.small,
+                ) {
+                    Text(
+                        text = pluralStringResource(R.plurals.topic_post_cited_count, citedCount, citedCount),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                    )
+                }
             }
         }
     }

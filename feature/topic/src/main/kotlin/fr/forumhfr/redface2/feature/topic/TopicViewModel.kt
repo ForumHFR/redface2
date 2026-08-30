@@ -154,6 +154,11 @@ class TopicViewModel @AssistedInject constructor(
      */
     private var searchFormJob: Job? = null
 
+    /** #783 — latest-wins reverse-citation read and post-page resolution. */
+    private var citingPostsJob: Job? = null
+    private var citingPostNavigationJob: Job? = null
+    private var citingPostsGeneration: Int = 0
+
     // #986 — account-scoped owner token for the resolve → optional confirm → add interaction.
     // A logout/account switch cancels both jobs, advances the token and resets the visible state,
     // so a late result can never describe or mutate the next account's UI state.
@@ -457,6 +462,9 @@ class TopicViewModel @AssistedInject constructor(
             // refresh — by then the new post has been persisted and the user just wants
             // to recover from a transient error.
             TopicIntent.Retry -> loadCurrentPage()
+            is TopicIntent.OnCitedBadgeClick -> openCitingPosts(intent.post)
+            is TopicIntent.OnCitingPostClick -> openCitingPost(intent.post)
+            TopicIntent.OnDismissCitingSheet -> dismissCitingPosts()
             is TopicIntent.DeletePost -> deletePost(intent.numreponse)
             TopicIntent.Refresh -> refresh()
             is TopicIntent.UpdatePollSelection -> updatePollSelection(intent.choice, intent.selected)
@@ -479,6 +487,108 @@ class TopicViewModel @AssistedInject constructor(
             TopicIntent.NextResult -> nextResult()
             TopicIntent.PrevResult -> prevResult()
         }
+    }
+
+    /**
+     * #783 — opens the sheet immediately then performs the volatile anonymous read. A second badge
+     * tap cancels the first request; dismissal also cancels it, so a late result cannot reopen the
+     * sheet. The server badge remains the title source even when the returned list is deduplicated.
+     */
+    private fun openCitingPosts(post: Post) {
+        val citedCount = post.citedCount?.takeIf { it > 0 } ?: return
+        citingPostNavigationJob?.cancel()
+        citingPostsJob?.cancel()
+        val generation = ++citingPostsGeneration
+        val target = CitingPostsSheetState(
+            numreponse = post.numreponse,
+            citedCount = citedCount,
+        )
+        _state.update { it.copy(citingPostsSheet = target) }
+        citingPostsJob = viewModelScope.launch {
+            _state.update { state ->
+                if (
+                    generation == citingPostsGeneration &&
+                    state.citingPostsSheet?.numreponse == target.numreponse
+                ) {
+                    state.copy(
+                        citingPostsSheet = target.copy(content = CitingPostsSheetContent.Loading),
+                    )
+                } else {
+                    state
+                }
+            }
+            val result = try {
+                topicRepository.getCitingPosts(
+                    cat = request.cat,
+                    post = request.post,
+                    numreponse = target.numreponse,
+                )
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (@Suppress("TooGenericExceptionCaught") throwable: Throwable) {
+                Result.failure(throwable)
+            }
+            _state.update { state ->
+                val current = state.citingPostsSheet
+                if (
+                    generation != citingPostsGeneration ||
+                    current?.numreponse != target.numreponse
+                ) {
+                    return@update state
+                }
+                val content = result.fold(
+                    onSuccess = { posts ->
+                        if (posts.isEmpty()) {
+                            CitingPostsSheetContent.Empty
+                        } else {
+                            CitingPostsSheetContent.Loaded(posts)
+                        }
+                    },
+                    onFailure = { error ->
+                        CitingPostsSheetContent.Error(classifyHfrError(error))
+                    },
+                )
+                state.copy(citingPostsSheet = current.copy(content = content))
+            }
+        }
+    }
+
+    /**
+     * #783 — filtered rows expose `page=1&numreponse=…`; HFR's redirect is the source of truth for
+     * the real page. Once resolved, reuse [goToPost] unchanged so the #782 return chain and
+     * [TopicEffect.ScrollToPost] landing remain identical to every other in-topic jump.
+     */
+    private fun openCitingPost(post: Post) {
+        val loaded = _state.value.citingPostsSheet?.content as? CitingPostsSheetContent.Loaded
+            ?: return
+        if (loaded.posts.none { it.numreponse == post.numreponse }) return
+        dismissCitingPosts()
+        citingPostNavigationJob?.cancel()
+        citingPostNavigationJob = viewModelScope.launch {
+            val resolvedPage = try {
+                withTimeoutOrNull(RESOLVE_TIMEOUT_MS) {
+                    searchRepository.resolveSearchResultPage(
+                        cat = request.cat,
+                        post = request.post,
+                        numreponse = post.numreponse,
+                    )
+                }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (@Suppress("TooGenericExceptionCaught") ignored: Throwable) {
+                null
+            }
+            // The unfiltered href rendered by quote_only carries page=1. A failed probe therefore
+            // degrades to that same server-provided fallback, never to a guessed page.
+            goToPost(targetPage = resolvedPage ?: 1, numreponse = post.numreponse)
+        }
+    }
+
+    private fun dismissCitingPosts() {
+        citingPostsGeneration++
+        citingPostsJob?.cancel()
+        citingPostsJob = null
+        _state.update { it.copy(citingPostsSheet = null) }
     }
 
     /**

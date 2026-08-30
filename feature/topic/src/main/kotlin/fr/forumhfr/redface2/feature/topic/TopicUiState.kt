@@ -113,6 +113,12 @@ data class TopicUiState(
      */
     val search: TopicSearchUiState = TopicSearchUiState(),
     /**
+     * #783 — reverse-citation sheet, `null` while closed. The target identifiers and the server
+     * badge count stay stable across every load phase so the title never derives information from
+     * the returned row count (HFR may deduplicate citing posts independently from the counter).
+     */
+    val citingPostsSheet: CitingPostsSheetState? = null,
+    /**
      * #782 / #895 étape 4 — `true` while the in-VM quote-jump chain is non-empty, i.e. the next
      * back gesture should unwind one jump ([TopicViewModel.returnFromJump]) instead of leaving
      * the topic. Drives the screen's `BackHandler(enabled = …)` — the interception moved from
@@ -220,6 +226,21 @@ data class TopicUiState(
                 availablePages = emptyList(),
             )
     }
+}
+
+/** #783 — stable target plus the one-shot reverse-citation load lifecycle. */
+data class CitingPostsSheetState(
+    val numreponse: Int,
+    val citedCount: Int,
+    val content: CitingPostsSheetContent = CitingPostsSheetContent.Idle,
+)
+
+sealed interface CitingPostsSheetContent {
+    data object Idle : CitingPostsSheetContent
+    data object Loading : CitingPostsSheetContent
+    data class Loaded(val posts: List<Post>) : CitingPostsSheetContent
+    data object Empty : CitingPostsSheetContent
+    data class Error(val kind: HfrErrorKind) : CitingPostsSheetContent
 }
 
 /** #779 — state of the Topic-only poll vote interaction. Never log this type: [form] is secret. */
@@ -342,6 +363,15 @@ enum class TopicSearchStatus {
 
 sealed interface TopicIntent {
     data object Retry : TopicIntent
+
+    /** #783 — opens the native HFR reverse-citation sheet for a server-counted post. */
+    data class OnCitedBadgeClick(val post: Post) : TopicIntent
+
+    /** #783 — closes the sheet, resolves the citing post's real page, then uses the jump engine. */
+    data class OnCitingPostClick(val post: Post) : TopicIntent
+
+    /** #783 — closes the reverse-citation sheet and cancels its in-flight read. */
+    data object OnDismissCitingSheet : TopicIntent
 
     /**
      * #335 — manual pull-to-refresh of the currently open page. Re-fetches over the network and

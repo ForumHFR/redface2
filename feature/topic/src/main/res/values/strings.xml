@@ -98,6 +98,16 @@
         <item quantity="one">cité %1$d fois</item>
         <item quantity="other">cité %1$d fois</item>
     </plurals>
+    <!-- #783 — feuille de l'index inverse HFR. Le titre reprend le compteur serveur ; le corps
+         n'affiche volontairement aucun total, car HFR peut dédupliquer les posts citeurs. -->
+    <plurals name="topic_citing_posts_title">
+        <item quantity="one">Cité %1$d fois</item>
+        <item quantity="other">Cité %1$d fois</item>
+    </plurals>
+    <string name="topic_citing_posts_empty">Aucun citeur trouvé</string>
+    <string name="topic_citing_posts_error">Impossible de charger les citations</string>
+    <string name="topic_citing_posts_no_text">Message sans extrait textuel</string>
+    <string name="topic_citing_posts_open">Aller au message de %1$s</string>
     <string name="topic_poll_option">%1$s — %2$.1f%% (%3$d votes)</string>
     <!-- #697 — forme « formulaire » (pas encore voté / lecture anonyme) : options sans résultats,
          et remplacement du résumé total-votes par cette mention factuelle. -->
