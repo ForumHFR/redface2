@@ -16,6 +16,12 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.48.2` — `internal` (dev) — 2026-08-31
+
+### Corrigé
+
+- **Feuilles (bottom sheet) : résidu d'oscillation à l'ancre haute** ([#1193](https://github.com/ForumHFR/redface2/issues/1193)) — après le fix `skipPartiallyExpanded` de 0.48.1, un fling vers le haut alors que la feuille est déjà pleine faisait encore déborder le settle à ressort M3 1.4.0. Ajout d'un clamp nested-scroll directionnel (`Modifier.clampSheetTopOverscroll`) sur le contenu des feuilles citeurs et picker smileys : absorbe la vélocité montante résiduelle à l'ancre haute, sans toucher au scroll normal ni au swipe-de-fermeture. (Route drag direct du handle non couverte → fix upstream material3 1.5.0, [#1196](https://github.com/ForumHFR/redface2/issues/1196). À confirmer sur device.)
+
 ## `0.48.1` — `internal` (dev) — 2026-08-31
 
 ### Corrigé
