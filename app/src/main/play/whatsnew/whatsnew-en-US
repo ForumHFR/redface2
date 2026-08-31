@@ -1,3 +1,4 @@
-Redface 2 v0.48.0 — dev.
+Redface 2 v0.48.1 — dev.
 
-- Citations (#783): a post's "cited N times" badge is now tappable and opens the list of messages quoting it (author, date, excerpt), with a direct jump to each.
+- Fix (#1193): the sheets listing citers and perso smileys no longer bounce at the top when opening.
+- Fix (#1188): after tapping a citer, switching page no longer tears you off your page while the jump resolves.

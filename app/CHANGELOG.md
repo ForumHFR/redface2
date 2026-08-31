@@ -16,6 +16,13 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.48.1` — `internal` (dev) — 2026-08-31
+
+### Corrigé
+
+- **Feuilles (bottom sheet) : oscillation/rebond de l'animation d'ouverture** ([#1193](https://github.com/ForumHFR/redface2/issues/1193)) — la liste des citeurs et le picker de smileys persos rebondissaient en butée haute à l'ouverture. Cause : défaut Material 3 1.4.0 (`skipPartiallyExpanded = false`) + contenu haut/scrollable. Forcé `skipPartiallyExpanded = true` sur les deux feuilles + hauteur de contenu stabilisée côté citeurs. (À confirmer sur device.)
+- **Vue Topic : saut de navigation tardif après tap sur un citeur** ([#1188](https://github.com/ForumHFR/redface2/issues/1188)) — un changement de page pendant la probe de résolution (≤ 3 s) pouvait arracher l'utilisateur à sa page. Garde générationnelle + annulation du job sur changement de page.
+
 ## `0.48.0` — `internal` (dev) — 2026-08-31
 
 ### Ajouté

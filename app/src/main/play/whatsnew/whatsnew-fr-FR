@@ -1,3 +1,4 @@
-Redface 2 v0.48.0 — dev.
+Redface 2 v0.48.1 — dev.
 
-- Citations (#783) : le badge « cité N fois » d'un post est désormais cliquable et ouvre la liste des messages qui le citent (pseudo, date, extrait), avec saut direct vers chacun.
+- Correctif (#1193) : les feuilles qui listent les citeurs et les smileys persos ne rebondissent plus en butée haute à l'ouverture.
+- Correctif (#1188) : après avoir touché un citeur, changer de page ne t'arrache plus à ta page pendant que le saut se résout.
