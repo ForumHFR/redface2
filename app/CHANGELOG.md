@@ -16,6 +16,12 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.48.3` — `internal` (dev) — 2026-08-31
+
+### Corrigé
+
+- **Barre de navigation basse : plus de « flash » des libellés au démarrage** ([#1138](https://github.com/ForumHFR/redface2/issues/1138)) — quand les libellés de la barre du bas étaient masqués (réglage #666), ils s'affichaient brièvement au lancement avant que la préférence (DataStore, asynchrone) ne se résolve et ne les masque. L'état initial est désormais semé par un miroir SharedPreferences lu **synchronement** à la construction du ViewModel (même pattern bootstrap que le thème et l'écran de démarrage), écrit à chaque changement et rempli en backfill quand la valeur DataStore se résout : plus de flash dès le prochain démarrage à froid (un dernier flash résiduel possible au tout premier lancement après mise à jour, le temps que le miroir se remplisse). Signalé par nicko.
+
 ## `0.48.2` — `internal` (dev) — 2026-08-31
 
 ### Corrigé

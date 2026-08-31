@@ -19,6 +19,7 @@ import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
+import fr.forumhfr.redface2.core.domain.preferences.NavBarLabelsBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
@@ -62,6 +63,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
     @param:UserPreferencesDataStore private val dataStore: DataStore<Preferences>,
     private val themeBootstrapStore: ThemeBootstrapStore,
     private val startScreenBootstrapStore: StartScreenBootstrapStore,
+    private val navBarLabelsBootstrapStore: NavBarLabelsBootstrapStore,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
     @param:ApplicationScope private val externalScope: CoroutineScope,
 ) : UserPreferencesRepository {
@@ -612,6 +614,14 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             // behaviour; hiding them is the opt-out to an icon-only bar.
             .map { prefs -> prefs[KEY_NAV_BAR_LABELS] ?: true }
             .distinctUntilChanged()
+            // #1138 backfill, same contract as the theme mirror (#386): converge the synchronous
+            // bootstrap copy from the observed truth (idempotent, write-on-diff), so users who hid
+            // the labels BEFORE the mirror existed stop flashing them on the next cold start.
+            .onEach { enabled ->
+                if (navBarLabelsBootstrapStore.read() != enabled) {
+                    navBarLabelsBootstrapStore.write(enabled)
+                }
+            }
             .catch { emit(true) }
 
     override suspend fun setNavBarLabels(enabled: Boolean) {
@@ -619,6 +629,9 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             dataStore.edit { prefs ->
                 prefs[KEY_NAV_BAR_LABELS] = enabled
             }
+            // Mirror for the synchronous cold-start seed (#1138) — DataStore stays the source of
+            // truth, the mirror only seeds the first frame.
+            navBarLabelsBootstrapStore.write(enabled)
         }
     }
 
