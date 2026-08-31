@@ -1,3 +1,3 @@
-Redface 2 v0.49.0 — dev.
+Redface 2 v0.49.1 — dev.
 
-- Nouveau (#1201) : si vous êtes l'auteur d'un sujet, vous pouvez clore son sondage directement depuis l'app (bouton « Clore ce sondage », avec confirmation).
+- Correctif : fiabilité de l'écriture — une coupure réseau ne peut plus faire rejouer une action (double message, ou faux échec sur un vote/une clôture pourtant pris en compte).

@@ -24,10 +24,10 @@ import okhttp3.CookieJar
 import okhttp3.HttpUrl
 
 /**
- * Production CookieJar bound to the @AuthenticatedClient OkHttp instance. Reads from and
- * writes to a [CookieStore] (DataStore-backed in production), and exposes the runtime cache
- * as a [StateFlow] so consumers like `DefaultAuthRepository` can derive auth state without
- * waiting for the eventually-consistent DataStore round-trip.
+ * Production CookieJar shared by the authenticated read and mutation OkHttp clients. Reads from
+ * and writes to a [CookieStore] (DataStore-backed in production), and exposes the runtime cache as
+ * a [StateFlow] so consumers like `DefaultAuthRepository` can derive auth state without waiting for
+ * the eventually-consistent DataStore round-trip.
  *
  * State semantics:
  * - The flow's value type is nullable: `null` means "the persisted store hasn't been read
