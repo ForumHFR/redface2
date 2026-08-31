@@ -16,6 +16,12 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.49.1` — `internal` (dev) — 2026-08-31
+
+### Corrigé
+
+- **Écriture HFR : plus de rejeu réseau des mutations** — les requêtes qui modifient le forum (publier/citer/éditer un message, créer un sujet, voter, clore un sondage, poser/retirer un drapeau, envoyer une image) passent désormais par un client réseau dédié où le retry automatique de connexion est désactivé (`retryOnConnectionFailure(false)`). Sans cela, une coupure réseau au mauvais moment (après que HFR a traité la requête mais avant la réception de la réponse) pouvait faire **rejouer** la requête : double message pour une réponse, ou faux échec affiché pour un vote/une clôture pourtant bien pris en compte. Les lectures conservent le retry. Aligne le code sur la spec (`protocol-hfr.md` : « aucun retry automatique » sur les mutations). Trouvé par la revue de promotion bêta.
+
 ## `0.49.0` — `internal` (dev) — 2026-08-31
 
 ### Ajouté

@@ -10,6 +10,7 @@ import fr.forumhfr.redface2.core.model.write.FlagAddContext
 import fr.forumhfr.redface2.core.network.qualifiers.AnonymousClient
 import fr.forumhfr.redface2.core.network.qualifiers.AuthenticatedClient
 import fr.forumhfr.redface2.core.network.qualifiers.HfrBaseUrl
+import fr.forumhfr.redface2.core.network.qualifiers.MutationClient
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -27,6 +28,7 @@ import okhttp3.Response
 class HfrClient @Inject constructor(
     @param:AuthenticatedClient private val authenticated: OkHttpClient,
     @param:AnonymousClient private val anonymous: OkHttpClient,
+    @param:MutationClient private val mutation: OkHttpClient,
     @param:HfrBaseUrl private val baseUrl: HttpUrl,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) {
@@ -327,7 +329,9 @@ class HfrClient @Inject constructor(
      * HTTP 200 with distinct body text — see `ReplySubmitResponseParser` for the
      * classification.
      *
-     * `hash_check` is **never** logged, including on transport errors.
+     * `hash_check` is **never** logged, including on transport errors. Reply and quote submissions
+     * are non-idempotent: the [mutation] client enforces no transport replay with
+     * `retryOnConnectionFailure(false)`.
      */
     suspend fun submitReply(formBody: FormBody): String {
         val url = baseUrl.newBuilder()
@@ -335,7 +339,7 @@ class HfrClient @Inject constructor(
             .addQueryParameter("config", "hfr.inc")
             .build()
         val request = Request.Builder().url(url).post(formBody).build()
-        return authenticated.newCall(request).executeAuthenticatedHtml()
+        return mutation.newCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -344,7 +348,8 @@ class HfrClient @Inject constructor(
      * The repository owns the complete browser-style [formBody], including the volatile
      * `hash_check`. A live authenticated submission proved that no `Referer` header is required:
      * the token and the form's hidden `(cat, page, numeropost)` tuple are the request protection.
-     * Vote submission is non-idempotent, so this method performs one call and never retries.
+     * Vote submission is non-idempotent: in addition to this method issuing one application call,
+     * the [mutation] client enforces no transport replay with `retryOnConnectionFailure(false)`.
      */
     suspend fun submitPollVote(formBody: FormBody): String {
         val url = baseUrl.newBuilder()
@@ -352,7 +357,7 @@ class HfrClient @Inject constructor(
             .addQueryParameter("config", "hfr.inc")
             .build()
         val request = Request.Builder().url(url).post(formBody).build()
-        return authenticated.newCall(request).executeAuthenticatedHtml()
+        return mutation.newCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -365,15 +370,16 @@ class HfrClient @Inject constructor(
      *
      * A GET link (like `addflag.php` / `delflag.php`), authenticated, with NO `hash_check` and NO
      * `Referer` : the session cookie is the request protection. [topicId] is the topic's post id
-     * (there is no `numreponse`). The closure is non-idempotent AND irreversible, so this performs a
-     * single call and never retries. Returns the response HTML for
+     * (there is no `numreponse`). The closure is non-idempotent AND irreversible: this method issues
+     * one application call and the [mutation] client enforces no transport replay with
+     * `retryOnConnectionFailure(false)`. Returns the response HTML for
      * [fr.forumhfr.redface2.core.parser.write.poll.PollCloseResponseParser] to classify : success
      * carries « Le sondage a bien été clos ». HFR replies HTTP 200 either way, so the body is the
      * only signal.
      *
-     * Always uses the authenticated client : closing a poll is an owner mutation, and a freshly
-     * expired session must raise [SessionExpiredException] rather than silently hitting the anonymous
-     * page.
+     * The mutation client carries the authenticated cookie jar : closing a poll is an owner mutation,
+     * and a freshly expired session must raise [SessionExpiredException] rather than silently hitting
+     * the anonymous page.
      */
     suspend fun closePoll(cat: Int, topicId: Int): String {
         val url = baseUrl.newBuilder()
@@ -384,7 +390,7 @@ class HfrClient @Inject constructor(
             .addQueryParameter("post", topicId.toString())
             .build()
         val request = Request.Builder().url(url).get().build()
-        return authenticated.newCall(request).executeAuthenticatedHtml()
+        return mutation.newCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -445,7 +451,7 @@ class HfrClient @Inject constructor(
             .addQueryParameter("config", "hfr.inc")
             .build()
         val request = Request.Builder().url(url).post(formBody).build()
-        return authenticated.newCall(request).executeAuthenticatedHtml()
+        return mutation.newCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -469,7 +475,7 @@ class HfrClient @Inject constructor(
             .addQueryParameter("config", "hfr.inc")
             .build()
         val request = Request.Builder().url(url).post(formBody).build()
-        return authenticated.newCall(request).executeAuthenticatedHtml()
+        return mutation.newCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -516,7 +522,7 @@ class HfrClient @Inject constructor(
             .addQueryParameter("config", "hfr.inc")
             .build()
         val request = Request.Builder().url(url).post(formBody).build()
-        return authenticated.newCall(request).executeAuthenticatedHtml()
+        return mutation.newCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -718,8 +724,8 @@ class HfrClient @Inject constructor(
      * success carries « Favori positionné », anything else does not. HFR returns HTTP 200
      * in both cases, so the body text is the only signal.
      *
-     * Always uses the authenticated client : adding a favourite is a user-private mutation,
-     * and a freshly expired session must raise [SessionExpiredException] rather than
+     * The mutation client carries the authenticated cookie jar : adding a favourite is a user-private
+     * mutation, and a freshly expired session must raise [SessionExpiredException] rather than
      * silently hitting the anonymous page.
      */
     suspend fun addFlag(context: FlagAddContext): String {
@@ -738,7 +744,7 @@ class HfrClient @Inject constructor(
             .addQueryParameter("subcat", context.subcat?.toString().orEmpty())
             .build()
         val request = Request.Builder().url(url).get().build()
-        return authenticated.newCall(request).executeAuthenticatedHtml()
+        return mutation.newCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -771,9 +777,9 @@ class HfrClient @Inject constructor(
      * favourite) does not. HFR returns HTTP 200 in both cases, so the body text is the only
      * signal.
      *
-     * Always uses the authenticated client : delflag is a destructive mutation, a freshly
-     * expired session must raise [SessionExpiredException] rather than silently hitting the
-     * anonymous page.
+     * The mutation client carries the authenticated cookie jar : delflag is a destructive mutation,
+     * and a freshly expired session must raise [SessionExpiredException] rather than silently hitting
+     * the anonymous page.
      */
     suspend fun removeFlag(
         cat: Int,
@@ -796,7 +802,7 @@ class HfrClient @Inject constructor(
             .addQueryParameter("new", "0")
             .build()
         val request = Request.Builder().url(url).get().build()
-        return authenticated.newCall(request).executeAuthenticatedHtml()
+        return mutation.newCall(request).executeAuthenticatedHtml()
     }
 
     /**

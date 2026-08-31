@@ -41,6 +41,9 @@ class HfrClientTest {
         client = HfrClient(
             authenticated = taggedClient("authenticated"),
             anonymous = taggedClient("anonymous"),
+            mutation = taggedClient("mutation").newBuilder()
+                .retryOnConnectionFailure(false)
+                .build(),
             baseUrl = server.url("/"),
             ioDispatcher = Dispatchers.Unconfined,
         )
@@ -313,7 +316,7 @@ class HfrClientTest {
     }
 
     @Test
-    fun `submitPrivateMessageEdit POSTs bdd_php on the authenticated client and forwards the form body`() = runTest {
+    fun `submitPrivateMessageEdit POSTs bdd_php on the mutation client and forwards the form body`() = runTest {
         // MPStorage write (#6, ADR-014 §4) — GUARDED, NOT OBSERVED LIVE: the bdd.php cat=prive write
         // contract was never captured. Here we only assert the REQUEST shape (endpoint + that the
         // repository-built body, carrying cat=prive as a String, is forwarded verbatim).
@@ -329,7 +332,7 @@ class HfrClientTest {
 
         assertEquals("<html><body>ok</body></html>", html)
         val request = server.takeRequest()
-        assertEquals("authenticated", request.headers["X-RF2-Client"])
+        assertEquals("mutation", request.headers["X-RF2-Client"])
         assertEquals("POST", request.method)
         assertEquals("/bdd.php", requireNotNull(request.requestUrl).encodedPath)
         assertEquals("hfr.inc", request.requestUrl!!.queryParameter("config"))
@@ -340,7 +343,7 @@ class HfrClientTest {
     }
 
     @Test
-    fun `submitPollVote POSTs vote_php authenticated without Referer and forwards body`() = runTest {
+    fun `submitPollVote POSTs vote_php on the mutation client without Referer and forwards body`() = runTest {
         server.enqueue(MockResponse().setResponseCode(200).setBody("<div class=\"hop\">ok</div>"))
         val formBody = okhttp3.FormBody.Builder(Charsets.UTF_8)
             .add("hash_check", "00000000000000000000000000000000")
@@ -355,7 +358,7 @@ class HfrClientTest {
         assertEquals("<div class=\"hop\">ok</div>", html)
         val request = server.takeRequest()
         val url = requireNotNull(request.requestUrl)
-        assertEquals("authenticated", request.headers["X-RF2-Client"])
+        assertEquals("mutation", request.headers["X-RF2-Client"])
         assertEquals("POST", request.method)
         assertEquals("/user/vote.php", url.encodedPath)
         assertEquals("hfr.inc", url.queryParameter("config"))
@@ -373,7 +376,34 @@ class HfrClientTest {
     }
 
     @Test
-    fun `addFlag builds the addflag URL on the authenticated client without owntopic mapping`() = runTest {
+    fun `reply edit new-topic and poll-close use the mutation client`() = runTest {
+        val formBody = okhttp3.FormBody.Builder(Charsets.UTF_8)
+            .add("hash_check", "deadbeef")
+            .build()
+
+        suspend fun assertMutationCall(
+            expectedMethod: String,
+            expectedPath: String,
+            call: suspend () -> Unit,
+        ) {
+            server.enqueue(MockResponse().setResponseCode(200).setBody("<html><body>ok</body></html>"))
+
+            call()
+
+            val request = server.takeRequest()
+            assertEquals("mutation", request.headers["X-RF2-Client"])
+            assertEquals(expectedMethod, request.method)
+            assertEquals(expectedPath, requireNotNull(request.requestUrl).encodedPath)
+        }
+
+        assertMutationCall("POST", "/bddpost.php") { client.submitReply(formBody) }
+        assertMutationCall("POST", "/bdd.php") { client.submitEditPost(formBody) }
+        assertMutationCall("POST", "/bddpost.php") { client.submitNewTopic(formBody) }
+        assertMutationCall("GET", "/user/close_sondage.php") { client.closePoll(cat = 23, topicId = 35395) }
+    }
+
+    @Test
+    fun `addFlag builds the addflag URL on the mutation client without owntopic mapping`() = runTest {
         server.enqueue(MockResponse().setResponseCode(200).setBody("<html><body>Favori positionné</body></html>"))
         val context = FlagAddContext(
             cat = 23,
@@ -389,7 +419,7 @@ class HfrClientTest {
         assertTrue(html.contains("Favori positionné"))
         val request = server.takeRequest()
         val url = requireNotNull(request.requestUrl)
-        assertEquals("authenticated", request.headers["X-RF2-Client"])
+        assertEquals("mutation", request.headers["X-RF2-Client"])
         assertEquals("GET", request.method)
         assertEquals("/user/addflag.php", url.encodedPath)
         assertEquals(
@@ -423,7 +453,7 @@ class HfrClientTest {
     }
 
     @Test
-    fun `removeFlag builds the delflag URL on the authenticated client mapping each type to owntopic`() = runTest {
+    fun `removeFlag builds the delflag URL on the mutation client mapping each type to owntopic`() = runTest {
         // owntopic discriminator: CYAN→1, RED→2, FAVORITE→3 (cf. Flag.kt / protocol-hfr.md).
         listOf(
             FlagType.CYAN to "1",
@@ -439,7 +469,7 @@ class HfrClientTest {
             assertTrue(html.contains("Drapeau effacé avec succès"))
             val request = server.takeRequest()
             val url = requireNotNull(request.requestUrl)
-            assertEquals("authenticated", request.headers["X-RF2-Client"])
+            assertEquals("mutation", request.headers["X-RF2-Client"])
             assertEquals("/user/delflag.php", url.encodedPath)
             assertEquals("hfr.inc", url.queryParameter("config"))
             assertEquals("23", url.queryParameter("cat"))
@@ -758,6 +788,9 @@ class HfrClientTest {
     private fun cancellableClient(listener: EventListener): HfrClient = HfrClient(
         authenticated = taggedClient("authenticated", listener),
         anonymous = taggedClient("anonymous", listener),
+        mutation = taggedClient("mutation", listener).newBuilder()
+            .retryOnConnectionFailure(false)
+            .build(),
         baseUrl = server.url("/"),
         ioDispatcher = Dispatchers.IO,
     )

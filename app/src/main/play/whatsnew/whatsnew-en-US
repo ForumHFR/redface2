@@ -1,3 +1,3 @@
-Redface 2 v0.49.0 — dev.
+Redface 2 v0.49.1 — dev.
 
-- New (#1201): if you are the author of a topic, you can now close its poll directly from the app ("Close this poll" button, with confirmation).
+- Fix: write reliability — a network drop can no longer replay an action (duplicate post, or a false failure on a vote/poll close that actually went through).
