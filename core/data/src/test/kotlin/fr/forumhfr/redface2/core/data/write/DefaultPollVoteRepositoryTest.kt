@@ -1,10 +1,12 @@
 package fr.forumhfr.redface2.core.data.write
 
+import fr.forumhfr.redface2.core.model.write.PollCloseResult
 import fr.forumhfr.redface2.core.model.write.PollVoteChoice
 import fr.forumhfr.redface2.core.model.write.PollVoteFailureReason
 import fr.forumhfr.redface2.core.model.write.PollVoteForm
 import fr.forumhfr.redface2.core.model.write.PollVoteResult
 import fr.forumhfr.redface2.core.network.HfrClient
+import fr.forumhfr.redface2.core.parser.write.poll.PollCloseResponseParser
 import fr.forumhfr.redface2.core.parser.write.poll.PollVoteResponseParser
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -24,9 +26,11 @@ import org.junit.Test
 class DefaultPollVoteRepositoryTest {
     private val hfrClient = mockk<HfrClient>()
     private val responseParser = PollVoteResponseParser()
+    private val closeResponseParser = PollCloseResponseParser()
     private val repository = DefaultPollVoteRepository(
         hfrClient = hfrClient,
         responseParser = responseParser,
+        closeResponseParser = closeResponseParser,
         ioDispatcher = Dispatchers.Unconfined,
     )
 
@@ -182,7 +186,8 @@ class DefaultPollVoteRepositoryTest {
         val dispatcher = executor.asCoroutineDispatcher()
         val client = mockk<HfrClient>()
         val parser = mockk<PollVoteResponseParser>()
-        val threadedRepository = DefaultPollVoteRepository(client, parser, dispatcher)
+        val closeParser = mockk<PollCloseResponseParser>()
+        val threadedRepository = DefaultPollVoteRepository(client, parser, closeParser, dispatcher)
         try {
             coEvery { client.submitPollVote(any()) } coAnswers {
                 assertOnIoThread()
@@ -199,6 +204,53 @@ class DefaultPollVoteRepositoryTest {
             }
 
             assertEquals(PollVoteResult.Accepted, result)
+        } finally {
+            dispatcher.close()
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `closePoll GETs the endpoint and maps the live success message`() = runTest {
+        coEvery { hfrClient.closePoll(13, 96127) } returns CLOSE_SUCCESS_HTML
+
+        val result = repository.closePoll(cat = 13, topicId = 96127)
+
+        assertEquals(PollCloseResult.Success, result)
+        coVerify(exactly = 1) { hfrClient.closePoll(13, 96127) }
+    }
+
+    @Test
+    fun `closePoll folds an unrecognised response to a generic failure`() = runTest {
+        coEvery { hfrClient.closePoll(any(), any()) } returns
+            "<div class=\"hop\">Vous n'êtes pas autorisé.</div>"
+
+        assertEquals(PollCloseResult.Failure, repository.closePoll(cat = 13, topicId = 96127))
+    }
+
+    @Test
+    fun `closePoll network I-O and response parsing run on the injected IO dispatcher`() {
+        val executor = Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, IO_THREAD_NAME)
+        }
+        val dispatcher = executor.asCoroutineDispatcher()
+        val client = mockk<HfrClient>()
+        val parser = mockk<PollVoteResponseParser>()
+        val closeParser = mockk<PollCloseResponseParser>()
+        val threadedRepository = DefaultPollVoteRepository(client, parser, closeParser, dispatcher)
+        try {
+            coEvery { client.closePoll(any(), any()) } coAnswers {
+                assertOnIoThread()
+                CLOSE_SUCCESS_HTML
+            }
+            every { closeParser.parse(any()) } answers {
+                assertOnIoThread()
+                PollCloseResult.Success
+            }
+
+            val result = runBlocking { threadedRepository.closePoll(cat = 13, topicId = 96127) }
+
+            assertEquals(PollCloseResult.Success, result)
         } finally {
             dispatcher.close()
             executor.shutdownNow()
@@ -269,6 +321,8 @@ class DefaultPollVoteRepositoryTest {
         private const val IO_THREAD_NAME = "poll-vote-io"
         private const val ACCEPTED_HTML =
             "<div class=\"hop\">Votre vote a bien été pris en compte !</div>"
+        private const val CLOSE_SUCCESS_HTML =
+            "<div class=\"hop\">Le sondage a bien été clos</div>"
         private val REQUIRED_NUMERIC_FIELDS = listOf("cat", "page", "numeropost")
     }
 }

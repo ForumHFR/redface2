@@ -214,6 +214,33 @@ class TopicPollVoteCardTest {
         compose.onNodeWithText("Erreur réseau. Votre sélection est conservée.").assertIsDisplayed()
     }
 
+    @Test
+    fun `owner of an open poll sees the close affordance and its tap is routed`() {
+        val form = pollForm(multipleChoice = false)
+        var closeTaps = 0
+        setCard(
+            form = form,
+            state = PollVoteUiState(form = form),
+            canClosePoll = true,
+            onClosePoll = { closeTaps++ },
+        )
+
+        compose.onNodeWithText("Clore ce sondage")
+            .assertIsDisplayed()
+            .assertIsEnabled()
+            .performClick()
+
+        assertEquals(1, closeTaps)
+    }
+
+    @Test
+    fun `the close affordance is absent when the caller did not grant it`() {
+        val form = pollForm(multipleChoice = false)
+        setCard(form = form, state = PollVoteUiState(form = form), canClosePoll = false)
+
+        compose.onNodeWithText("Clore ce sondage").assertDoesNotExist()
+    }
+
     @Suppress("LongParameterList") // Render harness: each argument controls one card knob, all defaulted.
     private fun setCard(
         form: PollVoteForm,
@@ -222,6 +249,8 @@ class TopicPollVoteCardTest {
         onBlankVote: () -> Unit = {},
         onExpansionChanged: (Boolean) -> Unit = {},
         poll: Poll = votingPoll(form),
+        canClosePoll: Boolean = false,
+        onClosePoll: () -> Unit = {},
     ) {
         compose.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
@@ -234,6 +263,7 @@ class TopicPollVoteCardTest {
                     ),
                     revealed = true,
                     onExpansionChanged = onExpansionChanged,
+                    onClosePoll = onClosePoll.takeIf { canClosePoll },
                 )
             }
         }

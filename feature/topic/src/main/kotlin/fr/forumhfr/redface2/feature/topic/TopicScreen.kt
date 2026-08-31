@@ -425,6 +425,9 @@ fun TopicScreen(
     val favoriteAddedMsg = stringResource(R.string.topic_post_favorite_added)
     val favoriteFailedMsg = stringResource(R.string.topic_post_favorite_failed)
     val flagNotFoundMsg = stringResource(R.string.topic_remove_flag_not_found)
+    // #1201 — poll closure feedback messages (resolved upfront, same rationale).
+    val pollClosedMsg = stringResource(R.string.topic_poll_close_success)
+    val pollCloseFailedMsg = stringResource(R.string.topic_poll_close_failure)
     // #292 — delete feedback messages, resolved upfront (same rationale as refreshFailedMsg).
     val deleteSuccessMsg = stringResource(R.string.topic_post_delete_success)
     val deleteFailedLoginMsg = stringResource(R.string.topic_post_delete_failed_login)
@@ -437,6 +440,9 @@ fun TopicScreen(
     // resolve → confirm → remove flow); the outcomes ride the screen's single TopicEffect collector
     // below, like every other one-shot Toast on this screen.
     val removeTopicFlagState by viewModel.removeTopicFlagState.collectAsStateWithLifecycle()
+    // #1201 — close-poll confirmation gate. State-driven dialog (the ViewModel owns the
+    // confirm → close flow) ; the outcomes ride the screen's single TopicEffect collector below.
+    val closePollState by viewModel.closePollState.collectAsStateWithLifecycle()
 
     // Bug fix (build 89) — report the loaded title up so `:app` caches it per topic. The next page
     // (recreated screen) reads it back through `request.titleHint`, keeping the top bar title stable
@@ -653,6 +659,22 @@ fun TopicScreen(
                         android.widget.Toast.LENGTH_SHORT,
                     ).show()
                 }
+                TopicEffect.PollClosed -> {
+                    // #1201 — close_sondage.php confirmed ; a page refresh to the closed state runs
+                    // separately in the ViewModel.
+                    android.widget.Toast.makeText(
+                        context,
+                        pollClosedMsg,
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+                TopicEffect.PollCloseFailed -> {
+                    android.widget.Toast.makeText(
+                        context,
+                        pollCloseFailedMsg,
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                }
             }
         }
     }
@@ -695,6 +717,8 @@ fun TopicScreen(
         onClearMultiQuote = onClearMultiQuote,
         pollManualExpanded = pollManualExpanded,
         onPollExpansionChanged = onPollExpansionChanged,
+        // #1201 — the owner « Clore ce sondage » tap raises the confirmation dialog above.
+        onClosePoll = { viewModel.send(TopicIntent.CloseTopicPoll) },
     )
 
     // #292 — confirmation before the (irreversible, no-undo) deletion. Only « Supprimer » sends the
@@ -716,6 +740,15 @@ fun TopicScreen(
             flag = confirming.flag,
             onConfirm = viewModel::confirmRemoveTopicFlag,
             onDismiss = viewModel::cancelRemoveTopicFlag,
+        )
+    }
+
+    // #1201 — confirmation gate before the (irreversible, no-undo) poll closure. Renders only while
+    // the ViewModel is Confirming ; confirming moves to Closing (action disabled) and fires the close.
+    if (closePollState is ClosePollState.Confirming) {
+        ClosePollConfirmDialog(
+            onConfirm = viewModel::confirmClosePoll,
+            onDismiss = viewModel::cancelClosePoll,
         )
     }
 
@@ -750,6 +783,33 @@ private fun RemoveTopicFlagConfirmDialog(
         dismissButton = {
             TextButton(onClick = onDismiss) {
                 Text(stringResource(R.string.topic_remove_flag_dialog_cancel))
+            }
+        },
+    )
+}
+
+/**
+ * #1201 — M3 confirmation dialog shown before the `close_sondage.php` call. Spells out that the
+ * closure is definitive (HFR has no re-open) so an owner cannot fat-finger it, mirroring the
+ * delete-post / remove-flag confirmations.
+ */
+@Composable
+private fun ClosePollConfirmDialog(
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.topic_poll_close_dialog_title)) },
+        text = { Text(stringResource(R.string.topic_poll_close_dialog_message)) },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(stringResource(R.string.topic_poll_close_dialog_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.topic_poll_close_dialog_cancel))
             }
         },
     )
@@ -1032,6 +1092,8 @@ internal fun TopicContent(
     // policy) + the callback recording a tap on the poll card. Threaded to the header card's poll.
     pollManualExpanded: Boolean? = null,
     onPollExpansionChanged: (Boolean) -> Unit = {},
+    // #1201 — the owner « Clore ce sondage » tap (raises the confirmation dialog).
+    onClosePoll: () -> Unit = {},
     // Vague 4 (#604) lot 1 — HFR accepted a quick-reply POST. Since #895 étape 4 this feeds
     // `TopicViewModel.applySubmitResult` directly (wired at the stateful entry point): the retained
     // engine force-refreshes and lands the submit — no route refresh (historically `:app` bumped a
@@ -1316,6 +1378,7 @@ internal fun TopicContent(
                                 },
                                 pollManualExpanded = pollManualExpanded,
                                 onPollExpansionChanged = onPollExpansionChanged,
+                                onClosePoll = onClosePoll,
                             )
                         }
                         PullToRefreshDefaults.Indicator(
@@ -1871,6 +1934,8 @@ private fun TopicLoadedContent(
     // policy) + the callback recording a tap on the poll card. Threaded down to the header card.
     pollManualExpanded: Boolean? = null,
     onPollExpansionChanged: (Boolean) -> Unit = {},
+    // #1201 — the owner « Clore ce sondage » tap. Threaded down to the poll card.
+    onClosePoll: () -> Unit = {},
 ) {
     // Scroll-anchor (#104 follow-up): the post the reader was sent to (quote link, deep link, last-read).
     // Marked by tinting ONLY its identity band with tertiaryContainer (XaTriX: the left-rail attempt was
@@ -2128,6 +2193,11 @@ private fun TopicLoadedContent(
                         pollClosed = poll.closed,
                     ),
                     onExpansionChanged = onPollExpansionChanged,
+                    // #1201 — the « Clore ce sondage » affordance is owner-only on an OPEN poll. The
+                    // gate is the reusable `isFirstPostOwner` proxy (#1170) : no new close-link parse.
+                    // A non-null callback opts the button in ; HFR remains authoritative — an
+                    // unauthorised close returns a plain failure.
+                    onClosePoll = onClosePoll.takeIf { topic.isFirstPostOwner && !poll.closed },
                     // #884 — island: keeps its inset when the posts go full-width.
                     modifier = islandModifier,
                 )
@@ -2635,6 +2705,7 @@ internal fun resolvePollRevealed(
         ?: (pollsExpandedDefault || (expandUnansweredPolls && canVote))
 }
 
+@Suppress("LongParameterList") // fully-controlled card: poll + vote slice + expansion + owner close.
 @Composable
 // `internal` so the Compose JVM and record-only Roborazzi tests exercise the real card.
 internal fun TopicPollCard(
@@ -2645,6 +2716,10 @@ internal fun TopicPollCard(
     // the revealed state itself, it only reports a toggle through [onExpansionChanged].
     revealed: Boolean,
     onExpansionChanged: (Boolean) -> Unit,
+    // #1201 — the owner-only « Clore ce sondage » affordance : NON-null exactly when the caller's
+    // `isFirstPostOwner && !poll.closed` gate holds. `null` (the default) hides the button — same
+    // nullable-affordance shape as [pollVote]. The card only renders it and routes its tap.
+    onClosePoll: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val pollDateLocale = LocalConfiguration.current.locales[0]
@@ -2699,6 +2774,20 @@ internal fun TopicPollCard(
                     )
                 }
             }
+            // #1201 — owner-only « Clore ce sondage » on an OPEN poll (the caller gated it via a
+            // non-null callback). The confirmation dialog owns the irreversible commit, so the button
+            // just routes the request.
+            onClosePoll?.let { closePoll ->
+                TextButton(
+                    onClick = closePoll,
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error,
+                    ),
+                    modifier = Modifier.align(Alignment.Start),
+                ) {
+                    Text(stringResource(R.string.topic_poll_close))
+                }
+            }
             poll.expiresAt?.let { expiresAt ->
                 Text(
                     text = stringResource(
@@ -2724,54 +2813,63 @@ internal fun TopicPollCard(
                 } else {
                     // #697/#1170 — results, closed polls and cache-only form shapes stay read-only;
                     // voting controls exist only with a live open form slice.
-                    poll.options.forEach { option ->
-                        Text(
-                            // #697 — the FORM shape carries no numbers : render the bare label instead
-                            // of a misleading « 0.0% (0 votes) ».
-                            text = if (poll.resultsAvailable) {
-                                stringResource(
-                                    R.string.topic_poll_option,
-                                    option.text,
-                                    option.percentage,
-                                    option.votes,
-                                )
-                            } else {
-                                option.text
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    val choiceLabel = if (poll.multipleChoice) {
-                        stringResource(R.string.topic_poll_multiple_choices)
-                    } else {
-                        stringResource(R.string.topic_poll_single_choice)
-                    }
-                    Text(
-                        // #697 — no total on the FORM shape either ; a factual hint replaces it (the
-                        // in-app vote is #779, so no promise about WHERE to vote).
-                        text = if (poll.resultsAvailable) {
-                            stringResource(R.string.topic_poll_summary, poll.totalVotes, choiceLabel)
-                        } else {
-                            stringResource(R.string.topic_poll_no_results, choiceLabel)
-                        },
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    poll.blankVotes?.let { blankVotes ->
-                        Text(
-                            text = pluralStringResource(
-                                R.plurals.topic_poll_blank_votes,
-                                blankVotes,
-                                blankVotes,
-                            ),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+                    TopicPollReadOnlyResults(poll)
                 }
             }
         }
+    }
+}
+
+/**
+ * #697/#1170 — the read-only body of the poll card : results, closed polls and cache-only form
+ * shapes. Extracted from [TopicPollCard] so the card stays under detekt's complexity cap (#1201).
+ */
+@Composable
+private fun TopicPollReadOnlyResults(poll: Poll) {
+    poll.options.forEach { option ->
+        Text(
+            // #697 — the FORM shape carries no numbers : render the bare label instead
+            // of a misleading « 0.0% (0 votes) ».
+            text = if (poll.resultsAvailable) {
+                stringResource(
+                    R.string.topic_poll_option,
+                    option.text,
+                    option.percentage,
+                    option.votes,
+                )
+            } else {
+                option.text
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    val choiceLabel = if (poll.multipleChoice) {
+        stringResource(R.string.topic_poll_multiple_choices)
+    } else {
+        stringResource(R.string.topic_poll_single_choice)
+    }
+    Text(
+        // #697 — no total on the FORM shape either ; a factual hint replaces it (the
+        // in-app vote is #779, so no promise about WHERE to vote).
+        text = if (poll.resultsAvailable) {
+            stringResource(R.string.topic_poll_summary, poll.totalVotes, choiceLabel)
+        } else {
+            stringResource(R.string.topic_poll_no_results, choiceLabel)
+        },
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    poll.blankVotes?.let { blankVotes ->
+        Text(
+            text = pluralStringResource(
+                R.plurals.topic_poll_blank_votes,
+                blankVotes,
+                blankVotes,
+            ),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

@@ -48,6 +48,7 @@ La documentation HTML est issue de la rétro-ingénierie du code de [Redface v1]
 | Suppression post/topic owned | POST | `/bdd.php?config=hfr.inc` avec `delete=1` | **oui** |
 | Nouveau topic | POST | `/bddpost.php?config=hfr.inc` | **oui** |
 | Vote sondage | POST | `/user/vote.php?config=hfr.inc` | **oui** |
+| Clore sondage (owner) | GET | `/user/close_sondage.php?config=hfr.inc&cat={cat}&post={topicId}` | **oui** |
 | MP (envoi) | POST | `/bddpost.php?config=hfr.inc&cat=prive&pseudo={dest}` | **oui** |
 | Conversation MP | GET | `/forum2.php?config=hfr.inc&cat=prive&post={mp_id}&page={page}` | **oui** |
 | Liste des MPs | GET | `/forum1.php?config=hfr.inc&cat=prive&page={page}&subcat=&sondage=0&owntopic=0&trash=0&trash_post=0&moderation=0&new=0&nojs=0&subcatgroup=0` | **oui** |
@@ -213,6 +214,32 @@ Le vote est **non idempotent** : exactement un POST, aucun retry automatique. Av
 repository refuse le token vide, une sélection vide/inconnue, plusieurs choix sur un mono, une
 sélection au-delà de `maxSelections`, ou des champs `cat`/`page`/`numeropost` absents ou non
 numériques. `PollVoteForm` et son `hash_check` sont transitoires, jamais persistés ni loggés.
+
+### Clore un sondage — GET `/user/close_sondage.php` (#1201)
+
+Le **créateur du sujet** peut clore le sondage de son topic à tout moment. Contrat capturé live le
+2026-08-31 (`XaTelitte`, topic de test créé puis supprimé).
+
+```text
+GET /user/close_sondage.php?cat={cat}&config=hfr.inc&post={topicId}
+```
+
+- **Authentifié, sans `hash_check`, sans `Referer`** (même famille GET que `addflag.php`/`delflag.php`).
+  Paramètres : `cat`, `config=hfr.inc`, `post` (= topic id). Pas de `numreponse`.
+- **Réponse succès** (HTTP 200, `text/html`) : message dans `div.hop` « **Le sondage a bien été clos** »,
+  sans meta-refresh. Fixture : `close_sondage_success.html`.
+- **Après clôture** : la page du topic n'offre plus le lien « Clore la partie sondage » et porte le
+  marqueur `<b class="s1Ext">Ce sondage est clos</b>` (déjà parsé en lecture — `Poll.closed`, #1170).
+- **Irréversible** (pas de réouverture). Un seul GET, aucun retry.
+- **Contrôle owner-only** : le lien `<a href="/user/close_sondage.php?…">Clore la partie sondage</a>`
+  n'est rendu que pour l'owner d'un sondage **ouvert** (sous les boutons Voter / Voir les résultats). Le
+  gate applicatif utilise le proxy `Topic.isFirstPostOwner && !poll.closed`.
+
+**Création/édition d'un sondage** : un sondage se crée/modifie en **éditant le 1er post** — l'option
+n'existe **pas** dans le formulaire de nouveau sujet. POST `bdd.php` (édition FP) avec `have_sondage=1`,
+`textreponse0` = la question, `textreponse1..10` = les options, `max_votes` (choix multiples),
+`allowvisitor`, date d'expiration `jour/mois/annee/heure/minute`, `subcat` obligatoire, `content_form`
+conservé, jamais `delete=1`.
 
 ### POST `bddpost.php` (reply, quote ou nouveau topic)
 
@@ -380,7 +407,7 @@ Pour un post normal, la réponse succès contient un refresh vers la page du top
 Les inconnues restantes sont explicitement limitées aux points suivants :
 
 - succès de création topic : formulaire GET capturé (`write_create_topic_form_android_cat.html`) et réponse POST succès capturée (`write_create_topic_success_response.html`). Contrat connu : refresh vers la liste, aucun id du topic créé. Limite restante : la navigation directe #206 est impossible ; workaround livré = highlight exact du titre dans la liste d'arrivée ;
-- création/édition de sondage : les champs de formulaire FP sont observés, mais aucun POST de création ou modification n'a été envoyé. Impact : création/édition de sondage hors MVP écriture. Le POST de **vote** est, lui, vérifié séparément dans la section `/user/vote.php` ;
+- création/édition de sondage : contrat désormais **capturé live** (#1201, 2026-08-31) — voir la section « Clore un sondage » ci-dessus (création par édition du FP, clôture par `close_sondage.php`). Le POST de **vote** est vérifié séparément dans la section `/user/vote.php` ;
 - `verifrequet=1100` : valeur observée dans tous les formulaires, pas de variant négatif testé. Impact : envoyer la valeur observée telle quelle ;
 - second paramètre de `[quotemsg=numreponse,X,user_id]` : valeurs observées `768`, `640`, `1`; le sens exact reste opaque. Impact : ne pas reconstruire localement les quotes, réutiliser le `content_form` prérempli par HFR ;
 - edit FP du topic Redface 2 : non testé car `XaTelitte` ne possède pas le FP ; edit FP owned validé sur topic temporaire Programmation.

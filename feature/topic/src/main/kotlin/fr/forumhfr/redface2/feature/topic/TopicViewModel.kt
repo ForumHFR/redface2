@@ -33,6 +33,7 @@ import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.model.TopicSearchForm
 import fr.forumhfr.redface2.core.model.TopicSearchRequest
 import fr.forumhfr.redface2.core.model.write.EditPostContext
+import fr.forumhfr.redface2.core.model.write.PollCloseResult
 import fr.forumhfr.redface2.core.model.write.PollVoteChoice
 import fr.forumhfr.redface2.core.model.write.PollVoteFailureReason
 import fr.forumhfr.redface2.core.model.write.PollVoteForm
@@ -470,6 +471,7 @@ class TopicViewModel @AssistedInject constructor(
             is TopicIntent.UpdatePollSelection -> updatePollSelection(intent.choice, intent.selected)
             TopicIntent.SubmitPollVote -> submitPollVote(PollVoteSubmissionType.NORMAL)
             TopicIntent.SubmitBlankPollVote -> submitPollVote(PollVoteSubmissionType.BLANK)
+            TopicIntent.CloseTopicPoll -> requestClosePoll()
             is TopicIntent.SetAuthorBlocked -> setAuthorBlocked(intent.author, intent.blocked)
             TopicIntent.RequestRemoveTopicFlag -> requestRemoveTopicFlag()
             TopicIntent.OpenSearch -> openSearch()
@@ -1906,6 +1908,112 @@ class TopicViewModel @AssistedInject constructor(
                 // throws outside its Result (or the coroutine is cancelled). Otherwise the state stays
                 // Removing forever and the anti double-tap guard wedges until the VM is recreated.
                 _removeTopicFlagState.value = RemoveTopicFlagState.Idle
+            }
+        }
+    }
+
+    // ─── close poll (#1201) ───────────────────────────────────────────────────────
+
+    /**
+     * #1201 — drives the « Clore ce sondage » owner interaction. Explicit MVI state so the
+     * confirmation gates the irreversible `close_sondage.php` call and the anti double-tap guard is
+     * observable. The affordance itself is gated in the UI on `Topic.isFirstPostOwner && !poll.closed`;
+     * HFR is the authority (an unauthorised close simply returns a [PollCloseResult.Failure]).
+     */
+    private val _closePollState = MutableStateFlow<ClosePollState>(ClosePollState.Idle)
+    val closePollState: StateFlow<ClosePollState> = _closePollState.asStateFlow()
+
+    /**
+     * #1201 — the owner tapped « Clore » : raise the confirmation dialog. Defensive guard — only from
+     * a loaded page carrying an open poll, and never while a close is already in flight — so a stray
+     * intent (e.g. a closed poll) can neither open a pointless dialog nor launch a duplicate call.
+     */
+    fun requestClosePoll() {
+        if (_closePollState.value != ClosePollState.Idle) return
+        val poll = (_state.value.mode as? TopicUiState.Mode.Loaded)?.topic?.poll
+        if (poll != null && !poll.closed) {
+            _closePollState.value = ClosePollState.Confirming
+        }
+    }
+
+    /** #1201 — the owner dismissed the confirmation dialog without closing. */
+    fun cancelClosePoll() {
+        if (_closePollState.value is ClosePollState.Confirming) {
+            _closePollState.value = ClosePollState.Idle
+        }
+    }
+
+    /**
+     * #1201 — the owner confirmed : move to [ClosePollState.Closing] (disables the action), run the
+     * detached GET, then emit the one-shot outcome on [effects]. On success, refresh the page so the
+     * server-authoritative `Poll.closed` state replaces the open card. The closure is irreversible, so
+     * nothing optimistic happens here : the closed card only appears once HFR confirms and the refresh
+     * lands.
+     */
+    fun confirmClosePoll() {
+        if (_closePollState.value != ClosePollState.Confirming) return
+        _closePollState.value = ClosePollState.Closing
+        val cat = request.cat
+        val topicId = request.post
+        viewModelScope.launch {
+            val result = try {
+                // #1144 pattern — the GET runs on [externalScope] so leaving the topic mid-request no
+                // longer aborts a closure the owner confirmed in the dialog.
+                externalScope.awaitDetached { pollVoteRepository.closePoll(cat, topicId) }
+            } catch (cancellation: CancellationException) {
+                _closePollState.value = ClosePollState.Idle
+                throw cancellation
+            } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+                android.util.Log.w(LOG_TAG, "Close poll failed", error)
+                _effects.trySend(TopicEffect.PollCloseFailed)
+                _closePollState.value = ClosePollState.Idle
+                return@launch
+            }
+            when (result) {
+                PollCloseResult.Success -> {
+                    _effects.trySend(TopicEffect.PollClosed)
+                    _closePollState.value = ClosePollState.Idle
+                    refreshAfterPollClosed()
+                }
+                PollCloseResult.Failure -> {
+                    _effects.trySend(TopicEffect.PollCloseFailed)
+                    _closePollState.value = ClosePollState.Idle
+                }
+            }
+        }
+    }
+
+    /**
+     * #1201 — reload the current page over the network so the freshly-closed poll surfaces its
+     * server-authoritative `Poll.closed = true` (persisted by the repository cache). Mirrors the
+     * generation-owned refresh of [refresh] : a page switch arriving meanwhile owns the page and the
+     * late reload is dropped. A refresh failure is silent — the close already succeeded and its toast
+     * fired ; a pull-to-refresh recovers the closed view.
+     */
+    private fun refreshAfterPollClosed() {
+        val displayed = _state.value.mode as? TopicUiState.Mode.Loaded ?: return
+        if (displayed.topic.page != request.page) return
+        becomePageOwner()
+        pageSnapshots.remove(request.page)
+        val generation = ownerGeneration
+        // konsist:bypass-prefetch-guard — deliberate authenticated refetch after the user's explicit
+        // close mutation; [becomePageOwner] cancelled the anonymous warmup first.
+        loadJob = viewModelScope.launch {
+            try {
+                val topic = topicRepository.refreshTopicPage(request.cat, request.post, request.page)
+                if (generation != ownerGeneration) return@launch
+                _state.update {
+                    it.copy(
+                        mode = loadedMode(topic),
+                        availablePages = (1..topic.totalPages).toList(),
+                        search = it.search.capturingAnchor(topic),
+                    )
+                }
+                recordSnapshot(topic)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (@Suppress("TooGenericExceptionCaught") refreshError: Exception) {
+                android.util.Log.w(LOG_TAG, "Post-poll-close refresh failed", refreshError)
             }
         }
     }

@@ -16,6 +16,12 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.49.0` — `internal` (dev) — 2026-08-31
+
+### Ajouté
+
+- **Clore un sondage depuis l'app** ([#1201](https://github.com/ForumHFR/redface2/issues/1201)) — le créateur d'un sujet peut désormais clore le sondage de son topic directement depuis l'application (jusqu'ici il fallait passer par le web). Un bouton **« Clore ce sondage »** apparaît sous le sondage, visible uniquement pour l'auteur du sujet tant que le sondage est ouvert ; une confirmation est demandée car l'action est **définitive** (plus personne ne peut voter, pas de réouverture). Contrat HFR `close_sondage.php` capturé live. Demandé par XaTriX.
+
 ## `0.48.3` — `internal` (dev) — 2026-08-31
 
 ### Corrigé
