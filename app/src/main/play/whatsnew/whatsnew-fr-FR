@@ -1,3 +1,3 @@
-Redface 2 v0.49.1 — dev.
+Redface 2 v0.49.2 — dev.
 
-- Correctif : fiabilité de l'écriture — une coupure réseau ne peut plus faire rejouer une action (double message, ou faux échec sur un vote/une clôture pourtant pris en compte).
+- Correctif : le bouton « Clore ce sondage » (auteur du sujet) est maintenant accessible depuis toutes les pages du topic, plus seulement la première.

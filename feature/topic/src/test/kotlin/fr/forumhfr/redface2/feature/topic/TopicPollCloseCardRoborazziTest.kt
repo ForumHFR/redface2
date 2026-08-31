@@ -29,7 +29,7 @@ import org.robolectric.annotation.GraphicsMode
  * #1201 — record-only visual review of the owner « Clore ce sondage » affordance in the three static
  * colour schemes. The PNG files are inspection artefacts, not versioned baselines. Two scenarios : an
  * OPEN poll where the owner sees the button, and a CLOSED poll where the affordance is gone (the
- * caller applies the `isFirstPostOwner && !poll.closed` gate).
+ * caller applies the native `poll.canClose` capability gate).
  *
  *     ./scripts/docker-dev.sh ./gradlew :feature:topic:testDebugUnitTest \
  *         --tests '*TopicPollCloseCardRoborazziTest*' --console=plain --no-daemon
@@ -65,7 +65,7 @@ class TopicPollCloseCardRoborazziTest {
                             pollVote = content.form?.let { TopicPollVoteUi(PollVoteUiState(it)) },
                             revealed = true,
                             onExpansionChanged = {},
-                            onClosePoll = onClose.takeIf { content.canClosePoll },
+                            onClosePoll = onClose.takeIf { content.poll.canClose },
                         )
                     }
                 }
@@ -84,7 +84,7 @@ class TopicPollCloseCardRoborazziTest {
     private fun CloseScenario.content(): CloseContent = when (this) {
         CloseScenario.OwnerOpen -> {
             val form = pollForm()
-            CloseContent(poll = votingPoll(form), form = form, canClosePoll = true)
+            CloseContent(poll = votingPoll(form).copy(canClose = true), form = form)
         }
         CloseScenario.Closed -> CloseContent(
             poll = Poll(
@@ -101,7 +101,6 @@ class TopicPollCloseCardRoborazziTest {
                 closed = true,
             ),
             form = null,
-            canClosePoll = false,
         )
     }
 
@@ -128,7 +127,6 @@ class TopicPollCloseCardRoborazziTest {
     private data class CloseContent(
         val poll: Poll,
         val form: PollVoteForm?,
-        val canClosePoll: Boolean,
     )
 
     private enum class CloseScenario(val fileName: String) {

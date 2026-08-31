@@ -1,0 +1,21 @@
+Fixture : topic_poll_owner_open.html
+Origine : page de lecture d'un topic HFR (forum2.php) vue par l'OWNER du sujet, sondage OUVERT —
+          montre le contrôle owner « Clore la partie sondage » (lien GET /user/close_sondage.php)
+          rendu juste après le </form> du sondage, sous « Voir les résultats ». Preuve pour #1206
+          (rendre le bouton Clore accessible sur TOUTES les pages via ce lien natif, page-independent,
+          au lieu du proxy isFirstPostOwner qui est faux hors page 1).
+Capture : live le 2026-08-31, AUTHENTIFIÉ sous XaTelitte (compte de test de l'agent), sur un topic
+          de test jetable (cat=23 « Technologies Mobiles » / subcat=550 Android, post=35441, premier
+          post numreponse=2799757) créé pour la capture, sondage ajouté par édition du 1er post
+          (have_sondage=1, question + 3 options), puis le topic SUPPRIMÉ juste après (« Message
+          effacé avec succès ! » vérifié). Round-trip complet : topic créé → sondage ajouté → page
+          capturée → topic supprimé.
+Contenu : page topic complète avec le bloc <div class="sondage"> (question + 3 options + boutons
+          Voter / Voir les résultats) et, pour l'owner, le lien
+          <a href="/user/close_sondage.php?cat=23&config=hfr.inc&post=35441"><b class="s1Ext">Clore
+          la partie sondage</b></a>.
+Sanitation : hash_check rédigé (32 zéros, valeur unique cc4d3b… remplacée) ; aucun email, aucun
+          cookie de session (md_id/md_passs/md_user) ni userId présent — vérifié par énumération
+          (grep = 0 avant écriture). writeCookie('md_users_res') = préférence d'affichage HFR, pas
+          un secret. Canal : script Python authentifié direct (login_validation.php + cookies jar).
+Contrat : docs/specs/protocol-hfr.md § « Clore un sondage » ; redface2-work/specs/FAITS-clore-sondage.md.

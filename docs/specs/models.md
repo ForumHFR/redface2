@@ -418,6 +418,7 @@ data class Poll(
     val resultsAvailable: Boolean = true, // #697 — false = forme « formulaire » (pas encore voté)
     val maxSelections: Int? = null,       // #779 — mono=1 ; multi=caption « Sondage à N choix possibles » ; null=borne multi inconnue/ancien cache, jamais coercée à 1
     val closed: Boolean = false,          // état de clôture fourni par HFR ; fait foi pour désactiver l'écriture
+    val canClose: Boolean = false,        // #1206 — lien natif close_sondage.php présent : owner + sondage ouvert ; false sinon et pour ancien cache
     val expiresAt: LocalDateTime? = null, // heure murale HFR sans fuseau ; ne jamais convertir en Instant ni en déduire la clôture via l'horloge locale
     val blankVotes: Int? = null,          // 0 est une vraie valeur ; null = formulaire sans résultats, compteur absent ou ancien cache
 )
@@ -439,6 +440,10 @@ radio, la valeur de la caption pour un multi, `null` si cette borne est réellem
 contrat domaine/transport du vote est livré par #779 ; son orchestration MVI et son UI restent un
 chantier séparé. `hasVoted` reste `false` sur la forme résultats et ne décide jamais de la capacité
 de vote : seule la présence de `Topic.pollVoteForm` le fait.
+
+Le signal `Poll.canClose` vient exclusivement du lien HFR `close_sondage.php`, adjacent au sondage :
+HFR ne le rend que pour le propriétaire d'un sondage ouvert, sur chaque page du topic. Son absence,
+y compris dans un ancien cache, vaut `false`.
 
 `EditInfo` est retourné par `HfrParser.parseEditPage(html)` (cf. [architecture.md]({{ site.baseurl }}/specs/architecture#core-parser--hfrparser)). Il capture l'état pré-rempli du formulaire d'édition HFR et ce qui doit être renvoyé côté `bdd.php` (cf. [protocol-hfr.md]({{ site.baseurl }}/specs/protocol-hfr#post-bddphp-edit)).
 

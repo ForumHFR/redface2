@@ -2193,11 +2193,10 @@ private fun TopicLoadedContent(
                         pollClosed = poll.closed,
                     ),
                     onExpansionChanged = onPollExpansionChanged,
-                    // #1201 — the « Clore ce sondage » affordance is owner-only on an OPEN poll. The
-                    // gate is the reusable `isFirstPostOwner` proxy (#1170) : no new close-link parse.
-                    // A non-null callback opts the button in ; HFR remains authoritative — an
-                    // unauthorised close returns a plain failure.
-                    onClosePoll = onClosePoll.takeIf { topic.isFirstPostOwner && !poll.closed },
+                    // #1206 — HFR's native close link is rendered for the owner of an open poll on
+                    // every page. A non-null callback opts the button in; no page-dependent FP
+                    // ownership proxy is involved.
+                    onClosePoll = onClosePoll.takeIf { poll.canClose },
                     // #884 — island: keeps its inset when the posts go full-width.
                     modifier = islandModifier,
                 )
@@ -2716,9 +2715,9 @@ internal fun TopicPollCard(
     // the revealed state itself, it only reports a toggle through [onExpansionChanged].
     revealed: Boolean,
     onExpansionChanged: (Boolean) -> Unit,
-    // #1201 — the owner-only « Clore ce sondage » affordance : NON-null exactly when the caller's
-    // `isFirstPostOwner && !poll.closed` gate holds. `null` (the default) hides the button — same
-    // nullable-affordance shape as [pollVote]. The card only renders it and routes its tap.
+    // #1206 — the owner-only « Clore ce sondage » affordance: NON-null exactly when the caller's
+    // `poll.canClose` gate holds. `null` (the default) hides the button — same nullable-affordance
+    // shape as [pollVote]. The card only renders it and routes its tap.
     onClosePoll: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {

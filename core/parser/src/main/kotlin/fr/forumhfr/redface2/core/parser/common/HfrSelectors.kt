@@ -50,6 +50,7 @@ object HfrSelectors {
     const val POLL_OPTION_LABEL = ".sondageRight"
     const val POLL_OPTION_PERCENT = ".sondageTop"
     const val POLL_CLOSED_MARKER = "div.sondage + b.s1Ext"
+    const val POLL_CLOSE_LINK = "a[href*=close_sondage.php]"
 
     // #697 — the poll's FORM shape (not-yet-voted / anonymous): options are <ol><li> rows with a
     // vote input and a <label> text. Naming contract (both proven on live fixtures): single-choice

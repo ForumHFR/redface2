@@ -2487,12 +2487,12 @@ class TopicViewModelTest {
     // ─── close poll (#1201) ───────────────────────────────────────────────
 
     @Test
-    fun `CloseTopicPoll on an open poll moves to Confirming (#1201)`() = runTest {
+    fun `CloseTopicPoll with native capability moves to Confirming on page 2 (#1206)`() = runTest {
         val form = fakePollVoteForm()
         val viewModel = topicViewModel(
-            request = topicRequest(page = 1),
+            request = topicRequest(page = 2),
             topicRepository = FakeTopicRepository(
-                listOf(flowOf(fakeTopic(1, 1, poll = fakeVotingPoll(form), pollVoteForm = form))),
+                listOf(flowOf(fakeTopic(2, 2, poll = fakeClosablePoll(form), pollVoteForm = form))),
             ),
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
         )
@@ -2500,6 +2500,21 @@ class TopicViewModelTest {
         viewModel.send(TopicIntent.CloseTopicPoll)
 
         assertEquals(ClosePollState.Confirming, viewModel.closePollState.value)
+    }
+
+    @Test
+    fun `CloseTopicPoll is a no-op on an open poll without native capability (#1204)`() = runTest {
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = FakeTopicRepository(
+                listOf(flowOf(fakeTopic(2, 2, poll = fakePollResults()))),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.send(TopicIntent.CloseTopicPoll)
+
+        assertEquals(ClosePollState.Idle, viewModel.closePollState.value)
     }
 
     @Test
@@ -2518,13 +2533,38 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `confirmClosePoll fails closed when native capability disappears (#1204)`() = runTest {
+        val form = fakePollVoteForm()
+        val emissions = MutableSharedFlow<Topic>(replay = 1).apply {
+            tryEmit(fakeTopic(1, 1, poll = fakeClosablePoll(form), pollVoteForm = form))
+        }
+        val pollRepository = FakePollVoteRepository(closeResult = PollCloseResult.Success)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeStreamingTopicRepository(emissions),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            pollVoteRepository = pollRepository,
+        )
+
+        viewModel.send(TopicIntent.CloseTopicPoll)
+        assertEquals(ClosePollState.Confirming, viewModel.closePollState.value)
+
+        emissions.emit(fakeTopic(1, 1, poll = fakeVotingPoll(form), pollVoteForm = form))
+        runCurrent()
+        viewModel.confirmClosePoll()
+
+        assertEquals(ClosePollState.Idle, viewModel.closePollState.value)
+        assertTrue("revoked native capability must block close_sondage", pollRepository.closeCalls.isEmpty())
+    }
+
+    @Test
     fun `confirmClosePoll closes then refreshes to the closed poll and emits PollClosed (#1201)`() =
         runTest {
             val form = fakePollVoteForm()
             val pollRepository = FakePollVoteRepository(closeResult = PollCloseResult.Success)
             val topicRepository = FakeTopicRepository(
                 flowsToReturn = listOf(
-                    flowOf(fakeTopic(1, 1, poll = fakeVotingPoll(form), pollVoteForm = form)),
+                    flowOf(fakeTopic(1, 1, poll = fakeClosablePoll(form), pollVoteForm = form)),
                 ),
                 refreshTopicsToReturn = listOf(fakeTopic(1, 1, poll = fakePollResults().copy(closed = true))),
             )
@@ -2559,7 +2599,7 @@ class TopicViewModelTest {
         val form = fakePollVoteForm()
         val pollRepository = FakePollVoteRepository(closeResult = PollCloseResult.Failure)
         val topicRepository = FakeTopicRepository(
-            listOf(flowOf(fakeTopic(1, 1, poll = fakeVotingPoll(form), pollVoteForm = form))),
+            listOf(flowOf(fakeTopic(1, 1, poll = fakeClosablePoll(form), pollVoteForm = form))),
         )
         val appScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
         val viewModel = topicViewModel(
@@ -2587,7 +2627,7 @@ class TopicViewModelTest {
         val form = fakePollVoteForm()
         val pollRepository = FakePollVoteRepository(closeError = IOException("offline"))
         val topicRepository = FakeTopicRepository(
-            listOf(flowOf(fakeTopic(1, 1, poll = fakeVotingPoll(form), pollVoteForm = form))),
+            listOf(flowOf(fakeTopic(1, 1, poll = fakeClosablePoll(form), pollVoteForm = form))),
         )
         val appScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
         val viewModel = topicViewModel(
@@ -2619,7 +2659,7 @@ class TopicViewModelTest {
         }
         val topicRepository = FakeTopicRepository(
             flowsToReturn = listOf(
-                flowOf(fakeTopic(1, 1, poll = fakeVotingPoll(form), pollVoteForm = form)),
+                flowOf(fakeTopic(1, 1, poll = fakeClosablePoll(form), pollVoteForm = form)),
             ),
             refreshTopicsToReturn = listOf(fakeTopic(1, 1, poll = fakePollResults().copy(closed = true))),
         )
@@ -2657,7 +2697,7 @@ class TopicViewModelTest {
         val viewModel = topicViewModel(
             request = topicRequest(page = 1),
             topicRepository = FakeTopicRepository(
-                listOf(flowOf(fakeTopic(1, 1, poll = fakeVotingPoll(form), pollVoteForm = form))),
+                listOf(flowOf(fakeTopic(1, 1, poll = fakeClosablePoll(form), pollVoteForm = form))),
             ),
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
             pollVoteRepository = pollRepository,
@@ -4953,6 +4993,8 @@ class TopicViewModelTest {
         resultsAvailable = false,
         maxSelections = form.maxSelections,
     )
+
+    private fun fakeClosablePoll(form: PollVoteForm): Poll = fakeVotingPoll(form).copy(canClose = true)
 
     private fun fakePollResults(): Poll = Poll(
         question = "Quel langage préférez-vous ?",

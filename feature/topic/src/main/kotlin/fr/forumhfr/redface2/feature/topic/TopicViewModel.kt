@@ -1917,24 +1917,27 @@ class TopicViewModel @AssistedInject constructor(
     /**
      * #1201 — drives the « Clore ce sondage » owner interaction. Explicit MVI state so the
      * confirmation gates the irreversible `close_sondage.php` call and the anti double-tap guard is
-     * observable. The affordance itself is gated in the UI on `Topic.isFirstPostOwner && !poll.closed`;
-     * HFR is the authority (an unauthorised close simply returns a [PollCloseResult.Failure]).
+     * observable. The affordance itself is gated on HFR's owner-only `Poll.canClose` capability;
+     * HFR remains the authority (an unauthorised close returns a [PollCloseResult.Failure]).
      */
     private val _closePollState = MutableStateFlow<ClosePollState>(ClosePollState.Idle)
     val closePollState: StateFlow<ClosePollState> = _closePollState.asStateFlow()
 
     /**
-     * #1201 — the owner tapped « Clore » : raise the confirmation dialog. Defensive guard — only from
-     * a loaded page carrying an open poll, and never while a close is already in flight — so a stray
-     * intent (e.g. a closed poll) can neither open a pointless dialog nor launch a duplicate call.
+     * #1201/#1204 — the owner tapped « Clore » : raise the confirmation dialog. Defensive
+     * fail-close guard — only from a loaded page carrying HFR's native close capability, and never
+     * while a close is already in flight — so a stray intent from a non-owner or closed poll can
+     * neither open a pointless dialog nor launch a duplicate call.
      */
     fun requestClosePoll() {
         if (_closePollState.value != ClosePollState.Idle) return
-        val poll = (_state.value.mode as? TopicUiState.Mode.Loaded)?.topic?.poll
-        if (poll != null && !poll.closed) {
+        if (currentPollCanClose()) {
             _closePollState.value = ClosePollState.Confirming
         }
     }
+
+    private fun currentPollCanClose(): Boolean =
+        (_state.value.mode as? TopicUiState.Mode.Loaded)?.topic?.poll?.canClose == true
 
     /** #1201 — the owner dismissed the confirmation dialog without closing. */
     fun cancelClosePoll() {
@@ -1952,6 +1955,12 @@ class TopicViewModel @AssistedInject constructor(
      */
     fun confirmClosePoll() {
         if (_closePollState.value != ClosePollState.Confirming) return
+        // #1204 — the page may have refreshed while the confirmation dialog was open. Re-check
+        // HFR's capability immediately before the irreversible network mutation.
+        if (!currentPollCanClose()) {
+            _closePollState.value = ClosePollState.Idle
+            return
+        }
         _closePollState.value = ClosePollState.Closing
         val cat = request.cat
         val topicId = request.post

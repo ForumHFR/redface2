@@ -27,6 +27,7 @@ internal class TopicPollParser {
             ?.takeIf { marker -> marker.previousElementSibling() === pollElement }
             ?.text()
             ?.contains("Ce sondage est clos") == true
+        val canClose = !closed && parseCanClose(pollElement)
         val expiresAt = parseExpiresAt(pollElement.text())
         val blankVotes = parseBlankVotes(totalBlockText(pollElement))
 
@@ -38,7 +39,7 @@ internal class TopicPollParser {
         // (radio/checkbox inputs), which this parser used to drop silently (optionBars empty →
         // null → « aucun sondage ne s'affiche », CharLee's report).
         return if (question != null && optionBars.isEmpty()) {
-            parseFormPoll(question, pollVoteForm, closed, expiresAt, blankVotes)
+            parseFormPoll(question, pollVoteForm, closed, canClose, expiresAt, blankVotes)
         } else if (question == null || optionBars.isEmpty() || optionBars.size != optionLabels.size) {
             null
         } else {
@@ -89,6 +90,7 @@ internal class TopicPollParser {
                 hasVoted = false,
                 maxSelections = maxSelections,
                 closed = closed,
+                canClose = canClose,
                 expiresAt = expiresAt,
                 blankVotes = blankVotes,
             )
@@ -101,10 +103,12 @@ internal class TopicPollParser {
      * Options, input type and maximum selection count all come from that single transformer so the
      * read model and submit contract cannot diverge on the same DOM.
      */
+    @Suppress("LongParameterList") // FORM transformer: each parsed field maps to the Poll read model.
     private fun parseFormPoll(
         question: String,
         pollVoteForm: PollVoteForm?,
         closed: Boolean,
+        canClose: Boolean,
         expiresAt: LocalDateTime?,
         blankVotes: Int?,
     ): Poll? {
@@ -118,9 +122,30 @@ internal class TopicPollParser {
             resultsAvailable = false,
             maxSelections = form.maxSelections,
             closed = closed,
+            canClose = canClose,
             expiresAt = expiresAt,
             blankVotes = blankVotes,
         )
+    }
+
+    /**
+     * #1206 — HFR renders this adjacent link only for the owner of an open poll. FORM-shaped
+     * polls wrap `div.sondage` in the vote form, while RESULTS-shaped polls do not, so adjacency is
+     * checked against that form when present and against the poll div otherwise. Scoping the CSS
+     * match to the sibling parent prevents an unrelated `close_sondage.php` link elsewhere in the
+     * page from granting the capability.
+     */
+    private fun parseCanClose(pollElement: Element): Boolean {
+        val pollContainer = pollElement.parent()?.takeIf { it.tagName() == "form" } ?: pollElement
+        return pollContainer.parent()
+            ?.select(HfrSelectors.POLL_CLOSE_LINK)
+            ?.any { link ->
+                link.previousElementSibling() === pollContainer &&
+                    link.selectFirst("b.s1Ext")
+                        ?.text()
+                        ?.trim()
+                        ?.equals(CLOSE_POLL_LABEL, ignoreCase = true) == true
+            } == true
     }
 
     internal fun parseExpiresAt(text: String): LocalDateTime? {
@@ -161,6 +186,7 @@ internal class TopicPollParser {
         val EXPIRY_REGEX = Regex(
             """Ce\s+sondage\s+expirera\s+le\s+(\d{2}-\d{2}-\d{4})\s+à\s+(\d{2}:\d{2})""",
         )
+        const val CLOSE_POLL_LABEL = "Clore la partie sondage"
         val BLANK_VOTES_REGEX = Regex("""\((\d+)\s+votes?\s+blancs?\)""")
         val EXPIRY_FORMATTER: DateTimeFormatter = DateTimeFormatter
             .ofPattern("dd-MM-uuuu HH:mm")
