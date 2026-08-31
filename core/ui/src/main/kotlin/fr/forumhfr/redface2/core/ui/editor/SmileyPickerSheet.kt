@@ -28,6 +28,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -95,10 +96,14 @@ fun SmileyPickerSheet(
     modifier: Modifier = Modifier,
     layout: SmileyPickerLayoutSpec = SmileyPickerLayoutSpec.Current,
 ) {
+    // #1193 — force skipPartiallyExpanded: the tall, scrollable picker otherwise anchors at M3's
+    // PartiallyExpanded and its underdamped settle overshoots the top butée on opening. Same fix as
+    // QuickReplySheet / MessageEditorComponents; scope is Fix 1 only (no tab/IME/search change).
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         modifier = modifier,
         sheetMaxWidth = SMILEY_SHEET_MAX_WIDTH,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
     ) {
         // Local-only tab selection : the picker's tab state is not worth piping all the
         // way into the ViewModel. `rememberSaveable` so a configuration change (rotation,

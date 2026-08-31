@@ -17,6 +17,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -47,7 +48,13 @@ internal fun CitingPostsSheet(
     onDismiss: () -> Unit,
     onPostClick: (Post) -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    // #1193 — force skipPartiallyExpanded: the tall, scrollable citer list otherwise anchors at
+    // M3's PartiallyExpanded and its underdamped settle overshoots the top butée on opening. Same
+    // fix as QuickReplySheet / MessageEditorComponents.
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -91,7 +98,7 @@ private fun CitingPostsLoading() {
         contentAlignment = Alignment.Center,
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 180.dp),
+            .heightIn(min = CITING_POSTS_CONTENT_MIN_HEIGHT),
     ) {
         CircularProgressIndicator()
     }
@@ -105,7 +112,12 @@ private fun CitingPostsList(
     LazyColumn(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(max = 520.dp),
+            // #1193 — reserve the same 180 dp minimum as the Loading / Empty / Error states so a
+            // short result does not shrink the sheet below the Loading placeholder when
+            // Loading→Loaded lands mid-open (which would move the top anchor and re-run the M3
+            // settle). A long list still grows up to the max — Fix 1 (skipPartiallyExpanded) is
+            // the primary guard against the opening oscillation.
+            .heightIn(min = CITING_POSTS_CONTENT_MIN_HEIGHT, max = CITING_POSTS_LIST_MAX_HEIGHT),
     ) {
         items(items = posts, key = { post -> post.numreponse }) { post ->
             CitingPostRow(post = post, onClick = { onPostClick(post) })
@@ -172,7 +184,7 @@ private fun CitingPostsMessage(text: String) {
         contentAlignment = Alignment.Center,
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 180.dp)
+            .heightIn(min = CITING_POSTS_CONTENT_MIN_HEIGHT)
             .padding(24.dp),
     ) {
         Text(
@@ -192,6 +204,12 @@ private fun citingPostsErrorLabel(kind: HfrErrorKind): String {
         stringResource(R.string.topic_citing_posts_error)
     }
 }
+
+// #1193 — a common minimum height across the Loading / Loaded / Empty / Error states so a short
+// Loaded result does not shrink the sheet (and re-run the M3 settle) relative to the Loading
+// placeholder. A long Loaded list still grows up to CITING_POSTS_LIST_MAX_HEIGHT.
+private val CITING_POSTS_CONTENT_MIN_HEIGHT = 180.dp
+private val CITING_POSTS_LIST_MAX_HEIGHT = 520.dp
 
 // #783 (gate Fable R3) — citations span years, so an HH:mm-only stamp is ambiguous (all rows read as
 // today). Show the compact HFR-style date + time (« dd/MM/yyyy à HH:mm ») in Europe/Paris, the forum's
