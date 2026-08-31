@@ -1,3 +1,3 @@
-Redface 2 v0.49.1 — dev.
+Redface 2 v0.49.2 — dev.
 
-- Fix: write reliability — a network drop can no longer replay an action (duplicate post, or a false failure on a vote/poll close that actually went through).
+- Fix: the "Close this poll" button (topic author) is now available from every page of the topic, not just the first one.

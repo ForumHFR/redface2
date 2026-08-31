@@ -16,6 +16,12 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.49.2` — `internal` (dev) — 2026-08-31
+
+### Corrigé
+
+- **Clore un sondage : bouton accessible depuis toutes les pages** ([#1206](https://github.com/ForumHFR/redface2/issues/1206)) — le bouton **« Clore ce sondage »** (#1201) n'apparaissait qu'en page 1 du topic. Il est désormais visible sur **toutes** les pages, comme le sondage lui-même : le droit de clore est déduit de la présence du lien natif « Clore la partie sondage » que HFR rend pour l'auteur du sujet sur chaque page (au lieu d'un proxy limité à la page 1). Durcissement associé ([#1204](https://github.com/ForumHFR/redface2/issues/1204)) : le ViewModel re-vérifie ce droit avant d'envoyer la clôture (fail-close). Signalé par XaTriX.
+
 ## `0.49.1` — `internal` (dev) — 2026-08-31
 
 ### Corrigé

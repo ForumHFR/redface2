@@ -21,8 +21,25 @@ class TopicPollParserTest {
         val poll = parseFixture("topic_poll_closed.html")
 
         assertTrue(poll.closed)
+        assertFalse("a closed poll must never expose the close capability", poll.canClose)
         assertEquals(0, poll.blankVotes)
         assertNull(poll.expiresAt)
+    }
+
+    @Test
+    fun `owner open poll exposes native close capability`() {
+        val poll = parseFixture("topic_poll_owner_open.html")
+
+        assertFalse(poll.closed)
+        assertTrue("the adjacent native close link must expose canClose", poll.canClose)
+    }
+
+    @Test
+    fun `authenticated non-owner open poll fails closed without native link`() {
+        val poll = parseFixture("topic_poll_form_authenticated_multi.html")
+
+        assertFalse(poll.closed)
+        assertFalse("an authenticated vote form is not proof of ownership", poll.canClose)
     }
 
     @Test

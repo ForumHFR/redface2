@@ -151,6 +151,9 @@ internal object TopicMappers {
         // vote. `null` reads as « unknown legacy limit » until the next fetch overwrites the row.
         @SerialName("maxSelections") val maxSelections: Int? = null,
         @SerialName("closed") val closed: Boolean = false,
+        // #1206 — capability observed from HFR's native owner-only close link. Legacy rows and
+        // non-owner captures must fail closed.
+        @SerialName("canClose") val canClose: Boolean = false,
         @SerialName("expiresAt") val expiresAt: String? = null,
         @SerialName("blankVotes") val blankVotes: Int? = null,
     )
@@ -171,6 +174,7 @@ internal object TopicMappers {
         resultsAvailable = resultsAvailable,
         maxSelections = maxSelections,
         closed = closed,
+        canClose = canClose,
         expiresAt = expiresAt?.toString(),
         blankVotes = blankVotes,
     )
@@ -184,6 +188,7 @@ internal object TopicMappers {
         resultsAvailable = resultsAvailable,
         maxSelections = maxSelections,
         closed = closed,
+        canClose = canClose,
         expiresAt = expiresAt?.let { runCatching { LocalDateTime.parse(it) }.getOrNull() },
         blankVotes = blankVotes,
     )

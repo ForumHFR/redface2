@@ -183,6 +183,30 @@ class TopicMappersPollTest {
     }
 
     @Test
+    fun `native close capability survives cache while legacy rows fail closed (#1206)`() {
+        val poll = Poll(
+            question = "Harness?",
+            options = listOf(PollOption("Open source", votes = 0, percentage = 0f)),
+            multipleChoice = false,
+            totalVotes = 0,
+            hasVoted = false,
+            canClose = true,
+        )
+        val (entity, posts) = TopicMappers.toEntities(
+            topicWith(poll),
+            Instant.EPOCH,
+            FetchMode.AUTHENTICATED,
+        )
+
+        assertTrue(requireNotNull(TopicMappers.toDomain(entity, posts).poll).canClose)
+
+        val legacyEntity = entity.copy(
+            pollJson = requireNotNull(entity.pollJson).replace(",\"canClose\":true", ""),
+        )
+        assertFalse(requireNotNull(TopicMappers.toDomain(legacyEntity, posts).poll).canClose)
+    }
+
+    @Test
     fun `legacy JSON without server poll metadata uses backward-compatible defaults (#1170)`() {
         val poll = Poll(
             question = "Harness?",

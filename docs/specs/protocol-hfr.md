@@ -232,8 +232,10 @@ GET /user/close_sondage.php?cat={cat}&config=hfr.inc&post={topicId}
   marqueur `<b class="s1Ext">Ce sondage est clos</b>` (déjà parsé en lecture — `Poll.closed`, #1170).
 - **Irréversible** (pas de réouverture). Un seul GET, aucun retry.
 - **Contrôle owner-only** : le lien `<a href="/user/close_sondage.php?…">Clore la partie sondage</a>`
-  n'est rendu que pour l'owner d'un sondage **ouvert** (sous les boutons Voter / Voir les résultats). Le
-  gate applicatif utilise le proxy `Topic.isFirstPostOwner && !poll.closed`.
+  n'est rendu que pour l'owner d'un sondage **ouvert** (sous les boutons Voter / Voir les résultats), et
+  HFR le rend sur **chaque** page du topic. Le gate applicatif parse la **présence de ce lien**
+  (`Poll.canClose`, #1206) — signal autoritaire owner + sondage ouvert, valable sur toutes les pages —
+  et non le proxy `Topic.isFirstPostOwner` (faux hors page 1, d'où le bouton bridé corrigé en #1206).
 
 **Création/édition d'un sondage** : un sondage se crée/modifie en **éditant le 1er post** — l'option
 n'existe **pas** dans le formulaire de nouveau sujet. POST `bdd.php` (édition FP) avec `have_sondage=1`,

@@ -94,6 +94,12 @@ data class Poll(
     val maxSelections: Int? = null,
     val closed: Boolean = false,
     /**
+     * Whether HFR exposed the native adjacent `close_sondage.php` link on this page. The link is
+     * rendered only for the owner of an open poll, so this server-provided capability is the sole
+     * gate for the close affordance. `false` also covers non-owner, closed and legacy cache rows.
+     */
+    val canClose: Boolean = false,
+    /**
      * HFR wall-clock expiry without a time zone. Never convert it to an `Instant` or infer closure
      * from the local clock: the server-provided [closed] state is the source of truth.
      */
