@@ -15,6 +15,7 @@ import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
+import fr.forumhfr.redface2.core.domain.preferences.NavBarLabelsBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
@@ -80,6 +81,15 @@ class DataStoreUserPreferencesRepositoryTest {
         }
     }
 
+    /** In-memory [NavBarLabelsBootstrapStore] (#1138) — same stance as the mirrors above; default true. */
+    private val navBarLabelsBootstrapStore = object : NavBarLabelsBootstrapStore {
+        var stored = true
+        override fun read(): Boolean = stored
+        override fun write(enabled: Boolean) {
+            stored = enabled
+        }
+    }
+
     @Before
     fun setUp() {
         dataStore = PreferenceDataStoreFactory.create(
@@ -89,6 +99,7 @@ class DataStoreUserPreferencesRepositoryTest {
             dataStore = dataStore,
             themeBootstrapStore = themeBootstrapStore,
             startScreenBootstrapStore = startScreenBootstrapStore,
+            navBarLabelsBootstrapStore = navBarLabelsBootstrapStore,
             ioDispatcher = dispatcher,
             externalScope = externalScope,
         )
@@ -115,6 +126,7 @@ class DataStoreUserPreferencesRepositoryTest {
             dataStore = survivalStore,
             themeBootstrapStore = themeBootstrapStore,
             startScreenBootstrapStore = startScreenBootstrapStore,
+            navBarLabelsBootstrapStore = navBarLabelsBootstrapStore,
             ioDispatcher = ioDispatcher,
             externalScope = appScope,
         )
@@ -950,6 +962,33 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `setNavBarLabels mirrors the value into the bootstrap store`() = runTest(dispatcher) {
+        // #1138 — the synchronous cold-start mirror must follow every nav-bar-labels write, so the
+        // next cold start seeds the StateFlow from the stored value instead of the hard-coded true.
+        repository.setNavBarLabels(false)
+        assertFalse(navBarLabelsBootstrapStore.read())
+
+        repository.setNavBarLabels(true)
+        assertTrue(navBarLabelsBootstrapStore.read())
+    }
+
+    @Test
+    fun `observing the nav bar labels backfills an empty mirror from the persisted value`() = runTest(dispatcher) {
+        // #1138 — same convergence contract as the theme mirror (#386): a user who hid the labels
+        // BEFORE the mirror existed has `false` in DataStore but the default `true` in the mirror.
+        // The first observation must converge the mirror so the flash stops on the NEXT cold start.
+        dataStore.edit { prefs -> prefs[booleanPreferencesKey("nav_bar_labels")] = false }
+        assertTrue("precondition: the mirror still holds its default", navBarLabelsBootstrapStore.read())
+
+        repository.observeNavBarLabels().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertFalse(navBarLabelsBootstrapStore.read())
+    }
+
+    @Test
     fun `observeFunnyEmptyState defaults to false then persists true and false`() = runTest(dispatcher) {
         // #662 — the sober style-A empty state is the default; the smiley wink is strictly opt-in.
         repository.observeFunnyEmptyState().test {
@@ -1459,6 +1498,7 @@ class DataStoreUserPreferencesRepositoryTest {
             dataStore = store,
             themeBootstrapStore = themeBootstrapStore,
             startScreenBootstrapStore = startScreenBootstrapStore,
+            navBarLabelsBootstrapStore = navBarLabelsBootstrapStore,
             ioDispatcher = ioDispatcher,
             externalScope = appScope,
         )
@@ -1481,6 +1521,7 @@ class DataStoreUserPreferencesRepositoryTest {
             dataStore = store,
             themeBootstrapStore = themeBootstrapStore,
             startScreenBootstrapStore = startScreenBootstrapStore,
+            navBarLabelsBootstrapStore = navBarLabelsBootstrapStore,
             ioDispatcher = ioDispatcher,
             externalScope = appScope,
         )

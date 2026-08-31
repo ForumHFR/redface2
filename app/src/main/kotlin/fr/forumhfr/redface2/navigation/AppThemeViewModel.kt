@@ -8,6 +8,7 @@ import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.NavBarLabelsBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
@@ -32,9 +33,11 @@ import kotlinx.coroutines.flow.stateIn
 class AppThemeViewModel @Inject constructor(
     private val userPreferencesRepository: UserPreferencesRepository,
     themeBootstrapStore: ThemeBootstrapStore,
+    navBarLabelsBootstrapStore: NavBarLabelsBootstrapStore,
 ) : ViewModel() {
 
     private val bootstrap = themeBootstrapStore.read()
+    private val navBarLabelsSeed = navBarLabelsBootstrapStore.read()
 
     val themeMode: StateFlow<ThemeMode> =
         userPreferencesRepository.observeThemeMode()
@@ -91,10 +94,12 @@ class AppThemeViewModel @Inject constructor(
             .stateIn(viewModelScope, SharingStarted.Eagerly, SmileyPickerDecoration.NONE)
 
     // #666 — show the labels under the bottom-nav icons. Eagerly collected at the shell so the
-    // NavigationSuiteScaffold can drop the labels. No bootstrap mirror; seed = the `true` default.
+    // NavigationSuiteScaffold can drop the labels. Seeded from the SYNCHRONOUS bootstrap mirror
+    // (#1138) — NOT a hard-coded `true` — so a user who hid the labels no longer sees them flash
+    // on a cold start before the stored `false` hydrates from DataStore.
     val navBarLabels: StateFlow<Boolean> =
         userPreferencesRepository.observeNavBarLabels()
-            .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+            .stateIn(viewModelScope, SharingStarted.Eagerly, navBarLabelsSeed)
 
     // #445 — debug bounds overlay toggle (dev channel only; the channel gate lives in RedfaceApp).
     // No bootstrap mirror: it does not paint the pre-first-frame window, so the seed is the `false`
