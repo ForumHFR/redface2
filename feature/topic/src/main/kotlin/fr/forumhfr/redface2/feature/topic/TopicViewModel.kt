@@ -564,6 +564,11 @@ class TopicViewModel @AssistedInject constructor(
         if (loaded.posts.none { it.numreponse == post.numreponse }) return
         dismissCitingPosts()
         citingPostNavigationJob?.cancel()
+        // #1188 — capture the page owner BEFORE the probe suspends. A page switch during the ≤3 s
+        // probe bumps [ownerGeneration] (and cancels this job via [becomePageOwner]) ; a late reply
+        // that still lands must not tear the user off the page they chose. Same generation-guard
+        // pattern as [resolveScrollToPageThenLoad].
+        val generation = ownerGeneration
         citingPostNavigationJob = viewModelScope.launch {
             val resolvedPage = try {
                 withTimeoutOrNull(RESOLVE_TIMEOUT_MS) {
@@ -578,6 +583,7 @@ class TopicViewModel @AssistedInject constructor(
             } catch (@Suppress("TooGenericExceptionCaught") ignored: Throwable) {
                 null
             }
+            if (generation != ownerGeneration) return@launch
             // The unfiltered href rendered by quote_only carries page=1. A failed probe therefore
             // degrades to that same server-provided fallback, never to a guessed page.
             goToPost(targetPage = resolvedPage ?: 1, numreponse = post.numreponse)
@@ -1090,6 +1096,9 @@ class TopicViewModel @AssistedInject constructor(
         takeOverFromSearch()
         loadJob?.cancel()
         prefetchJob?.cancel()
+        // #1188 — a page switch during a citing-post probe owns the page now : cancel the late
+        // navigation so its resolved goToPost cannot rip the user off the page they just chose.
+        citingPostNavigationJob?.cancel()
         prefetchedPage = null
         reclaimRefreshIndicator()
         // Gate Sol PR1 — a SAME-PAGE re-own (Retry, refresh, search takeover) keeps the

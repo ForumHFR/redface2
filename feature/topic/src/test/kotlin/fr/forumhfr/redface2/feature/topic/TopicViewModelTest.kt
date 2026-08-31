@@ -235,6 +235,63 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `a page switch during a citing-post probe drops the late navigation (#1188)`() = runTest {
+        val target = fakePost(numreponse = 700, citedCount = 2)
+        val citer = fakePost(numreponse = 801, author = "Alice")
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flow { emit(fakeTopic(1, 5, posts = listOf(target, citer))) },
+                flow { emit(fakeTopic(2, 5, posts = listOf(citer))) },
+            ),
+        ).apply {
+            citingResult = Result.success(listOf(citer))
+        }
+        // The probe hangs until [probeGate] fires : the user switches page WHILE it is in flight.
+        val probeGate = CompletableDeferred<Unit>()
+        val resolveCalls = mutableListOf<Triple<Int, Int, Int>>()
+        val gatedSearch = object : SearchRepository {
+            override suspend fun search(request: SearchRequest): SearchResultPage =
+                throw UnsupportedOperationException("TopicViewModel never searches")
+
+            override suspend fun resolveSearchResultPage(cat: Int, post: Int, numreponse: Int): Int? {
+                resolveCalls += Triple(cat, post, numreponse)
+                probeGate.await()
+                // Resolves to the page we switched TO : without the fix the late goToPost would
+                // land here (target page == current page) and emit a ScrollToPost, ripping the
+                // user off the page they just chose.
+                return 2
+            }
+        }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+            searchRepository = gatedSearch,
+        )
+        viewModel.send(TopicIntent.OnCitedBadgeClick(target))
+        advanceUntilIdle()
+
+        viewModel.effects.test {
+            // Tap a citer : the probe starts and suspends on the gate — no navigation yet.
+            viewModel.send(TopicIntent.OnCitingPostClick(citer))
+            assertEquals(listOf(Triple(SAMPLE_CAT, SAMPLE_POST, citer.numreponse)), resolveCalls)
+            expectNoEvents()
+
+            // The user changes page mid-probe : this bumps the owner generation AND cancels the
+            // citing-post navigation job (becomePageOwner, #1188). Its own landing is the only
+            // legitimate effect.
+            viewModel.switchToPage(2)
+            assertEquals(TopicEffect.ScrollToTop(2), awaitItem())
+
+            // The probe replies LATE : the resolved goToPost must be dropped, never emitted.
+            probeGate.complete(Unit)
+            advanceUntilIdle()
+            expectNoEvents()
+            cancel()
+        }
+    }
+
+    @Test
     fun `staff directory is requested once and merged into the loaded mode`() = runTest {
         val staffRepository = FakeAuthorRoleRepository(
             staff = mapOf("ernestor" to AuthorRole.MODERATOR),
