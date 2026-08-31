@@ -32,6 +32,7 @@ import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.postContentExcerpt
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
+import fr.forumhfr.redface2.core.ui.sheet.clampSheetTopOverscroll
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -51,13 +52,18 @@ internal fun CitingPostsSheet(
     // #1193 — force skipPartiallyExpanded: the tall, scrollable citer list otherwise anchors at
     // M3's PartiallyExpanded and its underdamped settle overshoots the top butée on opening. Same
     // fix as QuickReplySheet / MessageEditorComponents.
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetState = sheetState,
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                // #1193 residual — swallow the upward overscroll left over at the Expanded anchor
+                // so the M3 spring settle cannot overshoot above it. Sits on the content wrapper
+                // (closest nested-scroll parent to the CitingPostsList LazyColumn), not the sheet.
+                .clampSheetTopOverscroll(sheetState)
                 .navigationBarsPadding(),
         ) {
             Text(
