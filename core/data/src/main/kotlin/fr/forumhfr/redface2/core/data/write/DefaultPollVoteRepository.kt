@@ -2,11 +2,13 @@ package fr.forumhfr.redface2.core.data.write
 
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.write.PollVoteRepository
+import fr.forumhfr.redface2.core.model.write.PollCloseResult
 import fr.forumhfr.redface2.core.model.write.PollVoteChoice
 import fr.forumhfr.redface2.core.model.write.PollVoteFailureReason
 import fr.forumhfr.redface2.core.model.write.PollVoteForm
 import fr.forumhfr.redface2.core.model.write.PollVoteResult
 import fr.forumhfr.redface2.core.network.HfrClient
+import fr.forumhfr.redface2.core.parser.write.poll.PollCloseResponseParser
 import fr.forumhfr.redface2.core.parser.write.poll.PollVoteResponseParser
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -19,6 +21,7 @@ import okhttp3.FormBody
 class DefaultPollVoteRepository @Inject constructor(
     private val hfrClient: HfrClient,
     private val responseParser: PollVoteResponseParser,
+    private val closeResponseParser: PollCloseResponseParser,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : PollVoteRepository {
 
@@ -53,6 +56,15 @@ class DefaultPollVoteRepository @Inject constructor(
         }
 
         responseParser.parse(hfrClient.submitPollVote(buildBlankFormBody(form)))
+    }
+
+    /**
+     * #1201 — GET `close_sondage.php` and classify the response, all on [ioDispatcher]. No form is
+     * built (the endpoint is a bare GET), no `hash_check` guard applies, and the call runs exactly
+     * once : the closure is irreversible, so a retry would be at best a no-op « already closed ».
+     */
+    override suspend fun closePoll(cat: Int, topicId: Int): PollCloseResult = withContext(ioDispatcher) {
+        closeResponseParser.parse(hfrClient.closePoll(cat, topicId))
     }
 
     private fun guardAgainstInvalidSubmission(

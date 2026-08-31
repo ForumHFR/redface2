@@ -15,6 +15,7 @@ import fr.forumhfr.redface2.core.parser.messages.PrivateMessageReplyLinkParser
 import fr.forumhfr.redface2.core.parser.write.ReplyFormParser
 import fr.forumhfr.redface2.core.parser.write.ReplySubmitResponseParser
 import fr.forumhfr.redface2.core.parser.write.TopicFormParser
+import fr.forumhfr.redface2.core.parser.write.poll.PollCloseResponseParser
 import fr.forumhfr.redface2.core.parser.write.poll.PollVoteResponseParser
 import javax.inject.Singleton
 
@@ -79,5 +80,9 @@ abstract class ReplyRepositoryModule {
         @Provides
         @Singleton
         fun providePollVoteResponseParser(): PollVoteResponseParser = PollVoteResponseParser()
+
+        @Provides
+        @Singleton
+        fun providePollCloseResponseParser(): PollCloseResponseParser = PollCloseResponseParser()
     }
 }

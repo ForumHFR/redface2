@@ -356,6 +356,38 @@ class HfrClient @Inject constructor(
     }
 
     /**
+     * #1201 — GET HFR's authenticated `close_sondage.php` to close a topic's poll.
+     *
+     * Wire shape (captured live 2026-08-31, cf. `docs/specs/protocol-hfr.md` § Clore un sondage and
+     * the fixture `close_sondage_success.html`) :
+     *
+     * `/user/close_sondage.php?cat={cat}&config=hfr.inc&post={topicId}`
+     *
+     * A GET link (like `addflag.php` / `delflag.php`), authenticated, with NO `hash_check` and NO
+     * `Referer` : the session cookie is the request protection. [topicId] is the topic's post id
+     * (there is no `numreponse`). The closure is non-idempotent AND irreversible, so this performs a
+     * single call and never retries. Returns the response HTML for
+     * [fr.forumhfr.redface2.core.parser.write.poll.PollCloseResponseParser] to classify : success
+     * carries « Le sondage a bien été clos ». HFR replies HTTP 200 either way, so the body is the
+     * only signal.
+     *
+     * Always uses the authenticated client : closing a poll is an owner mutation, and a freshly
+     * expired session must raise [SessionExpiredException] rather than silently hitting the anonymous
+     * page.
+     */
+    suspend fun closePoll(cat: Int, topicId: Int): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("user")
+            .addPathSegment("close_sondage.php")
+            .addQueryParameter("cat", cat.toString())
+            .addQueryParameter("config", "hfr.inc")
+            .addQueryParameter("post", topicId.toString())
+            .build()
+        val request = Request.Builder().url(url).get().build()
+        return authenticated.newCall(request).executeAuthenticatedHtml()
+    }
+
+    /**
      * Phase 2D (#147) — GET the HFR edit form for a post the user owns. The URL
      * shape is the same as the reply form, but with a `numreponse={N}` parameter
      * that tells HFR to render the « edit existing post » composer (prefills

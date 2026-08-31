@@ -58,6 +58,7 @@ import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.Poll
 import fr.forumhfr.redface2.core.model.PollOption
 import fr.forumhfr.redface2.core.model.Topic
+import fr.forumhfr.redface2.core.model.write.PollCloseResult
 import fr.forumhfr.redface2.core.model.write.PollVoteChoice
 import fr.forumhfr.redface2.core.model.write.PollVoteFailureReason
 import fr.forumhfr.redface2.core.model.write.PollVoteForm
@@ -2481,6 +2482,193 @@ class TopicViewModelTest {
 
         assertEquals(RemoveTopicFlagState.Idle, viewModel.removeTopicFlagState.value)
         assertEquals("cancelling must never call delflag", 0, flagRepo.removeFlagCalls)
+    }
+
+    // ─── close poll (#1201) ───────────────────────────────────────────────
+
+    @Test
+    fun `CloseTopicPoll on an open poll moves to Confirming (#1201)`() = runTest {
+        val form = fakePollVoteForm()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                listOf(flowOf(fakeTopic(1, 1, poll = fakeVotingPoll(form), pollVoteForm = form))),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.send(TopicIntent.CloseTopicPoll)
+
+        assertEquals(ClosePollState.Confirming, viewModel.closePollState.value)
+    }
+
+    @Test
+    fun `CloseTopicPoll is a no-op on an already-closed poll (#1201)`() = runTest {
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                listOf(flowOf(fakeTopic(1, 1, poll = fakePollResults().copy(closed = true)))),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.send(TopicIntent.CloseTopicPoll)
+
+        assertEquals(ClosePollState.Idle, viewModel.closePollState.value)
+    }
+
+    @Test
+    fun `confirmClosePoll closes then refreshes to the closed poll and emits PollClosed (#1201)`() =
+        runTest {
+            val form = fakePollVoteForm()
+            val pollRepository = FakePollVoteRepository(closeResult = PollCloseResult.Success)
+            val topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(
+                    flowOf(fakeTopic(1, 1, poll = fakeVotingPoll(form), pollVoteForm = form)),
+                ),
+                refreshTopicsToReturn = listOf(fakeTopic(1, 1, poll = fakePollResults().copy(closed = true))),
+            )
+            val appScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+            val viewModel = topicViewModel(
+                request = topicRequest(page = 1),
+                topicRepository = topicRepository,
+                authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+                pollVoteRepository = pollRepository,
+                externalScope = appScope,
+            )
+
+            viewModel.send(TopicIntent.CloseTopicPoll)
+            assertEquals(ClosePollState.Confirming, viewModel.closePollState.value)
+            viewModel.confirmClosePoll()
+
+            viewModel.effects.test {
+                assertEquals(TopicEffect.PollClosed, awaitItem())
+                cancelAndIgnoreRemainingEvents()
+            }
+            advanceUntilIdle()
+
+            assertEquals(ClosePollState.Idle, viewModel.closePollState.value)
+            assertEquals(listOf(SAMPLE_CAT to SAMPLE_POST), pollRepository.closeCalls)
+            assertEquals(listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 1)), topicRepository.refreshCalls)
+            val loaded = viewModel.state.value.mode as TopicUiState.Mode.Loaded
+            assertTrue("the refresh must surface the server-closed poll", loaded.topic.poll?.closed == true)
+        }
+
+    @Test
+    fun `confirmClosePoll failure emits PollCloseFailed and does not refresh (#1201)`() = runTest {
+        val form = fakePollVoteForm()
+        val pollRepository = FakePollVoteRepository(closeResult = PollCloseResult.Failure)
+        val topicRepository = FakeTopicRepository(
+            listOf(flowOf(fakeTopic(1, 1, poll = fakeVotingPoll(form), pollVoteForm = form))),
+        )
+        val appScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = topicRepository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            pollVoteRepository = pollRepository,
+            externalScope = appScope,
+        )
+
+        viewModel.send(TopicIntent.CloseTopicPoll)
+        viewModel.confirmClosePoll()
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.PollCloseFailed, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        advanceUntilIdle()
+        assertEquals(ClosePollState.Idle, viewModel.closePollState.value)
+        assertTrue("a failed close must never refresh the page", topicRepository.refreshCalls.isEmpty())
+    }
+
+    @Test
+    fun `confirmClosePoll folds a transport error into PollCloseFailed (#1201)`() = runTest {
+        val form = fakePollVoteForm()
+        val pollRepository = FakePollVoteRepository(closeError = IOException("offline"))
+        val topicRepository = FakeTopicRepository(
+            listOf(flowOf(fakeTopic(1, 1, poll = fakeVotingPoll(form), pollVoteForm = form))),
+        )
+        val appScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = topicRepository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            pollVoteRepository = pollRepository,
+            externalScope = appScope,
+        )
+
+        viewModel.send(TopicIntent.CloseTopicPoll)
+        viewModel.confirmClosePoll()
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.PollCloseFailed, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        advanceUntilIdle()
+        assertEquals(ClosePollState.Idle, viewModel.closePollState.value)
+        assertTrue(topicRepository.refreshCalls.isEmpty())
+    }
+
+    @Test
+    fun `confirmClosePoll moves through Closing while the detached call is in flight (#1201)`() = runTest {
+        val form = fakePollVoteForm()
+        val closeGate = CompletableDeferred<Unit>()
+        val pollRepository = FakePollVoteRepository(closeResult = PollCloseResult.Success).apply {
+            this.closeGate = closeGate
+        }
+        val topicRepository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flowOf(fakeTopic(1, 1, poll = fakeVotingPoll(form), pollVoteForm = form)),
+            ),
+            refreshTopicsToReturn = listOf(fakeTopic(1, 1, poll = fakePollResults().copy(closed = true))),
+        )
+        val appScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = topicRepository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            pollVoteRepository = pollRepository,
+            externalScope = appScope,
+        )
+
+        viewModel.send(TopicIntent.CloseTopicPoll)
+        viewModel.confirmClosePoll()
+        runCurrent()
+
+        assertEquals(ClosePollState.Closing, viewModel.closePollState.value)
+        assertEquals(1, pollRepository.closeCalls.size)
+
+        // A second tap while Closing must not launch a duplicate close.
+        viewModel.send(TopicIntent.CloseTopicPoll)
+        assertEquals(ClosePollState.Closing, viewModel.closePollState.value)
+        assertEquals(1, pollRepository.closeCalls.size)
+
+        closeGate.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(ClosePollState.Idle, viewModel.closePollState.value)
+        assertEquals(1, pollRepository.completedCloseCalls.size)
+    }
+
+    @Test
+    fun `cancelClosePoll dismisses the confirmation without closing (#1201)`() = runTest {
+        val form = fakePollVoteForm()
+        val pollRepository = FakePollVoteRepository(closeResult = PollCloseResult.Success)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                listOf(flowOf(fakeTopic(1, 1, poll = fakeVotingPoll(form), pollVoteForm = form))),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            pollVoteRepository = pollRepository,
+        )
+
+        viewModel.send(TopicIntent.CloseTopicPoll)
+        assertEquals(ClosePollState.Confirming, viewModel.closePollState.value)
+        viewModel.cancelClosePoll()
+
+        assertEquals(ClosePollState.Idle, viewModel.closePollState.value)
+        assertTrue("cancelling must never call close_sondage", pollRepository.closeCalls.isEmpty())
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -4969,12 +5157,20 @@ private class FakeDeletePostRepository(
 private class FakePollVoteRepository(
     private val result: PollVoteResult = PollVoteResult.Failed(PollVoteFailureReason.UnexpectedResponse),
     private val error: Throwable? = null,
+    // #1201 — outcome / gate / error for closePoll, independent of the vote knobs above.
+    private val closeResult: PollCloseResult = PollCloseResult.Success,
+    private val closeError: Throwable? = null,
 ) : PollVoteRepository {
     val calls = mutableListOf<Pair<PollVoteForm, Set<PollVoteChoice>>>()
     val completedCalls = mutableListOf<Pair<PollVoteForm, Set<PollVoteChoice>>>()
     val blankCalls = mutableListOf<PollVoteForm>()
     val completedBlankCalls = mutableListOf<PollVoteForm>()
     var gate: CompletableDeferred<Unit>? = null
+
+    // #1201 — closePoll call log + gate so a test can observe the Closing frame.
+    val closeCalls = mutableListOf<Pair<Int, Int>>()
+    val completedCloseCalls = mutableListOf<Pair<Int, Int>>()
+    var closeGate: CompletableDeferred<Unit>? = null
 
     override suspend fun submitPollVote(
         form: PollVoteForm,
@@ -4994,6 +5190,15 @@ private class FakePollVoteRepository(
         error?.let { throw it }
         completedBlankCalls += form
         return result
+    }
+
+    override suspend fun closePoll(cat: Int, topicId: Int): PollCloseResult {
+        val call = cat to topicId
+        closeCalls += call
+        closeGate?.await()
+        closeError?.let { throw it }
+        completedCloseCalls += call
+        return closeResult
     }
 }
 

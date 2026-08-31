@@ -392,6 +392,14 @@ sealed interface TopicIntent {
     /** #1170 — submit a blank vote only while the current selection is empty. */
     data object SubmitBlankPollVote : TopicIntent
 
+    /**
+     * #1201 — the first-post owner tapped « Clore ce sondage ». Carries no payload : the ViewModel
+     * resolves `(cat, topicId)` from its [TopicRequest]. Raises the confirmation dialog
+     * ([ClosePollState.Confirming]) ; the actual, irreversible close only fires on
+     * [TopicViewModel.confirmClosePoll].
+     */
+    data object CloseTopicPoll : TopicIntent
+
     /** #879 — filtered search : fetch the next page of the result list (footer card). */
     data object SearchNextResultsPage : TopicIntent
 
@@ -592,6 +600,16 @@ sealed interface TopicEffect {
      * session, or an unresolvable lookup (resolve failure folds here — cf. TopicViewModel).
      */
     data object TopicFlagNotFound : TopicEffect
+
+    /**
+     * #1201 — `close_sondage.php` confirmed the closure. One-shot feedback ; a page refresh to the
+     * closed state runs separately so the card stops offering the vote / close affordances. HFR has
+     * no re-open, so the message must not promise one.
+     */
+    data object PollClosed : TopicEffect
+
+    /** #1201 — the closure failed (refused, transport, session, or an unrecognised HFR page). */
+    data object PollCloseFailed : TopicEffect
 }
 
 /**
@@ -612,6 +630,23 @@ sealed interface RemoveTopicFlagState {
     data object Resolving : RemoveTopicFlagState
     data class Confirming(val flag: Flag) : RemoveTopicFlagState
     data class Removing(val flag: Flag) : RemoveTopicFlagState
+}
+
+/**
+ * #1201 — drives the « Clore ce sondage » owner interaction. Explicit MVI state so the confirmation
+ * gates the (irreversible) `close_sondage.php` call and the anti double-tap guard is observable.
+ * Simpler than [RemoveTopicFlagState] : the topic ViewModel already holds `(cat, topicId)` and the
+ * poll from its loaded state, so there is no async [RemoveTopicFlagState.Resolving] step.
+ *
+ * - [Idle] — nothing pending.
+ * - [Confirming] — the owner tapped « Clore » ; the screen shows the confirmation dialog. Absent this
+ *   state, no dialog.
+ * - [Closing] — the user confirmed ; the `close_sondage.php` call is in flight (anti double-tap).
+ */
+sealed interface ClosePollState {
+    data object Idle : ClosePollState
+    data object Confirming : ClosePollState
+    data object Closing : ClosePollState
 }
 
 /**
