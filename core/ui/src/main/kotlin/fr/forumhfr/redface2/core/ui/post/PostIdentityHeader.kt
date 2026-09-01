@@ -11,6 +11,7 @@ import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -30,8 +31,8 @@ import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
  * avatar reads against the name+date block as one tidy unit. Slots, so each feature supplies its own
  * labels/icons without `:core:ui` reaching a feature string or a material-icon:
  *  - [pseudo] (optional) — overrides the default pseudo text; the topic and MP pass the gold-sheen
- *    [CreatorPseudoText] for an RF2 creator (#221). When `null`, a plain ellipsised [Text] of [author]
- *    is drawn. Note:
+ *    [CreatorPseudoText] for an RF2 creator, and can use the slot to juxtapose a staff-role pill
+ *    (#221). When `null`, a plain ellipsised [Text] of [author] is drawn. Note:
  *    [onAuthorClick] is applied to that fallback text only — a supplied [pseudo] owns its own
  *    interaction. CONTRACT (#884): the provided slot also OWNS the post heading semantics — exactly
  *    one node inside it must set `semantics { heading() }`, on the real pseudo text node (the best
@@ -42,6 +43,8 @@ import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
  *    production variant (`TopicPostCardFullWidthTest`, `MessageCardShellSmokeTest`).
  *  - [dateTrailing] (optional) — a marker on the SAME row as the date, to its right (the topic's
  *    and MP's data-driven `· édité`, #483/#1051); `null` keeps the date as a plain single line.
+ *  - [supportingContentColorOverride] — lets a structural two-tone band make the date explicit
+ *    (white for moderation); `null` preserves the historical `onSurfaceVariant` role.
  *  - [subline] (optional) — extra line under the date; unused by the topic now, available for MP.
  *  - [trailing] (optional) — the `⋯` per-post menu glyph supplied by topic and MP cards; `null` for
  *    hosts without a contextual menu.
@@ -77,11 +80,14 @@ fun PostIdentityHeader(
     avatarContentDescription: String? = null,
     avatarSpacing: Dp = DEFAULT_AVATAR_SPACING,
     lineSpacing: Dp = DEFAULT_LINE_SPACING,
+    supportingContentColorOverride: Color? = null,
     pseudo: (@Composable () -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
     dateTrailing: (@Composable () -> Unit)? = null,
     subline: (@Composable () -> Unit)? = null,
 ) {
+    val supportingContentColor =
+        supportingContentColorOverride ?: MaterialTheme.colorScheme.onSurfaceVariant
     Row(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(avatarSpacing),
@@ -112,7 +118,7 @@ fun PostIdentityHeader(
         ) {
             if (pseudo != null) {
                 // #884 a11y — a caller-supplied pseudo owns its heading semantics (the topic and
-                // creator-MP branches mark their real pseudo text node); wrapping the slot here
+                // feature branches mark their real pseudo text node); wrapping the slot here
                 // would double the heading.
                 pseudo()
             } else {
@@ -147,7 +153,7 @@ fun PostIdentityHeader(
                     Text(
                         text = dateText,
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = supportingContentColor,
                     )
                     dateTrailing()
                 }
@@ -155,7 +161,7 @@ fun PostIdentityHeader(
                 Text(
                     text = dateText,
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = supportingContentColor,
                 )
             }
             subline?.invoke()

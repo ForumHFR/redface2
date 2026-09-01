@@ -10,6 +10,7 @@ import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
+import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
@@ -1178,6 +1179,54 @@ class SettingsViewModelTest {
     }
 
     // ──────────────────────────────────────────────────────────────────────
+    // Unanswered poll expansion (#1170)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `init hydrates topicUnansweredPollsExpanded from a persisted true`() = runTest {
+        repository.emitTopicUnansweredPollsExpanded(true)
+
+        val viewModel = newViewModel()
+
+        assertTrue(viewModel.state.value.topicUnansweredPollsExpanded)
+        assertFalse(viewModel.state.value.topicUnansweredPollsExpandedError)
+    }
+
+    @Test
+    fun `TopicUnansweredPollsExpandedChanged exposes an independent optimistic flip`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        repository.blockTopicUnansweredPollsExpandedSetUntil = gate
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.TopicUnansweredPollsExpandedChanged(true))
+
+        val midFlight = viewModel.state.value
+        assertTrue(midFlight.topicUnansweredPollsExpanded)
+        assertTrue(midFlight.isUpdatingTopicUnansweredPollsExpanded)
+        assertFalse(midFlight.canToggleTopicUnansweredPollsExpanded)
+        assertFalse("the global poll setting remains independent", midFlight.topicPollsExpanded)
+
+        gate.complete(Unit)
+
+        assertTrue(viewModel.state.value.topicUnansweredPollsExpanded)
+        assertFalse(viewModel.state.value.isUpdatingTopicUnansweredPollsExpanded)
+        assertEquals(1, repository.topicUnansweredPollsExpandedSetCalls)
+    }
+
+    @Test
+    fun `TopicUnansweredPollsExpandedChanged reverts and raises its error on persist failure`() = runTest {
+        repository.failOnTopicUnansweredPollsExpandedSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.TopicUnansweredPollsExpandedChanged(true))
+
+        assertFalse(viewModel.state.value.topicUnansweredPollsExpanded)
+        assertFalse(viewModel.state.value.isUpdatingTopicUnansweredPollsExpanded)
+        assertTrue(viewModel.state.value.topicUnansweredPollsExpandedError)
+        assertEquals(1, repository.topicUnansweredPollsExpandedSetCalls)
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
     // Author signatures (#330)
     // ──────────────────────────────────────────────────────────────────────
 
@@ -1597,6 +1646,44 @@ class SettingsViewModelTest {
         assertFalse("failed persist must revert to the previous value", viewModel.state.value.debugBoundsOverlay)
         assertFalse(viewModel.state.value.isUpdatingDebugBoundsOverlay)
         assertTrue(viewModel.state.value.debugBoundsOverlayError)
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // External-link app chooser (#1207)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `init hydrates alwaysAskLinkApp from the persisted preference`() = runTest {
+        repository.emitAlwaysAskLinkApp(true)
+
+        val viewModel = newViewModel()
+
+        assertTrue(viewModel.state.value.alwaysAskLinkApp)
+        assertFalse(viewModel.state.value.alwaysAskLinkAppError)
+    }
+
+    @Test
+    fun `AlwaysAskLinkAppChanged persists the flip`() = runTest {
+        val viewModel = newViewModel()
+        assertFalse(viewModel.state.value.alwaysAskLinkApp)
+
+        viewModel.submit(SettingsIntent.AlwaysAskLinkAppChanged(true))
+
+        assertTrue(viewModel.state.value.alwaysAskLinkApp)
+        assertFalse(viewModel.state.value.isUpdatingAlwaysAskLinkApp)
+        assertEquals(1, repository.alwaysAskLinkAppSetCalls)
+    }
+
+    @Test
+    fun `AlwaysAskLinkAppChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnAlwaysAskLinkAppSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.AlwaysAskLinkAppChanged(true))
+
+        assertFalse(viewModel.state.value.alwaysAskLinkApp)
+        assertFalse(viewModel.state.value.isUpdatingAlwaysAskLinkApp)
+        assertTrue(viewModel.state.value.alwaysAskLinkAppError)
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -2049,6 +2136,23 @@ class SettingsViewModelTest {
 
         override fun readProxyConfigForNetworkBootstrap(): ProxyConfig = config.value
 
+        private val alwaysAskLinkApp = MutableStateFlow(false)
+        var alwaysAskLinkAppSetCalls: Int = 0
+            private set
+        var failOnAlwaysAskLinkAppSet: Boolean = false
+
+        override fun observeAlwaysAskLinkApp(): Flow<Boolean> = alwaysAskLinkApp
+
+        override suspend fun setAlwaysAskLinkApp(enabled: Boolean) {
+            alwaysAskLinkAppSetCalls += 1
+            check(!failOnAlwaysAskLinkAppSet) { "boom" }
+            alwaysAskLinkApp.value = enabled
+        }
+
+        fun emitAlwaysAskLinkApp(enabled: Boolean) {
+            alwaysAskLinkApp.value = enabled
+        }
+
         /**
          * Test seam for the #788 re-sync tests: when non-null, `observeIgnoreTopicCache()` returns
          * this overridden flow instead of the internal `MutableStateFlow`. A `MutableSharedFlow`
@@ -2281,6 +2385,27 @@ class SettingsViewModelTest {
 
         fun emitTopicPollsExpanded(value: Boolean) {
             topicPollsExpanded.value = value
+        }
+
+        // #1170 — unanswered poll expansion. Independent optimistic-flip seam.
+        private val topicUnansweredPollsExpanded = MutableStateFlow(false)
+        var topicUnansweredPollsExpandedSetCalls: Int = 0
+            private set
+        var failOnTopicUnansweredPollsExpandedSet: Boolean = false
+        var blockTopicUnansweredPollsExpandedSetUntil: CompletableDeferred<Unit>? = null
+
+        override fun observeTopicUnansweredPollsExpanded(): Flow<Boolean> =
+            topicUnansweredPollsExpanded
+
+        override suspend fun setTopicUnansweredPollsExpanded(enabled: Boolean) {
+            topicUnansweredPollsExpandedSetCalls += 1
+            blockTopicUnansweredPollsExpandedSetUntil?.await()
+            check(!failOnTopicUnansweredPollsExpandedSet) { "boom" }
+            topicUnansweredPollsExpanded.value = enabled
+        }
+
+        fun emitTopicUnansweredPollsExpanded(value: Boolean) {
+            topicUnansweredPollsExpanded.value = value
         }
 
         // #330 — afficher les signatures. Même seam optimistic-flip que topicPollsExpanded.
@@ -2716,6 +2841,16 @@ class SettingsViewModelTest {
 
         fun emitAccentColor(value: AccentColor) {
             accentColor.value = value
+        }
+
+        // #1132 — Forum flag-filter preference has no Settings UI; a plain in-memory seam keeps the
+        // interface satisfied (SettingsViewModel never reads or writes it).
+        private val forumCategoryFlagFilter = MutableStateFlow(CategoryFlagFilter.ALL)
+
+        override fun observeForumCategoryFlagFilter(): Flow<CategoryFlagFilter> = forumCategoryFlagFilter
+
+        override suspend fun setForumCategoryFlagFilter(filter: CategoryFlagFilter) {
+            forumCategoryFlagFilter.value = filter
         }
     }
 

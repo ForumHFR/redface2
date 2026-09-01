@@ -5,7 +5,6 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
-import android.net.Uri
 import android.view.View
 import android.view.Window
 import android.widget.Toast
@@ -108,6 +107,7 @@ import fr.forumhfr.redface2.core.domain.preferences.StartScreenChoice
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.account.RedfaceAccountMenu
+import fr.forumhfr.redface2.core.ui.browser.openUrlInExternalBrowser
 import fr.forumhfr.redface2.core.ui.debug.DebugBoundsOverlay
 import fr.forumhfr.redface2.core.ui.theme.ReadingDisplaySettings
 import fr.forumhfr.redface2.feature.auth.LoginScreen
@@ -326,8 +326,8 @@ data class TopicRoute(
      * #750 — `true` when [page] is untrusted: HFR email-notification links always say `page=1`
      * while the real target travels as `numreponse`. Forwarded to `TopicRequest.resolveScrollToPage`
      * so the ViewModel resolves the actual page (server-side redirect probe, #277 mechanism) before
-     * the first load. Only the email deep-link path sets it; defaulted so older serialised back
-     * stacks deserialise without the field.
+     * the first load. Inbound legacy or pretty links set it when they combine an anchor with page 1;
+     * defaulted so older serialised back stacks deserialise without the field.
      */
     val resolveScrollToPage: Boolean = false,
 ) : RedfaceNavKey
@@ -850,8 +850,11 @@ private data class ProfileSheetRequest(
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3AdaptiveApi::class)
+// Root shell composable — aggregates theme resolution, immersive-bar wiring and deep-link dispatch.
+// Stays at detekt's method threshold even after extracting the deep-link `when` (applyDeepLinkResolution).
+@Suppress("CyclomaticComplexMethod")
 @Composable
-fun RedfaceApp(intent: Intent?) {
+internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
     // #286 — resolve the persisted theme selection before applying RedfaceTheme. SYSTEM (default)
     // keeps the historical isSystemInDarkTheme() behaviour; LIGHT/DARK force the app theme.
     val themeViewModel: AppThemeViewModel = hiltViewModel()
@@ -859,6 +862,8 @@ fun RedfaceApp(intent: Intent?) {
     val amoledEnabled by themeViewModel.amoledEnabled.collectAsStateWithLifecycle()
     // TU 2788511 — accent colour family (rose ↔ vivid « REDFACE1 » red), resolved at the root for RedfaceTheme.
     val accentColor by themeViewModel.accentColor.collectAsStateWithLifecycle()
+    // #1207 — force Android's « Ouvrir avec… » chooser for explicit external-link actions.
+    val alwaysAskLinkApp by themeViewModel.alwaysAskLinkApp.collectAsStateWithLifecycle()
     // #287 — reading presets (density + font scale) resolved at the root and bundled for RedfaceTheme.
     val displayDensity by themeViewModel.displayDensity.collectAsStateWithLifecycle()
     val fontScale by themeViewModel.fontScale.collectAsStateWithLifecycle()
@@ -930,6 +935,7 @@ fun RedfaceApp(intent: Intent?) {
         darkTheme = darkTheme,
         amoledTheme = amoledEnabled,
         accentColor = accentColor,
+        alwaysAskLinkApp = alwaysAskLinkApp,
         reading = ReadingDisplaySettings(
             density = displayDensity,
             fontScale = fontScale,
@@ -1031,14 +1037,18 @@ fun RedfaceApp(intent: Intent?) {
             currentDestination = result.target
         }
 
-        LaunchedEffect(intent) {
-            val parsed = intent?.data?.let(::parseHfrDeepLink) ?: return@LaunchedEffect
-            switchTab(parsed.destination)
-            resetStack(
-                backStack = backStacks.getValue(parsed.destination),
-                root = parsed.destination.rootRoute,
-                route = parsed.route,
-            )
+        val context = LocalContext.current
+        // #1203 — consume deliveries, not action+URI identities: a deliberate re-tap of the same
+        // link gets a new ID, while recreation restores both the current and last-resolved IDs.
+        var lastResolvedDeepLinkDeliveryId by rememberSaveable { mutableStateOf<Long?>(null) }
+        LaunchedEffect(intentDelivery?.id) {
+            val delivery = intentDelivery ?: return@LaunchedEffect
+            if (!shouldApplyDeepLinkDelivery(delivery.id, lastResolvedDeepLinkDeliveryId)) {
+                return@LaunchedEffect
+            }
+            lastResolvedDeepLinkDeliveryId = delivery.id
+
+            applyDeepLinkResolution(delivery.intent, context, switchTab, backStacks)
         }
 
         // Issue #198 — global account menu hoisted out of `Messages` and re-injected into
@@ -1064,7 +1074,6 @@ fun RedfaceApp(intent: Intent?) {
         }
         val reportEmailSubject = stringResource(fr.forumhfr.redface2.core.ui.R.string.account_menu_report_email_subject)
         val reportNoEmailClient = stringResource(fr.forumhfr.redface2.core.ui.R.string.account_menu_no_email_client)
-        val context = LocalContext.current
         // #531 — optimistic « read » marks of the inbox, now keyed by the conversation DATE seen at
         // open-time (was a bare Set<Int>). Storing the date lets a fresh page-1 network result RECONCILE
         // the mark: HFR re-flagging a thread unread is only honoured when its server date is STRICTLY
@@ -1153,9 +1162,9 @@ fun RedfaceApp(intent: Intent?) {
         // replaced the TopicRoute (new nav entry → new ViewModel), re-seeding a `rememberSaveable`
         // toggle inside the poll card to the global default on every page. Since #895 étape 4 the
         // entry survives page changes; hoisting still makes the choice survive leaving and
-        // reopening the topic within the session. Absence of a key = follow the
-        // `topicPollsExpanded` default; the toggle records the manual choice here. RAM/session
-        // only, never serialized into a route.
+        // reopening the topic within the session. Absence of a key = follow the automatic policy
+        // (`topicPollsExpanded` plus the unanswered-poll opt-in); the toggle records the manual
+        // choice here. RAM/session only, never serialized into a route.
         var topicPollExpansionCache by remember { mutableStateOf(emptyMap<TopicPollKey, Boolean>()) }
 
         // #812 — the session-clearing block below must run on real SESSION TRANSITIONS only
@@ -1919,8 +1928,8 @@ internal fun EditorQuotesHandoff?.forScope(scope: QuoteScope?): EditorQuotesHand
  * state owned by the topic screen dies when its entry leaves the back stack, so hoisting makes the
  * choice survive leaving and reopening the topic (and survived the per-page entry swap back when
  * page changes replaced the route, pre-#895 étape 4 — the original trigger). The `var` backing
- * [expansions] lives in [RedfaceApp]. A `null` lookup (no entry for the
- * topic) means « follow the global default »; [onExpansionChanged] records the user's manual toggle.
+ * [expansions] lives in [RedfaceApp]. A `null` lookup (no entry for the topic) means « follow the
+ * automatic poll policy »; [onExpansionChanged] records the user's manual toggle.
  *
  * @property expansions the manual collapse/expand choice per topic the user has toggled.
  * @property onExpansionChanged records a topic's manual poll choice when the card is tapped.
@@ -2761,8 +2770,8 @@ private fun RedfaceNavHost(
                     // #436 — « Tout vider » : a long press on the « Citer N » FAB empties the
                     // whole hoisted basket (same reset path as the post-editor launch / logout).
                     onClearMultiQuote = multiQuoteNavState.onClear,
-                    // #465 — the topic's saved manual poll choice (null = follow the global
-                    // default), and the callback recording a tap on the poll card. Hoisted to
+                    // #465/#1170 — the topic's saved manual poll choice (null = follow the
+                    // automatic poll policy), and the callback recording a tap on the card. Hoisted to
                     // :app so it survives leaving and reopening the topic (pre-#895 étape 4:
                     // the per-page TopicRoute swap), keyed by (cat, post).
                     pollManualExpanded = topicPollNavState.expansions[
@@ -3019,55 +3028,32 @@ private fun RedfaceNavHost(
     )
 }
 
-internal fun parseHfrDeepLink(uri: Uri): ParsedDeepLink? = when (uri.path) {
-    // forum1.php is the topic-list page (per category / subcategory). Required:
-    // `cat`. Optional: `subcat`, `page`. Lands on the Forum tab so the back stack
-    // walks Forum -> Category -> (deeper) instead of Flags.
-    "/forum1.php" -> {
-        val cat = uri.getQueryParameter("cat")?.toIntOrNull() ?: return null
-        val subcat = uri.getQueryParameter("subcat")?.toIntOrNull()
-        // Preserve `page` from the deep link so a shared link to e.g.
-        // forum1.php?cat=23&subcat=550&page=2 lands on page 2 instead of silently
-        // resetting to 1. Out-of-range / malformed values fall back to 1.
-        val page = uri.getQueryParameter("page")?.toIntOrNull()?.coerceAtLeast(1) ?: 1
-        ParsedDeepLink(
-            destination = TopLevelDestination.Forum,
-            route = CategoryRoute(cat = cat, subcat = subcat, page = page),
-        )
+// #1032 PR2 — apply a resolved HFR deep link. Extracted from RedfaceApp's LaunchedEffect so the
+// three-branch resolution `when` does not push the composable over detekt's complexity threshold.
+// Pure dispatch: the delivery guard (rememberSaveable) stays in the effect above.
+private fun applyDeepLinkResolution(
+    intent: Intent,
+    context: Context,
+    switchTab: (TopLevelDestination) -> Unit,
+    backStacks: Map<TopLevelDestination, NavBackStack<NavKey>>,
+) {
+    when (val resolution = resolveHfrDeepLink(intent)) {
+        is HfrDeepLinkResolution.Route -> {
+            val parsed = resolution.parsed
+            switchTab(parsed.destination)
+            resetStack(
+                backStack = backStacks.getValue(parsed.destination),
+                root = parsed.destination.rootRoute,
+                route = parsed.route,
+            )
+        }
+
+        is HfrDeepLinkResolution.BrowserFallback -> {
+            openUrlInExternalBrowser(context, resolution.uri)
+        }
+
+        HfrDeepLinkResolution.Ignore -> Unit
     }
-
-    // forum2.php is the topic-content page (the actual posts). Required: `cat`,
-    // `post`. Optional: `page`, fragment `#t<numreponse>` for scroll-to-post.
-    // Lands on the Flags tab — the typical reading surface.
-    "/forum2.php" -> {
-        val cat = uri.getQueryParameter("cat")?.toIntOrNull() ?: return null
-        val post = uri.getQueryParameter("post")?.toIntOrNull() ?: return null
-        val page = uri.getQueryParameter("page")?.toIntOrNull() ?: 1
-        // #750 — the `numreponse` QUERY param is the fallback target: HFR email-notification
-        // links carry it alongside the fragment, and some mail clients strip the fragment.
-        val scrollTo = uri.fragment?.removePrefix("t")?.toIntOrNull()
-            ?: uri.getQueryParameter("numreponse")?.toIntOrNull()
-        ParsedDeepLink(
-            destination = TopLevelDestination.Flags,
-            route = TopicRoute(
-                cat = cat,
-                post = post,
-                page = page,
-                scrollTo = scrollTo,
-                // #750 — email links always serialise `page=1` whatever page the target post
-                // lives on; a page-1 link WITH an anchor is therefore untrusted and the real
-                // page is resolved before the first load. An explicit page > 1 is trusted as-is.
-                resolveScrollToPage = scrollTo != null && page == 1,
-            ),
-        )
-    }
-
-    "/forum1f.php" -> ParsedDeepLink(
-        destination = TopLevelDestination.Flags,
-        route = FlagsListRoute,
-    )
-
-    else -> null
 }
 
 private fun resetStack(

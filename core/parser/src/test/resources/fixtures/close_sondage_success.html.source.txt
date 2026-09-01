@@ -1,0 +1,13 @@
+Fixture : close_sondage_success.html
+Origine : réponse HTTP de la clôture de sondage HFR — GET /user/close_sondage.php
+          (contrôle « Clore la partie sondage » réservé au créateur du sujet), #1201.
+Capture : live le 2026-08-31, AUTHENTIFIÉ sous XaTelitte (compte de test de l'agent), sur un
+          topic de test jetable (cat=23 « Technologies Mobiles » / subcat=550 Android,
+          post=35440, premier post numreponse=2799706) créé pour la capture puis SUPPRIMÉ
+          juste après (HTTP 404 vérifié). Round-trip complet : topic créé → sondage ajouté
+          par édition du 1er post → sondage clos → topic supprimé.
+Contenu : mini-page de confirmation HFR (div.hop « Le sondage a bien été clos »), servie en
+          HTTP 200 sans meta-refresh.
+Sanitation : aucun hash_check, cookie, email ni identifiant personnel — page de confirmation
+          sans jeton (grep = 0 vérifié avant commit). Canal : curl authentifié direct.
+Contrat : docs/specs/protocol-hfr.md § « Clore un sondage » ; redface2-work/specs/FAITS-clore-sondage.md.

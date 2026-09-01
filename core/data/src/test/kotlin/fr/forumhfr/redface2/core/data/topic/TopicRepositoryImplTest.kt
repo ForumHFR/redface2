@@ -12,6 +12,7 @@ import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
+import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
@@ -74,6 +75,7 @@ class TopicRepositoryImplTest {
         client = HfrClient(
             authenticated = okHttp,
             anonymous = okHttp,
+            mutation = okHttp.newBuilder().retryOnConnectionFailure(false).build(),
             baseUrl = server.url("/"),
             ioDispatcher = Dispatchers.Unconfined,
         )
@@ -131,6 +133,36 @@ class TopicRepositoryImplTest {
             assertFalse("TTL-skip emission must be settled", cached.provisional)
         }
         assertEquals("fresh cache hit must not trigger a refresh", 1, server.requestCount)
+    }
+
+    @Test
+    fun `fresh authenticated open-poll cache forces refresh to rehydrate vote form (#779)`() = runTest {
+        // The fixture is logged-out HTML, but refreshTopicPage deliberately stores it as an
+        // AUTHENTICATED row: this isolates the cache decision from cookies while preserving the
+        // real FORM-shape DOM. The parser surfaces a blank-token form; Room stores only Poll.
+        server.enqueue(MockResponse().setBody(fixtureHtml("topic_poll_form_meteo.html")))
+        server.enqueue(MockResponse().setBody(fixtureHtml("topic_poll_form_meteo.html")))
+        val repo = repository(now = Instant.parse("2026-04-26T18:00:00Z"))
+
+        val warm = repo.refreshTopicPage(13, 44_713, 1)
+        assertFalse(requireNotNull(warm.poll).resultsAvailable)
+        assertNotNull(warm.pollVoteForm)
+        assertEquals(1, server.requestCount)
+
+        // Same fixed clock means the row is fresh by the 60s TTL. The open poll nevertheless
+        // disables the skip: cache is provisional, then one live GET restores PollVoteForm.
+        repo.observeTopicPage(13, 44_713, 1).test {
+            val cached = awaitItem()
+            assertTrue(cached.provisional)
+            assertFalse(requireNotNull(cached.topic.poll).resultsAvailable)
+            assertNull("transient form must be absent from the Room emission", cached.topic.pollVoteForm)
+
+            val refreshed = awaitItem()
+            assertFalse(refreshed.provisional)
+            assertNotNull("authenticated refresh must rehydrate the vote form", refreshed.topic.pollVoteForm)
+            awaitComplete()
+        }
+        assertEquals("fresh open-poll row must issue exactly one rehydration GET", 2, server.requestCount)
     }
 
     @Test
@@ -681,6 +713,10 @@ class TopicRepositoryImplTest {
 
         override suspend fun setTopicPollsExpanded(enabled: Boolean) = Unit
 
+        override fun observeTopicUnansweredPollsExpanded(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setTopicUnansweredPollsExpanded(enabled: Boolean) = Unit
+
         override fun observeTopicSignatures(): Flow<Boolean> = MutableStateFlow(false)
 
         override suspend fun setTopicSignatures(enabled: Boolean) = Unit
@@ -771,5 +807,13 @@ class TopicRepositoryImplTest {
         override suspend fun setImmersiveNavBarReveal(mode: ImmersiveNavBarReveal) = Unit
         override fun observeAccentColor(): Flow<AccentColor> = MutableStateFlow(AccentColor.ROSE)
         override suspend fun setAccentColor(color: AccentColor) = Unit
+        override fun observeAlwaysAskLinkApp(): Flow<Boolean> = MutableStateFlow(false)
+        override suspend fun setAlwaysAskLinkApp(enabled: Boolean) = Unit
+
+        // #1132 — Forum flag-filter preference is irrelevant to TopicRepositoryImpl; default ALL stub.
+        override fun observeForumCategoryFlagFilter(): Flow<CategoryFlagFilter> =
+            MutableStateFlow(CategoryFlagFilter.ALL)
+
+        override suspend fun setForumCategoryFlagFilter(filter: CategoryFlagFilter) = Unit
     }
 }

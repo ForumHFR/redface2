@@ -45,6 +45,7 @@ class DefaultEditPostRepositoryTest {
         client = HfrClient(
             authenticated = okHttp,
             anonymous = okHttp,
+            mutation = okHttp.newBuilder().retryOnConnectionFailure(false).build(),
             baseUrl = server.url("/"),
             ioDispatcher = Dispatchers.Unconfined,
         )

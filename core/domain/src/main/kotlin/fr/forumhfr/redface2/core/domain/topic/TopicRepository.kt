@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.domain.topic
 
+import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.Topic
 import kotlinx.coroutines.flow.Flow
 
@@ -31,6 +32,16 @@ interface TopicRepository {
      * The persisted row is tagged as authenticated.
      */
     suspend fun refreshTopicPage(cat: Int, post: Int, page: Int): Topic
+
+    /**
+     * #783 — returns the distinct post rows HFR exposes for its native reverse citation index.
+     * The server-side badge counts citation occurrences while `quote_only=1` may deduplicate
+     * citing posts, so callers must never equate this list's size with `Post.citedCount`.
+     *
+     * The result is deliberately uncached: this is volatile, user-triggered detail data rather
+     * than part of the durable topic-page snapshot.
+     */
+    suspend fun getCitingPosts(cat: Int, post: Int, numreponse: Int): Result<List<Post>>
 
     /**
      * Background prefetch — anonymous fetch (no HFR cookies, no

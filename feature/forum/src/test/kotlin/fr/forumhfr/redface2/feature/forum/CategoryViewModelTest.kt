@@ -5,11 +5,14 @@ import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.forum.FlagFilterBucket
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
+import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
+import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.SubCategory
 import fr.forumhfr.redface2.core.model.TopicListPage
 import fr.forumhfr.redface2.core.model.TopicSummary
+import io.mockk.mockk
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -55,6 +58,7 @@ class CategoryViewModelTest {
             request = CategoryRequest(cat = 23, initialSubcat = null),
             forumRepository = repo,
             authRepository = FakeAuthRepository(initial = AuthState.Authenticated("xat")),
+            userPreferencesRepository = FakePreferences(),
         )
         vm.uiState.test {
             // Drain warm-up emissions until canCreateTopic flips on (the
@@ -73,6 +77,7 @@ class CategoryViewModelTest {
             request = CategoryRequest(cat = 23, initialSubcat = null),
             forumRepository = repo,
             authRepository = FakeAuthRepository(initial = AuthState.Anonymous),
+            userPreferencesRepository = FakePreferences(),
         )
         vm.uiState.test {
             // The initial StateFlow seed is `canCreateTopic = false` already ;
@@ -90,6 +95,7 @@ class CategoryViewModelTest {
             request = CategoryRequest(cat = 23, initialSubcat = null),
             forumRepository = repo,
             authRepository = FakeAuthRepository(),
+            userPreferencesRepository = FakePreferences(),
         )
 
         vm.uiState.test {
@@ -124,6 +130,7 @@ class CategoryViewModelTest {
             request = CategoryRequest(cat = 23, initialSubcat = 550, initialPage = 4),
             forumRepository = repo,
             authRepository = FakeAuthRepository(),
+            userPreferencesRepository = FakePreferences(),
         )
 
         // Initial uiState carries the initialPage straight through (no warm-up needed —
@@ -138,6 +145,7 @@ class CategoryViewModelTest {
             request = CategoryRequest(cat = 13, initialSubcat = 422),
             forumRepository = repo,
             authRepository = FakeAuthRepository(),
+            userPreferencesRepository = FakePreferences(),
         )
 
         vm.uiState.test {
@@ -165,6 +173,7 @@ class CategoryViewModelTest {
             request = CategoryRequest(cat = 23, initialSubcat = 550),
             forumRepository = repo,
             authRepository = FakeAuthRepository(),
+            userPreferencesRepository = FakePreferences(),
         )
 
         vm.uiState.test {
@@ -192,6 +201,7 @@ class CategoryViewModelTest {
             request = CategoryRequest(cat = 23, initialSubcat = null),
             forumRepository = repo,
             authRepository = FakeAuthRepository(),
+            userPreferencesRepository = FakePreferences(),
         )
 
         vm.uiState.test {
@@ -220,6 +230,7 @@ class CategoryViewModelTest {
             request = CategoryRequest(cat = 999, initialSubcat = null),
             forumRepository = repo,
             authRepository = FakeAuthRepository(),
+            userPreferencesRepository = FakePreferences(),
         )
 
         vm.uiState.test {
@@ -248,6 +259,7 @@ class CategoryViewModelTest {
             request = CategoryRequest(cat = 23, initialSubcat = 550),
             forumRepository = repo,
             authRepository = FakeAuthRepository(),
+            userPreferencesRepository = FakePreferences(),
         )
 
         vm.refresh()
@@ -263,6 +275,7 @@ class CategoryViewModelTest {
             request = CategoryRequest(cat = 23, initialSubcat = null, initialPage = 1),
             forumRepository = repo,
             authRepository = FakeAuthRepository(),
+            userPreferencesRepository = FakePreferences(),
         )
 
         // Move state to (subcat=550, page=2) before the user pulls to refresh.
@@ -282,6 +295,7 @@ class CategoryViewModelTest {
             request = CategoryRequest(cat = 23, initialSubcat = 550),
             forumRepository = repo,
             authRepository = FakeAuthRepository(),
+            userPreferencesRepository = FakePreferences(),
         )
 
         // Force at least one collector on uiState so the underlying combine starts
@@ -320,6 +334,7 @@ class CategoryViewModelTest {
             request = CategoryRequest(cat = 23, initialSubcat = null),
             forumRepository = repo,
             authRepository = FakeAuthRepository(),
+            userPreferencesRepository = FakePreferences(),
         )
 
         vm.uiState.test {
@@ -353,6 +368,7 @@ class CategoryViewModelTest {
             request = CategoryRequest(cat = 23, initialSubcat = 550),
             forumRepository = repo,
             authRepository = FakeAuthRepository(),
+            userPreferencesRepository = FakePreferences(),
         )
 
         val topics = listOf(
@@ -415,6 +431,7 @@ class CategoryViewModelTest {
             request = CategoryRequest(cat = 23, initialSubcat = null),
             forumRepository = repo,
             authRepository = FakeAuthRepository(),
+            userPreferencesRepository = FakePreferences(),
         )
 
         vm.uiState.test {
@@ -442,12 +459,86 @@ class CategoryViewModelTest {
     }
 
     @Test
+    fun `search is closed by default and openSearch activates it`() = runTest {
+        val repo = FakeForumRepository()
+        val vm = categoryVm(repo)
+
+        vm.uiState.test {
+            val initial = awaitContent { !it.searchActive }
+            assertFalse("search must start closed", initial.searchActive)
+
+            vm.openSearch()
+            val opened = awaitContent { it.searchActive }
+            assertTrue("openSearch must activate the search", opened.searchActive)
+            // Opening does not seed a query — an open, empty field is a valid state.
+            assertEquals("", opened.searchQuery)
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `clearing the query keeps the search open`() = runTest {
+        // #1130 — the clear cross calls updateSearchQuery("") only; it must NOT leave the mode.
+        val repo = FakeForumRepository()
+        val vm = categoryVm(repo)
+
+        vm.uiState.test {
+            awaitContent { !it.searchActive }
+            vm.openSearch()
+            vm.updateSearchQuery("usb")
+            awaitContent { it.searchActive && it.searchQuery == "usb" }
+
+            vm.updateSearchQuery("")
+            val cleared = awaitContent { it.searchQuery == "" }
+            assertTrue("clearing the query must not close the search", cleared.searchActive)
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `closeSearch atomically empties and exits with no intermediate open-empty item`() = runTest {
+        // #1130 — closeSearch writes ONE combined flow, so uiState must jump straight from
+        // (open, "android") to (closed, "") with NO (open, "") item in between. The pre-fix
+        // implementation wrote two separate MutableStateFlows joined by `combine` and DID surface
+        // that intermediate; this test refutes it by draining every item emitted after closeSearch
+        // and asserting none is the forbidden (active && empty) state before the atomic final one.
+        val repo = FakeForumRepository()
+        val vm = categoryVm(repo)
+
+        vm.uiState.test {
+            awaitContent { !it.searchActive }
+            vm.openSearch()
+            vm.updateSearchQuery("android")
+            awaitContent { it.searchActive && it.searchQuery == "android" }
+
+            vm.closeSearch()
+            // Drain until the atomic final state (closed AND empty). Any item seen on the way that
+            // is (open, empty) is the non-atomic leak the fix removes — it would arrive first.
+            var item = awaitItem()
+            while (item.searchActive || item.searchQuery.isNotEmpty()) {
+                assertFalse(
+                    "closeSearch leaked an intermediate (open, empty) state — not atomic",
+                    item.searchActive && item.searchQuery.isEmpty(),
+                )
+                item = awaitItem()
+            }
+            assertFalse("closeSearch must leave the search mode", item.searchActive)
+            assertEquals("closeSearch must empty the query", "", item.searchQuery)
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `failure from observeSubcategories surfaces as SubcategoriesUiState Error`() = runTest {
         val repo = FakeForumRepository()
         val vm = CategoryViewModel(
             request = CategoryRequest(cat = 23, initialSubcat = null),
             forumRepository = repo,
             authRepository = FakeAuthRepository(),
+            userPreferencesRepository = FakePreferences(),
         )
 
         vm.uiState.test {
@@ -471,6 +562,7 @@ class CategoryViewModelTest {
             request = CategoryRequest(cat = 23, initialSubcat = 550, initialPage = 1),
             forumRepository = repo,
             authRepository = FakeAuthRepository(),
+            userPreferencesRepository = FakePreferences(),
         )
         // Listings: 130 topics @ 50 per page → 3 pages total. Prefetch should fire for page 2.
         val multiPage = EMPTY_PAGE.copy(totalTopics = 130, resultsPerPage = 50)
@@ -512,6 +604,7 @@ class CategoryViewModelTest {
             request = CategoryRequest(cat = 23, initialSubcat = 550, initialPage = 1),
             forumRepository = repo,
             authRepository = FakeAuthRepository(),
+            userPreferencesRepository = FakePreferences(),
         )
         val multiPage = EMPTY_PAGE.copy(totalTopics = 130, resultsPerPage = 50)
 
@@ -551,6 +644,7 @@ class CategoryViewModelTest {
             request = CategoryRequest(cat = 23, initialSubcat = 550, initialPage = 3),
             forumRepository = repo,
             authRepository = FakeAuthRepository(),
+            userPreferencesRepository = FakePreferences(),
         )
         val multiPage = EMPTY_PAGE.copy(totalTopics = 130, resultsPerPage = 50, page = 3)
 
@@ -757,14 +851,160 @@ class CategoryViewModelTest {
         }
     }
 
+    // ---- #1132 — remembering the last flag filter --------------------------------------------
+
+    @Test
+    fun `a persisted READ seed applies with a single fetch and never a visible ALL selector`() = runTest {
+        val repo = FakeForumRepository()
+        repo.flagFilterResponder = { _, _, _ -> ForumResult.Success(pageOf(topicSummary(42, "Read"))) }
+        val prefs = FakePreferences(initial = CategoryFlagFilter.READ)
+        val auth = FakeAuthRepository(initial = AuthState.Authenticated("xat"))
+        val vm = categoryVm(repo, auth, prefs = prefs)
+
+        vm.uiState.test {
+            repo.emitTopicList(23, null, 1, ForumResult.Success(EMPTY_PAGE))
+            // The selector is only ever rendered while canCreateTopic is true. Drain to the seeded
+            // READ state and assert NO authenticated item on the way surfaced the ALL selector — the
+            // hydration gate must jump straight from the initial Loading (selector hidden) to READ.
+            withTimeout(AWAIT_CONTENT_TIMEOUT_MS) {
+                var item = awaitItem()
+                while (!(item.canCreateTopic && item.flagFilter == CategoryFlagFilter.READ)) {
+                    assertFalse(
+                        "an authenticated state must never show the ALL selector before READ lands",
+                        item.canCreateTopic && item.flagFilter == CategoryFlagFilter.ALL,
+                    )
+                    item = awaitItem()
+                }
+            }
+            cancelAndIgnoreRemainingEvents()
+        }
+        // Exactly one bucket fetch — the hydration fetch — despite the initial subcat emission (drop(1)).
+        assertEquals(
+            listOf(Triple(23, null, FlagFilterBucket.READ)),
+            repo.getFlagFilteredTopicsCalls,
+        )
+    }
+
+    @Test
+    fun `a default ALL seed fetches no bucket`() = runTest {
+        val repo = FakeForumRepository()
+        val prefs = FakePreferences(initial = CategoryFlagFilter.ALL)
+        val auth = FakeAuthRepository(initial = AuthState.Authenticated("xat"))
+        val vm = categoryVm(repo, auth, prefs = prefs)
+
+        vm.uiState.test {
+            repo.emitTopicList(23, null, 1, ForumResult.Success(EMPTY_PAGE))
+            val content = awaitContent { it.canCreateTopic && it.topics is TopicsUiState.Content }
+            assertEquals(CategoryFlagFilter.ALL, content.flagFilter)
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertTrue("an ALL seed must not fetch any bucket", repo.getFlagFilteredTopicsCalls.isEmpty())
+    }
+
+    @Test
+    fun `selecting FAVORITES persists it and a new category ViewModel restores it as the seed`() = runTest {
+        val prefs = FakePreferences(initial = CategoryFlagFilter.ALL)
+
+        val repo1 = FakeForumRepository()
+        repo1.flagFilterResponder = { _, _, _ -> ForumResult.Success(pageOf(topicSummary(9, "Fav"))) }
+        val vm1 = categoryVm(repo1, FakeAuthRepository(initial = AuthState.Authenticated("xat")), prefs = prefs)
+        vm1.uiState.test {
+            repo1.emitTopicList(23, null, 1, ForumResult.Success(EMPTY_PAGE))
+            awaitContent { it.canCreateTopic && it.flagFilter == CategoryFlagFilter.ALL }
+            vm1.selectFlagFilter(CategoryFlagFilter.FAVORITES)
+            awaitContent { it.flagFilter == CategoryFlagFilter.FAVORITES }
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(listOf(CategoryFlagFilter.FAVORITES), prefs.setCalls)
+
+        // A brand-new category ViewModel sharing the same (persisted) preferences seeds FAVORITES.
+        val repo2 = FakeForumRepository()
+        repo2.flagFilterResponder = { _, _, _ -> ForumResult.Success(pageOf(topicSummary(9, "Fav"))) }
+        val vm2 = categoryVm(repo2, FakeAuthRepository(initial = AuthState.Authenticated("xat")), prefs = prefs)
+        vm2.uiState.test {
+            repo2.emitTopicList(23, null, 1, ForumResult.Success(EMPTY_PAGE))
+            val seeded = awaitContent { it.canCreateTopic && it.flagFilter == CategoryFlagFilter.FAVORITES }
+            assertEquals(CategoryFlagFilter.FAVORITES, seeded.flagFilter)
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(
+            listOf(Triple(23, null, FlagFilterBucket.FAVORITES)),
+            repo2.getFlagFilteredTopicsCalls,
+        )
+    }
+
+    @Test
+    fun `logout resets the local filter to ALL but leaves the persisted preference untouched`() = runTest {
+        val prefs = FakePreferences(initial = CategoryFlagFilter.ALL)
+        val auth = FakeAuthRepository(initial = AuthState.Authenticated("xat"))
+        val repo = FakeForumRepository()
+        repo.flagFilterResponder = { _, _, _ -> ForumResult.Success(pageOf(topicSummary(9, "Fav"))) }
+        val vm = categoryVm(repo, auth, prefs = prefs)
+
+        vm.uiState.test {
+            repo.emitTopicList(23, null, 1, ForumResult.Success(EMPTY_PAGE))
+            awaitContent { it.canCreateTopic }
+            vm.selectFlagFilter(CategoryFlagFilter.FAVORITES)
+            awaitContent { it.flagFilter == CategoryFlagFilter.FAVORITES }
+            auth.logout()
+            val reset = awaitContent { it.flagFilter == CategoryFlagFilter.ALL }
+            assertFalse("selector hidden once anonymous", reset.canCreateTopic)
+            cancelAndIgnoreRemainingEvents()
+        }
+        // The only write was the explicit FAVORITES selection; the logout reset must NOT have written.
+        assertEquals(listOf(CategoryFlagFilter.FAVORITES), prefs.setCalls)
+    }
+
+    @Test
+    fun `an anonymous entry with FAVORITES stored seeds local ALL with no bucket fetch and no write`() = runTest {
+        val prefs = FakePreferences(initial = CategoryFlagFilter.FAVORITES)
+        val auth = FakeAuthRepository(initial = AuthState.Anonymous)
+        val repo = FakeForumRepository()
+        val vm = categoryVm(repo, auth, prefs = prefs)
+
+        vm.uiState.test {
+            repo.emitTopicList(23, null, 1, ForumResult.Success(EMPTY_PAGE))
+            val content = awaitContent { it.topics is TopicsUiState.Content }
+            assertEquals(CategoryFlagFilter.ALL, content.flagFilter)
+            assertFalse("an anonymous session hides the selector", content.canCreateTopic)
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertTrue("an anonymous seed must not fetch a bucket", repo.getFlagFilteredTopicsCalls.isEmpty())
+        assertTrue("an anonymous seed must not write the preference", prefs.setCalls.isEmpty())
+    }
+
+    @Test
+    fun `reselecting the already-active filter neither refetches nor rewrites the preference`() = runTest {
+        val prefs = FakePreferences(initial = CategoryFlagFilter.ALL)
+        val auth = FakeAuthRepository(initial = AuthState.Authenticated("xat"))
+        val repo = FakeForumRepository()
+        repo.flagFilterResponder = { _, _, _ -> ForumResult.Success(pageOf(topicSummary(9, "Fav"))) }
+        val vm = categoryVm(repo, auth, prefs = prefs)
+
+        vm.uiState.test {
+            repo.emitTopicList(23, null, 1, ForumResult.Success(EMPTY_PAGE))
+            awaitContent { it.canCreateTopic }
+            vm.selectFlagFilter(CategoryFlagFilter.PARTICIPATED)
+            awaitContent {
+                it.flagFilter == CategoryFlagFilter.PARTICIPATED && it.flagFilterTopics is TopicsUiState.Content
+            }
+            vm.selectFlagFilter(CategoryFlagFilter.PARTICIPATED) // identical — must be a no-op
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(1, repo.getFlagFilteredTopicsCalls.size)
+        assertEquals(listOf(CategoryFlagFilter.PARTICIPATED), prefs.setCalls)
+    }
+
     private fun categoryVm(
         repo: FakeForumRepository,
         auth: AuthRepository = FakeAuthRepository(),
         request: CategoryRequest = CategoryRequest(cat = 23, initialSubcat = null),
+        prefs: UserPreferencesRepository = FakePreferences(),
     ): CategoryViewModel = CategoryViewModel(
         request = request,
         forumRepository = repo,
         authRepository = auth,
+        userPreferencesRepository = prefs,
     )
 
     private companion object {
@@ -961,5 +1201,30 @@ class CategoryViewModelTest {
         override suspend fun logout() {
             state.value = AuthState.Anonymous
         }
+    }
+
+    /**
+     * #1132 — records / stores the persisted Forum flag-filter so a test can assert the write AND a
+     * SECOND ViewModel can restore it. Everything else on [UserPreferencesRepository] is delegated to
+     * a relaxed mock: the ViewModel only touches the two forum-filter methods, so this avoids a
+     * hand-written stub of the ~85 other preference accessors.
+     */
+    private class FakePreferences(
+        initial: CategoryFlagFilter = CategoryFlagFilter.ALL,
+    ) : UserPreferencesRepository by mockk(relaxed = true) {
+        private val stored = MutableStateFlow(initial)
+        var setCalls: List<CategoryFlagFilter> = emptyList()
+            private set
+
+        override fun observeForumCategoryFlagFilter(): Flow<CategoryFlagFilter> = stored
+
+        override suspend fun setForumCategoryFlagFilter(filter: CategoryFlagFilter) {
+            setCalls = setCalls + filter
+            stored.value = filter
+        }
+
+        override fun observeTopicUnansweredPollsExpanded(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setTopicUnansweredPollsExpanded(enabled: Boolean) = Unit
     }
 }

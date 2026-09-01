@@ -8,6 +8,7 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
+import fr.forumhfr.redface2.core.domain.author.AuthorRoleRepository
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.blacklist.BlacklistRepository
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
@@ -23,13 +24,20 @@ import fr.forumhfr.redface2.core.domain.topic.TopicRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicSearchRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostResult
-import fr.forumhfr.redface2.core.model.Post
+import fr.forumhfr.redface2.core.domain.write.PollVoteRepository
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.AuthorRole
+import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.write.FlagAddContext
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.model.TopicSearchForm
 import fr.forumhfr.redface2.core.model.TopicSearchRequest
 import fr.forumhfr.redface2.core.model.write.EditPostContext
+import fr.forumhfr.redface2.core.model.write.PollCloseResult
+import fr.forumhfr.redface2.core.model.write.PollVoteChoice
+import fr.forumhfr.redface2.core.model.write.PollVoteFailureReason
+import fr.forumhfr.redface2.core.model.write.PollVoteForm
+import fr.forumhfr.redface2.core.model.write.PollVoteResult
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -86,14 +94,16 @@ class TopicViewModel @AssistedInject constructor(
     private val authRepository: AuthRepository,
     private val userPreferencesRepository: UserPreferencesRepository,
     private val deletePostRepository: DeletePostRepository,
+    private val pollVoteRepository: PollVoteRepository,
     private val blacklistRepository: BlacklistRepository,
+    private val authorRoleRepository: AuthorRoleRepository,
     private val topicSearchRepository: TopicSearchRepository,
     private val searchRepository: SearchRepository,
     // #809 — plain Hilt dependency (the assisted Factory is unchanged): resolves + removes THIS
     // topic's drapeau for the top-bar long-press.
     private val flagRepository: FlagRepository,
-    // #1144 — process-lifetime scope for the three HFR MUTATIONS this ViewModel owns (delete a post,
-    // remove the topic's drapeau, add a favourite). Since #1083 every HfrClient call is genuinely
+    // #1144/#779 — process-lifetime scope for the four HFR MUTATIONS this ViewModel owns (delete a
+    // post, vote, remove the topic's drapeau, add a favourite). Since #1083 every HfrClient call is
     // cancellable, so those writes would be aborted mid-socket by a back press; [awaitDetached]
     // re-parents them here. READS stay on `viewModelScope` — leaving the screen must still cancel
     // them. Plain Hilt dependency, the assisted Factory is unchanged.
@@ -111,6 +121,9 @@ class TopicViewModel @AssistedInject constructor(
      */
     private var blockedCanonicals: Set<String> = emptySet()
 
+    /** #221 — latest non-empty global staff directory, independent from every page load job. */
+    private var staffByPseudo: Map<String, AuthorRole> = emptyMap()
+
     private val _effects: Channel<TopicEffect> = Channel(capacity = Channel.BUFFERED)
     val effects: Flow<TopicEffect> = _effects.receiveAsFlow()
 
@@ -121,6 +134,19 @@ class TopicViewModel @AssistedInject constructor(
     /** Chantier C (#546) — at most one intra-topic search POST in flight at a time. */
     private var searchJob: Job? = null
 
+    /** #779 — anti double-submit lock; the detached POST itself may outlive this job/VM. */
+    private var pollVoteJob: Job? = null
+
+    /**
+     * Generation owning the visible Submitting/Refreshing phase. A page takeover advances
+     * [ownerGeneration], so a later page emission cannot inherit another page's busy indicator.
+     */
+    private var pollVoteMutationGeneration: Int? = null
+
+    /** Canonical account owning a poll mutation; kept private so no account token reaches UI. */
+    private var pollVoteAccount: String? = null
+    private var hasObservedPollVoteAccount: Boolean = false
+
     /**
      * #877 — at most one background « fetch a fresh search form » in flight (cf. [ensureSearchForm]).
      * Fired when the search bar opens over a page whose transient `searchForm` is absent — the
@@ -128,6 +154,11 @@ class TopicViewModel @AssistedInject constructor(
      * unavailable until an unrelated reload.
      */
     private var searchFormJob: Job? = null
+
+    /** #783 — latest-wins reverse-citation read and post-page resolution. */
+    private var citingPostsJob: Job? = null
+    private var citingPostNavigationJob: Job? = null
+    private var citingPostsGeneration: Int = 0
 
     // #986 — account-scoped owner token for the resolve → optional confirm → add interaction.
     // A logout/account switch cancels both jobs, advances the token and resets the visible state,
@@ -263,6 +294,9 @@ class TopicViewModel @AssistedInject constructor(
         // contract) seeds [blockedCanonicals] before the load below computes the initial hidden set —
         // a blocked post therefore never flashes before it is hidden, even on the force-refresh path.
         observeBlockedCanonicals()
+        // #221 — decorative and best-effort: starts once without joining loadJob, so posts never
+        // wait for the staff directory and leaving the screen still cancels the read with the VM.
+        loadStaff()
         // #895 F1 — the canonical current page survives process death : the SavedState page
         // (written by every switch and at init) or an already-resolved #750 page wins over the
         // route's initial page. A config change never reaches this code (the ViewModel survives).
@@ -312,6 +346,22 @@ class TopicViewModel @AssistedInject constructor(
         authRepository.observeAuthState()
             .onEach { authState ->
                 val connectedPseudo = (authState as? AuthState.Authenticated)?.pseudo
+                val nextPollVoteAccount = connectedPseudo?.trim()?.lowercase()
+                val pollVoteAccountChanged = hasObservedPollVoteAccount &&
+                    pollVoteAccount != nextPollVoteAccount
+                pollVoteAccount = nextPollVoteAccount
+                hasObservedPollVoteAccount = true
+                if (pollVoteAccountChanged) {
+                    // #779/#1204 — a transient form/token, its selection and the cached close
+                    // capability belong to one account only. Dismiss any open close confirmation.
+                    // The detached POST is deliberately not cancelled; its late result is fenced by
+                    // the account snapshot, while the next account must fetch its own fresh form.
+                    pollVoteMutationGeneration = null
+                    pageSnapshots.clear()
+                    if (_closePollState.value is ClosePollState.Confirming) {
+                        _closePollState.value = ClosePollState.Idle
+                    }
+                }
                 if (!_state.value.connectedPseudo.equals(connectedPseudo, ignoreCase = true)) {
                     favoriteAuthGeneration++
                     favoriteResolveJob?.cancel()
@@ -324,7 +374,21 @@ class TopicViewModel @AssistedInject constructor(
                     _favoriteAtPostState.value = FavoriteAtPostState.Unknown
                 }
                 _state.update {
+                    val accountSafeMode = if (pollVoteAccountChanged) {
+                        (it.mode as? TopicUiState.Mode.Loaded)?.let { loaded ->
+                            loaded.copy(
+                                topic = loaded.topic.copy(
+                                    poll = loaded.topic.poll?.copy(canClose = false),
+                                    pollVoteForm = null,
+                                ),
+                                pollVote = null,
+                            )
+                        } ?: it.mode
+                    } else {
+                        it.mode
+                    }
                     it.copy(
+                        mode = accountSafeMode,
                         isAuthenticated = authState is AuthState.Authenticated,
                         // #545 — carry the session pseudo for the ownership fallback (profiles
                         // with affichoutils=0 get no toolbar : isEditable/isOwnPost are blind).
@@ -352,6 +416,13 @@ class TopicViewModel @AssistedInject constructor(
         userPreferencesRepository.observeTopicPollsExpanded()
             .onEach { expanded ->
                 _state.update { it.copy(pollsExpandedDefault = expanded) }
+            }
+            .launchIn(viewModelScope)
+        // #1170 — independently keep live unanswered polls expanded when the global default is
+        // collapsed. The screen combines this preference with the transient form capability.
+        userPreferencesRepository.observeTopicUnansweredPollsExpanded()
+            .onEach { expanded ->
+                _state.update { it.copy(expandUnansweredPolls = expanded) }
             }
             .launchIn(viewModelScope)
         // #330 — mirror the signatures preference so the post cards can show/hide the author
@@ -399,8 +470,15 @@ class TopicViewModel @AssistedInject constructor(
             // refresh — by then the new post has been persisted and the user just wants
             // to recover from a transient error.
             TopicIntent.Retry -> loadCurrentPage()
+            is TopicIntent.OnCitedBadgeClick -> openCitingPosts(intent.post)
+            is TopicIntent.OnCitingPostClick -> openCitingPost(intent.post)
+            TopicIntent.OnDismissCitingSheet -> dismissCitingPosts()
             is TopicIntent.DeletePost -> deletePost(intent.numreponse)
             TopicIntent.Refresh -> refresh()
+            is TopicIntent.UpdatePollSelection -> updatePollSelection(intent.choice, intent.selected)
+            TopicIntent.SubmitPollVote -> submitPollVote(PollVoteSubmissionType.NORMAL)
+            TopicIntent.SubmitBlankPollVote -> submitPollVote(PollVoteSubmissionType.BLANK)
+            TopicIntent.CloseTopicPoll -> requestClosePoll()
             is TopicIntent.SetAuthorBlocked -> setAuthorBlocked(intent.author, intent.blocked)
             TopicIntent.RequestRemoveTopicFlag -> requestRemoveTopicFlag()
             TopicIntent.OpenSearch -> openSearch()
@@ -421,6 +499,114 @@ class TopicViewModel @AssistedInject constructor(
     }
 
     /**
+     * #783 — opens the sheet immediately then performs the volatile anonymous read. A second badge
+     * tap cancels the first request; dismissal also cancels it, so a late result cannot reopen the
+     * sheet. The server badge remains the title source even when the returned list is deduplicated.
+     */
+    private fun openCitingPosts(post: Post) {
+        val citedCount = post.citedCount?.takeIf { it > 0 } ?: return
+        citingPostNavigationJob?.cancel()
+        citingPostsJob?.cancel()
+        val generation = ++citingPostsGeneration
+        val target = CitingPostsSheetState(
+            numreponse = post.numreponse,
+            citedCount = citedCount,
+        )
+        _state.update { it.copy(citingPostsSheet = target) }
+        citingPostsJob = viewModelScope.launch {
+            _state.update { state ->
+                if (
+                    generation == citingPostsGeneration &&
+                    state.citingPostsSheet?.numreponse == target.numreponse
+                ) {
+                    state.copy(
+                        citingPostsSheet = target.copy(content = CitingPostsSheetContent.Loading),
+                    )
+                } else {
+                    state
+                }
+            }
+            val result = try {
+                topicRepository.getCitingPosts(
+                    cat = request.cat,
+                    post = request.post,
+                    numreponse = target.numreponse,
+                )
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (@Suppress("TooGenericExceptionCaught") throwable: Throwable) {
+                Result.failure(throwable)
+            }
+            _state.update { state ->
+                val current = state.citingPostsSheet
+                if (
+                    generation != citingPostsGeneration ||
+                    current?.numreponse != target.numreponse
+                ) {
+                    return@update state
+                }
+                val content = result.fold(
+                    onSuccess = { posts ->
+                        if (posts.isEmpty()) {
+                            CitingPostsSheetContent.Empty
+                        } else {
+                            CitingPostsSheetContent.Loaded(posts)
+                        }
+                    },
+                    onFailure = { error ->
+                        CitingPostsSheetContent.Error(classifyHfrError(error))
+                    },
+                )
+                state.copy(citingPostsSheet = current.copy(content = content))
+            }
+        }
+    }
+
+    /**
+     * #783 — filtered rows expose `page=1&numreponse=…`; HFR's redirect is the source of truth for
+     * the real page. Once resolved, reuse [goToPost] unchanged so the #782 return chain and
+     * [TopicEffect.ScrollToPost] landing remain identical to every other in-topic jump.
+     */
+    private fun openCitingPost(post: Post) {
+        val loaded = _state.value.citingPostsSheet?.content as? CitingPostsSheetContent.Loaded
+            ?: return
+        if (loaded.posts.none { it.numreponse == post.numreponse }) return
+        dismissCitingPosts()
+        citingPostNavigationJob?.cancel()
+        // #1188 — capture the page owner BEFORE the probe suspends. A page switch during the ≤3 s
+        // probe bumps [ownerGeneration] (and cancels this job via [becomePageOwner]) ; a late reply
+        // that still lands must not tear the user off the page they chose. Same generation-guard
+        // pattern as [resolveScrollToPageThenLoad].
+        val generation = ownerGeneration
+        citingPostNavigationJob = viewModelScope.launch {
+            val resolvedPage = try {
+                withTimeoutOrNull(RESOLVE_TIMEOUT_MS) {
+                    searchRepository.resolveSearchResultPage(
+                        cat = request.cat,
+                        post = request.post,
+                        numreponse = post.numreponse,
+                    )
+                }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (@Suppress("TooGenericExceptionCaught") ignored: Throwable) {
+                null
+            }
+            if (generation != ownerGeneration) return@launch
+            // The unfiltered href rendered by quote_only carries page=1. A failed probe therefore
+            // degrades to that same server-provided fallback, never to a guessed page.
+            goToPost(targetPage = resolvedPage ?: 1, numreponse = post.numreponse)
+        }
+    }
+
+    private fun dismissCitingPosts() {
+        citingPostsGeneration++
+        citingPostsJob?.cancel()
+        citingPostsJob = null
+        _state.update { it.copy(citingPostsSheet = null) }
+    }
+
+    /**
      * #509 — block / unblock [author] from the post menu. This launch is on [viewModelScope], but the
      * DataStore commit still survives the sheet/ViewModel going away mid-write: the repository's
      * `persist {}` offloads the actual write to the application scope (the #507 pattern), so only the
@@ -433,6 +619,264 @@ class TopicViewModel @AssistedInject constructor(
             if (blocked) blacklistRepository.block(author) else blacklistRepository.unblock(author)
         }
     }
+
+    // ─── poll vote (#779) ────────────────────────────────────────────────────────
+
+    /**
+     * Updates only the poll slice currently on screen. Radio forms replace the whole selection;
+     * checkbox forms add/remove one choice and silently refuse an addition past HFR's known limit.
+     */
+    private fun updatePollSelection(choice: PollVoteChoice, selected: Boolean) {
+        _state.update { current ->
+            val loaded = current.mode as? TopicUiState.Mode.Loaded ?: return@update current
+            val pollVote = loaded.pollVote ?: return@update current
+            if (
+                pollVote.phase != PollVotePhase.Idle ||
+                pollVote.form.hashCheck.isBlank() ||
+                choice !in pollVote.form.choices
+            ) {
+                return@update current
+            }
+
+            val selection = if (!pollVote.form.multipleChoice) {
+                if (selected) setOf(choice) else pollVote.selectedChoices - choice
+            } else if (selected) {
+                val atLimit = pollVote.form.maxSelections
+                    ?.let { pollVote.selectedChoices.size >= it }
+                    ?: false
+                if (atLimit && choice !in pollVote.selectedChoices) {
+                    pollVote.selectedChoices
+                } else {
+                    pollVote.selectedChoices + choice
+                }
+            } else {
+                pollVote.selectedChoices - choice
+            }
+
+            current.copy(
+                mode = loaded.copy(
+                    pollVote = pollVote.copy(selectedChoices = selection, error = null),
+                ),
+            )
+        }
+    }
+
+    /**
+     * Submits exactly one normal or blank snapshot of the current form/selection. The POST is
+     * detached so a back press cannot cut an already-requested mutation; every UI continuation
+     * remains owned by this ViewModel and is fenced by topic/page/generation/account snapshots.
+     */
+    private fun submitPollVote(submissionType: PollVoteSubmissionType) {
+        val snapshot = pollVoteSubmissionSnapshot(submissionType) ?: return
+        pollVoteMutationGeneration = snapshot.generation
+        _state.update { state ->
+            val mode = state.mode as? TopicUiState.Mode.Loaded ?: return@update state
+            val vote = mode.pollVote ?: return@update state
+            state.copy(mode = mode.copy(pollVote = vote.copy(phase = PollVotePhase.Submitting, error = null)))
+        }
+        pollVoteJob = viewModelScope.launch { runPollVoteSubmission(snapshot) }
+    }
+
+    /**
+     * Builds the mutation snapshot only when the requested submit matches the selection: non-empty
+     * for a normal vote, empty for a blank vote. Both paths require the same live authenticated
+     * form and idle lifecycle. Returns `null` otherwise, so [submitPollVote] stays a single guard.
+     */
+    private fun pollVoteSubmissionSnapshot(
+        submissionType: PollVoteSubmissionType,
+    ): PollVoteMutationSnapshot? {
+        val current = _state.value
+        val pollVote = (current.mode as? TopicUiState.Mode.Loaded)?.pollVote ?: return null
+        val account = pollVoteAccount
+        return if (account != null && isReadyToSubmitPollVote(current, pollVote, submissionType)) {
+            PollVoteMutationSnapshot(
+                cat = request.cat,
+                post = request.post,
+                page = request.page,
+                form = pollVote.form,
+                selectedChoices = pollVote.selectedChoices,
+                submissionType = submissionType,
+                generation = ownerGeneration,
+                account = account,
+            )
+        } else {
+            null
+        }
+    }
+
+    /** The pre-submit eligibility gate, decomposed into named clauses to keep each condition flat. */
+    private fun isReadyToSubmitPollVote(
+        state: TopicUiState,
+        pollVote: PollVoteUiState,
+        submissionType: PollVoteSubmissionType,
+    ): Boolean {
+        val alreadyRunning = pollVote.phase != PollVotePhase.Idle || pollVoteJob?.isActive == true
+        val selectionMatchesSubmission = when (submissionType) {
+            PollVoteSubmissionType.NORMAL -> pollVote.selectedChoices.isNotEmpty()
+            PollVoteSubmissionType.BLANK -> pollVote.selectedChoices.isEmpty()
+        }
+        val hasLiveForm = pollVote.form.hashCheck.isNotBlank()
+        return !alreadyRunning && selectionMatchesSubmission && hasLiveForm && state.isAuthenticated
+    }
+
+    /**
+     * Runs the detached POST for [snapshot] and applies its terminal outcome, all fenced by
+     * [ownsPollVoteMutation]. A cancellation propagates; any other failure keeps the selection and
+     * surfaces a network error.
+     */
+    private suspend fun runPollVoteSubmission(snapshot: PollVoteMutationSnapshot) {
+        val result = try {
+            externalScope.awaitDetached {
+                when (snapshot.submissionType) {
+                    PollVoteSubmissionType.NORMAL ->
+                        pollVoteRepository.submitPollVote(snapshot.form, snapshot.selectedChoices)
+                    PollVoteSubmissionType.BLANK -> pollVoteRepository.submitBlankVote(snapshot.form)
+                }
+            }
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+            android.util.Log.w(LOG_TAG, "Poll vote POST failed", error)
+            if (ownsPollVoteMutation(snapshot)) settlePollVoteFailure(PollVoteUiError.Network)
+            return
+        }
+
+        if (!ownsPollVoteMutation(snapshot)) return
+        when (result) {
+            PollVoteResult.Accepted,
+            PollVoteResult.AlreadyVoted -> refreshAfterAcceptedPollVote(snapshot)
+            is PollVoteResult.Failed -> settlePollVoteFailure(result.reason.toPollVoteUiError())
+        }
+    }
+
+    /** Keeps the selected choices for a retry; only the lifecycle and localised error change. */
+    private fun settlePollVoteFailure(error: PollVoteUiError) {
+        pollVoteMutationGeneration = null
+        _state.update { current ->
+            val loaded = current.mode as? TopicUiState.Mode.Loaded ?: return@update current
+            val pollVote = loaded.pollVote ?: return@update current
+            current.copy(
+                mode = loaded.copy(
+                    pollVote = pollVote.copy(phase = PollVotePhase.Idle, error = error),
+                ),
+            )
+        }
+    }
+
+    /**
+     * Accepted and AlreadyVoted are both terminal: consume the local submit capability, then issue
+     * one authenticated current-page refresh. This path never calls [submitPollVote] recursively.
+     */
+    private fun refreshAfterAcceptedPollVote(snapshot: PollVoteMutationSnapshot) {
+        if (!ownsPollVoteMutation(snapshot)) return
+        becomePageOwner()
+        pageSnapshots.remove(snapshot.page)
+        pollVoteMutationGeneration = ownerGeneration
+        val refreshSnapshot = snapshot.copy(generation = ownerGeneration)
+        _state.update { current ->
+            val loaded = current.mode as? TopicUiState.Mode.Loaded ?: return@update current
+            val pollVote = loaded.pollVote ?: return@update current
+            val consumedForm = pollVote.form.withoutPollVoteSubmitCapability()
+            current.copy(
+                mode = loaded.copy(
+                    topic = loaded.topic.copy(pollVoteForm = consumedForm),
+                    pollVote = pollVote.copy(
+                        form = consumedForm,
+                        phase = PollVotePhase.Refreshing,
+                        error = null,
+                    ),
+                ),
+            )
+        }
+
+        // konsist:bypass-prefetch-guard — deliberate authenticated refetch following the user's
+        // explicit vote mutation; [becomePageOwner] cancelled the anonymous warmup first.
+        loadJob = viewModelScope.launch {
+            try {
+                val topic = topicRepository.refreshTopicPage(
+                    refreshSnapshot.cat,
+                    refreshSnapshot.post,
+                    refreshSnapshot.page,
+                )
+                if (!ownsPollVoteMutation(refreshSnapshot)) return@launch
+                _state.update { current ->
+                    val previous = current.mode as? TopicUiState.Mode.Loaded
+                    val refreshed = loadedMode(topic, previousLoaded = previous)
+                    val settled = if (topic.pollVoteForm == null) {
+                        refreshed
+                    } else {
+                        // A successful GET that still exposes the form is a stale view, not a vote
+                        // rejection. Keep it read-only: a terminal outcome must never trigger POST 2.
+                        val readOnlyVote = refreshed.pollVote?.let { vote ->
+                            vote.copy(
+                                form = vote.form.withoutPollVoteSubmitCapability(),
+                                phase = PollVotePhase.Idle,
+                                error = PollVoteUiError.RefreshFailedAfterAccepted,
+                            )
+                        }
+                        refreshed.copy(
+                            topic = refreshed.topic.copy(
+                                pollVoteForm = readOnlyVote?.form,
+                            ),
+                            pollVote = readOnlyVote,
+                        )
+                    }
+                    current.copy(
+                        mode = settled,
+                        availablePages = (1..topic.totalPages).toList(),
+                        search = current.search.capturingAnchor(topic),
+                    )
+                }
+                pollVoteMutationGeneration = null
+                recordSnapshot(topic)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (@Suppress("TooGenericExceptionCaught") refreshError: Exception) {
+                android.util.Log.w(LOG_TAG, "Post-poll-vote refresh failed", refreshError)
+                if (ownsPollVoteMutation(refreshSnapshot)) {
+                    settlePollVoteFailure(PollVoteUiError.RefreshFailedAfterAccepted)
+                }
+            }
+        }
+    }
+
+    private fun ownsPollVoteMutation(snapshot: PollVoteMutationSnapshot): Boolean {
+        val ownerMatches = snapshot.generation == ownerGeneration && snapshot.account == pollVoteAccount
+        val requestMatches =
+            snapshot.cat == request.cat && snapshot.post == request.post && snapshot.page == request.page
+        val displayed = (_state.value.mode as? TopicUiState.Mode.Loaded)?.topic ?: return false
+        val displayedMatches =
+            displayed.cat == snapshot.cat && displayed.post == snapshot.post && displayed.page == snapshot.page
+        return ownerMatches && requestMatches && displayedMatches
+    }
+
+    private data class PollVoteMutationSnapshot(
+        val cat: Int,
+        val post: Int,
+        val page: Int,
+        val form: PollVoteForm,
+        val selectedChoices: Set<PollVoteChoice>,
+        val submissionType: PollVoteSubmissionType,
+        val generation: Int,
+        val account: String,
+    )
+
+    private enum class PollVoteSubmissionType { NORMAL, BLANK }
+
+    private fun PollVoteFailureReason.toPollVoteUiError(): PollVoteUiError = when (this) {
+        PollVoteFailureReason.InvalidHashCheck -> PollVoteUiError.InvalidHashCheck
+        PollVoteFailureReason.EmptySelection -> PollVoteUiError.EmptySelection
+        PollVoteFailureReason.InvalidSelection -> PollVoteUiError.InvalidSelection
+        PollVoteFailureReason.TooManySelections -> PollVoteUiError.TooManySelections
+        PollVoteFailureReason.MalformedForm -> PollVoteUiError.MalformedForm
+        PollVoteFailureReason.UnexpectedResponse -> PollVoteUiError.UnexpectedResponse
+    }
+
+    /** Drops every POST-only field while retaining labels long enough to show refresh progress. */
+    private fun PollVoteForm.withoutPollVoteSubmitCapability(): PollVoteForm = copy(
+        hashCheck = "",
+        hiddenFields = emptyMap(),
+    )
 
     /**
      * #509 — single, load-independent owner of the blacklist. Collected once on [viewModelScope] (NOT
@@ -476,6 +920,29 @@ class TopicViewModel @AssistedInject constructor(
     }
 
     /**
+     * #221 — refreshes the global staff snapshot without touching the page load lifecycle. Empty or
+     * identical results are inert; a late success rebuilds the sole Loaded instance in place and
+     * preserves its #877 provisional provenance.
+     */
+    private fun loadStaff() {
+        viewModelScope.launch {
+            val staff = try {
+                authorRoleRepository.getStaff()
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (@Suppress("TooGenericExceptionCaught") _: Exception) {
+                return@launch
+            }
+            if (staff.isEmpty() || staff == staffByPseudo) return@launch
+            staffByPseudo = staff
+            _state.update { current ->
+                val loaded = current.mode as? TopicUiState.Mode.Loaded ?: return@update current
+                current.copy(mode = loadedMode(loaded.topic, provisional = loaded.provisional))
+            }
+        }
+    }
+
+    /**
      * #335 — manual pull-to-refresh of the current page. Re-fetches over the network and replaces the
      * loaded page in place, WITHOUT the post-submit overflow redirect (#226) or any scroll effect, so
      * the user keeps their reading position. NO-OP unless a page is already loaded and no refresh is
@@ -492,7 +959,16 @@ class TopicViewModel @AssistedInject constructor(
         // #910 — during a cold-switch grace the DISPLAYED page is the departed one while the
         // canonical page is already the target : a pull here would refresh a page the user is
         // leaving (and fight the in-flight switch load). The switch resolves within the grace.
-        if (displayed.topic.page != request.page || _state.value.isRefreshing) return
+        if (
+            displayed.topic.page != request.page ||
+            _state.value.isRefreshing ||
+            displayed.pollVote?.phase?.let { it != PollVotePhase.Idle } == true
+        ) {
+            return
+        }
+        // #221 — explicit refresh also retries a cold-start offline miss. Repository TTL and
+        // single-flight keep this effectively free while the directory is fresh/in flight.
+        loadStaff()
         becomePageOwner()
         _state.update { it.copy(isRefreshing = true) }
         // Gate Sol PR1 r2 (bloquant 1) — same ownership guard as every other async producer :
@@ -629,6 +1105,9 @@ class TopicViewModel @AssistedInject constructor(
         takeOverFromSearch()
         loadJob?.cancel()
         prefetchJob?.cancel()
+        // #1188 — a page switch during a citing-post probe owns the page now : cancel the late
+        // navigation so its resolved goToPost cannot rip the user off the page they just chose.
+        citingPostNavigationJob?.cancel()
         prefetchedPage = null
         reclaimRefreshIndicator()
         // Gate Sol PR1 — a SAME-PAGE re-own (Retry, refresh, search takeover) keeps the
@@ -823,16 +1302,61 @@ class TopicViewModel @AssistedInject constructor(
      * diverge — a path bypassing this seam would make masked citations flicker across
      * refresh/search/delete (Codex framing reservation on #785).
      */
-    private fun loadedMode(topic: Topic, provisional: Boolean = false): TopicUiState.Mode.Loaded =
+    private fun loadedMode(
+        topic: Topic,
+        provisional: Boolean = false,
+        previousLoaded: TopicUiState.Mode.Loaded? = _state.value.mode as? TopicUiState.Mode.Loaded,
+    ): TopicUiState.Mode.Loaded =
         TopicUiState.Mode.Loaded(
             topic = topic,
             hiddenNumreponses = computeHiddenNumreponses(topic, blockedCanonicals),
             blockedQuoteAuthors = blockedCanonicals,
+            staffByPseudo = staffByPseudo,
             // #877 — default false : every other caller (refresh, force-refresh, post-delete,
             // search, live re-filter) renders a settled network page ; only the cache-aside
             // collect above forwards the repository's provenance.
             provisional = provisional,
+            pollVote = resyncPollVote(previousLoaded?.pollVote, topic.pollVoteForm),
         )
+
+    /**
+     * #779 — single reducer for the transient poll form on every Topic emission. Selection survives
+     * a cache/network/background refresh only when wire identities (`name`/`value`) are unchanged;
+     * the new form's choice instances replace the old ones. A no-form emission always drops the
+     * slice (results/no poll), while a busy lifecycle survives same-generation emissions.
+     */
+    private fun resyncPollVote(
+        previous: PollVoteUiState?,
+        form: PollVoteForm?,
+    ): PollVoteUiState? {
+        form ?: return null
+        return if (previous == null) {
+            PollVoteUiState(form = form)
+        } else {
+            val previousIdentities = previous.form.choices.map { it.name to it.value }
+            val newIdentities = form.choices.map { it.name to it.value }
+            val choicesUnchanged = previousIdentities == newIdentities
+            val selectedIdentities = previous.selectedChoices.mapTo(HashSet()) { it.name to it.value }
+            val selectedChoices = if (choicesUnchanged) {
+                form.choices.filterTo(LinkedHashSet()) { (it.name to it.value) in selectedIdentities }
+            } else {
+                emptySet()
+            }
+            val mutationStillOwned = previous.phase != PollVotePhase.Idle &&
+                pollVoteMutationGeneration == ownerGeneration
+
+            PollVoteUiState(
+                form = form,
+                selectedChoices = selectedChoices,
+                phase = if (mutationStillOwned) previous.phase else PollVotePhase.Idle,
+                error = when {
+                    mutationStillOwned -> previous.error
+                    choicesUnchanged -> previous.error
+                    else -> null
+                },
+            )
+        }
+    }
 
     /**
      * #509 — `numreponse` of the posts in [topic] whose author is blacklisted (canonical match). The
@@ -901,7 +1425,9 @@ class TopicViewModel @AssistedInject constructor(
      */
     private fun recordSnapshot(topic: Topic) {
         if (topic.page != request.page) return
-        pageSnapshots[topic.page] = topic
+        // #779 — the in-memory LRU may be replayed after a page/account round-trip. A transient
+        // anti-CSRF form is tied to one live render and must be fetched again, never snapshotted.
+        pageSnapshots[topic.page] = topic.copy(pollVoteForm = null)
     }
 
     // ─── #895 étape 4 — page switch engine (unbranched until the navigation PR) ──
@@ -1389,6 +1915,157 @@ class TopicViewModel @AssistedInject constructor(
                 // throws outside its Result (or the coroutine is cancelled). Otherwise the state stays
                 // Removing forever and the anti double-tap guard wedges until the VM is recreated.
                 _removeTopicFlagState.value = RemoveTopicFlagState.Idle
+            }
+        }
+    }
+
+    // ─── close poll (#1201) ───────────────────────────────────────────────────────
+
+    /**
+     * #1201 — drives the « Clore ce sondage » owner interaction. Explicit MVI state so the
+     * confirmation gates the irreversible `close_sondage.php` call and the anti double-tap guard is
+     * observable. The affordance itself is gated on HFR's owner-only `Poll.canClose` capability;
+     * HFR remains the authority (an unauthorised close returns a [PollCloseResult.Failure]).
+     */
+    private val _closePollState = MutableStateFlow<ClosePollState>(ClosePollState.Idle)
+    val closePollState: StateFlow<ClosePollState> = _closePollState.asStateFlow()
+
+    /**
+     * #1201/#1204 — the owner tapped « Clore » : raise the confirmation dialog. Defensive
+     * fail-close guard — only from a loaded page carrying HFR's native close capability, and never
+     * while a close is already in flight — so a stray intent from a non-owner or closed poll can
+     * neither open a pointless dialog nor launch a duplicate call.
+     */
+    fun requestClosePoll() {
+        if (_closePollState.value != ClosePollState.Idle) return
+        if (currentPollCanClose()) {
+            _closePollState.value = ClosePollState.Confirming
+        }
+    }
+
+    private fun currentPollCanClose(): Boolean =
+        (_state.value.mode as? TopicUiState.Mode.Loaded)?.topic?.poll?.canClose == true
+
+    /**
+     * #1201/#1204/#1206 — HFR confirmed the irreversible close; keep the displayed card and every
+     * retained page snapshot for this topic terminal. A [Poll] has no stable identifier, but this
+     * ViewModel and its snapshot LRU are scoped to one `(cat, post)`, which identifies the poll.
+     */
+    private fun markCurrentPollClosedLocally() {
+        val currentTopic = (_state.value.mode as? TopicUiState.Mode.Loaded)?.topic ?: return
+        if (currentTopic.poll == null) return
+
+        pageSnapshots.replaceAll { _, snapshot ->
+            if (
+                snapshot.cat == currentTopic.cat &&
+                snapshot.post == currentTopic.post &&
+                snapshot.poll != null
+            ) {
+                snapshot.withClosedPoll()
+            } else {
+                snapshot
+            }
+        }
+        _state.update { state ->
+            val loaded = state.mode as? TopicUiState.Mode.Loaded ?: return@update state
+            state.copy(
+                mode = loaded.copy(
+                    topic = loaded.topic.withClosedPoll(),
+                ),
+            )
+        }
+    }
+
+    private fun Topic.withClosedPoll(): Topic {
+        val currentPoll = poll ?: return this
+        return copy(poll = currentPoll.copy(closed = true, canClose = false))
+    }
+
+    /** #1201 — the owner dismissed the confirmation dialog without closing. */
+    fun cancelClosePoll() {
+        if (_closePollState.value is ClosePollState.Confirming) {
+            _closePollState.value = ClosePollState.Idle
+        }
+    }
+
+    /**
+     * #1201 — the owner confirmed : move to [ClosePollState.Closing] (disables the action), run the
+     * detached GET, then emit the one-shot outcome on [effects]. On success, mark the local poll closed
+     * before returning to [ClosePollState.Idle], then refresh the page to resynchronise the full model.
+     * The closure is irreversible and the local terminal state is applied only after HFR confirms it,
+     * so a failed refresh can never expose a second close action.
+     */
+    fun confirmClosePoll() {
+        if (_closePollState.value != ClosePollState.Confirming) return
+        // #1204 — the page may have refreshed while the confirmation dialog was open. Re-check
+        // HFR's capability immediately before the irreversible network mutation.
+        if (!currentPollCanClose()) {
+            _closePollState.value = ClosePollState.Idle
+            return
+        }
+        _closePollState.value = ClosePollState.Closing
+        val cat = request.cat
+        val topicId = request.post
+        viewModelScope.launch {
+            val result = try {
+                // #1144 pattern — the GET runs on [externalScope] so leaving the topic mid-request no
+                // longer aborts a closure the owner confirmed in the dialog.
+                externalScope.awaitDetached { pollVoteRepository.closePoll(cat, topicId) }
+            } catch (cancellation: CancellationException) {
+                _closePollState.value = ClosePollState.Idle
+                throw cancellation
+            } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+                android.util.Log.w(LOG_TAG, "Close poll failed", error)
+                _effects.trySend(TopicEffect.PollCloseFailed)
+                _closePollState.value = ClosePollState.Idle
+                return@launch
+            }
+            when (result) {
+                PollCloseResult.Success -> {
+                    markCurrentPollClosedLocally()
+                    _effects.trySend(TopicEffect.PollClosed)
+                    _closePollState.value = ClosePollState.Idle
+                    refreshAfterPollClosed()
+                }
+                PollCloseResult.Failure -> {
+                    _effects.trySend(TopicEffect.PollCloseFailed)
+                    _closePollState.value = ClosePollState.Idle
+                }
+            }
+        }
+    }
+
+    /**
+     * #1201 — reload the current page over the network so the freshly-closed poll surfaces its
+     * server-authoritative `Poll.closed = true` (persisted by the repository cache). Mirrors the
+     * generation-owned refresh of [refresh] : a page switch arriving meanwhile owns the page and the
+     * late reload is dropped. A refresh failure is silent — the close already succeeded, the local poll
+     * remains terminal and its toast fired ; a pull-to-refresh can resynchronise the full server model.
+     */
+    private fun refreshAfterPollClosed() {
+        val displayed = _state.value.mode as? TopicUiState.Mode.Loaded ?: return
+        if (displayed.topic.page != request.page) return
+        becomePageOwner()
+        pageSnapshots.remove(request.page)
+        val generation = ownerGeneration
+        // konsist:bypass-prefetch-guard — deliberate authenticated refetch after the user's explicit
+        // close mutation; [becomePageOwner] cancelled the anonymous warmup first.
+        loadJob = viewModelScope.launch {
+            try {
+                val topic = topicRepository.refreshTopicPage(request.cat, request.post, request.page)
+                if (generation != ownerGeneration) return@launch
+                _state.update {
+                    it.copy(
+                        mode = loadedMode(topic),
+                        availablePages = (1..topic.totalPages).toList(),
+                        search = it.search.capturingAnchor(topic),
+                    )
+                }
+                recordSnapshot(topic)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (@Suppress("TooGenericExceptionCaught") refreshError: Exception) {
+                android.util.Log.w(LOG_TAG, "Post-poll-close refresh failed", refreshError)
             }
         }
     }

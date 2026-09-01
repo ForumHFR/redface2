@@ -5,17 +5,21 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.text.TextLayoutResult
 import fr.forumhfr.redface2.core.domain.ego.deriveEgoCanonicalPseudo
 import fr.forumhfr.redface2.core.domain.ego.isEgoPost
+import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
@@ -25,6 +29,7 @@ import fr.forumhfr.redface2.core.ui.post.HiddenPostCard
 import fr.forumhfr.redface2.core.ui.post.POST_CARD_SHELL_DIVIDER_TAG
 import fr.forumhfr.redface2.core.ui.post.PostCardShellContainerColorKey
 import fr.forumhfr.redface2.core.ui.post.PostIdentityBandContainerColorKey
+import fr.forumhfr.redface2.core.ui.post.PostIdentityBandContentColorKey
 import fr.forumhfr.redface2.core.ui.theme.RedfaceLightColorScheme
 import java.time.Instant
 import org.junit.Assert.assertTrue
@@ -50,6 +55,10 @@ class TopicEgoHighlightRenderTest {
 
         assertShellColor(EGO_POST_LIGHT)
         assertIdentityBandColor(RedfaceLightColorScheme.secondaryContainer)
+        // C6 — a normal band forwards contentColorFor(secondaryContainer). This theme reuses #FFDAD9
+        // for BOTH primaryContainer and secondaryContainer, so M3 contentColorFor matches the
+        // earlier-listed primaryContainer role and resolves onPrimaryContainer, not onSecondaryContainer.
+        assertIdentityBandContentColor(RedfaceLightColorScheme.onPrimaryContainer)
         assertStateCount(OWN_POST_STATE, 1)
         composeTestRule.onNodeWithTag(POST_CARD_SHELL_DIVIDER_TAG, useUnmergedTree = true)
             .assertDoesNotExist()
@@ -61,9 +70,49 @@ class TopicEgoHighlightRenderTest {
 
         assertShellColor(EGO_POST_LIGHT)
         assertIdentityBandColor(RedfaceLightColorScheme.tertiaryContainer)
+        assertIdentityBandContentColor(RedfaceLightColorScheme.onTertiaryContainer)
         assertStateCount(OWN_POST_STATE, 1)
         composeTestRule.onNodeWithTag(POST_CARD_SHELL_DIVIDER_TAG, useUnmergedTree = true)
             .assertExists()
+    }
+
+    @Test
+    fun `moderation post renders an RF1 red body and darker identity band`() {
+        val post = samplePost(isModerationPost = true).copy(editedAt = Instant.EPOCH)
+        setCard(post = post)
+
+        assertShellColor(MODERATION_BODY_LIGHT)
+        assertIdentityBandColor(MODERATION_HEADER_LIGHT)
+        assertIdentityBandContentColor(Color.White)
+        assertTextColor(post.date.asTopicDate(), Color.White)
+        assertTextColor("· édité", Color.White)
+        assertTextColor("⋯", Color.White)
+        assertStateCount(MODERATION_STATE, 1)
+        assertStateCount(OWN_POST_STATE, 0)
+    }
+
+    @Test
+    fun `moderation keeps its red band even when it is the scroll anchor`() {
+        val post = samplePost(isModerationPost = true)
+        setCard(post = post, highlighted = true)
+
+        // #1112 — the persistent moderation red wins on the band above the transient scroll-anchor
+        // tint; the card body was already red and stays red.
+        assertShellColor(MODERATION_BODY_LIGHT)
+        assertIdentityBandColor(MODERATION_HEADER_LIGHT)
+        assertIdentityBandContentColor(Color.White)
+        assertTextColor(post.date.asTopicDate(), Color.White)
+        assertStateCount(MODERATION_STATE, 1)
+    }
+
+    @Test
+    fun `an EgoPost that is also moderation stays blue on the card and neutral on the band`() {
+        setCard(post = samplePost(isModerationPost = true), egoPostHighlighted = true)
+
+        assertShellColor(EGO_POST_LIGHT)
+        assertIdentityBandColor(RedfaceLightColorScheme.secondaryContainer)
+        assertStateCount(OWN_POST_STATE, 1)
+        assertStateCount(MODERATION_STATE, 0)
     }
 
     @Test
@@ -77,6 +126,32 @@ class TopicEgoHighlightRenderTest {
         assertShellColor(EGO_POST_LIGHT)
         assertStateCount(OWN_POST_STATE, 1)
         assertStateCount(OWN_QUOTE_STATE, 1)
+    }
+
+    @Test
+    fun `staff pill coexists with the scroll anchor and EgoPost markers`() {
+        setCard(
+            egoPostHighlighted = true,
+            highlighted = true,
+            staffByPseudo = mapOf(EGO_CANONICAL to AuthorRole.ARCHITECT),
+        )
+
+        composeTestRule
+            .onNodeWithContentDescription("Rôle : Architecte / Développeur principal")
+            .assertExists()
+        assertIdentityBandColor(RedfaceLightColorScheme.tertiaryContainer)
+        assertStateCount(OWN_POST_STATE, 1)
+    }
+
+    @Test
+    fun `moderation post suppresses the staff pill`() {
+        setCard(
+            post = samplePost(isModerationPost = true),
+            staffByPseudo = mapOf(EGO_CANONICAL to AuthorRole.MODERATOR),
+        )
+
+        composeTestRule.onNodeWithContentDescription("Rôle : Modérateur").assertDoesNotExist()
+        assertStateCount(MODERATION_STATE, 1)
     }
 
     @Test
@@ -218,18 +293,21 @@ class TopicEgoHighlightRenderTest {
         assertStateCount(OWN_QUOTE_STATE, 0)
     }
 
+    @Suppress("LongParameterList") // Render harness: each argument controls one independent card knob, all defaulted.
     private fun setCard(
         post: Post = samplePost(),
         egoPostHighlighted: Boolean = false,
         egoQuoteCanonicalPseudo: String? = null,
         highlighted: Boolean = false,
         flat: Boolean = false,
+        staffByPseudo: Map<String, AuthorRole> = emptyMap(),
     ) {
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 Surface(color = MaterialTheme.colorScheme.surface) {
                     TopicPostCard(
                         post = post,
+                        staffByPseudo = staffByPseudo,
                         highlighted = highlighted,
                         citedCount = 0,
                         flat = flat,
@@ -255,6 +333,21 @@ class TopicEgoHighlightRenderTest {
             .assert(SemanticsMatcher.expectValue(PostIdentityBandContainerColorKey, expected))
     }
 
+    private fun assertIdentityBandContentColor(expected: Color) {
+        composeTestRule.onNodeWithTag(TOPIC_POST_IDENTITY_BAND_TAG, useUnmergedTree = true)
+            .assert(SemanticsMatcher.expectValue(PostIdentityBandContentColorKey, expected))
+    }
+
+    private fun assertTextColor(text: String, expected: Color) {
+        val layouts = mutableListOf<TextLayoutResult>()
+        val action = requireNotNull(
+            composeTestRule.onNodeWithText(text, useUnmergedTree = true)
+                .fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action,
+        )
+        assertTrue(action(layouts))
+        org.junit.Assert.assertEquals(expected, layouts.single().layoutInput.style.color)
+    }
+
     private fun assertStateCount(description: String, expected: Int) {
         composeTestRule.onAllNodes(
             SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, description),
@@ -265,6 +358,7 @@ class TopicEgoHighlightRenderTest {
     private fun samplePost(
         content: PostContent = PostContent(emptyList()),
         signature: PostContent? = null,
+        isModerationPost: Boolean = false,
     ): Post = Post(
         numreponse = 874,
         author = EGO_PSEUDO,
@@ -278,6 +372,7 @@ class TopicEgoHighlightRenderTest {
         quoteRef = 1,
         profileId = null,
         signature = signature,
+        isModerationPost = isModerationPost,
     )
 
     private fun autoQuoteContent(): PostContent = PostContent(
@@ -321,6 +416,9 @@ class TopicEgoHighlightRenderTest {
         const val EGO_CANONICAL = "xatrix"
         const val OWN_POST_STATE = "Votre message"
         const val OWN_QUOTE_STATE = "Citation de votre message"
+        const val MODERATION_STATE = "Message de la modération"
         val EGO_POST_LIGHT = Color(0xFFE4EDFF)
+        val MODERATION_HEADER_LIGHT = Color(0xFFB71C1C)
+        val MODERATION_BODY_LIGHT = Color(0xFFD32F2F)
     }
 }

@@ -254,17 +254,30 @@ Les URLs HFR doivent ouvrir directement le bon écran dans l'app.
 
 | Pattern URL | Écran cible | Statut |
 |-------------|-------------|--------|
-| `forum.hardware.fr/forum1.php?cat=X&post=Y&page=Z` | Topic page Z | Phase 1 |
-| `forum.hardware.fr/forum1.php?cat=X&post=Y` | Topic page 1 | Phase 1 |
-| `forum.hardware.fr/forum2.php?config=hfr.inc&cat=X&subcat=Y` | Liste topics | Phase 1 |
+| `forum.hardware.fr/forum1.php?cat=X&subcat=Y&page=Z` | Liste des topics de la catégorie X, page Z | Phase 1 |
+| `forum.hardware.fr/forum2.php?cat=X&post=Y&page=Z#tN` | Topic Y page Z, avec scroll vers le post N | Phase 1 |
+| `forum.hardware.fr/hfr/<Cat>/…/<slug>-sujet_Y_Z.htm#tN` | Topic Y page Z, catégorie résolue depuis le slug, avec scroll vers N | Phase 4 (#1032 PR2) |
 | `forum.hardware.fr/forum1f.php` | Drapeaux | Phase 1 |
-| `forum.hardware.fr/forum1.php?cat=X&post=Y#t12345` | Post spécifique (traitement custom, voir ci-dessous) | Phase 1 |
-| `forum.hardware.fr/forum1.php?config=hfr.inc&cat=prive&page=Z` | Inbox MP page Z | Phase 3 MVP — contrat capturé, deep link non câblé |
-| `forum.hardware.fr/forum2.php?config=hfr.inc&cat=prive&post=Y&page=Z` | Conversation MP Y page Z | Phase 3 MVP — contrat capturé, deep link non câblé |
+| `forum.hardware.fr/forum1.php?config=hfr.inc&cat=prive&page=Z` | Navigateur (inbox MP non routée dans l'app) | Fallback navigateur |
+| `forum.hardware.fr/forum2.php?config=hfr.inc&cat=prive&post=Y&page=Z` | Navigateur (conversation MP non routée dans l'app) | Fallback navigateur |
+| Autre chemin `/hfr/…` (profil, `liste_sujet`, slug de catégorie inconnu…) | Navigateur | Fallback navigateur |
 
 > **Deep links MP** : les contrats `cat=prive` ci-dessus sont confirmés par fixtures HFR
-> réelles, mais `parseHfrDeepLink` ne route pas encore ces URLs vers `MessagesRoute` /
-> `PrivateMessageThreadRoute`. Elles restent à câbler dans un suivi dédié.
+> réelles, mais ne sont pas encore routés vers `MessagesRoute` / `PrivateMessageThreadRoute`.
+> `resolveHfrDeepLink` les ouvre donc explicitement dans le navigateur au lieu d'échouer en silence.
+
+Le manifest garde deux filtres distincts, sans `autoVerify` : les chemins legacy exacts
+(`/forum1.php`, `/forum2.php`, `/forum1f.php`) et le préfixe volontairement large `/hfr/`.
+La sur-capture du second filtre est intentionnelle : `resolveHfrDeepLink` valide l'action, le
+schéma et le host, route les topics reconnus, puis délègue toute URL HFR non routable au navigateur.
+
+Comme `hardware.fr` est un domaine tiers, Redface 2 ne peut pas être *vérifié* comme handler et
+l'utilisateur doit l'activer manuellement. Pour rendre cet opt-in découvrable (#1032 PR3), la ligne
+Réglages → « Réseau et cache » → « Ouverture des liens HFR » affiche l'état courant — lu via
+`DomainVerificationManager` (API 31+ ; « inconnu » avant Android 12 (API < 31), statut non lisible) et décidé par
+la fonction pure `hfrLinkHandlingStatusOf` (`:core:ui/browser`) — et ouvre directement l'écran système
+« Ouvrir par défaut » (`ACTION_APP_OPEN_BY_DEFAULT_SETTINGS`, repli `ACTION_APPLICATION_DETAILS_SETTINGS`).
+La description se rafraîchit à l'`ON_RESUME` pour refléter un changement fait dans les réglages système.
 
 Implémentation via **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026). Les routes sont des types `@Serializable` qui implémentent un sealed interface marqueur `RedfaceNavKey : NavKey` :
 
@@ -506,12 +519,13 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
 
 ### Cas particulier : lien vers un post spécifique
 
-Nav 3 (comme Nav 2.x) **ne gère pas les fragments URI** (`#t{numreponse}`) nativement : on parse l'URI dans `RedfaceApp`, on identifie l'**onglet cible** (drapeaux, forum, …) et on **réinitialise** le back stack de cet onglet pour que le bouton retour ramène à la racine de l'onglet plutôt qu'à un état antérieur arbitraire :
+Nav 3 (comme Nav 2.x) **ne gère pas les fragments URI** (`#t{numreponse}`) nativement : on résout l'URI dans `RedfaceApp`, on identifie l'**onglet cible** (drapeaux, forum, …) et on **réinitialise** le back stack de cet onglet pour que le bouton retour ramène à la racine de l'onglet plutôt qu'à un état antérieur arbitraire. Le parseur legacy et le parseur d'URLs jolies appliquent la même règle d'ancre : une ancre sur une page 1 potentiellement mensongère demande d'abord la résolution serveur de la page réelle ; une page explicite supérieure à 1 est conservée.
 
 ```kotlin
 // app/.../navigation/RedfaceNavigation.kt — extrait
 @Composable
-fun RedfaceApp(intent: Intent?) {
+internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
+    val context = LocalContext.current
     val flagsBackStack = rememberNavBackStack(FlagsListRoute)
     val forumBackStack = rememberNavBackStack(ForumRoute)
     val searchBackStack = rememberNavBackStack(SearchRoute)
@@ -525,56 +539,43 @@ fun RedfaceApp(intent: Intent?) {
         TopLevelDestination.Messages to messagesBackStack,
     )
 
-    LaunchedEffect(intent) {
-        val parsed = intent?.data?.let(::parseHfrDeepLink) ?: return@LaunchedEffect
-        currentDestination = parsed.destination
-        resetStack(
-            backStack = backStacks.getValue(parsed.destination),
-            root = parsed.destination.rootRoute,
-            route = parsed.route,
-        )
-    }
-    // Pour la suite (NavigationSuiteScaffold avec les 4 onglets, Surface wrapper et
-    // RedfaceNavHost(backStack = backStacks.getValue(currentDestination))), voir
-    // app/src/main/kotlin/.../navigation/RedfaceNavigation.kt ligne 126-142.
-}
+    var lastResolvedDeepLinkDeliveryId by rememberSaveable { mutableStateOf<Long?>(null) }
+    LaunchedEffect(intentDelivery?.id) {
+        val delivery = intentDelivery ?: return@LaunchedEffect
+        if (!shouldApplyDeepLinkDelivery(delivery.id, lastResolvedDeepLinkDeliveryId)) {
+            return@LaunchedEffect
+        }
+        lastResolvedDeepLinkDeliveryId = delivery.id // avant tout effet externe
 
-private data class ParsedDeepLink(val destination: TopLevelDestination, val route: RedfaceNavKey)
-
-private fun parseHfrDeepLink(uri: Uri): ParsedDeepLink? = when (uri.path) {
-    "/forum1.php" -> {
-        val cat = uri.getQueryParameter("cat")?.toIntOrNull() ?: return null
-        val subcat = uri.getQueryParameter("subcat")?.toIntOrNull()
-        val page = uri.getQueryParameter("page")?.toIntOrNull()?.coerceAtLeast(1) ?: 1
-        ParsedDeepLink(
-            destination = TopLevelDestination.Forum,
-            route = CategoryRoute(cat = cat, subcat = subcat, page = page),
-        )
+        when (val resolution = resolveHfrDeepLink(delivery.intent)) {
+            is HfrDeepLinkResolution.Route -> {
+                val parsed = resolution.parsed
+                switchTab(parsed.destination)
+                resetStack(
+                    backStack = backStacks.getValue(parsed.destination),
+                    root = parsed.destination.rootRoute,
+                    route = parsed.route,
+                )
+            }
+            is HfrDeepLinkResolution.BrowserFallback -> {
+                openUrlInExternalBrowser(context, resolution.uri)
+            }
+            HfrDeepLinkResolution.Ignore -> Unit
+        }
     }
-    "/forum2.php" -> {
-        val cat = uri.getQueryParameter("cat")?.toIntOrNull() ?: return null
-        val post = uri.getQueryParameter("post")?.toIntOrNull() ?: return null
-        val page = uri.getQueryParameter("page")?.toIntOrNull() ?: 1
-        val scrollTo = uri.fragment?.removePrefix("t")?.toIntOrNull()
-        ParsedDeepLink(
-            destination = TopLevelDestination.Flags,
-            route = TopicRoute(cat = cat, post = post, page = page, scrollTo = scrollTo),
-        )
-    }
-    "/forum1f.php" -> ParsedDeepLink(TopLevelDestination.Flags, FlagsListRoute)
-    else -> null
-}
-
-private fun resetStack(
-    backStack: NavBackStack<NavKey>,
-    root: RedfaceNavKey,
-    route: RedfaceNavKey,
-) {
-    backStack.clear()
-    backStack.add(root)
-    if (route != root) backStack.add(route)
 }
 ```
+
+Pour #1203, `MainActivity` attribue à chaque livraison un identifiant monotone, initialisé à `0`.
+Dans `onCreate`, l'identifiant présent dans `savedInstanceState` est restauré tel quel et le suivant
+vaut `id + 1` ; sans identifiant sauvegardé, l'identifiant courant est utilisé. Chaque `onNewIntent`
+incrémente ensuite le compteur, et `onSaveInstanceState` persiste l'identifiant courant. Le garde
+`shouldApplyDeepLinkDelivery(deliveryId, lastResolvedDeliveryId)` applique donc toute livraison dont
+l'identifiant diffère du dernier consommé. Un **re-tap volontaire** du même lien reçoit un nouvel
+identifiant et est honoré ; lors d'une **recréation** (rotation ou restauration de process),
+l'identifiant courant et `lastResolvedDeliveryId` sont restaurés depuis le même `Bundle`, donc le
+lien déjà consommé n'est pas rejoué. La résolution détaillée vit dans `HfrDeepLinkResolution.kt` ;
+le parseur JVM pur de la forme jolie vit dans `:core:parser` et ne dépend pas d'`android.net.Uri`.
 
 Le `TopicScreen` reçoit le `scrollTo` (numreponse cible) via la `TopicRoute` et scroll jusqu'au bon post après chargement de la page. Un `scrollTo` non nul prime toujours sur la position de lecture sauvegardée (#307) — cf. § Topic (lecture).
 

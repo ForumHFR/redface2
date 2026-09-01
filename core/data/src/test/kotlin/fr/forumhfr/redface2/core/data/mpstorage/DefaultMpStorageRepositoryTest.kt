@@ -78,6 +78,7 @@ class DefaultMpStorageRepositoryTest {
         val client = HfrClient(
             authenticated = okHttp,
             anonymous = okHttp,
+            mutation = okHttp.newBuilder().retryOnConnectionFailure(false).build(),
             baseUrl = server.url("/"),
             ioDispatcher = Dispatchers.Unconfined,
         )
@@ -605,6 +606,8 @@ class DefaultMpStorageRepositoryTest {
     private class FakeWritePreferences : UserPreferencesRepository by mockk(relaxed = true) {
         val enabled = MutableStateFlow(false)
         override fun observeSyncPrivateMessagesWriteEnabled() = enabled
+        override fun observeTopicUnansweredPollsExpanded() = MutableStateFlow(false)
+        override suspend fun setTopicUnansweredPollsExpanded(enabled: Boolean) = Unit
     }
 
     private companion object {

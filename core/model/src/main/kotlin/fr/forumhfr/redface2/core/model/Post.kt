@@ -101,4 +101,11 @@ data class Post(
      * and recover the real value on the next live fetch.
      */
     val signature: PostContent? = null,
+    /**
+     * #1112 — intrinsic moderation marker for this post, detected structurally from HFR's
+     * `messageModo` class on the author cell. `false` when the class is absent or unrecognized;
+     * no author-name heuristic is used. Persisted in Room v18 for both topic and private-message
+     * cache rows so a cache hit preserves the moderation highlight.
+     */
+    val isModerationPost: Boolean = false,
 )

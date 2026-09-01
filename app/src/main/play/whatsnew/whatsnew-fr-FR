@@ -1,10 +1,8 @@
-Redface 2 v0.43.0 — bêta.
+Redface 2 v0.50.2 — bêta.
 
-Les conversations privées lisent enfin comme les sujets.
-
-- Zoom pincé, balayage de page, double-tap pour rafraîchir.
-- Le chrome de pagination des sujets : sélecteur de page, boutons flottants, appui long pour la première ou la dernière page.
-- La position de lecture de chaque page est retrouvée.
-- Citer plusieurs messages d'un coup, avec un bouton sur chaque carte.
-- Le menu s'ouvre par le « ... » de l'en-tête.
-- Cache local des conversations, désactivé par défaut.
+Grosse mise à jour depuis la 0.43.0 :
+- Sondages : voter dans l'app, voir les sondages clos et leur échéance, et clore le vôtre depuis n'importe quelle page.
+- Liens : ouverture externe sans rebond, choix de l'app, aide Firefox.
+- Posts de modération surlignés et pastilles de rôle du staff.
+- Vue Forum : filtre mémorisé, recherche, sujets épinglés séparés.
+- Badge « cité N fois » cliquable, plus divers correctifs de lecture.

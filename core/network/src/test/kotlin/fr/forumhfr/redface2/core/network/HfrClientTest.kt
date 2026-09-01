@@ -5,6 +5,7 @@ import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.search.SearchTextScope
 import fr.forumhfr.redface2.core.model.write.FlagAddContext
+import java.io.File
 import java.io.IOException
 import java.time.LocalDate
 import java.util.concurrent.CountDownLatch
@@ -40,6 +41,9 @@ class HfrClientTest {
         client = HfrClient(
             authenticated = taggedClient("authenticated"),
             anonymous = taggedClient("anonymous"),
+            mutation = taggedClient("mutation").newBuilder()
+                .retryOnConnectionFailure(false)
+                .build(),
             baseUrl = server.url("/"),
             ioDispatcher = Dispatchers.Unconfined,
         )
@@ -312,7 +316,7 @@ class HfrClientTest {
     }
 
     @Test
-    fun `submitPrivateMessageEdit POSTs bdd_php on the authenticated client and forwards the form body`() = runTest {
+    fun `submitPrivateMessageEdit POSTs bdd_php on the mutation client and forwards the form body`() = runTest {
         // MPStorage write (#6, ADR-014 §4) — GUARDED, NOT OBSERVED LIVE: the bdd.php cat=prive write
         // contract was never captured. Here we only assert the REQUEST shape (endpoint + that the
         // repository-built body, carrying cat=prive as a String, is forwarded verbatim).
@@ -328,7 +332,7 @@ class HfrClientTest {
 
         assertEquals("<html><body>ok</body></html>", html)
         val request = server.takeRequest()
-        assertEquals("authenticated", request.headers["X-RF2-Client"])
+        assertEquals("mutation", request.headers["X-RF2-Client"])
         assertEquals("POST", request.method)
         assertEquals("/bdd.php", requireNotNull(request.requestUrl).encodedPath)
         assertEquals("hfr.inc", request.requestUrl!!.queryParameter("config"))
@@ -339,7 +343,67 @@ class HfrClientTest {
     }
 
     @Test
-    fun `addFlag builds the addflag URL on the authenticated client without owntopic mapping`() = runTest {
+    fun `submitPollVote POSTs vote_php on the mutation client without Referer and forwards body`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("<div class=\"hop\">ok</div>"))
+        val formBody = okhttp3.FormBody.Builder(Charsets.UTF_8)
+            .add("hash_check", "00000000000000000000000000000000")
+            .add("cat", "13")
+            .add("page", "1")
+            .add("numeropost", "96127")
+            .add("reponse", "2")
+            .build()
+
+        val html = client.submitPollVote(formBody)
+
+        assertEquals("<div class=\"hop\">ok</div>", html)
+        val request = server.takeRequest()
+        val url = requireNotNull(request.requestUrl)
+        assertEquals("mutation", request.headers["X-RF2-Client"])
+        assertEquals("POST", request.method)
+        assertEquals("/user/vote.php", url.encodedPath)
+        assertEquals("hfr.inc", url.queryParameter("config"))
+        assertNull("live contract requires no Referer", request.headers["Referer"])
+        assertEquals(
+            mapOf(
+                "hash_check" to "00000000000000000000000000000000",
+                "cat" to "13",
+                "page" to "1",
+                "numeropost" to "96127",
+                "reponse" to "2",
+            ),
+            formFields(request.body.readUtf8()),
+        )
+    }
+
+    @Test
+    fun `reply edit new-topic and poll-close use the mutation client`() = runTest {
+        val formBody = okhttp3.FormBody.Builder(Charsets.UTF_8)
+            .add("hash_check", "deadbeef")
+            .build()
+
+        suspend fun assertMutationCall(
+            expectedMethod: String,
+            expectedPath: String,
+            call: suspend () -> Unit,
+        ) {
+            server.enqueue(MockResponse().setResponseCode(200).setBody("<html><body>ok</body></html>"))
+
+            call()
+
+            val request = server.takeRequest()
+            assertEquals("mutation", request.headers["X-RF2-Client"])
+            assertEquals(expectedMethod, request.method)
+            assertEquals(expectedPath, requireNotNull(request.requestUrl).encodedPath)
+        }
+
+        assertMutationCall("POST", "/bddpost.php") { client.submitReply(formBody) }
+        assertMutationCall("POST", "/bdd.php") { client.submitEditPost(formBody) }
+        assertMutationCall("POST", "/bddpost.php") { client.submitNewTopic(formBody) }
+        assertMutationCall("GET", "/user/close_sondage.php") { client.closePoll(cat = 23, topicId = 35395) }
+    }
+
+    @Test
+    fun `addFlag builds the addflag URL on the mutation client without owntopic mapping`() = runTest {
         server.enqueue(MockResponse().setResponseCode(200).setBody("<html><body>Favori positionné</body></html>"))
         val context = FlagAddContext(
             cat = 23,
@@ -355,7 +419,7 @@ class HfrClientTest {
         assertTrue(html.contains("Favori positionné"))
         val request = server.takeRequest()
         val url = requireNotNull(request.requestUrl)
-        assertEquals("authenticated", request.headers["X-RF2-Client"])
+        assertEquals("mutation", request.headers["X-RF2-Client"])
         assertEquals("GET", request.method)
         assertEquals("/user/addflag.php", url.encodedPath)
         assertEquals(
@@ -389,7 +453,7 @@ class HfrClientTest {
     }
 
     @Test
-    fun `removeFlag builds the delflag URL on the authenticated client mapping each type to owntopic`() = runTest {
+    fun `removeFlag builds the delflag URL on the mutation client mapping each type to owntopic`() = runTest {
         // owntopic discriminator: CYAN→1, RED→2, FAVORITE→3 (cf. Flag.kt / protocol-hfr.md).
         listOf(
             FlagType.CYAN to "1",
@@ -405,7 +469,7 @@ class HfrClientTest {
             assertTrue(html.contains("Drapeau effacé avec succès"))
             val request = server.takeRequest()
             val url = requireNotNull(request.requestUrl)
-            assertEquals("authenticated", request.headers["X-RF2-Client"])
+            assertEquals("mutation", request.headers["X-RF2-Client"])
             assertEquals("/user/delflag.php", url.encodedPath)
             assertEquals("hfr.inc", url.queryParameter("config"))
             assertEquals("23", url.queryParameter("cat"))
@@ -469,6 +533,49 @@ class HfrClientTest {
         assertEquals("35421", url.queryParameter("post"))
         assertEquals("1", url.queryParameter("page"))
         assertEquals("2786758", url.queryParameter("numreponse"))
+    }
+
+    @Test
+    fun `getCitingPosts follows the redirect and returns the captured quote-only body`() = runTest {
+        val fixture = sharedParserFixture("quote_only_citing_posts.html")
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(301)
+                .addHeader("Location", "/hfr/Discussions/Societe/citations-sujet_95092_1.htm"),
+        )
+        server.enqueue(MockResponse().setResponseCode(200).setBody(fixture))
+
+        val html = client.getCitingPosts(cat = 13, post = 95_092, numreponse = 23_786_379)
+
+        assertEquals(fixture, html)
+        assertEquals("the quote-only read must follow HFR's redirect", 2, server.requestCount)
+        val request = server.takeRequest()
+        val url = requireNotNull(request.requestUrl)
+        assertEquals("/forum2.php", url.encodedPath)
+        assertEquals("anonymous", request.headers["X-RF2-Client"])
+        assertEquals("hfr.inc", url.queryParameter("config"))
+        assertEquals("13", url.queryParameter("cat"))
+        assertEquals("95092", url.queryParameter("post"))
+        assertEquals("1", url.queryParameter("page"))
+        assertEquals("23786379", url.queryParameter("numreponse"))
+        assertEquals("1", url.queryParameter("quote_only"))
+        assertEquals(
+            "/hfr/Discussions/Societe/citations-sujet_95092_1.htm",
+            server.takeRequest().requestUrl?.encodedPath,
+        )
+    }
+
+    @Test
+    fun `getCitingPosts surfaces a server response as typed HfrServerException`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(503).setBody("maintenance"))
+
+        val error = runCatching {
+            client.getCitingPosts(cat = 13, post = 95_092, numreponse = 23_786_379)
+        }.exceptionOrNull()
+
+        val typed = error as? HfrServerException
+            ?: throw AssertionError("expected HfrServerException, got $error")
+        assertEquals(503, typed.code)
     }
 
     @Test
@@ -618,6 +725,53 @@ class HfrClientTest {
         assertEquals(500, typed.code)
     }
 
+    @Test
+    fun `getStaffResponsables GETs the exact staff endpoint on the anonymous client`() = runTest {
+        // #1112 / #221 — l'annuaire staff global est la source primaire du badge. Le GET doit viser
+        // message-smi-mp-aj.php avec responsable=1 (sans cat) et partir sur le client ANONYME.
+        server.enqueue(MockResponse().setResponseCode(200).setBody("<table class=\"main\"></table>"))
+
+        val html = client.getStaffResponsables()
+
+        assertEquals("<table class=\"main\"></table>", html)
+        val request = server.takeRequest()
+        val url = requireNotNull(request.requestUrl)
+        assertEquals("GET", request.method)
+        assertEquals("anonymous", request.headers["X-RF2-Client"])
+        assertEquals("/message-smi-mp-aj.php", url.encodedPath)
+        assertEquals("hfr.inc", url.queryParameter("config"))
+        assertEquals("0", url.queryParameter("user_id"))
+        assertEquals("1", url.queryParameter("responsable"))
+        assertNull("l'annuaire staff est global, sans paramètre cat", url.queryParameter("cat"))
+    }
+
+    @Test
+    fun `getStaffResponsables surfaces a 500 as HfrServerException carrying the code`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(500).setBody("<html>boom</html>"))
+
+        val error = runCatching { client.getStaffResponsables() }.exceptionOrNull()
+
+        val typed = error as? HfrServerException
+            ?: throw AssertionError("expected HfrServerException, got $error")
+        assertEquals(500, typed.code)
+    }
+
+    @Test
+    fun `getProfile GETs the exact profile path on the anonymous client`() = runTest {
+        // #1112 / #221 — le rôle HFR est lu sur la page profil publique. Le GET doit viser
+        // `/hfr/profil-{id}.htm` exact et partir sur le client ANONYME (lire un profil ne
+        // doit jamais marquer de drapeaux comme lus — règle prefetch-non-authentifié).
+        server.enqueue(MockResponse().setResponseCode(200).setBody("<html><body>profil</body></html>"))
+
+        val html = client.getProfile(userId = 15461)
+
+        assertEquals("<html><body>profil</body></html>", html)
+        val request = server.takeRequest()
+        assertEquals("GET", request.method)
+        assertEquals("anonymous", request.headers["X-RF2-Client"])
+        assertEquals("/hfr/profil-15461.htm", requireNotNull(request.requestUrl).encodedPath)
+    }
+
     /**
      * Decodes an `application/x-www-form-urlencoded` POST body into a field map. A field absent from
      * the body (e.g. an unchecked checkbox) is simply not a key — `map["filter"]` is then `null`.
@@ -634,6 +788,9 @@ class HfrClientTest {
     private fun cancellableClient(listener: EventListener): HfrClient = HfrClient(
         authenticated = taggedClient("authenticated", listener),
         anonymous = taggedClient("anonymous", listener),
+        mutation = taggedClient("mutation", listener).newBuilder()
+            .retryOnConnectionFailure(false)
+            .build(),
         baseUrl = server.url("/"),
         ioDispatcher = Dispatchers.IO,
     )
@@ -670,6 +827,22 @@ class HfrClientTest {
                 chain.proceed(request)
             }
             .build()
+
+    /**
+     * #783 keeps the real anonymous capture in :core:parser, its single source of truth. Gradle
+     * runs a subproject test from that subproject directory while IDE runners commonly use the
+     * repository root, so accept exactly those two deterministic layouts instead of copying the
+     * 150 KB fixture into :core:network.
+     */
+    private fun sharedParserFixture(name: String): String {
+        val candidates = listOf(
+            File("../parser/src/test/resources/fixtures", name),
+            File("core/parser/src/test/resources/fixtures", name),
+        )
+        val file = candidates.firstOrNull { candidate -> candidate.isFile }
+            ?: error("Shared parser fixture not found: $name (tried $candidates)")
+        return file.readText()
+    }
 
     private class CallLifecycleListener : EventListener() {
         @Volatile

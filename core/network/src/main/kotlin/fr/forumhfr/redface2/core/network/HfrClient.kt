@@ -10,6 +10,7 @@ import fr.forumhfr.redface2.core.model.write.FlagAddContext
 import fr.forumhfr.redface2.core.network.qualifiers.AnonymousClient
 import fr.forumhfr.redface2.core.network.qualifiers.AuthenticatedClient
 import fr.forumhfr.redface2.core.network.qualifiers.HfrBaseUrl
+import fr.forumhfr.redface2.core.network.qualifiers.MutationClient
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -27,6 +28,7 @@ import okhttp3.Response
 class HfrClient @Inject constructor(
     @param:AuthenticatedClient private val authenticated: OkHttpClient,
     @param:AnonymousClient private val anonymous: OkHttpClient,
+    @param:MutationClient private val mutation: OkHttpClient,
     @param:HfrBaseUrl private val baseUrl: HttpUrl,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) {
@@ -69,6 +71,34 @@ class HfrClient @Inject constructor(
                 }
                 trace("$TOPIC_TRACE_PREFIX.body_read") { response.body.string() }
             }
+        }
+    }
+
+    /**
+     * #783 — fetches HFR's native reverse citation index for [numreponse].
+     *
+     * The request deliberately carries the full `(cat, post, numreponse)` tuple because a
+     * `numreponse` is unique only inside its category. Unlike [resolveTopicPageUrl], this read uses
+     * the ordinary redirect-following [anonymous] client: HFR first resolves the target then serves
+     * a filtered topic page whose standard `messagetable` rows are the posts citing the target.
+     * Anonymous access avoids marking any drapeau as read.
+     */
+    suspend fun getCitingPosts(cat: Int, post: Int, numreponse: Int): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("forum2.php")
+            .addQueryParameter("config", "hfr.inc")
+            .addQueryParameter("cat", cat.toString())
+            .addQueryParameter("post", post.toString())
+            .addQueryParameter("page", "1")
+            .addQueryParameter("numreponse", numreponse.toString())
+            .addQueryParameter("quote_only", "1")
+            .build()
+        val request = Request.Builder().url(url).get().build()
+        return anonymous.newCall(request).executeCancellable { response ->
+            if (!response.isSuccessful) {
+                throw HfrServerException(response.code, response.request.url.toString())
+            }
+            response.body.string()
         }
     }
 
@@ -299,7 +329,9 @@ class HfrClient @Inject constructor(
      * HTTP 200 with distinct body text — see `ReplySubmitResponseParser` for the
      * classification.
      *
-     * `hash_check` is **never** logged, including on transport errors.
+     * `hash_check` is **never** logged, including on transport errors. Reply and quote submissions
+     * are non-idempotent: the [mutation] client enforces no transport replay with
+     * `retryOnConnectionFailure(false)`.
      */
     suspend fun submitReply(formBody: FormBody): String {
         val url = baseUrl.newBuilder()
@@ -307,7 +339,58 @@ class HfrClient @Inject constructor(
             .addQueryParameter("config", "hfr.inc")
             .build()
         val request = Request.Builder().url(url).post(formBody).build()
-        return authenticated.newCall(request).executeAuthenticatedHtml()
+        return mutation.newCall(request).executeAuthenticatedHtml()
+    }
+
+    /**
+     * #779 — POST one poll vote to HFR's authenticated `vote.php` endpoint.
+     *
+     * The repository owns the complete browser-style [formBody], including the volatile
+     * `hash_check`. A live authenticated submission proved that no `Referer` header is required:
+     * the token and the form's hidden `(cat, page, numeropost)` tuple are the request protection.
+     * Vote submission is non-idempotent: in addition to this method issuing one application call,
+     * the [mutation] client enforces no transport replay with `retryOnConnectionFailure(false)`.
+     */
+    suspend fun submitPollVote(formBody: FormBody): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegments("user/vote.php")
+            .addQueryParameter("config", "hfr.inc")
+            .build()
+        val request = Request.Builder().url(url).post(formBody).build()
+        return mutation.newCall(request).executeAuthenticatedHtml()
+    }
+
+    /**
+     * #1201 — GET HFR's authenticated `close_sondage.php` to close a topic's poll.
+     *
+     * Wire shape (captured live 2026-08-31, cf. `docs/specs/protocol-hfr.md` § Clore un sondage and
+     * the fixture `close_sondage_success.html`) :
+     *
+     * `/user/close_sondage.php?cat={cat}&config=hfr.inc&post={topicId}`
+     *
+     * A GET link (like `addflag.php` / `delflag.php`), authenticated, with NO `hash_check` and NO
+     * `Referer` : the session cookie is the request protection. [topicId] is the topic's post id
+     * (there is no `numreponse`). The closure is non-idempotent AND irreversible: this method issues
+     * one application call and the [mutation] client enforces no transport replay with
+     * `retryOnConnectionFailure(false)`. Returns the response HTML for
+     * [fr.forumhfr.redface2.core.parser.write.poll.PollCloseResponseParser] to classify : success
+     * carries « Le sondage a bien été clos ». HFR replies HTTP 200 either way, so the body is the
+     * only signal.
+     *
+     * The mutation client carries the authenticated cookie jar : closing a poll is an owner mutation,
+     * and a freshly expired session must raise [SessionExpiredException] rather than silently hitting
+     * the anonymous page.
+     */
+    suspend fun closePoll(cat: Int, topicId: Int): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("user")
+            .addPathSegment("close_sondage.php")
+            .addQueryParameter("cat", cat.toString())
+            .addQueryParameter("config", "hfr.inc")
+            .addQueryParameter("post", topicId.toString())
+            .build()
+        val request = Request.Builder().url(url).get().build()
+        return mutation.newCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -368,7 +451,7 @@ class HfrClient @Inject constructor(
             .addQueryParameter("config", "hfr.inc")
             .build()
         val request = Request.Builder().url(url).post(formBody).build()
-        return authenticated.newCall(request).executeAuthenticatedHtml()
+        return mutation.newCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -392,7 +475,7 @@ class HfrClient @Inject constructor(
             .addQueryParameter("config", "hfr.inc")
             .build()
         val request = Request.Builder().url(url).post(formBody).build()
-        return authenticated.newCall(request).executeAuthenticatedHtml()
+        return mutation.newCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -439,7 +522,7 @@ class HfrClient @Inject constructor(
             .addQueryParameter("config", "hfr.inc")
             .build()
         val request = Request.Builder().url(url).post(formBody).build()
-        return authenticated.newCall(request).executeAuthenticatedHtml()
+        return mutation.newCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -641,8 +724,8 @@ class HfrClient @Inject constructor(
      * success carries « Favori positionné », anything else does not. HFR returns HTTP 200
      * in both cases, so the body text is the only signal.
      *
-     * Always uses the authenticated client : adding a favourite is a user-private mutation,
-     * and a freshly expired session must raise [SessionExpiredException] rather than
+     * The mutation client carries the authenticated cookie jar : adding a favourite is a user-private
+     * mutation, and a freshly expired session must raise [SessionExpiredException] rather than
      * silently hitting the anonymous page.
      */
     suspend fun addFlag(context: FlagAddContext): String {
@@ -661,7 +744,7 @@ class HfrClient @Inject constructor(
             .addQueryParameter("subcat", context.subcat?.toString().orEmpty())
             .build()
         val request = Request.Builder().url(url).get().build()
-        return authenticated.newCall(request).executeAuthenticatedHtml()
+        return mutation.newCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -694,9 +777,9 @@ class HfrClient @Inject constructor(
      * favourite) does not. HFR returns HTTP 200 in both cases, so the body text is the only
      * signal.
      *
-     * Always uses the authenticated client : delflag is a destructive mutation, a freshly
-     * expired session must raise [SessionExpiredException] rather than silently hitting the
-     * anonymous page.
+     * The mutation client carries the authenticated cookie jar : delflag is a destructive mutation,
+     * and a freshly expired session must raise [SessionExpiredException] rather than silently hitting
+     * the anonymous page.
      */
     suspend fun removeFlag(
         cat: Int,
@@ -719,7 +802,7 @@ class HfrClient @Inject constructor(
             .addQueryParameter("new", "0")
             .build()
         val request = Request.Builder().url(url).get().build()
-        return authenticated.newCall(request).executeAuthenticatedHtml()
+        return mutation.newCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -748,6 +831,37 @@ class HfrClient @Inject constructor(
             if (!response.isSuccessful) {
                 // #324 — typed so the profile sheet/page can tell a 5xx outage from a
                 // local network cut (cf. core.domain.error.classifyHfrError).
+                throw HfrServerException(response.code, url.toString())
+            }
+            response.body.string()
+        }
+    }
+
+    /**
+     * #1112 / #221 — GET the GLOBAL staff directory (« Contacter un responsable »), the primary
+     * source of the author-role badge.
+     *
+     * Wire shape (cf. `docs/specs/protocol-hfr.md` § Annuaire staff) — no authentication required :
+     * `GET /message-smi-mp-aj.php?config=hfr.inc&user_id=0&responsable=1` (no `cat`). The response
+     * is a small AJAX HTML fragment (a `<table class="main">` of `a.s1Topic` anchors) parsed by
+     * [fr.forumhfr.redface2.core.parser.staff.StaffParser].
+     *
+     * Uses the [anonymous] client : the directory is public and global (indexed by pseudo, no
+     * profileId), and a read must never mark drapeaux as read (prefetch-non-authentifié rule).
+     *
+     * No `withContext(ioDispatcher)` here : [executeCancellable] already runs the call off the
+     * caller thread (same stance as [getProfile]).
+     */
+    suspend fun getStaffResponsables(): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("message-smi-mp-aj.php")
+            .addQueryParameter("config", "hfr.inc")
+            .addQueryParameter("user_id", "0")
+            .addQueryParameter("responsable", "1")
+            .build()
+        val request = Request.Builder().url(url).get().build()
+        return anonymous.newCall(request).executeCancellable { response ->
+            if (!response.isSuccessful) {
                 throw HfrServerException(response.code, url.toString())
             }
             response.body.string()

@@ -16,6 +16,7 @@ import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
+import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
@@ -1561,6 +1562,10 @@ class TopicFormViewModelTest {
 
         override suspend fun setTopicPollsExpanded(enabled: Boolean) = Unit
 
+        override fun observeTopicUnansweredPollsExpanded(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setTopicUnansweredPollsExpanded(enabled: Boolean) = Unit
+
         override fun observeTopicSignatures(): Flow<Boolean> = MutableStateFlow(false)
 
         override suspend fun setTopicSignatures(enabled: Boolean) = Unit
@@ -1653,6 +1658,14 @@ class TopicFormViewModelTest {
         override suspend fun setImmersiveNavBarReveal(mode: ImmersiveNavBarReveal) = Unit
         override fun observeAccentColor(): Flow<AccentColor> = MutableStateFlow(AccentColor.ROSE)
         override suspend fun setAccentColor(color: AccentColor) = Unit
+        override fun observeAlwaysAskLinkApp(): Flow<Boolean> = MutableStateFlow(false)
+        override suspend fun setAlwaysAskLinkApp(enabled: Boolean) = Unit
+
+        // #1132 — Forum flag-filter preference is irrelevant to the editor; default ALL stub.
+        override fun observeForumCategoryFlagFilter(): Flow<CategoryFlagFilter> =
+            MutableStateFlow(CategoryFlagFilter.ALL)
+
+        override suspend fun setForumCategoryFlagFilter(filter: CategoryFlagFilter) = Unit
     }
 
     /** #405 — in-memory fake [EditorDraftStore], same shape as the one in `PostEditorViewModelTest`. */

@@ -12,8 +12,8 @@ internal data class TopicPollKey(val cat: Int, val post: Int)
 // Upper bound on the per-topic poll-expansion cache, mirroring TOPIC_TITLE_CACHE_MAX / the scroll
 // anchor cap. A long reading session opens many topics with polls; the cap keeps the map from
 // growing unbounded for the app's lifetime. Eviction is least-recently-WRITTEN (like the scroll
-// anchors): dropping an old manual choice just lets that topic fall back to the global default,
-// which is harmless.
+// anchors): dropping an old manual choice just lets that topic fall back to the automatic policy
+// (global default plus the unanswered-poll opt-in), which is harmless.
 internal const val TOPIC_POLL_EXPANSION_CACHE_MAX = 128
 
 /**
@@ -23,8 +23,8 @@ internal const val TOPIC_POLL_EXPANSION_CACHE_MAX = 128
  * tail (least-recently-written eviction), and an unchanged value short-circuits to the same instance
  * so a redundant toggle never reallocates the map nor recomposes `RedfaceApp`.
  *
- * Only topics the user has manually toggled appear here; absence of a key means « follow the global
- * `topicPollsExpanded` default ». The map is hoisted into `RedfaceApp` (above `NavDisplay`), exactly
+ * Only topics the user has manually toggled appear here; absence of a key means « follow the
+ * automatic poll policy ». The map is hoisted into `RedfaceApp` (above `NavDisplay`), exactly
  * like the title / scroll-anchor caches — so collapsing or expanding a poll survives leaving and
  * reopening the topic within the session (and survived the per-page `TopicRoute` entry swap back
  * when page changes replaced the route, pre-#895 étape 4). In-memory only (session-scoped), reset

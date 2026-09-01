@@ -1,10 +1,13 @@
 package fr.forumhfr.redface2.feature.topic
 
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
+import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
+import fr.forumhfr.redface2.core.model.write.PollVoteChoice
+import fr.forumhfr.redface2.core.model.write.PollVoteForm
 
 data class TopicUiState(
     val request: TopicRequest,
@@ -68,6 +71,12 @@ data class TopicUiState(
      */
     val pollsExpandedDefault: Boolean = false,
     /**
+     * #1170 — mirrors `UserPreferencesRepository.observeTopicUnansweredPollsExpanded()`. When
+     * enabled, an open poll with a live non-blank vote token stays expanded even if
+     * [pollsExpandedDefault] is false. Manual per-topic expansion choices remain authoritative.
+     */
+    val expandUnansweredPolls: Boolean = false,
+    /**
      * #330 — mirrors `UserPreferencesRepository.observeTopicSignatures()`. When `true`, each post
      * card renders the author's signature (`Post.signature`) beneath the body, in a subdued style
      * separated by a divider. Default `false`: signatures are noisy and opt-in. Flips on the first
@@ -103,6 +112,12 @@ data class TopicUiState(
      * answers a topic page), so there is no separate "results list" model here.
      */
     val search: TopicSearchUiState = TopicSearchUiState(),
+    /**
+     * #783 — reverse-citation sheet, `null` while closed. The target identifiers and the server
+     * badge count stay stable across every load phase so the title never derives information from
+     * the returned row count (HFR may deduplicate citing posts independently from the counter).
+     */
+    val citingPostsSheet: CitingPostsSheetState? = null,
     /**
      * #782 / #895 étape 4 — `true` while the in-VM quote-jump chain is non-empty, i.e. the next
      * back gesture should unwind one jump ([TopicViewModel.returnFromJump]) instead of leaving
@@ -149,6 +164,12 @@ data class TopicUiState(
              */
             val blockedQuoteAuthors: Set<String> = emptySet(),
             /**
+             * #221 — snapshot décoratif de l'annuaire staff global, indexé par pseudo canonique.
+             * Chargé indépendamment de la page : un échec laisse la map vide et ne bloque jamais
+             * les posts. Le rôle reste hors de [Post] car ce référentiel global est soumis à TTL.
+             */
+            val staffByPseudo: Map<String, AuthorRole> = emptyMap(),
+            /**
              * #877 — `true` while this page is the instant cache emission that a network refresh
              * will supersede on the same load (cf. `TopicPageEmission.provisional`). The posts
              * render normally (cache-first snappiness) but the top-bar pill keeps « Chargement… »
@@ -157,6 +178,12 @@ data class TopicUiState(
              * refresh), so this can never strand the pill.
              */
             val provisional: Boolean = false,
+            /**
+             * #779 — transient voting slice rebuilt from [Topic.pollVoteForm] on every page
+             * emission. `null` means results/no poll/cache-only content; the anti-CSRF form is
+             * never persisted or copied into SavedStateHandle.
+             */
+            val pollVote: PollVoteUiState? = null,
         ) : Mode
 
         data class Error(
@@ -199,6 +226,49 @@ data class TopicUiState(
                 availablePages = emptyList(),
             )
     }
+}
+
+/** #783 — stable target plus the one-shot reverse-citation load lifecycle. */
+data class CitingPostsSheetState(
+    val numreponse: Int,
+    val citedCount: Int,
+    val content: CitingPostsSheetContent = CitingPostsSheetContent.Idle,
+)
+
+sealed interface CitingPostsSheetContent {
+    data object Idle : CitingPostsSheetContent
+    data object Loading : CitingPostsSheetContent
+    data class Loaded(val posts: List<Post>) : CitingPostsSheetContent
+    data object Empty : CitingPostsSheetContent
+    data class Error(val kind: HfrErrorKind) : CitingPostsSheetContent
+}
+
+/** #779 — state of the Topic-only poll vote interaction. Never log this type: [form] is secret. */
+data class PollVoteUiState(
+    val form: PollVoteForm,
+    val selectedChoices: Set<PollVoteChoice> = emptySet(),
+    val phase: PollVotePhase = PollVotePhase.Idle,
+    val error: PollVoteUiError? = null,
+)
+
+enum class PollVotePhase {
+    Idle,
+    Submitting,
+    Refreshing,
+}
+
+/** UI-facing, localisable classification of repository and post-vote refresh failures. */
+enum class PollVoteUiError {
+    InvalidHashCheck,
+    EmptySelection,
+    InvalidSelection,
+    TooManySelections,
+    MalformedForm,
+    UnexpectedResponse,
+    Network,
+
+    /** HFR accepted the vote; only the subsequent results refresh failed. */
+    RefreshFailedAfterAccepted,
 }
 
 /**
@@ -294,12 +364,41 @@ enum class TopicSearchStatus {
 sealed interface TopicIntent {
     data object Retry : TopicIntent
 
+    /** #783 — opens the native HFR reverse-citation sheet for a server-counted post. */
+    data class OnCitedBadgeClick(val post: Post) : TopicIntent
+
+    /** #783 — closes the sheet, resolves the citing post's real page, then uses the jump engine. */
+    data class OnCitingPostClick(val post: Post) : TopicIntent
+
+    /** #783 — closes the reverse-citation sheet and cancels its in-flight read. */
+    data object OnDismissCitingSheet : TopicIntent
+
     /**
      * #335 — manual pull-to-refresh of the currently open page. Re-fetches over the network and
      * updates the loaded page in place, without the post-submit overflow redirect (#226) or any
      * scroll effect, so the user keeps their reading position.
      */
     data object Refresh : TopicIntent
+
+    /** #779 — select/unselect one option of the currently displayed poll form. */
+    data class UpdatePollSelection(
+        val choice: PollVoteChoice,
+        val selected: Boolean,
+    ) : TopicIntent
+
+    /** #779 — submit the current selection once; terminal outcomes only refresh the page. */
+    data object SubmitPollVote : TopicIntent
+
+    /** #1170 — submit a blank vote only while the current selection is empty. */
+    data object SubmitBlankPollVote : TopicIntent
+
+    /**
+     * #1201 — the first-post owner tapped « Clore ce sondage ». Carries no payload : the ViewModel
+     * resolves `(cat, topicId)` from its [TopicRequest]. Raises the confirmation dialog
+     * ([ClosePollState.Confirming]) ; the actual, irreversible close only fires on
+     * [TopicViewModel.confirmClosePoll].
+     */
+    data object CloseTopicPoll : TopicIntent
 
     /** #879 — filtered search : fetch the next page of the result list (footer card). */
     data object SearchNextResultsPage : TopicIntent
@@ -501,6 +600,16 @@ sealed interface TopicEffect {
      * session, or an unresolvable lookup (resolve failure folds here — cf. TopicViewModel).
      */
     data object TopicFlagNotFound : TopicEffect
+
+    /**
+     * #1201 — `close_sondage.php` confirmed the closure. One-shot feedback ; a page refresh to the
+     * closed state runs separately so the card stops offering the vote / close affordances. HFR has
+     * no re-open, so the message must not promise one.
+     */
+    data object PollClosed : TopicEffect
+
+    /** #1201 — the closure failed (refused, transport, session, or an unrecognised HFR page). */
+    data object PollCloseFailed : TopicEffect
 }
 
 /**
@@ -521,6 +630,23 @@ sealed interface RemoveTopicFlagState {
     data object Resolving : RemoveTopicFlagState
     data class Confirming(val flag: Flag) : RemoveTopicFlagState
     data class Removing(val flag: Flag) : RemoveTopicFlagState
+}
+
+/**
+ * #1201 — drives the « Clore ce sondage » owner interaction. Explicit MVI state so the confirmation
+ * gates the (irreversible) `close_sondage.php` call and the anti double-tap guard is observable.
+ * Simpler than [RemoveTopicFlagState] : the topic ViewModel already holds `(cat, topicId)` and the
+ * poll from its loaded state, so there is no async [RemoveTopicFlagState.Resolving] step.
+ *
+ * - [Idle] — nothing pending.
+ * - [Confirming] — the owner tapped « Clore » ; the screen shows the confirmation dialog. Absent this
+ *   state, no dialog.
+ * - [Closing] — the user confirmed ; the `close_sondage.php` call is in flight (anti double-tap).
+ */
+sealed interface ClosePollState {
+    data object Idle : ClosePollState
+    data object Confirming : ClosePollState
+    data object Closing : ClosePollState
 }
 
 /**

@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.parser.profile
 
+import fr.forumhfr.redface2.core.model.AuthorRole
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -109,6 +110,30 @@ class ProfileParserTest {
             "https://forum-images.hardware.fr/images/perso/15867/mesdiscussions-15867.png",
             profile.avatarUrl,
         )
+    }
+
+    // ─── Author role (#1112, #221) — « Statut » → AuthorRole ─────────────────
+
+    @Test
+    fun `parseAuthorRole maps Moderateur to MODERATOR from the anonymous fixture`() {
+        // Fixture réelle capturée en anonyme (Ernestor, userId=15461, Statut=Modérateur).
+        val role = parser.parseAuthorRole(fixture("profile/profile_moderator_anonymous.html"))
+        assertEquals(AuthorRole.MODERATOR, role)
+    }
+
+    @Test
+    fun `parseAuthorRole maps Membre to MEMBER from the anonymous fixture`() {
+        // La fixture membre anonyme existante (ezzz, userId=15867) porte « Statut : Membre ».
+        val role = parser.parseAuthorRole(fixture("profile/profile_ezzz_anonymous.html"))
+        assertEquals(AuthorRole.MEMBER, role)
+    }
+
+    @Test
+    fun `parseAuthorRole returns null when the Statut row is absent`() {
+        // Pas de fabrication d'un faux profil : le cas « statut absent/inconnu » est prouvé
+        // par la page dégénérée (aucune tr.profil « Statut ») → branche else → null.
+        val role = parser.parseAuthorRole("<html><body></body></html>")
+        assertNull(role)
     }
 
     // ─── Robustness: missing page does not crash ──────────────────────────────

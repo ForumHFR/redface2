@@ -50,6 +50,8 @@ import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.pageToOpen
 import fr.forumhfr.redface2.core.model.pagesToRead
 import fr.forumhfr.redface2.core.ui.FlagMarker
+import fr.forumhfr.redface2.core.ui.browser.LocalAlwaysAskLinkApp
+import fr.forumhfr.redface2.core.ui.browser.openUrlInExternalBrowser
 import fr.forumhfr.redface2.core.ui.formatLastReplyTimestamp
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.icon.categoryIcon
@@ -76,6 +78,7 @@ fun FlagActionsSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
+    val alwaysAskLinkApp = LocalAlwaysAskLinkApp.current
     val linkCopied = stringResource(R.string.flags_sheet_link_copied)
     val browserFailed = stringResource(R.string.flags_sheet_browser_failed)
     val shareFailed = stringResource(R.string.flags_sheet_share_failed)
@@ -127,7 +130,9 @@ fun FlagActionsSheet(
                     actions = actions,
                     onGoToPage = { showPageDialog = true },
                     onCopyLink = { copyTopicLink(context, flagTopicUrl(flag), linkCopied) },
-                    onOpenBrowser = { openTopicInBrowser(context, flagTopicUrl(flag), browserFailed) },
+                    onOpenBrowser = {
+                        openTopicInBrowser(context, flagTopicUrl(flag), browserFailed, alwaysAskLinkApp)
+                    },
                 ),
             )
         }
@@ -545,10 +550,16 @@ private fun copyTopicLink(context: Context, url: String, feedback: String) {
     }
 }
 
-/** Opens [url] in the browser; toasts [failureFeedback] when no app can handle the intent. */
-private fun openTopicInBrowser(context: Context, url: String, failureFeedback: String) {
-    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) }
-        .onFailure { Toast.makeText(context, failureFeedback, Toast.LENGTH_SHORT).show() }
+/** Opens [url] outside Redface 2; toasts [failureFeedback] when no browser can handle it. */
+private fun openTopicInBrowser(
+    context: Context,
+    url: String,
+    failureFeedback: String,
+    alwaysAsk: Boolean,
+) {
+    if (!openUrlInExternalBrowser(context, url.toUri(), alwaysAsk)) {
+        Toast.makeText(context, failureFeedback, Toast.LENGTH_SHORT).show()
+    }
 }
 
 /** #676 v2 — shares the topic [url] via the system share sheet; toasts [failureFeedback] if none. */

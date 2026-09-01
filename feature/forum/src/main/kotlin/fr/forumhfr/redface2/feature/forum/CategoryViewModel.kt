@@ -11,6 +11,8 @@ import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.forum.FlagFilterBucket
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
+import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
+import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.SubCategory
@@ -24,12 +26,16 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.scan
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
@@ -61,25 +67,44 @@ class CategoryViewModel @AssistedInject constructor(
     @Assisted private val request: CategoryRequest,
     private val forumRepository: ForumRepository,
     authRepository: AuthRepository,
+    private val userPreferencesRepository: UserPreferencesRepository,
 ) : ViewModel() {
 
-    private val isAuthenticated: StateFlow<Boolean> = authRepository.observeAuthState()
+    // #1132 — the REAL auth state, seeded `null` (still unknown) so the persisted-filter seed can
+    // wait for the FIRST genuine emission instead of racing a fake `Anonymous`. Both [isAuthenticated]
+    // and the hydration in `init` derive from this single shared source.
+    private val authState: StateFlow<AuthState?> = authRepository.observeAuthState()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), initialValue = null)
+
+    private val isAuthenticated: StateFlow<Boolean> = authState
         .map { it is AuthState.Authenticated }
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), initialValue = false)
 
     private val selectedSubcat: MutableStateFlow<Int?> = MutableStateFlow(request.initialSubcat)
     private val page: MutableStateFlow<Int> = MutableStateFlow(request.initialPage.coerceAtLeast(1))
-    private val searchQuery: MutableStateFlow<String> = MutableStateFlow("")
+    // #1130 — the query AND its open/closed mode live in ONE flow so closeSearch (empty + close)
+    // is a SINGLE emission and thus truly atomic: `combine` offers no multi-flow transaction, so
+    // two separate MutableStateFlows could surface an intermediate (query="", active=true) before
+    // the final state. Hosted here (not in the Composable) so the open/clear/close logic is
+    // unit-testable without a Compose harness. `active` is NOT derived from the query — an open,
+    // empty field is a valid state.
+    private val search: MutableStateFlow<SearchSlice> = MutableStateFlow(SearchSlice(query = "", active = false))
     private val isRefreshing: MutableStateFlow<Boolean> = MutableStateFlow(false)
 
     // #455 — « Mes drapeaux » filter. Pushed state (not flatMapLatest) so refresh() can
     // await the bucket fetch and drive [isRefreshing] correctly, and so a refresh keeps the
     // current content instead of flashing Loading. ALL = the normal listing is the source;
-    // the bucket fetch only runs for the three flag modes. Seeded ALL, not from the route.
+    // the bucket fetch only runs for the three flag modes. Seeded ALL then REPLACED by the
+    // persisted preference at hydration (#1132) — see [flagFilterHydrated] and the `init` block.
     private val flagFilter: MutableStateFlow<CategoryFlagFilter> = MutableStateFlow(CategoryFlagFilter.ALL)
     private val flagFilterTopics: MutableStateFlow<TopicsUiState> = MutableStateFlow(TopicsUiState.Loading)
     private var flagFilterJob: Job? = null
+
+    // #1132 — `false` until the persisted filter has been resolved against the first real auth state.
+    // [filterSlice] stays SILENT while this is false, so `uiState` cannot emit and thus cannot flash a
+    // transient ALL selector before the persisted (possibly non-ALL) filter lands.
+    private val flagFilterHydrated: MutableStateFlow<Boolean> = MutableStateFlow(false)
 
     // scan keeps the last non-null name across `Loading` / `Failure` re-emissions so a
     // global refreshCategories() round-trip does not reflash the screen title back to
@@ -147,18 +172,27 @@ class CategoryViewModel @AssistedInject constructor(
     }
 
     // Fold the flag filter (#455) into a single slice so the final `combine` stays within
-    // the 5-arg typed overload (coreState already aggregates the 5 core sources).
-    private val filterSlice: Flow<FilterSlice> = combine(flagFilter, flagFilterTopics) { filter, topics ->
-        FilterSlice(filter, topics)
-    }
+    // the 5-arg typed overload (coreState already aggregates the 5 core sources). #1132 — the slice
+    // emits NOTHING until [flagFilterHydrated] flips true (map to `null` + filterNotNull), so the
+    // final `uiState` combine holds its initial Loading seed and never surfaces a transient ALL
+    // selector before the persisted filter is applied.
+    private val filterSlice: Flow<FilterSlice> = combine(
+        flagFilter,
+        flagFilterTopics,
+        flagFilterHydrated,
+    ) { filter, topics, hydrated ->
+        if (hydrated) FilterSlice(filter, topics) else null
+    }.filterNotNull()
 
+    // #1130 — [search] is already a single combined flow (query + active), so it feeds the final
+    // `combine` directly and keeps the same 5 typed sources.
     val uiState: StateFlow<CategoryUiState> = combine(
         coreState,
         filterSlice,
-        searchQuery,
+        search,
         isRefreshing,
         isAuthenticated,
-    ) { core, filter, query, refreshing, authenticated ->
+    ) { core, filter, searchState, refreshing, authenticated ->
         val filterActive = filter.flagFilter != CategoryFlagFilter.ALL
         CategoryUiState(
             cat = request.cat,
@@ -170,12 +204,13 @@ class CategoryViewModel @AssistedInject constructor(
             pageCount = if (filterActive) 1 else core.topics.pageCount(),
             subcategories = core.subcategories,
             topics = core.topics,
-            searchQuery = query,
+            searchQuery = searchState.query,
+            searchActive = searchState.active,
             // The text search applies to whichever listing is active (bucket or normal).
             filteredTopics = if (filterActive) {
-                filter.flagFilterTopics.filterTopics(query)
+                filter.flagFilterTopics.filterTopics(searchState.query)
             } else {
-                core.topics.filterTopics(query)
+                core.topics.filterTopics(searchState.query)
             },
             isRefreshing = refreshing,
             canCreateTopic = authenticated,
@@ -228,10 +263,12 @@ class CategoryViewModel @AssistedInject constructor(
             }
             .launchIn(viewModelScope)
 
-        // #455 — re-fetch the active flag bucket for the new (sub)category when the user
-        // switches subcat. At init the filter is ALL, so the first (initial) emission is a
-        // no-op; only a genuine subcat change with a filter active triggers a fetch.
+        // #455 — re-fetch the active flag bucket for the new (sub)category when the user switches
+        // subcat. #1132 — `drop(1)` skips the INITIAL emission: a persisted non-ALL seed already
+        // launches its own fetch at hydration, so the initial subcat value must NOT fire a second
+        // (duplicate) bucket fetch. Only a genuine subcat CHANGE with a filter active refetches.
         selectedSubcat
+            .drop(1)
             .onEach {
                 if (flagFilter.value != CategoryFlagFilter.ALL) {
                     launchFlagFilterFetch(keepContent = false)
@@ -249,6 +286,30 @@ class CategoryViewModel @AssistedInject constructor(
                     flagFilterJob?.cancel()
                     flagFilter.value = CategoryFlagFilter.ALL
                     flagFilterTopics.value = TopicsUiState.Loading
+                    // #1132 — a logout is a UI safety reset, NOT a user choice: never call the setter
+                    // here, so the persisted preference survives the logout untouched.
+                }
+            }
+            .launchIn(viewModelScope)
+
+        // #1132 — hydrate the flag filter from the persisted preference, resolved against the FIRST
+        // real auth state (not the `null` placeholder). Authenticated → the stored value; anonymous →
+        // a LOCAL ALL that never touches DataStore (an anonymous session has no flags and must not
+        // clobber the remembered preference). `take(1)` seeds exactly once: a later login on the same
+        // screen does NOT restore the preference — the NEXT category does. Marking hydrated lets
+        // [uiState] start emitting; a non-ALL seed launches the bucket fetch immediately so the first
+        // VISIBLE state already shows the persisted filter's listing (no ALL flash).
+        combine(
+            userPreferencesRepository.observeForumCategoryFlagFilter(),
+            authState.filterNotNull(),
+        ) { persisted, auth -> persisted to auth }
+            .take(1)
+            .onEach { (persisted, auth) ->
+                val seed = if (auth is AuthState.Authenticated) persisted else CategoryFlagFilter.ALL
+                flagFilter.value = seed
+                flagFilterHydrated.value = true
+                if (seed != CategoryFlagFilter.ALL) {
+                    launchFlagFilterFetch(keepContent = false)
                 }
             }
             .launchIn(viewModelScope)
@@ -295,7 +356,22 @@ class CategoryViewModel @AssistedInject constructor(
     }
 
     fun updateSearchQuery(query: String) {
-        searchQuery.value = query
+        search.update { it.copy(query = query) }
+    }
+
+    /** #1130 — opens the in-page search (autofocus is driven by the field entering composition). */
+    fun openSearch() {
+        search.update { it.copy(active = true) }
+    }
+
+    /**
+     * #1130 — leaves the search mode atomically: empties the query AND closes the field in a SINGLE
+     * write to the combined [search] flow, so no intermediate (empty, still-open) state can surface.
+     * Target of both the leading back arrow and the system/gesture back. Distinct from the clear
+     * cross, which only empties the query via [updateSearchQuery] and keeps the mode open.
+     */
+    fun closeSearch() {
+        search.value = SearchSlice(query = "", active = false)
     }
 
     /**
@@ -307,6 +383,10 @@ class CategoryViewModel @AssistedInject constructor(
         if (flagFilter.value == filter) return
         flagFilter.value = filter
         launchFlagFilterFetch(keepContent = false)
+        // #1132 — persist the user's explicit choice AFTER the optimistic local update + fetch, so the
+        // UI reacts instantly and the write happens off the critical path. The early-return above makes
+        // a re-selection of the same value a no-op (neither refetch nor rewrite).
+        viewModelScope.launch { userPreferencesRepository.setForumCategoryFlagFilter(filter) }
     }
 
     private fun launchFlagFilterFetch(keepContent: Boolean) {
@@ -437,6 +517,11 @@ class CategoryViewModel @AssistedInject constructor(
     private data class FilterSlice(
         val flagFilter: CategoryFlagFilter,
         val flagFilterTopics: TopicsUiState,
+    )
+
+    private data class SearchSlice(
+        val query: String,
+        val active: Boolean,
     )
 
     private companion object {

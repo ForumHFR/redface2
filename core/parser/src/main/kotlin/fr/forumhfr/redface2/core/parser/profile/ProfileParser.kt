@@ -1,6 +1,8 @@
 package fr.forumhfr.redface2.core.parser.profile
 
+import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.UserProfile
+import fr.forumhfr.redface2.core.parser.authorRoleFromLabel
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 
@@ -87,6 +89,31 @@ class ProfileParser {
             signatureText = signatureText,
             rawFields = rawFields,
         )
+    }
+
+    /**
+     * Rôle HFR (#1112, #221) — source **secondaire** : lit le champ « Statut » de la page profil
+     * (`/hfr/profil-{userId}.htm`) et le mappe en [AuthorRole] via le mapping **partagé**
+     * [authorRoleFromLabel] (le même que l'annuaire staff, aucune divergence).
+     *
+     * Le rôle vit dans la `tr.profil` dont le `td.profilCase2` normalisé vaut « Statut », valeur
+     * dans le `td.profilCase3` associé. Aucune heuristique (pas de pseudo, de CSS ni de contenu de
+     * post). Libellé absent, cellule vide ou valeur non reconnue → `null`.
+     *
+     * `null` est un résultat HTTP **valide** (page servie, statut non reconnu), à distinguer
+     * d'un échec réseau — cette distinction est portée par le repository, pas par le parser.
+     */
+    fun parseAuthorRole(html: String): AuthorRole? {
+        val document = Jsoup.parse(html)
+        val status = document.select("tr.profil")
+            .firstOrNull { row ->
+                row.selectFirst("td.profilCase2")?.text()?.trimLabel() == KEY_STATUS
+            }
+            ?.selectFirst("td.profilCase3")
+            ?.text()
+            ?.trim()
+            ?: return null
+        return authorRoleFromLabel(status)
     }
 
     /**
@@ -192,6 +219,7 @@ class ProfileParser {
         private const val KEY_REGISTERED_AT = "Date d'arrivée sur le forum"
         private const val KEY_LOCATION = "Ville"
         private const val KEY_SIGNATURE = "Signature des messages"
+        private const val KEY_STATUS = "Statut"
 
         private val PROMOTED_KEYS = setOf(
             KEY_PSEUDO,

@@ -1,0 +1,8 @@
+Source: https://forum.hardware.fr/hfr/Discussions/Manga/sujet_181_1.htm (forum2.php?cat=13&post=181&page=1)
+Captured: 2026-08-29
+Auth: logged-IN (compte de test XaTelitte)
+Endpoint cible du form: POST /user/vote.php?config=hfr.inc
+Sanitization: réduit au sous-arbre <form action=vote.php>…</form>. hash_check RÉEL remplacé par 32 zéros
+(placeholder non-vide). Aucun secret. Forme multi : checkboxes name=reponse1..10 value=1, caption
+« Sondage à 7 choix » présente DANS le form (source de maxSelections). Champs cachés verbatim identiques
+au fixture mono.

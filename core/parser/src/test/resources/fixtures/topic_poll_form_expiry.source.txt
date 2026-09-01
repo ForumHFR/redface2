@@ -1,0 +1,9 @@
+Source: https://forum.hardware.fr/hfr/ia/harness-sujet_16_1.htm (cat=32 post=16)
+Captured: 2026-08-30
+Auth: logged-IN (compte de test XaTelitte), AVANT vote.
+Etat: sondage OUVERT avec DATE D'EXPIRATION.
+Date d'expiration = NOEUD TEXTE NU entre la question et l'<ol>:
+  <b class="s2">Harness?</b><br />Ce sondage expirera le 01-01-2027&nbsp;à&nbsp;12:00<br /><br /><ol>
+Format: "Ce sondage expirera le DD-MM-YYYY à HH:MM" (&nbsp;à&nbsp;, PAS de fuseau horaire).
+Form mono: radios name=reponse value=1..2. 2 boutons submit sondage_submit: "Voter" et "Voir les résultats".
+Sanitization: sous-arbre <form action=vote.php>…</form>. hash_check RÉEL -> 32 zéros (placeholder non-vide).

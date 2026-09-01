@@ -32,6 +32,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.contentColorFor
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.pullToRefresh
@@ -51,6 +52,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -78,10 +80,12 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.currentStateAsState
 import fr.forumhfr.redface2.core.domain.author.isRf2Creator
+import fr.forumhfr.redface2.core.domain.author.resolveAuthorRolePill
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.ego.deriveEgoCanonicalPseudo
 import fr.forumhfr.redface2.core.domain.ego.isEgoPost
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
+import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
 import fr.forumhfr.redface2.core.model.postContentExcerpt
@@ -94,6 +98,7 @@ import fr.forumhfr.redface2.core.ui.pager.PageFab
 import fr.forumhfr.redface2.core.ui.pager.PageFabDefaults
 import fr.forumhfr.redface2.core.ui.pager.PageNavigation
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
+import fr.forumhfr.redface2.core.ui.post.AuthorRolePill
 import fr.forumhfr.redface2.core.ui.post.CreatorPseudoText
 import fr.forumhfr.redface2.core.ui.post.HiddenPostCard
 import fr.forumhfr.redface2.core.ui.post.PostCardShellFlatBottomEdge
@@ -106,6 +111,7 @@ import fr.forumhfr.redface2.core.ui.post.PostListScaffold
 import fr.forumhfr.redface2.core.ui.post.PostMediaDiskCachePolicy
 import fr.forumhfr.redface2.core.ui.post.ReadingPostCard
 import fr.forumhfr.redface2.core.ui.post.ReadingPostCardPresentation
+import fr.forumhfr.redface2.core.ui.post.readingContentColors
 import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 import fr.forumhfr.redface2.core.ui.zoom.PinchZoomState
@@ -967,6 +973,7 @@ private fun PrivateMessageThreadReader(
                 messages = mode.thread.messages,
                 hiddenNumreponses = mode.hiddenNumreponses,
                 blockedQuoteAuthors = mode.blockedQuoteAuthors,
+                staffByPseudo = mode.staffByPseudo,
                 page = state.page,
                 fullWidthPosts = state.fullWidthPosts,
                 showSignatures = state.showSignatures,
@@ -1583,6 +1590,7 @@ private fun ThreadMessages(
     messages: List<Post>,
     hiddenNumreponses: Set<Int>,
     blockedQuoteAuthors: Set<String>,
+    staffByPseudo: Map<String, AuthorRole>,
     page: Int,
     fullWidthPosts: Boolean,
     showSignatures: Boolean,
@@ -1703,6 +1711,7 @@ private fun ThreadMessages(
                 )
                 MessageCard(
                     message = message,
+                    staffByPseudo = staffByPseudo,
                     multiQuoteSelected = multiQuoteSelections.any { selection ->
                         selection.numreponse == message.numreponse
                     },
@@ -1834,13 +1843,19 @@ internal fun isHiddenMessage(message: Post, hidden: Set<Int>, revealed: Set<Int>
  * [presentation] is the shared render-only state bundle. The list derives its values from reader
  * preferences, the session pseudo (#1050 Ego markers) and message position, while this adapter
  * forwards the bundle unchanged — its only addition is the EgoPost StateDescription on the
- * identity band (#874 P1 parity). The band itself stays `secondaryContainer`: EgoPost colours the
- * card below it, never the identity strip. Neutral defaults keep direct test/preview mounts unmarked.
+ * identity band (#874 P1 parity). EgoPost colours the card below the neutral band; a moderation
+ * post instead receives the shared RF1 red body and darker red identity band. Neutral defaults
+ * keep direct test/preview mounts unmarked.
  */
 @Composable
-@Suppress("LongParameterList") // Thin card adapter: render state plus independent host capabilities.
+// Thin card adapter: render state plus independent host capabilities. #221 — the creator/staff
+// pseudo slot (gold leaf | neutral label + role pill) tipped the branch count to the topic parity
+// level ; same suppression posture as the topic post card composables in TopicScreen.
+@Suppress("LongParameterList", "CyclomaticComplexMethod")
 internal fun MessageCard(
     message: Post,
+    /** #221 — global canonical staff directory; empty keeps direct tests/previews neutral. */
+    staffByPseudo: Map<String, AuthorRole> = emptyMap(),
     presentation: ReadingPostCardPresentation = ReadingPostCardPresentation(),
     multiQuoteSelected: Boolean = false,
     onOpenProfile: (() -> Unit)? = null,
@@ -1860,11 +1875,20 @@ internal fun MessageCard(
     // on the identity node (TalkBack traverses it first), never a heading. The fallback pseudo or
     // creator slot stays the card's exactly-one heading (#884, pinned by MessageCardShellSmokeTest).
     val egoPostStateDescription = stringResource(R.string.messages_post_ego_state_description)
+    val moderationPostStateDescription =
+        stringResource(R.string.messages_post_moderation_state_description)
     val citedCount = message.citedCount ?: 0
     // #221 — canonical creator detection (case / format-char / NBSP insensitive) runs once per
-    // author, not on every recomposition of this hot list row. Only creators need a pseudo slot;
-    // everyone else keeps PostIdentityHeader's neutral fallback and its built-in interaction/a11y.
+    // author, not on every recomposition of this hot list row. Creators and staff need a pseudo
+    // slot (gold leaf or neutral Text + role pill); everyone else keeps the neutral fallback.
     val isCreator = remember(message.author) { isRf2Creator(message.author) }
+    val authorRole = remember(message.author, message.isModerationPost, staffByPseudo) {
+        resolveAuthorRolePill(
+            author = message.author,
+            isModerationPost = message.isModerationPost,
+            staffByPseudo = staffByPseudo,
+        )
+    }
     ReadingPostCard(
         post = message,
         presentation = presentation.copy(selected = multiQuoteSelected),
@@ -1874,24 +1898,35 @@ internal fun MessageCard(
         mediaDiskCachePolicy = PostMediaDiskCachePolicy.DISABLED,
         onGoToCitedPost = onGoToCitedPost,
         onImageLongPress = onImageLongPress,
-        identity = {
+        identity = { moderationOverride ->
             // An MP has no anchor/category tint, but still carries the same full-width identity band
-            // as a normal topic post. Its secondaryContainer colour is therefore FIXED and independent
-            // from EgoPost: the highlight belongs to the enclosing card container below the band.
+            // as a normal topic post. Its neutral secondaryContainer colour is independent from
+            // EgoPost; a moderation row explicitly overrides it with the RF1 two-tone red header.
             // PostIdentityBand adds no padding, so the shared band rhythm is reinjected on the
             // header — MP-owned gutters at cardBodyHorizontal, shared symmetric vertical inset at
             // cardHeaderVertical; the header↔body gap remains the body slot's own cardBodyTop.
+            val bandContainerColor = moderationOverride?.containerColor
+                ?: MaterialTheme.colorScheme.secondaryContainer
+            val bandContentColor = moderationOverride?.contentColor
+                ?: contentColorFor(bandContainerColor)
+            val supportingContentColorOverride = moderationOverride?.let { bandContentColor }
             PostIdentityBand(
                 modifier = Modifier.semantics {
-                    if (presentation.egoPostHighlighted) {
-                        stateDescription = egoPostStateDescription
+                    when {
+                        presentation.egoPostHighlighted -> {
+                            stateDescription = egoPostStateDescription
+                        }
+                        moderationOverride != null -> {
+                            stateDescription = moderationPostStateDescription
+                        }
                     }
                 },
-                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                containerColor = bandContainerColor,
+                contentColor = bandContentColor,
             ) {
-                // A creator supplies the shared gold pseudo leaf; everyone else uses the neutral
-                // fallback. Per the slot contract, the creator branch owns both the profile tap and
-                // the exactly-one heading on its real text node. The band adds no heading of its own.
+                // A creator supplies the shared gold pseudo leaf; a non-creator staff supplies a
+                // neutral Text beside its pill; everyone else uses the neutral fallback. Per the
+                // slot contract, the real pseudo node owns the profile tap and exactly one heading.
                 PostIdentityHeader(
                     author = message.author,
                     avatarUrl = message.avatarUrl,
@@ -1904,23 +1939,45 @@ internal fun MessageCard(
                     onAvatarClickLabel = openProfileLabel,
                     onAuthorClick = onOpenProfile,
                     onAuthorClickLabel = openProfileLabel,
-                    pseudo = if (isCreator) {
+                    supportingContentColorOverride = supportingContentColorOverride,
+                    pseudo = if (isCreator || authorRole != null) {
                         {
-                            val pseudoModifier = (
-                                if (onOpenProfile != null) {
-                                    Modifier.clickable(
-                                        onClick = onOpenProfile,
-                                        role = Role.Button,
-                                        onClickLabel = openProfileLabel,
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                val pseudoModifier = (
+                                    if (onOpenProfile != null) {
+                                        Modifier
+                                            .weight(weight = 1f, fill = false)
+                                            .clickable(
+                                                onClick = onOpenProfile,
+                                                role = Role.Button,
+                                                onClickLabel = openProfileLabel,
+                                            )
+                                    } else {
+                                        Modifier.weight(weight = 1f, fill = false)
+                                    }
+                                    ).semantics { heading() }
+                                if (isCreator) {
+                                    CreatorPseudoText(
+                                        author = message.author,
+                                        modifier = pseudoModifier,
+                                        colorOverride = supportingContentColorOverride,
                                     )
                                 } else {
-                                    Modifier
+                                    Text(
+                                        text = message.author,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = pseudoModifier,
+                                    )
                                 }
-                                ).semantics { heading() }
-                            CreatorPseudoText(
-                                author = message.author,
-                                modifier = pseudoModifier,
-                            )
+                                authorRole?.let { AuthorRolePill(role = it) }
+                            }
                         }
                     } else {
                         null
@@ -1928,7 +1985,12 @@ internal fun MessageCard(
                     // #1117 — strict topic parity: one explicit 48.dp menu target in the header,
                     // and no competing card-wide long press that can collide with text selection.
                     trailing = onOpenMenu?.let { openMenu ->
-                        { MessageMenuTrigger(onOpenMenu = openMenu) }
+                        {
+                            MessageMenuTrigger(
+                                onOpenMenu = openMenu,
+                                colorOverride = supportingContentColorOverride,
+                            )
+                        }
                     },
                     // #483/#1051 — same compact data-driven marker as the topic; null emits no slot.
                     dateTrailing = if (message.editedAt != null) {
@@ -1937,7 +1999,8 @@ internal fun MessageCard(
                             Text(
                                 text = "· $editedLabel",
                                 style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = supportingContentColorOverride
+                                    ?: MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.semantics { contentDescription = editedLabel },
                             )
                         }
@@ -1977,6 +2040,7 @@ private fun MessageQuoteActions(
     multiQuoteSelected: Boolean,
     horizontalPadding: Dp,
 ) {
+    val readingColors = readingContentColors()
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1994,10 +2058,10 @@ private fun MessageQuoteActions(
         TextButton(
             onClick = actions.onToggleMultiQuote,
             colors = if (multiQuoteSelected) {
-                ButtonDefaults.textButtonColors()
+                ButtonDefaults.textButtonColors(contentColor = readingColors.linkColor)
             } else {
                 ButtonDefaults.textButtonColors(
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    contentColor = readingColors.onBodyVariant,
                 )
             },
             modifier = Modifier.semantics {
@@ -2015,7 +2079,10 @@ private fun MessageQuoteActions(
                 ),
             )
         }
-        TextButton(onClick = actions.onQuote) {
+        TextButton(
+            onClick = actions.onQuote,
+            colors = ButtonDefaults.textButtonColors(contentColor = readingColors.linkColor),
+        ) {
             Text(text = stringResource(R.string.messages_quote))
         }
     }
@@ -2023,13 +2090,16 @@ private fun MessageQuoteActions(
 
 /** Topic-parity menu glyph reused by visible and hidden MP cards. */
 @Composable
-private fun MessageMenuTrigger(onOpenMenu: () -> Unit) {
+private fun MessageMenuTrigger(
+    onOpenMenu: () -> Unit,
+    colorOverride: Color? = null,
+) {
     val menuLabel = stringResource(R.string.messages_message_menu_action)
     Text(
         text = "⋯",
         style = MaterialTheme.typography.titleMedium,
         fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = colorOverride ?: MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier
             .minimumInteractiveComponentSize()
             .clickable(

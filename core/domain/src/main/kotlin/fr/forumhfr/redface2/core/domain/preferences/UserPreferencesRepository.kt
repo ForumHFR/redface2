@@ -213,6 +213,16 @@ interface UserPreferencesRepository {
     suspend fun setAccentColor(color: AccentColor)
 
     /**
+     * External-link app selection (#1207): when `true`, every explicit « ouvrir dans le
+     * navigateur » action uses Android's « Ouvrir avec… » chooser instead of launching the
+     * concrete default browser directly. Default `false` preserves the historical direct launch.
+     */
+    fun observeAlwaysAskLinkApp(): Flow<Boolean>
+
+    /** Persists [observeAlwaysAskLinkApp]. Default `false` until the first call. */
+    suspend fun setAlwaysAskLinkApp(enabled: Boolean)
+
+    /**
      * Topic top app bar auto-hide (build 89 follow-up): when `true`, the topic top bar (title +
      * page counter) collapses while the user scrolls down through the posts and re-appears as soon
      * as they scroll back toward the top — Material3 `enterAlways` behaviour — freeing reading
@@ -326,6 +336,17 @@ interface UserPreferencesRepository {
 
     /** Persists [observeTopicPollsExpanded]. Default `false` until the first call. */
     suspend fun setTopicPollsExpanded(enabled: Boolean)
+
+    /**
+     * #1170 — whether an unanswered topic poll stays expanded when [observeTopicPollsExpanded]
+     * is disabled. Default `false`: the historical global collapsed/expanded preference remains
+     * authoritative until the reader explicitly opts in. A poll is eligible only while its live
+     * vote form carries a non-blank token and the server did not mark it closed.
+     */
+    fun observeTopicUnansweredPollsExpanded(): Flow<Boolean>
+
+    /** Persists [observeTopicUnansweredPollsExpanded]. Default `false` until the first call. */
+    suspend fun setTopicUnansweredPollsExpanded(enabled: Boolean)
 
     /**
      * #330 — whether each post's author signature (`<span class="signature">`, web parity) is
@@ -564,4 +585,22 @@ interface UserPreferencesRepository {
 
     /** Persists [observeImmersiveNavBarReveal]. Default [ImmersiveNavBarReveal.MANUAL] until the first call. */
     suspend fun setImmersiveNavBarReveal(mode: ImmersiveNavBarReveal)
+
+    /**
+     * #1132 — the last « Mes drapeaux » filter the user picked on the Forum category screen (#455).
+     * Re-applied as the seed when the user enters the NEXT category instead of always starting from
+     * [CategoryFlagFilter.ALL]. There is deliberately no Settings UI: the preference is remembered
+     * implicitly from the on-screen selector. Observed by `:feature:forum`
+     * ([fr.forumhfr.redface2.feature.forum.CategoryViewModel]). A corrupt / unknown stored value
+     * degrades to [CategoryFlagFilter.ALL].
+     */
+    fun observeForumCategoryFlagFilter(): Flow<CategoryFlagFilter>
+
+    /**
+     * Persists [observeForumCategoryFlagFilter]. Default [CategoryFlagFilter.ALL] until the first
+     * call. Only written when the user explicitly picks a filter on an authenticated session — an
+     * anonymous seed and a logout reset must NOT touch this key (a logout is a UI safety measure,
+     * not a user choice).
+     */
+    suspend fun setForumCategoryFlagFilter(filter: CategoryFlagFilter)
 }

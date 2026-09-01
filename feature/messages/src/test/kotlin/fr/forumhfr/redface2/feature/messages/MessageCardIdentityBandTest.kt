@@ -7,6 +7,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
@@ -19,8 +20,10 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
@@ -28,6 +31,7 @@ import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.post.PostCardShellContainerColorKey
 import fr.forumhfr.redface2.core.ui.post.PostIdentityBandContainerColorKey
+import fr.forumhfr.redface2.core.ui.post.PostIdentityBandContentColorKey
 import fr.forumhfr.redface2.core.ui.post.ReadingPostCardPresentation
 import fr.forumhfr.redface2.core.ui.theme.DisplayMetrics
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
@@ -35,6 +39,7 @@ import fr.forumhfr.redface2.core.ui.theme.RedfaceLightColorScheme
 import fr.forumhfr.redface2.core.ui.theme.egoHighlightColors
 import java.time.Instant
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -71,6 +76,16 @@ class MessageCardIdentityBandTest {
             .assertLeftPositionInRootIsEqualTo(16.dp)
             .assertWidthIsEqualTo(328.dp)
             .assert(hasAnyAncestor(shellMatcher(RedfaceLightColorScheme.surfaceContainer)))
+            // C6 — a normal band forwards contentColorFor(secondaryContainer). This theme reuses
+            // #FFDAD9 for BOTH primaryContainer and secondaryContainer, so M3 contentColorFor matches
+            // the earlier-listed primaryContainer role and resolves onPrimaryContainer, not
+            // onSecondaryContainer (unchanged from the historical Surface-derived content colour).
+            .assert(
+                SemanticsMatcher.expectValue(
+                    PostIdentityBandContentColorKey,
+                    RedfaceLightColorScheme.onPrimaryContainer,
+                ),
+            )
         assertMpGutters(
             cardLeft = 16.dp,
             expectedHorizontal = 12.dp,
@@ -132,6 +147,40 @@ class MessageCardIdentityBandTest {
         compose.runOnIdle { flat.value = true }
 
         assertEgoPostBandContract(expectedShellColor = expectedEgoPostColor)
+    }
+
+    @Test
+    fun `a moderation message uses the RF1 red body and white-on-dark-red band`() {
+        val message = sampleMessage(isModerationPost = true).copy(editedAt = Instant.EPOCH)
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                MessageCard(
+                    message = message,
+                    staffByPseudo = mapOf("xatrix" to AuthorRole.MODERATOR),
+                    onOpenMenu = {},
+                    quoteAffordances = MessageQuoteAffordances(onQuote = {}, onToggleMultiQuote = {}),
+                )
+            }
+        }
+
+        shellNode(MODERATION_BODY_LIGHT).assertExists()
+        compose.onNode(
+            SemanticsMatcher.expectValue(
+                PostIdentityBandContainerColorKey,
+                MODERATION_HEADER_LIGHT,
+            ),
+            useUnmergedTree = true,
+        ).assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, MODERATION_STATE),
+        ).assert(
+            SemanticsMatcher.expectValue(PostIdentityBandContentColorKey, Color.White),
+        )
+        compose.onNodeWithContentDescription("Rôle : Modérateur").assertDoesNotExist()
+        assertTextColor(message.date.asMessageDate(), Color.White)
+        assertTextColor("· édité", Color.White)
+        assertTextColor("⋯", Color.White)
+        assertTextColor("+ Citer", MODERATION_VARIANT_LIGHT)
+        assertTextColor("Citer", MODERATION_LINK_LIGHT)
     }
 
     private fun setCard(
@@ -219,7 +268,17 @@ class MessageCardIdentityBandTest {
         useUnmergedTree = true,
     )
 
-    private fun sampleMessage(): Post = Post(
+    private fun assertTextColor(text: String, expected: Color) {
+        val layouts = mutableListOf<TextLayoutResult>()
+        val action = requireNotNull(
+            compose.onNodeWithText(text, useUnmergedTree = true)
+                .fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action,
+        )
+        assertTrue(action(layouts))
+        assertEquals(expected, layouts.single().layoutInput.style.color)
+    }
+
+    private fun sampleMessage(isModerationPost: Boolean = false): Post = Post(
         numreponse = 1,
         author = "XaTriX",
         date = Instant.EPOCH,
@@ -233,11 +292,17 @@ class MessageCardIdentityBandTest {
         isOwnPost = false,
         quotedAuthors = emptyList(),
         postIndex = null,
+        isModerationPost = isModerationPost,
     )
 
     private companion object {
         const val BODY_TEXT = "bonjour"
         const val OWN_POST_STATE = "Votre message"
+        const val MODERATION_STATE = "Message de la modération"
         const val DP_TOLERANCE = 0.01f
+        val MODERATION_HEADER_LIGHT = Color(0xFFB71C1C)
+        val MODERATION_BODY_LIGHT = Color(0xFFD32F2F)
+        val MODERATION_VARIANT_LIGHT = Color(0xFFFFF8F8)
+        val MODERATION_LINK_LIGHT = Color(0xFFFFF9C4)
     }
 }

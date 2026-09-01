@@ -59,6 +59,7 @@
     <string name="topic_error_title">Erreur de chargement</string>
     <string name="topic_error_body">Impossible d’ouvrir la page %1$d.\n\n%2$s</string>
     <string name="topic_post_ego_state_description">Votre message</string>
+    <string name="topic_post_moderation_state_description">Message de la modération</string>
     <!-- #362 — per-post contextual menu (post number, permalink copy, edit marker, citations). -->
     <!-- #436 — libellés courts du bouton « + » en pied de carte (parité web quote+/quote-). Le
          glyphe et le mot basculent avec l'appartenance au panier ; le contentDescription long
@@ -97,6 +98,16 @@
         <item quantity="one">cité %1$d fois</item>
         <item quantity="other">cité %1$d fois</item>
     </plurals>
+    <!-- #783 — feuille de l'index inverse HFR. Le titre reprend le compteur serveur ; le corps
+         n'affiche volontairement aucun total, car HFR peut dédupliquer les posts citeurs. -->
+    <plurals name="topic_citing_posts_title">
+        <item quantity="one">Cité %1$d fois</item>
+        <item quantity="other">Cité %1$d fois</item>
+    </plurals>
+    <string name="topic_citing_posts_empty">Aucun citeur trouvé</string>
+    <string name="topic_citing_posts_error">Impossible de charger les citations</string>
+    <string name="topic_citing_posts_no_text">Message sans extrait textuel</string>
+    <string name="topic_citing_posts_open">Aller au message de %1$s</string>
     <string name="topic_poll_option">%1$s — %2$.1f%% (%3$d votes)</string>
     <!-- #697 — forme « formulaire » (pas encore voté / lecture anonyme) : options sans résultats,
          et remplacement du résumé total-votes par cette mention factuelle. -->
@@ -106,6 +117,39 @@
     <string name="topic_poll_single_choice">choix unique</string>
     <string name="topic_poll_show">(afficher)</string>
     <string name="topic_poll_hide">(masquer)</string>
+    <string name="topic_poll_closed">Sondage clos</string>
+    <string name="topic_poll_expires_at">Expire le %1$s</string>
+    <string name="topic_poll_expired_at">A expiré le %1$s</string>
+    <plurals name="topic_poll_blank_votes">
+        <item quantity="one">%1$d vote blanc</item>
+        <item quantity="other">%1$d votes blancs</item>
+    </plurals>
+    <!-- #779 — vote Topic-only : contrôles, progression et erreurs typées du slice MVI. -->
+    <plurals name="topic_poll_max_choices">
+        <item quantity="one">%1$d choix maximum</item>
+        <item quantity="other">%1$d choix maximum</item>
+    </plurals>
+    <string name="topic_poll_vote">Voter</string>
+    <string name="topic_poll_vote_blank">Voter blanc</string>
+    <string name="topic_poll_submitting">Envoi du vote…</string>
+    <string name="topic_poll_refreshing">Actualisation des résultats…</string>
+    <string name="topic_poll_unavailable">Vote indisponible. Actualisez la page ou reconnectez-vous.</string>
+    <string name="topic_poll_error_invalid_hash">La session de vote a expiré. Actualisez la page.</string>
+    <string name="topic_poll_error_empty_selection">Sélectionnez au moins une réponse.</string>
+    <string name="topic_poll_error_invalid_selection">Les réponses du sondage ont changé. Actualisez la page.</string>
+    <string name="topic_poll_error_too_many_selections">Trop de réponses sont sélectionnées.</string>
+    <string name="topic_poll_error_malformed_form">Ce sondage ne peut pas être envoyé depuis l’app.</string>
+    <string name="topic_poll_error_unexpected_response">HFR a renvoyé une réponse inattendue. Réessayez.</string>
+    <string name="topic_poll_error_network">Erreur réseau. Votre sélection est conservée.</string>
+    <string name="topic_poll_error_refresh_after_accepted">Vote enregistré, mais l’actualisation des résultats a échoué. Tirez pour réessayer.</string>
+    <!-- #1201 — clôture d'un sondage (réservée au créateur du sujet, action définitive) -->
+    <string name="topic_poll_close">Clore ce sondage</string>
+    <string name="topic_poll_close_dialog_title">Clore le sondage ?</string>
+    <string name="topic_poll_close_dialog_message">Cette action est définitive, personne ne pourra plus voter.</string>
+    <string name="topic_poll_close_dialog_confirm">Clore</string>
+    <string name="topic_poll_close_dialog_cancel">Annuler</string>
+    <string name="topic_poll_close_success">Sondage clos.</string>
+    <string name="topic_poll_close_failure">La clôture du sondage a échoué.</string>
     <string name="topic_retry">Réessayer</string>
     <string name="topic_zoom_reset_chip">1×</string>
     <string name="topic_zoom_reset">Revenir au zoom normal</string>

@@ -1,5 +1,8 @@
 package fr.forumhfr.redface2.core.model
 
+import fr.forumhfr.redface2.core.model.write.PollVoteForm
+import java.time.LocalDateTime
+
 data class Topic(
     val cat: Int,
     val post: Int,
@@ -24,6 +27,16 @@ data class Topic(
     val totalPages: Int,
     val isFirstPostOwner: Boolean,
     val poll: Poll?,
+    /**
+     * Vote form associated with [poll], or `null` when HFR served results/no poll.
+     *
+     * This capability is **transient** and tied to the exact live page: its `hash_check` is never
+     * persisted, copied to `SavedStateHandle`, or logged. Room deliberately stores only [poll], so
+     * cache rehydration restores this field as `null` until an authenticated GET supplies a fresh
+     * form. Logged-out parsing may still surface a form with a blank token; the submit repository
+     * owns the downstream guard that rejects it before POST.
+     */
+    val pollVoteForm: PollVoteForm? = null,
     /**
      * Whether the user can reply to / quote / edit on this topic. Postability is
      * **driven by the presence of the `bddpost` reply form** in the topic page HTML
@@ -67,6 +80,33 @@ data class Poll(
      * `true` on the RESULTS shape (.sondageLeft bars), the only shape parsed before #697.
      */
     val resultsAvailable: Boolean = true,
+    /**
+     * #779 (PR 1) — the maximum number of options a voter may pick, read from HFR's
+     * « Sondage à N choix possibles » caption (present on both the vote FORM's `div.sondage`
+     * and the results card). A single-choice poll (radio inputs / no caption) resolves to `1`,
+     * a factual property of a radio group — not an invented value.
+     *
+     * `null` means the limit is genuinely unknown : a legacy cache row written before this field
+     * existed, or a multiple-choice poll whose caption could not be read. Callers must treat
+     * `null` as « unknown legacy limit », never silently coerce it to `1` — that would falsely
+     * cap a multi-choice poll at a single vote. HFR's real vote endpoint stays untouched here
+     * (#779 PR 1 is parse-only) ; the future submit path (PR 2/PR 3) consumes this.
+    */
+    val maxSelections: Int? = null,
+    val closed: Boolean = false,
+    /**
+     * Whether HFR exposed the native adjacent `close_sondage.php` link on this page. The link is
+     * rendered only for the owner of an open poll, so this server-provided capability is the sole
+     * gate for the close affordance. `false` also covers non-owner, closed and legacy cache rows.
+     */
+    val canClose: Boolean = false,
+    /**
+     * HFR wall-clock expiry without a time zone. Never convert it to an `Instant` or infer closure
+     * from the local clock: the server-provided [closed] state is the source of truth.
+     */
+    val expiresAt: LocalDateTime? = null,
+    /** `0` is a real count; `null` means no results counter or a legacy cache row. */
+    val blankVotes: Int? = null,
 )
 
 data class PollOption(

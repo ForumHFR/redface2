@@ -48,6 +48,54 @@ data class UserProfile(
 
 `Post.profileId: Int?` (Phase 2 finish #208) — id numérique HFR extrait depuis `<a href="/hfr/profil-{N}.htm">` dans le toolbar de chaque post. Null pour les posts « Publicité » ou les reads anonymes sans lien profil. Persisté en Room v6 (`MIGRATION_5_6`). Clé canonique pour la navigation vers le profil — `post.author` et `post.avatarUrl` sont des hints d'affichage.
 
+### Rôle de l'auteur — `AuthorRole` (#1112, #221)
+
+Rôle forum d'un auteur (badge). Le rôle **n'est pas** dans le HTML du post ; il est **hybride**, à
+deux sources publiques anonymes (cf. `protocol-hfr.md` § Rôle de l'auteur). Aucun champ n'est ajouté
+à `Post` ni à `UserProfile`.
+
+```kotlin
+enum class AuthorRole {
+    MEMBER,       // « Membre »
+    MODERATOR,    // « Modérateur »
+    ADMIN,        // « Administrateur »
+    SUPER_ADMIN,  // « Super Administrateur »
+    DEVELOPER,    // « Développeur »
+    ARCHITECT,    // « Architecte / Développeur principal »
+}
+```
+
+**Deux sources, deux clés** :
+
+- **Primaire — annuaire staff GLOBAL, clé = pseudo.** Un seul GET (`message-smi-mp-aj.php?responsable=1`)
+  donne la liste complète des responsables indexée par **pseudo**. C'est ce qui alimente le badge d'une
+  liste de posts : 1 GET + lookups locaux par pseudo (pas de N+1). L'annuaire n'expose **aucun**
+  `profileId`. Les pseudos HFR étant uniques, aucune confirmation par `profileId` n'est nécessaire.
+- **Secondaire — page profil, clé = `Post.profileId`.** La page profil (`/hfr/profil-{id}.htm`, champ
+  « Statut ») donne le rôle d'**un** auteur. Réservée à une demande explicite mono-utilisateur (écran
+  profil, PR C) — **jamais** un fallback « requêter tous les `profileId` » si l'annuaire échoue.
+
+Le mapping `libellé → AuthorRole` est **partagé** entre les deux sources (`authorRoleFromLabel` dans
+`:core:parser`) et conserve les six rôles distincts : `Membre` → `MEMBER`, `Modérateur` →
+`MODERATOR`, `Administrateur` → `ADMIN`, `Super Administrateur` → `SUPER_ADMIN`, `Développeur` →
+`DEVELOPER`, `Architecte / Développeur principal` → `ARCHITECT`. Tout libellé absent ou non reconnu
+→ l'entrée staff est ignorée, le profil rend `null`.
+
+Résolu par `AuthorRoleRepository` (interface dans `:core:domain/author`, impl
+`DefaultAuthorRoleRepository` dans `:core:data/author`) :
+
+- **`suspend fun getStaff(): Map<String, AuthorRole>`** — clés = pseudos **canonicalisés**
+  (`canonicalizePseudo`). Cache mémoire **unique** + TTL 24h ; single-flight unique. Échec réseau →
+  **cache périmé** s'il existe (sans avancer son timestamp), sinon `emptyMap()` ; un parse vide
+  n'écrase pas un cache valide.
+- **`suspend fun getRole(profileId: Int): AuthorRole?`** — GET anonyme de la page profil ; cache LRU
+  borné (~512) + TTL 24h, `null` (cache négatif) inclus ; single-flight par id ; échec réseau → `null`
+  non caché.
+
+Les deux partagent une **borne de parallélisme globale** (4 GET concurrents) et un scope propriétaire ;
+`CancellationException` et erreurs inattendues remontent. Donnée **décorative / publique / best-effort**
+(pas de badge si rôle indéterminé). **Pas de Room.**
+
 ---
 
 ## Vue d'ensemble
@@ -276,6 +324,7 @@ data class Topic(
     val totalPages: Int,
     val isFirstPostOwner: Boolean,   // Phase 1 : figé à false par TopicPageParser tant que parseEditPage n'est pas livrée (Phase 2). Renseigné côté serveur via la page d'édition du FP.
     val poll: Poll?,
+    val pollVoteForm: PollVoteForm? = null, // #779 : capacité de vote transitoire de CETTE page, présente uniquement avec poll.resultsAvailable=false. Jamais Room/SavedStateHandle/log ; le cache la réhydrate à null et force un GET authentifié pour retrouver le hash_check.
     val canReply: Boolean = false,   // #213 : postabilité = présence du formulaire bddpost dans la page topic (rendu uniquement en session authentifiée sur topic non verrouillé). Remplace l'ancien heuristique hasSubcat (subcat > 0), qui excluait à tort les cats IA postables (subcat=0) et faisait confiance au subcat du widget de recherche capturé logged-out. Persisté en Room v7 (MIGRATION_6_7). Défaut false : rows pré-v7 / prefetch anon en lecture seule jusqu'au prochain fetch authentifié. Gate Répondre/Citer/Modifier/Modifier-1er-message.
 ) {
     companion object { const val SUBCAT_UNKNOWN: Int = -1 }
@@ -367,6 +416,11 @@ data class Poll(
     val totalVotes: Int,
     val hasVoted: Boolean,
     val resultsAvailable: Boolean = true, // #697 — false = forme « formulaire » (pas encore voté)
+    val maxSelections: Int? = null,       // #779 — mono=1 ; multi=caption « Sondage à N choix possibles » ; null=borne multi inconnue/ancien cache, jamais coercée à 1
+    val closed: Boolean = false,          // état de clôture fourni par HFR ; fait foi pour désactiver l'écriture
+    val canClose: Boolean = false,        // #1206 — lien natif close_sondage.php présent : owner + sondage ouvert ; false sinon et pour ancien cache
+    val expiresAt: LocalDateTime? = null, // heure murale HFR sans fuseau ; ne jamais convertir en Instant ni en déduire la clôture via l'horloge locale
+    val blankVotes: Int? = null,          // 0 est une vraie valeur ; null = formulaire sans résultats, compteur absent ou ancien cache
 )
 
 data class PollOption(
@@ -381,8 +435,15 @@ pourcentages) uniquement après avoir voté ou cliqué « voir les résultats »
 « formulaire » (inputs radio/checkbox `name=reponse`) dans tous les autres cas — donc dans **toutes**
 les lectures anonymes, ce que l'app reçoit. `resultsAvailable = false` marque cette seconde forme :
 seuls `question`, `options[].text` et `multipleChoice` (déduit du type d'input : checkbox = multi)
-sont porteurs de sens. Le vote in-app est un chantier séparé (#779) ; `hasVoted` reste `false` en
-lecture seule.
+sont porteurs de sens. `Poll.maxSelections` porte la borne de sélection du même DOM : `1` pour une
+radio, la valeur de la caption pour un multi, `null` si cette borne est réellement inconnue. Le
+contrat domaine/transport du vote est livré par #779 ; son orchestration MVI et son UI restent un
+chantier séparé. `hasVoted` reste `false` sur la forme résultats et ne décide jamais de la capacité
+de vote : seule la présence de `Topic.pollVoteForm` le fait.
+
+Le signal `Poll.canClose` vient exclusivement du lien HFR `close_sondage.php`, adjacent au sondage :
+HFR ne le rend que pour le propriétaire d'un sondage ouvert, sur chaque page du topic. Son absence,
+y compris dans un ancien cache, vaut `false`.
 
 `EditInfo` est retourné par `HfrParser.parseEditPage(html)` (cf. [architecture.md]({{ site.baseurl }}/specs/architecture#core-parser--hfrparser)). Il capture l'état pré-rempli du formulaire d'édition HFR et ce qui doit être renvoyé côté `bdd.php` (cf. [protocol-hfr.md]({{ site.baseurl }}/specs/protocol-hfr#post-bddphp-edit)).
 
@@ -488,6 +549,32 @@ data class ReplyForm(
     val initialContent: String = "",  // Phase 2C (#146) : reply → "" ; quote → bloc `[quotemsg=…]` prérempli par HFR (verbatim, jamais reconstruit côté app)
 )
 
+data class PollVoteForm(              // #779 : extrait du form action*=vote.php de la page topic
+    val hashCheck: String,            // token CSRF volatile ; peut être vide logged-out ; JAMAIS persisté/loggé
+    val hiddenFields: Map<String, String>, // cat,p,page,sondage,owntopic,subcat,numeropost dans l'ordre DOM ; hash_check exclu
+    val choices: List<PollVoteChoice>,
+    val multipleChoice: Boolean,      // checkbox=true ; radio=false
+    val maxSelections: Int?,          // mono=1 ; multi=caption ; null si borne inconnue
+)
+
+data class PollVoteChoice(
+    val id: String,
+    val name: String,                 // mono : reponse ; multi : reponseN
+    val value: String,                // mono : index ; multi : 1
+    val label: String,
+)
+
+sealed interface PollVoteResult {
+    data object Accepted : PollVoteResult
+    data object AlreadyVoted : PollVoteResult
+    data class Failed(val reason: PollVoteFailureReason) : PollVoteResult
+}
+
+enum class PollVoteFailureReason {
+    InvalidHashCheck, EmptySelection, InvalidSelection, TooManySelections,
+    MalformedForm, UnexpectedResponse,
+}
+
 data class EditFirstPostContext(            // Phase 2D (#148) : édition du premier post d'un topic
     val cat: Int,
     val subcat: Int,                         // requis > 0
@@ -541,7 +628,12 @@ sealed interface ReplyFailureReason {
 }
 ```
 
-Le contrat HFR sous-jacent est documenté dans [`protocol-hfr.md` § POST `bddpost.php`]({{ site.baseurl }}/specs/protocol-hfr). Les `ReplyFailureReason` mappent un-à-un sur les fixtures `write_*_error.html` / `write_*_response.html` capturées en Phase 2A.
+Les formulaires d'écriture sont transitoires. En particulier, `PollVoteForm.hashCheck` ne traverse
+jamais Room ni `SavedStateHandle` et n'est jamais loggé ; un round-trip cache conserve `Poll` mais
+remet `Topic.pollVoteForm` à `null`. Les gardes pré-POST produisent tous les
+`PollVoteFailureReason` sauf `UnexpectedResponse`, réservé au parser de réponse.
+
+Les contrats HFR sous-jacents sont documentés dans [`protocol-hfr.md` § Form fields critiques]({{ site.baseurl }}/specs/protocol-hfr#form-fields-critiques). Les `ReplyFailureReason` mappent un-à-un sur les fixtures `write_*_error.html` / `write_*_response.html` capturées en Phase 2A.
 
 ---
 

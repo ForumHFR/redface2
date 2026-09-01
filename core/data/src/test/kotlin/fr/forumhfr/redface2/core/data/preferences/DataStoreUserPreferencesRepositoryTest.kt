@@ -3,9 +3,11 @@ package fr.forumhfr.redface2.core.data.preferences
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import app.cash.turbine.test
+import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
@@ -13,6 +15,7 @@ import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
+import fr.forumhfr.redface2.core.domain.preferences.NavBarLabelsBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
@@ -78,6 +81,15 @@ class DataStoreUserPreferencesRepositoryTest {
         }
     }
 
+    /** In-memory [NavBarLabelsBootstrapStore] (#1138) — same stance as the mirrors above; default true. */
+    private val navBarLabelsBootstrapStore = object : NavBarLabelsBootstrapStore {
+        var stored = true
+        override fun read(): Boolean = stored
+        override fun write(enabled: Boolean) {
+            stored = enabled
+        }
+    }
+
     @Before
     fun setUp() {
         dataStore = PreferenceDataStoreFactory.create(
@@ -87,6 +99,7 @@ class DataStoreUserPreferencesRepositoryTest {
             dataStore = dataStore,
             themeBootstrapStore = themeBootstrapStore,
             startScreenBootstrapStore = startScreenBootstrapStore,
+            navBarLabelsBootstrapStore = navBarLabelsBootstrapStore,
             ioDispatcher = dispatcher,
             externalScope = externalScope,
         )
@@ -113,6 +126,7 @@ class DataStoreUserPreferencesRepositoryTest {
             dataStore = survivalStore,
             themeBootstrapStore = themeBootstrapStore,
             startScreenBootstrapStore = startScreenBootstrapStore,
+            navBarLabelsBootstrapStore = navBarLabelsBootstrapStore,
             ioDispatcher = ioDispatcher,
             externalScope = appScope,
         )
@@ -772,6 +786,26 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `always ask link app defaults false and round-trips true then false`() = runTest(dispatcher) {
+        repository.observeAlwaysAskLinkApp().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setAlwaysAskLinkApp(true)
+        repository.observeAlwaysAskLinkApp().test {
+            assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setAlwaysAskLinkApp(false)
+        repository.observeAlwaysAskLinkApp().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `observeTopicTopBarAutoHide defaults to false then persists true and false`() = runTest(dispatcher) {
         repository.observeTopicTopBarAutoHide().test {
             assertFalse(awaitItem())
@@ -811,6 +845,29 @@ class DataStoreUserPreferencesRepositoryTest {
             cancelAndIgnoreRemainingEvents()
         }
     }
+
+    @Test
+    fun `unanswered poll expansion defaults false and round-trips the exact key`() =
+        runTest(dispatcher) {
+            val key = booleanPreferencesKey("topic_unanswered_polls_expanded")
+            repository.observeTopicUnansweredPollsExpanded().test {
+                assertFalse(awaitItem())
+                cancelAndIgnoreRemainingEvents()
+            }
+
+            repository.setTopicUnansweredPollsExpanded(true)
+            assertEquals(true, dataStore.data.first()[key])
+            repository.observeTopicUnansweredPollsExpanded().test {
+                assertTrue(awaitItem())
+                cancelAndIgnoreRemainingEvents()
+            }
+
+            dataStore.edit { prefs -> prefs[key] = false }
+            repository.observeTopicUnansweredPollsExpanded().test {
+                assertFalse(awaitItem())
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
 
     @Test
     fun `observeFoldLongQuotes defaults to true then persists false and true`() = runTest(dispatcher) {
@@ -922,6 +979,33 @@ class DataStoreUserPreferencesRepositoryTest {
             assertTrue(awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `setNavBarLabels mirrors the value into the bootstrap store`() = runTest(dispatcher) {
+        // #1138 — the synchronous cold-start mirror must follow every nav-bar-labels write, so the
+        // next cold start seeds the StateFlow from the stored value instead of the hard-coded true.
+        repository.setNavBarLabels(false)
+        assertFalse(navBarLabelsBootstrapStore.read())
+
+        repository.setNavBarLabels(true)
+        assertTrue(navBarLabelsBootstrapStore.read())
+    }
+
+    @Test
+    fun `observing the nav bar labels backfills an empty mirror from the persisted value`() = runTest(dispatcher) {
+        // #1138 — same convergence contract as the theme mirror (#386): a user who hid the labels
+        // BEFORE the mirror existed has `false` in DataStore but the default `true` in the mirror.
+        // The first observation must converge the mirror so the flash stops on the NEXT cold start.
+        dataStore.edit { prefs -> prefs[booleanPreferencesKey("nav_bar_labels")] = false }
+        assertTrue("precondition: the mirror still holds its default", navBarLabelsBootstrapStore.read())
+
+        repository.observeNavBarLabels().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertFalse(navBarLabelsBootstrapStore.read())
     }
 
     @Test
@@ -1365,5 +1449,106 @@ class DataStoreUserPreferencesRepositoryTest {
             assertEquals(FontScalePreference.M, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `observeForumCategoryFlagFilter defaults to ALL on an empty store`() = runTest(dispatcher) {
+        // #1132 — ALL is the default (the normal listing), never the enum's first ordinal by chance.
+        repository.observeForumCategoryFlagFilter().test {
+            assertEquals(CategoryFlagFilter.ALL, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setForumCategoryFlagFilter persists and round-trips all four values`() = runTest(dispatcher) {
+        // #1132 — every value must round-trip, FAVORITES included (treated like the other three).
+        for (filter in CategoryFlagFilter.entries) {
+            repository.setForumCategoryFlagFilter(filter)
+            repository.observeForumCategoryFlagFilter().test {
+                assertEquals(filter, awaitItem())
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+    }
+
+    @Test
+    fun `corrupt forum_category_flag_filter value falls back to ALL instead of crashing`() = runTest(dispatcher) {
+        // An unknown value (older build / manual edit) must degrade to ALL, not crash valueOf.
+        dataStore.edit { prefs -> prefs[stringPreferencesKey("forum_category_flag_filter")] = "STARRED" }
+
+        repository.observeForumCategoryFlagFilter().test {
+            assertEquals(CategoryFlagFilter.ALL, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `forum flag-filter reads come from the in-memory cache, not a divergent disk value`() = runTest(dispatcher) {
+        // #1132 bug A — the cache is the in-memory source of truth. Once a value is set in-session, a
+        // later reader (the next category's ViewModel) sees THAT value, even if the disk holds a
+        // different one (e.g. an older value not yet overwritten by the async commit). Pre-fix, observe
+        // mapped `dataStore.data` live and would return the disk value — this test would fail.
+        repository.setForumCategoryFlagFilter(CategoryFlagFilter.READ)
+        assertEquals(CategoryFlagFilter.READ, repository.observeForumCategoryFlagFilter().first())
+
+        // Mutate the DISK directly to a different value behind the cache's back.
+        dataStore.edit { prefs ->
+            prefs[stringPreferencesKey("forum_category_flag_filter")] = CategoryFlagFilter.FAVORITES.name
+        }
+
+        // A fresh collector still returns the cached READ — the disk change is not re-read.
+        assertEquals(CategoryFlagFilter.READ, repository.observeForumCategoryFlagFilter().first())
+    }
+
+    @Test
+    fun `two rapid forum flag-filter writes are cache-visible before commit and persist last-wins`() = runTest {
+        // #1132 bugs A+B — cache-first decouples the in-session read from the async disk commit, and
+        // the last choice wins both in the cache and on disk. Built on a StandardTestDispatcher so the
+        // disk commits are provably only STARTED (dispatched onto the app scope) — not committed —
+        // after `runCurrent`, mirroring the #507 survival test's harness.
+        val ioDispatcher = StandardTestDispatcher(testScheduler)
+        val dataStoreScope = CoroutineScope(ioDispatcher + Job())
+        val appScope = CoroutineScope(ioDispatcher + SupervisorJob())
+        val store = PreferenceDataStoreFactory.create(
+            scope = dataStoreScope,
+            produceFile = { tempFolder.newFile("forum_filter_ordering.preferences_pb") },
+        )
+        val repo = DataStoreUserPreferencesRepository(
+            dataStore = store,
+            themeBootstrapStore = themeBootstrapStore,
+            startScreenBootstrapStore = startScreenBootstrapStore,
+            navBarLabelsBootstrapStore = navBarLabelsBootstrapStore,
+            ioDispatcher = ioDispatcher,
+            externalScope = appScope,
+        )
+
+        // Two rapid choices, each on its own caller (mirrors two quick selectFlagFilter taps, each on
+        // its own viewModelScope.launch). Their async disk commits stay queued on appScope.
+        val callers = CoroutineScope(ioDispatcher + Job())
+        callers.launch { repo.setForumCategoryFlagFilter(CategoryFlagFilter.READ) }
+        callers.launch { repo.setForumCategoryFlagFilter(CategoryFlagFilter.FAVORITES) }
+        runCurrent() // runs the SYNCHRONOUS cache updates; the disk commits are dispatched, not committed
+
+        // In-session: a fresh collector already sees the last choice from the cache, with NO disk
+        // commit yet. Pre-fix (observe mapped `dataStore.data`) this would read the empty disk → ALL.
+        assertEquals(CategoryFlagFilter.FAVORITES, repo.observeForumCategoryFlagFilter().first())
+
+        advanceUntilIdle() // let both queued disk commits run
+
+        // Cross-restart: a fresh repository reading the same file cold sees the last choice on disk.
+        val fresh = DataStoreUserPreferencesRepository(
+            dataStore = store,
+            themeBootstrapStore = themeBootstrapStore,
+            startScreenBootstrapStore = startScreenBootstrapStore,
+            navBarLabelsBootstrapStore = navBarLabelsBootstrapStore,
+            ioDispatcher = ioDispatcher,
+            externalScope = appScope,
+        )
+        assertEquals(CategoryFlagFilter.FAVORITES, fresh.observeForumCategoryFlagFilter().first())
+
+        callers.cancel()
+        appScope.cancel()
+        dataStoreScope.cancel()
     }
 }

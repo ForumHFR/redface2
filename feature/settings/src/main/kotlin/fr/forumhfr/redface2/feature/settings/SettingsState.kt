@@ -96,6 +96,12 @@ data class SettingsState(
     val isUpdatingAccentColor: Boolean = false,
     val accentColorError: Boolean = false,
     val accentColorTouchedLocally: Boolean = false,
+    // #1207 — force Android's « Ouvrir avec… » chooser for explicit external-link actions.
+    // Default false preserves the direct-default-browser behaviour until the user opts in.
+    val alwaysAskLinkApp: Boolean = false,
+    val isUpdatingAlwaysAskLinkApp: Boolean = false,
+    val alwaysAskLinkAppError: Boolean = false,
+    val alwaysAskLinkAppTouchedLocally: Boolean = false,
     // Topic reading preferences (build 89 follow-up). Same optimistic-flip machinery:
     // `topicTopBarAutoHide` is the displayed value, `isUpdating*` gates the switch while
     // DataStore writes, `*Error` surfaces a persist failure, `*TouchedLocally` is a legacy write
@@ -129,6 +135,12 @@ data class SettingsState(
     val isUpdatingTopicPollsExpanded: Boolean = false,
     val topicPollsExpandedError: Boolean = false,
     val topicPollsExpandedTouchedLocally: Boolean = false,
+    // #1170 — déplier uniquement les sondages auxquels le lecteur peut encore répondre, même si
+    // le réglage général ci-dessus reste désactivé. Préférence indépendante, opt-in par défaut.
+    val topicUnansweredPollsExpanded: Boolean = false,
+    val isUpdatingTopicUnansweredPollsExpanded: Boolean = false,
+    val topicUnansweredPollsExpandedError: Boolean = false,
+    val topicUnansweredPollsExpandedTouchedLocally: Boolean = false,
     // #330 — afficher les signatures sous les posts. Même machinerie optimistic-flip + garde de
     // course au démarrage. Default FALSE (masquées) : les signatures sont bruyantes, donc opt-in.
     val topicSignatures: Boolean = false,
@@ -334,6 +346,10 @@ data class SettingsState(
     val canToggleTopicPollsExpanded: Boolean
         get() = !isUpdatingTopicPollsExpanded
 
+    // #1170 — independent from the global poll-expansion write and value.
+    val canToggleTopicUnansweredPollsExpanded: Boolean
+        get() = !isUpdatingTopicUnansweredPollsExpanded
+
     // #330 — the signatures toggle is gated only by its own write.
     val canToggleTopicSignatures: Boolean
         get() = !isUpdatingTopicSignatures
@@ -496,6 +512,9 @@ sealed interface SettingsIntent {
     data class AmoledEnabledChanged(val enabled: Boolean) : SettingsIntent
     data class AccentColorChanged(val color: AccentColor) : SettingsIntent
 
+    /** #1207 — use Android's app chooser for every explicit external-link opening. */
+    data class AlwaysAskLinkAppChanged(val enabled: Boolean) : SettingsIntent
+
     // Build 89 follow-up — topic top-bar auto-hide toggle. Optimistic-flip contract, like the
     // flags toggles: the boolean is the desired post-flip state.
     data class TopicTopBarAutoHideChanged(val enabled: Boolean) : SettingsIntent
@@ -509,6 +528,9 @@ sealed interface SettingsIntent {
 
     /** #456 — sondages dépliés par défaut dans la lecture de sujet. */
     data class TopicPollsExpandedChanged(val enabled: Boolean) : SettingsIntent
+
+    /** #1170 — déplier les sondages ouverts auxquels le lecteur peut encore répondre. */
+    data class TopicUnansweredPollsExpandedChanged(val enabled: Boolean) : SettingsIntent
 
     /** #330 — afficher les signatures des auteurs sous les posts. */
     data class TopicSignaturesChanged(val enabled: Boolean) : SettingsIntent

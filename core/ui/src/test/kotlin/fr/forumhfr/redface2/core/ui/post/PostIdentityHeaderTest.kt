@@ -2,6 +2,8 @@ package fr.forumhfr.redface2.core.ui.post
 
 import androidx.compose.material3.Text
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -15,6 +17,7 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.text.TextLayoutResult
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -59,6 +62,29 @@ class PostIdentityHeaderTest {
         // falls back to the initial-letter placeholder — its TalkBack announcement carries the author.
         composeTestRule.onNodeWithText("MonPseudo").assertIsDisplayed()
         composeTestRule.onNodeWithText("12/06/2026 10:00:00").assertIsDisplayed()
+    }
+
+    @Test
+    fun `supporting colour override reaches the date at full opacity`() {
+        composeTestRule.setContent {
+            RedfaceTheme {
+                PostIdentityHeader(
+                    author = "Modération",
+                    avatarUrl = null,
+                    dateText = "date modération",
+                    supportingContentColorOverride = Color.White,
+                )
+            }
+        }
+
+        val layouts = mutableListOf<TextLayoutResult>()
+        val readLayout = requireNotNull(
+            composeTestRule.onNodeWithText("date modération")
+                .fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action,
+        )
+        assertEquals(true, readLayout(layouts))
+        assertEquals(Color.White, layouts.single().layoutInput.style.color)
+        assertEquals(1f, layouts.single().layoutInput.style.color.alpha, 0f)
     }
 
     @Test

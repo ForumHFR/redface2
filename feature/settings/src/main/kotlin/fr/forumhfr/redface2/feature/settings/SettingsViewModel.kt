@@ -137,6 +137,11 @@ class SettingsViewModel @Inject constructor(
             apply = { state, value -> state.copy(topicPollsExpanded = value) },
         )
         observePreference(
+            flow = userPreferencesRepository.observeTopicUnansweredPollsExpanded(),
+            isLocked = { it.isUpdatingTopicUnansweredPollsExpanded },
+            apply = { state, value -> state.copy(topicUnansweredPollsExpanded = value) },
+        )
+        observePreference(
             flow = userPreferencesRepository.observeTopicSignatures(),
             isLocked = { it.isUpdatingTopicSignatures },
             apply = { state, value -> state.copy(topicSignatures = value) },
@@ -195,6 +200,11 @@ class SettingsViewModel @Inject constructor(
             flow = userPreferencesRepository.observeAccentColor(),
             isLocked = { it.isUpdatingAccentColor },
             apply = { state, value -> state.copy(accentColor = value) },
+        )
+        observePreference(
+            flow = userPreferencesRepository.observeAlwaysAskLinkApp(),
+            isLocked = { it.isUpdatingAlwaysAskLinkApp },
+            apply = { state, value -> state.copy(alwaysAskLinkApp = value) },
         )
         observePreference(
             flow = userPreferencesRepository.observeConfirmBeforePosting(),
@@ -334,10 +344,13 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.ThemeModeChanged -> updateThemeMode(intent.mode)
             is SettingsIntent.AmoledEnabledChanged -> updateAmoled(intent.enabled)
             is SettingsIntent.AccentColorChanged -> updateAccentColor(intent.color)
+            is SettingsIntent.AlwaysAskLinkAppChanged -> updateAlwaysAskLinkApp(intent.enabled)
             is SettingsIntent.TopicTopBarAutoHideChanged -> updateTopicTopBarAutoHide(intent.enabled)
             is SettingsIntent.TopicPageFabsChanged -> updateTopicPageFabs(intent.enabled)
             is SettingsIntent.MpUnreadBadgeChanged -> updateMpUnreadBadge(intent.enabled)
             is SettingsIntent.TopicPollsExpandedChanged -> updateTopicPollsExpanded(intent.enabled)
+            is SettingsIntent.TopicUnansweredPollsExpandedChanged ->
+                updateTopicUnansweredPollsExpanded(intent.enabled)
             is SettingsIntent.TopicSignaturesChanged -> updateTopicSignatures(intent.enabled)
             is SettingsIntent.FoldLongQuotesChanged -> updateFoldLongQuotes(intent.enabled)
             is SettingsIntent.FullWidthPostsChanged -> updateFullWidthPosts(intent.enabled)
@@ -914,6 +927,33 @@ class SettingsViewModel @Inject constructor(
         )
     }
 
+    private fun updateAlwaysAskLinkApp(desired: Boolean) {
+        val previous = _state.value.alwaysAskLinkApp
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    alwaysAskLinkApp = desired,
+                    isUpdatingAlwaysAskLinkApp = true,
+                    alwaysAskLinkAppError = false,
+                    alwaysAskLinkAppTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(alwaysAskLinkApp = desired, isUpdatingAlwaysAskLinkApp = false)
+                } else {
+                    state.copy(
+                        alwaysAskLinkApp = previous,
+                        isUpdatingAlwaysAskLinkApp = false,
+                        alwaysAskLinkAppError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setAlwaysAskLinkApp,
+        )
+    }
+
     private fun updateTopicTopBarAutoHide(desired: Boolean) {
         val previous = _state.value.topicTopBarAutoHide
         updateBooleanPreference(
@@ -992,6 +1032,36 @@ class SettingsViewModel @Inject constructor(
                 }
             },
             persist = userPreferencesRepository::setTopicPollsExpanded,
+        )
+    }
+
+    private fun updateTopicUnansweredPollsExpanded(desired: Boolean) {
+        val previous = _state.value.topicUnansweredPollsExpanded
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    topicUnansweredPollsExpanded = desired,
+                    isUpdatingTopicUnansweredPollsExpanded = true,
+                    topicUnansweredPollsExpandedError = false,
+                    topicUnansweredPollsExpandedTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(
+                        topicUnansweredPollsExpanded = desired,
+                        isUpdatingTopicUnansweredPollsExpanded = false,
+                    )
+                } else {
+                    state.copy(
+                        topicUnansweredPollsExpanded = previous,
+                        isUpdatingTopicUnansweredPollsExpanded = false,
+                        topicUnansweredPollsExpandedError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setTopicUnansweredPollsExpanded,
         )
     }
 

@@ -354,18 +354,19 @@ private fun PostBlocksRenderer(
 
 @Composable
 private fun ParagraphBlock(inlines: List<PostInline>) {
-    val primary = MaterialTheme.colorScheme.primary
-    val linkStyles = remember(primary) {
+    val readingColors = readingContentColors()
+    val linkStyles = remember(readingColors.linkColor) {
         TextLinkStyles(
             style = SpanStyle(
-                color = primary,
+                color = readingColors.linkColor,
                 textDecoration = TextDecoration.Underline,
             ),
         )
     }
     val imageAlt = stringResource(R.string.post_inline_image_alt)
     // #553 — signatures provide LocalIgnoreInlineColors = true so author `[color]` is dropped.
-    val ignoreColors = LocalIgnoreInlineColors.current
+    val ignoreColors =
+        LocalIgnoreInlineColors.current || LocalReadingContentColors.current != null
     // State-hygiene audit 2026-07-05 — author `[color]` legibility: dark is detected from the
     // surface luminance so it follows AMOLED and a forced ThemeMode, not just the system flag
     // (same rule as CreatorHighlight). isDark keys the remember so a live theme switch rebuilds
@@ -386,7 +387,11 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
             Text(
                 text = annotated,
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = readingColors.onBody,
+                modifier = Modifier.semantics {
+                    this[PostRendererBodyColorKey] = readingColors.onBody
+                    this[PostRendererLinkColorKey] = readingColors.linkColor
+                },
             )
         }
         return
@@ -499,6 +504,7 @@ private fun ParagraphProse(
     measuredSizes: Map<String, IntSize?>,
     deadSmileyUrls: Set<String>,
 ) {
+    val readingColors = readingContentColors()
     // Two guards against a tall/large inline smiley overlapping the text:
     //  - width: cap each smiley to RF1's `img { max-width: 90% }` of the content width (read from
     //    BoxWithConstraints, which shrinks with quote depth) so it never overflows a narrow quote;
@@ -555,7 +561,11 @@ private fun ParagraphProse(
             text = annotated,
             inlineContent = inlineContent,
             style = MaterialTheme.typography.bodyMedium.copy(lineHeight = TextUnit.Unspecified),
-            color = MaterialTheme.colorScheme.onSurface,
+            color = readingColors.onBody,
+            modifier = Modifier.semantics {
+                this[PostRendererBodyColorKey] = readingColors.onBody
+                this[PostRendererLinkColorKey] = readingColors.linkColor
+            },
         )
     }
 }
@@ -615,6 +625,7 @@ private fun QuoteHeader(
     block: PostBlock.Quote,
     onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
 ) {
+    val readingColors = readingContentColors()
     val page = block.page
     val numreponse = block.numreponse
     val text = block.author
@@ -624,7 +635,7 @@ private fun QuoteHeader(
         Text(
             text = text,
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
+            color = readingColors.linkColor,
             modifier = Modifier.clickable(
                 onClickLabel = stringResource(R.string.post_quote_go_to),
             ) { onGoToCitedPost(page, numreponse) },
@@ -633,7 +644,7 @@ private fun QuoteHeader(
         Text(
             text = text,
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = readingColors.onBodyVariant,
         )
     }
 }
@@ -659,6 +670,7 @@ private fun FoldableQuoteBlock(
     onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
 ) {
     var expanded by rememberSaveable(block) { mutableStateOf(false) }
+    val readingColors = readingContentColors()
     QuoteFrame(
         author = block.author,
         quoteDepth = quoteDepth,
@@ -683,7 +695,7 @@ private fun FoldableQuoteBlock(
                     stringResource(R.string.post_quote_expand)
                 },
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
+                color = readingColors.linkColor,
             )
         }
         if (expanded) {
@@ -790,11 +802,13 @@ private fun QuoteFrame(
         QuoteAccentRole.SOURCED_EVEN -> MaterialTheme.colorScheme.primary
         QuoteAccentRole.SOURCED_ODD -> MaterialTheme.colorScheme.tertiary
     }
+    val moderationColors = LocalModerationHighlightColors.current
     val egoQuote = isEgoQuote(author, quoteDepth, LocalEgoQuotePseudo.current)
-    val containerColor = if (egoQuote) {
-        egoHighlightColors().quoteContainer
-    } else {
-        MaterialTheme.colorScheme.surfaceContainerHighest
+    val containerColor = when {
+        // The structural moderation marker wins over every quote variant, including EgoQuote.
+        moderationColors != null -> moderationColors.subSurfaceContainer
+        egoQuote -> egoHighlightColors().quoteContainer
+        else -> MaterialTheme.colorScheme.surfaceContainerHighest
     }
     val egoStateDescription = if (egoQuote) {
         stringResource(R.string.post_quote_ego_state_description)
@@ -802,13 +816,16 @@ private fun QuoteFrame(
         null
     }
     Card(
-        modifier = modifier.then(
-            if (egoStateDescription != null) {
-                Modifier.semantics { stateDescription = egoStateDescription }
-            } else {
-                Modifier
-            },
-        ),
+        modifier = modifier
+            .testTag(POST_RENDERER_QUOTE_CONTAINER_TAG)
+            .semantics { this[PostRendererContainerColorKey] = containerColor }
+            .then(
+                if (egoStateDescription != null) {
+                    Modifier.semantics { stateDescription = egoStateDescription }
+                } else {
+                    Modifier
+                },
+            ),
         colors = CardDefaults.cardColors(
             containerColor = containerColor,
         ),
@@ -858,6 +875,18 @@ internal const val LONG_QUOTE_PREVIEW_TAG = "LongQuotePreview"
 /** Internal Compose-test diagnostic; custom semantics keys are ignored by accessibility services. */
 internal val LongQuotePreviewFadeColorKey = SemanticsPropertyKey<Color>("LongQuotePreviewFadeColor")
 
+/** Internal visual-role diagnostics; custom semantics are ignored by accessibility services. */
+internal val PostRendererContainerColorKey = SemanticsPropertyKey<Color>("PostRendererContainerColor")
+internal val PostRendererContentColorKey = SemanticsPropertyKey<Color>("PostRendererContentColor")
+internal val PostRendererBodyColorKey = SemanticsPropertyKey<Color>("PostRendererBodyColor")
+internal val PostRendererLinkColorKey = SemanticsPropertyKey<Color>("PostRendererLinkColor")
+
+internal const val POST_RENDERER_QUOTE_CONTAINER_TAG = "PostRendererQuoteContainer"
+internal const val POST_RENDERER_SPOILER_CONTAINER_TAG = "PostRendererSpoilerContainer"
+internal const val POST_RENDERER_MONOSPACE_CONTAINER_TAG = "PostRendererMonospaceContainer"
+internal const val POST_RENDERER_BLOCK_IMAGE_ERROR_TAG = "PostRendererBlockImageError"
+internal const val POST_RENDERER_INLINE_IMAGE_ERROR_TAG = "PostRendererInlineImageError"
+
 @Composable
 private fun CollapsedQuoteBlock(
     block: PostBlock.Quote,
@@ -869,6 +898,7 @@ private fun CollapsedQuoteBlock(
     // revealed so the user gets another N levels before the next collapse, instead of an
     // unbounded recursion that would defeat the depth guard entirely.
     var revealed by rememberSaveable(block) { mutableStateOf(false) }
+    val readingColors = readingContentColors()
     QuoteFrame(
         author = block.author,
         quoteDepth = quoteDepth,
@@ -886,7 +916,7 @@ private fun CollapsedQuoteBlock(
                     stringResource(R.string.post_quote_collapsed)
                 },
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = readingColors.onBodyVariant,
             )
             Text(
                 text = if (revealed) {
@@ -895,7 +925,7 @@ private fun CollapsedQuoteBlock(
                     stringResource(R.string.post_quote_show)
                 },
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
+                color = readingColors.linkColor,
             )
         }
         if (revealed) {
@@ -928,6 +958,7 @@ private fun BlockedQuoteBlock(
     onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
 ) {
     var revealed by rememberSaveable(block) { mutableStateOf(false) }
+    val readingColors = readingContentColors()
     QuoteFrame(
         author = block.author,
         quoteDepth = quoteDepth,
@@ -942,7 +973,7 @@ private fun BlockedQuoteBlock(
                 // isBlockedQuoteAuthor never matches a null author, so the fallback is defensive.
                 text = stringResource(R.string.post_quote_blocked_author, block.author.orEmpty()),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = readingColors.onBodyVariant,
             )
             Text(
                 text = if (revealed) {
@@ -951,7 +982,7 @@ private fun BlockedQuoteBlock(
                     stringResource(R.string.post_quote_show)
                 },
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
+                color = readingColors.linkColor,
             )
         }
         if (revealed) {
@@ -973,11 +1004,17 @@ private fun SpoilerBlock(
     onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
 ) {
     var revealed by rememberSaveable(block) { mutableStateOf(false) }
+    val readingColors = readingContentColors()
+    val containerColor = LocalModerationHighlightColors.current?.subSurfaceContainer
+        ?: MaterialTheme.colorScheme.surfaceContainerLow
     Card(
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            containerColor = containerColor,
         ),
-        modifier = Modifier.clickable { revealed = !revealed },
+        modifier = Modifier
+            .testTag(POST_RENDERER_SPOILER_CONTAINER_TAG)
+            .semantics { this[PostRendererContainerColorKey] = containerColor }
+            .clickable { revealed = !revealed },
     ) {
         Column(
             modifier = Modifier
@@ -993,7 +1030,7 @@ private fun SpoilerBlock(
                     text = block.label ?: stringResource(R.string.post_spoiler_default_label),
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = readingColors.onBodyVariant,
                 )
                 Text(
                     text = if (revealed) {
@@ -1002,7 +1039,7 @@ private fun SpoilerBlock(
                         stringResource(R.string.post_spoiler_show)
                     },
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = readingColors.linkColor,
                 )
             }
             if (revealed) {
@@ -1239,7 +1276,10 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
                     modifier = sizeModifier
                         .testTag(BLOCK_IMAGE_TEST_TAG)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                        .background(
+                            LocalModerationHighlightColors.current?.subSurfaceContainer
+                                ?: MaterialTheme.colorScheme.surfaceContainerHighest,
+                        )
                         .clickable(role = Role.Button, onClickLabel = retryLabel) {
                             ledger.retryUrl(url)
                         },
@@ -1292,26 +1332,40 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
 }
 
 @Composable
-private fun ImageBlockError(description: String?) {
-    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+internal fun ImageBlockError(description: String?) {
+    val readingColors = readingContentColors()
+    val containerColor = LocalModerationHighlightColors.current?.subSurfaceContainer
+        ?: Color.Transparent
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(containerColor)
+            .testTag(POST_RENDERER_BLOCK_IMAGE_ERROR_TAG)
+            .semantics {
+                this[PostRendererContainerColorKey] = containerColor
+                this[PostRendererContentColorKey] = readingColors.onBodyVariant
+            },
+        contentAlignment = Alignment.Center,
+    ) {
         Text(
             text = description?.takeIf(String::isNotBlank)?.let {
                 stringResource(R.string.post_image_error_with_alt, it)
             } ?: stringResource(R.string.post_image_error),
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = readingColors.onBodyVariant,
         )
     }
 }
 
 @Composable
 private fun FixedBlock(block: PostBlock.Fixed) {
+    val readingColors = readingContentColors()
     // [fixed] = column-aligned ASCII art/tables → keep no-wrap + horizontal scroll (#244).
     MonospaceContainer(scrollHorizontally = true) {
         Text(
             text = block.text,
             style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-            color = MaterialTheme.colorScheme.onSurface,
+            color = readingColors.onBody,
             softWrap = false,
         )
     }
@@ -1319,6 +1373,7 @@ private fun FixedBlock(block: PostBlock.Fixed) {
 
 @Composable
 private fun CodeBlockBlock(block: PostBlock.CodeBlock) {
+    val readingColors = readingContentColors()
     // [code] = often prose / long pasted lines → WRAP within the card width so it stays readable on
     // mobile (#244, dogfood). No horizontal scroll. A left line-number gutter (like HFR's web render)
     // makes the wrap unambiguous: one number per LOGICAL line, wrapped continuations stay unnumbered.
@@ -1328,14 +1383,14 @@ private fun CodeBlockBlock(block: PostBlock.CodeBlock) {
                 Text(
                     text = lang,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = readingColors.onBodyVariant,
                 )
             }
             CodeWithLineNumbers(
                 code = block.text,
                 codeStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-                codeColor = MaterialTheme.colorScheme.onSurface,
-                gutterColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                codeColor = readingColors.onBody,
+                gutterColor = readingColors.onBodyVariant,
                 dividerColor = MaterialTheme.colorScheme.outlineVariant,
             )
         }
@@ -1450,11 +1505,16 @@ private fun CodeWithLineNumbers(
  */
 @Composable
 private fun MonospaceContainer(scrollHorizontally: Boolean, content: @Composable () -> Unit) {
+    val containerColor = LocalModerationHighlightColors.current?.subSurfaceContainer
+        ?: MaterialTheme.colorScheme.surfaceContainerHighest
     Card(
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+            containerColor = containerColor,
         ),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(POST_RENDERER_MONOSPACE_CONTAINER_TAG)
+            .semantics { this[PostRendererContainerColorKey] = containerColor },
     ) {
         val scrollState = rememberScrollState()
         Column(
@@ -2181,15 +2241,18 @@ internal fun imageInlineContent(
  * generation for THIS url only). Independent of the §5 host capability — see the block slot.
  */
 @Composable
-private fun InlineImageErrorSlot(url: String, description: String?) {
+internal fun InlineImageErrorSlot(url: String, description: String?) {
     val ledger = LocalMediaAttemptLedger.current
     val errorText = description?.takeIf(String::isNotBlank)
         ?.let { stringResource(R.string.post_image_error_with_alt, it) }
         ?: stringResource(R.string.post_image_error)
     val retryLabel = stringResource(R.string.post_image_retry_action)
+    val readingColors = readingContentColors()
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .testTag(POST_RENDERER_INLINE_IMAGE_ERROR_TAG)
+            .semantics { this[PostRendererContentColorKey] = readingColors.onBodyVariant }
             .clickable(role = Role.Button, onClickLabel = retryLabel) { ledger.retryUrl(url) }
             .semantics { contentDescription = errorText },
         contentAlignment = Alignment.Center,
@@ -2197,7 +2260,7 @@ private fun InlineImageErrorSlot(url: String, description: String?) {
         Icon(
             painter = painterResource(R.drawable.ic_ms_broken_image),
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            tint = readingColors.onBodyVariant,
             modifier = Modifier.fillMaxSize(INLINE_ERROR_GLYPH_FRACTION),
         )
     }

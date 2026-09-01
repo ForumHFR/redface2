@@ -13,6 +13,16 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 - ADR-013, architecture, roadmap et matrice de parité alignées sur le substrat Room dormant du
   contenu MP : schéma 17, ordre RAM → Room opt-in → réseau obligatoire, verrou commun aux accès et
   purges, éviction cinq pages, réconciliation au démarrage et prérequis sécurité avant activation UI.
+- `protocol-hfr.md` et `models.md` alignés sur les sondages réels : formulaire de vote transitoire,
+  contrats `vote.php` et `close_sondage.php`, vote blanc, expiration et clôture irréversible.
+- Rôles du staff et compte « Modération » documentés depuis leurs deux sources HFR publiques, avec
+  rendu partagé Topic/MP et rôles distincts (modérateur, admin, supadmin, développeur, architecte).
+- `navigation.md` aligné sur les deep links HFR entrants : résolution dans `RedfaceApp` et identifiant
+  monotone par livraison pour accepter un nouveau tap sans rejouer l'intent lors d'une recréation.
+- Migration Room 17 → 18 documentée avec la persistance du marqueur structurel « Modération » dans
+  les caches de posts Topic et MP.
+- Matrice de parité Topic ↔ MP complétée pour les marqueurs Modération et rôles staff : 31 fonctions
+  livrées sur 34, 2 non applicables par nature et 1 encore absente faute de preuve serveur.
 
 ---
 

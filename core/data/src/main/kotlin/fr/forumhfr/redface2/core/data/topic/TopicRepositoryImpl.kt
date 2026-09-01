@@ -12,6 +12,7 @@ import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicPageEmission
 import fr.forumhfr.redface2.core.domain.topic.TopicRepository
+import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.parser.HfrParser
@@ -43,9 +44,13 @@ class TopicRepositoryImpl @Inject constructor(
      *   fresh AUTHENTICATED fetch. The result is still persisted so toggling back OFF
      *   later finds a parser-coherent cache. Network failures propagate as a flow
      *   exception (no silent fallback to a potentially stale cache row).
-     * - Cache hit, **AUTHENTICATED** + fresh → emit and stop. No network. This is the
+     * - Cache hit, **AUTHENTICATED** + fresh → normally emit and stop. No network. This is the
      *   snappy back-nav case: returning to a page within `CachePolicy.topicPage` does
-     *   not refetch and does not silently mark drapeaux as read.
+     *   not refetch and does not silently mark drapeaux as read. **Exception:** an open poll
+     *   (`poll.resultsAvailable == false`) disables this TTL skip because its transient vote form
+     *   and `hash_check` are never stored in Room. Every observation then emits the cached poll
+     *   provisionally and performs one authenticated GET to rehydrate the form. This is the same
+     *   finite cache-then-network shape as an ANONYMOUS row, not a refresh loop.
      * - Cache hit, **ANONYMOUS** (warmed by [prefetch]) → always emit cache
      *   then re-fetch authenticated, regardless of TTL. The anon row is missing
      *   per-user fields (`isOwnPost`, `isEditable`, …) and reading without re-fetching
@@ -83,7 +88,11 @@ class TopicRepositoryImpl @Inject constructor(
             // remains for ordinary back-nav (forceRefresh = false).
             val canSkipRefresh = !forceRefresh &&
                 cached.authMode == FetchMode.AUTHENTICATED &&
-                CachePolicy.isFresh(cached.fetchedAt, CachePolicy.topicPage, clock)
+                CachePolicy.isFresh(cached.fetchedAt, CachePolicy.topicPage, clock) &&
+                // #779 — Room intentionally drops PollVoteForm (especially hash_check). A cached
+                // FORM-shape poll therefore needs one live authenticated GET on every observation
+                // even inside the 60s TTL, otherwise the vote capability could never rehydrate.
+                cached.topic.poll?.resultsAvailable != false
             // #877 — the cache page is provisional ONLY when a refresh follows on this very
             // flow. On the TTL-skip path it IS the settled page: flagging it provisional
             // would strand the pill on « Chargement… » with nothing left to confirm it.
@@ -114,6 +123,30 @@ class TopicRepositoryImpl @Inject constructor(
 
     override suspend fun refreshTopicPage(cat: Int, post: Int, page: Int): Topic =
         fetchAndPersist(cat, post, page, FetchMode.AUTHENTICATED)
+
+    /**
+     * #783 — one-shot, anonymous and intentionally uncached reverse-citation read. The enclosing
+     * IO context covers both the network call and the synchronous Jsoup parse. Cancellation is
+     * rethrown rather than hidden in `Result.failure`, matching the repository's structured-
+     * concurrency contract.
+     */
+    override suspend fun getCitingPosts(
+        cat: Int,
+        post: Int,
+        numreponse: Int,
+    ): Result<List<Post>> = withContext(ioDispatcher) {
+        try {
+            val html = client.getCitingPosts(cat = cat, post = post, numreponse = numreponse)
+            // #783 (gate Fable R2) — the server MAY theoretically repeat a numreponse (dedup is
+            // observed but not contractual). distinctBy keeps the citers a set so the sheet's
+            // LazyColumn key (post.numreponse) stays unique and never crashes on a duplicate.
+            Result.success(parser.parseCitingPosts(html).distinctBy { it.numreponse })
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (@Suppress("TooGenericExceptionCaught") throwable: Throwable) {
+            Result.failure(throwable)
+        }
+    }
 
     /**
      * Phase 1D PR 4 — anonymous prefetch. Issues an unauthenticated fetch (cf.

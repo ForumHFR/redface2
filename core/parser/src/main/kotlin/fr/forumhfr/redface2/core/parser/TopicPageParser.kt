@@ -1,18 +1,24 @@
 package fr.forumhfr.redface2.core.parser
 
-import fr.forumhfr.redface2.core.model.Poll
-import fr.forumhfr.redface2.core.model.PollOption
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.parser.common.HfrSelectors
+import fr.forumhfr.redface2.core.parser.write.poll.PollVoteFormParser
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
-import org.jsoup.nodes.TextNode
 
-class TopicPageParser(
-    private val postsParser: PostsParser = PostsParser(),
-    private val searchFormParser: TopicSearchFormParser = TopicSearchFormParser(),
+class TopicPageParser private constructor(
+    private val postsParser: PostsParser,
+    private val searchFormParser: TopicSearchFormParser,
+    private val pollVoteFormParser: PollVoteFormParser,
+    private val topicPollParser: TopicPollParser,
 ) {
+    constructor(
+        postsParser: PostsParser = PostsParser(),
+        searchFormParser: TopicSearchFormParser = TopicSearchFormParser(),
+        pollVoteFormParser: PollVoteFormParser = PollVoteFormParser(),
+    ) : this(postsParser, searchFormParser, pollVoteFormParser, TopicPollParser())
+
     fun parse(html: String): Topic {
         val document = Jsoup.parse(html)
         // #227 — HFR obfuscates the per-post toolbar `message.php` links (quote + edit) in
@@ -26,6 +32,8 @@ class TopicPageParser(
         val pageInfo = postsParser.parsePageInfo(document)
         val posts = postsParser.parsePosts(document)
         val replyForm = document.selectFirst(REPLY_FORM_SELECTOR)
+        val pollVoteForm = pollVoteFormParser.parse(document)
+        val poll = topicPollParser.parse(document.selectFirst(HfrSelectors.POLL), pollVoteForm)
 
         return Topic(
             cat = requireInputValue(document, HfrSelectors.CATEGORY_ID_INPUT),
@@ -57,7 +65,12 @@ class TopicPageParser(
             // pre-#148 captures keep their stored value because Room ships the
             // column since v1.
             isFirstPostOwner = pageInfo.current == 1 && posts.firstOrNull()?.isEditable == true,
-            poll = parsePoll(document),
+            poll = poll,
+            // A vote form is a transient capability, not a durable poll property. Surface it only
+            // for an open FORM shape; results and closed pages must never retain a stray vote form.
+            pollVoteForm = pollVoteForm.takeIf {
+                poll != null && !poll.resultsAvailable && !poll.closed
+            },
             // Chantier C (#546) — the intra-topic search form is part of THIS page ; parse it here so
             // the ViewModel gets it for free on every live load. Null when absent ; not persisted.
             searchForm = searchFormParser.parse(document),
@@ -93,109 +106,6 @@ class TopicPageParser(
             ?: error("Required input not found for $selector")
     }
 
-    private fun parsePoll(document: Document): Poll? {
-        val pollElement = document.selectFirst(HfrSelectors.POLL) ?: return null
-        val question = pollElement
-            .selectFirst(HfrSelectors.POLL_QUESTION)
-            ?.text()
-            ?.trim()
-            ?.takeIf(String::isNotEmpty)
-
-        val optionBars = pollElement.select(HfrSelectors.POLL_OPTION_BAR)
-        val optionLabels = pollElement.select(HfrSelectors.POLL_OPTION_LABEL)
-        // #697 — HFR serves TWO poll shapes. The RESULTS shape (.sondageLeft bars, below) only
-        // exists once the reader voted or clicked « voir les résultats » ; every other fetch —
-        // including ALL anonymous reads, i.e. what this app receives — gets the FORM shape
-        // (radio/checkbox inputs), which this parser used to drop silently (optionBars empty →
-        // null → « aucun sondage ne s'affiche », CharLee's report).
-        return if (question != null && optionBars.isEmpty()) {
-            parseFormPoll(pollElement, question)
-        } else if (question == null || optionBars.isEmpty() || optionBars.size != optionLabels.size) {
-            null
-        } else {
-            val options = optionBars.mapIndexed { index, optionBar ->
-                val percentText = optionBar
-                    .select(HfrSelectors.POLL_OPTION_PERCENT)
-                    .firstOrNull()
-                    ?.text()
-                    .orEmpty()
-                val votesText = optionBar
-                    .select(HfrSelectors.POLL_OPTION_PERCENT)
-                    .lastOrNull()
-                    ?.text()
-                    .orEmpty()
-
-                PollOption(
-                    text = optionLabels[index].text().trim(),
-                    votes = firstInt(votesText),
-                    percentage = firstFloat(percentText),
-                )
-            }
-
-            val trailingText = pollElement.childNodes()
-                .filterIsInstance<TextNode>()
-                .joinToString(" ") { it.text() }
-            val summaryText = buildString {
-                append(pollElement.text())
-                append(' ')
-                append(trailingText)
-            }
-
-            Poll(
-                question = question,
-                options = options,
-                multipleChoice = choiceCount(summaryText) > 1,
-                totalVotes = firstInt(
-                    Regex("""Total\s*[:\s]\s*(\d+)\s+votes?""", RegexOption.IGNORE_CASE)
-                        .find(summaryText)
-                        ?.groupValues
-                        ?.getOrNull(1)
-                        .orEmpty(),
-                ),
-                hasVoted = false,
-            )
-        }
-    }
-
-    /**
-     * #697 — builds a read-only [Poll] from the FORM shape: `<ol><li><input name=reponse><label>`.
-     * No votes/percentages exist in this shape (fields are 0, [Poll.resultsAvailable] = false).
-     * Multiple-choice detection reads the INPUT TYPE (checkbox = multi, radio = single — proven on
-     * live fixtures 44713 mono / 16022 multi) : the results-shape « Sondage à N choix » caption
-     * does not exist here, so [choiceCount] must not be used.
-     */
-    private fun parseFormPoll(pollElement: Element, question: String): Poll? {
-        val formOptions = pollElement.select(HfrSelectors.POLL_FORM_OPTION)
-        val labels = formOptions.mapNotNull { option ->
-            option.selectFirst(HfrSelectors.POLL_FORM_OPTION_LABEL)?.text()?.trim()?.takeIf(String::isNotEmpty)
-        }
-        if (labels.isEmpty() || labels.size != formOptions.size) return null
-        return Poll(
-            question = question,
-            options = labels.map { PollOption(text = it, votes = 0, percentage = 0f) },
-            multipleChoice = pollElement.selectFirst(HfrSelectors.POLL_FORM_MULTI_INPUT) != null,
-            totalVotes = 0,
-            hasVoted = false,
-            resultsAvailable = false,
-        )
-    }
-
-    private fun firstInt(text: String): Int =
-        Regex("""(\d+)""").find(text)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-
-    private fun firstFloat(text: String): Float =
-        Regex("""(\d+(?:[.,]\d+)?)""").find(text)?.groupValues?.get(1)
-            ?.replace(',', '.')
-            ?.toFloatOrNull()
-            ?: 0f
-
-    private fun choiceCount(text: String): Int =
-        Regex("""Sondage à\s+(\d+)\s+choix""", RegexOption.IGNORE_CASE)
-            .find(text)
-            ?.groupValues
-            ?.getOrNull(1)
-            ?.toIntOrNull()
-            ?: 1
 }
 
 // #213 — the reply form posts to `/bddpost.php` (possibly with query params, e.g.

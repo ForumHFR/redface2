@@ -39,4 +39,6 @@ data class PrivateMessageEntity(
     val editedAt: Instant?,
     val citedCount: Int?,
     val signature: PostContent?,
+    /** #1112 — persisted `messageModo` marker; pre-v18 cache rows backfill to `false`. */
+    val isModerationPost: Boolean = false,
 )

@@ -110,6 +110,7 @@ class RoomPrivateMessageThreadDiskCache @Inject internal constructor(
         editedAt = editedAt,
         citedCount = citedCount,
         signature = signature,
+        isModerationPost = isModerationPost,
     )
 
     private fun PrivateMessageEntity.toModel(): Post = Post(
@@ -127,6 +128,7 @@ class RoomPrivateMessageThreadDiskCache @Inject internal constructor(
         editedAt = editedAt,
         citedCount = citedCount,
         signature = signature,
+        isModerationPost = isModerationPost,
     )
 
     private companion object {

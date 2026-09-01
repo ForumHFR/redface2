@@ -44,6 +44,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
@@ -51,6 +52,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.contentColorFor
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.pullToRefresh
@@ -77,10 +80,12 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -103,14 +108,18 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.domain.author.isRf2Creator
+import fr.forumhfr.redface2.core.domain.author.resolveAuthorRolePill
 import fr.forumhfr.redface2.core.domain.ego.deriveEgoCanonicalPseudo
 import fr.forumhfr.redface2.core.domain.ego.isEgoPost
+import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.Poll
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.postContentExcerpt
+import fr.forumhfr.redface2.core.model.write.PollVoteChoice
+import fr.forumhfr.redface2.core.model.write.PollVoteForm
 import fr.forumhfr.redface2.core.model.write.QuoteLocator
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.RedfacePlaceholderScreen
@@ -120,6 +129,7 @@ import fr.forumhfr.redface2.core.ui.pager.PageFab
 import fr.forumhfr.redface2.core.ui.pager.PageFabDefaults
 import fr.forumhfr.redface2.core.ui.pager.PageNavigation
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
+import fr.forumhfr.redface2.core.ui.post.AuthorRolePill
 import fr.forumhfr.redface2.core.ui.post.CreatorPseudoText
 import fr.forumhfr.redface2.core.ui.post.HiddenPostCard
 import fr.forumhfr.redface2.core.ui.post.PostCardShellFlatBottomEdge
@@ -132,11 +142,13 @@ import fr.forumhfr.redface2.core.ui.post.PostListScaffold
 import fr.forumhfr.redface2.core.ui.post.ReadingPostCard
 import fr.forumhfr.redface2.core.ui.post.ReadingPostCardPresentation
 import fr.forumhfr.redface2.core.ui.post.collectPostMediaUrls
+import fr.forumhfr.redface2.core.ui.post.readingContentColors
 import fr.forumhfr.redface2.core.ui.post.retryFailedPostMedia
 import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import java.util.Locale
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.drop
@@ -293,8 +305,9 @@ fun TopicScreen(
      * #465 — the user's MANUAL poll-expansion choice for THIS topic, owned by `:app` so it survives
      * leaving and reopening the topic (like the multi-quote basket / scroll anchors ; hoisted when
      * page changes still swapped the `TopicRoute`, pre-#895 étape 4). `null` means « no manual
-     * choice yet — follow the [TopicUiState.pollsExpandedDefault] setting »; `true` / `false`
-     * mean the user explicitly expanded / collapsed the poll. The screen only renders it.
+     * choice yet — follow the automatic policy from [TopicUiState.pollsExpandedDefault] and
+     * [TopicUiState.expandUnansweredPolls] »; `true` / `false` mean the user explicitly expanded /
+     * collapsed the poll. The screen only renders it.
      */
     pollManualExpanded: Boolean? = null,
     /**
@@ -412,6 +425,9 @@ fun TopicScreen(
     val favoriteAddedMsg = stringResource(R.string.topic_post_favorite_added)
     val favoriteFailedMsg = stringResource(R.string.topic_post_favorite_failed)
     val flagNotFoundMsg = stringResource(R.string.topic_remove_flag_not_found)
+    // #1201 — poll closure feedback messages (resolved upfront, same rationale).
+    val pollClosedMsg = stringResource(R.string.topic_poll_close_success)
+    val pollCloseFailedMsg = stringResource(R.string.topic_poll_close_failure)
     // #292 — delete feedback messages, resolved upfront (same rationale as refreshFailedMsg).
     val deleteSuccessMsg = stringResource(R.string.topic_post_delete_success)
     val deleteFailedLoginMsg = stringResource(R.string.topic_post_delete_failed_login)
@@ -424,6 +440,9 @@ fun TopicScreen(
     // resolve → confirm → remove flow); the outcomes ride the screen's single TopicEffect collector
     // below, like every other one-shot Toast on this screen.
     val removeTopicFlagState by viewModel.removeTopicFlagState.collectAsStateWithLifecycle()
+    // #1201 — close-poll confirmation gate. State-driven dialog (the ViewModel owns the
+    // confirm → close flow) ; the outcomes ride the screen's single TopicEffect collector below.
+    val closePollState by viewModel.closePollState.collectAsStateWithLifecycle()
 
     // Bug fix (build 89) — report the loaded title up so `:app` caches it per topic. The next page
     // (recreated screen) reads it back through `request.titleHint`, keeping the top bar title stable
@@ -640,6 +659,22 @@ fun TopicScreen(
                         android.widget.Toast.LENGTH_SHORT,
                     ).show()
                 }
+                TopicEffect.PollClosed -> {
+                    // #1201 — close_sondage.php confirmed ; a page refresh to the closed state runs
+                    // separately in the ViewModel.
+                    android.widget.Toast.makeText(
+                        context,
+                        pollClosedMsg,
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+                TopicEffect.PollCloseFailed -> {
+                    android.widget.Toast.makeText(
+                        context,
+                        pollCloseFailedMsg,
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                }
             }
         }
     }
@@ -682,6 +717,8 @@ fun TopicScreen(
         onClearMultiQuote = onClearMultiQuote,
         pollManualExpanded = pollManualExpanded,
         onPollExpansionChanged = onPollExpansionChanged,
+        // #1201 — the owner « Clore ce sondage » tap raises the confirmation dialog above.
+        onClosePoll = { viewModel.send(TopicIntent.CloseTopicPoll) },
     )
 
     // #292 — confirmation before the (irreversible, no-undo) deletion. Only « Supprimer » sends the
@@ -703,6 +740,15 @@ fun TopicScreen(
             flag = confirming.flag,
             onConfirm = viewModel::confirmRemoveTopicFlag,
             onDismiss = viewModel::cancelRemoveTopicFlag,
+        )
+    }
+
+    // #1201 — confirmation gate before the (irreversible, no-undo) poll closure. Renders only while
+    // the ViewModel is Confirming ; confirming moves to Closing (action disabled) and fires the close.
+    if (closePollState is ClosePollState.Confirming) {
+        ClosePollConfirmDialog(
+            onConfirm = viewModel::confirmClosePoll,
+            onDismiss = viewModel::cancelClosePoll,
         )
     }
 
@@ -737,6 +783,33 @@ private fun RemoveTopicFlagConfirmDialog(
         dismissButton = {
             TextButton(onClick = onDismiss) {
                 Text(stringResource(R.string.topic_remove_flag_dialog_cancel))
+            }
+        },
+    )
+}
+
+/**
+ * #1201 — M3 confirmation dialog shown before the `close_sondage.php` call. Spells out that the
+ * closure is definitive (HFR has no re-open) so an owner cannot fat-finger it, mirroring the
+ * delete-post / remove-flag confirmations.
+ */
+@Composable
+private fun ClosePollConfirmDialog(
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.topic_poll_close_dialog_title)) },
+        text = { Text(stringResource(R.string.topic_poll_close_dialog_message)) },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(stringResource(R.string.topic_poll_close_dialog_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.topic_poll_close_dialog_cancel))
             }
         },
     )
@@ -1015,10 +1088,12 @@ internal fun TopicContent(
     onMultiQuote: (subcat: Int, page: Int) -> Unit = { _, _ -> },
     // #436 — empties the whole basket (« Tout vider », long-press on the « Citer N » FAB).
     onClearMultiQuote: () -> Unit = {},
-    // #465 — the topic's manual poll choice (owned by :app, null = follow the global default) +
-    // the callback recording a tap on the poll card. Threaded to the header card's poll.
+    // #465/#1170 — the topic's manual poll choice (owned by :app, null = follow the automatic poll
+    // policy) + the callback recording a tap on the poll card. Threaded to the header card's poll.
     pollManualExpanded: Boolean? = null,
     onPollExpansionChanged: (Boolean) -> Unit = {},
+    // #1201 — the owner « Clore ce sondage » tap (raises the confirmation dialog).
+    onClosePoll: () -> Unit = {},
     // Vague 4 (#604) lot 1 — HFR accepted a quick-reply POST. Since #895 étape 4 this feeds
     // `TopicViewModel.applySubmitResult` directly (wired at the stateful entry point): the retained
     // engine force-refreshes and lands the submit — no route refresh (historically `:app` bumped a
@@ -1241,6 +1316,7 @@ internal fun TopicContent(
                                 state = state,
                                 topic = mode.topic,
                                 hiddenNumreponses = mode.hiddenNumreponses,
+                                staffByPseudo = mode.staffByPseudo,
                                 zoomState = zoomState,
                                 // #604 lot 2 / #806 — « Citer » opens the quick-reply sheet with the
                                 // card pre-armed (1-citation session), unless the preset routes any
@@ -1282,6 +1358,9 @@ internal fun TopicContent(
                                 favoriteAtPostState = favoriteAtPostState,
                                 onFavoriteMenuOpened = onFavoriteMenuOpened,
                                 onFavoriteAction = onFavoriteAction,
+                                onCitedBadgeClick = { post ->
+                                    onIntent(TopicIntent.OnCitedBadgeClick(post))
+                                },
                                 onDoubleTapRefresh = refreshWithMediaRetry,
                                 onSearchNextResults = { onIntent(TopicIntent.SearchNextResultsPage) },
                                 listState = listState,
@@ -1290,8 +1369,16 @@ internal fun TopicContent(
                                 onSetAuthorBlocked = { author, blocked ->
                                     onIntent(TopicIntent.SetAuthorBlocked(author, blocked))
                                 },
+                                onPollSelectionChanged = { choice, selected ->
+                                    onIntent(TopicIntent.UpdatePollSelection(choice, selected))
+                                },
+                                onPollVoteSubmit = { onIntent(TopicIntent.SubmitPollVote) },
+                                onPollBlankVoteSubmit = {
+                                    onIntent(TopicIntent.SubmitBlankPollVote)
+                                },
                                 pollManualExpanded = pollManualExpanded,
                                 onPollExpansionChanged = onPollExpansionChanged,
+                                onClosePoll = onClosePoll,
                             )
                         }
                         PullToRefreshDefaults.Indicator(
@@ -1370,6 +1457,13 @@ internal fun TopicContent(
                 quickReplyFor = null
                 onQuickReplySubmitted(targetPage, scrollTo)
             },
+        )
+    }
+    state.citingPostsSheet?.let { sheet ->
+        CitingPostsSheet(
+            state = sheet,
+            onDismiss = { onIntent(TopicIntent.OnDismissCitingSheet) },
+            onPostClick = { post -> onIntent(TopicIntent.OnCitingPostClick(post)) },
         )
     }
 }
@@ -1796,6 +1890,8 @@ private fun TopicLoadedContent(
     // #509 — `numreponse` of posts whose author is blacklisted; rendered as a collapsed
     // "post masqué" placeholder instead of the full card (the post stays in the list).
     hiddenNumreponses: Set<Int> = emptySet(),
+    // #221 — global staff snapshot, independent from the loaded topic page.
+    staffByPseudo: Map<String, AuthorRole> = emptyMap(),
     // Vague 3 (#604) — onReply dropped: the dissolved header card was its only consumer here
     // (the bottom FAB cluster replies from TopicContent's own callback).
     onQuoteRequested: (selection: QuoteSelection) -> Unit,
@@ -1815,6 +1911,8 @@ private fun TopicLoadedContent(
     favoriteAtPostState: FavoriteAtPostState = FavoriteAtPostState.Unknown,
     onFavoriteMenuOpened: () -> Unit = {},
     onFavoriteAction: (Post) -> Unit = {},
+    /** #783 — opens the server-backed list of posts citing the tapped post. */
+    onCitedBadgeClick: (Post) -> Unit = {},
     /** #382 — double-tap anywhere on the list refreshes the current page (RF1 parity). */
     onDoubleTapRefresh: () -> Unit = {},
     /** #879 — filtered search : « résultats suivants » footer tap. */
@@ -1828,10 +1926,16 @@ private fun TopicLoadedContent(
     onToggleMultiQuote: (selection: QuoteSelection) -> Unit = {},
     // #509 — block/unblock a post's author from the post menu (blacklist).
     onSetAuthorBlocked: (author: String, blocked: Boolean) -> Unit = { _, _ -> },
-    // #465 — the topic's manual poll choice (owned by :app, null = follow the global default) + the
-    // callback recording a tap on the poll card. Threaded down to the header card's poll.
+    // #779/#1170 — Topic-only normal/blank vote intents; Loaded owns the transient form/state.
+    onPollSelectionChanged: (choice: PollVoteChoice, selected: Boolean) -> Unit = { _, _ -> },
+    onPollVoteSubmit: () -> Unit = {},
+    onPollBlankVoteSubmit: () -> Unit = {},
+    // #465/#1170 — the topic's manual poll choice (owned by :app, null = follow the automatic poll
+    // policy) + the callback recording a tap on the poll card. Threaded down to the header card.
     pollManualExpanded: Boolean? = null,
     onPollExpansionChanged: (Boolean) -> Unit = {},
+    // #1201 — the owner « Clore ce sondage » tap. Threaded down to the poll card.
+    onClosePoll: () -> Unit = {},
 ) {
     // Scroll-anchor (#104 follow-up): the post the reader was sent to (quote link, deep link, last-read).
     // Marked by tinting ONLY its identity band with tertiaryContainer (XaTriX: the left-rail attempt was
@@ -2073,9 +2177,26 @@ private fun TopicLoadedContent(
             topic.poll?.let { poll ->
                 TopicPollCard(
                     poll = poll,
-                    expandedDefault = state.pollsExpandedDefault,
-                    manualExpanded = pollManualExpanded,
+                    pollVote = (state.mode as? TopicUiState.Mode.Loaded)?.pollVote?.let { slice ->
+                        TopicPollVoteUi(
+                            state = slice,
+                            onSelectionChanged = onPollSelectionChanged,
+                            onVote = onPollVoteSubmit,
+                            onBlankVote = onPollBlankVoteSubmit,
+                        )
+                    },
+                    revealed = resolvePollRevealed(
+                        manualExpanded = pollManualExpanded,
+                        pollsExpandedDefault = state.pollsExpandedDefault,
+                        expandUnansweredPolls = state.expandUnansweredPolls,
+                        pollVoteForm = topic.pollVoteForm,
+                        pollClosed = poll.closed,
+                    ),
                     onExpansionChanged = onPollExpansionChanged,
+                    // #1206 — HFR's native close link is rendered for the owner of an open poll on
+                    // every page. A non-null callback opts the button in; no page-dependent FP
+                    // ownership proxy is involved.
+                    onClosePoll = onClosePoll.takeIf { poll.canClose },
                     // #884 — island: keeps its inset when the posts go full-width.
                     modifier = islandModifier,
                 )
@@ -2177,10 +2298,12 @@ private fun TopicLoadedContent(
                 } else {
                     TopicPostCard(
                         post = post,
+                        staffByPseudo = staffByPseudo,
                         highlighted = highlight == post.numreponse,
                         // #863 — the SERVER count (« Message cité N fois », cross-page), parsed
                         // from div.edited ; null = never cited. The page-scoped client scan is gone.
                         citedCount = post.citedCount ?: 0,
+                        onCitedBadgeClick = onCitedBadgeClick,
                         // #699 — makes sourced quote headers tappable (jump to the cited post).
                         onGoToCitedPost = onGoToPost,
                         // #330 — render the author signature beneath the body when the reading preference
@@ -2549,26 +2672,61 @@ private fun EndOfSearchResultsCard(modifier: Modifier = Modifier) {
     }
 }
 
-@Composable
-private fun TopicPollCard(
-    poll: Poll,
-    expandedDefault: Boolean,
-    // #465 — the user's manual choice for this topic's poll, hoisted to :app so it survives leaving
-    // and reopening the topic (pre-#895: the per-page TopicRoute swap). `null` = no manual choice
-    // yet → follow [expandedDefault] (#456).
+/**
+ * #779/#1170 — the live poll-vote affordance handed to [TopicPollCard] : the transient slice plus
+ * its selection, normal-submit and blank-submit callbacks. `null` at the call site means « no
+ * in-app vote » (results, cache-only form, anonymous session), so the card keeps its historical
+ * read-only rendering. Bundling the slice with its callbacks keeps the card's parameter list at the
+ * reading-surface's contract, not a callback bag.
+ */
+internal data class TopicPollVoteUi(
+    val state: PollVoteUiState,
+    val onSelectionChanged: (PollVoteChoice, Boolean) -> Unit = { _, _ -> },
+    val onVote: () -> Unit = {},
+    val onBlankVote: () -> Unit = {},
+)
+
+/**
+ * #1170 — resolves the controlled poll-card expansion without consulting `Poll.hasVoted` (not
+ * reliable yet). A non-blank transient token is the same submit-capability gate used by the vote
+ * controls; [pollClosed] additionally prevents an expired/closed poll from auto-expanding. The
+ * nullable manual choice is checked first so an explicit collapse remains sticky across pages.
+ */
+internal fun resolvePollRevealed(
     manualExpanded: Boolean?,
+    pollsExpandedDefault: Boolean,
+    expandUnansweredPolls: Boolean,
+    pollVoteForm: PollVoteForm?,
+    pollClosed: Boolean,
+): Boolean {
+    val canVote = pollVoteForm?.hashCheck?.isNotBlank() == true && !pollClosed
+    return manualExpanded
+        ?: (pollsExpandedDefault || (expandUnansweredPolls && canVote))
+}
+
+@Suppress("LongParameterList") // fully-controlled card: poll + vote slice + expansion + owner close.
+@Composable
+// `internal` so the Compose JVM and record-only Roborazzi tests exercise the real card.
+internal fun TopicPollCard(
+    poll: Poll,
+    pollVote: TopicPollVoteUi? = null,
+    // #456/#465 — the resolved expansion state, computed by the caller (the manual per-topic choice
+    // owned by :app wins over the persisted default). The card is fully controlled : it never holds
+    // the revealed state itself, it only reports a toggle through [onExpansionChanged].
+    revealed: Boolean,
     onExpansionChanged: (Boolean) -> Unit,
+    // #1206 — the owner-only « Clore ce sondage » affordance: NON-null exactly when the caller's
+    // `poll.canClose` gate holds. `null` (the default) hides the button — same nullable-affordance
+    // shape as [pollVote]. The card only renders it and routes its tap.
+    onClosePoll: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
-    // #456 — the preference seeds the initial state; #465 — once the user taps, the manual choice
-    // (owned by :app, keyed by topic) wins and survives navigation between the topic's pages. The
-    // card is fully controlled: it never holds the revealed state itself, it only reports a toggle.
-    val revealed = manualExpanded ?: expandedDefault
+    val pollDateLocale = LocalConfiguration.current.locales[0]
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         ),
-        modifier = modifier.clickable { onExpansionChanged(!revealed) },
+        modifier = modifier,
     ) {
         Column(
             modifier = Modifier
@@ -2577,6 +2735,12 @@ private fun TopicPollCard(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .minimumInteractiveComponentSize()
+                    // #779 — only the header toggles expansion. Interactive vote controls below
+                    // never compete with a whole-card clickable modifier.
+                    .clickable(role = Role.Button) { onExpansionChanged(!revealed) },
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -2596,44 +2760,260 @@ private fun TopicPollCard(
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
-            if (revealed) {
-                poll.options.forEach { option ->
+            if (poll.closed) {
+                Surface(
+                    shape = MaterialTheme.shapes.small,
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                ) {
                     Text(
-                        // #697 — the FORM shape carries no numbers : render the bare label instead
-                        // of a misleading « 0.0% (0 votes) ».
-                        text = if (poll.resultsAvailable) {
-                            stringResource(
-                                R.string.topic_poll_option,
-                                option.text,
-                                option.percentage,
-                                option.votes,
-                            )
-                        } else {
-                            option.text
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        text = stringResource(R.string.topic_poll_closed),
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                     )
                 }
-                val choiceLabel = if (poll.multipleChoice) {
-                    stringResource(R.string.topic_poll_multiple_choices)
-                } else {
-                    stringResource(R.string.topic_poll_single_choice)
+            }
+            // #1201 — owner-only « Clore ce sondage » on an OPEN poll (the caller gated it via a
+            // non-null callback). The confirmation dialog owns the irreversible commit, so the button
+            // just routes the request.
+            onClosePoll?.let { closePoll ->
+                TextButton(
+                    onClick = closePoll,
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error,
+                    ),
+                    modifier = Modifier.align(Alignment.Start),
+                ) {
+                    Text(stringResource(R.string.topic_poll_close))
                 }
+            }
+            poll.expiresAt?.let { expiresAt ->
                 Text(
-                    // #697 — no total on the FORM shape either ; a factual hint replaces it (the
-                    // in-app vote is #779, so no promise about WHERE to vote).
-                    text = if (poll.resultsAvailable) {
-                        stringResource(R.string.topic_poll_summary, poll.totalVotes, choiceLabel)
-                    } else {
-                        stringResource(R.string.topic_poll_no_results, choiceLabel)
-                    },
-                    style = MaterialTheme.typography.labelMedium,
+                    text = stringResource(
+                        if (poll.closed) {
+                            R.string.topic_poll_expired_at
+                        } else {
+                            R.string.topic_poll_expires_at
+                        },
+                        expiresAt.asPollExpirationDate(pollDateLocale),
+                    ),
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            if (revealed) {
+                if (!poll.closed && !poll.resultsAvailable && pollVote != null) {
+                    TopicPollVoteForm(
+                        pollVote = pollVote.state,
+                        onSelectionChanged = pollVote.onSelectionChanged,
+                        onVote = pollVote.onVote,
+                        onBlankVote = pollVote.onBlankVote,
+                    )
+                } else {
+                    // #697/#1170 — results, closed polls and cache-only form shapes stay read-only;
+                    // voting controls exist only with a live open form slice.
+                    TopicPollReadOnlyResults(poll)
+                }
+            }
         }
     }
+}
+
+/**
+ * #697/#1170 — the read-only body of the poll card : results, closed polls and cache-only form
+ * shapes. Extracted from [TopicPollCard] so the card stays under detekt's complexity cap (#1201).
+ */
+@Composable
+private fun TopicPollReadOnlyResults(poll: Poll) {
+    poll.options.forEach { option ->
+        Text(
+            // #697 — the FORM shape carries no numbers : render the bare label instead
+            // of a misleading « 0.0% (0 votes) ».
+            text = if (poll.resultsAvailable) {
+                stringResource(
+                    R.string.topic_poll_option,
+                    option.text,
+                    option.percentage,
+                    option.votes,
+                )
+            } else {
+                option.text
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    val choiceLabel = if (poll.multipleChoice) {
+        stringResource(R.string.topic_poll_multiple_choices)
+    } else {
+        stringResource(R.string.topic_poll_single_choice)
+    }
+    Text(
+        // #697 — no total on the FORM shape either ; a factual hint replaces it (the
+        // in-app vote is #779, so no promise about WHERE to vote).
+        text = if (poll.resultsAvailable) {
+            stringResource(R.string.topic_poll_summary, poll.totalVotes, choiceLabel)
+        } else {
+            stringResource(R.string.topic_poll_no_results, choiceLabel)
+        },
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    poll.blankVotes?.let { blankVotes ->
+        Text(
+            text = pluralStringResource(
+                R.plurals.topic_poll_blank_votes,
+                blankVotes,
+                blankVotes,
+            ),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun TopicPollVoteForm(
+    pollVote: PollVoteUiState,
+    onSelectionChanged: (PollVoteChoice, Boolean) -> Unit,
+    onVote: () -> Unit,
+    onBlankVote: () -> Unit,
+) {
+    val form = pollVote.form
+    val canInteract = form.hashCheck.isNotBlank() && pollVote.phase == PollVotePhase.Idle
+
+    form.choices.forEach { choice ->
+        PollVoteChoiceRow(
+            choice = choice,
+            selected = choice in pollVote.selectedChoices,
+            multipleChoice = form.multipleChoice,
+            enabled = canInteract,
+            onToggle = { checked -> onSelectionChanged(choice, checked) },
+        )
+    }
+
+    if (form.multipleChoice) {
+        form.maxSelections?.let { maximum ->
+            Text(
+                text = pluralStringResource(R.plurals.topic_poll_max_choices, maximum, maximum),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Button(
+            onClick = onVote,
+            enabled = canInteract && pollVote.selectedChoices.isNotEmpty(),
+        ) {
+            Text(stringResource(R.string.topic_poll_vote))
+        }
+        OutlinedButton(
+            onClick = onBlankVote,
+            enabled = canInteract && pollVote.selectedChoices.isEmpty(),
+        ) {
+            Text(stringResource(R.string.topic_poll_vote_blank))
+        }
+    }
+
+    PollVotePhaseNotice(phase = pollVote.phase)
+
+    if (form.hashCheck.isBlank() && pollVote.phase == PollVotePhase.Idle && pollVote.error == null) {
+        Text(
+            text = stringResource(R.string.topic_poll_unavailable),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    pollVote.error?.let { error ->
+        Text(
+            text = stringResource(error.pollVoteMessageRes()),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+    }
+}
+
+/**
+ * #779 — one selectable poll option : a radio (single-choice) or a checkbox (multiple-choice) whose
+ * WHOLE row is the click target. The control is inert (`onClick = null`) : the row's clickable owns
+ * the semantics and the toggle, so TalkBack announces a single node with the correct [Role].
+ */
+@Composable
+private fun PollVoteChoiceRow(
+    choice: PollVoteChoice,
+    selected: Boolean,
+    multipleChoice: Boolean,
+    enabled: Boolean,
+    onToggle: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(
+                enabled = enabled,
+                role = if (multipleChoice) Role.Checkbox else Role.RadioButton,
+                // #1170 — selected radios can be tapped again to clear the single-choice group;
+                // checkboxes retain their historical toggle behaviour through the same expression.
+                onClick = { onToggle(!selected) },
+            )
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (multipleChoice) {
+            Checkbox(checked = selected, onCheckedChange = null, enabled = enabled)
+        } else {
+            RadioButton(selected = selected, onClick = null, enabled = enabled)
+        }
+        Text(
+            text = choice.label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+private fun java.time.LocalDateTime.asPollExpirationDate(locale: Locale): String =
+    DateTimeFormatter
+        .ofLocalizedDateTime(FormatStyle.MEDIUM, FormatStyle.SHORT)
+        .withLocale(locale)
+        .format(this)
+
+/**
+ * #779 — the in-flight notice under the vote button : a label + indeterminate bar while a submit or
+ * the post-vote refresh runs, and nothing at all when the slice is idle.
+ */
+@Composable
+private fun PollVotePhaseNotice(phase: PollVotePhase) {
+    val label = when (phase) {
+        PollVotePhase.Submitting -> R.string.topic_poll_submitting
+        PollVotePhase.Refreshing -> R.string.topic_poll_refreshing
+        PollVotePhase.Idle -> null
+    }
+    if (label != null) {
+        Text(
+            text = stringResource(label),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+    }
+}
+
+private fun PollVoteUiError.pollVoteMessageRes(): Int = when (this) {
+    PollVoteUiError.InvalidHashCheck -> R.string.topic_poll_error_invalid_hash
+    PollVoteUiError.EmptySelection -> R.string.topic_poll_error_empty_selection
+    PollVoteUiError.InvalidSelection -> R.string.topic_poll_error_invalid_selection
+    PollVoteUiError.TooManySelections -> R.string.topic_poll_error_too_many_selections
+    PollVoteUiError.MalformedForm -> R.string.topic_poll_error_malformed_form
+    PollVoteUiError.UnexpectedResponse -> R.string.topic_poll_error_unexpected_response
+    PollVoteUiError.Network -> R.string.topic_poll_error_network
+    PollVoteUiError.RefreshFailedAfterAccepted -> R.string.topic_poll_error_refresh_after_accepted
 }
 
 @Composable
@@ -2644,15 +3024,15 @@ private fun TopicPollCard(
 // « + » affordance (gating, label flip, tap). Same visibility relaxation as other tested internals.
 internal fun TopicPostCard(
     post: Post,
+    /** #221 — global canonical staff directory; empty keeps direct tests/previews neutral. */
+    staffByPseudo: Map<String, AuthorRole> = emptyMap(),
     /**
      * #104 follow-up — true for the scroll-anchor post (quote link / deep link / last-read landing).
      * Tints this post's identity band with tertiaryContainer so the anchored post is findable, without
      * the old card+band double highlight (removed in #104) nor a left rail (dropped as ugly). Default false.
      */
     highlighted: Boolean = false,
-    /**
-     * #239 — number of posts on the current page that cite this one. 0 hides the badge.
-     */
+    /** #239/#863 — HFR's server count across the whole topic. 0 hides the badge. */
     citedCount: Int,
     /**
      * #330 — when `true` (the « Afficher les signatures » reading preference is on), the author's
@@ -2708,6 +3088,8 @@ internal fun TopicPostCard(
      * of the header bar), permalink copy, edit marker, citation count.
      */
     onOpenMenu: () -> Unit = {},
+    /** #783 — invoked only from the positive server-count pill. */
+    onCitedBadgeClick: (Post) -> Unit = {},
     /**
      * #436 — true when this post sits in the multi-quote basket (#291). Marks the card with a
      * primary border and flips the footer toggle to « ✓ Cité », so the selection is visible without
@@ -2738,6 +3120,13 @@ internal fun TopicPostCard(
 ) {
     // #287 — structural spacing from the active density preset (Comfort = the historical rhythm).
     val m = LocalDisplayMetrics.current
+    val authorRole = remember(post.author, post.isModerationPost, staffByPseudo) {
+        resolveAuthorRolePill(
+            author = post.author,
+            isModerationPost = post.isModerationPost,
+            staffByPseudo = staffByPseudo,
+        )
+    }
     // #436 — the per-post actions row (Citer / Modifier / multi-quote) is gated as a unit. Computed
     // once so the shared card receives either the whole footer or null; its body then owns the card's
     // bottom padding only in the null branch, keeping the body↔card gap at m.cardBodyBottom.
@@ -2746,6 +3135,8 @@ internal fun TopicPostCard(
     // « Ajouté à la citation » pill is gone, so multi-quote selection never grows the card.
     val hasBadges = citedCount > 0
     val egoPostStateDescription = stringResource(R.string.topic_post_ego_state_description)
+    val moderationPostStateDescription =
+        stringResource(R.string.topic_post_moderation_state_description)
     ReadingPostCard(
         post = post,
         presentation = ReadingPostCardPresentation(
@@ -2762,30 +3153,43 @@ internal fun TopicPostCard(
         // width (forum idiom, dogfooding v109): secondaryContainer over the neutral card. #104 follow-up
         // (XaTriX): the scroll-anchor post tints ONLY this band with tertiaryContainer (the left rail was
         // dropped as ugly) — a single tertiary band, not the old card+band double tint. The shared
-        // PostIdentityBand (#351) sets LocalContentColor from its containerColor for the pseudo; the
-        // enclosing Card clips the strip to its rounded corners. The #104 tint logic is UNCHANGED — it
-        // stays the topic's decision, passed in as containerColor.
-        identity = {
+        // PostIdentityBand (#351) receives both roles explicitly; the enclosing Card clips the strip
+        // to its rounded corners. The #104 tint logic stays the topic's decision.
+        identity = { moderationOverride ->
+            val bandContainerColor = when {
+                // #1112 (retour device XaTriX) : un post de modération garde son header rouge même
+                // quand il est la cible d'ancrage — le rouge persistant prime sur la teinte d'ancrage transitoire.
+                moderationOverride != null -> moderationOverride.containerColor
+                highlighted -> MaterialTheme.colorScheme.tertiaryContainer
+                else -> MaterialTheme.colorScheme.secondaryContainer
+            }
+            val bandContentColor = when {
+                moderationOverride != null -> moderationOverride.contentColor
+                highlighted -> contentColorFor(MaterialTheme.colorScheme.tertiaryContainer)
+                else -> contentColorFor(MaterialTheme.colorScheme.secondaryContainer)
+            }
             PostIdentityBand(
-                // #874 P1 — the EgoPost a11y marker sits on the identity node, which is present in
-                // both display modes and is what TalkBack traverses first on a post.
+                // #874/#1112 — colour is not the sole signal: the active intrinsic marker sits on
+                // the identity node, present in both display modes and traversed first by TalkBack.
                 modifier = Modifier
                     .testTag(TOPIC_POST_IDENTITY_BAND_TAG)
                     .semantics {
-                        if (egoPostHighlighted) {
-                            stateDescription = egoPostStateDescription
+                        when {
+                            egoPostHighlighted -> stateDescription = egoPostStateDescription
+                            moderationOverride != null -> {
+                                stateDescription = moderationPostStateDescription
+                            }
                         }
                     },
-                containerColor = if (highlighted) {
-                    MaterialTheme.colorScheme.tertiaryContainer
-                } else {
-                    MaterialTheme.colorScheme.secondaryContainer
-                },
+                containerColor = bandContainerColor,
+                contentColor = bandContentColor,
             ) {
                 TopicPostIdentityHeader(
                     post = post,
+                    authorRole = authorRole,
                     onOpenProfile = onOpenProfile,
                     onOpenMenu = onOpenMenu,
+                    supportingContentColorOverride = moderationOverride?.let { bandContentColor },
                     // #287 — the band's header padding (12.dp horizontal, m.cardHeaderVertical vertical)
                     // is reinjected on the header slot's modifier (densities stay feature-owned, #351).
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = m.cardHeaderVertical),
@@ -2801,6 +3205,7 @@ internal fun TopicPostCard(
                 TopicPostBadges(
                     citedCount = citedCount,
                     horizontalPadding = m.cardBodyHorizontal,
+                    onClick = { onCitedBadgeClick(post) },
                 )
             }
         } else {
@@ -2843,11 +3248,15 @@ internal const val TOPIC_POST_IDENTITY_BAND_TAG = "TopicPostIdentityBand"
  * Profile-tap labels/min-size and the pseudo's no-min-size convention come from the primitive.
  */
 @Composable
+// #1112 — post/role/profile/menu data + modifier + the moderation supporting-colour override.
+@Suppress("LongParameterList")
 private fun TopicPostIdentityHeader(
     post: Post,
+    authorRole: AuthorRole?,
     onOpenProfile: (() -> Unit)?,
     onOpenMenu: () -> Unit,
     modifier: Modifier = Modifier,
+    supportingContentColorOverride: Color? = null,
 ) {
     // Phase 2 finish (#208) — tapping the avatar OR the author pseudo opens the profile bottom sheet
     // when `onOpenProfile` is non-null (the date stays inert: review feedback I6). The min-size on the
@@ -2865,11 +3274,13 @@ private fun TopicPostIdentityHeader(
         modifier = modifier,
         onAvatarClick = onOpenProfile,
         onAvatarClickLabel = openProfileLabel,
+        supportingContentColorOverride = supportingContentColorOverride,
         // #208 — the avatar carries the 48dp-compliant tap target; the pseudo is a convenience tap at
         // its natural text height (the primitive omits the min-size box on the supplied pseudo slot).
         pseudo = {
             Row(
                 modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // #884 a11y (vague 3) — heading() rides on the REAL pseudo text node (both variants
@@ -2894,7 +3305,11 @@ private fun TopicPostIdentityHeader(
                 // recomposition of this hot list row — same off-the-render-path stance as #509.
                 val isCreator = remember(post.author) { isRf2Creator(post.author) }
                 if (isCreator) {
-                    CreatorPseudoText(author = post.author, modifier = pseudoModifier)
+                    CreatorPseudoText(
+                        author = post.author,
+                        modifier = pseudoModifier,
+                        colorOverride = supportingContentColorOverride,
+                    )
                 } else {
                     Text(
                         text = post.author,
@@ -2905,6 +3320,7 @@ private fun TopicPostIdentityHeader(
                         modifier = pseudoModifier,
                     )
                 }
+                authorRole?.let { AuthorRolePill(role = it) }
             }
         },
         // #483 — the compact « · édité » marker (beta feedback Azgor). The exact edit time stays in the
@@ -2918,7 +3334,8 @@ private fun TopicPostIdentityHeader(
                     // (« édité »), so the dot is never vocalised.
                     text = "· $editedLabel",
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = supportingContentColorOverride
+                        ?: MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.semantics { contentDescription = editedLabel },
                 )
             }
@@ -2933,7 +3350,8 @@ private fun TopicPostIdentityHeader(
                 text = "⋯",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = supportingContentColorOverride
+                    ?: MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
                     .minimumInteractiveComponentSize()
                     .clickable(
@@ -2962,6 +3380,7 @@ private fun TopicPostIdentityHeader(
 private fun TopicPostBadges(
     citedCount: Int,
     horizontalPadding: Dp,
+    onClick: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -2972,19 +3391,26 @@ private fun TopicPostBadges(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (citedCount > 0) {
-            // #239/#863 — sober pill: HFR's server-side citation count (cross-page,
-            // authoritative). Jumping to the citing posts is a follow-up (#783).
+            // #239/#863/#783 — sober pill: HFR's server-side citation count (cross-page,
+            // authoritative). Its click opens HFR's native reverse index.
             // surfaceContainerHighest : a touch above the surfaceContainer card so the pill reads.
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                shape = MaterialTheme.shapes.small,
-            ) {
-                Text(
-                    text = pluralStringResource(R.plurals.topic_post_cited_count, citedCount, citedCount),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                )
+            // #783 (gate Fable R1) — a Surface(onClick) applies M3's minimumInteractiveComponentSize
+            // (48 dp), which would inflate the whole post card and undo the #882 de-inflation. Neutralize
+            // it for THIS pill only, so it reclaims its labelSmall content size. The tap target then
+            // equals the visual pill — acceptable for a secondary affordance (cf. #603 34 dp bands).
+            CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
+                Surface(
+                    onClick = onClick,
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    shape = MaterialTheme.shapes.small,
+                ) {
+                    Text(
+                        text = pluralStringResource(R.plurals.topic_post_cited_count, citedCount, citedCount),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                    )
+                }
             }
         }
     }
@@ -3017,6 +3443,7 @@ private fun TopicPostActions(
     multiQuoteSelected: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val readingColors = readingContentColors()
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -3025,7 +3452,10 @@ private fun TopicPostActions(
         horizontalArrangement = Arrangement.End,
     ) {
         if (onEdit != null) {
-            TextButton(onClick = onEdit) {
+            TextButton(
+                onClick = onEdit,
+                colors = ButtonDefaults.textButtonColors(contentColor = readingColors.linkColor),
+            ) {
                 Text(text = stringResource(R.string.topic_post_edit))
             }
         }
@@ -3045,10 +3475,10 @@ private fun TopicPostActions(
             TextButton(
                 onClick = onToggleMultiQuote,
                 colors = if (multiQuoteSelected) {
-                    ButtonDefaults.textButtonColors()
+                    ButtonDefaults.textButtonColors(contentColor = readingColors.linkColor)
                 } else {
                     ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        contentColor = readingColors.onBodyVariant,
                     )
                 },
                 // #436 — the contentDescription carries the ACTION (« Ajouter/Retirer de la citation
@@ -3091,6 +3521,7 @@ private fun TopicPostActions(
  */
 @Composable
 private fun QuoteTextButton(onQuote: () -> Unit, onQuoteLongPress: (() -> Unit)?) {
+    val readingColors = readingContentColors()
     val longPressLabel = stringResource(R.string.topic_post_quote_full_editor)
     val interaction = if (onQuoteLongPress != null) {
         Modifier.combinedClickable(
@@ -3113,7 +3544,7 @@ private fun QuoteTextButton(onQuote: () -> Unit, onQuoteLongPress: (() -> Unit)?
     ) {
         Text(
             text = stringResource(R.string.topic_post_quote),
-            color = MaterialTheme.colorScheme.primary,
+            color = readingColors.linkColor,
             style = MaterialTheme.typography.labelLarge,
         )
     }

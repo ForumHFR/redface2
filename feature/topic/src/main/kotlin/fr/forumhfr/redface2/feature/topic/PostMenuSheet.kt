@@ -1,10 +1,8 @@
 package fr.forumhfr.redface2.feature.topic
 
-import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.content.Intent
 import android.os.Build
 import android.widget.Toast
 import androidx.compose.foundation.clickable
@@ -40,6 +38,8 @@ import androidx.core.net.toUri
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.postContentPlainText
 import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
+import fr.forumhfr.redface2.core.ui.browser.LocalAlwaysAskLinkApp
+import fr.forumhfr.redface2.core.ui.browser.openUrlInExternalBrowser
 import fr.forumhfr.redface2.core.ui.post.hideThenDismiss
 import fr.forumhfr.redface2.core.ui.R as CoreUiR
 
@@ -135,6 +135,7 @@ internal fun PostMenuSheet(
     val sheetState = rememberModalBottomSheetState()
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
+    val alwaysAskLinkApp = LocalAlwaysAskLinkApp.current
     val plainText = remember(post.content) { postContentPlainText(post.content) }
     // Resolved at composition time — the action callbacks run outside composition.
     val copiedFeedback = stringResource(R.string.topic_post_menu_link_copied)
@@ -223,7 +224,7 @@ internal fun PostMenuSheet(
 
             OutlinedButton(
                 onClick = {
-                    openPermalinkInBrowser(context, permalink, browserFailedFeedback)
+                    openPermalinkInBrowser(context, permalink, browserFailedFeedback, alwaysAskLinkApp)
                     hideThenDismiss(coroutineScope, sheetState, onDismiss)
                 },
                 modifier = Modifier.fillMaxWidth(),
@@ -457,14 +458,15 @@ private fun copyPostTextToClipboard(context: Context, text: String, feedback: St
 }
 
 /**
- * Fires an `ACTION_VIEW` on the canonical permalink — lands in the default browser (or
- * the user's link-handling app). A device without any handler is vanishingly rare but
- * cheap to survive: the failure surfaces as a Toast instead of a crash.
+ * Opens the canonical permalink in an external browser without routing HFR links back to Redface 2.
  */
-private fun openPermalinkInBrowser(context: Context, permalink: String, failureFeedback: String) {
-    try {
-        context.startActivity(Intent(Intent.ACTION_VIEW, permalink.toUri()))
-    } catch (ignored: ActivityNotFoundException) {
+private fun openPermalinkInBrowser(
+    context: Context,
+    permalink: String,
+    failureFeedback: String,
+    alwaysAsk: Boolean,
+) {
+    if (!openUrlInExternalBrowser(context, permalink.toUri(), alwaysAsk)) {
         Toast.makeText(context, failureFeedback, Toast.LENGTH_SHORT).show()
     }
 }

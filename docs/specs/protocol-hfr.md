@@ -17,7 +17,7 @@ Endpoints, form fields, constantes et edge cases du protocole HFR utilisés par 
 
 HFR expose deux surfaces consommables côté client :
 
-1. **HTML sur les endpoints `forum*.php`** — le scraping historique, toujours en place pour la lecture des posts, les MPs, le login et toutes les mutations en v1 (`bddpost.php`, `addflag.php`, `delflag.php`).
+1. **HTML sur les endpoints `forum*.php`** — le scraping historique, toujours en place pour la lecture des posts, les MPs, le login et toutes les mutations en v1 (`bddpost.php`, `vote.php`, `addflag.php`, `delflag.php`).
 2. **JSON sur `/webservices/rest_api.php`** — une API REST partielle exposée par MesDiscussions (le moteur du forum), retrouvée et instrumentée fin avril 2026, qui couvre la portion **browsing** : catégories, sous-catégories, listings de topics, drapeaux personnels, metadata d'un topic. Décision de stratégie hybride : [ADR-003]({{ site.baseurl }}/adr/003-api-rest-hfr-hybride).
 
 Cette page documente les invariants des deux surfaces — constantes, form fields, anti-CSRF, anti-bot, optimisations JS inline, contrat REST — que **le LLM qui écrit le parser, le client réseau ou les mappers REST doit respecter**.
@@ -34,6 +34,7 @@ La documentation HTML est issue de la rétro-ingénierie du code de [Redface v1]
 | Liste de topics d'une sous-catégorie | GET | `/forum2.php?config=hfr.inc&cat={cat}&subcat={subcat}&page={page}` | non (logué ↔ lu/non-lu visible) |
 | Liste topics (rewrite SEO) | GET | `/hfr/{cat_slug}/{subcat_slug}/liste_sujet-{page}.htm` | non |
 | Lecture d'un topic | GET | `/forum2.php?config=hfr.inc&cat={cat}&post={post}&page={page}` | non |
+| Posts citants d'un post (#783) | GET | `/forum2.php?config=hfr.inc&cat={cat}&post={post}&numreponse={numreponse}&quote_only=1` | non |
 | Drapeaux (accueil Redface 2) — REST | GET | `/webservices/rest_api.php?uri=forums/hardwarefr/topics/{participated,read,favorites}/&page={page}&results_per_page={n}` | **oui** |
 | Drapeaux par catégorie — REST | GET | `/webservices/rest_api.php?uri=forums/hardwarefr/categories/{cat}/topics/{participated,read,favorites}/&page={page}&results_per_page={n}` | **oui** |
 | Login | POST | `/login_validation.php?config=hfr.inc&redirect=&url=` | — |
@@ -46,12 +47,15 @@ La documentation HTML est issue de la rétro-ingénierie du code de [Redface v1]
 | Edit FP (premier post) | POST | `/bdd.php?config=hfr.inc` avec champs spécifiques | **oui** |
 | Suppression post/topic owned | POST | `/bdd.php?config=hfr.inc` avec `delete=1` | **oui** |
 | Nouveau topic | POST | `/bddpost.php?config=hfr.inc` | **oui** |
+| Vote sondage | POST | `/user/vote.php?config=hfr.inc` | **oui** |
+| Clore sondage (owner) | GET | `/user/close_sondage.php?config=hfr.inc&cat={cat}&post={topicId}` | **oui** |
 | MP (envoi) | POST | `/bddpost.php?config=hfr.inc&cat=prive&pseudo={dest}` | **oui** |
 | Conversation MP | GET | `/forum2.php?config=hfr.inc&cat=prive&post={mp_id}&page={page}` | **oui** |
 | Liste des MPs | GET | `/forum1.php?config=hfr.inc&cat=prive&page={page}&subcat=&sondage=0&owntopic=0&trash=0&trash_post=0&moderation=0&new=0&nojs=0&subcatgroup=0` | **oui** |
 | Ajouter aux drapeaux | GET | `/user/addflag.php?config=hfr.inc&cat={cat}&post={post}&numreponse={numreponse}` | **oui** |
 | Retirer un drapeau | GET | `/user/delflag.php?config=hfr.inc&cat={cat}&subcat={subcat}&post={topicId}&page={page}&p=1&sondage=0&owntopic={1,2,3}&new=0` | **oui** |
 | Profil public | GET | `/hfr/profil-{user_id}.htm` | non |
+| Annuaire staff (responsables) | GET | `/message-smi-mp-aj.php?config=hfr.inc&user_id=0&responsable=1` | non |
 | Paramètres utilisateur | GET | `/editprofil.php?config=hfr.inc&page={1..7}` | **oui** |
 | Modération (alerte) | GET/POST | `/modo.php?config=hfr.inc&cat={cat}&post={post}&numreponse={numreponse}` | **oui** |
 | Recherche (form) | GET | `/search.php?config=hfr.inc` | non |
@@ -60,6 +64,8 @@ La documentation HTML est issue de la rétro-ingénierie du code de [Redface v1]
 > **Note sur `PRIVATE_MESSAGE_CAT_ID`** : la catégorie des MPs est la **chaîne** `"prive"` et non un entier. Attention lors du typage côté Kotlin — `cat: String` pour les endpoints MP ou sentinel dédié.
 
 > **Note sur l'URL "Liste des MPs"** : l'endpoint canonique est `forum1.php?config=hfr.inc&cat=prive&...`, **pas** `message.php?config=hfr.inc` (qui ouvre le composer d'un MP isolé). Vérifié dans le legacy v1 (`HFREndpoints.PRIVATE_MESSAGES_URL`, prouvé en prod ~10 ans) et reproduit dans `:core:network HfrClient.getPrivateMessageListPage()` de Phase 1B.1. Toute la chaîne de query params (`subcat=`, `sondage=0`, `owntopic=0`, etc.) est conservée à l'identique du legacy par défensif — HFR pourrait accepter une URL plus courte mais ce n'est pas testé.
+
+> **Note sur `quote_only=1` — liste des posts citants (#783, capturé live 2026-08-30)** : l'endpoint `forum2.php?config=hfr.inc&cat={cat}&post={post}&numreponse={numreponse}&quote_only=1` renvoie une **page topic filtrée** ne contenant que les posts qui **citent** le `numreponse` cible, dans le **DOM `messagetable` standard** (mêmes sélecteurs que la lecture normale — parsé par `HfrParser.parseCitingPosts`). Accessible **anonymement** (aucun cookie requis ; c'est le canal de lecture du badge « cité N fois », un sujet = une source canonique). **Caveat — pas de bijection avec `citedCount`** : la liste renvoyée n'égale pas forcément le compteur serveur affiché (« Message cité N fois »). Le compteur agrège des **occurrences** (un même post peut citer la cible plusieurs fois ; une citation par un post depuis supprimé compte encore), là où la liste expose des **posts distincts** ; HFR **déduplique** côté serveur (observé mais **non contractuel** — d'où la garde `distinctBy { numreponse }` du repo, gate Fable R2). Il n'y a **pas de pagination** de ce filtre : `page=2` **répète** la première page au lieu d'avancer. Le titre de la feuille reste donc le `citedCount` serveur (autorité de comptage) et le corps liste exactement les rows distinctes renvoyées, sans jamais présenter leur nombre comme un second compteur.
 
 ### Retirer un drapeau — `delflag.php` (#99, Phase 2 finish)
 
@@ -123,7 +129,14 @@ GET /hfr/profil-{userId}.htm
 | `Ville` | `location: String?` | Null si vide |
 | `Signature des messages` | `signatureText: String?` | Texte plat (`Jsoup.text()` côté parser — voir limites) |
 
-**Champs HFR non promus** : Email (obfusqué par HFR → `"Vous n'avez pas accès à cette information"`), Date de naissance, Sexe, Profession, Loisirs, Citation personnelle, Statut. Ces champs sont conservés dans `rawFields` pour forward-compatibility.
+**Champs HFR non promus dans `UserProfile`** : Email (obfusqué par HFR → `"Vous n'avez pas accès à cette information"`), Date de naissance, Sexe, Profession, Loisirs, Citation personnelle. Ces champs sont conservés dans `rawFields` pour forward-compatibility.
+
+**Rôle de l'auteur — source SECONDAIRE, champ « Statut »** (#1112, #221) : le champ « Statut »
+(`td.profilCase3` de la `tr.profil` dont le label vaut « Statut ») porte le rôle d'**un** auteur.
+Extrait par `HfrParser.parseAuthorRole(html): AuthorRole?` (≠ `parseUserProfile`, qui le laisse dans
+`rawFields`) via le mapping **partagé** `authorRoleFromLabel` (le même que l'annuaire staff). Indexé
+sur `Post.profileId`, réservé à une demande explicite mono-utilisateur (écran profil, PR C). Libellé
+absent, vide ou non reconnu → `null`. La **source primaire** du badge est l'annuaire staff (ci-dessous).
 
 **Limites connues** :
 - Emails obfusqués : ne jamais tenter de déobfusquer (cf. AGENTS.md § "Emails obfusqués").
@@ -133,11 +146,103 @@ GET /hfr/profil-{userId}.htm
 
 **Fixtures** :
 - `core/parser/src/test/resources/fixtures/profile/profile_xatrix_authenticated.html` — userId=54596, session auth, fixture complète avec signature.
-- `core/parser/src/test/resources/fixtures/profile/profile_ezzz_anonymous.html` — userId=15867, session anonyme, pas de localisation.
+- `core/parser/src/test/resources/fixtures/profile/profile_ezzz_anonymous.html` — userId=15867, session anonyme, pas de localisation (cas `Statut = Membre`).
+- `core/parser/src/test/resources/fixtures/profile/profile_moderator_anonymous.html` — userId=15461 (Ernestor), session anonyme, cas `Statut = Modérateur` (#1112, capture curl assainie).
+
+### Annuaire staff (responsables) — source PRIMAIRE du rôle (#1112, #221)
+
+**GET anonyme** (pas de session requise). URL exacte, **globale** (pas de `cat`) :
+
+```
+GET /message-smi-mp-aj.php?config=hfr.inc&user_id=0&responsable=1
+```
+
+- Réponse = fragment AJAX HTML (« Contacter un responsable ») : une `<table class="main">` d'ancres
+  `<a class="s1Topic" onclick="fillfield_private('pseudo')">pseudo <i>(Rôle)</i></a>`.
+- **Clé = pseudo**, jamais un `profileId` : l'endpoint n'expose aucun id numérique. Les pseudos HFR
+  étant uniques, aucune confirmation par `profileId` n'est nécessaire (pas de N+1).
+- **Caractère global** : un seul GET donne TOUS les responsables du forum → source idéale du badge
+  d'une liste de posts (1 GET + lookups locaux par pseudo).
+- Client **anonyme** (règle prefetch-non-authentifié : un read ne doit pas marquer de drapeaux lus).
+- Extrait par `HfrParser.parseStaffList(html): Map<String, AuthorRole>` (`StaffParser`) : pseudo =
+  argument de `fillfield_private('…')` (dé-échappé ; repli défensif `anchor.ownText()`), rôle = texte
+  du `<i>` mappé via `authorRoleFromLabel` (**libellé inconnu → entrée ignorée**). Pseudos **bruts** en
+  sortie ; la **canonicalisation** (`canonicalizePseudo`) est faite par le repository.
+
+**Libellés observés (capture 2026-08-27, 64 entrées)** : `Modérateur` (55) → `MODERATOR` ;
+`Administrateur` (2) → `ADMIN` ; `Super Administrateur` (3) → `SUPER_ADMIN` ; `Développeur` (1) →
+`DEVELOPER` ; `Architecte / Développeur principal` (3) → `ARCHITECT`.
+
+**Fixture** :
+- `core/parser/src/test/resources/fixtures/staff/staff_responsables_anonymous.html` — annuaire global
+  anonyme (#1112, capture curl, 64 entrées, aucune PII).
 
 ---
 
 ## Form fields critiques
+
+### POST `/user/vote.php` — vote sondage (#779)
+
+Contrat vérifié en live avec le compte de test authentifié :
+
+```text
+POST /user/vote.php?config=hfr.inc
+Content-Type: application/x-www-form-urlencoded
+```
+
+Le POST réussit **sans aucun header `Referer`**. La protection CSRF est le `hash_check`; les champs
+`cat`, `page` et `numeropost` nécessaires au routage sont déjà dans le body. Le client ne construit
+donc aucun `Referer` et n'ajoute aucun paramètre de contexte à la signature réseau.
+
+Ordre déterministe du payload, identique au formulaire observé :
+
+1. `hash_check` — token non vide de 32 caractères hexadécimaux en session authentifiée ; la même
+   forme est parsable logged-out avec une valeur vide, mais le repository refuse alors le POST ;
+2. champs cachés, verbatim et dans l'ordre DOM : `cat`, `p`, `page`, `sondage`, `owntopic`,
+   `subcat`, `numeropost` ;
+3. choix cochés dans l'ordre des options du formulaire, jamais dans l'ordre d'un `Set` appelant :
+   - mono (radios) : un seul `reponse=<value>` ;
+   - multi (checkboxes) : un `reponseN=1` par choix.
+
+Les réponses succès et déjà-voté sont toutes deux HTTP 200 `text/html`. Le message se trouve dans
+`div.hop` : « Votre vote a bien été pris en compte ! » (avec meta-refresh) ou « Désolé, vous avez
+déjà voté ! » (sans refresh). Le parser normalise casse, diacritiques et espaces avant de reconnaître
+exclusivement ces deux marqueurs. Toute autre réponse — y compris un
+`<meta http-equiv="Refresh" content="…; url=…">` sans marqueur — échoue avec `UnexpectedResponse`
+(fail-close).
+
+Le vote est **non idempotent** : exactement un POST, aucun retry automatique. Avant la requête, le
+repository refuse le token vide, une sélection vide/inconnue, plusieurs choix sur un mono, une
+sélection au-delà de `maxSelections`, ou des champs `cat`/`page`/`numeropost` absents ou non
+numériques. `PollVoteForm` et son `hash_check` sont transitoires, jamais persistés ni loggés.
+
+### Clore un sondage — GET `/user/close_sondage.php` (#1201)
+
+Le **créateur du sujet** peut clore le sondage de son topic à tout moment. Contrat capturé live le
+2026-08-31 (`XaTelitte`, topic de test créé puis supprimé).
+
+```text
+GET /user/close_sondage.php?cat={cat}&config=hfr.inc&post={topicId}
+```
+
+- **Authentifié, sans `hash_check`, sans `Referer`** (même famille GET que `addflag.php`/`delflag.php`).
+  Paramètres : `cat`, `config=hfr.inc`, `post` (= topic id). Pas de `numreponse`.
+- **Réponse succès** (HTTP 200, `text/html`) : message dans `div.hop` « **Le sondage a bien été clos** »,
+  sans meta-refresh. Fixture : `close_sondage_success.html`.
+- **Après clôture** : la page du topic n'offre plus le lien « Clore la partie sondage » et porte le
+  marqueur `<b class="s1Ext">Ce sondage est clos</b>` (déjà parsé en lecture — `Poll.closed`, #1170).
+- **Irréversible** (pas de réouverture). Un seul GET, aucun retry.
+- **Contrôle owner-only** : le lien `<a href="/user/close_sondage.php?…">Clore la partie sondage</a>`
+  n'est rendu que pour l'owner d'un sondage **ouvert** (sous les boutons Voter / Voir les résultats), et
+  HFR le rend sur **chaque** page du topic. Le gate applicatif parse la **présence de ce lien**
+  (`Poll.canClose`, #1206) — signal autoritaire owner + sondage ouvert, valable sur toutes les pages —
+  et non le proxy `Topic.isFirstPostOwner` (faux hors page 1, d'où le bouton bridé corrigé en #1206).
+
+**Création/édition d'un sondage** : un sondage se crée/modifie en **éditant le 1er post** — l'option
+n'existe **pas** dans le formulaire de nouveau sujet. POST `bdd.php` (édition FP) avec `have_sondage=1`,
+`textreponse0` = la question, `textreponse1..10` = les options, `max_votes` (choix multiples),
+`allowvisitor`, date d'expiration `jour/mois/annee/heure/minute`, `subcat` obligatoire, `content_form`
+conservé, jamais `delete=1`.
 
 ### POST `bddpost.php` (reply, quote ou nouveau topic)
 
@@ -305,7 +410,7 @@ Pour un post normal, la réponse succès contient un refresh vers la page du top
 Les inconnues restantes sont explicitement limitées aux points suivants :
 
 - succès de création topic : formulaire GET capturé (`write_create_topic_form_android_cat.html`) et réponse POST succès capturée (`write_create_topic_success_response.html`). Contrat connu : refresh vers la liste, aucun id du topic créé. Limite restante : la navigation directe #206 est impossible ; workaround livré = highlight exact du titre dans la liste d'arrivée ;
-- sondage : les champs de formulaire FP sont observés, mais aucun POST avec sondage n'a été envoyé. Impact : création/édition de sondage hors MVP écriture ;
+- création/édition de sondage : contrat désormais **capturé live** (#1201, 2026-08-31) — voir la section « Clore un sondage » ci-dessus (création par édition du FP, clôture par `close_sondage.php`). Le POST de **vote** est vérifié séparément dans la section `/user/vote.php` ;
 - `verifrequet=1100` : valeur observée dans tous les formulaires, pas de variant négatif testé. Impact : envoyer la valeur observée telle quelle ;
 - second paramètre de `[quotemsg=numreponse,X,user_id]` : valeurs observées `768`, `640`, `1`; le sens exact reste opaque. Impact : ne pas reconstruire localement les quotes, réutiliser le `content_form` prérempli par HFR ;
 - edit FP du topic Redface 2 : non testé car `XaTelitte` ne possède pas le FP ; edit FP owned validé sur topic temporaire Programmation.
@@ -364,7 +469,9 @@ require(hashCheck.isNotBlank()) { "hash_check absent — le POST serait silencie
 
 ### `verifrequet = "1100"`
 
-Constante anti-bot statique, présente dans **tous** les POST vers HFR. Valeur littérale `"1100"` (string, pas un nombre dynamique).
+Constante anti-bot statique, présente dans les formulaires d'écriture `bddpost.php` / `bdd.php`
+observés. Valeur littérale `"1100"` (string, pas un nombre dynamique). Le formulaire de vote
+`/user/vote.php` ne la porte pas et ne doit pas l'inventer.
 
 En Kotlin, à constanter dans `:core:network` :
 

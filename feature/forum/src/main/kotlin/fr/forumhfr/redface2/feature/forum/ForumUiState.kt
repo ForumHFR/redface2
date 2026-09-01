@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.forum
 
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
+import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.SubCategory
 import fr.forumhfr.redface2.core.model.TopicListPage
@@ -28,15 +29,6 @@ sealed interface ForumUiState {
         val kind: HfrErrorKind = HfrErrorKind.Other,
     ) : ForumUiState
 }
-
-/**
- * « Mes drapeaux » filter local to the category screen (#455), replicating the web
- * `owntopic` toolbar. [ALL] is the normal paginated listing; the three other modes show
- * ONLY the user's flagged topics of that (sub)category for the matching REST bucket — not
- * a decoration of the listing. Reset to [ALL] when the screen leaves composition (the
- * state lives in the ViewModel, not persisted).
- */
-enum class CategoryFlagFilter { ALL, PARTICIPATED, READ, FAVORITES }
 
 /**
  * UI state for a category detail screen. We keep subcategories and topic list as
@@ -73,6 +65,13 @@ data class CategoryUiState(
      * 0 matches the screen renders an explicit empty state.
      */
     val searchQuery: String,
+    /**
+     * `true` when the in-page search is open (#1130). Drives the search affordance's
+     * open/closed rendering and the `BackHandler` that leaves the mode on system back.
+     * Independent of [searchQuery]: an open, empty field is a valid state, so this is
+     * NOT derived from the query being non-blank.
+     */
+    val searchActive: Boolean = false,
     /** Filtered view over `topics.page.topics` per [searchQuery]. */
     val filteredTopics: List<TopicSummary>,
     /**

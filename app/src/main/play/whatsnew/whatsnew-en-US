@@ -1,10 +1,8 @@
-Redface 2 v0.43.0 — beta.
+Redface 2 v0.50.2 — beta.
 
-Private conversations finally read like topics.
-
-- Pinch zoom, page swipe, double-tap to refresh.
-- The topic pagination chrome: page picker, floating buttons, long press for the first or last page.
-- The reading position of each page is restored when you come back to it.
-- Quote several messages at once, with a button on every card.
-- A message's menu opens from the header "...".
-- New: keep conversations cached on the device, off by default.
+Big update since 0.43.0:
+- Polls: vote in the app, see closed polls and their deadline, and (as topic owner) close yours from any page.
+- Links: external links open without bouncing, app chooser, Firefox hint.
+- Moderation posts highlighted, staff role pills.
+- Forum view: remembered filter, search, separated pinned topics.
+- Clickable "quoted N times" badge, plus various reading fixes.

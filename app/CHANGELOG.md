@@ -16,6 +16,188 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.50.2` — `open` (bêta) — 2026-09-01
+
+Promotion bêta du lot développé en dev de `0.44.0` à `0.50.2`, depuis la précédente bêta `0.43.0` (parité de lecture MP). Le détail par version dev figure dans les entrées ci-dessous.
+
+### Sondages ([#779](https://github.com/ForumHFR/redface2/issues/779), [#1170](https://github.com/ForumHFR/redface2/issues/1170), [#1201](https://github.com/ForumHFR/redface2/issues/1201))
+
+- Voter depuis l'application (choix simple ou multiple, vote blanc), voir l'état clos et la date d'expiration, et déplier les sondages non répondus si on le souhaite.
+- Pour le créateur du sujet : clore le sondage depuis n'importe quelle page. Envoi durci — aucun rejeu réseau, aucune redirection inconnue prise pour un succès, clôture verrouillée après coup et lors d'un changement de compte.
+
+### Liens HFR ([#1032](https://github.com/ForumHFR/redface2/issues/1032), [#1207](https://github.com/ForumHFR/redface2/issues/1207), [#1184](https://github.com/ForumHFR/redface2/issues/1184), [#1203](https://github.com/ForumHFR/redface2/issues/1203))
+
+- Les liens externes s'ouvrent sans rebondir dans l'application ; réglage du gestionnaire par défaut ; option « toujours demander quelle app » ; aide Firefox. Un lien HFR retapé rouvre bien le post attendu.
+
+### Modération & rôles du staff ([#1112](https://github.com/ForumHFR/redface2/issues/1112), [#221](https://github.com/ForumHFR/redface2/issues/221))
+
+- Posts du compte « Modération » surlignés en rouge fidèle à RF1 ; pastilles de rôle du staff (Modérateur, Admin, SupAdmin, Dev, Architecte).
+
+### Vue Forum ([#1129](https://github.com/ForumHFR/redface2/issues/1129)–[#1132](https://github.com/ForumHFR/redface2/issues/1132))
+
+- Filtre mémorisé d'une catégorie à l'autre, recherche avec croix et sortie, sujets épinglés regroupés et séparés, bouton « + » qui ne recouvre plus la pagination.
+
+### Citations & lecture ([#783](https://github.com/ForumHFR/redface2/issues/783), [#1193](https://github.com/ForumHFR/redface2/issues/1193), [#1188](https://github.com/ForumHFR/redface2/issues/1188), [#1138](https://github.com/ForumHFR/redface2/issues/1138))
+
+- Badge « cité N fois » cliquable listant les citeurs ; feuilles citeurs/smileys plus stables ; plus de flash des libellés de la barre de navigation au démarrage.
+
+---
+
+## `0.50.1` — `internal` (dev) — 2026-09-01
+
+### Corrigé
+
+- **Deep links HFR retapés de nouveau honorés** ([#1203](https://github.com/ForumHFR/redface2/issues/1203)) — retaper le même lien après avoir navigué ailleurs déclenche désormais bien le changement d'onglet et la navigation vers le post, sans devoir tuer l'application. Les recréations d'Activity continuent de ne pas rejouer le lien déjà consommé.
+
+---
+
+## `0.50.0` — `internal` (dev) — 2026-09-01
+
+### Ajouté
+
+- **Ouvrir les liens dans une autre app** ([#1207](https://github.com/ForumHFR/redface2/issues/1207)) — nouvelle option de réglage **« toujours demander quelle app »** : quand elle est activée, les liens ouverts « dans le navigateur » (permalien d'un post, image, drapeau) passent par le sélecteur Android **« Ouvrir avec… »**, pour choisir une autre app que le navigateur par défaut à chaque fois (un autre navigateur, une app dédiée…). Redface 2 est exclu de la liste. Demandé par XaTriX.
+- **Aide Firefox dans les réglages** ([#1184](https://github.com/ForumHFR/redface2/issues/1184)) — une phrase d'aide sous « Ouverture des liens HFR » explique le réglage Firefox (« ouvrir les liens dans les applications ») responsable du rebond des liens vers l'app, et renvoie vers l'option ci-dessus.
+
+---
+
+## `0.49.2` — `internal` (dev) — 2026-08-31
+
+### Corrigé
+
+- **Clore un sondage : bouton accessible depuis toutes les pages** ([#1206](https://github.com/ForumHFR/redface2/issues/1206)) — le bouton **« Clore ce sondage »** (#1201) n'apparaissait qu'en page 1 du topic. Il est désormais visible sur **toutes** les pages, comme le sondage lui-même : le droit de clore est déduit de la présence du lien natif « Clore la partie sondage » que HFR rend pour l'auteur du sujet sur chaque page (au lieu d'un proxy limité à la page 1). Durcissement associé ([#1204](https://github.com/ForumHFR/redface2/issues/1204)) : le ViewModel re-vérifie ce droit avant d'envoyer la clôture (fail-close). Signalé par XaTriX.
+
+---
+
+## `0.49.1` — `internal` (dev) — 2026-08-31
+
+### Corrigé
+
+- **Écriture HFR : plus de rejeu réseau des mutations** ([#1205](https://github.com/ForumHFR/redface2/issues/1205)) — les requêtes qui modifient le forum (publier/citer/éditer un message, créer un sujet, voter, clore un sondage, poser/retirer un drapeau, envoyer une image) passent désormais par un client réseau dédié où le retry automatique de connexion est désactivé (`retryOnConnectionFailure(false)`). Sans cela, une coupure réseau au mauvais moment (après que HFR a traité la requête mais avant la réception de la réponse) pouvait faire **rejouer** la requête : double message pour une réponse, ou faux échec affiché pour un vote/une clôture pourtant bien pris en compte. Les lectures conservent le retry. Aligne le code sur la spec (`protocol-hfr.md` : « aucun retry automatique » sur les mutations). Trouvé par la revue de promotion bêta.
+
+---
+
+## `0.49.0` — `internal` (dev) — 2026-08-31
+
+### Ajouté
+
+- **Clore un sondage depuis l'app** ([#1201](https://github.com/ForumHFR/redface2/issues/1201)) — le créateur d'un sujet peut désormais clore le sondage de son topic directement depuis l'application (jusqu'ici il fallait passer par le web). Un bouton **« Clore ce sondage »** apparaît sous le sondage, visible uniquement pour l'auteur du sujet tant que le sondage est ouvert ; une confirmation est demandée car l'action est **définitive** (plus personne ne peut voter, pas de réouverture). Contrat HFR `close_sondage.php` capturé live. Demandé par XaTriX.
+
+---
+
+## `0.48.3` — `internal` (dev) — 2026-08-31
+
+### Corrigé
+
+- **Barre de navigation basse : plus de « flash » des libellés au démarrage** ([#1138](https://github.com/ForumHFR/redface2/issues/1138)) — quand les libellés de la barre du bas étaient masqués (réglage #666), ils s'affichaient brièvement au lancement avant que la préférence (DataStore, asynchrone) ne se résolve et ne les masque. L'état initial est désormais semé par un miroir SharedPreferences lu **synchronement** à la construction du ViewModel (même pattern bootstrap que le thème et l'écran de démarrage), écrit à chaque changement et rempli en backfill quand la valeur DataStore se résout : plus de flash dès le prochain démarrage à froid (un dernier flash résiduel possible au tout premier lancement après mise à jour, le temps que le miroir se remplisse). Signalé par nicko.
+
+---
+
+## `0.48.2` — `internal` (dev) — 2026-08-31
+
+### Corrigé
+
+- **Feuilles (bottom sheet) : résidu d'oscillation à l'ancre haute** ([#1193](https://github.com/ForumHFR/redface2/issues/1193)) — après le fix `skipPartiallyExpanded` de 0.48.1, un fling vers le haut alors que la feuille est déjà pleine faisait encore déborder le settle à ressort M3 1.4.0. Ajout d'un clamp nested-scroll directionnel (`Modifier.clampSheetTopOverscroll`) sur le contenu des feuilles citeurs et picker smileys : absorbe la vélocité montante résiduelle à l'ancre haute, sans toucher au scroll normal ni au swipe-de-fermeture. (Route drag direct du handle non couverte → fix upstream material3 1.5.0, [#1196](https://github.com/ForumHFR/redface2/issues/1196). À confirmer sur device.)
+
+---
+
+## `0.48.1` — `internal` (dev) — 2026-08-31
+
+### Corrigé
+
+- **Feuilles (bottom sheet) : oscillation/rebond de l'animation d'ouverture** ([#1193](https://github.com/ForumHFR/redface2/issues/1193)) — la liste des citeurs et le picker de smileys persos rebondissaient en butée haute à l'ouverture. Cause : défaut Material 3 1.4.0 (`skipPartiallyExpanded = false`) + contenu haut/scrollable. Forcé `skipPartiallyExpanded = true` sur les deux feuilles + hauteur de contenu stabilisée côté citeurs. (À confirmer sur device.)
+- **Vue Topic : saut de navigation tardif après tap sur un citeur** ([#1188](https://github.com/ForumHFR/redface2/issues/1188)) — un changement de page pendant la probe de résolution (≤ 3 s) pouvait arracher l'utilisateur à sa page. Garde générationnelle + annulation du job sur changement de page.
+
+---
+
+## `0.48.0` — `internal` (dev) — 2026-08-31
+
+### Ajouté
+
+- **Liste des citations d'un post (#783)** — le badge **« cité N fois »** d'un post devient cliquable : un tap ouvre une feuille listant les messages qui citent ce post (pseudo, date et heure, extrait), et un tap sur un citeur saute directement vers son message (avec la pile de retour existante). L'index inverse est servi nativement par HFR (endpoint `quote_only=1`), interrogé en anonyme (aucun drapeau marqué lu). La feuille gère les états chargement / vide / erreur et les profils supprimés. Note : la liste n'est pas forcément égale au compteur du badge (dédoublonnage côté serveur) — le titre reprend le compteur, le corps liste ce que le serveur renvoie. La pill cliquable ne gonfle pas la hauteur des cartes (densité préservée). Preuve visuelle Roborazzi (carte + feuille, light/dark/AMOLED).
+
+---
+
+## `0.47.0` — `internal` (dev) — 2026-08-30
+
+### Ajouté
+
+- **Ouverture correcte des liens HFR (#1032)** — chantier en trois volets. **Sortant** : « Ouvrir dans le navigateur » (permalien de post, sujet depuis les drapeaux, image) ne reboucle plus sur Redface 2 quand l'app est handler du domaine — ouverture directe du navigateur par défaut (résolu via un probe neutre, jamais l'URL HFR), repli sur un sélecteur excluant les variantes de l'app. **Entrant** : les liens HFR « jolis » partagés (`…-sujet_<post>_<page>.htm#tN`, la forme la plus courante) ouvrent désormais le bon sujet dans l'app (20 catégories mappées) en plus des formes `forumN.php` ; un lien HFR non routable (MP, profil, recherche, catégorie inconnue) part proprement au navigateur au lieu d'échouer en silence. **Réglage** : nouvelle ligne (section Réseau) affichant si Redface 2 est l'app par défaut pour les liens `forum.hardware.fr` (Android 12+), avec un raccourci vers l'écran système « Ouvrir par défaut » — l'association de domaine n'étant pas vérifiable automatiquement (domaine tiers, pas d'`autoVerify`), l'activation reste un opt-in manuel désormais découvrable.
+
+---
+
+## `0.46.1` — `internal` (dev) — 2026-08-30
+
+### Ajouté
+
+- **Sondages : état fermé, expiration, vote blanc et repli intelligent (#1170)** — les sondages **clos** sont reconnus (marqueur « Ce sondage est clos ») et affichent une pillule dédiée ; la **date d'expiration** (« Expire le … » / « A expiré le … ») est parsée et affichée ; le **vote blanc** est pris en charge à l'affichage (compteur « N vote blanc ») comme à l'écriture (bouton « Voter blanc », POST `vote.php` avec `sondage_submit=Voter` sans `reponse` — contrat capturé live). Nouveau réglage opt-in **« Déplier les sondages non répondus »** : quand le repli des sondages est actif, ceux où l'on peut encore voter restent dépliés. Radios mono désormais déselectionnables (le vote blanc reste atteignable). Persistance JSON (sans migration Room), preuve visuelle Roborazzi (clos / expiration / vote blanc, light/dark/AMOLED).
+
+---
+
+## `0.46.0` — `internal` (dev) — 2026-08-30
+
+### Ajouté
+
+- **Vote de sondage depuis l'app (#779)** — voter à un sondage d'un sujet : choix simple (radios) ou multiple (cases, avec borne « N choix maximum ») ; POST authentifié vers `vote.php`, puis rafraîchissement de la page vers les résultats. Réponses « vote pris en compte » / « déjà voté » gérées, sélection préservée en cas d'échec. Contrat capturé live (mono + multi, sans Referer). Couche domaine (`PollVoteForm`/parser de réponse/`HfrClient.submitPollVote`/`PollVoteRepository`/règle cache) + slice MVI + UI `TopicPollCard`. Résultats et sondages sans jeton restent en lecture seule. Preuve visuelle Roborazzi (light/dark/AMOLED).
+
+---
+
+## `0.45.2` — `internal` (dev) — 2026-08-29
+
+Correctif du rendu « Modération » (retour device XaTriX).
+
+### Corrigé
+
+- **Header « Modération » resté bleu sur le dernier message lu** ([#1112](https://github.com/ForumHFR/redface2/issues/1112)) : un post du compte « Modération » qui est aussi le dernier message lu affichait sa barre de titre en bleu (surbrillance de position) au lieu du rouge. Le rouge de modération prime désormais sur la surbrillance de position — le header reste rouge.
+
+---
+
+## `0.45.1` — `internal` (dev) — 2026-08-29
+
+Renforcement du rendu des posts « Modération » (retour dogfood XaTriX) : le fond rosé était trop discret pour un message de modération.
+
+### Modifié
+
+- **Posts « Modération » en rouge, façon RF1** ([#1112](https://github.com/ForumHFR/redface2/issues/1112)) : le fond rosé pâle est remplacé par le rendu de Redface 1 — **tout le post en rouge, texte blanc** (header rouge soutenu, corps rouge, citations/spoiler/code en rouge médian, liseré rouge autour du post). Beaucoup plus visible. Coexiste avec la surbrillance de vos propres citations (qui reste bleutée quand le post est le vôtre). Topic et MP, thèmes clair / sombre / AMOLED.
+
+---
+
+## `0.45.0` — `internal` (dev) — 2026-08-28
+
+Modération et rôles du staff dans la lecture des posts (topic et messages privés). Demandé par XaTriX.
+
+### Ajouté
+
+- **Fond rosé sur les posts du compte « Modération »** ([#1112](https://github.com/ForumHFR/redface2/issues/1112)) : les messages postés par le compte partagé « Modération » sont surlignés en rosé sur tout le post, comme sur HFR web / Redface 1, détecté structurellement (classe HTML `messageModo`). Actif par défaut, sans réglage. Coexiste avec la surbrillance EgoQuote (le ego reste bleuté). Topic et MP.
+
+- **Pastilles de rôle du staff** ([#221](https://github.com/ForumHFR/redface2/issues/221)) : une pastille (Modérateur, Admin, SupAdmin, Dev, Architecte) s'affiche à côté du pseudo des membres du staff HFR qui s'expriment sous leur propre nom, distincte du fond rosé « Modération ». Alimentée par l'annuaire staff (1 requête, best-effort, cache 24 h). Topic et MP.
+
+### Interne
+
+- Socle hybride du rôle d'auteur ([#1158](https://github.com/ForumHFR/redface2/issues/1158), PR A de #1112/#221) : annuaire staff par pseudo + rôle par profil, sans UI.
+- Parser du formulaire de vote de sondage ([#779](https://github.com/ForumHFR/redface2/issues/779), lot 1/3), sans écriture live.
+
+---
+
+## `0.44.0` — `internal` (dev) — 2026-08-27
+
+Polish de la Vue Forum (liste des sujets d'une catégorie) : recherche, pagination, sujets épinglés et mémorisation du filtre. Demandé sur le fil TU (Tronklou, kikou2419).
+
+### Ajouté
+
+- **Mémoriser le dernier filtre de la Vue Forum** ([#1132](https://github.com/ForumHFR/redface2/issues/1132)) : le choix Tout / Participé / Lus / Favoris est conservé et réappliqué en changeant de catégorie, sans réglage à configurer. Rétabli à « Tout » à la déconnexion, sans effacer la préférence mémorisée.
+
+- **Effacer et quitter la recherche** ([#1130](https://github.com/ForumHFR/redface2/issues/1130)) : le champ de recherche d'une catégorie a maintenant une croix d'effacement du texte et une flèche de sortie (le retour système quitte aussi la recherche), au lieu de devoir vider le champ caractère par caractère.
+
+### Modifié
+
+- **Sujets épinglés distincts** ([#1129](https://github.com/ForumHFR/redface2/issues/1129)) : les sujets épinglés sont regroupés en tête et séparés des sujets normaux par un séparateur « Autres sujets », avec un badge de statut plus lisible (fond tonal) placé avant le titre. La liste des vues « Mes drapeaux » (Participé/Lus/Favoris) reste plate.
+
+### Corrigé
+
+- **Le bouton « + » ne recouvre plus « Suivant »** ([#1131](https://github.com/ForumHFR/redface2/issues/1131)) : la liste réserve la place du bouton flottant de création de sujet, de sorte que le bouton « Suivant » de la pagination reste atteignable — en résultats de recherche comme sur la dernière page d'une catégorie.
+
+---
+
 ## `0.43.0` — `open` (bêta) — 2026-08-25
 
 Promotion bêta du chantier de **parité de lecture Sujet ↔ Conversations privées** ([#1040](https://github.com/ForumHFR/redface2/issues/1040)), livré en dev de `0.42.0` à `0.42.8`.

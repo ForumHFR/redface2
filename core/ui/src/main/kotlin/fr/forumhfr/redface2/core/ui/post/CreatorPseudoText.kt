@@ -4,6 +4,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -17,13 +18,24 @@ import fr.forumhfr.redface2.core.ui.theme.rememberCreatorPseudoBrush
  *
  * The caller owns creator detection, interaction and accessibility semantics through [modifier]. In
  * particular, when this text fills the [PostIdentityHeader] `pseudo` slot, that modifier must put the
- * slot's single `heading()` on this real pseudo node.
+ * slot's single `heading()` on this real pseudo node. [colorOverride] disables the brush entirely:
+ * a `TextStyle` brush wins over `color`, so merely copying a colour onto the animated style would
+ * leave a moderation pseudo gold instead of white.
  */
 @Composable
-fun CreatorPseudoText(author: String, modifier: Modifier = Modifier) {
+fun CreatorPseudoText(
+    author: String,
+    modifier: Modifier = Modifier,
+    colorOverride: Color? = null,
+) {
+    val style = if (colorOverride != null) {
+        MaterialTheme.typography.titleSmall.copy(color = colorOverride)
+    } else {
+        MaterialTheme.typography.titleSmall.copy(brush = rememberCreatorPseudoBrush())
+    }
     Text(
         text = author,
-        style = MaterialTheme.typography.titleSmall.copy(brush = rememberCreatorPseudoBrush()),
+        style = style,
         fontWeight = FontWeight.SemiBold,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,

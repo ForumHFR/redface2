@@ -28,6 +28,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -65,6 +66,7 @@ import fr.forumhfr.redface2.core.ui.post.LocalIntrinsicMediaSizeCache
 import fr.forumhfr.redface2.core.ui.theme.LocalSmileyPickerDecoration
 import fr.forumhfr.redface2.core.ui.post.LocalMediaAttemptLedger
 import fr.forumhfr.redface2.core.ui.post.measureAndCacheIntrinsicMediaSize
+import fr.forumhfr.redface2.core.ui.sheet.clampSheetTopOverscroll
 
 /**
  * Phase 2F-B (#11 partial) — bottom-sheet smiley picker. Promoted from `:feature:editor`
@@ -95,10 +97,15 @@ fun SmileyPickerSheet(
     modifier: Modifier = Modifier,
     layout: SmileyPickerLayoutSpec = SmileyPickerLayoutSpec.Current,
 ) {
+    // #1193 — force skipPartiallyExpanded: the tall, scrollable picker otherwise anchors at M3's
+    // PartiallyExpanded and its underdamped settle overshoots the top butée on opening. Same fix as
+    // QuickReplySheet / MessageEditorComponents; scope is Fix 1 only (no tab/IME/search change).
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         modifier = modifier,
         sheetMaxWidth = SMILEY_SHEET_MAX_WIDTH,
+        sheetState = sheetState,
     ) {
         // Local-only tab selection : the picker's tab state is not worth piping all the
         // way into the ViewModel. `rememberSaveable` so a configuration change (rotation,
@@ -118,6 +125,10 @@ fun SmileyPickerSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                // #1193 residual — swallow the upward overscroll left over at the Expanded anchor so
+                // the M3 spring settle cannot overshoot above it. Sits on the content wrapper
+                // (closest nested-scroll parent to the grid's LazyVerticalGrid), not the sheet.
+                .clampSheetTopOverscroll(sheetState)
                 // #900 — header density pass (tinc, DEV #2790993) : the VISIBLE « Smileys » title
                 // line is gone (the Standard/Wiki tabs already name the surface visually), spacing
                 // tightened 12 → 8 dp. The sheet keeps an ACCESSIBLE name through paneTitle —

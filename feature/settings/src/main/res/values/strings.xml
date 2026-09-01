@@ -81,6 +81,16 @@
     <string name="settings_nav_proxy_description">Router les requêtes HFR via votre proxy.</string>
     <string name="settings_nav_maintenance">Maintenance</string>
     <string name="settings_nav_maintenance_description">Vider les caches, options de debug.</string>
+    <!-- #1032 — statut « app par défaut pour les liens HFR » + raccourci vers le réglage système. -->
+    <string name="settings_nav_hfr_links">Ouverture des liens HFR</string>
+    <string name="settings_nav_hfr_links_description_default">Redface 2 est l\'app par défaut pour forum.hardware.fr</string>
+    <string name="settings_nav_hfr_links_description_not_default">Redface 2 n\'est pas l\'app par défaut — appuyez pour régler</string>
+    <string name="settings_nav_hfr_links_description_unknown">Gérer l\'ouverture des liens dans les réglages Android</string>
+    <string name="settings_always_ask_link_app_title">Toujours demander quelle app</string>
+    <string name="settings_always_ask_link_app_description">Ouvre les liens via le sélecteur « Ouvrir avec… » au lieu du navigateur par défaut, pour choisir une autre application à chaque fois.</string>
+    <string name="settings_always_ask_link_app_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
+    <string name="settings_hfr_links_firefox_title">Firefox</string>
+    <string name="settings_hfr_links_firefox_help">Sous Firefox, réglez « Ouvrir les liens dans les applications » sur « Ne jamais » pour lire dans le navigateur, ou activez « Toujours demander quelle app » ci-dessus pour choisir l’application à chaque fois.</string>
     <string name="settings_nav_display">Affichage</string>
     <string name="settings_nav_display_description">Thème, AMOLED, densité et taille de police.</string>
     <string name="settings_nav_images">Images</string>
@@ -356,6 +366,10 @@
     <string name="settings_topic_polls_expanded_title">Déplier les sondages</string>
     <string name="settings_topic_polls_expanded_description">Sondages dépliés en haut des sujets ; sinon une ligne repliée.</string>
     <string name="settings_topic_polls_expanded_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
+    <!-- #1170 — opt-in indépendant : garder visibles les sondages ouverts avec un vote disponible. -->
+    <string name="settings_topic_unanswered_polls_expanded_title">Déplier les sondages non répondus</string>
+    <string name="settings_topic_unanswered_polls_expanded_description">Garde dépliés les sondages où vous pouvez encore voter, même si les autres sont repliés.</string>
+    <string name="settings_topic_unanswered_polls_expanded_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
 
     <!-- #330 — Lecture. Afficher la signature de l'auteur sous chaque post (parité web). -->
     <string name="settings_topic_signatures_title">Afficher les signatures</string>

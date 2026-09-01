@@ -6,6 +6,7 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
+import fr.forumhfr.redface2.core.domain.author.AuthorRoleRepository
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.blacklist.BlacklistRepository
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
@@ -20,6 +21,7 @@ import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
 import fr.forumhfr.redface2.core.model.mpstorage.MpStorageFlagEntry
@@ -51,13 +53,16 @@ import kotlinx.coroutines.supervisorScope
 @HiltViewModel(assistedFactory = PrivateMessageThreadViewModel.Factory::class)
 // Assisted route + one injected collaborator per independent thread concern; the image saver reuses
 // this existing lifecycle/effect owner instead of introducing the duplicate ViewModel rejected for #1051.
-@Suppress("LongParameterList")
+// #221 tipped it over LargeClass with the best-effort staff loader ; splitting the thread hub is a
+// separate refactor, tracked rather than forced by this feature (same posture as TopicViewModel).
+@Suppress("LongParameterList", "LargeClass")
 class PrivateMessageThreadViewModel @AssistedInject constructor(
     @Assisted private val request: PrivateMessageThreadRequest,
     private val repository: MessagesRepository,
     private val authRepository: AuthRepository,
     private val userPreferencesRepository: UserPreferencesRepository,
     private val blacklistRepository: BlacklistRepository,
+    private val authorRoleRepository: AuthorRoleRepository,
     private val readPositionStore: PrivateMessageReadPositionStore,
     private val mpStorageRepository: MpStorageRepository,
     private val writeRepository: PrivateMessageWriteRepository,
@@ -86,6 +91,8 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     // repository snapshot instead of reusing the previous session's last in-memory set.
     private var blacklistJob: Job? = null
     private var blockedCanonicals: Set<String> = emptySet()
+    // #221 — global, public and render-only: it survives private-session resets and account changes.
+    private var staffByPseudo: Map<String, AuthorRole> = emptyMap()
 
     /**
      * #1040 lot 6 — reading anchors belong to the retained DISPLAY session, never to the shared
@@ -137,6 +144,9 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     private var cachedRosterForm: ReplyForm? = null
 
     init {
+        // #221 — one screen-lifetime load, deliberately outside the auth collector and every job
+        // cancelled by clearPrivateState. It is public decoration, not private session state.
+        loadStaff()
         viewModelScope.launch {
             authRepository.observeAuthState()
                 .distinctUntilChanged()
@@ -241,6 +251,9 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     fun refresh() {
         val current = _state.value
         if (current.mode !is PrivateMessageThreadUiState.Mode.Content || current.isRefreshing) return
+        // #221 — retry an initial offline empty result on the user's explicit refresh. The
+        // repository's 24 h cache and single-flight absorb fresh/concurrent calls.
+        loadStaff()
         load(current.page, LandingRequest.None)
     }
 
@@ -589,6 +602,29 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     }
 
     /**
+     * #221 — best-effort staff loader, independent from auth/page jobs. A late non-empty change
+     * rebuilds exactly one Content value in place; empty, identical and ordinary failures are inert.
+     */
+    private fun loadStaff() {
+        viewModelScope.launch {
+            val staff = try {
+                authorRoleRepository.getStaff()
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (@Suppress("TooGenericExceptionCaught") _: Exception) {
+                return@launch
+            }
+            if (staff.isEmpty() || staff == staffByPseudo) return@launch
+            staffByPseudo = staff
+            _state.update { current ->
+                val content = current.mode as? PrivateMessageThreadUiState.Mode.Content
+                    ?: return@update current
+                current.copy(mode = contentMode(content.thread, content.source))
+            }
+        }
+    }
+
+    /**
      * Single construction seam for a loaded page: post-level and quote-level masking always use the
      * same blacklist snapshot, on initial load, page change and live blacklist re-filter alike.
      */
@@ -601,6 +637,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
             source = source,
             hiddenNumreponses = computeHiddenNumreponses(thread.messages),
             blockedQuoteAuthors = blockedCanonicals,
+            staffByPseudo = staffByPseudo,
         )
 
     private fun computeHiddenNumreponses(messages: List<Post>): Set<Int> {
