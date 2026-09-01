@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.model
 
 import fr.forumhfr.redface2.core.model.write.PollVoteForm
+import java.time.LocalDateTime
 
 data class Topic(
     val cat: Int,
@@ -103,7 +104,7 @@ data class Poll(
      * HFR wall-clock expiry without a time zone. Never convert it to an `Instant` or infer closure
      * from the local clock: the server-provided [closed] state is the source of truth.
      */
-    val expiresAt: java.time.LocalDateTime? = null,
+    val expiresAt: LocalDateTime? = null,
     /** `0` is a real count; `null` means no results counter or a legacy cache row. */
     val blankVotes: Int? = null,
 )

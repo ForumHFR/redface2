@@ -1,4 +1,4 @@
-Redface 2 v0.50.1 — dev.
+Redface 2 v0.50.2 — dev.
 
-- Tapping the same HFR link again now opens the expected post.
-- You no longer need to kill the app between identical link openings.
+- Poll closure stays locked after success and when switching accounts.
+- An unexpected vote redirect is no longer mistaken for success.

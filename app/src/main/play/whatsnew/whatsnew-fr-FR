@@ -1,4 +1,4 @@
-Redface 2 v0.50.1 — dev.
+Redface 2 v0.50.2 — dev.
 
-- Retaper le même lien HFR ouvre de nouveau le post attendu.
-- Plus besoin de tuer l'application entre deux ouvertures du même lien.
+- La clôture d'un sondage reste verrouillée après son succès et lors d'un changement de compte.
+- Une redirection de vote inattendue n'est plus prise pour un succès.

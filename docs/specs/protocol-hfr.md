@@ -207,8 +207,9 @@ Ordre déterministe du payload, identique au formulaire observé :
 Les réponses succès et déjà-voté sont toutes deux HTTP 200 `text/html`. Le message se trouve dans
 `div.hop` : « Votre vote a bien été pris en compte ! » (avec meta-refresh) ou « Désolé, vous avez
 déjà voté ! » (sans refresh). Le parser normalise casse, diacritiques et espaces avant de reconnaître
-ces marqueurs ; un `<meta http-equiv="Refresh" content="…; url=…">` reste un fallback succès borné,
-testé après le marqueur déjà-voté.
+exclusivement ces deux marqueurs. Toute autre réponse — y compris un
+`<meta http-equiv="Refresh" content="…; url=…">` sans marqueur — échoue avec `UnexpectedResponse`
+(fail-close).
 
 Le vote est **non idempotent** : exactement un POST, aucun retry automatique. Avant la requête, le
 repository refuse le token vide, une sélection vide/inconnue, plusieurs choix sur un mono, une
