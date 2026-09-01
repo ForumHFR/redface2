@@ -1,6 +1,6 @@
 package fr.forumhfr.redface2.feature.settings
 
-import java.text.Normalizer
+import fr.forumhfr.redface2.core.domain.search.foldForSearch
 
 /**
  * #494 — pure, testable model of the settings catalogue for the activable search.
@@ -45,7 +45,8 @@ internal data class SettingsSearchableItem(
  *   title, description, or any keyword. `enabled = false` items remain matchable.
  * - Sections left with no matching item are omitted.
  *
- * Folding replicates `ForumUiState.foldForSearch` (NFD + combining-marks removal + lowercase).
+ * Folding is the shared `foldForSearch` of `:core:domain` (NFD + combining-marks removal + lowercase +
+ * `œ`/`æ` spelled out, #739) — the same one as the Forum and Drapeaux searches.
  */
 internal fun filterSettingsSections(
     sections: List<SettingsSearchableSection>,
@@ -68,10 +69,3 @@ private fun SettingsSearchableItem.matches(needle: String): Boolean =
     title.foldForSearch().contains(needle) ||
         description?.foldForSearch()?.contains(needle) == true ||
         keywords.any { it.foldForSearch().contains(needle) }
-
-private fun String.foldForSearch(): String =
-    Normalizer.normalize(this, Normalizer.Form.NFD)
-        .replace(COMBINING_MARKS, "")
-        .lowercase()
-
-private val COMBINING_MARKS = Regex("\\p{InCombiningDiacriticalMarks}+")

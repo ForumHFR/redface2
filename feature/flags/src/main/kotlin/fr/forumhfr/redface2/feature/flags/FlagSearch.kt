@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.flags
 
+import fr.forumhfr.redface2.core.domain.search.containsFolded
 import fr.forumhfr.redface2.core.model.Flag
 
 /**
@@ -7,16 +8,21 @@ import fr.forumhfr.redface2.core.model.Flag
  * [ADR-003]) and the flagged topics of the current tab are already loaded, so « rechercher dans les
  * drapeaux » is a title filter applied to the rendered [FlagsContent] — it never touches the
  * fetch/cache pipeline. Pure and testable without Android.
+ *
+ * Matching is case- AND accent-insensitive (#739): both the query and the title go through the
+ * shared [containsFolded] folding (NFD + combining-marks removal + lowercase + `œ`/`æ` spelled
+ * out), so « cafe » finds « café » and « café » finds « cafe » — the same folding as the Forum and
+ * Settings searches.
  */
 
 /**
- * Keeps the flags whose [Flag.title] contains [query] (case-insensitive, trimmed). A blank query is
- * a no-op (returns [flags] unchanged).
+ * Keeps the flags whose [Flag.title] contains [query] (case- and accent-insensitive, trimmed). A
+ * blank query is a no-op (returns [flags] unchanged).
  */
 fun filterFlagsByQuery(flags: List<Flag>, query: String): List<Flag> {
     val q = query.trim()
     if (q.isEmpty()) return flags
-    return flags.filter { it.title.contains(q, ignoreCase = true) }
+    return flags.filter { it.title.containsFolded(q) }
 }
 
 /**
@@ -49,16 +55,16 @@ fun FlagsContent.isEmpty(): Boolean = when (this) {
 /**
  * Pure client-side DT search (#603 harmonisation — the same « rechercher dans les drapeaux » loupe is
  * now offered on the DT tab, applied to its conversation list). Keeps the [DtListItem.InboxBacked] rows
- * whose conversation subject contains [query] (case-insensitive, trimmed). [DtListItem.StorageOnly]
- * orphans carry no subject (only a threadId), so an active query drops them — they have nothing to match.
- * A blank query is a no-op (returns [items] unchanged).
+ * whose conversation subject contains [query] (case- and accent-insensitive, trimmed — #739).
+ * [DtListItem.StorageOnly] orphans carry no subject (only a threadId), so an active query drops them —
+ * they have nothing to match. A blank query is a no-op (returns [items] unchanged).
  */
 fun filterDtItemsByQuery(items: List<DtListItem>, query: String): List<DtListItem> {
     val q = query.trim()
     if (q.isEmpty()) return items
     return items.filter { item ->
         when (item) {
-            is DtListItem.InboxBacked -> item.conversation.subject.contains(q, ignoreCase = true)
+            is DtListItem.InboxBacked -> item.conversation.subject.containsFolded(q)
             is DtListItem.StorageOnly -> false
         }
     }

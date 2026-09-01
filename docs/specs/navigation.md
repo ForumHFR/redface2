@@ -100,6 +100,8 @@ L'écran le plus important de l'app. Affiche les topics suivis par l'utilisateur
   - **Pull-to-refresh** (#588) pour resynchroniser.
   - **Reprise de lecture** = **position** (page/ancre), pas un lu/non-lu serveur (MPStorage ne stocke qu'une position de reprise par conversation, cf. [ADR-018]({{ site.baseurl }}/adr/018-mp-cache-disque-opt-in) décision 2 / #361 et [ADR-014]({{ site.baseurl }}/adr/014-mpstorage-v01-de-facto) §5).
 
+**Recherche locale (#603 PR2, #739)** : la loupe de la top bar filtre **côté client** les titres de l'onglet courant (le sujet des conversations pour l'onglet DT) — HFR n'offre aucune recherche serveur des drapeaux (cf. [ADR-003]({{ site.baseurl }}/adr/003-api-rest-hfr-hybride)) et la liste est déjà chargée, donc aucun fetch supplémentaire. Le filtre est insensible à la casse **et aux accents** (#739 : « cafe » trouve « café » et inversement ; ligatures `œ`/`æ` tolérées) via le repli partagé `foldForSearch()` de `:core:domain` (`search/SearchFolding.kt`), le même que la recherche du Forum et celle des Réglages. Requête vide = liste inchangée (sections vides de parité web conservées) ; en vue groupée, une catégorie sans résultat est masquée.
+
 **Regroupement par catégorie (#179, vue par défaut)** :
 - À l'intérieur de chaque onglet réel, les topics sont **groupés par catégorie**, dans l'ordre canonique du forum (cf. `ForumRepository.observeCategories()` ; ordre de secours en dur si le catalogue n'est pas encore chargé). C'est la parité avec la vue web « Vos sujets ».
 - Chaque catégorie est une bande séparatrice (`stickyHeader`). Par défaut, les **catégories vides sont conservées** (parité web) avec un placeholder par onglet (« Aucun nouveau message » pour cyan, « Aucun sujet dans cette catégorie » sinon).
