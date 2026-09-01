@@ -1406,7 +1406,7 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                         ),
                         topicSubmitNavState = TopicSubmitNavState(
                             pending = topicPendingSubmit,
-                            onPublish = { cat, post, targetPage, scrollTo ->
+                            onPublish = { cat, post, targetPage, scrollTo, quotedNumreponses ->
                                 topicSubmitEventId += 1
                                 topicPendingSubmit = TopicPendingSubmit(
                                     cat = cat,
@@ -1415,6 +1415,7 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                                         eventId = topicSubmitEventId,
                                         targetPage = targetPage,
                                         scrollTo = scrollTo,
+                                        quotedNumreponses = quotedNumreponses,
                                     ),
                                 )
                             },
@@ -1846,7 +1847,7 @@ private fun isTopicEntryFor(below: Any?, cat: Int, topicId: Int): Boolean {
  */
 private data class TopicSubmitNavState(
     val pending: TopicPendingSubmit?,
-    val onPublish: (cat: Int, post: Int, targetPage: Int?, scrollTo: Int?) -> Unit,
+    val onPublish: (cat: Int, post: Int, targetPage: Int?, scrollTo: Int?, quotedNumreponses: List<Int>) -> Unit,
     val onConsumed: () -> Unit,
 )
 
@@ -2903,21 +2904,28 @@ private fun RedfaceNavHost(
                             backStack.removeAt(backStack.lastIndex)
                         }
                     },
-                    onSubmitSucceeded = { targetPage, scrollTo ->
+                    onSubmitSucceeded = { targetPage, scrollTo, quotedNumreponses ->
                         // #895 étape 4 (PR 2) — publish the outcome BEFORE the pop, so the revealed
                         // topic entry finds it on first recomposition and hands it to its RETAINED
                         // ViewModel (in-place force refresh + landing, #200/#226 — the historical
                         // route-replace + submitSignal rebuild is gone). `targetPage` is parsed
                         // from HFR's success URL; `scrollTo` is the numreponse from the `#t{N}`
                         // fragment (quote / edit), or null when HFR anchored `#bas` (plain reply →
-                        // bottom landing). Guarded on the entry below actually being THIS topic —
-                        // an editor opened from the Flags list (onReplyFlag) pops back to the list,
-                        // and a pending outcome armed there would fire on a LATER unrelated open
-                        // of the topic.
+                        // bottom landing) ; `quotedNumreponses` (#974) lets the engine land on the
+                        // cited post instead of the fresh one. Guarded on the entry below actually
+                        // being THIS topic — an editor opened from the Flags list (onReplyFlag) pops
+                        // back to the list, and a pending outcome armed there would fire on a LATER
+                        // unrelated open of the topic.
                         val topicId = route.topicId
                         val below = backStack.getOrNull(backStack.lastIndex - 1)
                         if (topicId != null && isTopicEntryFor(below, route.cat, topicId)) {
-                            topicSubmitNavState.onPublish(route.cat, topicId, targetPage, scrollTo)
+                            topicSubmitNavState.onPublish(
+                                route.cat,
+                                topicId,
+                                targetPage,
+                                scrollTo,
+                                quotedNumreponses,
+                            )
                         }
                         // #868/#869 — the selection's intent is consumed by the SUCCESSFUL submit
                         // of a basket-consuming session (« Citer N » / its escalation), and only
@@ -2968,7 +2976,8 @@ private fun RedfaceNavHost(
                         val cat = route.cat
                         val below = backStack.getOrNull(backStack.lastIndex - 1)
                         if (cat != null && topicId != null && isTopicEntryFor(below, cat, topicId)) {
-                            topicSubmitNavState.onPublish(cat, topicId, targetPage, scrollTo)
+                            // An FP edit never cites anything : no #974 quote landing to forward.
+                            topicSubmitNavState.onPublish(cat, topicId, targetPage, scrollTo, emptyList())
                         }
                         if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)

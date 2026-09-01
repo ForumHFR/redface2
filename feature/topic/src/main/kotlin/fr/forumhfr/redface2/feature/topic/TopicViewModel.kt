@@ -261,6 +261,9 @@ class TopicViewModel @AssistedInject constructor(
      * per switch/entry, dispatched by [dispatchPendingLanding] on the first matching Loaded :
      * - [Post] → [TopicEffect.ScrollToPost] once the numreponse is on the page (stays pending
      *   through emissions of the same generation otherwise — historical scrollTo behaviour) ;
+     * - [PostOrBottom] → [TopicEffect.ScrollToPost] when the numreponse is on the page, else
+     *   [TopicEffect.ScrollToEndOfPage] — terminal on the first Loaded either way (#974 : a submit
+     *   that carried quotes lands on the cited post, or at the bottom when it is on another page) ;
      * - [Anchor] → [TopicEffect.ScrollToAnchor] (revisit / #782 return / process restore) ;
      * - [Bottom] → [TopicEffect.ScrollToEndOfPage] (post-submit `#bas`, #412 `page - 1` step) ;
      * - [Top] → [TopicEffect.ScrollToTop] (default landing of a fresh page).
@@ -275,6 +278,7 @@ class TopicViewModel @AssistedInject constructor(
          * navigations, #953/F4 — a same-page jump to that very numreponse must land top-of-post).
          */
         data class Post(val numreponse: Int, val lastRead: Boolean = false) : PendingLanding
+        data class PostOrBottom(val numreponse: Int) : PendingLanding
         data class Anchor(val anchor: TopicScrollAnchor) : PendingLanding
         data object Bottom : PendingLanding
         data object Top : PendingLanding
@@ -1401,6 +1405,14 @@ class TopicViewModel @AssistedInject constructor(
             is PendingLanding.Post ->
                 TopicEffect.ScrollToPost(landing.numreponse, lastRead = landing.lastRead)
                     .takeIf { topic.posts.any { post -> post.numreponse == landing.numreponse } }
+            // #974 — a cited post absent from the landing page falls back to the bottom AT ONCE :
+            // the submit refresh is one terminal emission, there is no later emission to wait for.
+            is PendingLanding.PostOrBottom ->
+                if (topic.posts.any { post -> post.numreponse == landing.numreponse }) {
+                    TopicEffect.ScrollToPost(landing.numreponse)
+                } else {
+                    TopicEffect.ScrollToEndOfPage(armed.page)
+                }
             is PendingLanding.Anchor -> TopicEffect.ScrollToAnchor(landing.anchor, armed.page)
             PendingLanding.Bottom -> TopicEffect.ScrollToEndOfPage(armed.page)
             PendingLanding.Top -> TopicEffect.ScrollToTop(armed.page)
@@ -1524,19 +1536,27 @@ class TopicViewModel @AssistedInject constructor(
 
     /**
      * Post-submit result delivered to THIS retained ViewModel (Sol GO, option A) : the editor /
-     * quick-reply sheet publishes `{targetPage, scrollTo}` after a successful POST ; the target
-     * falls back on the CANONICAL current page (never the route page). Arms the single #226
-     * redirect budget, dirties the target snapshot and force-fetches it — landing `scrollTo`
-     * (quote / edit) or bottom (`#bas`, plain reply).
+     * quick-reply sheet publishes `{targetPage, scrollTo, quotedNumreponses}` after a successful
+     * POST ; the target falls back on the CANONICAL current page (never the route page). Arms the
+     * single #226 redirect budget, dirties the target snapshot and force-fetches it. Landing, by
+     * priority :
+     * - [quotedNumreponses] non-empty (#974) → the HIGHEST cited post (the one closest to the end,
+     *   where the reading resumes) when it is on the landing page, the bottom otherwise — a reply
+     *   to an older post must not throw the reader onto the fresh post at the bottom ;
+     * - `scrollTo` (edit, HFR's `#t{N}`) → that post ;
+     * - bottom (`#bas`, plain reply).
+     *
+     * @param quotedNumreponses the `numreponse` of every post the submit cited (appearance order,
+     *   inline `[quotemsg]` tags and cards alike), empty for a plain reply or an edit.
      */
-    fun applySubmitResult(targetPage: Int?, scrollTo: Int?) {
+    fun applySubmitResult(targetPage: Int?, scrollTo: Int?, quotedNumreponses: List<Int> = emptyList()) {
         postSubmitRedirectBudget = 1
         val target = targetPage ?: request.page
         // F2 — the submitted-to page is dirty : its snapshot must never serve again as terminal.
         pageSnapshots.remove(target)
         jumpStack.clear()
         syncJumpAvailability()
-        performSubmitRefresh(target, scrollTo)
+        performSubmitRefresh(target, scrollTo, quotedNumreponse = quotedNumreponses.maxOrNull())
     }
 
     /**
@@ -1618,10 +1638,10 @@ class TopicViewModel @AssistedInject constructor(
      * submit result ; ownership taken via [becomePageOwner] (which cancels the anonymous warmup),
      * never an anonymous prefetch escalating to authenticated.
      */
-    private fun performSubmitRefresh(initialTarget: Int, scrollTo: Int?) {
+    private fun performSubmitRefresh(initialTarget: Int, scrollTo: Int?, quotedNumreponse: Int?) {
         becomePageOwner()
         savedStateHandle[KEY_FORCE_REFRESH_DONE] = true
-        adoptSubmitTarget(initialTarget, scrollTo)
+        adoptSubmitTarget(initialTarget, scrollTo, quotedNumreponse)
         val generation = ownerGeneration
         loadJob = viewModelScope.launch {
             // Gate Sol PR1 (récursion fragile → ITÉRATIF) : the #226 redirect continues INSIDE
@@ -1647,7 +1667,7 @@ class TopicViewModel @AssistedInject constructor(
                         pageSnapshots.remove(target)
                         pageSnapshots.remove(topic.totalPages)
                         target = topic.totalPages
-                        adoptSubmitTarget(target, scrollTo = null)
+                        adoptSubmitTarget(target, scrollTo = null, quotedNumreponse = quotedNumreponse)
                         continue
                     }
                     recordSnapshot(topic)
@@ -1672,9 +1692,10 @@ class TopicViewModel @AssistedInject constructor(
     /**
      * Adopt [target] as the canonical submit-landing page : canonical page updated, content kept
      * on screen when it already shows something (zero-flash on the common same-page reply), the
-     * skeleton only when the target's content is unknown, landing re-armed for the new page.
+     * skeleton only when the target's content is unknown, landing re-armed for the new page —
+     * cited post (#974, [quotedNumreponse], bottom when absent) > `scrollTo` > bottom.
      */
-    private fun adoptSubmitTarget(target: Int, scrollTo: Int?) {
+    private fun adoptSubmitTarget(target: Int, scrollTo: Int?, quotedNumreponse: Int?) {
         if (target != request.page) {
             updateCanonicalPage(target)
             // A cross-page submit landing shows the skeleton unless a snapshot can bridge the
@@ -1685,7 +1706,13 @@ class TopicViewModel @AssistedInject constructor(
         } else if (_state.value.mode !is TopicUiState.Mode.Loaded) {
             _state.update { it.copy(mode = TopicUiState.Mode.Loading) }
         }
-        armLanding(scrollTo?.let { PendingLanding.Post(it) } ?: PendingLanding.Bottom)
+        armLanding(
+            when {
+                quotedNumreponse != null -> PendingLanding.PostOrBottom(quotedNumreponse)
+                scrollTo != null -> PendingLanding.Post(scrollTo)
+                else -> PendingLanding.Bottom
+            },
+        )
     }
 
     /**

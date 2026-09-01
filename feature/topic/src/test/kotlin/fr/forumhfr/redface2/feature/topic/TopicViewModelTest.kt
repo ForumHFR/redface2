@@ -3069,6 +3069,107 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `a submit with a quote lands on the cited post when it is on the landing page (#974)`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(fakeTopic(2, 2)) }),
+            // The refreshed page carries the cited post (640) AND the fresh reply (777) after it.
+            refreshTopicsToReturn = listOf(
+                fakeTopic(2, 2, posts = listOf(fakePost(600), fakePost(640), fakePost(777))),
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            // HFR anchors a quote success on the cited post (`#t{numreponse_cité}`), so scrollTo
+            // carries it too : the reading resumes on the cited post, never at the bottom.
+            viewModel.applySubmitResult(targetPage = 2, scrollTo = 640, quotedNumreponses = listOf(640))
+            assertEquals(TopicEffect.ScrollToPost(640), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a multi-quote submit lands on the highest cited post (#974)`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(fakeTopic(2, 2)) }),
+            refreshTopicsToReturn = listOf(
+                fakeTopic(2, 2, posts = listOf(fakePost(600), fakePost(640), fakePost(655), fakePost(777))),
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            // Card order is citation order (640 first) and HFR anchors on the FIRST cited post ;
+            // the landing is the cited post closest to the end of the page (655), where the
+            // reading resumes.
+            viewModel.applySubmitResult(targetPage = 2, scrollTo = 640, quotedNumreponses = listOf(640, 655, 600))
+            assertEquals(TopicEffect.ScrollToPost(655), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a quote whose cited post is not on the landing page lands at the bottom (#974)`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(fakeTopic(2, 3)) }),
+            // The reply landed on page 3 ; the cited post (640) lives on page 2. No cross-page
+            // navigation : the landing degrades to the bottom of the landing page, the historical
+            // plain-reply behaviour.
+            refreshTopicsToReturn = listOf(fakeTopic(3, 3, posts = listOf(fakePost(900), fakePost(901)))),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            viewModel.applySubmitResult(targetPage = 3, scrollTo = 640, quotedNumreponses = listOf(640))
+            // Terminal at once — a [PendingLanding.Post] would have stayed pending (no scroll).
+            assertEquals(TopicEffect.ScrollToEndOfPage(3), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(3, viewModel.state.value.request.page)
+    }
+
+    @Test
+    fun `a quote submit anchored on bas keeps the overflow redirect and lands at the bottom (#974)`() = runTest {
+        // Defensive : should HFR ever anchor `#bas` on a quote success, the null scrollTo keeps
+        // the #226 overflow path and the quote landing degrades to the bottom of the real last
+        // page (the cited post is by construction on an earlier page).
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(fakeTopic(2, 2)) }),
+            refreshTopicsToReturn = listOf(
+                fakeTopic(2, 3, posts = listOf(fakePost(640))),
+                fakeTopic(3, 3, posts = listOf(fakePost(777))),
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            viewModel.applySubmitResult(targetPage = 2, scrollTo = null, quotedNumreponses = listOf(640))
+            assertEquals(TopicEffect.ScrollToEndOfPage(3), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(
+            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2), Triple(SAMPLE_CAT, SAMPLE_POST, 3)),
+            repository.refreshCalls,
+        )
+    }
+
+    @Test
     fun `the internal overflow redirect fires once and never chases a moving tail (#895)`() = runTest {
         val repository = FakeTopicRepository(
             flowsToReturn = listOf(flow { emit(fakeTopic(2, 2)) }),

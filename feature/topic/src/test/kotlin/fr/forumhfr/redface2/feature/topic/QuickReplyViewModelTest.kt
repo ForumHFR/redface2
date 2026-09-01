@@ -323,7 +323,11 @@ class QuickReplyViewModelTest {
             "[quotemsg=101]corps[/quotemsg]\n\n[quotemsg=202]corps[/quotemsg]\n\nmon avis",
             repository.submittedBodies.single(),
         )
-        assertEquals(QuickReplyEffect.SubmitSucceeded(targetPage = 9, scrollTo = 77), viewModel.effects.first())
+        // #974 — the cited posts (card order) ride the effect so the topic engine can land on them.
+        assertEquals(
+            QuickReplyEffect.SubmitSucceeded(targetPage = 9, scrollTo = 77, quotedNumreponses = listOf(101, 202)),
+            viewModel.effects.first(),
+        )
         assertTrue(viewModel.state.value.quotes.isEmpty())
     }
 
@@ -576,6 +580,31 @@ class QuickReplyViewModelTest {
         assertEquals(listOf("[quotemsg=101]corps[/quotemsg]\n\nmon ajout"), repository.submittedBodies)
         // No card in state → plain submit path, riding the warmed quote form : no extra fetch.
         assertEquals(listOf(null, 101), repository.fetchedQuotedNumreponses)
+    }
+
+    @Test
+    fun `inline mode forwards every quotemsg numreponse of the field for the topic landing (#974)`() = runTest {
+        // Production default : no card, the citations are `[quotemsg]` BBCode in the field (one
+        // materialised at opening, one typed by hand). HFR anchors the success on the FIRST cited
+        // post ; the effect must still carry them all so the topic engine can pick the landing.
+        val repository = FakeQuickReplyRepository(
+            results = mutableListOf(ReplySubmitResult.Success(refreshUrl = null, targetPage = 9, numreponse = 101)),
+        )
+        val viewModel = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
+        viewModel.onSheetOpened(listOf(preview(101, "alice")))
+        advanceUntilIdle()
+        assertTrue("inline mode arms no card", viewModel.state.value.quotes.isEmpty())
+        viewModel.onTextChanged(
+            TextFieldValue("[quotemsg=101]corps[/quotemsg]\n\n[quotemsg=303,3,9]suite[/quotemsg]\n\nmon ajout"),
+        )
+
+        viewModel.onSubmitClicked()
+        advanceUntilIdle()
+
+        assertEquals(
+            QuickReplyEffect.SubmitSucceeded(targetPage = 9, scrollTo = 101, quotedNumreponses = listOf(101, 303)),
+            viewModel.effects.first(),
+        )
     }
 
     private fun preview(numreponse: Int, author: String): QuoteSelection = QuoteSelection(

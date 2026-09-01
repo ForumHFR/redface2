@@ -24,6 +24,7 @@ import fr.forumhfr.redface2.core.domain.upload.UploadException
 import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import fr.forumhfr.redface2.core.domain.write.EditPostRepository
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
+import fr.forumhfr.redface2.core.domain.write.QuotedNumreponses
 import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.PostContent
@@ -921,7 +922,22 @@ class PostEditorViewModel @AssistedInject constructor(
                 }
             }
             outcome.fold(
-                onSuccess = { result -> handleSubmitOutcome(snapshot.mode, snapshot.numreponse, result) },
+                onSuccess = { result ->
+                    handleSubmitOutcome(
+                        mode = snapshot.mode,
+                        numreponse = snapshot.numreponse,
+                        result = result,
+                        // #974 — the cited posts, whatever the rendering mode : inline `[quotemsg]`
+                        // tags typed or prefilled in the field (cards OFF, the production default)
+                        // unioned with the armed cards (cards ON). Empty for an edit (no cards, the
+                        // edited body's own quotes are not a landing hint — scrollTo owns it).
+                        quotedNumreponses = if (snapshot.mode == PostEditorMode.Edit) {
+                            emptyList()
+                        } else {
+                            QuotedNumreponses.of(snapshot.draft.text, snapshot.quotes)
+                        },
+                    )
+                },
                 onFailure = ::handleSubmitFailure,
             )
         }
@@ -976,6 +992,7 @@ class PostEditorViewModel @AssistedInject constructor(
         mode: PostEditorMode,
         numreponse: Int?,
         result: ReplySubmitResult,
+        quotedNumreponses: List<Int>,
     ) {
         when (result) {
             is ReplySubmitResult.Success -> {
@@ -994,7 +1011,11 @@ class PostEditorViewModel @AssistedInject constructor(
                 autosaveJob?.cancel()
                 draftKey?.let { key -> draftStore.delete(draftOwner, key) }
                 _effects.trySend(
-                    PostEditorEffect.SubmitSucceeded(targetPage = result.targetPage, scrollTo = scrollTo),
+                    PostEditorEffect.SubmitSucceeded(
+                        targetPage = result.targetPage,
+                        scrollTo = scrollTo,
+                        quotedNumreponses = quotedNumreponses,
+                    ),
                 )
                 _state.update { it.copy(isSubmitting = false, submitError = null) }
             }

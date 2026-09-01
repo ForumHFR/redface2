@@ -658,16 +658,18 @@ class PostEditorViewModelTest {
             val effect = awaitItem() as PostEditorEffect.SubmitSucceeded
             assertEquals(20, effect.targetPage)
             assertNull("Reply must keep scrollTo null — anchor is #bas", effect.scrollTo)
+            // #974 — a body without any `[quotemsg]` cites nothing : the topic lands at the bottom.
+            assertEquals(emptyList<Int>(), effect.quotedNumreponses)
             cancelAndIgnoreRemainingEvents()
         }
     }
 
     @Test
     fun `Quote success forwards the parser-extracted numreponse as scrollTo (issue #200)`() = runTest {
-        // Issue #200 — quote anchors `#t{numreponse}` on the success URL so the parser
-        // surfaces the new post id directly. The ViewModel must propagate it as scrollTo
-        // so the topic screen scrolls to the freshly-created quote post after the
-        // post-submit force refresh.
+        // Issue #200 — quote anchors `#t{numreponse}` on the success URL, and that numreponse is
+        // the CITED post (HFR anchors on the quote form's `numrep` : 2523833 is the post quoted
+        // by `write_quote_form_bbcode_rich.html`, not the freshly-created reply). The ViewModel
+        // must propagate it as scrollTo — the topic engine's landing hint (#974).
         replyRepository.formResult = Result.success(authenticatedForm())
         replyRepository.submitResult = ReplySubmitResult.Success(
             refreshUrl = "/hfr/foo/bar-sujet_148750_1.htm#t2523833",
@@ -683,9 +685,41 @@ class PostEditorViewModelTest {
             val effect = awaitItem() as PostEditorEffect.SubmitSucceeded
             assertEquals(1, effect.targetPage)
             assertEquals(
-                "quote success must scroll to the new quote post id from the parser",
+                "quote success must forward the CITED post id from the parser as scrollTo",
                 2_523_833,
                 effect.scrollTo,
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `Reply with cards forwards the cited numreponses for the topic landing (#974)`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
+        replyRepository.formResultsByNumrep = mapOf(
+            101 to Result.success(authenticatedForm(initialContent = "[quotemsg=101,1,9]a[/quotemsg]\n\n")),
+            303 to Result.success(authenticatedForm(initialContent = "[quotemsg=303,3,9]c[/quotemsg]\n\n")),
+        )
+        // HFR anchors the success on the FIRST cited post (`numrep`) ; the topic engine picks the
+        // landing itself from the full card list, in card order.
+        replyRepository.submitResult = ReplySubmitResult.Success(
+            refreshUrl = "/hfr/foo/bar-sujet_35395_20.htm#t101",
+            targetPage = 20,
+            numreponse = 101,
+        )
+        val viewModel = newReplyViewModel(initialQuotes = listOf(card(101), card(303)))
+        testScheduler.advanceUntilIdle()
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("Reply")))
+
+        viewModel.effects.test {
+            viewModel.submit(PostEditorIntent.SubmitClicked)
+            assertEquals(
+                PostEditorEffect.SubmitSucceeded(
+                    targetPage = 20,
+                    scrollTo = 101,
+                    quotedNumreponses = listOf(101, 303),
+                ),
+                awaitItem(),
             )
             cancelAndIgnoreRemainingEvents()
         }
@@ -1834,6 +1868,47 @@ class PostEditorViewModelTest {
             "plain submit context — the quote already lives in the content",
             replyRepository.lastSubmittedContext?.quotedNumreponse,
         )
+    }
+
+    @Test
+    fun `cards OFF - submit forwards the inline quotemsg numreponses for the topic landing (#974)`() = runTest {
+        // Production default : no card is armed, the citations live as `[quotemsg]` BBCode in the
+        // field (one prefilled at opening, one typed by hand). The success effect must still name
+        // every cited post — the topic engine lands on the highest one (#974).
+        replyRepository.formResultsByNumrep = mapOf(
+            101 to Result.success(authenticatedForm(initialContent = "[quotemsg=101,1,9]a[/quotemsg]\n\n")),
+        )
+        replyRepository.submitResult = ReplySubmitResult.Success(
+            refreshUrl = "/hfr/foo/bar-sujet_35395_20.htm#t101",
+            targetPage = 20,
+            numreponse = 101,
+        )
+        val viewModel = newReplyViewModel(
+            initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false),
+        )
+        testScheduler.advanceUntilIdle()
+        assertTrue("inline mode arms no card", viewModel.state.value.quotes.isEmpty())
+        viewModel.submit(
+            PostEditorIntent.ContentChanged(
+                TextFieldValue(
+                    "[quotemsg=101,1,9]a[/quotemsg]\n\n[quotemsg=303,3,9]c[/quotemsg]\n\nma réponse",
+                ),
+            ),
+        )
+
+        viewModel.effects.test {
+            viewModel.submit(PostEditorIntent.SubmitClicked)
+            assertEquals(
+                PostEditorEffect.SubmitSucceeded(
+                    targetPage = 20,
+                    scrollTo = 101,
+                    quotedNumreponses = listOf(101, 303),
+                ),
+                awaitItem(),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     // ----- #604 lot 3 : cartes de citation dans l'éditeur ---------------------
