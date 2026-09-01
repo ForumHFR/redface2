@@ -16,12 +16,30 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
-## `0.50.2` — `internal` (dev) — 2026-09-01
+## `0.50.2` — `open` (bêta) — 2026-09-01
 
-### Corrigé
+Promotion bêta du lot développé en dev de `0.44.0` à `0.50.2`, depuis la précédente bêta `0.43.0` (parité de lecture MP). Le détail par version dev figure dans les entrées ci-dessous.
 
-- **Sondages : clôture et vote fiabilisés** ([#779](https://github.com/ForumHFR/redface2/issues/779), [#1201](https://github.com/ForumHFR/redface2/issues/1201), [#1204](https://github.com/ForumHFR/redface2/issues/1204)) — une déconnexion ou un changement de compte retire désormais aussi le droit de clôture conservé en cache et ferme sa confirmation. Après une clôture confirmée par HFR, le sondage devient immédiatement clos localement, même si son rafraîchissement échoue, ce qui interdit toute seconde requête. Une redirection inconnue après un vote n'est plus classée à tort comme un succès.
-- **Documentation de la promotion bêta** — décompte de la matrice de parité, changelog des specs et cohérence des notes de release corrigés pour le lot.
+### Sondages ([#779](https://github.com/ForumHFR/redface2/issues/779), [#1170](https://github.com/ForumHFR/redface2/issues/1170), [#1201](https://github.com/ForumHFR/redface2/issues/1201))
+
+- Voter depuis l'application (choix simple ou multiple, vote blanc), voir l'état clos et la date d'expiration, et déplier les sondages non répondus si on le souhaite.
+- Pour le créateur du sujet : clore le sondage depuis n'importe quelle page. Envoi durci — aucun rejeu réseau, aucune redirection inconnue prise pour un succès, clôture verrouillée après coup et lors d'un changement de compte.
+
+### Liens HFR ([#1032](https://github.com/ForumHFR/redface2/issues/1032), [#1207](https://github.com/ForumHFR/redface2/issues/1207), [#1184](https://github.com/ForumHFR/redface2/issues/1184), [#1203](https://github.com/ForumHFR/redface2/issues/1203))
+
+- Les liens externes s'ouvrent sans rebondir dans l'application ; réglage du gestionnaire par défaut ; option « toujours demander quelle app » ; aide Firefox. Un lien HFR retapé rouvre bien le post attendu.
+
+### Modération & rôles du staff ([#1112](https://github.com/ForumHFR/redface2/issues/1112), [#221](https://github.com/ForumHFR/redface2/issues/221))
+
+- Posts du compte « Modération » surlignés en rouge fidèle à RF1 ; pastilles de rôle du staff (Modérateur, Admin, SupAdmin, Dev, Architecte).
+
+### Vue Forum ([#1129](https://github.com/ForumHFR/redface2/issues/1129)–[#1132](https://github.com/ForumHFR/redface2/issues/1132))
+
+- Filtre mémorisé d'une catégorie à l'autre, recherche avec croix et sortie, sujets épinglés regroupés et séparés, bouton « + » qui ne recouvre plus la pagination.
+
+### Citations & lecture ([#783](https://github.com/ForumHFR/redface2/issues/783), [#1193](https://github.com/ForumHFR/redface2/issues/1193), [#1188](https://github.com/ForumHFR/redface2/issues/1188), [#1138](https://github.com/ForumHFR/redface2/issues/1138))
+
+- Badge « cité N fois » cliquable listant les citeurs ; feuilles citeurs/smileys plus stables ; plus de flash des libellés de la barre de navigation au démarrage.
 
 ---
 
