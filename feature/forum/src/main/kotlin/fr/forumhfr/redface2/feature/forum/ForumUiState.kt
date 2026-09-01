@@ -2,12 +2,12 @@ package fr.forumhfr.redface2.feature.forum
 
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
+import fr.forumhfr.redface2.core.domain.search.foldForSearch
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.SubCategory
 import fr.forumhfr.redface2.core.model.TopicListPage
 import fr.forumhfr.redface2.core.model.TopicSummary
 import kotlin.math.ceil
-import java.text.Normalizer
 
 /**
  * UI state for the Forum home screen (list of HFR top-level categories). The state
@@ -110,8 +110,9 @@ data class CategoryUiState(
  *
  * The matcher is :
  * - case-insensitive (`Foo` matches `foo bar`)
- * - accent-insensitive — Unicode NFD-decomposes both sides then strips combining
- *   marks, so `electronique` matches `Electronique` and `CŒUR` matches `cœur`
+ * - accent-insensitive — both sides go through the shared `foldForSearch` of
+ *   `:core:domain` (NFD + combining-marks removal + lowercase + `œ`/`æ` spelled out,
+ *   #739), so `electronique` matches `Electronique` and `coeur` matches `cœur`
  *   without pulling a heavy dependency
  * - matches against `title`, `author` and `lastReplyAuthor` only — listing
  *   payloads do not currently expose subcategory names per topic, so we keep
@@ -127,13 +128,6 @@ internal fun matchesTopicQuery(topic: TopicSummary, query: String): Boolean {
         topic.author.foldForSearch().contains(needle) ||
         topic.lastReplyAuthor.foldForSearch().contains(needle)
 }
-
-private fun String.foldForSearch(): String =
-    Normalizer.normalize(this, Normalizer.Form.NFD)
-        .replace(COMBINING_MARKS, "")
-        .lowercase()
-
-private val COMBINING_MARKS = Regex("\\p{InCombiningDiacriticalMarks}+")
 
 /**
  * #206 workaround (« Exact post-création »). Returns `true` when [topic]'s title is the

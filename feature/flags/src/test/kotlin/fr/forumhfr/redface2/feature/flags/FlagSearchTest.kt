@@ -14,7 +14,8 @@ import java.time.Instant
  * loaded (HFR has no server search, cf. ADR-003), so « rechercher dans les drapeaux » is a pure
  * title filter applied to the rendered [FlagsContent] — no ViewModel pipeline change. Blank query is
  * a no-op (the grouped view keeps its web-parity empty sections); a real query drops non-matching
- * sections so the result is not a wall of empty placeholders.
+ * sections so the result is not a wall of empty placeholders. Matching is case- and
+ * accent-insensitive (#739) through the shared `foldForSearch` of `:core:domain`.
  */
 class FlagSearchTest {
 
@@ -39,6 +40,30 @@ class FlagSearchTest {
     fun `the query is trimmed before matching`() {
         val flags = listOf(flag("Compose"), flag("Rust"))
         assertEquals(listOf("Compose"), filterFlagsByQuery(flags, "  compose  ").map { it.title })
+    }
+
+    @Test
+    fun `an unaccented query finds an accented title (cafe finds café)`() {
+        val flags = listOf(flag("Le topic du café"), flag("Le topic du thé"))
+        assertEquals(listOf("Le topic du café"), filterFlagsByQuery(flags, "cafe").map { it.title })
+    }
+
+    @Test
+    fun `an accented query finds an unaccented title (café finds cafe)`() {
+        val flags = listOf(flag("Le topic du cafe"), flag("Le topic du the"))
+        assertEquals(listOf("Le topic du cafe"), filterFlagsByQuery(flags, "café").map { it.title })
+    }
+
+    @Test
+    fun `accent folding keeps the query case-insensitive`() {
+        val flags = listOf(flag("Réflexion sur la batterie"), flag("Rust"))
+        assertEquals(listOf("Réflexion sur la batterie"), filterFlagsByQuery(flags, "REFLEXION").map { it.title })
+    }
+
+    @Test
+    fun `a ligature title is found by its two-letter spelling`() {
+        val flags = listOf(flag("Le cœur du problème"), flag("Rust"))
+        assertEquals(listOf("Le cœur du problème"), filterFlagsByQuery(flags, "coeur").map { it.title })
     }
 
     @Test
@@ -96,6 +121,21 @@ class FlagSearchTest {
         // « Carte mère » + « CPU » match in Hardware ; nothing in Programmation/Discussions → dropped.
         assertEquals(listOf(1), filtered.sections.map { it.catId })
         assertEquals(listOf("Carte mère", "CPU"), filtered.sections.single().topics.map { it.title })
+    }
+
+    @Test
+    fun `grouped content search is accent-insensitive (the FlagsRoute path)`() {
+        val content = FlagsContent.Grouped(
+            listOf(
+                FlagCategorySection(1, "Hardware", listOf(flag("Carte mère"), flag("CPU"))),
+                FlagCategorySection(13, "Discussions", listOf(flag("Le topic du café"))),
+            ),
+        )
+
+        val filtered = content.filteredBy("mere") as FlagsContent.Grouped
+
+        assertEquals(listOf(1), filtered.sections.map { it.catId })
+        assertEquals(listOf("Carte mère"), filtered.sections.single().topics.map { it.title })
     }
 
     // --- FlagsContent.isEmpty ----------------------------------------------------------------
@@ -168,6 +208,13 @@ class FlagSearchTest {
     fun `the DT query is trimmed before matching`() {
         val items = listOf(dtInbox(1, "Claviers mécaniques"), dtInbox(2, "RDNA4"))
         assertEquals(listOf(1), filterDtItemsByQuery(items, "  claviers  ").map { it.threadId })
+    }
+
+    @Test
+    fun `the DT query is accent-insensitive in both directions`() {
+        val items = listOf(dtInbox(1, "Claviers mécaniques"), dtInbox(2, "Cafe du commerce"), dtInbox(3, "RDNA4"))
+        assertEquals(listOf(1), filterDtItemsByQuery(items, "mecaniques").map { it.threadId })
+        assertEquals(listOf(2), filterDtItemsByQuery(items, "café").map { it.threadId })
     }
 
     @Test
