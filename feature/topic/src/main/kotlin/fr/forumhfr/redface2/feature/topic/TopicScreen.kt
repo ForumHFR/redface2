@@ -931,10 +931,9 @@ private suspend fun LazyListState.reanchorWhileMediaSettles(target: Int, landing
             val step = reanchorStep(
                 current = current,
                 previous = previous,
-                target = target,
+                goal = ReanchorGoal(target, targetOffset),
                 stableFrames = stableFrames,
                 stableThreshold = stableThreshold,
-                targetOffset = targetOffset,
             )
         ) {
             ReanchorStep.Stop -> return
@@ -1087,6 +1086,12 @@ private fun TopicScrollRestorationEffects(
  */
 internal data class ReanchorFrame(val index: Int, val offset: Int, val targetSize: Int = 0)
 
+/**
+ * Item index to pin and target `scrollToItem` offset. `0` is the historical top-of-post pin ;
+ * otherwise #1137 marker alignment is recomputed every frame by the caller.
+ */
+internal data class ReanchorGoal(val index: Int, val offset: Int = 0)
+
 /** Outcome of one [reanchorStep] decision. */
 internal sealed interface ReanchorStep {
     /** The layout has settled (or the frame budget is spent) — stop re-anchoring. */
@@ -1104,32 +1109,29 @@ internal sealed interface ReanchorStep {
  * measured size, cf. [ReanchorFrame]) for [stableThreshold] consecutive frames. The caller passes
  * `Int.MAX_VALUE` during the initial cold-decode guard window so the helper keeps monitoring even if
  * the first frames are stable. Otherwise carry the updated stable count and ask for a re-pin whenever
- * the target is not currently where the landing wants it ([ReanchorFrame.index] != [target] or
- * [ReanchorFrame.offset] != [targetOffset]) — a no-op when it already is, harmless when the list
+ * the target is not currently where the landing wants it ([ReanchorFrame.index] != [ReanchorGoal.index]
+ * or [ReanchorFrame.offset] != [ReanchorGoal.offset]) — a no-op when it already is, harmless when the list
  * cannot scroll it there.
  *
  * @param current the target row's reading this frame
  * @param previous the same reading from the previous frame, or `null` on the first frame
- * @param target the item index we want pinned
+ * @param goal the item index and `scrollToItem` offset the target should rest at — `0` for the
+ *   historical top-of-post pin ; #1137 — the marker alignment otherwise, recomputed by the caller
+ *   every frame from the target's current size (the same size [current] carries)
  * @param stableFrames consecutive still frames observed so far
  * @param stableThreshold still frames required to consider the layout settled
- * @param targetOffset the `scrollToItem` offset the target should rest at — `0` for the historical
- *   top-of-post pin ; #1137 — the marker alignment otherwise, recomputed by the caller every frame
- *   from the target's current size (the same size [current] carries), so a growing post moves both
- *   the reading and the goal in the same step
  */
 internal fun reanchorStep(
     current: ReanchorFrame,
     previous: ReanchorFrame?,
-    target: Int,
+    goal: ReanchorGoal,
     stableFrames: Int,
     stableThreshold: Int,
-    targetOffset: Int = 0,
 ): ReanchorStep {
     val moved = previous == null || current != previous
     val nextStableFrames = if (moved) 0 else stableFrames + 1
     if (nextStableFrames >= stableThreshold) return ReanchorStep.Stop
-    val repin = current.index != target || current.offset != targetOffset
+    val repin = current.index != goal.index || current.offset != goal.offset
     return ReanchorStep.Continue(stableFrames = nextStableFrames, repin = repin)
 }
 

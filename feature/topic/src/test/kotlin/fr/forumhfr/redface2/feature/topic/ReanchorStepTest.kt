@@ -22,7 +22,7 @@ class ReanchorStepTest {
         val step = reanchorStep(
             current = ReanchorFrame(target, 0),
             previous = null,
-            target = target,
+            goal = ReanchorGoal(target),
             stableFrames = 99,
             stableThreshold = threshold,
         )
@@ -38,7 +38,7 @@ class ReanchorStepTest {
         val step = reanchorStep(
             frame,
             previous = frame,
-            target = target,
+            goal = ReanchorGoal(target),
             stableFrames = threshold - 1,
             stableThreshold = threshold,
         )
@@ -51,7 +51,7 @@ class ReanchorStepTest {
         val step = reanchorStep(
             frame,
             previous = frame,
-            target = target,
+            goal = ReanchorGoal(target),
             stableFrames = threshold,
             stableThreshold = Int.MAX_VALUE,
         )
@@ -67,7 +67,7 @@ class ReanchorStepTest {
         val step = reanchorStep(
             current = ReanchorFrame(target, 60),
             previous = ReanchorFrame(target, 0),
-            target = target,
+            goal = ReanchorGoal(target),
             stableFrames = threshold - 1,
             stableThreshold = threshold,
         )
@@ -85,7 +85,7 @@ class ReanchorStepTest {
         val step = reanchorStep(
             resting,
             previous = resting,
-            target = target,
+            goal = ReanchorGoal(target),
             stableFrames = threshold - 1,
             stableThreshold = threshold,
         )
@@ -98,7 +98,7 @@ class ReanchorStepTest {
         val step = reanchorStep(
             resting,
             previous = resting,
-            target = target,
+            goal = ReanchorGoal(target),
             stableFrames = 0,
             stableThreshold = threshold,
         )
@@ -112,12 +112,34 @@ class ReanchorStepTest {
     fun `staggered image growth resets stability so it never stops between two decodes`() {
         val a = ReanchorFrame(target, 0)
         // Two still frames accrue while image A holds.
-        var stable = (reanchorStep(a, a, target, 0, threshold) as ReanchorStep.Continue).stableFrames
-        stable = (reanchorStep(a, a, target, stable, threshold) as ReanchorStep.Continue).stableFrames
+        var stable = (
+            reanchorStep(
+                current = a,
+                previous = a,
+                goal = ReanchorGoal(target),
+                stableFrames = 0,
+                stableThreshold = threshold,
+            ) as ReanchorStep.Continue
+        ).stableFrames
+        stable = (
+            reanchorStep(
+                current = a,
+                previous = a,
+                goal = ReanchorGoal(target),
+                stableFrames = stable,
+                stableThreshold = threshold,
+            ) as ReanchorStep.Continue
+        ).stableFrames
         assertEquals(2, stable)
         // Image B now decodes and grows → the position moves → stability must reset, not stop.
         val b = ReanchorFrame(target, 80)
-        val step = reanchorStep(b, previous = a, target = target, stableFrames = stable, stableThreshold = threshold)
+        val step = reanchorStep(
+            b,
+            previous = a,
+            goal = ReanchorGoal(target),
+            stableFrames = stable,
+            stableThreshold = threshold,
+        )
         assertTrue(step is ReanchorStep.Continue)
         assertEquals("staggered growth resets stability", 0, (step as ReanchorStep.Continue).stableFrames)
     }
@@ -127,7 +149,7 @@ class ReanchorStepTest {
         val step = reanchorStep(
             current = ReanchorFrame(target - 1, 10),
             previous = ReanchorFrame(target, 0),
-            target = target,
+            goal = ReanchorGoal(target),
             stableFrames = 0,
             stableThreshold = threshold,
         )
@@ -144,10 +166,9 @@ class ReanchorStepTest {
         val step = reanchorStep(
             current = resting,
             previous = resting,
-            target = target,
+            goal = ReanchorGoal(target, markerOffset),
             stableFrames = 0,
             stableThreshold = threshold,
-            targetOffset = markerOffset,
         )
         assertTrue(step is ReanchorStep.Continue)
         step as ReanchorStep.Continue
@@ -163,10 +184,9 @@ class ReanchorStepTest {
         val step = reanchorStep(
             current = ReanchorFrame(target, 1728, targetSize = 1800 + 480),
             previous = ReanchorFrame(target, 1728, targetSize = 1800),
-            target = target,
+            goal = ReanchorGoal(target, 1728 + 480),
             stableFrames = threshold - 1,
             stableThreshold = threshold,
-            targetOffset = 1728 + 480,
         )
         assertTrue(step is ReanchorStep.Continue)
         step as ReanchorStep.Continue
@@ -180,10 +200,9 @@ class ReanchorStepTest {
         val step = reanchorStep(
             current = resting,
             previous = resting,
-            target = target,
+            goal = ReanchorGoal(target, 1728),
             stableFrames = threshold - 1,
             stableThreshold = threshold,
-            targetOffset = 1728,
         )
         assertEquals(ReanchorStep.Stop, step)
     }
@@ -196,21 +215,20 @@ class ReanchorStepTest {
         val step = reanchorStep(
             current = ReanchorFrame(target + 1, 0, targetSize = 1800),
             previous = ReanchorFrame(target, 0, targetSize = 1800),
-            target = target,
+            goal = ReanchorGoal(target, 1800),
             stableFrames = 0,
             stableThreshold = threshold,
-            targetOffset = 1800,
         )
         assertTrue(step is ReanchorStep.Continue)
         assertTrue((step as ReanchorStep.Continue).repin)
     }
 
     @Test
-    fun `targetOffset defaults to the historical top pin`() {
+    fun `goal offset defaults to the historical top pin`() {
         val step = reanchorStep(
             current = ReanchorFrame(target, 60),
             previous = ReanchorFrame(target, 0),
-            target = target,
+            goal = ReanchorGoal(target),
             stableFrames = 0,
             stableThreshold = threshold,
         )
