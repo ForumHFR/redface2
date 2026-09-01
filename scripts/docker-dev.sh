@@ -3,12 +3,15 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IMAGE="${REDFACE_DOCKER_IMAGE:-ghcr.io/cirruslabs/android-sdk:36@sha256:f9b3ea9ed2b5fc9522adae82c7b4622ab7aa54207ef532c8e615a347dca08f31}"
+# Keep in sync with android-compileSdk in gradle/libs.versions.toml.
+REDFACE_SDK_PLATFORMS="android-36 android-37.0"
 CACHE_ROOT="${REDFACE_DOCKER_CACHE_DIR:-$ROOT_DIR/.gradle-user/docker-uid$(id -u)}"
 GRADLE_CACHE_DIR="$CACHE_ROOT/gradle"
 ANDROID_CACHE_DIR="$CACHE_ROOT/android"
 ANDROID_SDK_PLATFORMS_DIR="$CACHE_ROOT/android-sdk/platforms"
 ANDROID_SDK_TEMP_DIR="$CACHE_ROOT/android-sdk/temp"
 PROJECT_CACHE_DIR_INSIDE="/workspace/.gradle-user/$(basename "$CACHE_ROOT")/project-cache"
+REQUESTED_ARGS=("$@")
 
 mkdir -p "$GRADLE_CACHE_DIR" "$ANDROID_CACHE_DIR" "$ANDROID_SDK_PLATFORMS_DIR" "$ANDROID_SDK_TEMP_DIR"
 
@@ -32,9 +35,11 @@ mkdir -p "$GRADLE_CACHE_DIR" "$ANDROID_CACHE_DIR" "$ANDROID_SDK_PLATFORMS_DIR" "
 #
 # AGP can auto-download missing SDK platforms in CI because GitHub runs the
 # pinned image as root. This local wrapper deliberately runs as the host
-# UID/GID, so /opt/android-sdk-linux is not writable; bind-mounted SDK platform
-# and temp directories give AGP a writable, user-owned cache without changing
-# the image or the keep-id ownership model.
+# UID/GID, and AGP refuses to install SDK components when the SDK root
+# (/opt/android-sdk-linux) is not writable, even if platforms/ and temp/ are
+# bind-mounted. The one-shot seed below provisions required platforms into the
+# user-owned cache before Gradle starts; local Gradle runs should not depend on
+# AGP auto-download.
 inject_project_cache_dir() {
   local entrypoint="$1"
   shift
@@ -72,18 +77,86 @@ if docker info --format '{{.Host.RemoteSocket.Path}}' 2>/dev/null | grep -qi 'po
   USERNS_ARGS=(--userns keep-id)
 fi
 
+android_sdk_platform_is_seeded() {
+  local platform_dir="$ANDROID_SDK_PLATFORMS_DIR/$1"
+  [ -f "$platform_dir/source.properties" ] && [ -f "$platform_dir/android.jar" ]
+}
+
+missing_android_sdk_platforms() {
+  local platform
+  for platform in $REDFACE_SDK_PLATFORMS; do
+    if ! android_sdk_platform_is_seeded "$platform"; then
+      printf '%s\n' "$platform"
+    fi
+  done
+}
+
+print_sdk_seed_retry_command() {
+  local arg
+  printf >&2 'Retry once network access is available: REDFACE_DOCKER_CACHE_DIR=%q %q' "$CACHE_ROOT" "$0"
+  for arg in "${REQUESTED_ARGS[@]}"; do
+    printf >&2 ' %q' "$arg"
+  done
+  printf >&2 '\n'
+}
+
 seed_android_sdk_platforms() {
-  if [ -n "$(find "$ANDROID_SDK_PLATFORMS_DIR" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+  local missing_platforms=()
+  mapfile -t missing_platforms < <(missing_android_sdk_platforms)
+  if [ "${#missing_platforms[@]}" -eq 0 ]; then
     return
   fi
 
-  docker run --rm \
+  if ! docker run --rm \
     "${USERNS_ARGS[@]}" \
     --security-opt label=disable \
     --user "$(id -u):$(id -g)" \
     -v "$ANDROID_SDK_PLATFORMS_DIR:/redface-android-sdk-platforms" \
+    -v "$ANDROID_SDK_TEMP_DIR:/opt/android-sdk-linux/temp" \
     "$IMAGE" \
-    sh -c 'cp -R /opt/android-sdk-linux/platforms/. /redface-android-sdk-platforms/'
+    sh -euc '
+      sdkmanager=/opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager
+      seed_root=/tmp/redface-sdk-seed
+      platforms_dir=/redface-android-sdk-platforms
+
+      for platform in "$@"; do
+        if [ -f "$platforms_dir/$platform/source.properties" ] &&
+          [ -f "$platforms_dir/$platform/android.jar" ]; then
+          continue
+        fi
+
+        if [ -d "/opt/android-sdk-linux/platforms/$platform" ]; then
+          echo "Seeding Android SDK platform $platform from the pinned image"
+          cp -R "/opt/android-sdk-linux/platforms/$platform" "$platforms_dir/"
+        else
+          if [ ! -x "$sdkmanager" ]; then
+            echo "sdkmanager not found or not executable: $sdkmanager" >&2
+            exit 1
+          fi
+
+          echo "Seeding Android SDK platform $platform via sdkmanager"
+          rm -rf "$seed_root"
+          mkdir -p "$seed_root"
+          log=/tmp/redface-sdkmanager.log
+          if ! yes | "$sdkmanager" --sdk_root="$seed_root" --install "platforms;$platform" >"$log" 2>&1; then
+            cat "$log" >&2
+            echo "sdkmanager failed while installing platforms;$platform" >&2
+            exit 1
+          fi
+          cp -R "$seed_root/platforms/$platform" "$platforms_dir/"
+        fi
+
+        if [ ! -f "$platforms_dir/$platform/source.properties" ] ||
+          [ ! -f "$platforms_dir/$platform/android.jar" ]; then
+          echo "Android SDK platform $platform was seeded but is incomplete under $platforms_dir/$platform" >&2
+          exit 1
+        fi
+      done
+    ' sh "${missing_platforms[@]}"; then
+    printf >&2 'Failed to seed required Android SDK platform(s): %s\n' "${missing_platforms[*]}"
+    print_sdk_seed_retry_command
+    return 1
+  fi
 }
 
 seed_android_sdk_platforms

@@ -56,7 +56,7 @@ Exemples :
 
 Le script monte le repo dans `/workspace`, persiste les caches Gradle / Android dans `.gradle-user/` et exécute le container avec l'UID/GID de l'utilisateur hôte pour éviter les fichiers root-owned sur Linux. En rootless Podman, `--userns keep-id` est ajouté automatiquement pour garder le mapping d'identité.
 
-Pour `compileSdk 37`, le wrapper monte aussi `.gradle-user/<cache>/android-sdk/platforms` sur `/opt/android-sdk-linux/platforms` et `.gradle-user/<cache>/android-sdk/temp` sur `/opt/android-sdk-linux/temp`. Au premier run, il copie dans ce cache les plateformes déjà présentes dans l'image (dont `android-36`) ; ensuite AGP installe les plateformes manquantes, comme `android-37.0`, dans ce cache utilisateur inscriptible. Les workflows GitHub Actions restent sur l'image brute : leurs jobs tournent en root, donc l'auto-download AGP peut écrire directement dans le SDK du container.
+Pour `compileSdk 37`, le wrapper monte aussi `.gradle-user/<cache>/android-sdk/platforms` sur `/opt/android-sdk-linux/platforms` et `.gradle-user/<cache>/android-sdk/temp` sur `/opt/android-sdk-linux/temp`. En local, AGP refuse d'installer une plateforme si la racine SDK `/opt/android-sdk-linux` n'est pas inscriptible ; le seed one-shot de `scripts/docker-dev.sh` provisionne donc toutes les plateformes requises (`android-36`, `android-37.0`) dans le cache utilisateur avant de lancer Gradle. Les workflows GitHub Actions restent sur l'image brute : leurs jobs tournent en root, donc l'auto-download AGP peut écrire directement dans le SDK du container.
 
 #### Signature debug canonique et `adb install -r`
 
