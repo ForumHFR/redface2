@@ -18,6 +18,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.ui.theme.RedfaceAmoledColorScheme
 import fr.forumhfr.redface2.core.ui.theme.RedfaceDarkColorScheme
 import fr.forumhfr.redface2.core.ui.theme.RedfaceLightColorScheme
+import fr.forumhfr.redface2.navigation.IntentDelivery
 import fr.forumhfr.redface2.navigation.RedfaceApp
 import javax.inject.Inject
 
@@ -26,17 +27,28 @@ class MainActivity : ComponentActivity() {
 
     @Inject lateinit var themeBootstrapStore: ThemeBootstrapStore
 
-    private var latestIntent by mutableStateOf<Intent?>(null)
+    private var latestIntentDelivery by mutableStateOf<IntentDelivery?>(null)
+    private var nextIntentDeliveryId = INITIAL_INTENT_DELIVERY_ID
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         applyBootstrapWindowBackground()
-        latestIntent = intent
+        val restoredDeliveryId = savedInstanceState
+            ?.takeIf { it.containsKey(STATE_INTENT_DELIVERY_ID) }
+            ?.getLong(STATE_INTENT_DELIVERY_ID)
+        val deliveryId = restoredDeliveryId ?: nextIntentDeliveryId
+        nextIntentDeliveryId = deliveryId + 1
+        latestIntentDelivery = IntentDelivery(intent, deliveryId)
 
         setContent {
-            RedfaceApp(intent = latestIntent)
+            RedfaceApp(intentDelivery = latestIntentDelivery)
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        latestIntentDelivery?.let { outState.putLong(STATE_INTENT_DELIVERY_ID, it.id) }
     }
 
     /**
@@ -71,6 +83,11 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        latestIntent = intent
+        latestIntentDelivery = IntentDelivery(intent, nextIntentDeliveryId++)
+    }
+
+    private companion object {
+        const val INITIAL_INTENT_DELIVERY_ID = 0L
+        const val STATE_INTENT_DELIVERY_ID = "intentDeliveryId"
     }
 }

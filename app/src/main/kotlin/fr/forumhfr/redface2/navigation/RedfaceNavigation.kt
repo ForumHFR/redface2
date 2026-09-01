@@ -854,7 +854,7 @@ private data class ProfileSheetRequest(
 // Stays at detekt's method threshold even after extracting the deep-link `when` (applyDeepLinkResolution).
 @Suppress("CyclomaticComplexMethod")
 @Composable
-fun RedfaceApp(intent: Intent?) {
+internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
     // #286 — resolve the persisted theme selection before applying RedfaceTheme. SYSTEM (default)
     // keeps the historical isSystemInDarkTheme() behaviour; LIGHT/DARK force the app theme.
     val themeViewModel: AppThemeViewModel = hiltViewModel()
@@ -1038,17 +1038,17 @@ fun RedfaceApp(intent: Intent?) {
         }
 
         val context = LocalContext.current
-        // #1032 PR2 — the same launch intent is re-published when MainActivity is recreated.
-        // Save the stable action+URI identity and mark it consumed BEFORE side effects so rotation
-        // or process restoration cannot reopen the browser or replay the stack reset.
-        var resolvedDeepLinkIntentId by rememberSaveable { mutableStateOf<String?>(null) }
-        LaunchedEffect(intent) {
-            val incomingIntent = intent ?: return@LaunchedEffect
-            val intentId = "${incomingIntent.action}\u0000${incomingIntent.dataString}"
-            if (intentId == resolvedDeepLinkIntentId) return@LaunchedEffect
-            resolvedDeepLinkIntentId = intentId
+        // #1203 — consume deliveries, not action+URI identities: a deliberate re-tap of the same
+        // link gets a new ID, while recreation restores both the current and last-resolved IDs.
+        var lastResolvedDeepLinkDeliveryId by rememberSaveable { mutableStateOf<Long?>(null) }
+        LaunchedEffect(intentDelivery?.id) {
+            val delivery = intentDelivery ?: return@LaunchedEffect
+            if (!shouldApplyDeepLinkDelivery(delivery.id, lastResolvedDeepLinkDeliveryId)) {
+                return@LaunchedEffect
+            }
+            lastResolvedDeepLinkDeliveryId = delivery.id
 
-            applyDeepLinkResolution(incomingIntent, context, switchTab, backStacks)
+            applyDeepLinkResolution(delivery.intent, context, switchTab, backStacks)
         }
 
         // Issue #198 — global account menu hoisted out of `Messages` and re-injected into
@@ -3030,7 +3030,7 @@ private fun RedfaceNavHost(
 
 // #1032 PR2 — apply a resolved HFR deep link. Extracted from RedfaceApp's LaunchedEffect so the
 // three-branch resolution `when` does not push the composable over detekt's complexity threshold.
-// Pure dispatch: the intent-identity guard (rememberSaveable) stays in the effect above.
+// Pure dispatch: the delivery guard (rememberSaveable) stays in the effect above.
 private fun applyDeepLinkResolution(
     intent: Intent,
     context: Context,
