@@ -20,7 +20,7 @@ android {
         // exported `schemas/` directory there so the v1 fixture is visible without
         // copying — keeps a single source of truth in `$projectDir/schemas/`.
         named("test") {
-            assets.srcDir("$projectDir/schemas")
+            assets.directories.add("$projectDir/schemas")
         }
     }
 }
