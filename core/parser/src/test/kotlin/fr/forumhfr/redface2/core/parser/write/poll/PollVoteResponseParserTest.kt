@@ -43,18 +43,18 @@ class PollVoteResponseParserTest {
     }
 
     @Test
-    fun `meta refresh with URL is a bounded accepted fallback`() {
+    fun `unknown meta refresh redirect is rejected`() {
         val html = """
             <html><head>
-              <meta http-equiv="refresh" content="1; URL=/hfr/topic.htm">
+              <meta http-equiv="refresh" content="1; URL=/hfr/unexpected.php">
             </head><body><div class="hop">Réponse inhabituelle.</div></body></html>
         """.trimIndent()
 
-        assertEquals(PollVoteResult.Accepted, parser.parse(html))
+        assertEquals(unexpectedResponse(), parser.parse(html))
     }
 
     @Test
-    fun `already-voted marker wins over meta refresh fallback`() {
+    fun `already-voted marker is recognised with meta refresh`() {
         val html = """
             <html><head>
               <meta http-equiv="Refresh" content="1; url=/hfr/topic.htm">

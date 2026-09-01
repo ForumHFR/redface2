@@ -2533,6 +2533,31 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `logout and account switch revoke poll close capability and dismiss confirmation (#1204)`() = runTest {
+        listOf(AuthState.Anonymous, AuthState.Authenticated("bob")).forEach { nextAuth ->
+            val form = fakePollVoteForm()
+            val auth = FakeAuthRepository(AuthState.Authenticated("alice"))
+            val viewModel = topicViewModel(
+                request = topicRequest(page = 1),
+                topicRepository = FakeTopicRepository(
+                    listOf(flowOf(fakeTopic(1, 1, poll = fakeClosablePoll(form), pollVoteForm = form))),
+                ),
+                authRepository = auth,
+            )
+            viewModel.send(TopicIntent.CloseTopicPoll)
+            assertEquals(ClosePollState.Confirming, viewModel.closePollState.value)
+
+            auth.emit(nextAuth)
+            runCurrent()
+
+            val loaded = viewModel.state.value.mode as TopicUiState.Mode.Loaded
+            assertEquals(false, loaded.topic.poll?.canClose)
+            assertEquals(null, loaded.topic.pollVoteForm)
+            assertEquals(ClosePollState.Idle, viewModel.closePollState.value)
+        }
+    }
+
+    @Test
     fun `confirmClosePoll fails closed when native capability disappears (#1204)`() = runTest {
         val form = fakePollVoteForm()
         val emissions = MutableSharedFlow<Topic>(replay = 1).apply {
@@ -2593,6 +2618,84 @@ class TopicViewModelTest {
             val loaded = viewModel.state.value.mode as TopicUiState.Mode.Loaded
             assertTrue("the refresh must surface the server-closed poll", loaded.topic.poll?.closed == true)
         }
+
+    @Test
+    fun `successful close stays locally terminal when refresh fails and cannot repeat (#1204)`() = runTest {
+        val form = fakePollVoteForm()
+        val pollRepository = FakePollVoteRepository(closeResult = PollCloseResult.Success)
+        val topicRepository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flowOf(fakeTopic(1, 1, poll = fakeClosablePoll(form), pollVoteForm = form)),
+            ),
+            refreshErrorToThrow = IOException("closed results offline"),
+        )
+        val appScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = topicRepository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            pollVoteRepository = pollRepository,
+            externalScope = appScope,
+        )
+
+        viewModel.send(TopicIntent.CloseTopicPoll)
+        viewModel.confirmClosePoll()
+        advanceUntilIdle()
+
+        val poll = (viewModel.state.value.mode as TopicUiState.Mode.Loaded).topic.poll
+        assertTrue("a confirmed close must be reflected locally", poll?.closed == true)
+        assertFalse("a confirmed close must revoke the close capability", poll?.canClose == true)
+        assertEquals(ClosePollState.Idle, viewModel.closePollState.value)
+
+        viewModel.send(TopicIntent.CloseTopicPoll)
+        viewModel.confirmClosePoll()
+        advanceUntilIdle()
+        assertEquals("the irreversible close must never be repeated", 1, pollRepository.closeCalls.size)
+    }
+
+    @Test
+    fun `successful close keeps retained page snapshots terminal (#1204 slash #1206)`() = runTest {
+        val form = fakePollVoteForm()
+        val pageOneReloadGate = CompletableDeferred<Unit>()
+        val pollRepository = FakePollVoteRepository(closeResult = PollCloseResult.Success)
+        val topicRepository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flowOf(fakeTopic(1, 2, poll = fakeClosablePoll(form), pollVoteForm = form)),
+                flowOf(fakeTopic(2, 2, poll = fakeClosablePoll(form), pollVoteForm = form)),
+                flow {
+                    pageOneReloadGate.await()
+                    emit(fakeTopic(1, 2, poll = fakePollResults().copy(closed = true)))
+                },
+            ),
+            refreshErrorToThrow = IOException("closed results offline"),
+        )
+        val appScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = topicRepository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            pollVoteRepository = pollRepository,
+            externalScope = appScope,
+        )
+        viewModel.switchToPage(2)
+        advanceUntilIdle()
+
+        viewModel.send(TopicIntent.CloseTopicPoll)
+        viewModel.confirmClosePoll()
+        advanceUntilIdle()
+        viewModel.switchToPage(1)
+        runCurrent()
+
+        val snapshotMode = viewModel.state.value.mode as TopicUiState.Mode.Loaded
+        assertEquals("the retained page snapshot must activate before its reload", 1, snapshotMode.topic.page)
+        assertFalse("the retained page must not be the departed provisional page", snapshotMode.provisional)
+        val snapshotPoll = snapshotMode.topic.poll
+        assertTrue("the retained page must expose the locally-closed poll", snapshotPoll?.closed == true)
+        assertFalse("the retained page must not restore the close action", snapshotPoll?.canClose == true)
+
+        pageOneReloadGate.complete(Unit)
+        advanceUntilIdle()
+    }
 
     @Test
     fun `confirmClosePoll failure emits PollCloseFailed and does not refresh (#1201)`() = runTest {

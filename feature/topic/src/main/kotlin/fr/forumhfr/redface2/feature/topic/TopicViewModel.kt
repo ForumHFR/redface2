@@ -352,11 +352,15 @@ class TopicViewModel @AssistedInject constructor(
                 pollVoteAccount = nextPollVoteAccount
                 hasObservedPollVoteAccount = true
                 if (pollVoteAccountChanged) {
-                    // #779 — a transient form/token and its selection belong to one account only.
+                    // #779/#1204 — a transient form/token, its selection and the cached close
+                    // capability belong to one account only. Dismiss any open close confirmation.
                     // The detached POST is deliberately not cancelled; its late result is fenced by
                     // the account snapshot, while the next account must fetch its own fresh form.
                     pollVoteMutationGeneration = null
                     pageSnapshots.clear()
+                    if (_closePollState.value is ClosePollState.Confirming) {
+                        _closePollState.value = ClosePollState.Idle
+                    }
                 }
                 if (!_state.value.connectedPseudo.equals(connectedPseudo, ignoreCase = true)) {
                     favoriteAuthGeneration++
@@ -373,7 +377,10 @@ class TopicViewModel @AssistedInject constructor(
                     val accountSafeMode = if (pollVoteAccountChanged) {
                         (it.mode as? TopicUiState.Mode.Loaded)?.let { loaded ->
                             loaded.copy(
-                                topic = loaded.topic.copy(pollVoteForm = null),
+                                topic = loaded.topic.copy(
+                                    poll = loaded.topic.poll?.copy(canClose = false),
+                                    pollVoteForm = null,
+                                ),
                                 pollVote = null,
                             )
                         } ?: it.mode
@@ -1939,6 +1946,41 @@ class TopicViewModel @AssistedInject constructor(
     private fun currentPollCanClose(): Boolean =
         (_state.value.mode as? TopicUiState.Mode.Loaded)?.topic?.poll?.canClose == true
 
+    /**
+     * #1201/#1204/#1206 — HFR confirmed the irreversible close; keep the displayed card and every
+     * retained page snapshot for this topic terminal. A [Poll] has no stable identifier, but this
+     * ViewModel and its snapshot LRU are scoped to one `(cat, post)`, which identifies the poll.
+     */
+    private fun markCurrentPollClosedLocally() {
+        val currentTopic = (_state.value.mode as? TopicUiState.Mode.Loaded)?.topic ?: return
+        if (currentTopic.poll == null) return
+
+        pageSnapshots.replaceAll { _, snapshot ->
+            if (
+                snapshot.cat == currentTopic.cat &&
+                snapshot.post == currentTopic.post &&
+                snapshot.poll != null
+            ) {
+                snapshot.withClosedPoll()
+            } else {
+                snapshot
+            }
+        }
+        _state.update { state ->
+            val loaded = state.mode as? TopicUiState.Mode.Loaded ?: return@update state
+            state.copy(
+                mode = loaded.copy(
+                    topic = loaded.topic.withClosedPoll(),
+                ),
+            )
+        }
+    }
+
+    private fun Topic.withClosedPoll(): Topic {
+        val currentPoll = poll ?: return this
+        return copy(poll = currentPoll.copy(closed = true, canClose = false))
+    }
+
     /** #1201 — the owner dismissed the confirmation dialog without closing. */
     fun cancelClosePoll() {
         if (_closePollState.value is ClosePollState.Confirming) {
@@ -1948,10 +1990,10 @@ class TopicViewModel @AssistedInject constructor(
 
     /**
      * #1201 — the owner confirmed : move to [ClosePollState.Closing] (disables the action), run the
-     * detached GET, then emit the one-shot outcome on [effects]. On success, refresh the page so the
-     * server-authoritative `Poll.closed` state replaces the open card. The closure is irreversible, so
-     * nothing optimistic happens here : the closed card only appears once HFR confirms and the refresh
-     * lands.
+     * detached GET, then emit the one-shot outcome on [effects]. On success, mark the local poll closed
+     * before returning to [ClosePollState.Idle], then refresh the page to resynchronise the full model.
+     * The closure is irreversible and the local terminal state is applied only after HFR confirms it,
+     * so a failed refresh can never expose a second close action.
      */
     fun confirmClosePoll() {
         if (_closePollState.value != ClosePollState.Confirming) return
@@ -1980,6 +2022,7 @@ class TopicViewModel @AssistedInject constructor(
             }
             when (result) {
                 PollCloseResult.Success -> {
+                    markCurrentPollClosedLocally()
                     _effects.trySend(TopicEffect.PollClosed)
                     _closePollState.value = ClosePollState.Idle
                     refreshAfterPollClosed()
@@ -1996,8 +2039,8 @@ class TopicViewModel @AssistedInject constructor(
      * #1201 — reload the current page over the network so the freshly-closed poll surfaces its
      * server-authoritative `Poll.closed = true` (persisted by the repository cache). Mirrors the
      * generation-owned refresh of [refresh] : a page switch arriving meanwhile owns the page and the
-     * late reload is dropped. A refresh failure is silent — the close already succeeded and its toast
-     * fired ; a pull-to-refresh recovers the closed view.
+     * late reload is dropped. A refresh failure is silent — the close already succeeded, the local poll
+     * remains terminal and its toast fired ; a pull-to-refresh can resynchronise the full server model.
      */
     private fun refreshAfterPollClosed() {
         val displayed = _state.value.mode as? TopicUiState.Mode.Loaded ?: return

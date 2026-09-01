@@ -12,7 +12,7 @@ import org.jsoup.Jsoup
  * Live responses put their message in `div.hop`: « Votre vote a bien été pris en compte ! » for
  * acceptance and « Désolé, vous avez déjà voté ! » for a duplicate. Matching is deliberately based
  * on normalised containment rather than fragile whole-string equality. The already-voted marker is
- * checked first; a meta-refresh carrying `url=` is then accepted as a bounded success fallback.
+ * checked first. Any response without one of these explicit markers fails closed.
  */
 class PollVoteResponseParser {
 
@@ -22,10 +22,6 @@ class PollVoteResponseParser {
         return when {
             message.contains(ALREADY_VOTED_MARKER) -> PollVoteResult.AlreadyVoted
             message.contains(ACCEPTED_MARKER) -> PollVoteResult.Accepted
-            document.select(META_SELECTOR).any { meta ->
-                meta.attr("http-equiv").equals(REFRESH, ignoreCase = true) &&
-                    URL_ASSIGNMENT.containsMatchIn(meta.attr("content"))
-            } -> PollVoteResult.Accepted
             else -> PollVoteResult.Failed(PollVoteFailureReason.UnexpectedResponse)
         }
     }
@@ -39,12 +35,9 @@ class PollVoteResponseParser {
 
     private companion object {
         private const val HOP_SELECTOR = "div.hop"
-        private const val META_SELECTOR = "meta[http-equiv]"
-        private const val REFRESH = "Refresh"
         private const val ALREADY_VOTED_MARKER = "vous avez deja vote"
         private const val ACCEPTED_MARKER = "votre vote a bien ete pris en compte"
         private val COMBINING_MARKS = Regex("\\p{M}+")
         private val WHITESPACE = Regex("[\\p{Z}\\s]+")
-        private val URL_ASSIGNMENT = Regex("(?:^|;)\\s*url\\s*=", RegexOption.IGNORE_CASE)
     }
 }

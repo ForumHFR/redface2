@@ -61,8 +61,8 @@ Trois verdicts possibles :
   2026-08-25 ([#1107](https://github.com/ForumHFR/redface2/issues/1107)) ont tranché **trois** des
   quatre dernières lignes qui le portaient ; la quatrième attend une seconde sonde sur citation
   ancienne et un contrôle positif d'âge connu, la latence de tracking n'étant pas exclue. Décompte
-  de la matrice à ce jour : **30 « oui, livré » + 2 « non par nature » + 1 « oui mais absent » =
-  33 lignes**.
+  de la matrice à ce jour : **31 « oui, livré » + 2 « non par nature » + 1 « oui mais absent » =
+  34 lignes**.
 
 Contexte d'architecture : le partage se fait au niveau de la **primitive sans politique** dans
 `:core:ui` — `ReadingPostCard` au lot 1, puis la machine de zoom, `PageFab` et `PageNavigation` au
