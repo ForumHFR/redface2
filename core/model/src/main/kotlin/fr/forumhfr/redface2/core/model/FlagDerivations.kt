@@ -17,6 +17,27 @@ package fr.forumhfr.redface2.core.model
  */
 fun Flag.pagesToRead(): Int = (totalPages - lastReadPage).coerceAtLeast(0)
 
+/** #814 — first [pagesToRead] value rendered [LagTone.MEDIUM] (the issue's « 1-2 pages = discret »). */
+const val LAG_TONE_MEDIUM_MIN_PAGES = 3
+
+/** #814 — first [pagesToRead] value rendered [LagTone.HIGH] (the issue's « 10+ = saillant »). */
+const val LAG_TONE_HIGH_MIN_PAGES = 10
+
+/**
+ * #814 — severity tier of a « pages à lire » counter. Total on purpose : the pill is never rendered for
+ * `pagesToRead <= 0` (the `hasUnread && pagesToRead > 0` guard lives in the row), but a caller passing
+ * 0 or a negative stale value still gets the discreet [LagTone.LOW] rather than a crash or a spurious
+ * alert. Boundaries are inclusive lower bounds : `3 → MEDIUM`, `10 → HIGH`.
+ */
+fun lagTone(pagesToRead: Int): LagTone = when {
+    pagesToRead >= LAG_TONE_HIGH_MIN_PAGES -> LagTone.HIGH
+    pagesToRead >= LAG_TONE_MEDIUM_MIN_PAGES -> LagTone.MEDIUM
+    else -> LagTone.LOW
+}
+
+/** [Flag] convenience over [lagTone], fed by [pagesToRead]. */
+fun Flag.lagTone(): LagTone = lagTone(pagesToRead())
+
 /**
  * The flag color actually shown for a row: the favori/étoile decoration WINS over the bucket color
  * (#384 / dev v118 web parity — a favorited topic listed under « Mes sujets » keeps its yellow

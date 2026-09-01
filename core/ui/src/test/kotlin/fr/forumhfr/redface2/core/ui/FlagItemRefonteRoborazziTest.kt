@@ -34,6 +34,11 @@ import org.robolectric.annotation.GraphicsMode
  *
  *     ./scripts/docker-dev.sh ./gradlew :core:ui:testDebugUnitTest \
  *         --tests '*FlagItemRefonteRoborazziTest*' --console=plain
+ *
+ * #814 — la pastille est teintée selon le RETARD (1-2 / 3-9 / ≥ 10 pages), plus selon le drapeau. Le
+ * showcase couvre les trois paliers sur deux couleurs de drapeau chacun, aux bornes exactes des
+ * paliers (1, 3, 10) plus les valeurs historiques (2, 8, 26), en light / dark / AMOLED : un cyan et un
+ * rouge au même retard doivent porter la même pastille.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w360dp-h900dp-xxhdpi")
@@ -55,6 +60,14 @@ class FlagItemRefonteRoborazziTest {
             FlagRow(SAMPLE_FAVORITE, MarkerStyle.STRIPE)
             FlagItemDivider()
             FlagRow(SAMPLE_RED_MANYPAGES, MarkerStyle.STRIPE)
+            FlagItemDivider()
+            // #814 — lag tiers at their exact lower bounds, on the OTHER flag colour than the rows
+            // above (LOW on red, MEDIUM / HIGH on cyan) : the pill must not follow the flag colour.
+            FlagRow(SAMPLE_LAG_LOW_RED, MarkerStyle.STRIPE)
+            FlagItemDivider()
+            FlagRow(SAMPLE_LAG_MEDIUM_CYAN, MarkerStyle.STRIPE)
+            FlagItemDivider()
+            FlagRow(SAMPLE_LAG_HIGH_CYAN, MarkerStyle.STRIPE)
             FlagItemDivider()
             // The three marker styles on the same unread cyan topic.
             Row(
@@ -145,6 +158,20 @@ class FlagItemRefonteRoborazziTest {
         val SAMPLE_RED_MANYPAGES = BASE.copy(
             topicId = 4, cat = 13, type = FlagType.RED, totalPages = 1726, lastReadPage = 1700,
             title = "Le topic de la blague Carambar et autres réjouissances", lastReplyAuthor = "Lt Ripley",
+        )
+
+        // #814 — one row per lag tier at its lower bound (pagesToRead = 1 / 3 / 10).
+        val SAMPLE_LAG_LOW_RED = BASE.copy(
+            topicId = 5, cat = 13, type = FlagType.RED, totalPages = 52, lastReadPage = 51,
+            title = "[#814] Rouge, 1 page de retard — pastille neutre", lastReplyAuthor = "thibw",
+        )
+        val SAMPLE_LAG_MEDIUM_CYAN = BASE.copy(
+            topicId = 6, cat = 1, type = FlagType.CYAN, totalPages = 120, lastReadPage = 117,
+            title = "[#814] Cyan, 3 pages de retard — pastille accentuée", lastReplyAuthor = "thibw",
+        )
+        val SAMPLE_LAG_HIGH_CYAN = BASE.copy(
+            topicId = 7, cat = 1, type = FlagType.CYAN, totalPages = 310, lastReadPage = 300,
+            title = "[#814] Cyan, 10 pages de retard — pastille alerte", lastReplyAuthor = "thibw",
         )
     }
 }
