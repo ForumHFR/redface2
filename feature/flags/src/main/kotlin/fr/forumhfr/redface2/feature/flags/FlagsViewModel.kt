@@ -83,12 +83,21 @@ class FlagsViewModel @Inject constructor(
     private var observedPseudo: String? = null
 
     /**
-     * #378 — instant of the last refresh triggered through [maybeAutoRefresh], for the
-     * throttle. ViewModel-scoped on purpose: the ViewModel survives the screen leaving the
-     * composition (tab switch, topic push), so rapid back-and-forth shares one window, while
-     * a cold app start (fresh ViewModel) always allows the first auto-refresh.
+     * #378 — instant of the last refresh triggered through [maybeAutoRefresh], PER [FlagType], for
+     * the throttle. ViewModel-scoped on purpose: the ViewModel survives the screen leaving the
+     * composition (tab switch, topic push), so rapid back-and-forth on the SAME tab shares one
+     * window, while a cold app start (fresh ViewModel) always allows the first auto-refresh.
+     *
+     * One window per type since #743 (styx42): a single shared instant meant that landing on another
+     * tab right after this one's refresh was swallowed by the window, so the freshly shown tab kept
+     * its cache — the throttle is now consulted for the landing tab's own type. Keyed on [FlagType]
+     * rather than [FlagTab] because the throttled unit is `flagRepository.refresh(type)` — the
+     * per-category REST fan-out of ONE type — and every tab that fetches maps 1:1 to a type
+     * (Super/DT carry none and return before the throttle). A future multi-type tab (#668) would
+     * re-decide this key together with the repository-level pull it needs (cf.
+     * `DefaultFlagRepository.refresh`).
      */
-    private var lastAutoRefreshAt: Instant? = null
+    private val lastAutoRefreshAt: MutableMap<FlagType, Instant> = mutableMapOf()
 
     /**
      * #378 follow-up — generation counter incremented by [onFlagOpened] (a topic was opened from
@@ -101,6 +110,22 @@ class FlagsViewModel @Inject constructor(
      */
     private var flagOpenedGeneration = 0L
     private var flagOpenedGenerationConsumed = 0L
+
+    /**
+     * #743 — the [FlagType] whose refresh (manual or auto) is currently behind [isRefreshing], and
+     * the landing that met that in-flight refresh while it was running for ANOTHER type. Refreshes
+     * stay strictly sequential — the repository treats every `refresh(type)` as a generation barrier
+     * for its shared sticky sweep, so two concurrent per-type refreshes would degrade the older one
+     * to a bucket-only result (cf. `DefaultFlagRepository.refresh`) — so a tab switched to while a
+     * refresh runs cannot start its own fan-out; its landing is REPLAYED once the in-flight refresh
+     * settles, if that tab is still the selected one (a tab left meanwhile lands again on its own).
+     * Latest landing wins; a landing on the type already in flight clears it (nothing to replay —
+     * the running refresh covers it, and its throttle window absorbs the resume/tab-effect double
+     * fire). Without this, « relancer l'app puis changer tout de suite d'onglet » still showed the
+     * new tab's cache whenever the first tab's fan-out was in flight at the switch.
+     */
+    private var refreshingType: FlagType? = null
+    private var deferredLandingType: FlagType? = null
 
     private val _selectedTab = MutableStateFlow<FlagTab>(FlagTab.Cyan)
     val selectedTab: StateFlow<FlagTab> = _selectedTab.asStateFlow()
@@ -822,12 +847,15 @@ class FlagsViewModel @Inject constructor(
         // A manual refresh captures the post-reading state too, so the generations visible at this
         // call would only duplicate the fan-out on the next landing — consume them (#378 follow-up).
         flagOpenedGenerationConsumed = flagOpenedGeneration
+        // #743 — a pull on the tab whose landing is waiting behind an in-flight refresh IS that
+        // landing's fetch: drop the replay so it does not double the fan-out right after the pull.
+        if (deferredLandingType == type) deferredLandingType = null
         viewModelScope.launch {
-            _isRefreshing.value = true
+            beginRefresh(type)
             try {
                 flagRepository.refresh(type)
             } finally {
-                _isRefreshing.value = false
+                endRefresh()
             }
         }
     }
@@ -853,18 +881,19 @@ class FlagsViewModel @Inject constructor(
      * - the « auto-refresh » preference is on (default; the Settings toggle is the opt-out),
      * - the user is authenticated (an anonymous landing has no flags to refresh),
      * - the selected tab has a real [FlagType] (Super/DT placeholders have no backend),
-     * - no refresh is already in flight,
-     * - the last auto-refresh is older than [AUTO_REFRESH_THROTTLE] — the per-tab REST fan-out
-     *   is ~one GET per public category, so rapid back-and-forth between a topic and the list
-     *   must not multiply it. A manual pull-to-refresh is never throttled and does not arm the
-     *   throttle (it goes straight through [refresh]).
+     * - no refresh is already in flight — a landing on ANOTHER tab that meets one is not dropped
+     *   but replayed once it settles (#743, cf. [deferredLandingType]),
+     * - the last auto-refresh OF THAT TAB'S TYPE is older than [AUTO_REFRESH_THROTTLE] (one window
+     *   per type, #743) — the per-tab REST fan-out is ~one GET per public category, so rapid
+     *   back-and-forth between a topic and the list must not multiply it. A manual pull-to-refresh
+     *   is never throttled and does not arm the throttle (it goes straight through [refresh]).
      */
     fun maybeAutoRefresh() {
         // Snapshot the tab at CALL time (the landing being refreshed) — re-reading it after the
         // suspension points below could refresh a different tab than the one that landed, or
         // no-op on a placeholder while still arming the throttle (Codex review on PR #421).
         val type = _selectedTab.value.flagType ?: return
-        if (_isRefreshing.value) return
+        if (deferLandingIfRefreshing(type)) return
         // Snapshot at CALL time (same rationale as the tab snapshot above): a read armed AFTER
         // this landing's call belongs to the NEXT landing. The launch suspends on the pref/auth
         // gates below — reading the generation there would let this refresh consume a reading it
@@ -874,7 +903,8 @@ class FlagsViewModel @Inject constructor(
             if (!userPreferencesRepository.observeFlagsAutoRefresh().first()) return@launch
             if (authRepository.observeAuthState().first() !is AuthState.Authenticated) return@launch
             val now = clock.instant()
-            val last = lastAutoRefreshAt
+            // #743 — this tab's OWN window: another tab's recent refresh never throttles this landing.
+            val last = lastAutoRefreshAt[type]
             // Throttle SKIPPED when a topic was opened since the last consuming refresh (see
             // [onFlagOpened]): that landing is a return from a read, the state most worth
             // refreshing.
@@ -883,13 +913,14 @@ class FlagsViewModel @Inject constructor(
                 return@launch
             }
             // Re-check after the suspensions: a manual pull-to-refresh may have started while
-            // the pref/auth reads were in flight — don't double the REST fan-out.
-            if (_isRefreshing.value) return@launch
+            // the pref/auth reads were in flight — don't double the REST fan-out (same type), or
+            // defer this landing behind it (other type, #743).
+            if (deferLandingIfRefreshing(type)) return@launch
             // Consume ONLY the generations visible at call time — a read armed during the
             // suspensions above stays pending for the next landing.
             flagOpenedGenerationConsumed = maxOf(flagOpenedGenerationConsumed, openedGenerationAtCall)
-            lastAutoRefreshAt = now
-            _isRefreshing.value = true
+            lastAutoRefreshAt[type] = now
+            beginRefresh(type)
             try {
                 flagRepository.refresh(type)
                 // #546 — a genuine landing / tab-switch / resume refresh: recall the list to the top
@@ -898,9 +929,40 @@ class FlagsViewModel @Inject constructor(
                 // the screen — see [recallListToTop].
                 if (!returningFromTopic) _recallListToTop.value = true
             } finally {
-                _isRefreshing.value = false
+                endRefresh()
             }
         }
+    }
+
+    /**
+     * #743 — in-flight guard shared by the two [maybeAutoRefresh] checkpoints. `true` when a refresh
+     * is running (the landing must not start a concurrent fan-out); the landing is then remembered
+     * for replay in [endRefresh] if it targets ANOTHER type than the one in flight, and cleared
+     * otherwise (latest landing wins, cf. [deferredLandingType]).
+     */
+    private fun deferLandingIfRefreshing(type: FlagType): Boolean {
+        if (!_isRefreshing.value) return false
+        deferredLandingType = type.takeIf { it != refreshingType }
+        return true
+    }
+
+    /** Raises the single loading cue ([isRefreshing]) for [type]'s round-trip, manual or auto. */
+    private fun beginRefresh(type: FlagType) {
+        refreshingType = type
+        _isRefreshing.value = true
+    }
+
+    /**
+     * Clears the loading cue, then replays the landing deferred behind this refresh (#743) — through
+     * [maybeAutoRefresh], so it still meets the pref/auth gates and its own throttle window — provided
+     * that tab is still the selected one; a tab left meanwhile lands again on its own when re-selected.
+     */
+    private fun endRefresh() {
+        refreshingType = null
+        _isRefreshing.value = false
+        val deferred = deferredLandingType ?: return
+        deferredLandingType = null
+        if (deferred == _selectedTab.value.flagType) maybeAutoRefresh()
     }
 
     /**
@@ -1254,10 +1316,13 @@ sealed interface FlagsContent {
 }
 
 /**
- * #378 — minimum delay between two auto-refreshes ([FlagsViewModel.maybeAutoRefresh]). 15 s:
- * shorter than any realistic topic-read round-trip (the « back from a topic » trigger stays
- * effective) but long enough that bouncing between tabs or popping in and out of a topic does
- * not re-run the per-category REST fan-out every time.
+ * #378 — minimum delay between two auto-refreshes OF THE SAME [FlagType]
+ * ([FlagsViewModel.maybeAutoRefresh]; one window per type since #743). 15 s: shorter than any
+ * realistic topic-read round-trip (the « back from a topic » trigger stays effective) but long
+ * enough that re-landing on a tab — resume, back-and-forth with another tab, popping in and out of
+ * a topic — does not re-run its per-category REST fan-out every time. Bouncing across the three
+ * tabs costs at most one fan-out per tab per window, and never two at once (refreshes stay
+ * sequential, cf. [FlagsViewModel.maybeAutoRefresh]).
  */
 private val AUTO_REFRESH_THROTTLE: Duration = Duration.ofSeconds(15)
 

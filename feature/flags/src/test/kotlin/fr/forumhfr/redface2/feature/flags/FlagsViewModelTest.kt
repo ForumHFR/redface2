@@ -1548,6 +1548,157 @@ class FlagsViewModelTest {
         assertEquals(2, flags.refreshCalls.size)
     }
 
+    // #743 (styx42) — the throttle window is PER TAB (per FlagType), no longer shared across tabs,
+    // and a landing that meets another tab's in-flight refresh is replayed instead of dropped.
+
+    @Test
+    fun `the throttle is per tab, landing on another tab inside the window still fetches it (#743)`() = runTest {
+        // Bug report: relaunching the app refreshed the open tab, but switching tab right away showed
+        // the new tab's cache — the single shared window swallowed its landing.
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
+        val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
+        val vm = viewModelWithClock(auth, flags, clock)
+
+        vm.maybeAutoRefresh() // Cyan lands at t0 and arms ITS window
+        clock.now = clock.now.plusSeconds(2)
+        vm.selectTab(FlagTab.Red)
+        vm.maybeAutoRefresh() // the screen's LaunchedEffect(selectedTab) re-fires on the switch
+
+        assertEquals(listOf(FlagType.CYAN, FlagType.RED), flags.refreshCalls)
+    }
+
+    @Test
+    fun `each tab keeps its own throttle window (#743)`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
+        val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
+        val vm = viewModelWithClock(auth, flags, clock)
+
+        vm.maybeAutoRefresh() // Cyan @ t0
+        clock.now = clock.now.plusSeconds(2)
+        vm.selectTab(FlagTab.Red)
+        vm.maybeAutoRefresh() // Red @ t0+2
+        assertEquals(listOf(FlagType.CYAN, FlagType.RED), flags.refreshCalls)
+
+        clock.now = clock.now.plusSeconds(3) // t0+5 — back on Cyan, inside Cyan's own window
+        vm.selectTab(FlagTab.Cyan)
+        vm.maybeAutoRefresh()
+        assertEquals(
+            "Cyan's window (armed at t0) is still open",
+            listOf(FlagType.CYAN, FlagType.RED),
+            flags.refreshCalls,
+        )
+
+        clock.now = clock.now.plusSeconds(11) // t0+16 — Cyan's window elapsed, Red's (t0+2) has not
+        vm.maybeAutoRefresh()
+        assertEquals(listOf(FlagType.CYAN, FlagType.RED, FlagType.CYAN), flags.refreshCalls)
+        vm.selectTab(FlagTab.Red)
+        vm.maybeAutoRefresh()
+        assertEquals(
+            "Red's window runs until t0+17",
+            listOf(FlagType.CYAN, FlagType.RED, FlagType.CYAN),
+            flags.refreshCalls,
+        )
+
+        clock.now = clock.now.plusSeconds(2) // t0+18 — Red's window elapsed too
+        vm.maybeAutoRefresh()
+        assertEquals(listOf(FlagType.CYAN, FlagType.RED, FlagType.CYAN, FlagType.RED), flags.refreshCalls)
+    }
+
+    @Test
+    fun `a manual refresh is never throttled by the per-tab window either (#743)`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
+        val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
+        val vm = viewModelWithClock(auth, flags, clock)
+
+        vm.maybeAutoRefresh() // Cyan @ t0
+        clock.now = clock.now.plusSeconds(2)
+        vm.selectTab(FlagTab.Red)
+        vm.maybeAutoRefresh() // Red @ t0+2, arms Red's window
+        clock.now = clock.now.plusSeconds(1)
+        vm.refresh() // user pull on Red inside its window — goes straight through
+
+        assertEquals(listOf(FlagType.CYAN, FlagType.RED, FlagType.RED), flags.refreshCalls)
+    }
+
+    @Test
+    fun `a landing on another tab during an in-flight refresh is replayed once it settles (#743)`() = runTest {
+        // Second half of the report: switching tab WHILE the first tab's fan-out is still running.
+        // Refreshes stay sequential (a concurrent per-type refresh would degrade the older one through
+        // the repository's sweep generation), so the Red landing waits for Cyan, then runs.
+        val flags = FakeFlagRepository()
+        flags.refreshGate = CompletableDeferred()
+        val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
+        val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
+        val vm = viewModelWithClock(auth, flags, clock)
+
+        vm.maybeAutoRefresh() // Cyan landing, suspended at the gate
+        vm.selectTab(FlagTab.Red)
+        vm.maybeAutoRefresh() // meets the in-flight refresh: no concurrent fan-out…
+        assertEquals(listOf(FlagType.CYAN), flags.refreshCalls)
+        assertTrue(vm.isRefreshing.value)
+
+        flags.refreshGate!!.complete(Unit) // …Cyan settles → the Red landing is replayed
+        assertEquals(listOf(FlagType.CYAN, FlagType.RED), flags.refreshCalls)
+        assertFalse(vm.isRefreshing.value)
+    }
+
+    @Test
+    fun `only the latest deferred landing is replayed (#743)`() = runTest {
+        val flags = FakeFlagRepository()
+        flags.refreshGate = CompletableDeferred()
+        val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
+        val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
+        val vm = viewModelWithClock(auth, flags, clock)
+
+        vm.maybeAutoRefresh() // Cyan, gated
+        vm.selectTab(FlagTab.Red)
+        vm.maybeAutoRefresh() // deferred: Red…
+        vm.selectTab(FlagTab.Favorite)
+        vm.maybeAutoRefresh() // …superseded by Favori, the tab actually on screen when Cyan settles
+
+        flags.refreshGate!!.complete(Unit)
+        assertEquals(listOf(FlagType.CYAN, FlagType.FAVORITE), flags.refreshCalls)
+    }
+
+    @Test
+    fun `a same-tab landing during an in-flight refresh stays a no-op (#743 non-regression)`() = runTest {
+        // ON_RESUME + LaunchedEffect(selectedTab) double fire on the same tab: still ONE fan-out, and
+        // nothing is replayed once it settles (the running refresh already covers that tab).
+        val flags = FakeFlagRepository()
+        flags.refreshGate = CompletableDeferred()
+        val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
+        val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
+        val vm = viewModelWithClock(auth, flags, clock)
+
+        vm.maybeAutoRefresh()
+        vm.maybeAutoRefresh()
+        flags.refreshGate!!.complete(Unit)
+
+        assertEquals(listOf(FlagType.CYAN), flags.refreshCalls)
+    }
+
+    @Test
+    fun `a pull on the deferred tab supersedes its replay (#743)`() = runTest {
+        // The user switches to Red during Cyan's fan-out and pulls right away: that pull IS Red's
+        // fetch — the deferred landing must not add a third fan-out once Cyan settles.
+        val flags = FakeFlagRepository()
+        flags.refreshGate = CompletableDeferred()
+        val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
+        val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
+        val vm = viewModelWithClock(auth, flags, clock)
+
+        vm.maybeAutoRefresh() // Cyan, gated
+        vm.selectTab(FlagTab.Red)
+        vm.maybeAutoRefresh() // deferred behind Cyan
+        vm.refresh() // manual pull on Red (gated too)
+        flags.refreshGate!!.complete(Unit)
+
+        assertEquals(listOf(FlagType.CYAN, FlagType.RED), flags.refreshCalls)
+    }
+
     @Test
     fun `tabUnreadFilter pairs each filter value with the tab that produced it`() = runTest {
         // #385/#421 — a tab switch must never be observable as « new tab + previous tab's
