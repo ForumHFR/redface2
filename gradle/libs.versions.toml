@@ -1,9 +1,9 @@
 [versions]
 agp = "9.2.0"
 kotlin = "2.3.21"
-ksp = "2.3.9"
+ksp = "2.3.11"
 hilt = "2.59.2"
-hilt-navigation-compose = "1.3.0"
+hilt-navigation-compose = "1.4.0"
 android-minSdk = "29"
 android-targetSdk = "36"
 android-compileSdk = "36"
@@ -30,7 +30,7 @@ robolectric = "4.16.1"
 turbine = "1.2.1"
 konsist = "0.17.3"
 javax-inject = "1"
-androidx-tracing = "1.3.0"
+androidx-tracing = "2.0.1"
 # Roborazzi 1.63.0 — JVM screenshot testing on top of Robolectric. Used **without** the
 # Gradle plugin because the latter is not yet AGP 9 compatible (cf.
 # https://github.com/takahirom/roborazzi/pull/781). We consume `roborazzi` +
@@ -39,7 +39,7 @@ androidx-tracing = "1.3.0"
 # `@GraphicsMode(NATIVE)` is required on test classes that call `captureRoboImage`. Wired
 # only in `:core:ui` for the moment as a diagnostic channel for AMOLED quote rendering
 # (cf. PR #207).
-roborazzi = "1.63.0"
+roborazzi = "1.73.0"
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
