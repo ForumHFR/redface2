@@ -14,10 +14,11 @@ import androidx.compose.ui.unit.dp
  * session has no FAB, and reserving the inset there would leave an 88.dp void with nothing
  * floating over it.
  *
- * Extracted as a pure function (nothing mounts the screen in JVM unit tests) so the value is
- * unit-testable. The [fr.forumhfr.redface2.feature.topic] list uses the same 88.dp clearance
- * but keeps its own private constant (it also folds in top/side insets we don't need here), so
- * the two are deliberately not shared.
+ * Extracted as a pure function (nothing mounted the screen in JVM unit tests before #1149's
+ * `ForumCategoryContent` harness) so the value is unit-testable. The
+ * [fr.forumhfr.redface2.feature.topic] list uses the same 88.dp clearance but keeps its own
+ * private constant (it also folds in top/side insets we don't need here), so the two are
+ * deliberately not shared.
  */
 internal fun forumListContentPadding(reserveFabSpace: Boolean): PaddingValues =
     if (reserveFabSpace) {

@@ -14,8 +14,9 @@ import org.junit.Test
  * - #1129: sticky/regular partitioning is stable, the boundary requires both sections, and the
  *   partition/separator is scoped to real category listings (never flag-filter buckets).
  *
- * Rendering note (#1129): `:feature:forum` has no Compose/Robolectric harness yet. Downstream UI
- * validation must cover one separator at the sticky/regular boundary, no separator for empty or
+ * Rendering note (#1129): the only Compose/Robolectric harness in `:feature:forum` is the #1149
+ * inset proof (`ForumCategoryContentInsetsTest`, mounting `ForumCategoryContent`). Downstream UI
+ * validation must still cover one separator at the sticky/regular boundary, no separator for empty or
  * single-kind results (including after search), no ordinary divider immediately before the
  * separator, the tonal status badge appearing before the title for sticky and/or locked rows, and
  * a FLAT list (no partition, no separator; per-row badge still shown) whenever a flag-filter bucket
