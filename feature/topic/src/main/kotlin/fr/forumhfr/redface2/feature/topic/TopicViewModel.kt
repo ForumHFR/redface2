@@ -266,7 +266,15 @@ class TopicViewModel @AssistedInject constructor(
      * - [Top] → [TopicEffect.ScrollToTop] (default landing of a fresh page).
      */
     private sealed interface PendingLanding {
-        data class Post(val numreponse: Int) : PendingLanding
+        /**
+         * [lastRead] (#1137) — `true` ONLY for the entry landing of a flag tap (#231 `forceRefresh`
+         * + route `scrollTo`), whose target is the reader's last-read post : the screen may then
+         * align on the « Dernier message lu » marker. Every other producer (cited jump, search hit,
+         * post-submit) lands to READ the post and leaves the default. The semantics travel WITH the
+         * landing, never re-derived from `request` (which keeps forceRefresh/scrollTo across in-VM
+         * navigations, #953/F4 — a same-page jump to that very numreponse must land top-of-post).
+         */
+        data class Post(val numreponse: Int, val lastRead: Boolean = false) : PendingLanding
         data class Anchor(val anchor: TopicScrollAnchor) : PendingLanding
         data object Bottom : PendingLanding
         data object Top : PendingLanding
@@ -327,7 +335,9 @@ class TopicViewModel @AssistedInject constructor(
         // The entry landing (armed by the chosen load path AFTER it takes ownership — arming
         // before the ownership bump would tag it with a stale generation).
         val entryLanding: PendingLanding? = when {
-            initialScrollTo != null -> PendingLanding.Post(initialScrollTo)
+            // #1137 — the flag tap (#231's forceRefresh) is the ONE entry whose scrollTo is the
+            // last-read post ; a deep link / search entry lands to read the post.
+            initialScrollTo != null -> PendingLanding.Post(initialScrollTo, lastRead = request.forceRefresh)
             // Process restore : land back on the persisted reading position, if any.
             canonicalPage != null -> pageAnchors[request.page]?.let { PendingLanding.Anchor(it) }
             else -> null
@@ -1389,7 +1399,7 @@ class TopicViewModel @AssistedInject constructor(
             // A Post target absent from the page stays pending : the next emission of the same
             // owner may contain it (historical scrollTo retry) — hence the nullable effect.
             is PendingLanding.Post ->
-                TopicEffect.ScrollToPost(landing.numreponse)
+                TopicEffect.ScrollToPost(landing.numreponse, lastRead = landing.lastRead)
                     .takeIf { topic.posts.any { post -> post.numreponse == landing.numreponse } }
             is PendingLanding.Anchor -> TopicEffect.ScrollToAnchor(landing.anchor, armed.page)
             PendingLanding.Bottom -> TopicEffect.ScrollToEndOfPage(armed.page)

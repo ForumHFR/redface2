@@ -134,4 +134,86 @@ class ReanchorStepTest {
         assertTrue(step is ReanchorStep.Continue)
         assertTrue((step as ReanchorStep.Continue).repin)
     }
+
+    // #1137 — marker alignment : the pin is « target at targetOffset », not « target at 0 ».
+
+    @Test
+    fun `resting at the marker offset is not a drift`() {
+        val markerOffset = 1728
+        val resting = ReanchorFrame(target, markerOffset, targetSize = 1800)
+        val step = reanchorStep(
+            current = resting,
+            previous = resting,
+            target = target,
+            stableFrames = 0,
+            stableThreshold = threshold,
+            targetOffset = markerOffset,
+        )
+        assertTrue(step is ReanchorStep.Continue)
+        step as ReanchorStep.Continue
+        assertFalse("at the wanted offset → no re-pin", step.repin)
+        assertEquals(1, step.stableFrames)
+    }
+
+    @Test
+    fun `the target growing under a marker landing counts as movement and re-pins to the new offset`() {
+        // The first visible item inflates (its own image decoded) : Lazy keeps index/offset, so the
+        // marker at its bottom drifted down by 480 px. The size change alone must reset stability,
+        // and the caller's recomputed goal (old + 480) must trigger the re-pin.
+        val step = reanchorStep(
+            current = ReanchorFrame(target, 1728, targetSize = 1800 + 480),
+            previous = ReanchorFrame(target, 1728, targetSize = 1800),
+            target = target,
+            stableFrames = threshold - 1,
+            stableThreshold = threshold,
+            targetOffset = 1728 + 480,
+        )
+        assertTrue(step is ReanchorStep.Continue)
+        step as ReanchorStep.Continue
+        assertEquals("size change resets stability instead of stopping", 0, step.stableFrames)
+        assertTrue("offset no longer matches the recomputed goal → re-pin", step.repin)
+    }
+
+    @Test
+    fun `a marker landing that settled at a non-zero offset stops on stillness like a top pin`() {
+        val resting = ReanchorFrame(target, 1728, targetSize = 1800)
+        val step = reanchorStep(
+            current = resting,
+            previous = resting,
+            target = target,
+            stableFrames = threshold - 1,
+            stableThreshold = threshold,
+            targetOffset = 1728,
+        )
+        assertEquals(ReanchorStep.Stop, step)
+    }
+
+    @Test
+    fun `an unmeasured marker snaps the item fully off and the normalised reading asks for a harmless re-pin`() {
+        // markerHeight 0 → targetOffset == the item's size : Lazy normalises the position to the next
+        // item at offset 0. The reading differs from the goal, so the step asks for a re-pin (a
+        // no-op scroll, same stance as a tail post resting at max scroll) and stillness stops it.
+        val step = reanchorStep(
+            current = ReanchorFrame(target + 1, 0, targetSize = 1800),
+            previous = ReanchorFrame(target, 0, targetSize = 1800),
+            target = target,
+            stableFrames = 0,
+            stableThreshold = threshold,
+            targetOffset = 1800,
+        )
+        assertTrue(step is ReanchorStep.Continue)
+        assertTrue((step as ReanchorStep.Continue).repin)
+    }
+
+    @Test
+    fun `targetOffset defaults to the historical top pin`() {
+        val step = reanchorStep(
+            current = ReanchorFrame(target, 60),
+            previous = ReanchorFrame(target, 0),
+            target = target,
+            stableFrames = 0,
+            stableThreshold = threshold,
+        )
+        assertTrue((step as ReanchorStep.Continue).repin)
+    }
 }

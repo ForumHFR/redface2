@@ -85,6 +85,7 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalDensity
@@ -336,6 +337,11 @@ fun TopicScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val favoriteAtPostState by viewModel.favoriteAtPostState.collectAsStateWithLifecycle()
     val lazyListState = rememberLazyListState()
+    // #1137 — measured height (px) of the « Dernier message lu » separator, written from where the
+    // marker is composed (onSizeChanged, inside the last-read post's item — cf. TopicLoadedContent)
+    // and read by the flag landing below to put the marker's top edge on the landing line (the post
+    // body above it, off-screen). Read from effect lambdas only — it never drives composition.
+    val lastReadMarkerHeightPx = remember { mutableIntStateOf(0) }
     // #518 follow-up — report scroll facts up so `:app` can reveal the hidden system nav bar per the
     // chosen mode. No-op (and clears stale facts) when the feature is inactive.
     ImmersiveNavBarScrollReporter(
@@ -485,7 +491,22 @@ fun TopicScreen(
                     if (index >= 0) {
                         // +1 because the LazyColumn header card occupies item 0.
                         val target = index + 1
-                        lazyListState.scrollToItem(target)
+                        // #1137 — a flag-tap landing (`effect.lastRead`, set by the ViewModel's entry
+                        // producer only) whose post overflows the viewport puts the TOP of the
+                        // « Dernier message lu » marker on the landing line instead of the top of the
+                        // post : the marker and the first unread post are on screen, the already-read
+                        // post one swipe up. A post that fits keeps the historical top-of-post
+                        // landing, and so does every other ScrollToPost producer (cited jump, search
+                        // hit, deep link, post-submit) — even when its numreponse is the one the
+                        // marker sits on : the reader was sent there to READ that post. The flag is
+                        // read off the EFFECT, not `request` (which keeps forceRefresh/scrollTo
+                        // across in-VM navigations, #953/F4).
+                        val landing = if (effect.lastRead) {
+                            LandingAlignment.LastReadMarker { lastReadMarkerHeightPx.intValue }
+                        } else {
+                            LandingAlignment.TopOfPost
+                        }
+                        lazyListState.landOn(target, landing)
                         // Gate r1/r2 — aligned only AFTER the scroll actually applied (a suspension
                         // or disposal mid-landing must keep persists blocked) ; the #197 re-anchor
                         // below only re-pins the same target, the position keeps describing this page.
@@ -494,7 +515,8 @@ fun TopicScreen(
                         // Coil decodes them, shifting the offset *after* this one-shot scroll and
                         // leaving the target off-screen on a cold image cache. Keep it pinned while
                         // the layout settles (bails on user scroll, bounded by a frame budget).
-                        lazyListState.reanchorWhileMediaSettles(target)
+                        // #1137 — the re-pins re-apply the SAME alignment, re-decided every frame.
+                        lazyListState.reanchorWhileMediaSettles(target, landing)
                     } else {
                         // Gate r2 — not-found : the no-scroll DECISION is the landing application
                         // (the content is this page, at a position the user now owns).
@@ -682,6 +704,8 @@ fun TopicScreen(
     TopicContent(
         state = state,
         listState = lazyListState,
+        // #1137 — the marker's measured height feeds the flag landing's alignment (cf. above).
+        onLastReadMarkerMeasured = { lastReadMarkerHeightPx.intValue = it },
         onIntent = viewModel::send,
         onBack = onBack,
         onReply = onReply,
@@ -873,16 +897,31 @@ private fun MoveFavoriteConfirmDialog(
  * perso) keep that nudge small in the common case; a dedicated warmup-before-reanchor is the follow-up
  * if a deep-link to a perso-heavy post drifts in practice (to validate on a cold-cache device).
  *
+ * #1137 note — the pin is no longer always « target at offset 0 » : a flag landing whose post
+ * overflows the viewport puts the top of the « Dernier message lu » marker on the landing line
+ * ([LandingAlignment.LastReadMarker]), and the offset that achieves it depends on the post's CURRENT
+ * height. That height is the very thing
+ * a cold decode changes (the post inflates as its own images land), so the desired offset is
+ * re-decided every frame from the live layout ([landingOffset]) — never frozen at landing time — and
+ * a size change of the target counts as movement for the settle test ([ReanchorFrame.targetSize]) :
+ * the first visible item growing keeps its `index`/`offset` reading while its bottom edge drifts down.
+ *
  * The per-frame decision is delegated to the pure [reanchorStep] so the state machine is unit-tested
  * without a frame clock or a live `LazyListState`.
  */
-private suspend fun LazyListState.reanchorWhileMediaSettles(target: Int) {
+private suspend fun LazyListState.reanchorWhileMediaSettles(target: Int, landing: LandingAlignment) {
     var stableFrames = 0
     var previous: ReanchorFrame? = null
+    // #1137 — the target's last measured size, carried over the frames where it is not laid out
+    // (snapped fully above the viewport while the marker height is still 0) : reading 0 there would
+    // flip the decision back to top-of-post and make the loop oscillate between the two pins.
+    var targetSize = measuredSizeOf(target) ?: 0
     repeat(REANCHOR_MAX_FRAMES) { frame ->
         withFrameNanos { }
         if (isScrollInProgress) return // user took over — never fight a manual scroll
-        val current = ReanchorFrame(firstVisibleItemIndex, firstVisibleItemScrollOffset)
+        measuredSizeOf(target)?.let { targetSize = it }
+        val current = ReanchorFrame(firstVisibleItemIndex, firstVisibleItemScrollOffset, targetSize)
+        val targetOffset = landingOffset(landing, targetSize)
         val stableThreshold = if (frame >= REANCHOR_MIN_FRAMES) {
             REANCHOR_STABLE_FRAMES
         } else {
@@ -895,17 +934,72 @@ private suspend fun LazyListState.reanchorWhileMediaSettles(target: Int) {
                 target = target,
                 stableFrames = stableFrames,
                 stableThreshold = stableThreshold,
+                targetOffset = targetOffset,
             )
         ) {
             ReanchorStep.Stop -> return
             is ReanchorStep.Continue -> {
                 stableFrames = step.stableFrames
-                if (step.repin) scrollToItem(target)
+                if (step.repin) scrollToItem(target, targetOffset)
             }
         }
         previous = current
     }
 }
+
+/**
+ * #1137 — how a `ScrollToPost` landing aligns its target, for the one-shot snap ([landOn]) and for
+ * every re-pin of [reanchorWhileMediaSettles] alike (the two must agree, or a re-pin would undo the
+ * landing).
+ */
+internal sealed interface LandingAlignment {
+    /** The target's top edge on the landing line — every landing before #1137, still every non-flag one. */
+    data object TopOfPost : LandingAlignment
+
+    /**
+     * Flag-tap landing (`TopicEffect.ScrollToPost.lastRead`, set by the ViewModel's flag entry
+     * producer only) : when the post overflows the viewport, the TOP of the « Dernier message lu »
+     * separator — rendered at the bottom of the same item — comes to the landing line, so the marker
+     * is the first thing on screen and the first unread post follows it ; the post body itself is
+     * entirely above the line. When the post fits, top-of-post as before. The decision itself is the
+     * pure [lastReadLandingOffset].
+     *
+     * [markerHeightPx] is read per decision, not captured : the marker is measured where it is
+     * composed (`onLastReadMarkerMeasured`), possibly after the first snap ; `0` while unmeasured.
+     */
+    class LastReadMarker(val markerHeightPx: () -> Int) : LandingAlignment
+}
+
+/**
+ * #1137 — one-shot landing of [target] under [landing]. The top-aligned snap always runs first : it
+ * is what composes and measures the target, and the marker alignment cannot be decided before the
+ * item has a height. A second snap then applies the resulting offset when it is non-zero, back to
+ * back with the first (no frame await in between).
+ */
+private suspend fun LazyListState.landOn(target: Int, landing: LandingAlignment) {
+    scrollToItem(target)
+    val offset = landingOffset(landing, targetSize = measuredSizeOf(target) ?: 0)
+    if (offset != 0) scrollToItem(target, offset)
+}
+
+/**
+ * #1137 — the `scrollToItem` offset the target should rest at under [landing], decided against the
+ * CURRENT layout and the target's [targetSize] (its measured main-axis size, cf. [measuredSizeOf]).
+ * `viewportEndOffset` is the span below the landing line (the layout's size minus the top content
+ * padding, which sits above that line and is not available to the item).
+ */
+private fun LazyListState.landingOffset(landing: LandingAlignment, targetSize: Int): Int = when (landing) {
+    LandingAlignment.TopOfPost -> 0
+    is LandingAlignment.LastReadMarker -> lastReadLandingOffset(
+        itemHeight = targetSize,
+        viewportHeight = layoutInfo.viewportEndOffset,
+        markerHeight = landing.markerHeightPx(),
+    )
+}
+
+/** #1137 — the measured main-axis size of item [target] this frame, `null` while it is not laid out. */
+private fun LazyListState.measuredSizeOf(target: Int): Int? =
+    layoutInfo.visibleItemsInfo.firstOrNull { it.index == target }?.size
 
 /**
  * #307 — one-shot restoration of the saved read position + the single central save point.
@@ -984,15 +1078,21 @@ private fun TopicScrollRestorationEffects(
     }
 }
 
-/** The target row's position within the viewport on a given frame. Cf. [reanchorStep]. */
-internal data class ReanchorFrame(val index: Int, val offset: Int)
+/**
+ * The target row's position within the viewport on a given frame — plus, since #1137, the target
+ * item's measured main-axis size ([targetSize]) : the first visible item GROWING (its own images
+ * decoding) leaves [index] and [offset] untouched while its bottom part — the marker a last-read
+ * landing keeps on screen — drifts down, so a size change must count as movement for the settle test.
+ * Cf. [reanchorStep].
+ */
+internal data class ReanchorFrame(val index: Int, val offset: Int, val targetSize: Int = 0)
 
 /** Outcome of one [reanchorStep] decision. */
 internal sealed interface ReanchorStep {
     /** The layout has settled (or the frame budget is spent) — stop re-anchoring. */
     data object Stop : ReanchorStep
 
-    /** Keep going: carry [stableFrames] to the next frame and re-pin to the top iff [repin]. */
+    /** Keep going: carry [stableFrames] to the next frame and re-pin to the landing offset iff [repin]. */
     data class Continue(val stableFrames: Int, val repin: Boolean) : ReanchorStep
 }
 
@@ -1000,18 +1100,23 @@ internal sealed interface ReanchorStep {
  * Pure per-frame decision for [reanchorWhileMediaSettles] (#197), extracted so the state machine is
  * unit-testable without a frame clock or a live `LazyListState`.
  *
- * Stop once the target's position has held still ([current] equal to [previous]) for
- * [stableThreshold] consecutive frames. The caller passes `Int.MAX_VALUE` during the initial
- * cold-decode guard window so the helper keeps monitoring even if the first frames are stable.
- * Otherwise carry the updated stable count and ask for a re-pin whenever the target is not currently
- * at the very top ([ReanchorFrame.index] != [target] or a non-zero offset) — a no-op when it already
- * is, harmless when the list cannot scroll it higher.
+ * Stop once the target's reading has held still ([current] equal to [previous] — position AND
+ * measured size, cf. [ReanchorFrame]) for [stableThreshold] consecutive frames. The caller passes
+ * `Int.MAX_VALUE` during the initial cold-decode guard window so the helper keeps monitoring even if
+ * the first frames are stable. Otherwise carry the updated stable count and ask for a re-pin whenever
+ * the target is not currently where the landing wants it ([ReanchorFrame.index] != [target] or
+ * [ReanchorFrame.offset] != [targetOffset]) — a no-op when it already is, harmless when the list
+ * cannot scroll it there.
  *
- * @param current the target row's position this frame
+ * @param current the target row's reading this frame
  * @param previous the same reading from the previous frame, or `null` on the first frame
- * @param target the item index we want pinned to the top
+ * @param target the item index we want pinned
  * @param stableFrames consecutive still frames observed so far
  * @param stableThreshold still frames required to consider the layout settled
+ * @param targetOffset the `scrollToItem` offset the target should rest at — `0` for the historical
+ *   top-of-post pin ; #1137 — the marker alignment otherwise, recomputed by the caller every frame
+ *   from the target's current size (the same size [current] carries), so a growing post moves both
+ *   the reading and the goal in the same step
  */
 internal fun reanchorStep(
     current: ReanchorFrame,
@@ -1019,12 +1124,42 @@ internal fun reanchorStep(
     target: Int,
     stableFrames: Int,
     stableThreshold: Int,
+    targetOffset: Int = 0,
 ): ReanchorStep {
     val moved = previous == null || current != previous
     val nextStableFrames = if (moved) 0 else stableFrames + 1
     if (nextStableFrames >= stableThreshold) return ReanchorStep.Stop
-    val repin = current.index != target || current.offset != 0
+    val repin = current.index != target || current.offset != targetOffset
     return ReanchorStep.Continue(stableFrames = nextStableFrames, repin = repin)
+}
+
+/**
+ * #1137 — pure alignment decision of a last-read landing ([LandingAlignment.LastReadMarker]),
+ * extracted so it is unit-testable without a `LazyListState` (same stance as [reanchorStep]).
+ *
+ * Returns the `scrollToItem` offset the target item should rest at :
+ *  - `0` — the item fits below the landing line ([itemHeight] <= [viewportHeight]) : top-of-post,
+ *    the historical landing, unchanged ;
+ *  - [itemHeight] − [markerHeight] — the item overflows : the TOP of the marker comes to the landing
+ *    line. Only the item's last [markerHeight] px (the marker) stay on screen, above the first unread
+ *    post ; the post body is entirely above the line. An unmeasured marker (`0`) degrades to the
+ *    whole item scrolled off, i.e. the first unread post at the top.
+ *
+ * Re-evaluated on every re-anchor frame : the post GROWS while its images decode (cold cache), so
+ * both the fit decision and the offset move with it — a decision frozen on the first frame would let
+ * the marker drift down as the post inflates. Defensive on garbage : a non-positive height (nothing
+ * laid out yet) and a marker at least as tall as its item return `0` — never a negative offset,
+ * never a move decided on unmeasured geometry.
+ *
+ * @param itemHeight measured main-axis size of the target item (post card + marker)
+ * @param viewportHeight main-axis span available below the landing line —
+ *   `LazyListLayoutInfo.viewportEndOffset` (the top content padding sits above that line)
+ * @param markerHeight measured height of the « Dernier message lu » separator, `0` while unknown
+ */
+internal fun lastReadLandingOffset(itemHeight: Int, viewportHeight: Int, markerHeight: Int): Int = when {
+    itemHeight <= 0 || viewportHeight <= 0 -> 0
+    itemHeight <= viewportHeight -> 0
+    else -> (itemHeight - markerHeight.coerceAtLeast(0)).coerceAtLeast(0)
 }
 
 /**
@@ -1099,6 +1234,9 @@ internal fun TopicContent(
     // engine force-refreshes and lands the submit — no route refresh (historically `:app` bumped a
     // submitSignal on the route, the same path as the full editor's onSubmitSucceeded, #200).
     onQuickReplySubmitted: (targetPage: Int?, scrollTo: Int?) -> Unit = { _, _ -> },
+    // #1137 — measured height (px) of the « Dernier message lu » separator, reported from where it is
+    // composed so the flag landing can align on it. Threaded down to TopicLoadedContent.
+    onLastReadMarkerMeasured: (heightPx: Int) -> Unit = {},
 ) {
     // #285 — the topic title and #284 — the page counter live in a persistent top app bar so they
     // stay visible while the user scrolls (the in-card title/caption scrolls away). While loading,
@@ -1379,6 +1517,7 @@ internal fun TopicContent(
                                 pollManualExpanded = pollManualExpanded,
                                 onPollExpansionChanged = onPollExpansionChanged,
                                 onClosePoll = onClosePoll,
+                                onLastReadMarkerMeasured = onLastReadMarkerMeasured,
                             )
                         }
                         PullToRefreshDefaults.Indicator(
@@ -1936,6 +2075,8 @@ private fun TopicLoadedContent(
     onPollExpansionChanged: (Boolean) -> Unit = {},
     // #1201 — the owner « Clore ce sondage » tap. Threaded down to the poll card.
     onClosePoll: () -> Unit = {},
+    // #1137 — reports the « Dernier message lu » separator's measured height (px) — cf. its mount.
+    onLastReadMarkerMeasured: (heightPx: Int) -> Unit = {},
 ) {
     // Scroll-anchor (#104 follow-up): the post the reader was sent to (quote link, deep link, last-read).
     // Marked by tinting ONLY its identity band with tertiaryContainer (XaTriX: the left-rail attempt was
@@ -2343,7 +2484,15 @@ private fun TopicLoadedContent(
                     // #983 — the separator owns its own symmetric vertical rhythm in full-width
                     // (no container adds a gap there), and stays edge to edge like the posts it cuts
                     // through — it is a rule, not an island card.
-                    LastReadMarker(modifier = Modifier.separatorPadding(state.fullWidthPosts))
+                    // #1137 — measured where it is composed, OUTSIDE the separator padding (the
+                    // outer modifier sees the padded size) : the flag landing puts the marker's top
+                    // edge on the landing line, i.e. keeps exactly this many px of the item on
+                    // screen.
+                    LastReadMarker(
+                        modifier = Modifier
+                            .onSizeChanged { onLastReadMarkerMeasured(it.height) }
+                            .separatorPadding(state.fullWidthPosts),
+                    )
                 }
             }
         }
