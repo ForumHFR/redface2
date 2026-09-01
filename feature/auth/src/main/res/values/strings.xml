@@ -3,6 +3,8 @@
     <string name="login_intro">Saisis tes identifiants HFR pour accéder à tes drapeaux et tes MPs.</string>
     <string name="login_pseudo">Pseudo</string>
     <string name="login_password">Mot de passe</string>
+    <string name="login_password_show">Afficher le mot de passe</string>
+    <string name="login_password_hide">Masquer le mot de passe</string>
     <string name="login_submit">Se connecter</string>
     <string name="login_cancel">Annuler</string>
     <string name="login_error_invalid">Pseudo ou mot de passe incorrect.</string>
