@@ -323,8 +323,10 @@ fun FlagsRoute(
     // bottom tab — AND when the user switches flag tab WITHOUT leaving the screen (#501: a tab
     // change kept FlagsRoute composed, so a Unit key never re-fired and the new tab showed stale
     // data). The ViewModel snapshots the tab at call time and gates the call (preference opt-out,
-    // auth, real tab, in-flight refresh, 15 s throttle), so a rapid tab burst is absorbed by the
-    // throttle and reuses the pull-to-refresh indicator as the visual cue.
+    // auth, real tab, in-flight refresh, 15 s throttle PER TAB — #743: a landing on another tab is
+    // never swallowed by this one's window, and one that meets an in-flight refresh is replayed once
+    // it settles), so a rapid tab burst costs at most one fan-out per tab and reuses the
+    // pull-to-refresh indicator as the visual cue.
     LaunchedEffect(selectedTab) {
         viewModel.maybeAutoRefresh()
     }
