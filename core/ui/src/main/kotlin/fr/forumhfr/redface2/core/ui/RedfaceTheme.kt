@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalContext
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
+import fr.forumhfr.redface2.core.ui.browser.LocalAlwaysAskLinkApp
 import fr.forumhfr.redface2.core.ui.theme.DisplayMetrics
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 import fr.forumhfr.redface2.core.ui.theme.LocalFoldLongQuotes
@@ -41,6 +42,8 @@ fun RedfaceTheme(
     // #287 — reading presets (density + font scale) bundled into one param to keep the parameter
     // list within detekt's LongParameterList budget.
     reading: ReadingDisplaySettings = ReadingDisplaySettings(),
+    // #1207 — chooser policy is global and read by the external-link menu leaves.
+    alwaysAskLinkApp: Boolean = false,
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {
@@ -61,6 +64,7 @@ fun RedfaceTheme(
         // #989 — expose the picker's cell delimiter (read via LocalSmileyPickerDecoration.current in
         // SmileyPickerGrid) so switching the setting re-decorates the grid.
         LocalSmileyPickerDecoration provides reading.smileyPickerDecoration,
+        LocalAlwaysAskLinkApp provides alwaysAskLinkApp,
     ) {
         MaterialTheme(
             colorScheme = colorScheme,

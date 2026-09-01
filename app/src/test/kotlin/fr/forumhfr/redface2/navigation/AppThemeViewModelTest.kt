@@ -77,6 +77,7 @@ class AppThemeViewModelTest {
             every { observeImmersiveBackButton() } returns MutableStateFlow(true)
             every { observeImmersiveNavBarReveal() } returns MutableStateFlow(ImmersiveNavBarReveal.MANUAL)
             every { observeAccentColor() } returns MutableStateFlow(AccentColor.ROSE)
+            every { observeAlwaysAskLinkApp() } returns MutableStateFlow(false)
             // #973 — eagerly collected by the VM constructor; default M is enough here.
             every { observeMediaDisplayProfile() } returns MutableStateFlow(MediaDisplayProfile.M)
             // #989 — nouveau flow de l'interface : à stubber sinon MockK échoue au premier collect.
@@ -115,6 +116,7 @@ class AppThemeViewModelTest {
             every { observeImmersiveBackButton() } returns MutableStateFlow(true)
             every { observeImmersiveNavBarReveal() } returns MutableStateFlow(ImmersiveNavBarReveal.MANUAL)
             every { observeAccentColor() } returns MutableStateFlow(AccentColor.ROSE)
+            every { observeAlwaysAskLinkApp() } returns MutableStateFlow(false)
             every { observeMediaDisplayProfile() } returns MutableStateFlow(MediaDisplayProfile.M)
             every { observeSmileyPickerDecoration() } returns MutableStateFlow(SmileyPickerDecoration.NONE)
             every { observeTopicUnansweredPollsExpanded() } returns MutableStateFlow(false)
@@ -153,6 +155,7 @@ class AppThemeViewModelTest {
             every { observeImmersiveBackButton() } returns MutableStateFlow(true)
             every { observeImmersiveNavBarReveal() } returns MutableStateFlow(ImmersiveNavBarReveal.MANUAL)
             every { observeAccentColor() } returns MutableStateFlow(AccentColor.ROSE)
+            every { observeAlwaysAskLinkApp() } returns MutableStateFlow(true)
             // #973 — eagerly collected by the VM constructor; default M is enough here.
             every { observeMediaDisplayProfile() } returns MutableStateFlow(MediaDisplayProfile.M)
             // #989 — nouveau flow de l'interface : à stubber sinon MockK échoue au premier collect.
@@ -169,6 +172,7 @@ class AppThemeViewModelTest {
 
         assertEquals(ThemeMode.LIGHT, vm.themeMode.value)
         assertEquals(false, vm.amoledEnabled.value)
+        assertTrue(vm.alwaysAskLinkApp.value)
     }
 
     @Test
@@ -189,6 +193,7 @@ class AppThemeViewModelTest {
             every { observeImmersiveBackButton() } returns MutableStateFlow(true)
             every { observeImmersiveNavBarReveal() } returns MutableStateFlow(ImmersiveNavBarReveal.MANUAL)
             every { observeAccentColor() } returns MutableStateFlow(AccentColor.ROSE)
+            every { observeAlwaysAskLinkApp() } returns MutableStateFlow(false)
             every { observeMediaDisplayProfile() } returns MutableStateFlow(MediaDisplayProfile.L)
             // #989 — nouveau flow de l'interface : à stubber sinon MockK échoue au premier collect.
             every { observeSmileyPickerDecoration() } returns MutableStateFlow(SmileyPickerDecoration.NONE)

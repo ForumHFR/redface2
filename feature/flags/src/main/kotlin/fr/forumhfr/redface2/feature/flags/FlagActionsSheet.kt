@@ -50,6 +50,7 @@ import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.pageToOpen
 import fr.forumhfr.redface2.core.model.pagesToRead
 import fr.forumhfr.redface2.core.ui.FlagMarker
+import fr.forumhfr.redface2.core.ui.browser.LocalAlwaysAskLinkApp
 import fr.forumhfr.redface2.core.ui.browser.openUrlInExternalBrowser
 import fr.forumhfr.redface2.core.ui.formatLastReplyTimestamp
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
@@ -77,6 +78,7 @@ fun FlagActionsSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
+    val alwaysAskLinkApp = LocalAlwaysAskLinkApp.current
     val linkCopied = stringResource(R.string.flags_sheet_link_copied)
     val browserFailed = stringResource(R.string.flags_sheet_browser_failed)
     val shareFailed = stringResource(R.string.flags_sheet_share_failed)
@@ -128,7 +130,9 @@ fun FlagActionsSheet(
                     actions = actions,
                     onGoToPage = { showPageDialog = true },
                     onCopyLink = { copyTopicLink(context, flagTopicUrl(flag), linkCopied) },
-                    onOpenBrowser = { openTopicInBrowser(context, flagTopicUrl(flag), browserFailed) },
+                    onOpenBrowser = {
+                        openTopicInBrowser(context, flagTopicUrl(flag), browserFailed, alwaysAskLinkApp)
+                    },
                 ),
             )
         }
@@ -547,8 +551,13 @@ private fun copyTopicLink(context: Context, url: String, feedback: String) {
 }
 
 /** Opens [url] outside Redface 2; toasts [failureFeedback] when no browser can handle it. */
-private fun openTopicInBrowser(context: Context, url: String, failureFeedback: String) {
-    if (!openUrlInExternalBrowser(context, url.toUri())) {
+private fun openTopicInBrowser(
+    context: Context,
+    url: String,
+    failureFeedback: String,
+    alwaysAsk: Boolean,
+) {
+    if (!openUrlInExternalBrowser(context, url.toUri(), alwaysAsk)) {
         Toast.makeText(context, failureFeedback, Toast.LENGTH_SHORT).show()
     }
 }

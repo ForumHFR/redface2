@@ -2389,6 +2389,8 @@ class PostEditorViewModelTest {
         override suspend fun setImmersiveNavBarReveal(mode: ImmersiveNavBarReveal) = Unit
         override fun observeAccentColor(): Flow<AccentColor> = MutableStateFlow(AccentColor.ROSE)
         override suspend fun setAccentColor(color: AccentColor) = Unit
+        override fun observeAlwaysAskLinkApp(): Flow<Boolean> = MutableStateFlow(false)
+        override suspend fun setAlwaysAskLinkApp(enabled: Boolean) = Unit
 
         // #1132 — Forum flag-filter preference is irrelevant to the editor; default ALL stub.
         override fun observeForumCategoryFlagFilter(): Flow<CategoryFlagFilter> =

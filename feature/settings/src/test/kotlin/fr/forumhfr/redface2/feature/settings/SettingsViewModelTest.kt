@@ -1649,6 +1649,44 @@ class SettingsViewModelTest {
     }
 
     // ──────────────────────────────────────────────────────────────────────
+    // External-link app chooser (#1207)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `init hydrates alwaysAskLinkApp from the persisted preference`() = runTest {
+        repository.emitAlwaysAskLinkApp(true)
+
+        val viewModel = newViewModel()
+
+        assertTrue(viewModel.state.value.alwaysAskLinkApp)
+        assertFalse(viewModel.state.value.alwaysAskLinkAppError)
+    }
+
+    @Test
+    fun `AlwaysAskLinkAppChanged persists the flip`() = runTest {
+        val viewModel = newViewModel()
+        assertFalse(viewModel.state.value.alwaysAskLinkApp)
+
+        viewModel.submit(SettingsIntent.AlwaysAskLinkAppChanged(true))
+
+        assertTrue(viewModel.state.value.alwaysAskLinkApp)
+        assertFalse(viewModel.state.value.isUpdatingAlwaysAskLinkApp)
+        assertEquals(1, repository.alwaysAskLinkAppSetCalls)
+    }
+
+    @Test
+    fun `AlwaysAskLinkAppChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnAlwaysAskLinkAppSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.AlwaysAskLinkAppChanged(true))
+
+        assertFalse(viewModel.state.value.alwaysAskLinkApp)
+        assertFalse(viewModel.state.value.isUpdatingAlwaysAskLinkApp)
+        assertTrue(viewModel.state.value.alwaysAskLinkAppError)
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
     // Confirm before posting (#312)
     // ──────────────────────────────────────────────────────────────────────
 
@@ -2097,6 +2135,23 @@ class SettingsViewModelTest {
         }
 
         override fun readProxyConfigForNetworkBootstrap(): ProxyConfig = config.value
+
+        private val alwaysAskLinkApp = MutableStateFlow(false)
+        var alwaysAskLinkAppSetCalls: Int = 0
+            private set
+        var failOnAlwaysAskLinkAppSet: Boolean = false
+
+        override fun observeAlwaysAskLinkApp(): Flow<Boolean> = alwaysAskLinkApp
+
+        override suspend fun setAlwaysAskLinkApp(enabled: Boolean) {
+            alwaysAskLinkAppSetCalls += 1
+            check(!failOnAlwaysAskLinkAppSet) { "boom" }
+            alwaysAskLinkApp.value = enabled
+        }
+
+        fun emitAlwaysAskLinkApp(enabled: Boolean) {
+            alwaysAskLinkApp.value = enabled
+        }
 
         /**
          * Test seam for the #788 re-sync tests: when non-null, `observeIgnoreTopicCache()` returns

@@ -342,6 +342,22 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeAlwaysAskLinkApp(): Flow<Boolean> =
+        dataStore.data
+            // Default `false` (#1207): keep launching the concrete default browser directly until
+            // the user explicitly opts into Android's « Ouvrir avec… » chooser on every opening.
+            .map { prefs -> prefs[KEY_ALWAYS_ASK_LINK_APP] ?: false }
+            .distinctUntilChanged()
+            .catch { emit(false) }
+
+    override suspend fun setAlwaysAskLinkApp(enabled: Boolean) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_ALWAYS_ASK_LINK_APP] = enabled
+            }
+        }
+    }
+
     override fun observeTopicTopBarAutoHide(): Flow<Boolean> =
         dataStore.data
             // Default `false`: the topic top bar stays pinned unless the user opts into auto-hide.
@@ -1182,6 +1198,9 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
         val KEY_AMOLED_ENABLED = booleanPreferencesKey("amoled_enabled")
         val KEY_ACCENT_COLOR = stringPreferencesKey("accent_color")
+
+        // #1207 — opt-in Android chooser for every explicit external-link opening.
+        val KEY_ALWAYS_ASK_LINK_APP = booleanPreferencesKey("always_ask_link_app")
 
         // build 89 follow-up — topic top app bar auto-hide on scroll.
         val KEY_TOPIC_TOPBAR_AUTO_HIDE = booleanPreferencesKey("topic_topbar_auto_hide")

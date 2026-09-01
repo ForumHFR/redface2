@@ -364,6 +364,21 @@ internal fun buildSettingsCatalogue(
                 keywords = listOf("lien", "defaut", "navigateur", "hfr", "ouvrir", "app"),
                 onClick = onOpenHfrLinkSettings,
             ),
+            toggleRow(
+                id = "always_ask_link_app",
+                title = stringResource(R.string.settings_always_ask_link_app_title),
+                description = stringResource(R.string.settings_always_ask_link_app_description),
+                checked = state.alwaysAskLinkApp,
+                enabled = !state.isUpdatingAlwaysAskLinkApp,
+                errorRes = R.string.settings_always_ask_link_app_persist_failed
+                    .takeIf { state.alwaysAskLinkAppError },
+                onCheckedChange = { onIntent(SettingsIntent.AlwaysAskLinkAppChanged(it)) },
+            ),
+            plainRow(
+                id = "hfr_link_firefox_help",
+                title = stringResource(R.string.settings_hfr_links_firefox_title),
+                description = stringResource(R.string.settings_hfr_links_firefox_help),
+            ),
             futureRow(
                 id = "future_prefetch_wifi_only",
                 title = stringResource(R.string.settings_future_prefetch_wifi_only),
@@ -1019,6 +1034,18 @@ private fun navRow(
             onClick = onClick,
             trailingContent = { ChevronTrailing() },
         )
+    },
+)
+
+/** An inert informational row, kept searchable like the surrounding navigation and toggle rows. */
+private fun plainRow(
+    id: String,
+    title: String,
+    description: String,
+): SettingsCatalogueRow = SettingsCatalogueRow(
+    searchable = SettingsSearchableItem(id = id, title = title, description = description),
+    render = {
+        RedfaceSettingsListItem(title = title, description = description)
     },
 )
 

@@ -32,6 +32,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import fr.forumhfr.redface2.core.ui.R
+import fr.forumhfr.redface2.core.ui.browser.LocalAlwaysAskLinkApp
 import fr.forumhfr.redface2.core.ui.browser.openUrlInExternalBrowser
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -65,6 +66,7 @@ fun PostImageMenuSheet(
     val sheetState = rememberModalBottomSheetState()
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
+    val alwaysAskLinkApp = LocalAlwaysAskLinkApp.current
     // Resolved at composition time — the action callbacks run outside composition.
     val copiedFeedback = stringResource(R.string.post_image_menu_url_copied)
     val browserFailedFeedback = stringResource(R.string.browser_no_handler)
@@ -109,7 +111,7 @@ fun PostImageMenuSheet(
 
             OutlinedButton(
                 onClick = {
-                    openImageUrlInBrowser(context, target.url, browserFailedFeedback)
+                    openImageUrlInBrowser(context, target.url, browserFailedFeedback, alwaysAskLinkApp)
                     hideThenDismiss(coroutineScope, sheetState, onDismiss)
                 },
                 modifier = Modifier.fillMaxWidth(),
@@ -185,8 +187,13 @@ private fun copyImageUrlToClipboard(context: Context, url: String, feedback: Str
 }
 
 /** Opens the direct image URL in an external browser, surfacing a Toast when none exists. */
-private fun openImageUrlInBrowser(context: Context, url: String, failureFeedback: String) {
-    if (!openUrlInExternalBrowser(context, url.toUri())) {
+private fun openImageUrlInBrowser(
+    context: Context,
+    url: String,
+    failureFeedback: String,
+    alwaysAsk: Boolean,
+) {
+    if (!openUrlInExternalBrowser(context, url.toUri(), alwaysAsk)) {
         Toast.makeText(context, failureFeedback, Toast.LENGTH_SHORT).show()
     }
 }

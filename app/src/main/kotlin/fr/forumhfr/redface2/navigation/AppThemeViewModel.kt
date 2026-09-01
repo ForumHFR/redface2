@@ -54,6 +54,12 @@ class AppThemeViewModel @Inject constructor(
         userPreferencesRepository.observeAccentColor()
             .stateIn(viewModelScope, SharingStarted.Eagerly, AccentColor.ROSE)
 
+    // #1207 — app-root chooser policy, exposed through RedfaceTheme's CompositionLocal so every
+    // explicit external-link menu observes one live global value without feature-level injection.
+    val alwaysAskLinkApp: StateFlow<Boolean> =
+        userPreferencesRepository.observeAlwaysAskLinkApp()
+            .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
     // #287 — reading presets. No bootstrap mirror (they do not paint the pre-first-frame window),
     // so the seed is just the enum default; DataStore resolves on the first Eagerly read.
     val displayDensity: StateFlow<DisplayDensity> =

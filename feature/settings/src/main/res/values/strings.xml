@@ -86,6 +86,11 @@
     <string name="settings_nav_hfr_links_description_default">Redface 2 est l\'app par défaut pour forum.hardware.fr</string>
     <string name="settings_nav_hfr_links_description_not_default">Redface 2 n\'est pas l\'app par défaut — appuyez pour régler</string>
     <string name="settings_nav_hfr_links_description_unknown">Gérer l\'ouverture des liens dans les réglages Android</string>
+    <string name="settings_always_ask_link_app_title">Toujours demander quelle app</string>
+    <string name="settings_always_ask_link_app_description">Ouvre les liens via le sélecteur « Ouvrir avec… » au lieu du navigateur par défaut, pour choisir une autre application à chaque fois.</string>
+    <string name="settings_always_ask_link_app_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
+    <string name="settings_hfr_links_firefox_title">Firefox</string>
+    <string name="settings_hfr_links_firefox_help">Sous Firefox, réglez « Ouvrir les liens dans les applications » sur « Ne jamais » pour lire dans le navigateur, ou activez « Toujours demander quelle app » ci-dessus pour choisir l’application à chaque fois.</string>
     <string name="settings_nav_display">Affichage</string>
     <string name="settings_nav_display_description">Thème, AMOLED, densité et taille de police.</string>
     <string name="settings_nav_images">Images</string>

@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.settings
 
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -14,7 +15,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-/** #1032 — placement, dynamic French copy, search indexing and tap dispatch of the HFR-links row. */
+/** #1032/#1184/#1207 — HFR-link status, chooser preference and Firefox help catalogue contract. */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class SettingsCatalogueHfrLinksTest {
@@ -27,6 +28,11 @@ class SettingsCatalogueHfrLinksTest {
         val network = buildCatalogue(HfrLinkHandlingStatus.UNKNOWN).first { it.id == "network" }
 
         assertTrue(network.items.any { it.searchable.id == "hfr_link_default_app" })
+        assertTrue(network.items.any { it.searchable.id == "always_ask_link_app" })
+        assertTrue(network.items.any { it.searchable.id == "hfr_link_firefox_help" })
+        val ids = network.items.map { it.searchable.id }
+        assertEquals(ids.indexOf("hfr_link_default_app") + 1, ids.indexOf("always_ask_link_app"))
+        assertEquals(ids.indexOf("always_ask_link_app") + 1, ids.indexOf("hfr_link_firefox_help"))
     }
 
     @Test
@@ -52,7 +58,7 @@ class SettingsCatalogueHfrLinksTest {
         val catalogue = buildCatalogue(HfrLinkHandlingStatus.NOT_DEFAULT)
 
         assertEquals(
-            listOf("hfr_link_default_app"),
+            listOf("hfr_link_default_app", "always_ask_link_app", "hfr_link_firefox_help"),
             filterSettingsSections(catalogue.map { it.toSearchable() }, "navigateur")
                 .flatMap { it.items }
                 .map { it.id },
@@ -78,6 +84,47 @@ class SettingsCatalogueHfrLinksTest {
         assertEquals(1, opened)
     }
 
+    @Test
+    fun `tapping always ask dispatches the flipped preference`() {
+        val received = mutableListOf<SettingsIntent>()
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                testCatalogue(
+                    status = HfrLinkHandlingStatus.NOT_DEFAULT,
+                    onOpen = {},
+                    onIntent = received::add,
+                ).first { it.id == "network" }
+                    .items
+                    .first { it.searchable.id == "always_ask_link_app" }
+                    .render()
+            }
+        }
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNode(isToggleable()).performClick()
+
+        assertEquals(listOf<SettingsIntent>(SettingsIntent.AlwaysAskLinkAppChanged(true)), received)
+    }
+
+    @Test
+    fun `the Firefox workaround is displayed below the link setting`() {
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                testCatalogue(HfrLinkHandlingStatus.NOT_DEFAULT, onOpen = {})
+                    .first { it.id == "network" }
+                    .items
+                    .first { it.searchable.id == "hfr_link_firefox_help" }
+                    .render()
+            }
+        }
+
+        composeTestRule.onNodeWithText(
+            "Sous Firefox, réglez « Ouvrir les liens dans les applications » sur « Ne jamais » " +
+                "pour lire dans le navigateur, ou activez « Toujours demander quelle app » " +
+                "ci-dessus pour choisir l’application à chaque fois.",
+        ).assertExists()
+    }
+
     private fun hfrRowDescription(sections: List<SettingsCatalogueSection>): String = requireNotNull(
         sections.first { it.id == "network" }
             .items
@@ -97,9 +144,10 @@ class SettingsCatalogueHfrLinksTest {
     private fun testCatalogue(
         status: HfrLinkHandlingStatus,
         onOpen: () -> Unit,
+        onIntent: (SettingsIntent) -> Unit = {},
     ): List<SettingsCatalogueSection> = buildSettingsCatalogue(
         state = SettingsState(),
-        onIntent = {},
+        onIntent = onIntent,
         startScreenState = StartScreenSettingsState(),
         onStartScreenIntent = {},
         onOpenProxy = {},
