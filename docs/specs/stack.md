@@ -110,7 +110,7 @@ Depuis Material 3 Adaptive 1.0 stable (oct. 2024, actuellement 1.2.0), Google ex
 
 | API | Usage dans Redface 2 |
 |---|---|
-| `NavigationSuiteScaffold` (artifact `material3-adaptive-navigation-suite`) | Remplace conditionnellement `NavigationBar` (Compact) / `NavigationRail` (Medium) / `PermanentNavigationDrawer` (Expanded) en fonction de `WindowSizeClass`. Utilisé dans `MainActivity`. **Caveat** : ce scaffold ne consomme pas les status bars en mode edge-to-edge — les écrans contenus doivent ajouter `Modifier.statusBarsPadding()` (ou un `Scaffold` interne qui consomme les insets) sinon le contenu passe sous la barre de statut. |
+| `NavigationSuiteScaffold` (artifact `material3-adaptive-navigation-suite`) | Remplace conditionnellement `NavigationBar` (Compact) / `NavigationRail` (Medium) / `PermanentNavigationDrawer` (Expanded) en fonction de `WindowSizeClass`. Utilisé dans `MainActivity`. **Caveat** : ce scaffold ne consomme pas les status bars en mode edge-to-edge — les écrans contenus doivent ajouter `Modifier.statusBarsPadding()` **ou** un `Scaffold` interne (son `paddingValues` porte déjà status + navigation bars), jamais les deux : cumuler `.padding(innerPadding)` et `statusBarsPadding()` / `navigationBarsPadding()` double l'inset (corrigé sur le Topic en #285, sur la Vue Forum en #1149). Sans l'un des deux, le contenu passe sous la barre de statut. |
 | `ListDetailPaneScaffold` | Écran Drapeaux → Topic : liste à gauche + détail à droite en Medium/Expanded, stack classique en Compact. |
 | `SupportingPaneScaffold` | Éditeur Compact : contenu à gauche + preview BBCode à droite sur tablette. |
 | `WindowSizeClass` | Breakpoints standards : Compact (< 600dp), Medium (600–840dp), Expanded (≥ 840dp). |

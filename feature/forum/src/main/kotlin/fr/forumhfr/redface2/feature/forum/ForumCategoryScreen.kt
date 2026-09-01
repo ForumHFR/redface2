@@ -12,10 +12,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
@@ -55,6 +53,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -88,7 +87,6 @@ import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
  * - Local in-page search field, filtering on title / author / last reply author.
  * - Per-row flag badge driven by the auth-only `flag_owntopic` REST field.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ForumCategoryScreen(
     request: CategoryRequest,
@@ -100,6 +98,78 @@ fun ForumCategoryScreen(
     )
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
+    // #1130 — system/gesture back leaves the search mode first (clearing the query) instead of
+    // popping the category route, mirroring the settings search shell. Disabled when the search
+    // is closed so normal back navigation proceeds. The active state lives in the ViewModel so
+    // the close/clear logic stays unit-testable without a Compose harness.
+    BackHandler(enabled = state.searchActive) { viewModel.closeSearch() }
+
+    ForumCategoryContent(
+        state = state,
+        // #206 workaround — highlight only on the listing page/subcat reached immediately after
+        // create. If the user changes page or subcat, the route hint is ignored so an unrelated
+        // same-title topic is not highlighted there.
+        highlightTitle = routeScopedHighlightTitle(
+            request = request,
+            selectedSubcat = state.selectedSubcat,
+            page = state.page,
+        ),
+        onOpenTopic = onOpenTopic,
+        onCreateTopic = onCreateTopic,
+        callbacks = ForumCategoryCallbacks(
+            onSelectSubcategory = viewModel::selectSubcategory,
+            onSelectFlagFilter = viewModel::selectFlagFilter,
+            onQueryChange = viewModel::updateSearchQuery,
+            onOpenSearch = viewModel::openSearch,
+            onCloseSearch = viewModel::closeSearch,
+            onRefresh = viewModel::refresh,
+            onSelectPage = viewModel::selectPage,
+        ),
+    )
+}
+
+/**
+ * ViewModel-facing actions of [ForumCategoryContent], hoisted so the stateless body can be
+ * mounted without a [CategoryViewModel] (JVM geometry / capture tests, #1149). Every action
+ * defaults to a no-op so a test host only wires what it exercises. Same shape as
+ * `PrivateMessageThreadCallbacks` in `:feature:messages`.
+ */
+@Suppress("LongParameterList") // One state-hoisted action per independent control on the surface.
+internal data class ForumCategoryCallbacks(
+    val onSelectSubcategory: (Int?) -> Unit = {},
+    val onSelectFlagFilter: (CategoryFlagFilter) -> Unit = {},
+    val onQueryChange: (String) -> Unit = {},
+    val onOpenSearch: () -> Unit = {},
+    val onCloseSearch: () -> Unit = {},
+    val onRefresh: () -> Unit = {},
+    val onSelectPage: (Int) -> Unit = {},
+)
+
+/**
+ * Stateless body of [ForumCategoryScreen]: the create-topic FAB [Scaffold] and the category
+ * column (title, sub-category chips, flag filter, search, pull-to-refresh topic list). Split
+ * from the screen so it can be mounted in JVM tests without Hilt — nothing mounted this surface
+ * before #1149 (cf. the rendering note in `ForumCategoryLayoutTest`).
+ *
+ * Insets (#1149) : the [Scaffold] keeps its default `contentWindowInsets` (system bars), so the
+ * `padding` it hands to the content ALREADY carries the status bar (top) and the navigation bar
+ * (bottom, or a side on 3-button landscape) — minus whatever an ancestor consumed (the app shell
+ * consumes the bottom navigation-bar inset under its bottom bar, #529, so that edge resolves to
+ * 0 on a phone and to the real bar height under a rail / drawer). The column applies that
+ * padding ONCE and must not add `statusBarsPadding()` / `navigationBarsPadding()` on top — that
+ * doubled the top margin everywhere and the bottom / side margins wherever the shell did not
+ * consume them. Same rule as the topic reader since #285. The #1131 FAB clearance is unrelated:
+ * it is the LazyColumn's own `contentPadding` ([forumListContentPadding]).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun ForumCategoryContent(
+    state: CategoryUiState,
+    highlightTitle: String?,
+    onOpenTopic: (TopicSummary) -> Unit,
+    onCreateTopic: (cat: Int, subcat: Int?) -> Unit,
+    callbacks: ForumCategoryCallbacks,
+) {
     // #482 — hoisted so the FAB can collapse to icon-only once the listing is scrolled
     // (Azgor: the extended FAB is "presque envahissant"). Shared with the LazyColumn below.
     val listState = rememberLazyListState()
@@ -109,12 +179,6 @@ fun ForumCategoryScreen(
             listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
         }
     }
-
-    // #1130 — system/gesture back leaves the search mode first (clearing the query) instead of
-    // popping the category route, mirroring the settings search shell. Disabled when the search
-    // is closed so normal back navigation proceeds. The active state lives in the ViewModel so
-    // the close/clear logic stays unit-testable without a Compose harness.
-    BackHandler(enabled = state.searchActive) { viewModel.closeSearch() }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -133,9 +197,9 @@ fun ForumCategoryScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                // #1149 — the Scaffold padding is the single inset source (see the KDoc above).
                 .padding(padding)
-                .statusBarsPadding()
-                .navigationBarsPadding(),
+                .testTag(FORUM_CATEGORY_CONTENT_TAG),
         ) {
             Text(
                 // Real category name when known (e.g. "Technologies Mobiles"), fall back
@@ -150,7 +214,7 @@ fun ForumCategoryScreen(
             SubcategoryChips(
                 state = state.subcategories,
                 selectedSubcat = state.selectedSubcat,
-                onSelect = viewModel::selectSubcategory,
+                onSelect = callbacks.onSelectSubcategory,
             )
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -160,16 +224,16 @@ fun ForumCategoryScreen(
             if (state.canCreateTopic) {
                 FlagFilterSelector(
                     selected = state.flagFilter,
-                    onSelect = viewModel::selectFlagFilter,
+                    onSelect = callbacks.onSelectFlagFilter,
                 )
             }
 
             SearchField(
                 searchActive = state.searchActive,
                 query = state.searchQuery,
-                onQueryChange = viewModel::updateSearchQuery,
-                onOpenSearch = viewModel::openSearch,
-                onCloseSearch = viewModel::closeSearch,
+                onQueryChange = callbacks.onQueryChange,
+                onOpenSearch = callbacks.onOpenSearch,
+                onCloseSearch = callbacks.onCloseSearch,
             )
 
             // In flag-filter mode the bucket listing is the source (and the pager is hidden,
@@ -178,7 +242,7 @@ fun ForumCategoryScreen(
             val activeTopics = if (filterActive) state.flagFilterTopics else state.topics
             PullToRefreshBox(
                 isRefreshing = state.isRefreshing,
-                onRefresh = viewModel::refresh,
+                onRefresh = callbacks.onRefresh,
                 modifier = Modifier.fillMaxSize(),
             ) {
                 TopicsBody(
@@ -187,8 +251,8 @@ fun ForumCategoryScreen(
                     filteredTopics = state.filteredTopics,
                     searchQuery = state.searchQuery,
                     onOpenTopic = onOpenTopic,
-                    onRetry = viewModel::refresh,
-                    onSelectPage = viewModel::selectPage,
+                    onRetry = callbacks.onRefresh,
+                    onSelectPage = callbacks.onSelectPage,
                     currentPage = state.page,
                     pageCount = state.pageCount,
                     showPager = !filterActive,
@@ -198,19 +262,15 @@ fun ForumCategoryScreen(
                     // #1131 — reserve the FAB clearance so the pager clears the « + » button.
                     // The FAB is rendered only when the user can create a topic.
                     contentPadding = forumListContentPadding(reserveFabSpace = state.canCreateTopic),
-                    // #206 workaround — highlight only on the listing page/subcat reached
-                    // immediately after create. If the user changes page or subcat, the route
-                    // hint is ignored so an unrelated same-title topic is not highlighted there.
-                    highlightTitle = routeScopedHighlightTitle(
-                        request = request,
-                        selectedSubcat = state.selectedSubcat,
-                        page = state.page,
-                    ),
+                    highlightTitle = highlightTitle,
                 )
             }
         }
     }
 }
+
+/** Test tag of the inset-padded content column of [ForumCategoryContent] (#1149 geometry proof). */
+internal const val FORUM_CATEGORY_CONTENT_TAG = "forum_category_content"
 
 /**
  * #1130 — the in-page search affordance with an explicit open/closed mode, mirroring the
