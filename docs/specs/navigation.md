@@ -524,7 +524,7 @@ Nav 3 (comme Nav 2.x) **ne gère pas les fragments URI** (`#t{numreponse}`) nati
 ```kotlin
 // app/.../navigation/RedfaceNavigation.kt — extrait
 @Composable
-fun RedfaceApp(intent: Intent?) {
+internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
     val context = LocalContext.current
     val flagsBackStack = rememberNavBackStack(FlagsListRoute)
     val forumBackStack = rememberNavBackStack(ForumRoute)
@@ -539,14 +539,15 @@ fun RedfaceApp(intent: Intent?) {
         TopLevelDestination.Messages to messagesBackStack,
     )
 
-    var resolvedDeepLinkIntentId by rememberSaveable { mutableStateOf<String?>(null) }
-    LaunchedEffect(intent) {
-        val incomingIntent = intent ?: return@LaunchedEffect
-        val intentId = "${incomingIntent.action}\u0000${incomingIntent.dataString}"
-        if (intentId == resolvedDeepLinkIntentId) return@LaunchedEffect
-        resolvedDeepLinkIntentId = intentId // avant tout effet externe
+    var lastResolvedDeepLinkDeliveryId by rememberSaveable { mutableStateOf<Long?>(null) }
+    LaunchedEffect(intentDelivery?.id) {
+        val delivery = intentDelivery ?: return@LaunchedEffect
+        if (!shouldApplyDeepLinkDelivery(delivery.id, lastResolvedDeepLinkDeliveryId)) {
+            return@LaunchedEffect
+        }
+        lastResolvedDeepLinkDeliveryId = delivery.id // avant tout effet externe
 
-        when (val resolution = resolveHfrDeepLink(incomingIntent)) {
+        when (val resolution = resolveHfrDeepLink(delivery.intent)) {
             is HfrDeepLinkResolution.Route -> {
                 val parsed = resolution.parsed
                 switchTab(parsed.destination)
@@ -565,10 +566,16 @@ fun RedfaceApp(intent: Intent?) {
 }
 ```
 
-Le marqueur `rememberSaveable` est écrit **avant** le reset ou l'ouverture externe : le même
-intent republié par `MainActivity.onCreate` après rotation ou restauration ne relance donc pas le
-navigateur. La résolution détaillée vit dans `HfrDeepLinkResolution.kt`; le parseur JVM pur de la forme jolie
-vit dans `:core:parser` et ne dépend pas d'`android.net.Uri`.
+Pour #1203, `MainActivity` attribue à chaque livraison un identifiant monotone, initialisé à `0`.
+Dans `onCreate`, l'identifiant présent dans `savedInstanceState` est restauré tel quel et le suivant
+vaut `id + 1` ; sans identifiant sauvegardé, l'identifiant courant est utilisé. Chaque `onNewIntent`
+incrémente ensuite le compteur, et `onSaveInstanceState` persiste l'identifiant courant. Le garde
+`shouldApplyDeepLinkDelivery(deliveryId, lastResolvedDeliveryId)` applique donc toute livraison dont
+l'identifiant diffère du dernier consommé. Un **re-tap volontaire** du même lien reçoit un nouvel
+identifiant et est honoré ; lors d'une **recréation** (rotation ou restauration de process),
+l'identifiant courant et `lastResolvedDeliveryId` sont restaurés depuis le même `Bundle`, donc le
+lien déjà consommé n'est pas rejoué. La résolution détaillée vit dans `HfrDeepLinkResolution.kt` ;
+le parseur JVM pur de la forme jolie vit dans `:core:parser` et ne dépend pas d'`android.net.Uri`.
 
 Le `TopicScreen` reçoit le `scrollTo` (numreponse cible) via la `TopicRoute` et scroll jusqu'au bon post après chargement de la page. Un `scrollTo` non nul prime toujours sur la position de lecture sauvegardée (#307) — cf. § Topic (lecture).
 

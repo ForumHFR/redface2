@@ -1,4 +1,4 @@
-Redface 2 v0.50.0 — dev.
+Redface 2 v0.50.1 — dev.
 
-- New: "always ask which app" option — open links in an app other than your default browser (Android's "Open with…" chooser).
-- Added a Firefox hint under the "HFR link opening" settings.
+- Tapping the same HFR link again now opens the expected post.
+- You no longer need to kill the app between identical link openings.

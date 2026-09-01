@@ -16,6 +16,12 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.50.1` — `internal` (dev) — 2026-09-01
+
+### Corrigé
+
+- **Deep links HFR retapés de nouveau honorés** ([#1203](https://github.com/ForumHFR/redface2/issues/1203)) — retaper le même lien après avoir navigué ailleurs déclenche désormais bien le changement d'onglet et la navigation vers le post, sans devoir tuer l'application. Les recréations d'Activity continuent de ne pas rejouer le lien déjà consommé.
+
 ## `0.50.0` — `internal` (dev) — 2026-09-01
 
 ### Ajouté
