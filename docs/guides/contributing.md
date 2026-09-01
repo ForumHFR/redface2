@@ -39,9 +39,9 @@ Phases 0 à 3 sont livrées (bootstrap ; lecture du forum ; écriture : poster/c
 
 Le chemin de référence mainteneur repose sur **`ghcr.io/cirruslabs/android-sdk:36@sha256:f9b3ea9ed2b5fc9522adae82c7b4622ab7aa54207ef532c8e615a347dca08f31`**. L'image a servi à valider `:app:assembleDebug` pendant [#4](https://github.com/ForumHFR/redface2/issues/4) et [#5](https://github.com/ForumHFR/redface2/issues/5), puis a été **épinglée** et codifiée dans [#35](https://github.com/ForumHFR/redface2/issues/35).
 
-- **Image de base** : `ghcr.io/cirruslabs/android-sdk:36@sha256:f9b3ea9ed2b5fc9522adae82c7b4622ab7aa54207ef532c8e615a347dca08f31` (manifest list multi-arch vérifiée le 2026-04-20 : `amd64` + `arm64`, JDK 21 + Android SDK 36)
-- **Dockerfile** : [Dockerfile](https://github.com/ForumHFR/redface2/blob/main/Dockerfile) à la racine, volontairement minimal
-- **Wrapper local** : `scripts/docker-dev.sh`
+- **Image de base** : `ghcr.io/cirruslabs/android-sdk:36@sha256:f9b3ea9ed2b5fc9522adae82c7b4622ab7aa54207ef532c8e615a347dca08f31` (manifest list multi-arch vérifiée le 2026-04-20 : `amd64` + `arm64`, JDK 21 + Android SDK 36 dans l'image brute)
+- **Dockerfile** : [Dockerfile](https://github.com/ForumHFR/redface2/blob/main/Dockerfile) à la racine, ajoute `platforms;android-37.0` pour le dev container
+- **Wrapper local** : `scripts/docker-dev.sh`, avec cache SDK plateformes sous `.gradle-user/.../android-sdk/`
 - **Dev container** : `.devcontainer/devcontainer.json`
 
 Exemples :
@@ -55,6 +55,8 @@ Exemples :
 ```
 
 Le script monte le repo dans `/workspace`, persiste les caches Gradle / Android dans `.gradle-user/` et exécute le container avec l'UID/GID de l'utilisateur hôte pour éviter les fichiers root-owned sur Linux. En rootless Podman, `--userns keep-id` est ajouté automatiquement pour garder le mapping d'identité.
+
+Pour `compileSdk 37`, le wrapper monte aussi `.gradle-user/<cache>/android-sdk/platforms` sur `/opt/android-sdk-linux/platforms` et `.gradle-user/<cache>/android-sdk/temp` sur `/opt/android-sdk-linux/temp`. Au premier run, il copie dans ce cache les plateformes déjà présentes dans l'image (dont `android-36`) ; ensuite AGP installe les plateformes manquantes, comme `android-37.0`, dans ce cache utilisateur inscriptible. Les workflows GitHub Actions restent sur l'image brute : leurs jobs tournent en root, donc l'auto-download AGP peut écrire directement dans le SDK du container.
 
 #### Signature debug canonique et `adb install -r`
 

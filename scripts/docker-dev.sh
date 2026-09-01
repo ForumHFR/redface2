@@ -6,9 +6,11 @@ IMAGE="${REDFACE_DOCKER_IMAGE:-ghcr.io/cirruslabs/android-sdk:36@sha256:f9b3ea9e
 CACHE_ROOT="${REDFACE_DOCKER_CACHE_DIR:-$ROOT_DIR/.gradle-user/docker-uid$(id -u)}"
 GRADLE_CACHE_DIR="$CACHE_ROOT/gradle"
 ANDROID_CACHE_DIR="$CACHE_ROOT/android"
+ANDROID_SDK_PLATFORMS_DIR="$CACHE_ROOT/android-sdk/platforms"
+ANDROID_SDK_TEMP_DIR="$CACHE_ROOT/android-sdk/temp"
 PROJECT_CACHE_DIR_INSIDE="/workspace/.gradle-user/$(basename "$CACHE_ROOT")/project-cache"
 
-mkdir -p "$GRADLE_CACHE_DIR" "$ANDROID_CACHE_DIR"
+mkdir -p "$GRADLE_CACHE_DIR" "$ANDROID_CACHE_DIR" "$ANDROID_SDK_PLATFORMS_DIR" "$ANDROID_SDK_TEMP_DIR"
 
 # Redirect Gradle's per-project cache (rootProject/.gradle/) outside the
 # repo. Without this, podman --userns keep-id remaps the container UID
@@ -27,6 +29,12 @@ mkdir -p "$GRADLE_CACHE_DIR" "$ANDROID_CACHE_DIR"
 # That tradeoff is intentional and was decided in PR #76. If the IDE
 # friction ever exceeds the cleanup friction, the right move is to set
 # `layout.buildDirectory` in build-logic/, not to extend this script.
+#
+# AGP can auto-download missing SDK platforms in CI because GitHub runs the
+# pinned image as root. This local wrapper deliberately runs as the host
+# UID/GID, so /opt/android-sdk-linux is not writable; bind-mounted SDK platform
+# and temp directories give AGP a writable, user-owned cache without changing
+# the image or the keep-id ownership model.
 inject_project_cache_dir() {
   local entrypoint="$1"
   shift
@@ -64,6 +72,22 @@ if docker info --format '{{.Host.RemoteSocket.Path}}' 2>/dev/null | grep -qi 'po
   USERNS_ARGS=(--userns keep-id)
 fi
 
+seed_android_sdk_platforms() {
+  if [ -n "$(find "$ANDROID_SDK_PLATFORMS_DIR" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+    return
+  fi
+
+  docker run --rm \
+    "${USERNS_ARGS[@]}" \
+    --security-opt label=disable \
+    --user "$(id -u):$(id -g)" \
+    -v "$ANDROID_SDK_PLATFORMS_DIR:/redface-android-sdk-platforms" \
+    "$IMAGE" \
+    sh -c 'cp -R /opt/android-sdk-linux/platforms/. /redface-android-sdk-platforms/'
+}
+
+seed_android_sdk_platforms
+
 exec docker run --rm \
   "${TTY_ARGS[@]}" \
   "${USERNS_ARGS[@]}" \
@@ -72,6 +96,8 @@ exec docker run --rm \
   -e HOME=/workspace/.gradle-user/$(basename "$CACHE_ROOT")/home \
   -e GRADLE_USER_HOME=/workspace/.gradle-user/$(basename "$CACHE_ROOT")/gradle \
   -e ANDROID_USER_HOME=/workspace/.gradle-user/$(basename "$CACHE_ROOT")/android \
+  -v "$ANDROID_SDK_PLATFORMS_DIR:/opt/android-sdk-linux/platforms" \
+  -v "$ANDROID_SDK_TEMP_DIR:/opt/android-sdk-linux/temp" \
   -v "$ROOT_DIR:/workspace" \
   -w /workspace \
   "$IMAGE" \
