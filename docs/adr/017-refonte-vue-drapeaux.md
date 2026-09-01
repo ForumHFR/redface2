@@ -86,6 +86,10 @@ mappeur), via des **fonctions pures unit-testées** :
 pages restantes d'affichage — il peut valoir `0` alors que `hasUnread` est vrai (non-lus sur la
 dernière page lue). Ne jamais déduire « tout lu » de `pagesToRead == 0`.
 
+- **Note (#814, 2026-09-02)** : `lagTone(pagesToRead)` (1-2 → `LOW`, 3-9 → `MEDIUM`, ≥ 10 → `HIGH`,
+  fonction pure `:core:model`) pilote la couleur de la pastille « pages à lire », désormais
+  **indépendante de la couleur du drapeau** (rôles M3 `surfaceVariant` / `tertiaryContainer` / `error`).
+
 La composition ne recalcule **jamais** le regroupement ; les en-têtes collants gardent un **état
 stable par catégorie** (clé = identité catégorie, pas un index fragile).
 

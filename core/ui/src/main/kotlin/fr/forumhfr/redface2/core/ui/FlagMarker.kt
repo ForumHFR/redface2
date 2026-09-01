@@ -26,9 +26,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.model.FlagType
+import fr.forumhfr.redface2.core.model.LagTone
 import fr.forumhfr.redface2.core.model.effectiveFlagColor
+import fr.forumhfr.redface2.core.model.lagTone
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.theme.FlagPalette
+import fr.forumhfr.redface2.core.ui.theme.lagToneColors
 
 /** Alpha applied to a marker / pill of a fully-read flag, so unread rows visibly pop (legacy parity). */
 private const val READ_ALPHA = 0.35f
@@ -122,18 +125,25 @@ private fun Modifier.markerOutline(enabled: Boolean, color: Color, shape: Shape)
 
 /**
  * Trailing « pages à lire » pill of a Drapeaux row (#603) — shown only when the topic is unread and
- * has at least one page left. Reads `+N` in the flag's accent color over a tonal background.
+ * has at least one page left. Reads `+N`.
+ *
+ * #814 (thibw, fil DEV) — the pill is coloured by how far BEHIND the reader is, not by the flag
+ * colour : [tone] defaults to [lagTone] of [count] (1-2 pages discreet · 3-9 accentuated · ≥ 10 alert)
+ * and resolves to canonical Material roles through [lagToneColors], so a cyan and a red flag with the
+ * same backlog carry the same pill on every theme (light / dark / AMOLED / accent / dynamic). The tone
+ * is overridable for previews and showcases only — production rows let it derive from [count].
  */
 @Composable
-fun PagesToReadPill(count: Int, accent: Color, modifier: Modifier = Modifier) {
+fun PagesToReadPill(count: Int, modifier: Modifier = Modifier, tone: LagTone = lagTone(count)) {
     // Audit #3 — the "+N" glyph alone reads as « plus 3 » with no context in TalkBack. Carry a clear,
     // localized, PLURAL-AWARE label on the container and mark the inner Text decorative so the pill
     // announces a single meaningful sentence (« 1 page à lire » vs « N pages à lire »).
     val pagesToReadDescription = pluralStringResource(R.plurals.flag_pages_to_read_a11y, count, count)
+    val colors = lagToneColors(tone)
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(7.dp))
-            .background(accent.copy(alpha = 0.20f))
+            .background(colors.container)
             .padding(horizontal = 7.dp, vertical = 1.dp)
             .semantics { contentDescription = pagesToReadDescription },
         contentAlignment = Alignment.Center,
@@ -142,7 +152,7 @@ fun PagesToReadPill(count: Int, accent: Color, modifier: Modifier = Modifier) {
             text = "+$count",
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.SemiBold,
-            color = accent,
+            color = colors.content,
             // Decorative — the container's contentDescription owns the announcement.
             modifier = Modifier.clearAndSetSemantics {},
         )

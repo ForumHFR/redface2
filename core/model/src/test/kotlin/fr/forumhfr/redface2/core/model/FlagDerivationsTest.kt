@@ -1,12 +1,13 @@
 package fr.forumhfr.redface2.core.model
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 100% coverage of the pure [Flag] derivations shared across layers (#603, ADR-017): [pagesToRead]
- * and [effectiveFlagColor]. Moved here from `:feature:flags` so the single source of truth is tested
- * where it lives.
+ * 100% coverage of the pure [Flag] derivations shared across layers (#603, ADR-017): [pagesToRead],
+ * [effectiveFlagColor] and the #814 [lagTone] severity tiers. Moved here from `:feature:flags` so the
+ * single source of truth is tested where it lives.
  */
 class FlagDerivationsTest {
 
@@ -56,6 +57,74 @@ class FlagDerivationsTest {
     fun `the type-isFavorite overload mirrors the Flag extension`() {
         assertEquals(FlagType.FAVORITE, effectiveFlagColor(FlagType.CYAN, isFavorite = true))
         assertEquals(FlagType.RED, effectiveFlagColor(FlagType.RED, isFavorite = false))
+    }
+
+    // #814 — lag tone tiers (1-2 / 3-9 / >= 10), inclusive lower bounds.
+
+    @Test
+    fun `lagTone is LOW for one or two pages behind`() {
+        assertEquals(LagTone.LOW, lagTone(1))
+        assertEquals(LagTone.LOW, lagTone(2))
+    }
+
+    @Test
+    fun `lagTone is LOW for zero and negative values (never rendered, but total)`() {
+        assertEquals(LagTone.LOW, lagTone(0))
+        assertEquals(LagTone.LOW, lagTone(-1))
+        assertEquals(LagTone.LOW, lagTone(Int.MIN_VALUE))
+    }
+
+    @Test
+    fun `lagTone switches to MEDIUM at exactly three pages`() {
+        assertEquals(LagTone.MEDIUM, lagTone(3))
+        assertEquals(3, LAG_TONE_MEDIUM_MIN_PAGES)
+    }
+
+    @Test
+    fun `lagTone stays MEDIUM up to nine pages`() {
+        assertEquals(LagTone.MEDIUM, lagTone(5))
+        assertEquals(LagTone.MEDIUM, lagTone(9))
+    }
+
+    @Test
+    fun `lagTone switches to HIGH at exactly ten pages`() {
+        assertEquals(LagTone.HIGH, lagTone(10))
+        assertEquals(10, LAG_TONE_HIGH_MIN_PAGES)
+    }
+
+    @Test
+    fun `lagTone stays HIGH for any larger backlog`() {
+        assertEquals(LagTone.HIGH, lagTone(26))
+        assertEquals(LagTone.HIGH, lagTone(1_700))
+        assertEquals(LagTone.HIGH, lagTone(Int.MAX_VALUE))
+    }
+
+    @Test
+    fun `lagTone is monotonic in the number of pages`() {
+        var previous = lagTone(0)
+        for (pages in 1..40) {
+            val current = lagTone(pages)
+            assertTrue("tone must never decrease ($previous → $current at $pages)", current >= previous)
+            previous = current
+        }
+    }
+
+    @Test
+    fun `Flag lagTone is derived from pagesToRead, not from the flag type`() {
+        // Same backlog, different buckets / favori decoration → same tone (the whole point of #814).
+        val cyan = baseFlag.copy(type = FlagType.CYAN, totalPages = 20, lastReadPage = 8)
+        val red = baseFlag.copy(type = FlagType.RED, totalPages = 20, lastReadPage = 8)
+        val favorite = baseFlag.copy(type = FlagType.CYAN, isFavorite = true, totalPages = 20, lastReadPage = 8)
+        assertEquals(LagTone.HIGH, cyan.lagTone())
+        assertEquals(LagTone.HIGH, red.lagTone())
+        assertEquals(LagTone.HIGH, favorite.lagTone())
+    }
+
+    @Test
+    fun `Flag lagTone follows the pagesToRead clamp on stale data`() {
+        // lastReadPage past totalPages clamps pagesToRead to 0 → LOW, never a negative-driven tier.
+        assertEquals(LagTone.LOW, baseFlag.copy(totalPages = 5, lastReadPage = 8).lagTone())
+        assertEquals(LagTone.MEDIUM, baseFlag.copy(totalPages = 10, lastReadPage = 7).lagTone())
     }
 
     private val baseFlag = Flag(

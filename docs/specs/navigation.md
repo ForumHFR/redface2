@@ -117,6 +117,8 @@ L'écran le plus important de l'app. Affiche les topics suivis par l'utilisateur
 - un **bottom sheet M3** (`ModalBottomSheet`, « Affichage des drapeaux ») ouvert depuis la top bar Drapeaux ou via la « config rapide » (tap sur la barre de navigation basse, #603) — masqué en anonyme (gate `canConfigureView`) ; il édite la portée courante (globale, ou l'onglet sélectionné quand le master est activé) et affiche un libellé de portée explicite ;
 - le miroir dans **Réglages > Drapeaux** (master « Réglages différents par onglet » + les deux toggles globaux qui servent de valeurs par défaut/repli).
 
+**Pastille « pages à lire » (#814)** : en fin de ligne, `+N` est teinté selon le **retard** et non selon la couleur du drapeau — 1-2 pages neutre (`surfaceVariant`), 3-9 accentué (`tertiaryContainer`), ≥ 10 alerte (`error`) ; paliers dans `lagTone` (`:core:model`), couleurs dans `lagToneColors` (`:core:ui`, rôles M3 canoniques, donc suivis en light / dark / AMOLED / accent). Demande de thibw (fil DEV).
+
 **Actions sur un topic :**
 - Tap → ouvrir le topic à la dernière position non lue
 - **Appui long** → sheet d'actions du drapeau (`FlagActionsSheet`, #603/ADR-017) : retrait avec confirmation (#99), super-favori, métadonnées du sujet. Le retrait n'est **pas** annulable dans l'app (pas d'undo).
