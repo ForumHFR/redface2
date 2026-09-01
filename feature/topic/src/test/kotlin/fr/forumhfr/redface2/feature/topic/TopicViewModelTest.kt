@@ -1213,6 +1213,44 @@ class TopicViewModelTest {
         )
     }
 
+    @Test
+    fun `a flag-tap entry lands with lastRead so the screen may align on the marker (#1137)`() = runTest {
+        val target = 55
+        val page = fakeTopic(2, 5, posts = listOf(fakePost(target)))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2, scrollTo = target).copy(forceRefresh = true),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(page) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.ScrollToPost(target, lastRead = true), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a same-page cited jump to the flag's own scrollTo is not a last-read landing (#1137)`() = runTest {
+        // The request still carries forceRefresh + scrollTo after the entry (#953/F4 : the engine
+        // preserves them), so deriving the alignment from the request would re-apply the marker
+        // alignment here. The PRODUCER decides : only the flag entry is « last read » ; a cited jump
+        // to the very same numreponse lands top-of-post.
+        val target = 55
+        val page = fakeTopic(2, 5, posts = listOf(fakePost(target), fakePost(56)))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2, scrollTo = target).copy(forceRefresh = true),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(page) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.ScrollToPost(target, lastRead = true), awaitItem())
+            viewModel.goToPost(targetPage = 2, numreponse = target)
+            assertEquals(TopicEffect.ScrollToPost(target, lastRead = false), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
     // Construction seam: the ViewModel now also takes a UserPreferencesRepository (for the build 89
     // top-bar auto-hide preference) which none of these tests exercise, so it defaults to a no-op
     // fake. Keeps every existing call site unchanged bar the constructor → helper rename.

@@ -487,8 +487,16 @@ sealed interface TopicEffect {
      * rendered. The ViewModel only emits this when the post is present in the loaded
      * page, so the screen can blindly trust `numreponse` and resolve the index from
      * the current `Topic.posts` list.
+     *
+     * [lastRead] (#1137) — `true` when this landing is the ENTRY of a flag tap : `numreponse` is
+     * the reader's last-read post, rendered with the « Dernier message lu » marker, and the screen
+     * may align on that marker when the post overflows the viewport. Decided by the PRODUCER, never
+     * re-derived from the request on the screen side : the request keeps `forceRefresh`/`scrollTo`
+     * across in-VM navigations (#953/F4), so a same-page cited jump or a search hit targeting the
+     * very same `numreponse` would otherwise be mistaken for a last-read landing — those land
+     * top-of-post (`false`, the default).
      */
-    data class ScrollToPost(val numreponse: Int) : TopicEffect
+    data class ScrollToPost(val numreponse: Int, val lastRead: Boolean = false) : TopicEffect
 
     /**
      * #879 (gate finding 2) — a NEW page of filtered search results replaced the list content in
