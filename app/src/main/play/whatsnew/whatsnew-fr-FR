@@ -1,4 +1,8 @@
-Redface 2 v0.50.2 — dev.
+Redface 2 v0.50.2 — bêta.
 
-- La clôture d'un sondage reste verrouillée après son succès et lors d'un changement de compte.
-- Une redirection de vote inattendue n'est plus prise pour un succès.
+Grosse mise à jour depuis la 0.43.0 :
+- Sondages : voter dans l'app, voir les sondages clos et leur échéance, et clore le vôtre depuis n'importe quelle page.
+- Liens : ouverture externe sans rebond, choix de l'app, aide Firefox.
+- Posts de modération surlignés et pastilles de rôle du staff.
+- Vue Forum : filtre mémorisé, recherche, sujets épinglés séparés.
+- Badge « cité N fois » cliquable, plus divers correctifs de lecture.

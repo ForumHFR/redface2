@@ -1,4 +1,8 @@
-Redface 2 v0.50.2 — dev.
+Redface 2 v0.50.2 — beta.
 
-- Poll closure stays locked after success and when switching accounts.
-- An unexpected vote redirect is no longer mistaken for success.
+Big update since 0.43.0:
+- Polls: vote in the app, see closed polls and their deadline, and (as topic owner) close yours from any page.
+- Links: external links open without bouncing, app chooser, Firefox hint.
+- Moderation posts highlighted, staff role pills.
+- Forum view: remembered filter, search, separated pinned topics.
+- Clickable "quoted N times" badge, plus various reading fixes.
