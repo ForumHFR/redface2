@@ -11,7 +11,8 @@ import androidx.core.net.toUri
 import fr.forumhfr.redface2.core.ui.R
 
 /**
- * Opens [uri] outside Redface 2, preferring the device's default browser.
+ * Opens [uri] outside Redface 2, preferring the device's default browser unless [alwaysAsk] forces
+ * Android's « Ouvrir avec… » chooser.
  *
  * The default-app probe deliberately targets a neutral HTTPS host rather than [uri]. Probing an
  * HFR URL would resolve back to Redface 2 when it is the user's link handler and recreate the loop
@@ -19,7 +20,7 @@ import fr.forumhfr.redface2.core.ui.R
  * every installable Redface 2 variant.
  */
 @Suppress("ReturnCount") // Guard (non-web scheme) + direct default-browser launch + chooser-exclusion tail.
-fun openUrlInExternalBrowser(context: Context, uri: Uri): Boolean {
+fun openUrlInExternalBrowser(context: Context, uri: Uri, alwaysAsk: Boolean = false): Boolean {
     if (uri.scheme !in WEB_SCHEMES) return false
 
     val probe = Intent(Intent.ACTION_VIEW, DEFAULT_BROWSER_PROBE.toUri())
@@ -27,12 +28,12 @@ fun openUrlInExternalBrowser(context: Context, uri: Uri): Boolean {
     val resolved = context.packageManager.resolveActivity(probe, PackageManager.MATCH_DEFAULT_ONLY)
     val defaultPackage = resolved?.activityInfo?.packageName
     val redfaceComponents = redfaceMainActivityComponents(context.packageName)
-
-    if (
+    val hasUsableDefaultBrowser =
         defaultPackage != null &&
-        defaultPackage != ANDROID_RESOLVER_PACKAGE &&
-        redfaceComponents.none { it.packageName == defaultPackage }
-    ) {
+            defaultPackage != ANDROID_RESOLVER_PACKAGE &&
+            redfaceComponents.none { it.packageName == defaultPackage }
+
+    if (!alwaysAsk && hasUsableDefaultBrowser) {
         val directIntent = Intent(Intent.ACTION_VIEW, uri)
             .setPackage(defaultPackage)
             .addNewTaskFlagIfNeeded(context)

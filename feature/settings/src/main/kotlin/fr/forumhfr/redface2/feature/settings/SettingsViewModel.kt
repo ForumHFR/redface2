@@ -202,6 +202,11 @@ class SettingsViewModel @Inject constructor(
             apply = { state, value -> state.copy(accentColor = value) },
         )
         observePreference(
+            flow = userPreferencesRepository.observeAlwaysAskLinkApp(),
+            isLocked = { it.isUpdatingAlwaysAskLinkApp },
+            apply = { state, value -> state.copy(alwaysAskLinkApp = value) },
+        )
+        observePreference(
             flow = userPreferencesRepository.observeConfirmBeforePosting(),
             isLocked = { it.isUpdatingConfirmBeforePosting },
             apply = { state, value -> state.copy(confirmBeforePosting = value) },
@@ -339,6 +344,7 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.ThemeModeChanged -> updateThemeMode(intent.mode)
             is SettingsIntent.AmoledEnabledChanged -> updateAmoled(intent.enabled)
             is SettingsIntent.AccentColorChanged -> updateAccentColor(intent.color)
+            is SettingsIntent.AlwaysAskLinkAppChanged -> updateAlwaysAskLinkApp(intent.enabled)
             is SettingsIntent.TopicTopBarAutoHideChanged -> updateTopicTopBarAutoHide(intent.enabled)
             is SettingsIntent.TopicPageFabsChanged -> updateTopicPageFabs(intent.enabled)
             is SettingsIntent.MpUnreadBadgeChanged -> updateMpUnreadBadge(intent.enabled)
@@ -918,6 +924,33 @@ class SettingsViewModel @Inject constructor(
                 }
             },
             persist = userPreferencesRepository::setAmoledEnabled,
+        )
+    }
+
+    private fun updateAlwaysAskLinkApp(desired: Boolean) {
+        val previous = _state.value.alwaysAskLinkApp
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    alwaysAskLinkApp = desired,
+                    isUpdatingAlwaysAskLinkApp = true,
+                    alwaysAskLinkAppError = false,
+                    alwaysAskLinkAppTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(alwaysAskLinkApp = desired, isUpdatingAlwaysAskLinkApp = false)
+                } else {
+                    state.copy(
+                        alwaysAskLinkApp = previous,
+                        isUpdatingAlwaysAskLinkApp = false,
+                        alwaysAskLinkAppError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setAlwaysAskLinkApp,
         )
     }
 

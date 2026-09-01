@@ -862,6 +862,8 @@ fun RedfaceApp(intent: Intent?) {
     val amoledEnabled by themeViewModel.amoledEnabled.collectAsStateWithLifecycle()
     // TU 2788511 — accent colour family (rose ↔ vivid « REDFACE1 » red), resolved at the root for RedfaceTheme.
     val accentColor by themeViewModel.accentColor.collectAsStateWithLifecycle()
+    // #1207 — force Android's « Ouvrir avec… » chooser for explicit external-link actions.
+    val alwaysAskLinkApp by themeViewModel.alwaysAskLinkApp.collectAsStateWithLifecycle()
     // #287 — reading presets (density + font scale) resolved at the root and bundled for RedfaceTheme.
     val displayDensity by themeViewModel.displayDensity.collectAsStateWithLifecycle()
     val fontScale by themeViewModel.fontScale.collectAsStateWithLifecycle()
@@ -933,6 +935,7 @@ fun RedfaceApp(intent: Intent?) {
         darkTheme = darkTheme,
         amoledTheme = amoledEnabled,
         accentColor = accentColor,
+        alwaysAskLinkApp = alwaysAskLinkApp,
         reading = ReadingDisplaySettings(
             density = displayDensity,
             fontScale = fontScale,

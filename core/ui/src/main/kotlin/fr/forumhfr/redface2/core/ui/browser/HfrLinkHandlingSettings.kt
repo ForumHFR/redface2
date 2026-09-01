@@ -11,7 +11,15 @@ import android.content.Intent
 import android.content.pm.verify.domain.DomainVerificationManager
 import android.os.Build
 import android.provider.Settings
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.core.net.toUri
+
+/**
+ * Global #1207 preference consumed by the three explicit external-link menus. `RedfaceTheme`
+ * provides the persisted value at the app root; `false` keeps previews and isolated hosts on the
+ * historical direct-default-browser behaviour.
+ */
+val LocalAlwaysAskLinkApp = staticCompositionLocalOf { false }
 
 /**
  * Whether Redface 2 is the effective default app for HFR links (#1032).

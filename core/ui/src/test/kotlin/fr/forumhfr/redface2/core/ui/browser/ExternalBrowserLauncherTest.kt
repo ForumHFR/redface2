@@ -14,6 +14,7 @@ import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -41,6 +42,23 @@ class ExternalBrowserLauncherTest {
         assertEquals(BROWSER_PACKAGE, started.`package`)
         assertEquals(target, started.data)
         assertTrue(started.flags and Intent.FLAG_ACTIVITY_NEW_TASK != 0)
+    }
+
+    @Test
+    fun `always ask forces the chooser even when a concrete default browser exists`() {
+        registerDefault(PROBE, BROWSER_PACKAGE)
+        val context = RecordingContext(application, BASE_PACKAGE)
+        val target = Uri.parse("https://forum.hardware.fr/forum2.php?cat=13&post=35395&page=42")
+
+        assertTrue(openUrlInExternalBrowser(context, target, alwaysAsk = true))
+
+        val chooser = context.startedIntents.single()
+        assertEquals(Intent.ACTION_CHOOSER, chooser.action)
+        val view = requireNotNull(chooser.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java))
+        assertEquals(Intent.ACTION_VIEW, view.action)
+        assertEquals(target, view.data)
+        assertNull(view.`package`)
+        assertArrayEquals(EXPECTED_EXCLUSIONS, excludedComponents(chooser))
     }
 
     /**

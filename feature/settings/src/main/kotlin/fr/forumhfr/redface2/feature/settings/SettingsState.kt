@@ -96,6 +96,12 @@ data class SettingsState(
     val isUpdatingAccentColor: Boolean = false,
     val accentColorError: Boolean = false,
     val accentColorTouchedLocally: Boolean = false,
+    // #1207 — force Android's « Ouvrir avec… » chooser for explicit external-link actions.
+    // Default false preserves the direct-default-browser behaviour until the user opts in.
+    val alwaysAskLinkApp: Boolean = false,
+    val isUpdatingAlwaysAskLinkApp: Boolean = false,
+    val alwaysAskLinkAppError: Boolean = false,
+    val alwaysAskLinkAppTouchedLocally: Boolean = false,
     // Topic reading preferences (build 89 follow-up). Same optimistic-flip machinery:
     // `topicTopBarAutoHide` is the displayed value, `isUpdating*` gates the switch while
     // DataStore writes, `*Error` surfaces a persist failure, `*TouchedLocally` is a legacy write
@@ -505,6 +511,9 @@ sealed interface SettingsIntent {
     data class ThemeModeChanged(val mode: ThemeMode) : SettingsIntent
     data class AmoledEnabledChanged(val enabled: Boolean) : SettingsIntent
     data class AccentColorChanged(val color: AccentColor) : SettingsIntent
+
+    /** #1207 — use Android's app chooser for every explicit external-link opening. */
+    data class AlwaysAskLinkAppChanged(val enabled: Boolean) : SettingsIntent
 
     // Build 89 follow-up — topic top-bar auto-hide toggle. Optimistic-flip contract, like the
     // flags toggles: the boolean is the desired post-flip state.

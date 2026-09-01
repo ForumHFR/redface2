@@ -16,6 +16,13 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.50.0` — `internal` (dev) — 2026-09-01
+
+### Ajouté
+
+- **Ouvrir les liens dans une autre app** ([#1207](https://github.com/ForumHFR/redface2/issues/1207)) — nouvelle option de réglage **« toujours demander quelle app »** : quand elle est activée, les liens ouverts « dans le navigateur » (permalien d'un post, image, drapeau) passent par le sélecteur Android **« Ouvrir avec… »**, pour choisir une autre app que le navigateur par défaut à chaque fois (un autre navigateur, une app dédiée…). Redface 2 est exclu de la liste. Demandé par XaTriX.
+- **Aide Firefox dans les réglages** ([#1184](https://github.com/ForumHFR/redface2/issues/1184)) — une phrase d'aide sous « Ouverture des liens HFR » explique le réglage Firefox (« ouvrir les liens dans les applications ») responsable du rebond des liens vers l'app, et renvoie vers l'option ci-dessus.
+
 ## `0.49.2` — `internal` (dev) — 2026-08-31
 
 ### Corrigé

@@ -213,6 +213,16 @@ interface UserPreferencesRepository {
     suspend fun setAccentColor(color: AccentColor)
 
     /**
+     * External-link app selection (#1207): when `true`, every explicit « ouvrir dans le
+     * navigateur » action uses Android's « Ouvrir avec… » chooser instead of launching the
+     * concrete default browser directly. Default `false` preserves the historical direct launch.
+     */
+    fun observeAlwaysAskLinkApp(): Flow<Boolean>
+
+    /** Persists [observeAlwaysAskLinkApp]. Default `false` until the first call. */
+    suspend fun setAlwaysAskLinkApp(enabled: Boolean)
+
+    /**
      * Topic top app bar auto-hide (build 89 follow-up): when `true`, the topic top bar (title +
      * page counter) collapses while the user scrolls down through the posts and re-appears as soon
      * as they scroll back toward the top — Material3 `enterAlways` behaviour — freeing reading

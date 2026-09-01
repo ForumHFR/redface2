@@ -786,6 +786,26 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `always ask link app defaults false and round-trips true then false`() = runTest(dispatcher) {
+        repository.observeAlwaysAskLinkApp().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setAlwaysAskLinkApp(true)
+        repository.observeAlwaysAskLinkApp().test {
+            assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setAlwaysAskLinkApp(false)
+        repository.observeAlwaysAskLinkApp().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `observeTopicTopBarAutoHide defaults to false then persists true and false`() = runTest(dispatcher) {
         repository.observeTopicTopBarAutoHide().test {
             assertFalse(awaitItem())
