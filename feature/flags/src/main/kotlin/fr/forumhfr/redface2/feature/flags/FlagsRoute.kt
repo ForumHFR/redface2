@@ -2276,12 +2276,13 @@ private fun FlagsEmptyState(
     ) {
         if (funny) {
             AsyncImage(
-                model = FUNNY_EMPTY_SMILEY_URL,
+                // #740 — local raw resource, no network (see [FUNNY_EMPTY_SMILEY_RES]).
+                model = FUNNY_EMPTY_SMILEY_RES,
                 // Decorative: the title/subtitle below carry the meaning (a11y). The perso smiley is a
                 // ~47×50 px PHOTO (not pixel-art), so the previous FilterQuality.None upscaled it into
                 // visible blocks (#662 feedback, rejected). Use smooth (default) filtering and a modest
-                // size so it stays clean. The app-wide ImageLoader registers AnimatedImageDecoder, so
-                // the .gif animates.
+                // size so it stays clean. The app-wide ImageLoader registers AnimatedImageDecoder, so a
+                // multi-frame .gif would animate; this asset happens to be a single frame.
                 contentDescription = null,
                 modifier = Modifier.size(48.dp),
                 contentScale = ContentScale.Fit,
@@ -2337,10 +2338,23 @@ private fun emptyStateSubtitle(tab: FlagTab): Int? = when (tab) {
     else -> null
 }
 
-// #662 — perso smiley for the « états vides humoristiques » opt-in (style C). The space in the HFR
-// perso filename is percent-encoded so the request URL is well-formed.
-private const val FUNNY_EMPTY_SMILEY_URL =
-    "https://forum-images.hardware.fr/images/perso/eric%20le%20looser.gif"
+/**
+ * #662 / #740 — perso smiley for the « états vides humoristiques » opt-in (style C), embedded as a
+ * raw resource so a purely decorative element never depends on the network (no offline fallback
+ * needed, no request on every empty render). Coil 3 maps a resource id to
+ * `android.resource://<package>/<id>` and streams it through the registered decoders.
+ *
+ * Provenance : HFR perso smiley `https://forum-images.hardware.fr/images/perso/eric le looser.gif`
+ * (GIF89a, 47 × 50 px, single frame, 2 288 bytes, sha256
+ * `facd4b76c343b19df3c20a175e9f7f19dbfb1a91f3a95625c6f0d40880990e6c`, server `Last-Modified`
+ * 2009-01-27), fetched unmodified on 2026-09-02. It is a smiley of the HFR forum, displayed by this
+ * HFR client exactly as the forum itself renders it — no third-party licence involved.
+ *
+ * Lives in `res/raw/` rather than `res/drawable/` : raw keeps the bytes untouched by AAPT, stays
+ * out of the icon/`GifUsage` lint sweeps of the drawable folders, and matches how Coil reads it
+ * (`Resources.openRawResource`). `internal` so `FunnyEmptySmileyAssetTest` can pin the contract.
+ */
+internal val FUNNY_EMPTY_SMILEY_RES: Int = R.raw.smiley_eric_le_looser
 
 /**
  * #662 — [FlagsEmptyState] wrapped in a scrollable, centred container for the non-lazy bodies (the DT
