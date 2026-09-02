@@ -1,4 +1,3 @@
-Redface 2 v0.52.1 — dev.
+Redface 2 v0.52.2 — dev.
 
-- Colours: confirming the hex field without editing it no longer switches the accent to custom; with a preset active the field is empty and shows the seed as a hint.
-- Colours: the preview paints posts on the same surface as the real topic (white cards on RF1 grey).
+- Colours: the preview at the top of the page now uses exactly the real reading colours (header, quote, spoiler, link, button). Post rendering itself is unchanged.

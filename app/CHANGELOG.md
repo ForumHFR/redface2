@@ -16,6 +16,16 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.52.2` — `internal` (dev) — 2026-09-02
+
+Retour testeurs sur le fil DEV (nicko, XaTriX) après 0.52.1. Produit par Sol (Codex) sous gate Fable.
+
+### Corrigé
+
+- **Couleurs : l'aperçu reprend les vraies couleurs de lecture** ([#1240](https://github.com/ForumHFR/redface2/issues/1240)) — l'en-tête du faux message utilisait la surface primaire (rouge vif en Rouge RF1 sombre) alors que les vrais posts ont un bandeau sur la surface secondaire (brun). L'en-tête, la citation (avec son rail d'accent), le spoiler, le lien, le bouton Répondre et la pastille drapeau de l'aperçu utilisent désormais exactement les tokens du rendu réel. Le rendu de lecture lui-même est inchangé.
+
+---
+
 ## `0.52.1` — `internal` (dev) — 2026-09-02
 
 Correctifs issus de la recette visuelle de 0.52.0 (émulateur API 34, rapport : https://forumhfr.github.io/artifacts/couleurs-296-recette/). Produit par Sol (Codex) sous gate Fable.

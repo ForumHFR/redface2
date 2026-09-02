@@ -1,4 +1,3 @@
-Redface 2 v0.52.1 — dev.
+Redface 2 v0.52.2 — dev.
 
-- Couleurs : valider le champ hexa sans l'avoir modifié ne bascule plus l'accent en personnalisé ; preset actif = champ vide avec la graine en indication.
-- Couleurs : l'aperçu montre les messages sur la même surface que le vrai topic (cartes blanches en Gris RF1).
+- Couleurs : l'aperçu en tête de page reprend exactement les couleurs du vrai rendu de lecture (en-tête, citation, spoiler, lien, bouton). Le rendu des messages est inchangé.
