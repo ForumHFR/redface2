@@ -3070,6 +3070,141 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `a plain submit from a delayed origin refreshes only that page and offers the tail (#1243)`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(fakeTopic(page = 2, totalPages = 5, title = "loaded")) }),
+            refreshTopicsToReturn = listOf(fakeTopic(page = 2, totalPages = 5, title = "refreshed")),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            viewModel.applySubmitResult(targetPage = 2, scrollTo = null)
+            assertEquals(TopicEffect.PostSubmittedElsewhere(page = 5), awaitItem())
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertEquals(2, viewModel.state.value.request.page)
+        assertEquals("refreshed", (viewModel.state.value.mode as TopicUiState.Mode.Loaded).topic.title)
+        assertEquals(listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)), repository.refreshCalls)
+        assertEquals(listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)), repository.calls)
+        assertFalse("the tail must not be warmed or fetched without a user action", repository.prefetches.any {
+            it.third == 5
+        })
+    }
+
+    @Test
+    fun `the submitted-elsewhere action opens the offered page at the bottom (#1243)`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flow { emit(fakeTopic(page = 2, totalPages = 5, title = "loaded")) },
+                flow { emit(fakeTopic(page = 5, totalPages = 5, title = "tail")) },
+            ),
+            refreshTopicsToReturn = listOf(fakeTopic(page = 2, totalPages = 5, title = "refreshed")),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            viewModel.applySubmitResult(targetPage = 2, scrollTo = null)
+            assertEquals(TopicEffect.PostSubmittedElsewhere(page = 5), awaitItem())
+
+            viewModel.openSubmittedPostPage(page = 5, departureAnchor = TopicScrollAnchor(index = 3, offset = 12))
+            assertEquals(TopicEffect.ScrollToEndOfPage(5), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertEquals(5, viewModel.state.value.request.page)
+        assertEquals(listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)), repository.refreshCalls)
+        assertEquals(
+            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2), Triple(SAMPLE_CAT, SAMPLE_POST, 5)),
+            repository.calls,
+        )
+    }
+
+    @Test
+    fun `a plain submit from an unknown page count stays on the source page (#1243)`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { }),
+            refreshTopicsToReturn = listOf(fakeTopic(page = 2, totalPages = 5, title = "refreshed")),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            viewModel.applySubmitResult(targetPage = 2, scrollTo = null)
+            assertEquals(TopicEffect.PostSubmittedElsewhere(page = 5), awaitItem())
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertEquals(2, viewModel.state.value.request.page)
+        assertEquals("refreshed", (viewModel.state.value.mode as TopicUiState.Mode.Loaded).topic.title)
+        assertEquals(listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)), repository.refreshCalls)
+    }
+
+    @Test
+    fun `a plain submit from the known tail still follows a legitimate overflow (#1243)`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(fakeTopic(page = 2, totalPages = 2)) }),
+            refreshTopicsToReturn = listOf(
+                fakeTopic(page = 2, totalPages = 3),
+                fakeTopic(page = 3, totalPages = 3),
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            viewModel.applySubmitResult(targetPage = 2, scrollTo = null)
+            assertEquals(TopicEffect.ScrollToEndOfPage(3), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertEquals(3, viewModel.state.value.request.page)
+        assertEquals(
+            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2), Triple(SAMPLE_CAT, SAMPLE_POST, 3)),
+            repository.refreshCalls,
+        )
+    }
+
+    @Test
+    fun `a quick-reply submit from a delayed origin uses the same stay-in-place rule (#1243)`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(fakeTopic(page = 3, totalPages = 7, title = "loaded")) }),
+            refreshTopicsToReturn = listOf(fakeTopic(page = 3, totalPages = 7, title = "refreshed")),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 3),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            viewModel.applySubmitResult(targetPage = 3, scrollTo = null)
+            assertEquals(TopicEffect.PostSubmittedElsewhere(page = 7), awaitItem())
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertEquals(3, viewModel.state.value.request.page)
+        assertEquals(listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 3)), repository.refreshCalls)
+    }
+
+    @Test
     fun `a submit with a quote lands on the cited post when it is on the landing page (#974)`() = runTest {
         val repository = FakeTopicRepository(
             flowsToReturn = listOf(flow { emit(fakeTopic(2, 2)) }),

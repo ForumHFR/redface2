@@ -551,6 +551,13 @@ sealed interface TopicEffect {
     data object PostSubmitRefreshFailed : TopicEffect
 
     /**
+     * #1243 — HFR accepted a plain reply sent from an already-read, non-tail page. The page is
+     * refreshed in place so the read flag cannot be advanced by an automatic authenticated load of
+     * the tail; the screen surfaces a Snackbar with an explicit action to open [page].
+     */
+    data class PostSubmittedElsewhere(val page: Int, val scrollTo: Int? = null) : TopicEffect
+
+    /**
      * #335 — emitted when a manual pull-to-refresh (`Refresh` intent) failed to reach HFR. The
      * current page stays on screen (cache-first); the screen surfaces a Toast inviting a retry.
      */
@@ -584,7 +591,7 @@ sealed interface TopicEffect {
     data object SearchResultsEnd : TopicEffect
 
     // ─── #809 — one-shot outcomes of the title long-press flag removal. They ride THIS channel
-    // (the screen's single effects collector + Toast surface, like PostDeleted) rather than a
+    // (the screen's single effects collector + transient feedback surface, like PostDeleted) rather than a
     // parallel consumable StateFlow — one one-shot mechanism per screen (review finding).
 
     /** #809 — `delflag.php` confirmed the removal ; the Drapeaux caches are already reconciled. */
