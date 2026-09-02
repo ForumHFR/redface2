@@ -310,13 +310,11 @@ class SettingsViewModel @Inject constructor(
     }
 
     private fun SettingsState.withThemeColorPreferences(preferences: ThemeColorPreferences): SettingsState {
-        val customInput = when (val accent = preferences.accent) {
-            is ThemeAccent.Custom -> accent.rgb.toThemeAccentHex()
-            is ThemeAccent.Preset -> customAccentHexInput
-        }
+        val customInput = preferences.customAccentSyncedInput()
         return copy(
             themeColorPreferences = preferences,
             customAccentHexInput = customInput,
+            customAccentHexSyncedInput = customInput,
             customAccentHexError = false,
         )
     }
@@ -708,14 +706,24 @@ class SettingsViewModel @Inject constructor(
     }
 
     private fun commitCustomAccentHex() {
-        val rgb = parseThemeAccentHexOrNull(_state.value.customAccentHexInput)
+        val snapshot = _state.value
+        if (snapshot.customAccentHexInput == snapshot.customAccentHexSyncedInput) return
+        val rgb = parseThemeAccentHexOrNull(snapshot.customAccentHexInput)
         if (rgb == null) {
             _state.update { it.copy(customAccentHexError = true) }
-            return
-        }
-        _state.update { it.copy(customAccentHexInput = rgb.toThemeAccentHex(), customAccentHexError = false) }
-        updateThemeColorPreferences { preferences ->
-            preferences.copy(accent = ThemeAccent.Custom(rgb))
+        } else if (rgb == snapshot.themeColorPreferences.accent.effectiveRgb()) {
+            val customInput = snapshot.themeColorPreferences.customAccentSyncedInput()
+            _state.update {
+                it.copy(
+                    customAccentHexInput = customInput,
+                    customAccentHexSyncedInput = customInput,
+                    customAccentHexError = false,
+                )
+            }
+        } else {
+            updateThemeColorPreferences { preferences ->
+                preferences.copy(accent = ThemeAccent.Custom(rgb))
+            }
         }
     }
 
@@ -732,13 +740,17 @@ class SettingsViewModel @Inject constructor(
     }
 
     private fun updateThemeColorPreferences(transform: (ThemeColorPreferences) -> ThemeColorPreferences) {
-        val previous = _state.value.themeColorPreferences
+        val snapshot = _state.value
+        val previous = snapshot.themeColorPreferences
         val desired = transform(previous)
         if (desired == previous) return
+        val accentChanged = desired.accent != previous.accent
+        val desiredInput = desired.customAccentSyncedInput()
         _state.update {
             it.copy(
                 themeColorPreferences = desired,
-                customAccentHexInput = desired.customAccentHexOrFallback(it.customAccentHexInput),
+                customAccentHexInput = if (accentChanged) desiredInput else it.customAccentHexInput,
+                customAccentHexSyncedInput = if (accentChanged) desiredInput else it.customAccentHexSyncedInput,
                 customAccentHexError = false,
                 isUpdatingThemeColors = true,
                 themeColorsError = false,
@@ -749,13 +761,23 @@ class SettingsViewModel @Inject constructor(
             runCatching { userPreferencesRepository.setThemeColorPreferences(desired) }
                 .onSuccess {
                     _state.update {
-                        it.copy(themeColorPreferences = desired, isUpdatingThemeColors = false)
+                        it.copy(
+                            themeColorPreferences = desired,
+                            customAccentHexInput = if (accentChanged) desiredInput else it.customAccentHexInput,
+                            customAccentHexSyncedInput =
+                                if (accentChanged) desiredInput else it.customAccentHexSyncedInput,
+                            isUpdatingThemeColors = false,
+                        )
                     }
                 }
                 .onFailure {
+                    val previousInput = previous.customAccentSyncedInput()
                     _state.update {
                         it.copy(
                             themeColorPreferences = previous,
+                            customAccentHexInput = if (accentChanged) previousInput else it.customAccentHexInput,
+                            customAccentHexSyncedInput =
+                                if (accentChanged) previousInput else it.customAccentHexSyncedInput,
                             isUpdatingThemeColors = false,
                             themeColorsError = true,
                         )
@@ -764,11 +786,16 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    private fun ThemeColorPreferences.customAccentHexOrFallback(fallback: String): String =
+    private fun ThemeColorPreferences.customAccentSyncedInput(): String =
         when (val accent = accent) {
             is ThemeAccent.Custom -> accent.rgb.toThemeAccentHex()
-            is ThemeAccent.Preset -> fallback
+            is ThemeAccent.Preset -> ""
         }
+
+    private fun ThemeAccent.effectiveRgb(): Int = when (this) {
+        is ThemeAccent.Custom -> rgb
+        is ThemeAccent.Preset -> preset.seedRgb
+    }
 
     // #287 — display density is an enum, so it uses the bespoke optimistic-flip shape (like
     // updateThemeMode) rather than updateBooleanPreference. previous is captured for revert.

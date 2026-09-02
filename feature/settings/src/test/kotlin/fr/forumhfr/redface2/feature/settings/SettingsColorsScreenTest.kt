@@ -5,15 +5,20 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.requestFocus
 import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
 import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.LightSurfaceTone
@@ -84,6 +89,59 @@ class SettingsColorsScreenTest {
         composeTestRule.onNodeWithText("Saisissez une couleur hexa sur 6 caractères, par exemple #A62C2C.")
             .assertExists()
         assertEquals(emptyList<ThemeColorPreferences>(), persisted)
+    }
+
+    @Test
+    fun `preset custom field is empty with seed placeholder and Done does not persist`() {
+        mountWithReducer()
+
+        hexField().performScrollTo().performImeAction()
+
+        assertEquals(emptyList<ThemeColorPreferences>(), persisted)
+        // M3 shows the placeholder of a labelled field only while it is focused.
+        hexField().requestFocus()
+        composeTestRule.onNodeWithText("#A62C2C").assertExists()
+    }
+
+    @Test
+    fun `preset tap clears custom text and updates the seed placeholder`() {
+        mountWithReducer(
+            initial = SettingsState(
+                themeColorPreferences = ThemeColorPreferences(accent = ThemeAccent.Custom(rgb = 0x12ABEF)),
+                customAccentHexInput = "#12ABEF",
+                customAccentHexSyncedInput = "#12ABEF",
+            ),
+        )
+
+        composeTestRule.onNodeWithText("Bleu").performScrollTo().performClick()
+
+        assertEquals(
+            ThemeColorPreferences(accent = ThemeAccent.Preset(AccentPreset.BLUE)),
+            persisted.last(),
+        )
+        composeTestRule.onNodeWithText("#12ABEF").assertDoesNotExist()
+        // M3 shows the placeholder of a labelled field only while it is focused.
+        hexField().requestFocus()
+        composeTestRule.onNodeWithText("#1976D2").assertExists()
+    }
+
+    @Test
+    fun `custom hex swatch follows the typed text`() {
+        mountWithReducer()
+
+        hexField().performScrollTo().performTextInput("12abef")
+
+        composeTestRule.onNodeWithTag(SETTINGS_COLORS_CUSTOM_HEX_SWATCH_TAG, useUnmergedTree = true)
+            .assert(SemanticsMatcher.expectValue(SettingsColorsCustomHexSwatchRgbKey, 0x12ABEF))
+        assertEquals(emptyList<ThemeColorPreferences>(), persisted)
+    }
+
+    @Test
+    fun `preview post uses the reading-card container token`() {
+        mountWithReducer()
+
+        composeTestRule.onNodeWithTag(SETTINGS_COLOR_PREVIEW_POST_TAG, useUnmergedTree = true)
+            .assert(SemanticsMatcher.expectValue(SettingsColorPreviewPostContainerColorKey, Color.White))
     }
 
     @Test
@@ -220,19 +278,50 @@ class SettingsColorsScreenTest {
     private fun SettingsState.commitCustomHexForTest(
         onPersist: (ThemeColorPreferences) -> Unit,
     ): SettingsState {
+        if (customAccentHexInput == customAccentHexSyncedInput) return this
         val rgb = parseThemeAccentHexOrNull(customAccentHexInput)
-            ?: return copy(customAccentHexError = true)
-        return persistForTest(
-            themeColorPreferences.copy(accent = ThemeAccent.Custom(rgb = rgb)),
-            onPersist,
-        ).copy(customAccentHexInput = rgb.toThemeAccentHex(), customAccentHexError = false)
+        return when {
+            rgb == null -> copy(customAccentHexError = true)
+            rgb == themeColorPreferences.accent.effectiveRgbForTest() -> {
+                val syncedInput = themeColorPreferences.customAccentSyncedInputForTest()
+                copy(
+                    customAccentHexInput = syncedInput,
+                    customAccentHexSyncedInput = syncedInput,
+                    customAccentHexError = false,
+                )
+            }
+            else -> persistForTest(
+                themeColorPreferences.copy(accent = ThemeAccent.Custom(rgb = rgb)),
+                onPersist,
+            )
+        }
     }
 
     private fun SettingsState.persistForTest(
         preferences: ThemeColorPreferences,
         onPersist: (ThemeColorPreferences) -> Unit,
     ): SettingsState {
+        if (preferences == themeColorPreferences) return this
         onPersist(preferences)
-        return copy(themeColorPreferences = preferences, themeColorsError = false)
+        val accentChanged = preferences.accent != themeColorPreferences.accent
+        val syncedInput = preferences.customAccentSyncedInputForTest()
+        return copy(
+            themeColorPreferences = preferences,
+            customAccentHexInput = if (accentChanged) syncedInput else customAccentHexInput,
+            customAccentHexSyncedInput = if (accentChanged) syncedInput else customAccentHexSyncedInput,
+            customAccentHexError = false,
+            themeColorsError = false,
+        )
+    }
+
+    private fun ThemeColorPreferences.customAccentSyncedInputForTest(): String =
+        when (val accent = accent) {
+            is ThemeAccent.Custom -> accent.rgb.toThemeAccentHex()
+            is ThemeAccent.Preset -> ""
+        }
+
+    private fun ThemeAccent.effectiveRgbForTest(): Int = when (this) {
+        is ThemeAccent.Custom -> rgb
+        is ThemeAccent.Preset -> preset.seedRgb
     }
 }
