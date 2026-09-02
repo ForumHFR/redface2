@@ -16,6 +16,23 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.53.0` — `internal` (dev) — 2026-09-03
+
+Mandat de nuit (retours du fil DEV du 02/09). Produit par Sol (Codex) sous gate Fable ; PR #1245, #1246.
+
+### Ajouté
+
+- **Couleurs : sélecteur Clair / Système / Sombre dans la page** — plus besoin d'aller dans Affichage pour voir l'aperçu dans l'autre thème ; le réglage d'Affichage reste (même préférence). Retour XaTriX.
+
+### Corrigé
+
+- **Drapeaux : l'accent choisi se voit enfin dans la liste** ([#1245](https://github.com/ForumHFR/redface2/pull/1245), retour CharLee build 298) — le style de bandeau « Doux » et la puce du style « Puce » utilisent la surface secondaire du thème, qui survit aux fonds « Blanc » et « Gris RF1 » (avant : `surfaceContainer`, aplati en blanc par ces deux fonds, d'où des en-têtes invisibles). Le style par défaut « Minimal » garde son fond mais teinte l'icône de catégorie avec l'accent. Style réglable dans les réglages d'affichage des Drapeaux.
+- **Couleurs : un accent « Neutre » ou un hex gris ne donne plus un schéma vert** (retour styx42) — une graine de faible chroma (HCT ≤ 12) construit un schéma monochrome au lieu de recevoir une teinte arbitraire.
+- **Topic : répondre en citant ne téléporte plus en bas** ([#1246](https://github.com/ForumHFR/redface2/pull/1246), retour nicko build 297, suite de #974/#1243) — avec les cartes de citation désactivées (défaut) la citation partait comme une réponse simple et suivait la règle de débordement vers la dernière page. Désormais une réponse qui cite reste sur sa page et reprend sur le message cité ; si la réponse a créé une page de plus, la snackbar « Message publié en page N » propose d'y aller. Message cité absent de la page d'arrivée : la position de lecture est conservée (plus de saut en bas).
+- **Réponse rapide : la page envoyée à HFR est celle où le volet est ouvert** — le ViewModel, scopé au sujet, gardait la page de sa première ouverture ; les envois suivants depuis une autre page postaient une page périmée et atterrissaient au mauvais endroit.
+
+---
+
 ## `0.52.3` — `internal` (dev) — 2026-09-02
 
 Hotfix issu du topic bêta (Eife, thom@s). Produit par Sol (Codex) sous gate Fable.

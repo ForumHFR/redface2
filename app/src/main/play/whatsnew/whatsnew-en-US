@@ -1,3 +1,6 @@
-Redface 2 v0.52.3 — dev.
+Redface 2 v0.53.0 — dev.
 
-- Posting from a page you are catching up on no longer jumps to the last page: you stay where you were, with a "Posted on page N" message offering to go there. Unread pages keep their flag.
+- Colours: a Light / System / Dark selector right on the page, to check the preview in both themes.
+- Flags: the "Soft" and "Bullet" category bands now take the chosen accent, even with the White or RF1 Grey background; the "Minimal" style tints its icon too.
+- Colours: a Neutral accent or a grey hex now gives real grey instead of green.
+- Topic: replying with a quote stays on the page and resumes at the quoted post; quick reply posts the page it was opened on.
