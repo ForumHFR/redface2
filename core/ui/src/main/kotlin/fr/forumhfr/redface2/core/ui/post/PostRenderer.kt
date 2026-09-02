@@ -523,11 +523,15 @@ private fun ParagraphProse(
             (maxWidth.toSp().value * SMILEY_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
         }
         // #959 (§3) + #991 — the CONTENT-IMAGE caps, in PHYSICAL px (the sizing equation works
-        // px-only): fImage × container width, and the 200 sp inline height cap at the current
-        // density × fontScale. Converted once here — the only place density is known.
+        // px-only): fImage × container width, reduced when needed by the inline placeholder padding
+        // so the padded inline node still fits the column, and the 200 sp inline height cap at the
+        // current density × fontScale. Converted once here — the only place density is known.
         val postImageMaxWidth = LocalPostImageMaxWidth.current
+        val inlineImageHorizontalPaddingPx = with(density) {
+            (INLINE_IMAGE_HORIZONTAL_PADDING * 2).roundToPx()
+        }
         val maxImageWidthPx = with(density) {
-            imageMaxWidthPx(maxWidth.toPx(), postImageMaxWidth)
+            inlineImageMaxWidthPx(maxWidth.toPx(), postImageMaxWidth, inlineImageHorizontalPaddingPx)
         }
         val maxImageHeightPx = with(density) { INLINE_IMAGE_MAX_HEIGHT_SP.sp.toPx() }.roundToInt()
         // §4 v1.4 (#957) — total horizontal placeholder padding of a content image (4 dp/side),
@@ -1983,9 +1987,10 @@ private fun smileyDisplayBox(
  * density-aware and works entirely in PHYSICAL pixels through [imageDisplaySizePx] (no-upscale =
  * 1 source px never spreads past 1 screen px; the pre-#959 "native px as sp" model upscaled every
  * bitmap by ×density): the caller passes the caps in px ([maxImageWidthPx] = fImage × container,
- * [maxImageHeightPx] = 200 sp in px) and the result converts back to sp HERE, through [density]
- * (÷ density × fontScale), so the physical size is stable under any density/fontScale. The
- * legibility floor is GONE from the measured path (cadrage Sol r1):
+ * or the inline padding-reserved cap from [inlineImageMaxWidthPx], [maxImageHeightPx] = 200 sp in
+ * px) and the result converts back to sp HERE, through [density] (÷ density × fontScale), so the
+ * physical size is stable under any density/fontScale. The legibility floor is GONE from the
+ * measured path (cadrage Sol r1):
  * [INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP] only shapes the placeholder SLOTS below.
  *
  * #253 — while the measurement is in flight (cold cache / miss) the SLOT falls back to a small

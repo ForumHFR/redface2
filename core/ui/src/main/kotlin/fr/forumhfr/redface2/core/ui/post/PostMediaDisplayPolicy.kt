@@ -26,8 +26,9 @@ import kotlin.math.roundToInt
  * `[img]` — inline AND block — follows ONE policy since #959 (contrat v1.5 §3), the PHYSICAL-pixel
  * equation [imageDisplaySizePx]: measured intrinsic native size, no physical upscale, height capped
  * (inline [INLINE_IMAGE_MAX_HEIGHT_SP] in px, block the clamped useful-height cap), width capped to
- * fImage × container ([PostImageMaxWidth.fraction]). Both paths convert their caps to px before
- * the equation and convert the result back (sp inline / dp block) at the Compose boundary.
+ * fImage × container ([PostImageMaxWidth.fraction]). Inline additionally reserves its placeholder
+ * padding before the equation via [inlineImageMaxWidthPx]. Both paths convert their caps to px
+ * before the equation and convert the result back (sp inline / dp block) at the Compose boundary.
  * The **production cold fallback** (unmeasured inline `[img]`) is
  * the one-line [INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP] square in `imageDisplayBox` (#253, no giant Fit flash).
  * The fixed 240×180 [inlineImage] bucket is now only the **default `collectInlineMedia` resolver**
@@ -215,6 +216,22 @@ internal const val SMILEY_RELATIVE_MAX_WIDTH_FRACTION = 0.9f
  */
 internal fun imageMaxWidthPx(containerWidthPx: Float, width: PostImageMaxWidth): Int =
     (containerWidthPx * width.fraction).roundToInt()
+
+/**
+ * #991 — inline content images add [horizontalPaddingPx] to their placeholder outside the measured
+ * bitmap. Their measured bitmap therefore cannot consume the full `fImage × container` when that
+ * plus padding would exceed the text column: P99/P100 intentionally collapse to
+ * `container - padding` on narrow columns, while P90/P95 keep the historical raw cap.
+ */
+internal fun inlineImageMaxWidthPx(
+    containerWidthPx: Float,
+    width: PostImageMaxWidth,
+    horizontalPaddingPx: Int,
+): Int {
+    val rawMaxWidth = imageMaxWidthPx(containerWidthPx, width)
+    val paddedMaxWidth = (containerWidthPx - horizontalPaddingPx).roundToInt().coerceAtLeast(1)
+    return minOf(rawMaxWidth, paddedMaxWidth)
+}
 
 /**
  * #959 (Lot 3, contrat v1.5 §7) — the density-aware DECODE size, common to the inline and block

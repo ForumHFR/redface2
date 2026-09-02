@@ -635,9 +635,12 @@ Deux sources distinctes :
   indépendante de l'agrandissement des GIF et du mode pleine largeur des posts. Elle est appliquée
   une seule fois par `LocalPostImageMaxWidth` aux trois chemins de rendu : inline mesuré
   (`ParagraphProse` → `imageDisplayBox`), bloc mesuré (`BlockImage` → `imageDisplaySizePx`) et
-  slot bloc froid (`coldBlockSlotDp`). Les smileys, cc-image et slots inline froids restent bornés
-  par le cap smiley séparé `0,9 × largeur` (`SMILEY_RELATIVE_MAX_WIDTH_FRACTION`) ; la préférence
-  n'entre pas dans `IntrinsicMediaSizeCache`, qui ne stocke que la taille native mesurée.
+  slot bloc froid (`coldBlockSlotDp`). Sur le chemin inline, la largeur mesurée réserve en plus le
+  padding horizontal `4 dp` de chaque côté : en colonne étroite, `99 %` et `100 %` peuvent donc
+  coïncider (ex. `352 dp` de bitmap dans une colonne `360 dp`) ; les chemins bloc restent distincts.
+  Les smileys, cc-image et slots inline froids restent bornés par le cap smiley séparé `0,9 × largeur`
+  (`SMILEY_RELATIVE_MAX_WIDTH_FRACTION`) ; la préférence n'entre pas dans `IntrinsicMediaSizeCache`,
+  qui ne stocke que la taille native mesurée.
 - Extraire le code smiley (`:jap:`, `:bounce:`) depuis l'attribut `alt`/`title` de l'`<img>` pour pouvoir le re-saisir côté éditeur — c'est un sujet **éditeur Phase 2**, pas le chemin principal de lecture.
 - Les smileys custom d'un utilisateur sont exposés dans son profil (section `perso`).
 - Un catalogue "wiki smileys" est disponible via `message-smi-mp-aj.php` (recherche de smileys) — utilisé par l'éditeur Phase 2F-B (#11 partiel), pas en lecture.

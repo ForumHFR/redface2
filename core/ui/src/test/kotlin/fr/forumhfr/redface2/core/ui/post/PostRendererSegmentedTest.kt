@@ -327,7 +327,7 @@ class PostRendererSegmentedTest {
         val selectedWidth = mutableStateOf(PostImageMaxWidth.P90)
         val deadCold = "https://images.example.org/never-served/fimage-cold.png"
         val cache = DefaultIntrinsicMediaSizeCache()
-        cache.putSuccess(imgA, IntrinsicMediaMetadata(IntSize(4000, 3000), mimeType = null))
+        cache.putSuccess(imgA, IntrinsicMediaMetadata(IntSize(4000, 1000), mimeType = null))
         cache.putSuccess(imgB, IntrinsicMediaMetadata(IntSize(4000, 3000), mimeType = null))
         val content = PostContent(
             blocks = listOf(
@@ -356,7 +356,7 @@ class PostRendererSegmentedTest {
         assertEquals(324f, p90.inlineMeasured, 2f)
         assertEquals(324f, p90.blockMeasured, 2f)
         assertEquals(324f, p90.blockCold, 2f)
-        assertEquals(360f, p100.inlineMeasured, 2f)
+        assertEquals(352f, p100.inlineMeasured, 2f)
         assertEquals(360f, p100.blockMeasured, 2f)
         assertEquals(360f, p100.blockCold, 2f)
     }

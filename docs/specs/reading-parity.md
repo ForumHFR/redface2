@@ -149,7 +149,10 @@ références sont des symboles, pas des numéros de ligne.
 **Note #991 — largeur maximale des images** : `LocalPostImageMaxWidth` est fourni par
 `RedfaceTheme` et lu par `PostRenderer` pour les trois chemins d'image de contenu : inline
 mesuré, bloc mesuré et slot bloc froid. Les surfaces Topic et MP/DT passent par le même renderer
-partagé et reçoivent donc la même valeur, indépendamment du mode pleine largeur.
+partagé et reçoivent donc la même valeur, indépendamment du mode pleine largeur. Le chemin inline
+réserve aussi le padding horizontal `4 dp` par côté du placeholder : en colonne étroite, `99 %` et
+`100 %` peuvent se rejoindre côté inline, tandis que les deux chemins bloc continuent de les
+distinguer.
 
 ## Anomalies Topic révélées par l'audit
 

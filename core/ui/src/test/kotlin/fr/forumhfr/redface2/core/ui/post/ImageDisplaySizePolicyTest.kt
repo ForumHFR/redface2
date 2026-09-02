@@ -114,4 +114,12 @@ class ImageDisplaySizePolicyTest {
         assertEquals(990, imageMaxWidthPx(1000f, PostImageMaxWidth.P99))
         assertEquals(1000, imageMaxWidthPx(1000f, PostImageMaxWidth.P100))
     }
+
+    @Test
+    fun `inline image max width reserves horizontal placeholder padding at high presets`() {
+        assertEquals(324, inlineImageMaxWidthPx(360f, PostImageMaxWidth.P90, horizontalPaddingPx = 8))
+        assertEquals(342, inlineImageMaxWidthPx(360f, PostImageMaxWidth.P95, horizontalPaddingPx = 8))
+        assertEquals(352, inlineImageMaxWidthPx(360f, PostImageMaxWidth.P99, horizontalPaddingPx = 8))
+        assertEquals(352, inlineImageMaxWidthPx(360f, PostImageMaxWidth.P100, horizontalPaddingPx = 8))
+    }
 }
