@@ -17,7 +17,8 @@ Voir SKILLS.md à la racine pour l'index humain des skills.
 
 ## Projet
 
-- Phase actuelle : **Phase 4 — UI & hygiène + Extensions** ([roadmap](docs/specs/roadmap.md)). Phases 0 à 3 livrées (bootstrap ; lecture du forum ; écriture poster/citer/upload ; messages MP + DT/MultiMP), bêta **0.37.0** publiée (Play open testing + F-Droid ; vues Drapeaux #603 et Topic #604 livrées, passe images #876 soldée). En cours : itération 2 des vues Topic et Éditeur, aide & réglages, architecture d'extensions (#6 MPStorage, #7).
+- État : bêta publique **0.50.2** (Play test ouvert + F-Droid, 2026-09-01), canal dev **0.52.x**. Phases 0 à 3 de la [roadmap](docs/specs/roadmap.md) livrées, refonte UI de la phase 4 livrée (#603, #604, #876, #874, #1040). Le travail courant est suivi par **milestones de vue** (Vue · Topic 2, Éditeur 2, Drapeaux 2, MP 1, Réglages 1, Compte HFR 1, Infra & dette) ; les phases restent des épics thématiques. Fond ouvert : architecture d'extensions (#7), sync MPStorage entre appareils (#6).
+- Versions : `versionName` dans `app/build.gradle.kts`, une entrée par release dans `app/CHANGELOG.md`, notes Play dans `app/src/main/play/whatsnew/` ; le `versionCode` est alloué par la CD (tags `app-v<N>`, cf. `docs/guides/release.md`).
 - Licence : GPL-3.0-only
 - Documentation : GitHub Pages via `docs/` (Jekyll + just-the-docs)
 - Langue : code en anglais, issues et docs en francais
@@ -25,9 +26,13 @@ Voir SKILLS.md à la racine pour l'index humain des skills.
 ## Setup
 
 ```bash
-# Build applicatif local — image Docker pin (cf. .devcontainer/devcontainer.json)
+# Build applicatif local dans l'image Docker épinglée (cf. .devcontainer/devcontainer.json) —
+# scripts/docker-dev.sh monte le cache Gradle et seed les plateformes SDK (compileSdk 37).
 # Variantes dev/prod (#233) : le :app:assembleDebug non flavoré ne résout plus.
-./gradlew :app:assembleProdDebug
+./scripts/docker-dev.sh ./gradlew :app:assembleProdDebug
+
+# Reproduire la CI avant de pousser (skill /validate) : tests JVM de tous les modules, detekt, lint
+./scripts/docker-dev.sh ./gradlew --continue testDebugUnitTest :app:testProdDebugUnitTest detektAll lintDebug
 
 # Preview Jekyll (necessite Ruby + Bundler)
 cd docs && bundle install && bundle exec jekyll serve
@@ -66,7 +71,7 @@ Kotlin, Jetpack Compose, MVI, Compose Navigation 3, Hilt (KSP), OkHttp 5, Jsoup,
 ## Tests
 
 Tests bootstrappes en Phase 0 et consommes des Phase 1 :
-- **Konsist** (`app/src/test/.../ArchitectureKonsistTest.kt`) — frontières architecture, scope non vide.
+- **Konsist** (`app/src/test/.../ArchitectureKonsistTest.kt`) — frontières architecture, scope non vide. Vit dans `:app` : après un fix hors `:app`, relancer `:app:testProdDebugUnitTest --tests '*ArchitectureKonsistTest*' --rerun` (le task est sinon UP-TO-DATE). La règle « material tokens » interdit d'importer les types `androidx.compose.material3.ColorScheme`/`Typography`/`Shapes` hors `core/ui`, **tests des features compris** : lire `MaterialTheme.colorScheme` en place.
 - **JUnit 4** + **Turbine** sur le parser (`core/parser/src/test/.../PostContentParserTest.kt`, `TopicPageParserTest.kt`) et les ViewModel slice (`feature/topic/src/test/.../TopicViewModelTest.kt`).
 - **MockK** et **Robolectric** consommés dans tout le repo (tests ViewModel/écrans, Compose Testing JVM, tests Roborazzi record de `:core:ui`).
 
@@ -193,7 +198,7 @@ Dans `AGENTS.md`, on ne garde que les conséquences opérationnelles pour les ag
 - **Smileys HFR** : deux syntaxes distinctes — builtin (~25, syntaxe `:code:` comme `:jap:`, `:o`, `:D`, `:bounce:`, `:pt1cable:`) et perso (centaines, syntaxe `[:smiley_name]`). Ne jamais inventer un code smiley — vérifier sur HFR réel ou laisser en placeholder.
 - **Tests exécutés, pas juste compilés** : l'IA ne claim jamais "testé" sans avoir réellement exécuté la commande de test et lu le résultat. Un test qui compile n'est pas un test qui passe. En cas d'impossibilité d'exécuter (env manquant, fixture absente, etc.), dire explicitement "tests ecrits mais non execute".
 - **Fixtures HTML** : capturees depuis HFR reel via `hfr-mcp` (`hfr_read ... output=path`), jamais inventees par une IA ou ecrites a la main. Nettoyer les donnees sensibles (cookies, hash_check, emails, identifiants) avant commit. Voir skill [`/parse-fixture`](https://github.com/ForumHFR/redface2/blob/main/.agents/skills/parse-fixture/SKILL.md).
-- **Vérification API actuelle** : quand tu écris un exemple de code ou du code de prod avec une API dont tu n'es pas sûr à 100% (existe-t-elle ? est-elle dépréciée ?), vérifier via la documentation officielle actuelle. MCP recommandés : Context7 ou Docfork (cf. [#19](https://github.com/ForumHFR/redface2/issues/19)). **Toujours préciser "stable release"** dans la requête — Context7 indexe aussi les pre-release/snapshots (ex: Kotlin 2.4-SNAPSHOT alors que la stable courante est 2.3.x). Cette vérification prend 10 secondes et évite les pièges (SwipeRefresh, EncryptedSharedPreferences, APIs inexistantes).
+- **Vérification API actuelle** : quand tu écris un exemple de code ou du code de prod avec une API dont tu n'es pas sûr à 100% (existe-t-elle ? est-elle dépréciée ?), vérifier via la documentation officielle actuelle. MCP recommandés : Context7 ou Docfork (cf. [#19](https://github.com/ForumHFR/redface2/issues/19)). **Toujours préciser "stable release"** dans la requête — Context7 indexe aussi les pre-release/snapshots (ex. une version `-SNAPSHOT` ou `-alpha` alors que le catalogue `gradle/libs.versions.toml` épingle la stable). Cette vérification prend 10 secondes et évite les pièges (SwipeRefresh, EncryptedSharedPreferences, APIs inexistantes).
 - **Langue** : docs en francais avec accents. Code, noms de variables, noms de classes en anglais.
 - **`numreponse`** : est unique par **categorie**, pas globalement sur le forum. Le mentionner quand pertinent.
 - **Deep links** : Compose Navigation 3 (comme 2.x) ne gere pas les fragments URI (`#t{id}`) nativement — parser l'URI dans `RedfaceApp` (et non `MainActivity`, qui ne fait que passer l'`Intent`), identifier l'onglet cible, puis **reinitialiser** le back stack de cet onglet via `resetStack(root, route)` pour que le bouton retour ramene a la racine de l'onglet et non a un etat anterieur arbitraire. Voir `docs/specs/navigation.md` § Cas particulier : lien vers un post specifique.
@@ -213,7 +218,7 @@ Tout commentaire sur issue, PR ou post HFR généré par un LLM doit commencer p
 
 | Fournisseur | Ligne d'attribution |
 |---|---|
-| Claude Code | `> Action par Claude <modèle> (demandée par @<demandeur>)` — ex. `Claude Fable 5`, `Claude Opus 4.8` |
+| Claude Code | `> Action par Claude <modèle> (demandée par @<demandeur>)` — ex. `Claude Fable 5.1`, `Claude Opus 5` |
 | OpenAI Codex | `> Action par GPT-5 Codex (demandée par @<demandeur>)` |
 | GitHub Copilot coding agent | `> Action par GitHub Copilot Agent (demandée par @<demandeur>)` |
 | Gemini CLI | `> Action par Gemini <version> (demandée par @<demandeur>)` |

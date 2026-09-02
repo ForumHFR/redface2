@@ -8,7 +8,26 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ## [Unreleased]
 
-### Changed
+_Rien pour l'instant._
+
+---
+
+## v0.12.0 — 2026-09-02
+
+**Reality pass** (audit README + docs 2026-09-02, bêta publique 0.50.2, dev 0.52.2) : cette version regroupe les alignements de specs restés en « Unreleased » depuis v0.11.0 et une passe de fraîcheur sur les pages d'entrée.
+
+### Changed (reality pass 2026-09-02)
+- `README.md` réécrit : pitch (client en bêta publique, plus « futur »), tableau d'installation par canal, état courant (bêta 0.50.2, dev 0.52.x, pilotage par milestones de vue), liens documentation/HFR, quickstart Docker, gardes machine, méthode, licence.
+- `docs/index.md` : état du projet réécrit en quatre points (bêta 0.50.2 remplace 0.41.0, #1040 livré, milestones de vue) ; sommaire des guides complété (installation, release, limitations connues, profiling, icône, capture de fixture).
+- `docs/guides/installation.md` réécrit : Play en test ouvert (plus « alpha closed-testing »), dépôt F-Droid avec ses deux apps `.beta` et `.dev`, artefacts GitHub Releases nommés, matrice de cohabitation des identifiants et signatures (seul conflit : Play ↔ APK `redface2-<canal>`).
+- `docs/guides/known-issues.md` : entrée « citations en mode connecté » retirée (corrigée par #1092) ; écriture MPStorage requalifiée (opt-in livré, OFF par défaut, POST conditionné au réglage) ; référence de la navigation de recherche corrigée (#894, pas #546).
+- `docs/guides/contributing.md` : section « Phase actuelle » remplacée par « Où en est le projet » (bêta 0.50.2, milestones de vue) ; Roborazzi 1.73 ; commentaires du tableau des modules.
+- `AGENTS.md` : état du projet et versions, quickstart Docker + commande de validation CI, règle Konsist « material tokens » (types M3 interdits hors core/ui, tests compris, `--rerun` obligatoire), exemples d'attribution `Claude Fable 5.1` / `Claude Opus 5`, note Context7 rendue générique.
+- `docs/specs/roadmap.md` : phase 4 requalifiée (refonte UI livrée, extensions non commencées, milestones de phase fermés en 06/2026), #1040 coché livré, participation alignée sur les milestones de vue.
+- `docs/specs/stack.md` : Hilt 2.60.1, version catalog existant ; `docs/guides/rationale.md` : décompte réel des modules (18 inclus) ; `docs/guides/naming.md` : statut du nom.
+- `docs/_config.yml` : description du site et footer v0.12.0.
+
+### Changed (alignements depuis v0.11.0)
 
 - ADR-013, architecture, roadmap et matrice de parité alignées sur le substrat Room dormant du
   contenu MP : schéma 17, ordre RAM → Room opt-in → réseau obligatoire, verrou commun aux accès et

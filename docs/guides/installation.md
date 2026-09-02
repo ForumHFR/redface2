@@ -6,69 +6,68 @@ nav_order: 1
 
 # Installer Redface 2
 
-Trois canaux de distribution sont disponibles. Ils utilisent des **clés de signature différentes**, donc l'app installée depuis l'un ne peut pas être mise à jour depuis un autre sans désinstallation préalable. Choisissez votre canal et restez dessus.
+Redface 2 est distribuée sur trois canaux et deux niveaux de fraîcheur : la **bêta** (promue depuis `main`, testée sur le [topic bêta HFR](https://forum.hardware.fr/forum2.php?config=hfr.inc&cat=23&post=35395&page=1)) et le canal **dev** (chaque merge notable sur `dev`, annoncé sur le [topic dev HFR](https://forum.hardware.fr/forum2.php?config=hfr.inc&cat=23&post=35421&page=1)). Les identifiants d'application et les signatures diffèrent selon le canal : le tableau de la fin dit ce qui cohabite et ce qui exige une désinstallation.
 
-## Google Play Store
+## Google Play, bêta ouverte
 
-Canal le plus large, recommandé pour la plupart des utilisateurs.
+Canal le plus simple, mises à jour automatiques.
 
-- Recherchez **« Redface 2 »** dans le Play Store.
-- Lien direct : à publier une fois la review Play terminée (l'app est actuellement en alpha closed-testing).
-- Mises à jour automatiques.
+- Fiche : [Redface 2 sur Google Play](https://play.google.com/store/apps/details?id=fr.forumhfr.redface2). L'app est en **test ouvert** : Play peut demander de rejoindre le programme de test avant l'installation.
+- Identifiant `fr.forumhfr.redface2`, libellé « Redface 2 β ».
+- Signature : **Play App Signing**. Google re-signe l'APK distribué avec sa propre clé ; notre clé d'upload ne sert qu'à envoyer le bundle.
 
-Signature : générée par Google via le système **Play App Signing** (notre clé d'upload est utilisée pour signer le bundle envoyé à Play, puis Google re-signe l'APK distribué).
+Le canal dev est aussi poussé sur Play, en **test interne** (liste fermée) : pour suivre le dev sans invitation Play, passer par F-Droid.
 
-## F-Droid (dépôt privé)
+## F-Droid, bêta et dev
 
-Canal préféré pour les utilisateurs qui veulent rester loin des Google Play Services ou auditer chaque release.
+Canal préféré pour rester loin des services Google ou auditer chaque release. Le dépôt publie **deux applications distinctes** :
 
-1. Installez un client F-Droid : [F-Droid officiel](https://f-droid.org/), [Neo Store](https://github.com/NeoApplications/Neo-Store), [Foxy Droid](https://github.com/kitsunyan/foxy-droid), ou équivalent.
-2. Dans le client, ouvrez **Paramètres → Dépôts → Ajouter un dépôt**.
-3. Entrez l'URL et le fingerprint suivants :
+| Application | Identifiant | Rythme |
+|---|---|---|
+| **Redface 2 β** | `fr.forumhfr.redface2.beta` | chaque bêta (même version que Play) |
+| **Redface 2 dev** | `fr.forumhfr.redface2.dev` | chaque release dev, souvent plusieurs par semaine |
+
+1. Installez un client F-Droid : [F-Droid](https://f-droid.org/), [Neo Store](https://github.com/NeoApplications/Neo-Store), [Droid-ify](https://github.com/Droid-ify/client) ou équivalent.
+2. Dans le client, ouvrez **Paramètres → Dépôts → Ajouter un dépôt** et saisissez :
 
    ```
    URL         : https://forumhfr.github.io/redface2-fdroid/repo
    Fingerprint : B0D265D6783596834715E6AB8C54C4A94A2642F6AD15E279F948A58DF174C8AB
    ```
 
-   Certains clients permettent de coller l'URL et le fingerprint comme un seul lien : `https://forumhfr.github.io/redface2-fdroid/repo?fingerprint=B0D265D6783596834715E6AB8C54C4A94A2642F6AD15E279F948A58DF174C8AB`.
+   Certains clients acceptent l'URL et l'empreinte en un seul lien : `https://forumhfr.github.io/redface2-fdroid/repo?fingerprint=B0D265D6783596834715E6AB8C54C4A94A2642F6AD15E279F948A58DF174C8AB`.
 
-4. Activez le dépôt. Redface 2 devrait apparaître dans la liste des applications disponibles.
-5. Installez. Les mises à jour seront proposées automatiquement à chaque nouvelle release (~1-2 min après publication sur Play).
+3. Activez le dépôt, puis installez « Redface 2 β », « Redface 2 dev », ou les deux. Les mises à jour arrivent une à deux minutes après chaque publication.
 
-Signature : notre **clé d'upload d'origine** (la même que celle envoyée à Play avant le re-signing Google).
+Signature : notre **clé d'upload**, la même pour les deux applications. Les identifiants `.beta` et `.dev` étant distincts de celui de Play, ces apps **cohabitent** avec la version Play et entre elles sur un même appareil.
 
-> **Important** : si vous avez déjà installé Redface 2 via Google Play Store, **désinstallez-la d'abord** avant d'installer via F-Droid. Les deux APKs sont signés par des clés différentes et Android refuse les mises à jour cross-signature.
+> L'entrée « Redface 2 » sans suffixe (`fr.forumhfr.redface2`) encore visible dans le dépôt est l'ancien canal alpha, figée en 0.3.x : ne pas l'installer.
 
-## GitHub Releases (sideload direct)
+## GitHub Releases, sideload
 
-Pour un audit ponctuel ou un test d'une version spécifique sans passer par un client tiers.
+Pour auditer ou tester une version précise sans client tiers. Chaque publication crée une [release `app-v<N>`](https://github.com/ForumHFR/redface2/releases) (`N` = `versionCode`) avec trois artefacts :
 
-1. Allez sur la page [Releases du dépôt redface2](https://github.com/ForumHFR/redface2/releases).
-2. Choisissez la version souhaitée.
-3. Téléchargez le fichier `redface2-vNN-XXXXXXX.apk` (où `NN` est le version code, `XXXXXXX` le commit SHA court).
-4. Sur Android, ouvrez le fichier APK téléchargé et acceptez l'installation depuis des sources inconnues si demandé.
+- `redface2-<canal>-v<N>-<sha>.apk` : identifiant Play `fr.forumhfr.redface2`, signé avec la clé d'upload. **Incompatible avec l'installation Play** (signature différente pour le même identifiant).
+- `redface2-fdroid-<canal>-v<N>-<sha>.apk` : la même app que celle du dépôt F-Droid (`.beta` ou `.dev`), donc interchangeable avec elle.
+- `redface2-<canal>-v<N>-<sha>.aab` : le bundle envoyé à Play, pour vérification.
 
-Signature : identique à F-Droid (clé d'upload d'origine). Donc un utilisateur peut basculer GitHub Releases ↔ F-Droid sans désinstaller, contrairement à Play.
+Sur Android, ouvrez l'APK téléchargé et acceptez l'installation depuis une source inconnue si demandé. Pas de mise à jour automatique par ce canal.
 
-Pas de mises à jour automatiques par ce canal. Refaire l'opération à chaque nouvelle version.
+## Qui cohabite avec qui
 
-## Comparaison des canaux
+| Installation | Identifiant | Signature | Cohabite avec |
+|---|---|---|---|
+| Play (bêta ouverte ou test interne) | `fr.forumhfr.redface2` | Google | F-Droid β, F-Droid dev |
+| F-Droid « Redface 2 β » ou APK `redface2-fdroid-beta` | `fr.forumhfr.redface2.beta` | clé d'upload | tout le reste |
+| F-Droid « Redface 2 dev » ou APK `redface2-fdroid-dev` | `fr.forumhfr.redface2.dev` | clé d'upload | tout le reste |
+| APK `redface2-<canal>` d'une release GitHub | `fr.forumhfr.redface2` | clé d'upload | F-Droid β, F-Droid dev ; **pas** avec Play |
 
-| Canal | Mises à jour auto | Signature | Audit | Recommandation |
-|---|---|---|---|---|
-| Play Store | ✅ | Google (re-signé) | difficile | grand public |
-| F-Droid (dépôt privé) | ✅ | Clé d'upload | facile (HTML statique) | utilisateurs F-Droid / audit |
-| GitHub Releases sideload | ❌ | Clé d'upload | facile (hash + signature visibles) | test ponctuel |
+Le seul conflit : passer entre Play et l'APK `redface2-<canal>` d'une release, même identifiant mais signatures différentes. Android refuse la mise à jour croisée ; il faut désinstaller l'une avant d'installer l'autre.
 
 ## Désinstaller proprement
-
-Si vous voulez changer de canal, désinstallez d'abord :
 
 ```
 Paramètres Android → Applications → Redface 2 → Désinstaller
 ```
 
-Ensuite installez via le nouveau canal.
-
-> **Vos données locales** (cookies de session HFR, préférences, cache Room) sont supprimées à la désinstallation. Il faudra vous reconnecter au forum après la réinstallation.
+> **Vos données locales** (cookies de session HFR, préférences, cache Room) sont supprimées à la désinstallation. Il faudra vous reconnecter au forum après la réinstallation. Les préférences ne sont pas partagées entre les apps β et dev.

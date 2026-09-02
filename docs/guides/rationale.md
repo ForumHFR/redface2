@@ -169,7 +169,7 @@ Chaque feature ne dépend que de `:core:domain` + `:core:ui`. Impossible d'impor
 
 ### Contre-argument honnête
 
-23 modules, c'est beaucoup. Dans la review audit [#17](https://github.com/ForumHFR/redface2/issues/17), ce point a été soulevé. On a phasé : 16 modules en Phases 0-3 (8 core + 8 features base, dont `:feature:profile` ajouté en Phase 2 — cf. ADR-001), les 8 extensions n'arrivent qu'en Phase 4. [Now in Android](https://github.com/android/nowinandroid) (60+ modules) et [Pocket Casts](https://github.com/Automattic/pocket-casts-android) (37) montrent que ce nombre est dans la norme pour une app Android moderne.
+23 modules, c'est beaucoup. Dans la review audit [#17](https://github.com/ForumHFR/redface2/issues/17), ce point a été soulevé. État au 2 septembre 2026 : 18 modules inclus (huit `:core:*` dont `:core:extension` encore vide, neuf `:feature:*`), les huit modules d'extension restent déclarés en commentaire dans `settings.gradle.kts`. On a phasé : 16 modules en Phases 0-3 (8 core + 8 features base, dont `:feature:profile` ajouté en Phase 2 — cf. ADR-001), les 8 extensions n'arrivent qu'en Phase 4. [Now in Android](https://github.com/android/nowinandroid) (60+ modules) et [Pocket Casts](https://github.com/Automattic/pocket-casts-android) (37) montrent que ce nombre est dans la norme pour une app Android moderne.
 
 ---
 

@@ -36,7 +36,7 @@ Chaque choix a été évalué, comparé et verrouillé. Voici le détail.
 | Screenshot testing | **Roborazzi adopté (Phase 4)** | [ADR-016]({{ site.baseurl }}/adr/016-roborazzi-screenshot-testing) | JVM via Robolectric, sans device ; **record-only** (record + inspection, pas de `verify` sous AGP 9) ; Compose Preview pour le design |
 | minSdk | **29** | 26, 31 | Android 10 : Scoped Storage, TLS 1.3, dark thème natif, ~88-90% parc 04/2026 |
 
-> **Versions précises** : le Gradle version catalog `gradle/libs.versions.toml` sera créé en Phase 0 comme source de vérité unique. Ce tableau garde les versions **major.minor** quand elles sont structurelles (Material 3 Adaptive 1.2+ pour les canonical layouts, Compose Navigation 3 pour les back stacks en state, OkHttp 5 pour le client HTTP + `CookieJar`). Les patches stables 2026 sont à résoudre via Context7/Docfork quand on interroge les docs officielles (cf. [#19](https://github.com/ForumHFR/redface2/issues/19)).
+> **Versions précises** : le Gradle version catalog `gradle/libs.versions.toml` est la source de vérité unique. Ce tableau garde les versions **major.minor** quand elles sont structurelles (Material 3 Adaptive 1.2+ pour les canonical layouts, Compose Navigation 3 pour les back stacks en state, OkHttp 5 pour le client HTTP + `CookieJar`). Les patches stables 2026 sont à résoudre via Context7/Docfork quand on interroge les docs officielles (cf. [#19](https://github.com/ForumHFR/redface2/issues/19)).
 
 ---
 
@@ -170,7 +170,7 @@ Voir `docs/specs/navigation.md` pour les exemples concrets (`NavDisplay`, `entry
 
 Hilt avec KSP (pas KAPT) résout le problème historique de build time. La sécurité à la compilation et l'intégration native avec Jetpack font la différence pour un projet open-source.
 
-Le bootstrap de code Phase 0 s'aligne actuellement sur **Hilt 2.59.2** dans le version catalog. Cette version sert de référence d'implémentation tant que le couple Kotlin/AGP 9 reste en place.
+Le version catalog épingle **Hilt 2.60.1** (état au 2 septembre 2026, avec Kotlin 2.4.10 et AGP 9.3.1) ; `gradle/libs.versions.toml` fait foi pour la version exacte.
 
 **Note** : Koin a évolué significativement. Le [compiler plugin K2](https://insert-koin.io/docs/reference/koin-annotations/start) (1.0.0-RC1) permet la génération du graphe de DI à la compilation, éliminant le risque de crash runtime. Koin est également KMP-natif. Si le projet évolue vers KMP, Koin deviendra le choix naturel. Hilt reste le choix pour la v1 Android-only grâce à son intégration Jetpack et sa base de contributeurs plus large.
 

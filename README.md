@@ -1,47 +1,66 @@
 # Redface 2
 
-> Le futur client Android pour [Hardware.fr](https://forum.hardware.fr)
+> Le client Android communautaire pour [forum.hardware.fr](https://forum.hardware.fr), en bêta publique.
 
-Réécriture complète de [Redface](https://github.com/ForumHFR/Redface) avec une stack moderne : **Kotlin**, **Jetpack Compose**, **MVI**, **Hilt**, **Room**.
+Réécriture complète de [Redface](https://github.com/ForumHFR/Redface) sur une stack 2026 : **Kotlin 2.4**, **Jetpack Compose** (Material 3), **MVI**, **Compose Navigation 3**, **Hilt**, **Room**, **OkHttp 5**. Le code est produit par des agents LLM orchestrés depuis Claude Code, avec relecture croisée et CI bloquante ; les testeurs du forum pilotent le produit.
 
-## Documentation
+## Installer
 
-Les spécifications complètes sont disponibles sur le site du projet :
+| Canal | Pour qui | Comment |
+|---|---|---|
+| **Google Play, bêta ouverte** | le plus simple | [Redface 2 sur Google Play](https://play.google.com/store/apps/details?id=fr.forumhfr.redface2) (programme de test ouvert) |
+| **F-Droid, bêta** | sans services Google, auditable | ajouter le dépôt `https://forumhfr.github.io/redface2-fdroid/repo` (empreinte dans le [guide d'installation](https://forumhfr.github.io/redface2/guides/installation)), app « Redface 2 β » |
+| **F-Droid, dev** | testeurs du canal de développement | même dépôt, app « Redface 2 dev », mise à jour à chaque release dev |
+| **GitHub Releases** | sideload ponctuel | APK signés attachés à chaque [release `app-v<N>`](https://github.com/ForumHFR/redface2/releases) |
 
-**[forumhfr.github.io/redface2](https://forumhfr.github.io/redface2)**
-
-- [Spécifications](https://forumhfr.github.io/redface2/specs) — Vue d'ensemble des pages canoniques
-- [Guides](https://forumhfr.github.io/redface2/guides) — Contribution, contexte et nommage
-- [Stack technique](https://forumhfr.github.io/redface2/specs/stack) — Pourquoi chaque techno
-- [Architecture](https://forumhfr.github.io/redface2/specs/architecture) — Modules, couches, data flow
-- [Scope fonctionnel](https://forumhfr.github.io/redface2/specs/scope) — Ce que l'app doit permettre de faire
-- [Protocole HFR](https://forumhfr.github.io/redface2/specs/protocol-hfr) — Contrats externes et edge cases
-- [Navigation](https://forumhfr.github.io/redface2/specs/navigation) — Écrans et flows
-- [Pattern MVI](https://forumhfr.github.io/redface2/specs/mvi) — Architecture UI
-- [Modèles](https://forumhfr.github.io/redface2/specs/models) — Structures de données
-- [Extensions](https://forumhfr.github.io/redface2/specs/extensions) — Extensions communautaires
-- [Méthodologie](https://forumhfr.github.io/redface2/specs/methodology) — Comment le projet spécifie, prototype et teste
-- [Roadmap](https://forumhfr.github.io/redface2/specs/roadmap) — Phases de dev
-- [Contribuer](https://forumhfr.github.io/redface2/guides/contributing) — Comment participer
+Les apps bêta et dev de F-Droid ont des identifiants distincts et cohabitent sur un même appareil. Détails, empreintes et pièges de signature : [Installer Redface 2](https://forumhfr.github.io/redface2/guides/installation).
 
 ## État
 
-Phase courante : **Phase 4 — Extensions + refonte UI** ([roadmap](https://forumhfr.github.io/redface2/specs/roadmap)). Phases 0 à 3 livrées (bootstrap ; lecture du forum ; écriture poster/citer/upload/smileys ; messages MP + DT/MultiMP + recherche), bêta **0.37.0** publiée (Play open testing + F-Droid ; refontes des vues Drapeaux [#603](https://github.com/ForumHFR/redface2/issues/603) et Topic [#604](https://github.com/ForumHFR/redface2/issues/604) livrées, passe images [#876](https://github.com/ForumHFR/redface2/issues/876) soldée). En cours : itération 2 des vues Topic et Éditeur, architecture d'extensions ([#6](https://github.com/ForumHFR/redface2/issues/6)/[#7](https://github.com/ForumHFR/redface2/issues/7)).
+- **Bêta publique 0.50.2** (1er septembre 2026) : sondages, liens HFR, modération et rôles du staff, vue forum, citations, fiabilité.
+- **Canal dev 0.52.x** : sous-menu Couleurs (presets, hexa, tons de fond, AMOLED, Material You), zoom interactif, largeur des images.
+- **Livré** : connexion HFR, drapeaux (favoris, lus, non lus, MultiMP), catégories et sous-catégories, lecture de sujet (pagination, ancres, recherche intra-sujet, deep links), écriture (répondre, citer, citer plusieurs, éditer, créer un sujet, sondages, upload d'images, smileys), messages privés et MultiMP (lecture, réponse, citation, membres), profils, liste noire, réglages (affichage, densité, images, couleurs, réseau et cache, proxy), cache Room et prefetch non authentifié.
+- **Organisation du travail** : les phases 0 à 4 de la [roadmap](https://forumhfr.github.io/redface2/specs/roadmap) sont livrées comme épics ; le suivi se fait désormais par milestones de vue (*Vue · Topic 2*, *Vue · Éditeur 2*, *Vue · Drapeaux 2*, *Vue · MP 1*, *Vue · Réglages 1*, *Vue · Compte HFR 1*, *Infra & dette*). Reste ouvert : architecture d'extensions ([#7](https://github.com/ForumHFR/redface2/issues/7)), sync MPStorage entre appareils ([#6](https://github.com/ForumHFR/redface2/issues/6)).
+- **Historique** : [`app/CHANGELOG.md`](app/CHANGELOG.md) (une entrée par release), [`CHANGELOG.md`](CHANGELOG.md) (versions des specs).
 
-## Pourquoi réécrire ?
+Suivi communautaire sur HFR : [topic bêta](https://forum.hardware.fr/forum2.php?config=hfr.inc&cat=23&post=35395&page=1) (retours utilisateurs) et [topic dev](https://forum.hardware.fr/forum2.php?config=hfr.inc&cat=23&post=35421&page=1) (changelogs et tests du canal dev).
 
-Redface v1 tourne sur une stack de 2015 : Java 11, Retrofit 1.9, RxJava 1, ButterKnife, Otto, minSdk 16. Chaque brique est obsolète ou dépréciée. Un refactoring incrémental serait plus coûteux qu'une réécriture.
+## Documentation
 
-## Méthodologie
+Site : **[forumhfr.github.io/redface2](https://forumhfr.github.io/redface2)** (publié depuis `main`).
 
-La méthode canonique du projet est documentée dans [Méthodologie](https://forumhfr.github.io/redface2/specs/methodology) et formalisée dans [ADR-000](https://forumhfr.github.io/redface2/adr/000-methodologie-triple-hybride). `AGENTS.md` garde les règles opérationnelles pour les agents, pas la méthode complète.
+- [Spécifications](https://forumhfr.github.io/redface2/specs) : [scope](https://forumhfr.github.io/redface2/specs/scope), [stack](https://forumhfr.github.io/redface2/specs/stack), [architecture](https://forumhfr.github.io/redface2/specs/architecture), [navigation](https://forumhfr.github.io/redface2/specs/navigation), [modèles](https://forumhfr.github.io/redface2/specs/models), [MVI](https://forumhfr.github.io/redface2/specs/mvi), [protocole HFR](https://forumhfr.github.io/redface2/specs/protocol-hfr), [parité de lecture Topic ↔ MP](https://forumhfr.github.io/redface2/specs/reading-parity), [extensions](https://forumhfr.github.io/redface2/specs/extensions), [roadmap](https://forumhfr.github.io/redface2/specs/roadmap), [méthodologie](https://forumhfr.github.io/redface2/specs/methodology).
+- [ADR](https://forumhfr.github.io/redface2/adr) : les décisions structurantes et leur pourquoi.
+- [Guides](https://forumhfr.github.io/redface2/guides) : [installation](https://forumhfr.github.io/redface2/guides/installation), [contribuer](https://forumhfr.github.io/redface2/guides/contributing), [release](https://forumhfr.github.io/redface2/guides/release), [limitations connues](https://forumhfr.github.io/redface2/guides/known-issues), [proxy](https://forumhfr.github.io/redface2/guides/proxy), [profiling](https://forumhfr.github.io/redface2/guides/profiling), [pourquoi Redface 2](https://forumhfr.github.io/redface2/guides/rationale).
+
+## Développer
+
+```bash
+# Build debug prod dans l'image Docker épinglée (SDK, JDK et caches reproductibles)
+./scripts/docker-dev.sh ./gradlew :app:assembleProdDebug
+
+# Reproduire la CI avant de pousser : tests JVM, detekt, lint
+./scripts/docker-dev.sh ./gradlew --continue testDebugUnitTest :app:testProdDebugUnitTest detektAll lintDebug
+```
+
+- 18 modules Gradle : `:app`, huit `:core:*` (model, domain, data, network, parser, database, ui, extension), neuf `:feature:*` (auth, flags, forum, topic, editor, messages, search, settings, profile). Structure détaillée dans le [guide de contribution](https://forumhfr.github.io/redface2/guides/contributing).
+- Branches : `dev` intègre, `main` publie. Toute modification passe par une pull request avec CI verte ; les branches partent d'`origin/dev`.
+- Gardes machine : Konsist (frontières d'architecture), detekt, lint Android, tests JVM (JUnit 4, MockK, Robolectric, Turbine, Roborazzi en mode record), garde de parité de lecture sur les PR touchant le rendu partagé.
+- Versions et outillage : voir [`gradle/libs.versions.toml`](gradle/libs.versions.toml) (source de vérité), `minSdk 29`, `targetSdk 36`, `compileSdk 37`.
+- Agents LLM : les règles opérationnelles sont dans [`AGENTS.md`](AGENTS.md) (source de vérité multi-outils, `CLAUDE.md` et `GEMINI.md` sont des liens), les skills dans [`.agents/skills/`](.agents/skills) ([index](SKILLS.md)).
+
+## Méthode
+
+Spec, prototype et TDD sélectifs selon le sujet ([méthodologie](https://forumhfr.github.io/redface2/specs/methodology), [ADR-000](https://forumhfr.github.io/redface2/adr/000-methodologie-triple-hybride)). Les fixtures HTML sont capturées sur le forum réel, jamais écrites à la main. Un changement structurant est cadré, produit et relu par des agents distincts ; chaque action générée par IA est attribuée à la personne qui l'a demandée. Un [point chiffré](https://forumhfr.github.io/artifacts/redface2-en-chiffres/) du dépôt est publié périodiquement.
 
 ## Participer
 
-Les contributions aux specs sont ouvertes. Voir les [issues](https://github.com/ForumHFR/redface2/issues) ou la page [Contribuer](https://forumhfr.github.io/redface2/guides/contributing).
+Ouvrez une [issue](https://github.com/ForumHFR/redface2/issues) (bug, demande, divergence spec/code), commentez les existantes ou proposez une PR sur `dev`. Les retours de test passent aussi par les topics HFR ci-dessus. Voir [Contribuer](https://forumhfr.github.io/redface2/guides/contributing).
+
+## Pourquoi réécrire ?
+
+Redface v1 tourne sur une stack de 2015 : Java, Retrofit 1.9, RxJava 1, ButterKnife, Otto, minSdk 16. Chaque brique est obsolète ou dépréciée et les migrations s'entraînent les unes les autres. Le raisonnement complet, doutes compris, est dans [Pourquoi Redface 2 ?](https://forumhfr.github.io/redface2/guides/rationale).
 
 ## Licence
 
-`GPL-3.0-only`
-
-Le choix vise à garder le client Android communautaire et à éviter les forks applicatifs fermés. La question d'un éventuel service réseau futur est traitée séparément.
+`GPL-3.0-only` : garder le client communautaire et éviter les forks applicatifs fermés ([ADR-010](https://forumhfr.github.io/redface2/adr/010-licence-client-android)).
