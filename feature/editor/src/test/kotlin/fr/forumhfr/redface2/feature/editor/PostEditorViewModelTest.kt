@@ -21,10 +21,10 @@ import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
 import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
-import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
+import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
@@ -2323,11 +2323,11 @@ class PostEditorViewModelTest {
         override suspend fun setFlagsGlyphStyle(style: FlagGlyphStyle) = Unit
         override fun observeThemeMode(): Flow<ThemeMode> = MutableStateFlow(ThemeMode.SYSTEM)
         override suspend fun setThemeMode(mode: ThemeMode) = Unit
-        @Suppress("DEPRECATION")
-        override fun observeAmoledEnabled(): Flow<Boolean> = MutableStateFlow(false)
 
-        @Suppress("DEPRECATION")
-        override suspend fun setAmoledEnabled(enabled: Boolean) = Unit
+        override fun observeThemeColorPreferences(): Flow<ThemeColorPreferences> =
+            MutableStateFlow(ThemeColorPreferences())
+
+        override suspend fun setThemeColorPreferences(preferences: ThemeColorPreferences) = Unit
         override fun observeTopicTopBarAutoHide(): Flow<Boolean> = MutableStateFlow(false)
         override suspend fun setTopicTopBarAutoHide(enabled: Boolean) = Unit
         override fun observeConfirmBeforePosting(): Flow<Boolean> = confirmBeforePosting
@@ -2471,11 +2471,6 @@ class PostEditorViewModelTest {
             MutableStateFlow(ImmersiveNavBarReveal.MANUAL)
 
         override suspend fun setImmersiveNavBarReveal(mode: ImmersiveNavBarReveal) = Unit
-        @Suppress("DEPRECATION")
-        override fun observeAccentColor(): Flow<AccentColor> = MutableStateFlow(AccentColor.ROSE)
-
-        @Suppress("DEPRECATION")
-        override suspend fun setAccentColor(color: AccentColor) = Unit
         override fun observeAlwaysAskLinkApp(): Flow<Boolean> = MutableStateFlow(false)
         override suspend fun setAlwaysAskLinkApp(enabled: Boolean) = Unit
 

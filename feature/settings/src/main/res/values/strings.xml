@@ -59,7 +59,7 @@
     <string name="settings_family_communication">Communication</string>
     <string name="settings_family_content">Contenu</string>
     <string name="settings_family_system">Système</string>
-    <string name="settings_category_subtitle_display">Thème, AMOLED, densité, police</string>
+    <string name="settings_category_subtitle_display">Thème, couleurs, densité, police</string>
     <string name="settings_category_subtitle_flags">Regroupement, masquer lus, auto-refresh</string>
     <string name="settings_category_subtitle_topic">Barre, sondages, navigation</string>
     <string name="settings_category_subtitle_mp">Badge de non-lus, cache disque global</string>
@@ -92,7 +92,9 @@
     <string name="settings_hfr_links_firefox_title">Firefox</string>
     <string name="settings_hfr_links_firefox_help">Sous Firefox, réglez « Ouvrir les liens dans les applications » sur « Ne jamais » pour lire dans le navigateur, ou activez « Toujours demander quelle app » ci-dessus pour choisir l’application à chaque fois.</string>
     <string name="settings_nav_display">Affichage</string>
-    <string name="settings_nav_display_description">Thème, AMOLED, densité et taille de police.</string>
+    <string name="settings_nav_display_description">Thème, couleurs, densité et taille de police.</string>
+    <string name="settings_nav_colors">Couleurs</string>
+    <string name="settings_nav_colors_description">Accent, couleur personnalisée, fonds et couleurs du système.</string>
     <string name="settings_nav_images">Images</string>
     <string name="settings_nav_images_description">Hébergeur d\'images, insertion, mes images uploadées.</string>
     <string name="settings_nav_account">Compte HFR et à propos</string>
@@ -112,8 +114,6 @@
     <string name="settings_phase_5">Phase 5</string>
     <!-- Pastille de tag d'un réglage à venir rattaché à une issue GitHub (identifiant technique). -->
     <string name="settings_future_issue_tag">#%1$d</string>
-    <string name="settings_future_ui_colors">Personnalisation des couleurs</string>
-    <string name="settings_future_material_you">Material You (thème dynamique)</string>
     <string name="settings_future_classic_theme">Thème HFR Classique</string>
     <string name="settings_future_flags_on_listing">Poser les drapeaux en listant une catégorie</string>
     <string name="settings_future_prefetch">Préchargement de la page suivante</string>
@@ -283,22 +283,52 @@
     <string name="settings_flags_funny_empty_state_description">Affiche un smiley perso HFR quand un onglet est vide, au lieu de l\'icône sobre.</string>
     <string name="settings_flags_funny_empty_state_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
 
-    <!-- #286 — Thème. Sélecteur Clair/Système/Sombre (Système = suit l'OS) + thème AMOLED (vrai
-         noir), persistés en DataStore et appliqués à toute l'app en direct. -->
+    <!-- #286 — Thème. Sélecteur Clair/Système/Sombre ; les couleurs détaillées vivent dans la
+         sous-page Couleurs (#595/#883). -->
     <string name="settings_theme_title">Thème</string>
     <string name="settings_theme_intro">Choisissez l\'apparence de l\'app. « Système » suit le réglage clair/sombre du téléphone.</string>
     <string name="settings_theme_light">Clair</string>
     <string name="settings_theme_system">Système</string>
     <string name="settings_theme_dark">Sombre</string>
     <string name="settings_theme_persist_failed">Impossible de mémoriser le thème. Réessayez.</string>
-    <string name="settings_theme_amoled_title">Thème AMOLED (vrai noir)</string>
-    <string name="settings_theme_amoled_description">Fond noir pur pour les écrans OLED. S\'applique uniquement en thème sombre.</string>
-    <string name="settings_theme_amoled_persist_failed">Impossible de mémoriser le réglage AMOLED. Réessayez.</string>
-    <!-- TU 2788511 — couleur d\'accent (rose ↔ rouge REDFACE1). -->
-    <string name="settings_theme_accent_intro">Couleur d\'accent de l\'app (boutons, sélection, en-têtes de message).</string>
-    <string name="settings_theme_accent_rose">Rose (défaut)</string>
-    <string name="settings_theme_accent_rouge_redface1">Rouge REDFACE1</string>
-    <string name="settings_theme_accent_persist_failed">Impossible de mémoriser la couleur d\'accent. Réessayez.</string>
+
+    <!-- #595 / #883 — sous-page Couleurs : accent, RGB custom, dynamic color et tons de surface. -->
+    <string name="settings_colors_persist_failed">Impossible de mémoriser les couleurs. Réessayez.</string>
+    <string name="settings_colors_preview_title">Aperçu</string>
+    <string name="settings_colors_preview_pseudo">XaTriX</string>
+    <string name="settings_colors_preview_date">Aujourd\'hui, 15:32</string>
+    <string name="settings_colors_preview_body">Un message de démonstration avec les surfaces de lecture.</string>
+    <string name="settings_colors_preview_link">Lien forum.hardware.fr</string>
+    <string name="settings_colors_preview_quote_author">Citation de Sol</string>
+    <string name="settings_colors_preview_quote_body">Le conteneur de citation suit le thème choisi.</string>
+    <string name="settings_colors_preview_spoiler">Spoiler fermé</string>
+    <string name="settings_colors_preview_flag">Drapeau</string>
+    <string name="settings_colors_preview_button">Répondre</string>
+    <string name="settings_colors_system_title">Couleurs du système</string>
+    <string name="settings_colors_system_description">Utilise les couleurs Android 12+ issues du fond d\'écran. L\'accent Redface est désactivé, les tons de fond restent appliqués.</string>
+    <string name="settings_colors_accent_title">Accent</string>
+    <string name="settings_colors_accent_description">Choisissez la couleur des actions, sélections et en-têtes.</string>
+    <string name="settings_colors_accent_disabled_by_system">Les couleurs du système remplacent l\'accent. Désactivez-les pour choisir une couleur Redface.</string>
+    <string name="settings_colors_accent_rose">Rose</string>
+    <string name="settings_colors_accent_rouge_redface1">Rouge RF1</string>
+    <string name="settings_colors_accent_blue">Bleu</string>
+    <string name="settings_colors_accent_green">Vert</string>
+    <string name="settings_colors_accent_violet">Violet</string>
+    <string name="settings_colors_accent_orange">Orange</string>
+    <string name="settings_colors_accent_teal">Sarcelle</string>
+    <string name="settings_colors_accent_neutral">Neutre</string>
+    <string name="settings_colors_custom_label">Couleur personnalisée</string>
+    <string name="settings_colors_custom_helper">Format #RRGGBB ou RRGGBB, sans alpha.</string>
+    <string name="settings_colors_custom_error">Saisissez une couleur hexa sur 6 caractères, par exemple #A62C2C.</string>
+    <string name="settings_colors_surface_title">Ton du fond</string>
+    <string name="settings_colors_surface_description">Les préférences claire et sombre restent mémorisées séparément.</string>
+    <string name="settings_colors_surface_active">%1$s (actif actuellement)</string>
+    <string name="settings_colors_light_surface_title">Fond clair</string>
+    <string name="settings_colors_dark_surface_title">Fond sombre</string>
+    <string name="settings_colors_surface_material_tinted">Teinté M3</string>
+    <string name="settings_colors_surface_white">Blanc</string>
+    <string name="settings_colors_surface_redface1_gray">Gris RF1</string>
+    <string name="settings_colors_surface_amoled">AMOLED</string>
 
     <!-- #287 — Préréglages de lecture. Densité (Confort/Compact = espacement des listes et des
          messages) + taille de la police de lecture (S/M/L, appliquée en plus du zoom du système),

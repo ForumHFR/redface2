@@ -134,6 +134,7 @@ import fr.forumhfr.redface2.feature.profile.ProfileViewModel
 import fr.forumhfr.redface2.feature.search.SearchScreen
 import fr.forumhfr.redface2.feature.settings.MyImagesScreen
 import fr.forumhfr.redface2.feature.settings.SettingsAccountAboutScreen
+import fr.forumhfr.redface2.feature.settings.SettingsColorsScreen
 import fr.forumhfr.redface2.feature.settings.SettingsCategoryDetailScreen
 import fr.forumhfr.redface2.feature.settings.SettingsDisplayScreen
 import fr.forumhfr.redface2.feature.settings.SettingsImagesScreen
@@ -414,6 +415,9 @@ data object SettingsMaintenanceRoute : RedfaceNavKey
 
 @Serializable
 data object SettingsDisplayRoute : RedfaceNavKey
+
+@Serializable
+data object SettingsColorsRoute : RedfaceNavKey
 
 @Serializable
 data object SettingsImagesRoute : RedfaceNavKey
@@ -2535,6 +2539,17 @@ private fun RedfaceNavHost(
             }
             entry<SettingsDisplayRoute> {
                 SettingsDisplayScreen(
+                    onBack = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
+                    onOpenColors = { backStack.add(SettingsColorsRoute) },
+                    topBarActions = accountMenu,
+                )
+            }
+            entry<SettingsColorsRoute> {
+                SettingsColorsScreen(
                     onBack = {
                         if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)

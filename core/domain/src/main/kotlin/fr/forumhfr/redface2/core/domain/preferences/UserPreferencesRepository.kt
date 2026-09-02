@@ -5,7 +5,6 @@ import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.combine
 
 interface UserPreferencesRepository {
     fun observeProxyConfig(): Flow<ProxyConfig>
@@ -193,64 +192,11 @@ interface UserPreferencesRepository {
     /** Persists [observeThemeMode]. Default [ThemeMode.SYSTEM] until the first call. */
     suspend fun setThemeMode(mode: ThemeMode)
 
-    /**
-     * AMOLED (true-black) theme toggle (#286): only takes effect when the effective theme is dark
-     * (forced [ThemeMode.DARK] or [ThemeMode.SYSTEM] while the OS is in dark mode). Default `false`.
-     */
-    @Deprecated(
-        message = "Use observeThemeColorPreferences; AMOLED is now DarkSurfaceTone.AMOLED.",
-        replaceWith = ReplaceWith("observeThemeColorPreferences()"),
-    )
-    fun observeAmoledEnabled(): Flow<Boolean>
+    /** Complete app colour preferences (#595/#883): accent, surface tones and Android 12+ dynamic color. */
+    fun observeThemeColorPreferences(): Flow<ThemeColorPreferences>
 
-    /** Persists [observeAmoledEnabled]. Default `false` until the first call. */
-    @Deprecated(
-        message = "Use setThemeColorPreferences; AMOLED is now DarkSurfaceTone.AMOLED.",
-        replaceWith = ReplaceWith("setThemeColorPreferences(preferences)"),
-    )
-    suspend fun setAmoledEnabled(enabled: Boolean)
-
-    /**
-     * Accent colour family (TU 2788511): [AccentColor.ROSE] (default) keeps the historical muted
-     * maroon/rose scheme; [AccentColor.ROUGE_REDFACE1] switches to the vivid Redface 1 red. Legacy
-     * projection kept for the current settings screen; app-root theming uses
-     * [observeThemeColorPreferences] and the colour bootstrap mirror.
-     */
-    @Deprecated(
-        message = "Use observeThemeColorPreferences; accents now support presets and custom RGB.",
-        replaceWith = ReplaceWith("observeThemeColorPreferences()"),
-    )
-    fun observeAccentColor(): Flow<AccentColor>
-
-    /** Persists [observeAccentColor]. Default [AccentColor.ROSE] until the first call. */
-    @Deprecated(
-        message = "Use setThemeColorPreferences; accents now support presets and custom RGB.",
-        replaceWith = ReplaceWith("setThemeColorPreferences(preferences)"),
-    )
-    suspend fun setAccentColor(color: AccentColor)
-
-    /**
-     * Complete app colour preferences. Default implementation keeps legacy fakes source-compatible;
-     * the DataStore implementation overrides it to persist every colour key atomically.
-     */
-    @Suppress("DEPRECATION")
-    fun observeThemeColorPreferences(): Flow<ThemeColorPreferences> =
-        combine(observeAccentColor(), observeAmoledEnabled()) { accentColor, amoledEnabled ->
-            ThemeColorPreferences(
-                accent = ThemeAccent.Preset(accentColor.toAccentPreset()),
-                darkSurfaceTone = if (amoledEnabled) DarkSurfaceTone.AMOLED else DarkSurfaceTone.MATERIAL_TINTED,
-            )
-        }
-
-    /**
-     * Persists the complete app colour preferences. Legacy-only implementations keep only the old
-     * rose/red accent and AMOLED subset; DataStore stores the full model.
-     */
-    @Suppress("DEPRECATION")
-    suspend fun setThemeColorPreferences(preferences: ThemeColorPreferences) {
-        setAccentColor(preferences.accent.toLegacyAccentColor())
-        setAmoledEnabled(preferences.darkSurfaceTone == DarkSurfaceTone.AMOLED)
-    }
+    /** Persists [observeThemeColorPreferences] atomically. */
+    suspend fun setThemeColorPreferences(preferences: ThemeColorPreferences)
 
     /**
      * External-link app selection (#1207): when `true`, every explicit « ouvrir dans le
