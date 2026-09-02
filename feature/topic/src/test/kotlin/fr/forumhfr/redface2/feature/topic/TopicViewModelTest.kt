@@ -3253,12 +3253,11 @@ class TopicViewModelTest {
     }
 
     @Test
-    fun `a quote whose cited post is not on the landing page lands at the bottom (#974)`() = runTest {
+    fun `a quote whose cited post is not on the landing page keeps the current position (#974 #1243)`() = runTest {
         val repository = FakeTopicRepository(
             flowsToReturn = listOf(flow { emit(fakeTopic(2, 3)) }),
             // The reply landed on page 3 ; the cited post (640) lives on page 2. No cross-page
-            // navigation : the landing degrades to the bottom of the landing page, the historical
-            // plain-reply behaviour.
+            // navigation, and no bottom fallback : preserve the reader's position (#1243).
             refreshTopicsToReturn = listOf(fakeTopic(3, 3, posts = listOf(fakePost(900), fakePost(901)))),
         )
         val viewModel = topicViewModel(
@@ -3269,23 +3268,21 @@ class TopicViewModelTest {
 
         viewModel.effects.test {
             viewModel.applySubmitResult(targetPage = 3, scrollTo = 640, quotedNumreponses = listOf(640))
-            // Terminal at once — a [PendingLanding.Post] would have stayed pending (no scroll).
-            assertEquals(TopicEffect.ScrollToEndOfPage(3), awaitItem())
+            expectNoEvents()
             cancelAndIgnoreRemainingEvents()
         }
         assertEquals(3, viewModel.state.value.request.page)
     }
 
     @Test
-    fun `a quote submit anchored on bas keeps the overflow redirect and lands at the bottom (#974)`() = runTest {
-        // Defensive : should HFR ever anchor `#bas` on a quote success, the null scrollTo keeps
-        // the #226 overflow path and the quote landing degrades to the bottom of the real last
-        // page (the cited post is by construction on an earlier page).
+    fun `a cards-off quote submit from the tail stays on the cited post after an overflow (#974 #1243)`() = runTest {
+        // Production default : cards OFF materialises `[quotemsg]` in the field and HFR answers
+        // with `#bas` (scrollTo null). The submit still carries quotedNumreponses, so it must not
+        // chase the freshly-created tail page.
         val repository = FakeTopicRepository(
             flowsToReturn = listOf(flow { emit(fakeTopic(2, 2)) }),
             refreshTopicsToReturn = listOf(
                 fakeTopic(2, 3, posts = listOf(fakePost(640))),
-                fakeTopic(3, 3, posts = listOf(fakePost(777))),
             ),
         )
         val viewModel = topicViewModel(
@@ -3296,11 +3293,14 @@ class TopicViewModelTest {
 
         viewModel.effects.test {
             viewModel.applySubmitResult(targetPage = 2, scrollTo = null, quotedNumreponses = listOf(640))
-            assertEquals(TopicEffect.ScrollToEndOfPage(3), awaitItem())
+            assertEquals(TopicEffect.ScrollToPost(640), awaitItem())
+            assertEquals(TopicEffect.PostSubmittedElsewhere(page = 3), awaitItem())
+            expectNoEvents()
             cancelAndIgnoreRemainingEvents()
         }
+        assertEquals(2, viewModel.state.value.request.page)
         assertEquals(
-            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2), Triple(SAMPLE_CAT, SAMPLE_POST, 3)),
+            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)),
             repository.refreshCalls,
         )
     }

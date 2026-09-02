@@ -191,6 +191,39 @@ class QuickReplyViewModelTest {
     }
 
     @Test
+    fun `the context page follows the current opening at the second submit`() = runTest {
+        val repository = FakeQuickReplyRepository(
+            results = mutableListOf(
+                ReplySubmitResult.Success(refreshUrl = null, targetPage = 3, numreponse = 301),
+                ReplySubmitResult.Success(refreshUrl = null, targetPage = 5, numreponse = 501),
+            ),
+        )
+        val viewModel = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
+        advanceUntilIdle() // init prefetch for the assisted request page (3).
+
+        viewModel.onSheetOpened(currentPage = 3)
+        viewModel.onTextChanged(TextFieldValue("premier"))
+        viewModel.onSubmitClicked()
+        advanceUntilIdle()
+        assertEquals(QuickReplyEffect.SubmitSucceeded(targetPage = 3, scrollTo = 301), viewModel.effects.first())
+
+        viewModel.onSheetOpened(currentPage = 5, initialQuotes = listOf(preview(202, "bob")))
+        advanceUntilIdle()
+        assertEquals("[quotemsg=202]corps[/quotemsg]\n", viewModel.state.value.text.text)
+        viewModel.onTextChanged(TextFieldValue(viewModel.state.value.text.text + "\nsecond"))
+        viewModel.onSubmitClicked()
+        advanceUntilIdle()
+
+        assertEquals(listOf(3, 5), repository.submittedPages)
+        assertEquals(listOf(3, 5, 5), repository.fetchedPages)
+        assertEquals(listOf(null, null, 202), repository.fetchedQuotedNumreponses)
+        assertEquals(
+            QuickReplyEffect.SubmitSucceeded(targetPage = 5, scrollTo = 501, quotedNumreponses = listOf(202)),
+            viewModel.effects.first(),
+        )
+    }
+
+    @Test
     fun `a typed HFR failure surfaces the error and keeps the draft`() = runTest {
         val store = FakeQuickReplyDraftStore()
         val repository = FakeQuickReplyRepository(
@@ -726,10 +759,13 @@ private class FakeQuickReplyRepository(
     var fetchCalls = 0
     var submitCalls = 0
     val submittedBodies = mutableListOf<String>()
+    val submittedPages = mutableListOf<Int>()
+    val fetchedPages = mutableListOf<Int>()
     val fetchedQuotedNumreponses = mutableListOf<Int?>()
 
     override suspend fun fetchReplyForm(context: ReplyContext): ReplyForm {
         fetchCalls++
+        fetchedPages += context.page
         fetchedQuotedNumreponses += context.quotedNumreponse
         val prefill = context.quotedNumreponse?.let { "[quotemsg=$it]corps[/quotemsg]" }.orEmpty()
         return ReplyForm(
@@ -749,6 +785,7 @@ private class FakeQuickReplyRepository(
     ): ReplySubmitResult {
         submitCalls++
         submittedBodies += bbcodeContent
+        submittedPages += context.page
         return results.removeFirstOrNull() ?: ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
     }
 }
