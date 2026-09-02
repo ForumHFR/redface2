@@ -6,6 +6,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 
 /**
@@ -94,6 +95,14 @@ val LocalShowScrollbar = staticCompositionLocalOf { true }
  * media and non-GIF blocks keep the strict v1.5 no-upscale.
  */
 val LocalMediaDisplayProfile = staticCompositionLocalOf { MediaDisplayProfile.M }
+
+/**
+ * #991 — maximum fImage width for post content images, seeded from
+ * [ReadingDisplaySettings.postImageMaxWidth] by `RedfaceTheme`. Read by the inline image, measured
+ * block image and cold block placeholder paths so the three renderers stay in sync. Defaults to
+ * [PostImageMaxWidth.DEFAULT] (0.95), preserving the historical cap for previews / unprovided hosts.
+ */
+val LocalPostImageMaxWidth = staticCompositionLocalOf { PostImageMaxWidth.DEFAULT }
 
 /**
  * #989 — the smiley picker's cell delimiter, seeded from

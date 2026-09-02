@@ -9,6 +9,7 @@ import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.NavBarLabelsBootstrapStore
+import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
@@ -91,6 +92,12 @@ class AppThemeViewModel @Inject constructor(
     val mediaDisplayProfile: StateFlow<MediaDisplayProfile> =
         userPreferencesRepository.observeMediaDisplayProfile()
             .stateIn(viewModelScope, SharingStarted.Eagerly, MediaDisplayProfile.M)
+
+    // #991 — maximum fImage width of content images, eagerly collected like the media profile.
+    // Seed = P95 so the historical 0.95 cap remains visible until DataStore hydrates.
+    val postImageMaxWidth: StateFlow<PostImageMaxWidth> =
+        userPreferencesRepository.observePostImageMaxWidth()
+            .stateIn(viewModelScope, SharingStarted.Eagerly, PostImageMaxWidth.DEFAULT)
 
     // #989 — the smiley picker's cell delimiter, collected at the shell like the reading presets so
     // RedfaceTheme can seed LocalSmileyPickerDecoration. Seed = NONE, the shipped default (an

@@ -7,6 +7,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import kotlin.math.roundToInt
 
 /**
@@ -42,16 +43,17 @@ internal fun blockImageColdCapPx(usefulHeightPx: Int, floor400DpPx: Int): Int =
         ),
     )
 
-/** Cold slot §6 : width = 0,9 × available ; height = min(capBloc, max(160 dp, 0,75 × width)). */
-internal fun coldBlockSlotDp(availableWidthDp: Float, capBlocDp: Float): Pair<Float, Float> {
-    val width = availableWidthDp * COLD_BLOCK_WIDTH_FRACTION
+/** Cold slot §6 : width = fImage × available ; height = min(capBloc, max(160 dp, 0,75 × width)). */
+internal fun coldBlockSlotDp(
+    availableWidthDp: Float,
+    capBlocDp: Float,
+    postImageMaxWidth: PostImageMaxWidth,
+): Pair<Float, Float> {
+    val width = availableWidthDp * postImageMaxWidth.fraction
     val height = minOf(capBlocDp, maxOf(COLD_BLOCK_MIN_HEIGHT_DP, width * COLD_BLOCK_RATIO))
     return width to height
 }
 
-// #959/[AMENDEMENT-v1.5-1] — locked alias of the dedicated image width fraction (single source
-// of truth; the equality is pinned by ImageDisplaySizePolicyTest).
-internal const val COLD_BLOCK_WIDTH_FRACTION = IMAGE_RELATIVE_MAX_WIDTH_FRACTION
 internal const val COLD_BLOCK_MIN_HEIGHT_DP = 160f
 internal const val COLD_BLOCK_RATIO = 0.75f
 

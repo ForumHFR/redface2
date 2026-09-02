@@ -15,6 +15,7 @@ import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
@@ -5865,6 +5866,11 @@ internal class FakeUserPreferencesRepository(
         MutableStateFlow(MediaDisplayProfile.M)
 
     override suspend fun setMediaDisplayProfile(profile: MediaDisplayProfile) = Unit
+
+    override fun observePostImageMaxWidth(): Flow<PostImageMaxWidth> =
+        MutableStateFlow(PostImageMaxWidth.DEFAULT)
+
+    override suspend fun setPostImageMaxWidth(width: PostImageMaxWidth) = Unit
 
     // #989 — délimiteur du picker : non exercé ici, présent pour satisfaire l'interface.
     override fun observeSmileyPickerDecoration(): Flow<SmileyPickerDecoration> =

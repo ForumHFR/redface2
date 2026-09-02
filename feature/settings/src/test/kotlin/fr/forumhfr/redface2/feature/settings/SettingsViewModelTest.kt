@@ -6,6 +6,7 @@ import fr.forumhfr.redface2.core.domain.messages.PrivateMessageContentCache
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageContentCacheException
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
@@ -986,6 +987,44 @@ class SettingsViewModelTest {
                 MediaDisplayProfile.L,
                 viewModel.state.value.mediaDisplayProfile,
             )
+        }
+
+    @Test
+    fun `init hydrates the post image max width from storage`() = runTest {
+        repository.emitPostImageMaxWidth(PostImageMaxWidth.P90)
+
+        val viewModel = newViewModel()
+
+        assertEquals(PostImageMaxWidth.P90, viewModel.state.value.postImageMaxWidth)
+    }
+
+    @Test
+    fun `PostImageMaxWidthChanged persists the new width and clears the updating flag`() = runTest {
+        val viewModel = newViewModel()
+        assertEquals(PostImageMaxWidth.DEFAULT, viewModel.state.value.postImageMaxWidth)
+
+        viewModel.submit(SettingsIntent.PostImageMaxWidthChanged(PostImageMaxWidth.P100))
+
+        val state = viewModel.state.value
+        assertEquals(PostImageMaxWidth.P100, state.postImageMaxWidth)
+        assertFalse(state.isUpdatingPostImageMaxWidth)
+        assertFalse(state.postImageMaxWidthError)
+        assertEquals(1, repository.postImageMaxWidthSetCalls)
+        assertEquals(PostImageMaxWidth.P100, repository.lastPostImageMaxWidthSet)
+    }
+
+    @Test
+    fun `PostImageMaxWidthChanged reverts to the previous width and raises the error flag on persist failure`() =
+        runTest {
+            repository.failOnPostImageMaxWidthSet = true
+            val viewModel = newViewModel()
+
+            viewModel.submit(SettingsIntent.PostImageMaxWidthChanged(PostImageMaxWidth.P90))
+
+            val state = viewModel.state.value
+            assertEquals(PostImageMaxWidth.DEFAULT, state.postImageMaxWidth)
+            assertFalse(state.isUpdatingPostImageMaxWidth)
+            assertTrue(state.postImageMaxWidthError)
         }
 
     @Test
@@ -2317,6 +2356,27 @@ class SettingsViewModelTest {
 
         fun emitMediaDisplayProfile(value: MediaDisplayProfile) {
             mediaDisplayProfile.value = value
+        }
+
+        // #991 — content-image fImage cap. Same optimistic-flip seam as the GIF profile.
+        private val postImageMaxWidth = MutableStateFlow(PostImageMaxWidth.DEFAULT)
+        var postImageMaxWidthSetCalls: Int = 0
+            private set
+        var lastPostImageMaxWidthSet: PostImageMaxWidth? = null
+            private set
+        var failOnPostImageMaxWidthSet: Boolean = false
+
+        override fun observePostImageMaxWidth(): Flow<PostImageMaxWidth> = postImageMaxWidth
+
+        override suspend fun setPostImageMaxWidth(width: PostImageMaxWidth) {
+            postImageMaxWidthSetCalls += 1
+            check(!failOnPostImageMaxWidthSet) { "boom" }
+            lastPostImageMaxWidthSet = width
+            postImageMaxWidth.value = width
+        }
+
+        fun emitPostImageMaxWidth(value: PostImageMaxWidth) {
+            postImageMaxWidth.value = value
         }
 
         // Build 89 follow-up — topic top-bar auto-hide. Same optimistic-flip seam as amoled.

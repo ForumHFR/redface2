@@ -21,6 +21,7 @@ import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.domain.preferences.NavBarLabelsBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
+import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenBootstrapStore
@@ -775,6 +776,21 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observePostImageMaxWidth(): Flow<PostImageMaxWidth> =
+        dataStore.data
+            // Default P95 (#991): preserves the historical fImage cap unless the user opts in.
+            .map(::readPostImageMaxWidth)
+            .distinctUntilChanged()
+            .catch { emit(PostImageMaxWidth.DEFAULT) }
+
+    override suspend fun setPostImageMaxWidth(width: PostImageMaxWidth) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_POST_IMAGE_MAX_WIDTH] = width.name
+            }
+        }
+    }
+
     override fun observeSmileyPickerDecoration(): Flow<SmileyPickerDecoration> =
         dataStore.data
             // Default NONE (#989): delimiters are opt-in selection aids, not thumbnail resizing.
@@ -975,6 +991,16 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         prefs[KEY_MEDIA_DISPLAY_PROFILE]
             ?.let { stored -> runCatching { MediaDisplayProfile.valueOf(stored) }.getOrNull() }
             ?: MediaDisplayProfile.M
+
+    /**
+     * Reads [KEY_POST_IMAGE_MAX_WIDTH] defensively (#991): an unknown / corrupt stored value
+     * (older build, manual edit) falls back to [PostImageMaxWidth.DEFAULT] instead of crashing on
+     * `PostImageMaxWidth.valueOf`, same stance as [readMediaDisplayProfile].
+     */
+    private fun readPostImageMaxWidth(prefs: Preferences): PostImageMaxWidth =
+        prefs[KEY_POST_IMAGE_MAX_WIDTH]
+            ?.let { stored -> runCatching { PostImageMaxWidth.valueOf(stored) }.getOrNull() }
+            ?: PostImageMaxWidth.DEFAULT
 
     /**
      * Reads [KEY_SMILEY_PICKER_DECORATION] defensively (#989): an unknown / corrupt stored value
@@ -1270,6 +1296,8 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val KEY_FONT_SCALE = stringPreferencesKey("font_scale")
         // #973 — block-GIF display profile (MediaDisplayProfile.name, defensively parsed).
         val KEY_MEDIA_DISPLAY_PROFILE = stringPreferencesKey("media_display_profile")
+        // #991 — post content image max width (PostImageMaxWidth.name, defensively parsed).
+        val KEY_POST_IMAGE_MAX_WIDTH = stringPreferencesKey("post_image_max_width")
         // #989 — smiley picker cell delimiter (SmileyPickerDecoration.name, defensively parsed).
         val KEY_SMILEY_PICKER_DECORATION = stringPreferencesKey("smiley_picker_decoration")
 

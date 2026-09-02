@@ -26,6 +26,7 @@ import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsChoice
@@ -181,6 +182,13 @@ fun SettingsDisplayScreen(
                 onSelected = { viewModel.submit(SettingsIntent.MediaDisplayProfileChanged(it)) },
             )
 
+            PostImageMaxWidthSetting(
+                selected = state.postImageMaxWidth,
+                enabled = state.canChangePostImageMaxWidth,
+                error = state.postImageMaxWidthError,
+                onSelected = { viewModel.submit(SettingsIntent.PostImageMaxWidthChanged(it)) },
+            )
+
             SmileyPickerDecorationSetting(
                 selected = state.smileyPickerDecoration,
                 enabled = state.canChangeSmileyPickerDecoration,
@@ -304,6 +312,60 @@ private fun DisplayToggleRow(
             )
         }
         Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
+    }
+}
+
+/**
+ * #991 — largeur maximale fImage des images de contenu. Extrait pour garder l'écran hôte sous les
+ * seuils de complexité et conserver ce levier indépendant de l'agrandissement GIF et du mode
+ * pleine largeur des posts.
+ */
+@Composable
+private fun PostImageMaxWidthSetting(
+    selected: PostImageMaxWidth,
+    enabled: Boolean,
+    error: Boolean,
+    onSelected: (PostImageMaxWidth) -> Unit,
+) {
+    val intro = stringResource(R.string.settings_img_width_intro_start) +
+        " " +
+        stringResource(R.string.settings_img_width_b)
+    val options = listOf(
+        RedfaceSettingsChoice(
+            PostImageMaxWidth.P90,
+            stringResource(R.string.settings_display_post_image_max_width_90),
+        ),
+        RedfaceSettingsChoice(
+            PostImageMaxWidth.P95,
+            stringResource(R.string.settings_display_post_image_max_width_95),
+        ),
+        RedfaceSettingsChoice(
+            PostImageMaxWidth.P99,
+            stringResource(R.string.settings_display_post_image_max_width_99),
+        ),
+        RedfaceSettingsChoice(
+            PostImageMaxWidth.P100,
+            stringResource(R.string.settings_display_post_image_max_width_100),
+        ),
+    )
+    Text(
+        text = stringResource(R.string.settings_display_post_image_max_width_title),
+        style = MaterialTheme.typography.titleMedium,
+        color = MaterialTheme.colorScheme.onSurface,
+    )
+    Text(
+        text = intro,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    RedfaceSettingsChoiceGroup(
+        options = options,
+        selected = selected,
+        onSelected = onSelected,
+        enabled = enabled,
+    )
+    if (error) {
+        PreferencePersistError(R.string.settings_img_width_persist_failed)
     }
 }
 
