@@ -25,8 +25,8 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.kotlinx.coroutines.android)
-    // #662 — AsyncImage for the opt-in perso-smiley empty state. The network fetcher
-    // (coil-network-okhttp) is provided app-wide via :core:ui; same direct dep pattern as :feature:editor.
+    // #662 — AsyncImage for the opt-in perso-smiley empty state. Since #740 the smiley is a local
+    // `res/raw` GIF (no network fetcher involved); same direct dep pattern as :feature:editor.
     implementation(libs.coil.compose)
 
     testImplementation(libs.junit4)
