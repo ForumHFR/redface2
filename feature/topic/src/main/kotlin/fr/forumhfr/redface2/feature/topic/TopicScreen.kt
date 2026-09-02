@@ -2289,13 +2289,13 @@ private fun TopicLoadedContent(
             // clickables (links, buttons, avatar) consume their own up events, so taps on them
             // never count toward this detector; drags past slop cancel it, so scrolling and the
             // #282 page swipe are untouched. The pull-to-refresh indicator gives the feedback
-            // (isRefreshing is already shared with the pull gesture); the haptic tick confirms
-            // the trigger under the finger.
-            .topicDoubleTapRefresh {
+            // (isRefreshing is already shared with the pull gesture); the haptic tick confirms the
+            // trigger under the finger. While zoomed, the detector is removed instead of relying on
+            // the callback guard, because `detectTapGestures` consumes taps before callback dispatch.
+            .topicDoubleTapRefresh(enabled = !zoomSuspendsScroll) {
                 // #182 — double-tap refresh is suspended while zoomed (contract ZOOMÉ).
-                // The magnifier already consumes the down on its Initial pass while
-                // zoomed (replied mode), so this guard is DEFENSE IN DEPTH — it keeps
-                // the suspension correct even if the modifier stacking ever changes.
+                // The magnifier now leaves tap and long-press targets transparent while zoomed,
+                // so this explicit guard owns the double-tap refresh suspension.
                 if (!zoomState.zoomed) {
                     haptics.performHapticFeedback(HapticFeedbackType.Confirm)
                     onDoubleTapRefresh()
@@ -2642,10 +2642,16 @@ private fun TopicLoadedContent(
 }
 
 /** #382 — the single list-level double-tap detector, exposed for mounted gesture coverage. */
-internal fun Modifier.topicDoubleTapRefresh(onDoubleTapRefresh: () -> Unit): Modifier =
+internal fun Modifier.topicDoubleTapRefresh(
+    enabled: Boolean = true,
+    onDoubleTapRefresh: () -> Unit,
+): Modifier = if (enabled) {
     pointerInput(Unit) {
         detectTapGestures(onDoubleTap = { onDoubleTapRefresh() })
     }
+} else {
+    this
+}
 
 /**
  * #600 → vague 3 (#604) — traversing « Dernier message lu » separator (mockup « Lecture A ») :
