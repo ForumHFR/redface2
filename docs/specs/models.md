@@ -441,6 +441,13 @@ contrat domaine/transport du vote est livré par #779 ; son orchestration MVI et
 chantier séparé. `hasVoted` reste `false` sur la forme résultats et ne décide jamais de la capacité
 de vote : seule la présence de `Topic.pollVoteForm` le fait.
 
+**Affichage des résultats (#1182, 2026-09-02)** : l'UI Redface reconstruit des barres horizontales
+depuis les compteurs parsés, avec un pourcentage entier arrondi. Le dénominateur est `Poll.totalVotes`
+car les fixtures résultats HFR montrent que le bloc `Total : N votes` inclut le vote blanc quand le
+compteur `(M votes blancs)` est affiché (`topic_khakha_page_2.html` : 164 réponses + 12 blancs = 176).
+Le vote blanc est rendu comme une ligne séparée, atténuée, dès que `blankVotes != null` ; s'il est
+absent ou issu d'un ancien cache, aucune ligne n'est inventée.
+
 Le signal `Poll.canClose` vient exclusivement du lien HFR `close_sondage.php`, adjacent au sondage :
 HFR ne le rend que pour le propriétaire d'un sondage ouvert, sur chaque page du topic. Son absence,
 y compris dans un ancien cache, vaut `false`.

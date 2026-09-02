@@ -28,7 +28,7 @@ import org.robolectric.annotation.GraphicsMode
 
 /**
  * #779/#1170 — record-only visual review of poll card states in the three static colour schemes.
- * The 21 PNG files are inspection artefacts, not versioned baselines.
+ * The 24 PNG files are inspection artefacts, not versioned baselines.
  *
  *     ./scripts/docker-dev.sh ./gradlew :feature:topic:testDebugUnitTest \
  *         --tests '*TopicPollVoteRoborazziTest*' --console=plain --no-daemon
@@ -131,6 +131,24 @@ class TopicPollVoteRoborazziTest {
             ),
             pollVote = null,
         )
+        PollScenario.ResultsWithBlank -> PollContent(
+            poll = Poll(
+                question = QUESTION,
+                options = listOf(
+                    PollOption("Kotlin", votes = 18, percentage = 60f),
+                    PollOption("Java", votes = 7, percentage = 23.3f),
+                    PollOption("Rust", votes = 2, percentage = 6.7f),
+                    PollOption("Compose Multiplatform", votes = 1, percentage = 3.3f),
+                ),
+                multipleChoice = false,
+                totalVotes = 30,
+                hasVoted = true,
+                resultsAvailable = true,
+                maxSelections = 1,
+                blankVotes = 2,
+            ),
+            pollVote = null,
+        )
         PollScenario.ClosedResults -> PollContent(
             poll = Poll(
                 question = QUESTION,
@@ -194,6 +212,7 @@ class TopicPollVoteRoborazziTest {
         MultiIdle("multi_idle"),
         Submitting("submitting"),
         Results("results_read_only"),
+        ResultsWithBlank("results_bars_blank"),
         ClosedResults("closed_results"),
         WithoutToken("without_token_read_only"),
     }
