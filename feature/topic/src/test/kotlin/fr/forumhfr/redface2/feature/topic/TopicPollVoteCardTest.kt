@@ -9,6 +9,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import fr.forumhfr.redface2.core.model.Poll
@@ -91,20 +92,25 @@ class TopicPollVoteCardTest {
     }
 
     @Test
-    fun `results keep the historical read-only rendering`() {
+    fun `results render accessible percentage bars`() {
         setResultsCard()
 
-        compose.onNodeWithText("Kotlin — 80", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Kotlin").assertIsDisplayed()
+        compose.onNodeWithText("8 votes").assertIsDisplayed()
+        compose.onNodeWithText("80\u00A0%").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Kotlin, 8 votes, 80\u00A0%").assertIsDisplayed()
         compose.onNodeWithText("10 votes au total • choix unique").assertIsDisplayed()
         compose.onNodeWithText("Voter").assertDoesNotExist()
     }
 
     @Test
-    fun `results show the blank vote count after the total`() {
+    fun `results show blank votes as a dedicated bar row`() {
         setResultsCard(blankVotes = 2)
 
         compose.onNodeWithText("10 votes au total • choix unique").assertIsDisplayed()
-        compose.onNodeWithText("2 votes blancs").assertIsDisplayed()
+        compose.onNodeWithText("Vote blanc").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Kotlin, 6 votes, 60\u00A0%").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Vote blanc, 2 votes, 20\u00A0%").assertIsDisplayed()
     }
 
     @Test
@@ -272,15 +278,16 @@ class TopicPollVoteCardTest {
     private fun setResultsCard(blankVotes: Int? = null) {
         compose.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                val optionVotes = if (blankVotes == null) listOf(8, 2) else listOf(6, 2)
                 TopicPollCard(
                     poll = Poll(
                         question = "Quel langage préférez-vous ?",
                         options = listOf(
-                            PollOption("Kotlin", votes = 8, percentage = 80f),
-                            PollOption("Java", votes = 2, percentage = 20f),
+                            PollOption("Kotlin", votes = optionVotes[0], percentage = 80f),
+                            PollOption("Java", votes = optionVotes[1], percentage = 20f),
                         ),
                         multipleChoice = false,
-                        totalVotes = 10,
+                        totalVotes = optionVotes.sum() + (blankVotes ?: 0),
                         hasVoted = true,
                         resultsAvailable = true,
                         maxSelections = 1,

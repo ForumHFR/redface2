@@ -2977,23 +2977,18 @@ internal fun TopicPollCard(
  */
 @Composable
 private fun TopicPollReadOnlyResults(poll: Poll) {
-    poll.options.forEach { option ->
-        Text(
-            // #697 — the FORM shape carries no numbers : render the bare label instead
-            // of a misleading « 0.0% (0 votes) ».
-            text = if (poll.resultsAvailable) {
-                stringResource(
-                    R.string.topic_poll_option,
-                    option.text,
-                    option.percentage,
-                    option.votes,
-                )
-            } else {
-                option.text
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+    if (poll.resultsAvailable) {
+        TopicPollResultBars(calculatePollResultBars(poll))
+    } else {
+        poll.options.forEach { option ->
+            Text(
+                // #697 — the FORM shape carries no numbers : render the bare label instead
+                // of a misleading « 0 % (0 votes) ».
+                text = option.text,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
     val choiceLabel = if (poll.multipleChoice) {
         stringResource(R.string.topic_poll_multiple_choices)
@@ -3011,16 +3006,18 @@ private fun TopicPollReadOnlyResults(poll: Poll) {
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-    poll.blankVotes?.let { blankVotes ->
-        Text(
-            text = pluralStringResource(
-                R.plurals.topic_poll_blank_votes,
-                blankVotes,
-                blankVotes,
-            ),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+    if (!poll.resultsAvailable) {
+        poll.blankVotes?.let { blankVotes ->
+            Text(
+                text = pluralStringResource(
+                    R.plurals.topic_poll_blank_votes,
+                    blankVotes,
+                    blankVotes,
+                ),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
