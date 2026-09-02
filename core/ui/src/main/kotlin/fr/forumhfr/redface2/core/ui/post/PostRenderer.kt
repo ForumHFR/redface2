@@ -109,6 +109,7 @@ import fr.forumhfr.redface2.core.ui.theme.LocalEgoQuotePseudo
 import fr.forumhfr.redface2.core.ui.theme.LocalFoldLongQuotes
 import fr.forumhfr.redface2.core.ui.theme.LocalIgnoreInlineColors
 import fr.forumhfr.redface2.core.ui.theme.LocalMediaDisplayProfile
+import fr.forumhfr.redface2.core.ui.theme.LocalPostImageMaxWidth
 import fr.forumhfr.redface2.core.ui.theme.egoHighlightColors
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
@@ -521,11 +522,12 @@ private fun ParagraphProse(
         val maxMediaWidthSp = with(density) {
             (maxWidth.toSp().value * SMILEY_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
         }
-        // #959 (§3) — the CONTENT-IMAGE caps, in PHYSICAL px (the sizing equation works px-only,
-        // cadrage Sol r1): fImage × container width, and the 200 sp inline height cap at the
-        // current density × fontScale. Converted once here — the only place density is known.
+        // #959 (§3) + #991 — the CONTENT-IMAGE caps, in PHYSICAL px (the sizing equation works
+        // px-only): fImage × container width, and the 200 sp inline height cap at the current
+        // density × fontScale. Converted once here — the only place density is known.
+        val postImageMaxWidth = LocalPostImageMaxWidth.current
         val maxImageWidthPx = with(density) {
-            (maxWidth.toPx() * IMAGE_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
+            imageMaxWidthPx(maxWidth.toPx(), postImageMaxWidth)
         }
         val maxImageHeightPx = with(density) { INLINE_IMAGE_MAX_HEIGHT_SP.sp.toPx() }.roundToInt()
         // §4 v1.4 (#957) — total horizontal placeholder padding of a content image (4 dp/side),
@@ -1138,6 +1140,7 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
     // The COLD path below is untouched by construction: no metadata → no measured box, the §6
     // slot is deterministic (no dimensions, no MIME — no factor).
     val mediaDisplayProfile = LocalMediaDisplayProfile.current
+    val postImageMaxWidth = LocalPostImageMaxWidth.current
     val gifCeiling = if (metadata?.mimeType == GIF_MIME_TYPE) mediaDisplayProfile.factor else 1f
     // #876 (§8 [AMENDEMENT-v1.5-4]) — `mApercu`: an eligible LINKED PREVIEW (a thumbnail wrapped
     // in a link to a DISTINCT resource of the SAME host, native axis ≤ 400 px — the pure guard
@@ -1163,7 +1166,7 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
         // the reserved loading slot. Cold falls back to the deterministic §6 slot below.
         val displayPx = measured?.let {
             with(blockDensity) {
-                val maxWidthPx = (maxWidth.toPx() * IMAGE_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
+                val maxWidthPx = imageMaxWidthPx(maxWidth.toPx(), postImageMaxWidth)
                 val maxHeightPx = capBlocDp.dp.roundToPx()
                 imageDisplaySizePx(it, maxWidthPx, maxHeightPx, scaleCeiling)
             }
@@ -1173,7 +1176,7 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
         } else {
             // §6 COLD slot (v1.4, [AMENDEMENT-Lot0-3]) : deterministic box before any dimension is
             // known — width fImage × available, height min(capBloc, max(160 dp, 0,75 × width)).
-            val (coldWidth, coldHeight) = coldBlockSlotDp(maxWidth.value, capBlocDp)
+            val (coldWidth, coldHeight) = coldBlockSlotDp(maxWidth.value, capBlocDp, postImageMaxWidth)
             Modifier.size(coldWidth.dp, coldHeight.dp)
         }
         // #831/#958 (Lot 2, §5) — contextual image menu on long-press + linked-image tap, BOTH gated

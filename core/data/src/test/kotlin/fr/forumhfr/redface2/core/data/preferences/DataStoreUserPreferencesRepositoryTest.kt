@@ -10,6 +10,7 @@ import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
@@ -1346,6 +1347,35 @@ class DataStoreUserPreferencesRepositoryTest {
 
         repository.observeMediaDisplayProfile().test {
             assertEquals(MediaDisplayProfile.M, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observePostImageMaxWidth defaults to P95 on an empty store`() = runTest(dispatcher) {
+        repository.observePostImageMaxWidth().test {
+            assertEquals(PostImageMaxWidth.DEFAULT, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setPostImageMaxWidth persists and round-trips every width`() = runTest(dispatcher) {
+        PostImageMaxWidth.entries.forEach { width ->
+            repository.setPostImageMaxWidth(width)
+            repository.observePostImageMaxWidth().test {
+                assertEquals(width, awaitItem())
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+    }
+
+    @Test
+    fun `corrupt post_image_max_width value falls back to P95 instead of crashing`() = runTest(dispatcher) {
+        dataStore.edit { prefs -> prefs[stringPreferencesKey("post_image_max_width")] = "P42" }
+
+        repository.observePostImageMaxWidth().test {
+            assertEquals(PostImageMaxWidth.DEFAULT, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
     }

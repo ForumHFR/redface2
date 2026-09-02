@@ -5,6 +5,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.SmileyKind
 import kotlin.math.roundToInt
@@ -25,9 +26,9 @@ import kotlin.math.roundToInt
  * `[img]` — inline AND block — follows ONE policy since #959 (contrat v1.5 §3), the PHYSICAL-pixel
  * equation [imageDisplaySizePx]: measured intrinsic native size, no physical upscale, height capped
  * (inline [INLINE_IMAGE_MAX_HEIGHT_SP] in px, block the clamped useful-height cap), width capped to
- * fImage × container ([IMAGE_RELATIVE_MAX_WIDTH_FRACTION]). Both paths convert their caps to px
- * before the equation and convert the result back (sp inline / dp block) at the Compose
- * boundary. The **production cold fallback** (unmeasured inline `[img]`) is
+ * fImage × container ([PostImageMaxWidth.fraction]). Both paths convert their caps to px before
+ * the equation and convert the result back (sp inline / dp block) at the Compose boundary.
+ * The **production cold fallback** (unmeasured inline `[img]`) is
  * the one-line [INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP] square in `imageDisplayBox` (#253, no giant Fit flash).
  * The fixed 240×180 [inlineImage] bucket is now only the **default `collectInlineMedia` resolver**
  * (legacy bucket exercised by tests), not the runtime fallback. This kills the empty frame around a
@@ -205,15 +206,15 @@ internal const val SMILEY_MAX_WIDTH_SP = 240
 internal const val SMILEY_RELATIVE_MAX_WIDTH_FRACTION = 0.9f
 
 /**
- * #959/[AMENDEMENT-v1.5-1] (D1 approuvée XaTriX) — the DEDICATED relative width cap of content
- * images (`fImage`), applied identically on the three image paths: inline ([imageDisplayBox]),
- * measured block ([PostMediaDisplayPolicy.blockImageDisplaySize]) and the cold block slot
- * (`COLD_BLOCK_WIDTH_FRACTION` is a LOCKED alias of this constant — single source of truth,
- * pinned by test). 0.95 is an assumed product divergence from the web `max-width:90%` (better
- * use of narrow phone columns). The smiley cap stays a separate 0.9
+ * #959/[AMENDEMENT-v1.5-1] (D1 approuvée XaTriX), then #991 — the DEDICATED relative width cap of
+ * content images (`fImage`), applied identically on the three image paths: inline
+ * ([imageDisplayBox]), measured block ([PostMediaDisplayPolicy.blockImageDisplaySize]) and the
+ * cold block slot. The default remains 0.95; #991 only lets the user select another content-image
+ * cap. The smiley cap stays a separate 0.9
  * ([SMILEY_RELATIVE_MAX_WIDTH_FRACTION], §9 untouchable).
  */
-internal const val IMAGE_RELATIVE_MAX_WIDTH_FRACTION = 0.95f
+internal fun imageMaxWidthPx(containerWidthPx: Float, width: PostImageMaxWidth): Int =
+    (containerWidthPx * width.fraction).roundToInt()
 
 /**
  * #959 (Lot 3, contrat v1.5 §7) — the density-aware DECODE size, common to the inline and block
@@ -369,4 +370,3 @@ internal fun capToWidth(size: PixelSize, maxWidthSp: Int): PixelSize {
         height = (size.height * scale).roundToInt().coerceAtLeast(1),
     )
 }
-

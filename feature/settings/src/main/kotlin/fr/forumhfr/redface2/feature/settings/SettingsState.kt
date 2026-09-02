@@ -5,6 +5,7 @@ import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
@@ -264,6 +265,11 @@ data class SettingsState(
     val isUpdatingMediaDisplayProfile: Boolean = false,
     val mediaDisplayProfileError: Boolean = false,
     val mediaDisplayProfileTouchedLocally: Boolean = false,
+    // #991 — largeur maximale fImage des images de contenu (P95 par défaut).
+    val postImageMaxWidth: PostImageMaxWidth = PostImageMaxWidth.DEFAULT,
+    val isUpdatingPostImageMaxWidth: Boolean = false,
+    val postImageMaxWidthError: Boolean = false,
+    val postImageMaxWidthTouchedLocally: Boolean = false,
     // #989 — délimiteur des cellules du picker de smileys (NONE par défaut).
     val smileyPickerDecoration: SmileyPickerDecoration = SmileyPickerDecoration.NONE,
     val isUpdatingSmileyPickerDecoration: Boolean = false,
@@ -432,6 +438,9 @@ data class SettingsState(
     // #973 — the block-GIF profile selector is gated only by its own write.
     val canChangeMediaDisplayProfile: Boolean
         get() = !isUpdatingMediaDisplayProfile
+
+    val canChangePostImageMaxWidth: Boolean
+        get() = !isUpdatingPostImageMaxWidth
 
     val canChangeSmileyPickerDecoration: Boolean
         get() = !isUpdatingSmileyPickerDecoration
@@ -607,6 +616,9 @@ sealed interface SettingsIntent {
     // #973 — block-GIF display profile. `profile` is the desired selection, applied optimistically
     // with revert-on-failure, like DisplayDensityChanged.
     data class MediaDisplayProfileChanged(val profile: MediaDisplayProfile) : SettingsIntent
+
+    // #991 — maximum fImage width for content images, applied optimistically like the GIF profile.
+    data class PostImageMaxWidthChanged(val width: PostImageMaxWidth) : SettingsIntent
 
     /** #989 — l'utilisateur choisit le délimiteur des cellules du picker de smileys. */
     data class SmileyPickerDecorationChanged(val decoration: SmileyPickerDecoration) : SettingsIntent

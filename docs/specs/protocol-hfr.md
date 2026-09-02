@@ -608,7 +608,36 @@ Deux sources distinctes :
 - **Source de vérité côté lecture** : c'est l'attribut `src` de l'`<img>` produit par HFR qui pilote le rendu, pas une table embarquée client-side. Le parser pose `PostInline.Smiley(kind, imageUrl)` directement à partir de l'`alt`/`title` (pour le `kind`) et du `src` (pour `imageUrl`) — `:core:ui` consomme `imageUrl` tel quel via `AsyncImage`. Pas de reconstruction d'URL à partir du nom (les chemins perso peuvent contenir des sous-dossiers numérotés `images/perso/<N>/`, des espaces encodés, et des variantes — la source HTML est la seule fiable).
 - Cache Coil agressif (les smileys ne changent jamais) : `CachePolicy.ENABLED` + disque infini.
 - **GIFs animés** : builtins comme perso peuvent être des `.gif` animés (`:bounce:`, `:pt1cable:`, majorité des perso). Le décodeur `coil-gif` (`AnimatedImageDecoder.Factory`, API 28+) est enregistré sur le `SingletonImageLoader` côté `:app` pour autoplay sans configuration par-call-site.
-- **Tailles différentes** : les smileys ne sont pas tous 16×16. Le crawl exhaustif `wikismilies.php` réalisé pendant le dogfood a trouvé **34 139** smileys perso, avec une distribution très concentrée sur une ligne HFR de **50 px** : `70×50` (8047), `50×50` (2811), `67×50` (1142), puis beaucoup de variantes `W×50`; les micro-smileys existent aussi (`15×15` 701, `19×19` 399, `16×16` 206). **Depuis #175 (Phase 2F, PR #222), RF2 fait du rendu INTRINSÈQUE** (`:core:ui` `PostMediaDisplayPolicy`), plus de bucket fixe : la taille native du smiley est **mesurée** via Coil (`ImageLoader.execute()` + `IntrinsicMediaSizeCache`) et appliquée **sans upscale** — un sprite `15×15` reste `15×15` (comme le rendu web HFR, qui montre l'`<img>` à sa taille native sous `img { max-width: 90% }`). Caps : **absolu `70 sp` hauteur / `240 sp` largeur** (`SMILEY_MAX_HEIGHT_SP` / `SMILEY_MAX_WIDTH_SP`, `intrinsicSmileyDisplaySize`) puis **relatif `0.9 × largeur du conteneur`** (`SMILEY_RELATIVE_MAX_WIDTH_FRACTION` via `BoxWithConstraints`, réplique le `max-width:90%` de RF1). Alignement **`AboveBaseline`** + `lineHeight` libérée (`TextUnit.Unspecified`) pour laisser la ligne **croître** au lieu de chevaucher (corrige le bug #129). Cold-fallback avant mesure : builtin `16×16` (`builtinPreseedSize`), perso `70×50` (`persoColdFallbackSize`). L'enfant `AsyncImage` suit le placeholder `sp` via `Modifier.fillMaxSize()` (accessibilité `fontScale`), `ContentScale.Fit`. *Avant #175 (Phase 1) : bucket fixe (builtin 18×18, perso 70×50, `Fit`, upscale des micro-smileys) — remplacé car peu fidèle au web.* Les images inline `[img]` restent en **bucket fixe `240×180` / `Inside`** — à migrer vers l'intrinsèque façon smileys (**#224**). Validation visuelle app↔web : **#131**.
+- **Tailles différentes** : les smileys ne sont pas tous 16×16. Le crawl exhaustif
+  `wikismilies.php` réalisé pendant le dogfood a trouvé **34 139** smileys perso, avec une
+  distribution très concentrée sur une ligne HFR de **50 px** : `70×50` (8047), `50×50` (2811),
+  `67×50` (1142), puis beaucoup de variantes `W×50`; les micro-smileys existent aussi (`15×15`
+  701, `19×19` 399, `16×16` 206). **Depuis #175 (Phase 2F, PR #222), RF2 fait du rendu
+  INTRINSÈQUE** (`:core:ui` `PostMediaDisplayPolicy`), plus de bucket fixe : la taille native du
+  smiley est **mesurée** via Coil (`ImageLoader.execute()` + `IntrinsicMediaSizeCache`) et
+  appliquée **sans upscale** — un sprite `15×15` reste `15×15` (comme le rendu web HFR, qui montre
+  l'`<img>` à sa taille native sous `img { max-width: 90% }`). Caps : **absolu `70 sp` hauteur /
+  `240 sp` largeur** (`SMILEY_MAX_HEIGHT_SP` / `SMILEY_MAX_WIDTH_SP`, `intrinsicSmileyDisplaySize`)
+  puis **relatif `0,9 × largeur du conteneur`** (`SMILEY_RELATIVE_MAX_WIDTH_FRACTION` via
+  `BoxWithConstraints`, réplique le `max-width:90%` de RF1). Alignement **`AboveBaseline`** +
+  `lineHeight` libérée (`TextUnit.Unspecified`) pour laisser la ligne **croître** au lieu de
+  chevaucher (corrige le bug #129). Cold-fallback avant mesure : builtin `16×16`
+  (`builtinPreseedSize`), perso `70×50` (`persoColdFallbackSize`). L'enfant `AsyncImage` suit le
+  placeholder `sp` via `Modifier.fillMaxSize()` (accessibilité `fontScale`), `ContentScale.Fit`.
+  *Avant #175 (Phase 1) : bucket fixe (builtin 18×18, perso 70×50, `Fit`, upscale des
+  micro-smileys) — remplacé car peu fidèle au web.* Les images inline `[img]` ont ensuite migré
+  vers le même principe de mesure native : elles utilisent `imageDisplayBox` avec no-upscale et caps
+  dédiés, tandis que le bucket `240×180` ne sert plus qu'aux tests du résolveur historique.
+  Validation visuelle app↔web : **#131**.
+- **Largeur maximale des images de contenu (#991, 2026-09-02)** : les images `[img]` / `fImage`
+  gardent le cap historique par défaut `0,95 × largeur du conteneur`, exposé par le réglage
+  « Largeur maximale des images » (`90 %`, `95 % (défaut)`, `99 %`, `100 %`). La valeur est
+  indépendante de l'agrandissement des GIF et du mode pleine largeur des posts. Elle est appliquée
+  une seule fois par `LocalPostImageMaxWidth` aux trois chemins de rendu : inline mesuré
+  (`ParagraphProse` → `imageDisplayBox`), bloc mesuré (`BlockImage` → `imageDisplaySizePx`) et
+  slot bloc froid (`coldBlockSlotDp`). Les smileys, cc-image et slots inline froids restent bornés
+  par le cap smiley séparé `0,9 × largeur` (`SMILEY_RELATIVE_MAX_WIDTH_FRACTION`) ; la préférence
+  n'entre pas dans `IntrinsicMediaSizeCache`, qui ne stocke que la taille native mesurée.
 - Extraire le code smiley (`:jap:`, `:bounce:`) depuis l'attribut `alt`/`title` de l'`<img>` pour pouvoir le re-saisir côté éditeur — c'est un sujet **éditeur Phase 2**, pas le chemin principal de lecture.
 - Les smileys custom d'un utilisateur sont exposés dans son profil (section `perso`).
 - Un catalogue "wiki smileys" est disponible via `message-smi-mp-aj.php` (recherche de smileys) — utilisé par l'éditeur Phase 2F-B (#11 partiel), pas en lecture.

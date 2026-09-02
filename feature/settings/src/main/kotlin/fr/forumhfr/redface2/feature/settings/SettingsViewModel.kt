@@ -12,8 +12,9 @@ import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
-import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
+import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
@@ -247,6 +248,12 @@ class SettingsViewModel @Inject constructor(
             isLocked = { it.isUpdatingMediaDisplayProfile },
             apply = { state, value -> state.copy(mediaDisplayProfile = value) },
         )
+        // #991 — largeur maximale fImage des images de contenu (enum), même forme de collecte.
+        observePreference(
+            flow = userPreferencesRepository.observePostImageMaxWidth(),
+            isLocked = { it.isUpdatingPostImageMaxWidth },
+            apply = { state, value -> state.copy(postImageMaxWidth = value) },
+        )
         // #989 — délimiteur du picker de smileys (enum), même forme de collecte.
         observePreference(
             flow = userPreferencesRepository.observeSmileyPickerDecoration(),
@@ -379,6 +386,7 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.DisplayDensityChanged -> updateDisplayDensity(intent.density)
             is SettingsIntent.FontScaleChanged -> updateFontScale(intent.scale)
             is SettingsIntent.MediaDisplayProfileChanged -> updateMediaDisplayProfile(intent.profile)
+            is SettingsIntent.PostImageMaxWidthChanged -> updatePostImageMaxWidth(intent.width)
             is SettingsIntent.SmileyPickerDecorationChanged ->
                 updateSmileyPickerDecoration(intent.decoration)
             is SettingsIntent.SetUploadProvider -> updateUploadProvider(intent.provider)
@@ -727,6 +735,63 @@ class SettingsViewModel @Inject constructor(
 
     // #973 — block-GIF display profile is an enum too; same bespoke optimistic-flip shape as
     // updateDisplayDensity. previous is captured for revert.
+    private fun updateMediaDisplayProfile(desired: MediaDisplayProfile) {
+        val previous = _state.value.mediaDisplayProfile
+        _state.update {
+            it.copy(
+                mediaDisplayProfile = desired,
+                isUpdatingMediaDisplayProfile = true,
+                mediaDisplayProfileError = false,
+                mediaDisplayProfileTouchedLocally = true,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { userPreferencesRepository.setMediaDisplayProfile(desired) }
+                .onSuccess {
+                    _state.update { it.copy(mediaDisplayProfile = desired, isUpdatingMediaDisplayProfile = false) }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            mediaDisplayProfile = previous,
+                            isUpdatingMediaDisplayProfile = false,
+                            mediaDisplayProfileError = true,
+                        )
+                    }
+                }
+        }
+    }
+
+    // #991 — content-image max width is an enum too; same optimistic-flip shape as GIF profile.
+    private fun updatePostImageMaxWidth(desired: PostImageMaxWidth) {
+        val previous = _state.value.postImageMaxWidth
+        _state.update {
+            it.copy(
+                postImageMaxWidth = desired,
+                isUpdatingPostImageMaxWidth = true,
+                postImageMaxWidthError = false,
+                postImageMaxWidthTouchedLocally = true,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { userPreferencesRepository.setPostImageMaxWidth(desired) }
+                .onSuccess {
+                    _state.update {
+                        it.copy(postImageMaxWidth = desired, isUpdatingPostImageMaxWidth = false)
+                    }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            postImageMaxWidth = previous,
+                            isUpdatingPostImageMaxWidth = false,
+                            postImageMaxWidthError = true,
+                        )
+                    }
+                }
+        }
+    }
+
     /** #989 — délimiteur du picker : même forme optimiste + rollback que le profil GIF (#973). */
     private fun updateSmileyPickerDecoration(desired: SmileyPickerDecoration) {
         val previous = _state.value.smileyPickerDecoration
@@ -754,33 +819,6 @@ class SettingsViewModel @Inject constructor(
                             smileyPickerDecoration = previous,
                             isUpdatingSmileyPickerDecoration = false,
                             smileyPickerDecorationError = true,
-                        )
-                    }
-                }
-        }
-    }
-
-    private fun updateMediaDisplayProfile(desired: MediaDisplayProfile) {
-        val previous = _state.value.mediaDisplayProfile
-        _state.update {
-            it.copy(
-                mediaDisplayProfile = desired,
-                isUpdatingMediaDisplayProfile = true,
-                mediaDisplayProfileError = false,
-                mediaDisplayProfileTouchedLocally = true,
-            )
-        }
-        viewModelScope.launch {
-            runCatching { userPreferencesRepository.setMediaDisplayProfile(desired) }
-                .onSuccess {
-                    _state.update { it.copy(mediaDisplayProfile = desired, isUpdatingMediaDisplayProfile = false) }
-                }
-                .onFailure {
-                    _state.update {
-                        it.copy(
-                            mediaDisplayProfile = previous,
-                            isUpdatingMediaDisplayProfile = false,
-                            mediaDisplayProfileError = true,
                         )
                     }
                 }

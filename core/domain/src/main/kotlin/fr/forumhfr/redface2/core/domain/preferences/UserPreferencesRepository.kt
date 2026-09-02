@@ -514,6 +514,16 @@ interface UserPreferencesRepository {
     suspend fun setMediaDisplayProfile(profile: MediaDisplayProfile)
 
     /**
+     * Maximum content image width (#991): [PostImageMaxWidth.P95] (default) keeps the historical
+     * fImage cap, while P90 / P99 / P100 let the user tighten or relax content images. This is
+     * independent from GIF enlargement and full-width posts.
+     */
+    fun observePostImageMaxWidth(): Flow<PostImageMaxWidth>
+
+    /** Persists [observePostImageMaxWidth]. Default [PostImageMaxWidth.P95] until the first call. */
+    suspend fun setPostImageMaxWidth(width: PostImageMaxWidth)
+
+    /**
      * Smiley picker cell delimiter (#989): [SmileyPickerDecoration.NONE] (default) keeps the
      * current undelimited picker; [SmileyPickerDecoration.OUTLINE] and
      * [SmileyPickerDecoration.SEPARATORS] add visual cell boundaries without changing thumbnail size

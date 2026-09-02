@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.ui.post
 
 import android.content.Context
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
@@ -24,11 +25,13 @@ import coil3.annotation.DelicateCoilApi
 import coil3.intercept.Interceptor
 import coil3.request.ImageResult
 import coil3.test.FakeImageLoaderEngine
+import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.parser.TopicPageParser
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.core.ui.theme.LocalPostImageMaxWidth
 import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -90,12 +93,27 @@ class PostRendererSegmentedTest {
         }
     }
 
-
     private val DpRect.w get() = (right - left).value
     private val DpRect.h get() = (bottom - top).value
     private val br = PostInline.LineBreak
     private fun text(v: String) = PostInline.Text(v)
     private fun img(url: String, desc: String) = PostInline.InlineImage(url = url, description = desc)
+
+    private data class ImagePathWidths(
+        val inlineMeasured: Float,
+        val blockMeasured: Float,
+        val blockCold: Float,
+    )
+
+    private fun currentImagePathWidths(): ImagePathWidths {
+        val blocks = composeTestRule.onAllNodesWithTag(BLOCK_IMAGE_TEST_TAG)
+        blocks.assertCountEquals(2)
+        return ImagePathWidths(
+            inlineMeasured = composeTestRule.onNodeWithContentDescription("inline-cap").getBoundsInRoot().w,
+            blockMeasured = blocks[0].getBoundsInRoot().w,
+            blockCold = blocks[1].getBoundsInRoot().w,
+        )
+    }
 
     // ---------- §2 branchement : ordre + topologie ----------
 
@@ -302,6 +320,45 @@ class PostRendererSegmentedTest {
         val bounds = composeTestRule.onNodeWithContentDescription("large").getBoundsInRoot()
         assertEquals(342f, bounds.w, 2f)
         assertEquals(256.7f, bounds.h, 2f)
+    }
+
+    @Test
+    fun `inline measured block measured and cold block follow LocalPostImageMaxWidth together`() {
+        val selectedWidth = mutableStateOf(PostImageMaxWidth.P90)
+        val deadCold = "https://images.example.org/never-served/fimage-cold.png"
+        val cache = DefaultIntrinsicMediaSizeCache()
+        cache.putSuccess(imgA, IntrinsicMediaMetadata(IntSize(4000, 3000), mimeType = null))
+        cache.putSuccess(imgB, IntrinsicMediaMetadata(IntSize(4000, 3000), mimeType = null))
+        val content = PostContent(
+            blocks = listOf(
+                PostBlock.Paragraph(listOf(text("avant "), img(imgA, "inline-cap"), text(" après"))),
+                PostBlock.Image(url = imgB, description = "block-cap"),
+                PostBlock.Image(url = deadCold, description = "cold-cap"),
+            ),
+        )
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(
+                    LocalIntrinsicMediaSizeCache provides cache,
+                    LocalPostImageMaxWidth provides selectedWidth.value,
+                ) {
+                    PostRenderer(content = content)
+                }
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        val p90 = currentImagePathWidths()
+        composeTestRule.runOnUiThread { selectedWidth.value = PostImageMaxWidth.P100 }
+        composeTestRule.waitForIdle()
+        val p100 = currentImagePathWidths()
+
+        assertEquals(324f, p90.inlineMeasured, 2f)
+        assertEquals(324f, p90.blockMeasured, 2f)
+        assertEquals(324f, p90.blockCold, 2f)
+        assertEquals(360f, p100.inlineMeasured, 2f)
+        assertEquals(360f, p100.blockMeasured, 2f)
+        assertEquals(360f, p100.blockCold, 2f)
     }
 
     @Test

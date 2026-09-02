@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.ui.post
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.SmileyKind
 import fr.forumhfr.redface2.core.ui.theme.RedfaceTypography
@@ -89,13 +90,36 @@ class PostMediaDisplayPolicyTest {
     @Test
     fun `cold block slot follows the v1_4 formula`() {
         // #957 — §6 cold : width fImage×available ; height min(cap, max(160, 0,75×width)).
-        // #959/[AMENDEMENT-v1.5-1] — fImage = 0,95 (was 0,9) : 360×0,95 = 342, h = 0,75×342.
-        val (w, h) = coldBlockSlotDp(availableWidthDp = 360f, capBlocDp = 400f)
+        // #991 keeps P95 as the default: 360×0,95 = 342, h = 0,75×342.
+        val (w, h) = coldBlockSlotDp(
+            availableWidthDp = 360f,
+            capBlocDp = 400f,
+            postImageMaxWidth = PostImageMaxWidth.P95,
+        )
         assertEquals(342f, w, 0.01f)
         assertEquals(256.5f, h, 0.01f)
         // Plancher 160 sur une colonne étroite ; cap qui borde en split-screen (E11 : 301 dp).
-        assertEquals(160f, coldBlockSlotDp(120f, 400f).second, 0.01f)
-        assertEquals(301f, coldBlockSlotDp(800f, 301f).second, 0.01f)
+        assertEquals(160f, coldBlockSlotDp(120f, 400f, PostImageMaxWidth.P95).second, 0.01f)
+        assertEquals(301f, coldBlockSlotDp(800f, 301f, PostImageMaxWidth.P95).second, 0.01f)
+    }
+
+    @Test
+    fun `cold block slot width follows the selected post image preset`() {
+        val p90 = coldBlockSlotDp(
+            availableWidthDp = 360f,
+            capBlocDp = 400f,
+            postImageMaxWidth = PostImageMaxWidth.P90,
+        )
+        val p100 = coldBlockSlotDp(
+            availableWidthDp = 360f,
+            capBlocDp = 400f,
+            postImageMaxWidth = PostImageMaxWidth.P100,
+        )
+
+        assertEquals(324f, p90.first, 0.01f)
+        assertEquals(243f, p90.second, 0.01f)
+        assertEquals(360f, p100.first, 0.01f)
+        assertEquals(270f, p100.second, 0.01f)
     }
 
     @Test

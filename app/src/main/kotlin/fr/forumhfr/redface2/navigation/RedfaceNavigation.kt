@@ -873,6 +873,8 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
     val showScrollbar by themeViewModel.showScrollbar.collectAsStateWithLifecycle()
     // #973 — block-GIF display profile (S/M/L), provided to the post renderer via RedfaceTheme.
     val mediaDisplayProfile by themeViewModel.mediaDisplayProfile.collectAsStateWithLifecycle()
+    // #991 — maximum fImage width, provided to all post image paths via RedfaceTheme.
+    val postImageMaxWidth by themeViewModel.postImageMaxWidth.collectAsStateWithLifecycle()
     // #989 — cell delimiter of the smiley picker, seeded into the theme below.
     val smileyPickerDecoration by themeViewModel.smileyPickerDecoration.collectAsStateWithLifecycle()
     // #666 — show/hide the labels under the bottom-nav icons (resolved at the shell for the suite below).
@@ -942,6 +944,7 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
             foldLongQuotes = foldLongQuotes,
             showScrollbar = showScrollbar,
             mediaDisplayProfile = mediaDisplayProfile,
+            postImageMaxWidth = postImageMaxWidth,
             smileyPickerDecoration = smileyPickerDecoration,
         ),
     ) {
