@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.settings
 
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -145,6 +146,50 @@ class SettingsColorsScreenTest {
     }
 
     @Test
+    fun `preview reading tokens follow Rouge RF1 dark reading surfaces`() {
+        val expected = mountPreviewForTokenAssertions(
+            preferences = ThemeColorPreferences(
+                accent = ThemeAccent.Preset(AccentPreset.ROUGE_REDFACE1),
+            ),
+            darkTheme = true,
+        )
+
+        assertPreviewReadingTokens(expected)
+    }
+
+    @Test
+    fun `preview reading tokens follow Rouge RF1 light reading surfaces`() {
+        val expected = mountPreviewForTokenAssertions(
+            preferences = ThemeColorPreferences(
+                accent = ThemeAccent.Preset(AccentPreset.ROUGE_REDFACE1),
+            ),
+            darkTheme = false,
+        )
+
+        assertPreviewReadingTokens(expected)
+    }
+
+    @Test
+    fun `preview spoiler uses the AMOLED bright surface branch`() {
+        val expected = mountPreviewForTokenAssertions(
+            preferences = ThemeColorPreferences(
+                accent = ThemeAccent.Preset(AccentPreset.ROUGE_REDFACE1),
+                darkSurfaceTone = DarkSurfaceTone.AMOLED,
+            ),
+            darkTheme = true,
+        )
+
+        assertEquals(expected.surfaceBright, expected.spoilerContainer)
+        composeTestRule.onNodeWithTag(SETTINGS_COLOR_PREVIEW_SPOILER_TAG, useUnmergedTree = true)
+            .assert(
+                SemanticsMatcher.expectValue(
+                    SettingsColorPreviewSpoilerContainerColorKey,
+                    expected.spoilerContainer,
+                ),
+            )
+    }
+
+    @Test
     fun `valid custom hex normalizes and persists the custom accent`() {
         mountWithReducer()
 
@@ -224,6 +269,51 @@ class SettingsColorsScreenTest {
             }
         }
         composeTestRule.waitForIdle()
+    }
+
+    private fun mountPreviewForTokenAssertions(
+        preferences: ThemeColorPreferences,
+        darkTheme: Boolean,
+    ): PreviewExpectedColors {
+        var expected: PreviewExpectedColors? = null
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = darkTheme, themeColorPreferences = preferences) {
+                expected = previewExpectedColors()
+            }
+            SettingsColorPreview(preferences = preferences, darkTheme = darkTheme)
+        }
+        composeTestRule.waitForIdle()
+        return checkNotNull(expected)
+    }
+
+    private fun assertPreviewReadingTokens(expected: PreviewExpectedColors) {
+        composeTestRule.onNodeWithTag(SETTINGS_COLOR_PREVIEW_HEADER_TAG, useUnmergedTree = true)
+            .assert(
+                SemanticsMatcher.expectValue(
+                    SettingsColorPreviewHeaderContainerColorKey,
+                    expected.headerContainer,
+                ),
+            )
+        composeTestRule.onNodeWithTag(SETTINGS_COLOR_PREVIEW_QUOTE_TAG, useUnmergedTree = true)
+            .assert(
+                SemanticsMatcher.expectValue(
+                    SettingsColorPreviewQuoteContainerColorKey,
+                    expected.quoteContainer,
+                ),
+            )
+            .assert(
+                SemanticsMatcher.expectValue(
+                    SettingsColorPreviewQuoteAccentColorKey,
+                    expected.quoteAccent,
+                ),
+            )
+        composeTestRule.onNodeWithTag(SETTINGS_COLOR_PREVIEW_SPOILER_TAG, useUnmergedTree = true)
+            .assert(
+                SemanticsMatcher.expectValue(
+                    SettingsColorPreviewSpoilerContainerColorKey,
+                    expected.spoilerContainer,
+                ),
+            )
     }
 
     @Composable
@@ -323,5 +413,30 @@ class SettingsColorsScreenTest {
     private fun ThemeAccent.effectiveRgbForTest(): Int = when (this) {
         is ThemeAccent.Custom -> rgb
         is ThemeAccent.Preset -> preset.seedRgb
+    }
+
+    private data class PreviewExpectedColors(
+        val headerContainer: Color,
+        val quoteContainer: Color,
+        val quoteAccent: Color,
+        val spoilerContainer: Color,
+        val surfaceBright: Color,
+    )
+
+    // Reads MaterialTheme in place: the Konsist rule keeps the material3 ColorScheme type in core ui.
+    @Composable
+    private fun previewExpectedColors(): PreviewExpectedColors {
+        val scheme = MaterialTheme.colorScheme
+        return PreviewExpectedColors(
+            headerContainer = scheme.secondaryContainer,
+            quoteContainer = scheme.surfaceContainerHighest,
+            quoteAccent = scheme.primary,
+            spoilerContainer = if (scheme.surface == Color.Black) {
+                scheme.surfaceBright
+            } else {
+                scheme.surfaceContainerLow
+            },
+            surfaceBright = scheme.surfaceBright,
+        )
     }
 }
