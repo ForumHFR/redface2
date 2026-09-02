@@ -1,8 +1,9 @@
-Redface 2 v0.50.2 — bêta.
+Redface 2 v0.51.0 — dev.
 
-Grosse mise à jour depuis la 0.43.0 :
-- Sondages : voter dans l'app, voir les sondages clos et leur échéance, et clore le vôtre depuis n'importe quelle page.
-- Liens : ouverture externe sans rebond, choix de l'app, aide Firefox.
-- Posts de modération surlignés et pastilles de rôle du staff.
-- Vue Forum : filtre mémorisé, recherche, sujets épinglés séparés.
-- Badge « cité N fois » cliquable, plus divers correctifs de lecture.
+Retours des testeurs après la bêta :
+- Répondre en citant ramène au message cité (nicko).
+- Ouvrir un drapeau montre le marqueur « dernier message lu » (nicko).
+- Onglets Drapeaux : plus d'onglet figé après un changement rapide (styx42).
+- Pastille « pages à lire » colorée selon le retard (thibw).
+- Recherche insensible aux accents, œil mot de passe, marge en trop en vue Forum, smiley d'état vide hors-ligne.
+- Technique : compileSdk 37, mises à jour androidx/Compose.

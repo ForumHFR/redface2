@@ -1,8 +1,9 @@
-Redface 2 v0.50.2 — beta.
+Redface 2 v0.51.0 — dev.
 
-Big update since 0.43.0:
-- Polls: vote in the app, see closed polls and their deadline, and (as topic owner) close yours from any page.
-- Links: external links open without bouncing, app chooser, Firefox hint.
-- Moderation posts highlighted, staff role pills.
-- Forum view: remembered filter, search, separated pinned topics.
-- Clickable "quoted N times" badge, plus various reading fixes.
+Tester feedback after the beta:
+- Replying with a quote lands on the quoted post (nicko).
+- Opening a flag shows the "last read" marker (nicko).
+- Flag tabs: no more stale tab after a quick switch (styx42).
+- "Pages to read" pill coloured by lag (thibw).
+- Accent-insensitive search, password eye, extra margin in the Forum view, offline empty-state smiley.
+- Technical: compileSdk 37, androidx/Compose updates.

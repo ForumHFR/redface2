@@ -16,6 +16,32 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.51.0` — `internal` (dev) — 2026-09-02
+
+Premier lot dev après la promotion bêta `0.50.2` : nuit de correctifs et de suggestions des testeurs (nicko, styx42, thibw, tinc), plus le passage à `compileSdk 37` qui débloque les mises à jour androidx / Compose.
+
+### Ajouté
+
+- **Pastille « pages à lire » colorée selon le retard** ([#814](https://github.com/ForumHFR/redface2/issues/814)) — dans la liste des drapeaux, la pastille « +N » prend sa couleur du nombre de pages en retard (1-2 : neutre, 3-9 : accentuée, 10 et plus : alerte) et non plus de la couleur du drapeau ; identique en clair, sombre et AMOLED. Suggestion de thibw.
+- **Œil « afficher le mot de passe » sur l'écran de connexion** ([#969](https://github.com/ForumHFR/redface2/issues/969)) — un bouton dans le champ mot de passe bascule son affichage en clair pour vérifier sa saisie.
+- **Recherche insensible aux accents** ([#739](https://github.com/ForumHFR/redface2/issues/739)) — la recherche dans les drapeaux et les discussions (et le filtre de sujets de la vue Forum, la recherche des réglages) ignore désormais accents, ligatures (œ, æ) et casse : « Élément » trouve « element » et inversement.
+
+### Corrigé
+
+- **Répondre en citant ramène au message cité quand il est sur la page d'arrivée** ([#974](https://github.com/ForumHFR/redface2/issues/974)) — après l'envoi d'une réponse avec citation(s), inline ou en cartes, la lecture reprend au niveau du message cité le plus récent lorsqu'il se trouve sur la page où la réponse a été publiée ; sans citation, ou si le message cité est sur une autre page, l'arrivée en bas de page est conservée (cas suivi dans [#1224](https://github.com/ForumHFR/redface2/issues/1224)). Signalé par nicko.
+- **Ouvrir un drapeau montre le marqueur « dernier message lu »** ([#1137](https://github.com/ForumHFR/redface2/issues/1137)) — quand le dernier post lu est plus haut que l'écran, l'arrivée ne s'aligne plus sur son haut (qui laissait tous les non-lus hors champ) mais sur le marqueur, la fin du post juste au-dessus ; l'ajustement suit le chargement des images. Signalé par nicko.
+- **Onglets Drapeaux : plus d'onglet figé après un changement rapide** ([#743](https://github.com/ForumHFR/redface2/issues/743)) — la fenêtre anti-rafale de l'actualisation automatique est désormais par onglet, et un onglet ouvert pendant l'actualisation d'un autre est rafraîchi dès que celle-ci se termine. Signalé par styx42.
+- **Vue Forum : marge doublée sous la barre d'état** ([#1149](https://github.com/ForumHFR/redface2/issues/1149)) — la liste d'une catégorie appliquait deux fois les marges des barres système (haut partout, bas et côtés selon la navigation) ; elles sont appliquées une seule fois.
+- **État vide « humoristique » des Drapeaux hors-ligne** ([#740](https://github.com/ForumHFR/redface2/issues/740)) — le smiley de l'état vide est désormais embarqué dans l'application au lieu d'être chargé depuis le forum, il s'affiche donc aussi sans réseau.
+
+### Technique
+
+- **compileSdk 37** ([#1216](https://github.com/ForumHFR/redface2/issues/1216)) — prérequis des mises à jour androidx / Compose / coil depuis août 2026 ; `targetSdk` reste 36. L'outillage local (`docker-dev.sh`) installe lui-même les plateformes SDK dans son cache ; `:core:ui` épingle Robolectric sur l'API 34.
+- **Toolchain** ([#1220](https://github.com/ForumHFR/redface2/pull/1220)) — AGP 9.3.1, Kotlin 2.4.10, KSP 2.3.10, Hilt 2.60.1 (jspecify en `compileOnly` pour KTLC-363).
+- **Dépendances** — androidx.core 1.19 ([#747](https://github.com/ForumHFR/redface2/pull/747)), Compose BOM 2026.08.00 ([#1009](https://github.com/ForumHFR/redface2/pull/1009)), coil 3.6 et groupe réseau/imagerie ([#1218](https://github.com/ForumHFR/redface2/pull/1218)).
+
+---
+
 ## `0.50.2` — `open` (bêta) — 2026-09-01
 
 Promotion bêta du lot développé en dev de `0.44.0` à `0.50.2`, depuis la précédente bêta `0.43.0` (parité de lecture MP). Le détail par version dev figure dans les entrées ci-dessous.
