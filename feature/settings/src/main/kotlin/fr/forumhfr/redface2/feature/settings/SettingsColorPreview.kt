@@ -12,7 +12,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -222,7 +221,7 @@ private fun PreviewQuote() {
 @Composable
 private fun PreviewSpoiler() {
     val readingColors = readingContentColors()
-    val spoilerContainerColor = previewSpoilerContainerColor(MaterialTheme.colorScheme)
+    val spoilerContainerColor = previewSpoilerContainerColor()
     Card(
         modifier = Modifier
             .testTag(SETTINGS_COLOR_PREVIEW_SPOILER_TAG)
@@ -277,5 +276,10 @@ private fun PreviewFooter() {
     }
 }
 
-private fun previewSpoilerContainerColor(scheme: ColorScheme): Color =
-    if (scheme.surface == Color.Black) scheme.surfaceBright else scheme.surfaceContainerLow
+// Mirrors PostRenderer.spoilerContainerColor (#978). Reads MaterialTheme directly: the Konsist rule
+// keeps the material3 ColorScheme type confined to core ui.
+@Composable
+private fun previewSpoilerContainerColor(): Color {
+    val scheme = MaterialTheme.colorScheme
+    return if (scheme.surface == Color.Black) scheme.surfaceBright else scheme.surfaceContainerLow
+}

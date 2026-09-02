@@ -1,6 +1,5 @@
 package fr.forumhfr.redface2.feature.settings
 
-import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -279,7 +278,7 @@ class SettingsColorsScreenTest {
         var expected: PreviewExpectedColors? = null
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = darkTheme, themeColorPreferences = preferences) {
-                expected = previewExpectedColors(MaterialTheme.colorScheme)
+                expected = previewExpectedColors()
             }
             SettingsColorPreview(preferences = preferences, darkTheme = darkTheme)
         }
@@ -424,8 +423,11 @@ class SettingsColorsScreenTest {
         val surfaceBright: Color,
     )
 
-    private fun previewExpectedColors(scheme: ColorScheme): PreviewExpectedColors =
-        PreviewExpectedColors(
+    // Reads MaterialTheme in place: the Konsist rule keeps the material3 ColorScheme type in core ui.
+    @Composable
+    private fun previewExpectedColors(): PreviewExpectedColors {
+        val scheme = MaterialTheme.colorScheme
+        return PreviewExpectedColors(
             headerContainer = scheme.secondaryContainer,
             quoteContainer = scheme.surfaceContainerHighest,
             quoteAccent = scheme.primary,
@@ -436,4 +438,5 @@ class SettingsColorsScreenTest {
             },
             surfaceBright = scheme.surfaceBright,
         )
+    }
 }
