@@ -53,7 +53,7 @@ internal fun TopicPollResultBars(resultBars: PollResultBars) {
                 votes = option.votes,
                 percentage = option.percentage,
                 widthFraction = option.widthFraction,
-                isLeading = option.isLeading,
+                role = if (option.isLeading) PollResultRowRole.LEADING else PollResultRowRole.REGULAR,
             )
         }
         resultBars.blankVote?.let { blankVote ->
@@ -62,11 +62,14 @@ internal fun TopicPollResultBars(resultBars: PollResultBars) {
                 votes = blankVote.votes,
                 percentage = blankVote.percentage,
                 widthFraction = blankVote.widthFraction,
-                isBlankVote = true,
+                role = PollResultRowRole.BLANK,
             )
         }
     }
 }
+
+/** Role used to select Material color roles for a poll result row. */
+private enum class PollResultRowRole { LEADING, REGULAR, BLANK }
 
 @Composable
 private fun TopicPollResultBarRow(
@@ -74,8 +77,7 @@ private fun TopicPollResultBarRow(
     votes: Int,
     percentage: Int,
     widthFraction: Float,
-    isBlankVote: Boolean = false,
-    isLeading: Boolean = false,
+    role: PollResultRowRole,
 ) {
     val votesLabel = pluralStringResource(R.plurals.topic_poll_result_votes, votes, votes)
     val percentageLabel = stringResource(R.string.topic_poll_result_percentage, percentage)
@@ -85,7 +87,7 @@ private fun TopicPollResultBarRow(
         votesLabel,
         percentageLabel,
     )
-    val rowColors = pollResultRowColors(isBlankVote = isBlankVote, isLeading = isLeading)
+    val rowColors = pollResultRowColors(role)
 
     Column(
         modifier = Modifier
@@ -137,18 +139,18 @@ private fun TopicPollResultBarRow(
 }
 
 @Composable
-private fun pollResultRowColors(isBlankVote: Boolean, isLeading: Boolean): PollResultRowColors {
+private fun pollResultRowColors(role: PollResultRowRole): PollResultRowColors {
     val colors = MaterialTheme.colorScheme
-    return when {
-        isBlankVote -> PollResultRowColors(
+    return when (role) {
+        PollResultRowRole.BLANK -> PollResultRowColors(
             fillColor = colors.outline,
             contentColor = colors.onSurfaceVariant,
         )
-        isLeading -> PollResultRowColors(
+        PollResultRowRole.LEADING -> PollResultRowColors(
             fillColor = colors.primaryContainer,
             contentColor = colors.onSurface,
         )
-        else -> PollResultRowColors(
+        PollResultRowRole.REGULAR -> PollResultRowColors(
             fillColor = colors.tertiaryContainer,
             contentColor = colors.onSurfaceVariant,
         )
