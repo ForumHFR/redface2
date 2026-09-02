@@ -16,6 +16,17 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.52.1` — `internal` (dev) — 2026-09-02
+
+Correctifs issus de la recette visuelle de 0.52.0 (émulateur API 34, rapport : https://forumhfr.github.io/artifacts/couleurs-296-recette/). Produit par Sol (Codex) sous gate Fable.
+
+### Corrigé
+
+- **Couleurs : le champ hexa ne s'active plus tout seul** ([#296](https://github.com/ForumHFR/redface2/issues/296)) — valider (Entrée ou perte de focus) le champ « Couleur personnalisée » sans l'avoir modifié ne bascule plus l'accent en personnalisé et ne désélectionne plus le preset. Quand un preset est actif, le champ est vide et sa couleur graine s'affiche en indication ; saisir exactement cette valeur ne change rien.
+- **Couleurs : aperçu fidèle en Gris RF1** ([#296](https://github.com/ForumHFR/redface2/issues/296)) — le faux message de l'aperçu utilise la même surface que les vraies cartes de posts (blanche sur fond gris RF1) au lieu d'un gris sur gris.
+
+---
+
 ## `0.52.0` — `internal` (dev) — 2026-09-02
 
 Lot « Couleurs » (#296), demandé de longue date par les testeurs (Lt Ripley, Stylken, Azgor, antiseptiqueIncolore) et par XaTriX (#883). Produit par Sol (Codex) sous gate Fable, en deux PR (#1237 moteur, #1238 réglages).

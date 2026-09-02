@@ -1,5 +1,4 @@
-Redface 2 v0.52.0 — dev.
+Redface 2 v0.52.1 — dev.
 
-- Nouveau : Réglages → Affichage → Couleurs. Accent au choix (8 presets ou code hexa), ton du fond (Teinté, Blanc, Gris RF1), AMOLED, couleurs du système (Android 12+), aperçu en direct.
-- Le thème clair passe par défaut sur un fond gris esprit RF1 ; l'ancien rendu reste disponible (Ton du fond → Teinté M3).
-- AMOLED : spoiler visible et accent conservé.
+- Couleurs : valider le champ hexa sans l'avoir modifié ne bascule plus l'accent en personnalisé ; preset actif = champ vide avec la graine en indication.
+- Couleurs : l'aperçu montre les messages sur la même surface que le vrai topic (cartes blanches en Gris RF1).

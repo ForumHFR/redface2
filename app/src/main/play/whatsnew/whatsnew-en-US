@@ -1,5 +1,4 @@
-Redface 2 v0.52.0 — dev.
+Redface 2 v0.52.1 — dev.
 
-- New: Settings → Display → Colours. Pick an accent (8 presets or a hex code), the background tone (Tinted, White, RF1 grey), AMOLED, system colours (Android 12+), with a live preview.
-- The light theme now defaults to an RF1-style grey background; the previous look stays available (Background tone → Tinted M3).
-- AMOLED: visible spoiler, accent kept.
+- Colours: confirming the hex field without editing it no longer switches the accent to custom; with a preset active the field is empty and shows the seed as a hint.
+- Colours: the preview paints posts on the same surface as the real topic (white cards on RF1 grey).
