@@ -12,6 +12,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
@@ -1498,7 +1499,7 @@ class PrivateMessageThreadContentTest {
     }
 
     @Test
-    fun `direct multi quote target is inert while the reader is zoomed`() {
+    fun `direct multi quote target still works while the reader is zoomed`() {
         var toggles = 0
         val state = contentState(
             messages = listOf(message(1, "Alice", "Corps du MP").copy(quoteRef = 1)),
@@ -1512,16 +1513,36 @@ class PrivateMessageThreadContentTest {
             ),
         )
 
-        compose.onNodeWithContentDescription("Ajouter à la citation multiple")
-            .performTouchInput { click() }
+        val target = compose.onNodeWithContentDescription(QUOTE_TARGET_DESCRIPTION)
+        target.performTouchInput { click() }
         assertEquals("the target must work at rest", 1, toggles)
 
-        pinchOutThread()
+        val targetCenterAtRest = target.fetchSemanticsNode().boundsInRoot.center
+        pinchOutThreadAround(anchorInRoot = targetCenterAtRest)
         compose.onNodeWithContentDescription(ZOOM_RESET_DESCRIPTION).assertIsDisplayed()
-        compose.onNodeWithContentDescription("Ajouter à la citation multiple")
-            .performTouchInput { click() }
 
-        assertEquals("the zoom modifier must consume down before the child target", 1, toggles)
+        val readerBounds = compose.onNodeWithTag(PRIVATE_MESSAGE_THREAD_READER_TAG)
+            .fetchSemanticsNode().boundsInRoot
+        val zoomedTargetBounds = target.fetchSemanticsNode().boundsInRoot
+        val resetBounds = compose.onNodeWithContentDescription(ZOOM_RESET_DESCRIPTION)
+            .fetchSemanticsNode().boundsInRoot
+        assertTrue(
+            "the transformed multi-quote target center must stay inside the reader bounds: " +
+                "target=$zoomedTargetBounds reader=$readerBounds",
+            readerBounds.containsPoint(zoomedTargetBounds.center),
+        )
+        assertTrue(
+            "the transformed multi-quote target must not overlap the zoom reset chip: " +
+                "target=$zoomedTargetBounds reset=$resetBounds",
+            !rectanglesOverlap(zoomedTargetBounds, resetBounds),
+        )
+
+        val visualTargetCenterInReader = zoomedTargetBounds.center - readerBounds.topLeft
+        compose.onNodeWithTag(PRIVATE_MESSAGE_THREAD_READER_TAG).performTouchInput {
+            click(visualTargetCenterInReader)
+        }
+
+        assertEquals("the zoom modifier must let tap gestures reach child targets", 2, toggles)
     }
 
     private fun pinchOutThread() {
@@ -1532,6 +1553,39 @@ class PrivateMessageThreadContentTest {
                 val halfGap = 150f + 25f * (index + 1)
                 updatePointerTo(0, center - Offset(0f, halfGap))
                 updatePointerTo(1, center + Offset(0f, halfGap))
+                move()
+            }
+            up(0)
+            up(1)
+        }
+        compose.waitForIdle()
+    }
+
+    private fun pinchOutThreadAround(anchorInRoot: Offset) {
+        val readerBounds = compose.onNodeWithTag(PRIVATE_MESSAGE_THREAD_READER_TAG)
+            .fetchSemanticsNode().boundsInRoot
+        val anchor = anchorInRoot - readerBounds.topLeft
+        val startTopPointer = anchor - Offset(0f, ANCHORED_PINCH_START_HALF_GAP_PX)
+        val startBottomPointer = anchor + Offset(0f, ANCHORED_PINCH_START_HALF_GAP_PX)
+        assertTrue(
+            "the anchored pinch first down must stay inside the reader: " +
+                "point=$startTopPointer reader=$readerBounds",
+            readerBounds.containsPoint(startTopPointer + readerBounds.topLeft),
+        )
+        assertTrue(
+            "the anchored pinch second down must stay inside the reader: " +
+                "point=$startBottomPointer reader=$readerBounds",
+            readerBounds.containsPoint(startBottomPointer + readerBounds.topLeft),
+        )
+        compose.onNodeWithTag(PRIVATE_MESSAGE_THREAD_READER_TAG).performTouchInput {
+            down(0, startTopPointer)
+            down(1, startBottomPointer)
+            repeat(ANCHORED_PINCH_STEPS) { index ->
+                val progress = (index + 1).toFloat() / ANCHORED_PINCH_STEPS
+                val halfGap = ANCHORED_PINCH_START_HALF_GAP_PX +
+                    (ANCHORED_PINCH_END_HALF_GAP_PX - ANCHORED_PINCH_START_HALF_GAP_PX) * progress
+                updatePointerTo(0, anchor - Offset(0f, halfGap))
+                updatePointerTo(1, anchor + Offset(0f, halfGap))
                 move()
             }
             up(0)
@@ -1780,9 +1834,13 @@ class PrivateMessageThreadContentTest {
         const val TARGET_INDEX = 10
         const val TARGET_AUTHOR = "Auteur 11"
         const val ANCHOR_TOLERANCE_PX = 0.5f
+        const val QUOTE_TARGET_DESCRIPTION = "Ajouter à la citation multiple"
         const val ZOOM_RESET_DESCRIPTION = "Revenir au zoom normal"
         const val FREE_SURFACE_INSET_PX = 24f
         const val HIDDEN_TARGET_NEARBY_INSET_PX = 8f
+        const val ANCHORED_PINCH_START_HALF_GAP_PX = 60f
+        const val ANCHORED_PINCH_END_HALF_GAP_PX = 150f
+        const val ANCHORED_PINCH_STEPS = 10
         const val GESTURE_IMAGE_URL = "https://rehost.diberie.com/Picture/Get/f/mp-double-tap.png"
         const val GESTURE_LINK_URL = "https://example.org/message-link"
         const val GESTURE_IMAGE_LINK_URL = "https://example.org/message-image-link"
@@ -1800,3 +1858,9 @@ class PrivateMessageThreadContentTest {
         )
     }
 }
+
+private fun Rect.containsPoint(point: Offset): Boolean =
+    point.x in left..right && point.y in top..bottom
+
+private fun rectanglesOverlap(first: Rect, second: Rect): Boolean =
+    first.left < second.right && second.left < first.right && first.top < second.bottom && second.top < first.bottom

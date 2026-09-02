@@ -18,6 +18,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
@@ -33,12 +34,11 @@ import kotlinx.coroutines.launch
 // #182/#1040 — shared global ephemeral magnifier, initially proven by the topic POC #935 and its
 // production tranche #937, then extracted without behavioural changes for the MP reader. Contract:
 // 1× = every existing gesture intact ; PINCHING = a second pointer cancels any uncommitted swipe,
-// scale anchors the content under the centroid ; ZOOMED = one-finger pan (X = bounded layer
-// translation, Y = real list scrolling + bounded panY complement at the bottom edge) while
-// swipe/PTR/double-tap/selection are suspended AND taps/long-presses are deterministically INERT
-// (REPLIED MODE, acted at POC iter 2 : child hit-testing does not follow the draw-only layer —
-// interact = reset via the chip or the snap, then tap) ; release ≤ 1.03 snaps back to rest ;
-// reset on page AND reader change (the feature owns and supplies the full route identity key).
+// scale anchors the content under the centroid ; ZOOMED = one-finger pan past touch slop
+// (X = bounded layer translation, Y = real list scrolling + bounded panY complement at the
+// bottom edge) while swipe/PTR/double-tap/native list scrolling are suspended; taps and
+// long-presses stay owned by transformed children ; release ≤ 1.03 snaps back to rest ; reset on
+// page AND reader change (the feature owns and supplies the full route identity key).
 
 private const val ZOOM_SNAP_MILLIS = 200
 
@@ -76,7 +76,7 @@ class PinchZoomState(private val animationScope: CoroutineScope) {
      */
     val panY = mutableFloatStateOf(0f)
 
-    /** True past the snap threshold — gates swipe/PTR/double-tap/selection at the call sites. */
+    /** True past the snap threshold — gates swipe/PTR/double-tap/native list scroll at call sites. */
     val zoomed: Boolean
         get() = scale.floatValue > 1f
 
@@ -297,10 +297,9 @@ fun rememberPinchZoomState(pageKey: Any, animationScope: CoroutineScope): PinchZ
  * down, consuming the position changes starves every child/sibling detector in their Main pass:
  * the in-flight page swipe cancels into its spring-back (its own native multi-touch defense is
  * #936 — this consumption is defense in depth), the list stops scrolling, PTR never engages.
- * While ZOOMED, the down itself is consumed (REPLIED MODE) : taps and long-presses are
- * deterministically inert at > 1× — child hit-testing does not follow the draw-only layer, so a
- * zoomed tap would land on untransformed coordinates (dead at best, an invisible neighbour at
- * worst). Interaction path at > 1× = reset (chip or snap) then tap.
+ * While ZOOMED, one-finger input stays transparent until movement crosses touch slop: down/up
+ * pairs and long-presses keep reaching transformed child hit targets, while a real pan engages
+ * this owner and consumes subsequent movement on the Initial pass.
  *
  * Sits BEFORE the zoom graphicsLayer in the modifier chain (same coordinate rule as
  * the feature page swipe): centroids are read in the untransformed local space that `PinchZoomMath`
@@ -312,17 +311,9 @@ fun Modifier.pinchZoom(
 ): Modifier = pointerInput(state) {
     awaitEachGesture {
         val firstDown = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-        // MODE REPLIÉ (contract fallback, acted at POC iter 2 — S25 field report) : child
-        // hit-testing does NOT follow the draw-only zoom layer, so a tap at >1× lands on the
-        // UNTRANSFORMED coordinates — dead at best, an invisible neighbour at worst (it only
-        // « worked » near 1× where both spaces almost coincide). Taps and long-presses are
-        // therefore deterministically INERT while zoomed : the down itself is consumed on the
-        // Initial pass, children never even start a gesture. Interaction path at >1× = reset
-        // (chip or snap) then tap — announced to testers before any A delivery (§7.5).
-        if (state.zoomed) firstDown.consume()
         state.viewportWidthPx = size.width.toFloat()
         state.viewportHeightPx = size.height.toFloat()
-        val tracking = MagnifierGestureTracking()
+        val tracking = MagnifierGestureTracking(firstDown.position)
         val engaged = trackMagnifierGesture(state, listState, tracking)
         state.releaseGesture()
         if (!engaged) return@awaitEachGesture
@@ -354,9 +345,9 @@ fun Modifier.pinchZoom(
 }
 
 /**
- * Draw phase of the shared magnifier. Kept separate from [pinchZoom] so a feature-owned page-swipe
- * modifier can remain between the Initial-pass pointer observer and the scaled layer. Reads only
- * snapshot floats in the draw phase: pinch frames do not recompose the post list.
+ * Transform layer of the shared magnifier. Kept separate from [pinchZoom] so a feature-owned
+ * page-swipe modifier can remain between the Initial-pass pointer observer and the scaled layer.
+ * Reads only snapshot floats in the layer block: pinch frames do not recompose the post list.
  */
 fun Modifier.pinchZoomTransform(state: PinchZoomState): Modifier = graphicsLayer {
     transformOrigin = TransformOrigin(0f, 0f)
@@ -367,20 +358,33 @@ fun Modifier.pinchZoomTransform(state: PinchZoomState): Modifier = graphicsLayer
     translationY = state.panY.floatValue
 }
 
-/** Per-gesture tracking for the release arbitration (settle vs damped glide). */
-private class MagnifierGestureTracking {
+/** Per-gesture tracking for slop gating and release arbitration (settle vs damped glide). */
+private class MagnifierGestureTracking(private val firstDownPosition: Offset) {
     val velocityTracker = VelocityTracker()
 
     /** Latched at the first two-pointer frame — a gesture that ever pinched never flings (Sol). */
     var hadPinch = false
+
+    private var panSlopCrossed = false
+
+    fun zoomedPanReady(event: PointerEvent, touchSlopPx: Float): Boolean {
+        val shouldLatchPan = !panSlopCrossed && event.changes.any { change ->
+            change.pressed && (change.position - firstDownPosition).getDistance() > touchSlopPx
+        }
+        if (shouldLatchPan) {
+            panSlopCrossed = true
+            velocityTracker.resetTracking()
+        }
+        return panSlopCrossed
+    }
 }
 
 /**
  * The magnifier event loop — Initial pass, one iteration per pointer event. Returns whether the
- * gesture ever ENGAGED (2nd pointer, or one-finger while zoomed). Once engaged, capture is held
- * until the last `up` even if the scale came back to exactly 1× mid-gesture (gate Sol r1) — and
- * the final up frame is consumed too (bench matrix finding : both fingers lifting in the SAME
- * frame otherwise let an armed sibling swipe complete and COMMIT).
+ * gesture ever ENGAGED (2nd pointer, or slop-crossing one-finger pan while zoomed). Once engaged,
+ * capture is held until the last `up` even if the scale came back to exactly 1× mid-gesture (gate
+ * Sol r1) — and the final up frame is consumed too (bench matrix finding : both fingers lifting in
+ * the SAME frame otherwise let an armed sibling swipe complete and COMMIT).
  */
 private suspend fun AwaitPointerEventScope.trackMagnifierGesture(
     state: PinchZoomState,
@@ -399,9 +403,9 @@ private suspend fun AwaitPointerEventScope.trackMagnifierGesture(
 
 /**
  * One pointer frame of the magnifier. Engages on the SECOND pointer — a plain tap must not freeze
- * an in-flight snap animation, but a new pinch interrupts it (hypothesis 8) — or on one finger
- * while already zoomed. The fling stop is SEQUENCED with the controlled mutations by the
- * engage/buffer contract in PinchZoomState (#937 framing, Sol). A 1× single pointer observes
+ * an in-flight snap animation, but a new pinch interrupts it (hypothesis 8) — or after touch slop
+ * on one finger while already zoomed. The fling stop is SEQUENCED with the controlled mutations by
+ * the engage/buffer contract in PinchZoomState (#937 framing, Sol). A 1× single pointer observes
  * WITHOUT consuming : every existing gesture stays intact, and a second pointer landing mid-drag
  * (armed swipe included) still upgrades this same gesture into a pinch on the next event. At 1×
  * while engaged, the controlled pan degrades gracefully (panX clamped to 0, dispatchRawDelta 1:1).
@@ -414,7 +418,11 @@ private fun AwaitPointerEventScope.handleMagnifierFrame(
     tracking: MagnifierGestureTracking,
 ): Boolean {
     val pressed = event.changes.count { it.pressed }
-    val engaging = pressed >= 2 || wasEngaged || state.zoomed
+    val zoomedPan = state.zoomed && pressed == 1 && tracking.zoomedPanReady(
+        event = event,
+        touchSlopPx = viewConfiguration.touchSlop,
+    )
+    val engaging = pressed >= 2 || wasEngaged || zoomedPan
     if (!engaging) return false
     if (!wasEngaged) state.engage(listState)
     if (pressed >= 2) {

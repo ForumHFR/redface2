@@ -880,9 +880,9 @@ private fun PrivateMessageThreadReader(
     val pageInteraction = runtime.pageInteraction
     val isZoomed by remember(zoomState) { derivedStateOf { zoomState.zoomed } }
     val haptics = LocalHapticFeedback.current
-    // #382/#1103 — one refresh authority for the single list-level detector. PinchZoom already
-    // consumes the first down on Initial while zoomed; the explicit zoom guard is defense in depth,
-    // matching the topic contract even if the modifier order changes later.
+    // #382/#1103 — one refresh authority for the single list-level detector. PinchZoom leaves
+    // child taps and long-presses transparent while zoomed; this explicit zoom guard owns the
+    // double-tap refresh suspension, matching the topic contract.
     val onDoubleTapRefresh = remember(haptics, zoomState) {
         {
             if (!zoomState.zoomed) {
@@ -1565,12 +1565,19 @@ private data class ThreadScrollSession(
  * #382/#1103 — the topic detector reused as the single MP double-tap arbiter on the LazyColumn.
  * Since #1117 removed the card-wide long press, free card surfaces and list interstices reach this
  * one owner. Explicit child targets consume their up, which cancels the detector; drags beyond
- * touch slop cancel through [detectTapGestures].
+ * touch slop cancel through [detectTapGestures]. While zoomed, the detector is removed entirely
+ * because `detectTapGestures` consumes tap events before its callback-level guard can decline them.
  */
-private fun Modifier.privateMessageDoubleTapRefresh(onDoubleTapRefresh: () -> Unit): Modifier =
+private fun Modifier.privateMessageDoubleTapRefresh(
+    enabled: Boolean,
+    onDoubleTapRefresh: () -> Unit,
+): Modifier = if (enabled) {
     pointerInput(Unit) {
         detectTapGestures(onDoubleTap = { onDoubleTapRefresh() })
     }
+} else {
+    this
+}
 
 /** Quote callbacks travel together so the hot list cannot grow a third independent capability. */
 private data class MessageQuoteCallbacks(
@@ -1668,7 +1675,10 @@ private fun ThreadMessages(
             .pinchZoom(scrollSession.zoomState, scrollSession.listState)
             .then(scrollSession.swipeModifier)
             // One owner covers free card surfaces and interstices; child clickables consume their up.
-            .privateMessageDoubleTapRefresh(scrollSession.onDoubleTapRefresh)
+            .privateMessageDoubleTapRefresh(
+                enabled = !zoomSuspendsScroll,
+                onDoubleTapRefresh = scrollSession.onDoubleTapRefresh,
+            )
             .pinchZoomTransform(scrollSession.zoomState),
     ) {
         itemsIndexed(
