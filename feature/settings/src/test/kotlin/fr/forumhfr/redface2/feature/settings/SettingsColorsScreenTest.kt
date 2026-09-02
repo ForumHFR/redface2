@@ -25,6 +25,7 @@ import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.LightSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.ThemeAccent
 import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
+import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import io.mockk.every
 import io.mockk.mockk
@@ -75,6 +76,35 @@ class SettingsColorsScreenTest {
             ThemeColorPreferences(accent = ThemeAccent.Preset(AccentPreset.BLUE)),
             persisted.last(),
         )
+    }
+
+    @Test
+    fun `theme mode group is shown and selecting dark emits ThemeModeChanged`() {
+        val intents = mutableListOf<SettingsIntent>()
+
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, dynamicColor = false) {
+                SettingsColorsContent(
+                    state = SettingsState(themeMode = ThemeMode.SYSTEM),
+                    callbacks = SettingsColorsCallbacks(
+                        onBack = {},
+                        onIntent = { intents += it },
+                    ),
+                    environment = SettingsColorsEnvironment(
+                        effectiveDark = false,
+                        systemColorsAvailable = true,
+                    ),
+                )
+            }
+        }
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithText("Thème").assertExists()
+        composeTestRule.onNodeWithText("Clair").assertExists()
+        composeTestRule.onNodeWithText("Système").assertExists()
+        composeTestRule.onNodeWithText("Sombre").performScrollTo().performClick()
+
+        assertEquals(listOf(SettingsIntent.ThemeModeChanged(ThemeMode.DARK)), intents)
     }
 
     @Test

@@ -139,6 +139,23 @@ internal fun SettingsColorsContent(
                 preferences = state.themeColorPreferences,
                 darkTheme = environment.effectiveDark,
             )
+            SettingsSectionTitle(
+                title = stringResource(R.string.settings_theme_title),
+                description = stringResource(R.string.settings_theme_intro),
+            )
+            RedfaceSettingsChoiceGroup(
+                options = listOf(
+                    RedfaceSettingsChoice(ThemeMode.LIGHT, stringResource(R.string.settings_theme_light)),
+                    RedfaceSettingsChoice(ThemeMode.SYSTEM, stringResource(R.string.settings_theme_system)),
+                    RedfaceSettingsChoice(ThemeMode.DARK, stringResource(R.string.settings_theme_dark)),
+                ),
+                selected = state.themeMode,
+                onSelected = { callbacks.onIntent(SettingsIntent.ThemeModeChanged(it)) },
+                enabled = state.canChangeThemeMode,
+            )
+            if (state.themeModeError) {
+                PreferencePersistError(R.string.settings_theme_persist_failed)
+            }
             SystemColorsSetting(
                 state = state,
                 environment = environment,
