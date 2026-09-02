@@ -16,6 +16,16 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.52.3` — `internal` (dev) — 2026-09-02
+
+Hotfix issu du topic bêta (Eife, thom@s). Produit par Sol (Codex) sous gate Fable.
+
+### Corrigé
+
+- **Poster depuis une page en retard ne téléporte plus en dernière page** ([#1243](https://github.com/ForumHFR/redface2/issues/1243)) — quand on rédige un message depuis une page qui n'est pas la dernière, l'app reste sur la page lue, à la même position, et affiche « Message publié en page N » avec une action pour y aller. La dernière page n'est plus chargée à l'insu du lecteur : les pages non lues gardent leur drapeau (le POST seul ne déplace pas le drapeau côté HFR, seul le chargement d'une page le fait). Le cas « ma réponse crée une nouvelle page alors que j'étais en dernière page » garde son saut automatique (#226) ; citation et édition inchangées.
+
+---
+
 ## `0.52.2` — `internal` (dev) — 2026-09-02
 
 Retour testeurs sur le fil DEV (nicko, XaTriX) après 0.52.1. Produit par Sol (Codex) sous gate Fable.

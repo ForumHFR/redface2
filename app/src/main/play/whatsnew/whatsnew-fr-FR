@@ -1,3 +1,3 @@
-Redface 2 v0.52.2 — dev.
+Redface 2 v0.52.3 — dev.
 
-- Couleurs : l'aperçu en tête de page reprend exactement les couleurs du vrai rendu de lecture (en-tête, citation, spoiler, lien, bouton). Le rendu des messages est inchangé.
+- Rédiger un message depuis une page en retard ne saute plus en dernière page : on reste sur la page lue, un message « Publié en page N » propose d'y aller. Les pages non lues gardent leur drapeau.
