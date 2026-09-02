@@ -1,5 +1,5 @@
-Redface 2 v0.51.2 — dev.
+Redface 2 v0.52.0 — dev.
 
-- "Maximum image width" setting (Display): 90%, 95% (default), 99% or 100% of the post width, on all three image paths. Requested by thom@s and XaTriX.
-- Pinch zoom: links, images, buttons and selection work again beyond 1x, in topics and private messages. Reported by antiseptiqueIncolore.
-- Gradle 9.7.1, Roborazzi 1.73.0, KSP 2.3.11.
+- New: Settings → Display → Colours. Pick an accent (8 presets or a hex code), the background tone (Tinted, White, RF1 grey), AMOLED, system colours (Android 12+), with a live preview.
+- The light theme now defaults to an RF1-style grey background; the previous look stays available (Background tone → Tinted M3).
+- AMOLED: visible spoiler, accent kept.

@@ -1,5 +1,5 @@
-Redface 2 v0.51.2 — dev.
+Redface 2 v0.52.0 — dev.
 
-- Réglage « Largeur maximale des images » (Affichage) : 90 %, 95 % (défaut), 99 % ou 100 % de la largeur du message, pour les trois chemins d'image. Demandé par thom@s et XaTriX.
-- Zoom pincé : liens, images, boutons et sélection redeviennent utilisables au-delà de 1×, dans les sujets et les MP. Signalé par antiseptiqueIncolore.
-- Gradle 9.7.1, Roborazzi 1.73.0, KSP 2.3.11.
+- Nouveau : Réglages → Affichage → Couleurs. Accent au choix (8 presets ou code hexa), ton du fond (Teinté, Blanc, Gris RF1), AMOLED, couleurs du système (Android 12+), aperçu en direct.
+- Le thème clair passe par défaut sur un fond gris esprit RF1 ; l'ancien rendu reste disponible (Ton du fond → Teinté M3).
+- AMOLED : spoiler visible et accent conservé.

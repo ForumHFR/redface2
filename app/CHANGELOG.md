@@ -16,6 +16,25 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.52.0` — `internal` (dev) — 2026-09-02
+
+Lot « Couleurs » (#296), demandé de longue date par les testeurs (Lt Ripley, Stylken, Azgor, antiseptiqueIncolore) et par XaTriX (#883). Produit par Sol (Codex) sous gate Fable, en deux PR (#1237 moteur, #1238 réglages).
+
+### Ajouté
+
+- **Réglages → Affichage → Couleurs** ([#296](https://github.com/ForumHFR/redface2/issues/296)) — nouvelle sous-page : **accent** parmi 8 presets (Rose, Rouge RF1, Bleu, Vert, Violet, Orange, Sarcelle, Neutre) ou **couleur personnalisée en hexa** (`#RRGGBB`) ; **ton du fond** en clair (Teinté M3, Blanc, Gris RF1) et en sombre (Teinté M3, AMOLED) ; **Couleurs du système** (Material You, Android 12+) ; **aperçu en direct** d'un faux message en tête de page ([#595](https://github.com/ForumHFR/redface2/issues/595) pour les couleurs). Le choix rose/rouge et l'interrupteur AMOLED déménagent dans cette sous-page.
+- **Fond gris « esprit RF1 » par défaut en thème clair** ([#883](https://github.com/ForumHFR/redface2/issues/883)) — page légèrement grisée, messages sur cartes blanches. S'applique aussi aux installations existantes ; pour retrouver l'ancien rendu : Couleurs → Ton du fond → Teinté M3 (ou Blanc pour du blanc pur).
+
+### Corrigé
+
+- **AMOLED : spoiler visible** ([#978](https://github.com/ForumHFR/redface2/issues/978)) — le bloc spoiler fermé ne se confond plus avec le fond noir. Plus largement, l'AMOLED garde désormais la couleur d'accent choisie (Rouge RF1 + AMOLED affiche enfin du rouge) ; Rose + AMOLED est inchangé.
+
+### Technique
+
+- Schémas Material 3 générés depuis une couleur graine avec `material-color-utilities` 5.0.1 (sans dépendance Compose) ; tertiaire slate forcé (pas de retour du jaune). Rose et Rouge RF1 gardent leurs schémas manuels à l'identique en clair/sombre teinté. Tests de contraste sur chaque preset × mode × ton, palettes fixes comprises. Préférences `ThemeColorPreferences` (migration tolérante, mirror anti-flash au démarrage).
+
+---
+
 ## `0.51.2` — `internal` (dev) — 2026-09-02
 
 Deux chantiers en retard sur la bêta, produits par Sol (Codex) sous gate Fable.
