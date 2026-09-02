@@ -153,6 +153,8 @@ seed_android_sdk_platforms() {
         fi
       done
     ' sh "${missing_platforms[@]}"; then
+    # Report what is STILL missing (a platform seeded before the failure is not reported as failed).
+    mapfile -t missing_platforms < <(missing_android_sdk_platforms)
     printf >&2 'Failed to seed required Android SDK platform(s): %s\n' "${missing_platforms[*]}"
     print_sdk_seed_retry_command
     return 1
