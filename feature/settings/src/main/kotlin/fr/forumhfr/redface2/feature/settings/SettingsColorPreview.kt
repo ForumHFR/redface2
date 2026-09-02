@@ -9,27 +9,58 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.contentColorFor
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.core.ui.post.readingContentColors
+import fr.forumhfr.redface2.core.ui.theme.FlagPalette
 
 internal const val SETTINGS_COLOR_PREVIEW_TAG = "settings_color_preview"
 internal const val SETTINGS_COLOR_PREVIEW_POST_TAG = "settings_color_preview_post"
+internal const val SETTINGS_COLOR_PREVIEW_HEADER_TAG = "settings_color_preview_header"
+internal const val SETTINGS_COLOR_PREVIEW_QUOTE_TAG = "settings_color_preview_quote"
+internal const val SETTINGS_COLOR_PREVIEW_SPOILER_TAG = "settings_color_preview_spoiler"
 internal val SettingsColorPreviewPostContainerColorKey = SemanticsPropertyKey<Color>(
     "SettingsColorPreviewPostContainerColor",
 )
+internal val SettingsColorPreviewHeaderContainerColorKey = SemanticsPropertyKey<Color>(
+    "SettingsColorPreviewHeaderContainerColor",
+)
+internal val SettingsColorPreviewQuoteContainerColorKey = SemanticsPropertyKey<Color>(
+    "SettingsColorPreviewQuoteContainerColor",
+)
+internal val SettingsColorPreviewQuoteAccentColorKey = SemanticsPropertyKey<Color>(
+    "SettingsColorPreviewQuoteAccentColor",
+)
+internal val SettingsColorPreviewSpoilerContainerColorKey = SemanticsPropertyKey<Color>(
+    "SettingsColorPreviewSpoilerContainerColor",
+)
+
+private val PREVIEW_QUOTE_ACCENT_WIDTH: Dp = 4.dp
+private val PREVIEW_QUOTE_TEXT_GUTTER: Dp = 12.dp
+private val PREVIEW_QUOTE_CONTENT_PADDING: Dp = 12.dp
 
 /** Live colour preview for Settings > Display > Colours. */
 @Composable
@@ -88,9 +119,15 @@ private fun PreviewPost() {
 
 @Composable
 private fun PreviewHeader() {
+    val headerContainerColor = MaterialTheme.colorScheme.secondaryContainer
     Surface(
-        color = MaterialTheme.colorScheme.primaryContainer,
-        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        modifier = Modifier
+            .testTag(SETTINGS_COLOR_PREVIEW_HEADER_TAG)
+            .semantics {
+                this[SettingsColorPreviewHeaderContainerColorKey] = headerContainerColor
+            },
+        color = headerContainerColor,
+        contentColor = contentColorFor(headerContainerColor),
     ) {
         Row(
             modifier = Modifier
@@ -113,6 +150,7 @@ private fun PreviewHeader() {
 
 @Composable
 private fun PreviewBody() {
+    val readingColors = readingContentColors()
     Column(
         modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -124,7 +162,7 @@ private fun PreviewBody() {
         Text(
             text = stringResource(R.string.settings_colors_preview_link),
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.primary,
+            color = readingColors.linkColor,
         )
         PreviewQuote()
         PreviewSpoiler()
@@ -134,22 +172,48 @@ private fun PreviewBody() {
 
 @Composable
 private fun PreviewQuote() {
-    Surface(
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-        shape = MaterialTheme.shapes.small,
+    val readingColors = readingContentColors()
+    val quoteContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest
+    val quoteAccentColor = MaterialTheme.colorScheme.primary
+    Card(
+        modifier = Modifier
+            .testTag(SETTINGS_COLOR_PREVIEW_QUOTE_TAG)
+            .semantics {
+                this[SettingsColorPreviewQuoteContainerColorKey] = quoteContainerColor
+                this[SettingsColorPreviewQuoteAccentColorKey] = quoteAccentColor
+            },
+        colors = CardDefaults.cardColors(containerColor = quoteContainerColor),
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .drawBehind {
+                    drawRect(
+                        color = quoteAccentColor,
+                        topLeft = Offset.Zero,
+                        size = Size(
+                            width = PREVIEW_QUOTE_ACCENT_WIDTH.toPx(),
+                            height = this.size.height,
+                        ),
+                    )
+                }
+                .padding(
+                    start = PREVIEW_QUOTE_ACCENT_WIDTH + PREVIEW_QUOTE_TEXT_GUTTER,
+                    top = PREVIEW_QUOTE_CONTENT_PADDING,
+                    end = PREVIEW_QUOTE_CONTENT_PADDING,
+                    bottom = PREVIEW_QUOTE_CONTENT_PADDING,
+                ),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
                 text = stringResource(R.string.settings_colors_preview_quote_author),
                 style = MaterialTheme.typography.labelMedium,
+                color = readingColors.onBodyVariant,
             )
             Text(
                 text = stringResource(R.string.settings_colors_preview_quote_body),
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodyMedium,
+                color = readingColors.onBody,
             )
         }
     }
@@ -157,16 +221,22 @@ private fun PreviewQuote() {
 
 @Composable
 private fun PreviewSpoiler() {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        shape = MaterialTheme.shapes.small,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    val readingColors = readingContentColors()
+    val spoilerContainerColor = previewSpoilerContainerColor(MaterialTheme.colorScheme)
+    Card(
+        modifier = Modifier
+            .testTag(SETTINGS_COLOR_PREVIEW_SPOILER_TAG)
+            .semantics {
+                this[SettingsColorPreviewSpoilerContainerColorKey] = spoilerContainerColor
+            },
+        colors = CardDefaults.cardColors(containerColor = spoilerContainerColor),
     ) {
         Text(
             text = stringResource(R.string.settings_colors_preview_spoiler),
-            style = MaterialTheme.typography.labelLarge,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = readingColors.onBodyVariant,
+            modifier = Modifier.padding(PREVIEW_QUOTE_CONTENT_PADDING),
         )
     }
 }
@@ -184,7 +254,7 @@ private fun PreviewFooter() {
         ) {
             Surface(
                 modifier = Modifier.size(14.dp),
-                color = MaterialTheme.colorScheme.primary,
+                color = FlagPalette.Cyan,
                 shape = CircleShape,
                 content = {},
             )
@@ -194,8 +264,18 @@ private fun PreviewFooter() {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Button(onClick = {}) {
+        val replyContainerColor = MaterialTheme.colorScheme.primaryContainer
+        Button(
+            onClick = {},
+            colors = ButtonDefaults.buttonColors(
+                containerColor = replyContainerColor,
+                contentColor = contentColorFor(replyContainerColor),
+            ),
+        ) {
             Text(stringResource(R.string.settings_colors_preview_button))
         }
     }
 }
+
+private fun previewSpoilerContainerColor(scheme: ColorScheme): Color =
+    if (scheme.surface == Color.Black) scheme.surfaceBright else scheme.surfaceContainerLow
