@@ -1995,10 +1995,10 @@ private fun CategoryHeaderBand(catId: Int, label: String, style: CategoryBandSty
 
 /** Trailing decorative chevron shared by the band styles; the open affordance is the band's onClickLabel. */
 @Composable
-private fun CategoryBandChevron() {
+private fun CategoryBandChevron(tint: Color = MaterialTheme.colorScheme.onSurfaceVariant) {
     RedfaceVectorIcon(
         resId = CoreUiR.drawable.ic_chevron_right,
-        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        tint = tint,
         size = 18.dp,
     )
 }
@@ -2020,7 +2020,7 @@ private fun CategoryBandMinimal(catId: Int, label: String, onClick: () -> Unit) 
         ) {
             RedfaceVectorIcon(
                 resId = categoryIcon(catId),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = MaterialTheme.colorScheme.primary,
                 size = 18.dp,
                 modifier = Modifier.padding(end = 10.dp),
             )
@@ -2039,33 +2039,34 @@ private fun CategoryBandMinimal(catId: Int, label: String, onClick: () -> Unit) 
 }
 
 /**
- * SOFT — a soft tonal block (`surfaceContainer`, opaque), normal-case `titleSmall` name in
- * `onSurface`, no divider: the tonal block itself is the separator.
+ * SOFT — a soft tonal block (`secondaryContainer`, opaque), normal-case `titleSmall` name in
+ * `onSecondaryContainer`, no divider: the tonal block itself is the separator.
  */
 @Composable
 private fun CategoryBandSoft(catId: Int, label: String, onClick: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .background(colors.secondaryContainer)
             .heightIn(min = 38.dp)
             .clickable(onClickLabel = stringResource(R.string.flags_category_open_label)) { onClick() }
             .padding(horizontal = 24.dp, vertical = 5.dp),
     ) {
         RedfaceVectorIcon(
             resId = categoryIcon(catId),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            tint = colors.onSecondaryContainer,
             size = 18.dp,
             modifier = Modifier.padding(end = 10.dp),
         )
         Text(
             text = label,
             style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurface,
+            color = colors.onSecondaryContainer,
             modifier = Modifier.weight(1f),
         )
-        CategoryBandChevron()
+        CategoryBandChevron(tint = colors.onSecondaryContainer)
     }
 }
 
@@ -2119,12 +2120,13 @@ private fun CategoryBandAccent(catId: Int, label: String, onClick: () -> Unit) {
 }
 
 /**
- * BULLET — the category name carried in a tonal pill chip (`surfaceContainerHigh`) on an opaque
+ * BULLET — the category name carried in a tonal pill chip (`secondaryContainer`) on an opaque
  * `surface` base, chevron pushed to the trailing edge. The chip wraps its content; the chip + base
  * give the originally-transparent mockup an opaque sticky-safe ground.
  */
 @Composable
 private fun CategoryBandBullet(catId: Int, label: String, onClick: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -2136,7 +2138,8 @@ private fun CategoryBandBullet(catId: Int, label: String, onClick: () -> Unit) {
             .padding(horizontal = 20.dp, vertical = 5.dp),
     ) {
         Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            color = colors.secondaryContainer,
+            contentColor = colors.onSecondaryContainer,
             shape = CircleShape,
             // weight(fill = false): the chip hugs a short name (chevron stays right via SpaceBetween)
             // but is capped at the available width for a long one, so it can never push the chevron off
@@ -2149,14 +2152,14 @@ private fun CategoryBandBullet(catId: Int, label: String, onClick: () -> Unit) {
             ) {
                 RedfaceVectorIcon(
                     resId = categoryIcon(catId),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = colors.onSecondaryContainer,
                     size = 16.dp,
                     modifier = Modifier.padding(end = 8.dp),
                 )
                 Text(
                     text = label,
                     style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = colors.onSecondaryContainer,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )

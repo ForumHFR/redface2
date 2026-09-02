@@ -6,6 +6,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
 import com.materialkolor.hct.Hct
 import com.materialkolor.scheme.DynamicScheme
+import com.materialkolor.scheme.SchemeMonochrome
 import com.materialkolor.scheme.SchemeTonalSpot
 import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
 import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
@@ -170,15 +171,31 @@ private fun generatedColorScheme(options: RedfaceColorSchemeOptions): ColorSchem
     }
 }
 
-private fun dynamicScheme(options: RedfaceColorSchemeOptions): DynamicScheme = when (options.generation.paletteStyle) {
-    RedfacePaletteStyle.TONAL_SPOT -> SchemeTonalSpot(
-        sourceColorHct = Hct.fromInt(options.accent.seedArgb()),
-        isDark = options.darkTheme,
-        contrastLevel = options.generation.contrastLevel,
-    )
+private fun dynamicScheme(options: RedfaceColorSchemeOptions): DynamicScheme {
+    val sourceColorHct = Hct.fromInt(options.accent.seedArgb())
+    return when (options.generation.paletteStyle) {
+        RedfacePaletteStyle.TONAL_SPOT -> if (sourceColorHct.hasLowChroma()) {
+            SchemeMonochrome(
+                sourceColorHct = sourceColorHct,
+                isDark = options.darkTheme,
+                contrastLevel = options.generation.contrastLevel,
+            )
+        } else {
+            SchemeTonalSpot(
+                sourceColorHct = sourceColorHct,
+                isDark = options.darkTheme,
+                contrastLevel = options.generation.contrastLevel,
+            )
+        }
+    }
 }
+
+private fun Hct.hasLowChroma(): Boolean = chroma <= NEUTRAL_SEED_CHROMA_MAX
 
 private fun Int.toColor(): Color = Color(toLong() and ARGB_LONG_MASK)
 
+// HCT chroma <= 12 reads as gray : TonalSpot would force chroma 36 on an arbitrary hue (a gray seed
+// came out green, styx42), and SchemeNeutral still keeps chroma 12 on that hue. Monochrome = 0 chroma.
+private const val NEUTRAL_SEED_CHROMA_MAX = 12.0
 private const val DEFAULT_CONTRAST_LEVEL = 0.0
 private const val ARGB_LONG_MASK = 0xFFFF_FFFFL

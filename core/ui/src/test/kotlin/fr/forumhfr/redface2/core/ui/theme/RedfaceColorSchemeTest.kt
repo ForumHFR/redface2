@@ -3,10 +3,13 @@ package fr.forumhfr.redface2.core.ui.theme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import com.materialkolor.hct.Hct
+import com.materialkolor.scheme.SchemeTonalSpot
 import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
 import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.LightSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.ThemeAccent
+import fr.forumhfr.redface2.core.domain.preferences.seedArgb
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.LagTone
 import fr.forumhfr.redface2.core.ui.post.ModerationHighlightColors
@@ -126,6 +129,12 @@ class RedfaceColorSchemeTest {
     fun `foreground and link contrast holds across presets customs and surface tones`() {
         allSchemes().forEach { (name, scheme) ->
             assertContrast("$name onSurface/surface", scheme.onSurface, scheme.surface, MIN_TEXT_CONTRAST)
+            assertContrast(
+                "$name onSecondaryContainer/secondaryContainer",
+                scheme.onSecondaryContainer,
+                scheme.secondaryContainer,
+                MIN_TEXT_CONTRAST,
+            )
             assertContrast("$name primary/surface", scheme.primary, scheme.surface, MIN_ACCENT_CONTRAST)
             assertContrast("$name primary/post", scheme.primary, scheme.surfaceContainer, MIN_LINK_CONTRAST)
         }
@@ -162,6 +171,32 @@ class RedfaceColorSchemeTest {
                 assertContrast("$name $tone", colors.content, colors.container, MIN_TEXT_CONTRAST)
             }
         }
+    }
+
+    @Test
+    fun `neutral seeds keep generated primary nearly gray`() {
+        val neutralLight = buildScheme(preset = AccentPreset.NEUTRAL, darkTheme = false)
+        val neutralDark = buildScheme(preset = AccentPreset.NEUTRAL, darkTheme = true)
+        val customGrayLight = buildScheme(rgb = 0x808080, darkTheme = false)
+        val customGrayDark = buildScheme(rgb = 0x808080, darkTheme = true)
+
+        listOf(
+            "neutral light" to neutralLight.primary,
+            "neutral dark" to neutralDark.primary,
+            "custom gray light" to customGrayLight.primary,
+            "custom gray dark" to customGrayDark.primary,
+        ).forEach { (name, color) ->
+            assertLowSaturation(name, color)
+        }
+    }
+
+    @Test
+    fun `colored generated presets still use tonal spot primaries`() {
+        val light = buildScheme(preset = AccentPreset.TEAL, darkTheme = false)
+        val dark = buildScheme(preset = AccentPreset.TEAL, darkTheme = true)
+
+        assertEquals(tonalSpotPrimary(AccentPreset.TEAL, darkTheme = false), light.primary)
+        assertEquals(tonalSpotPrimary(AccentPreset.TEAL, darkTheme = true), dark.primary)
     }
 
     @Test
@@ -266,6 +301,18 @@ class RedfaceColorSchemeTest {
         assertTrue("$name RGB distance was $distance", distance >= MIN_CONTAINER_DISTANCE)
     }
 
+    private fun assertLowSaturation(name: String, color: Color) {
+        val spread = colorChannelSpread(color)
+        assertTrue("$name channel spread was $spread", spread <= MAX_NEUTRAL_CHANNEL_SPREAD)
+    }
+
+    private fun tonalSpotPrimary(preset: AccentPreset, darkTheme: Boolean): Color =
+        SchemeTonalSpot(
+            sourceColorHct = Hct.fromInt(ThemeAccent.Preset(preset).seedArgb()),
+            isDark = darkTheme,
+            contrastLevel = 0.0,
+        ).primary.toColorForTest()
+
     private fun assertAmoledSurfaceLadder(name: String, scheme: ColorScheme) {
         assertIncreasingDistance(
             name,
@@ -309,6 +356,11 @@ class RedfaceColorSchemeTest {
         return sqrt(red * red + green * green + blue * blue)
     }
 
+    private fun colorChannelSpread(color: Color): Float =
+        maxOf(color.red, color.green, color.blue) - minOf(color.red, color.green, color.blue)
+
+    private fun Int.toColorForTest(): Color = Color(toLong() and ARGB_LONG_MASK)
+
     private fun ModerationHighlightColors.containers(): List<Color> =
         listOf(headerContainer, bodyContainer, subSurfaceContainer)
 
@@ -334,6 +386,8 @@ class RedfaceColorSchemeTest {
         const val MIN_MARKER_CONTRAST = 1.5f
         const val MIN_LARGE_BOLD_CONTRAST = 3f
         const val MIN_CONTAINER_DISTANCE = 0.015f
+        const val MAX_NEUTRAL_CHANNEL_SPREAD = 0.02f
         const val LUMINANCE_OFFSET = 0.05f
+        const val ARGB_LONG_MASK = 0xFFFF_FFFFL
     }
 }
