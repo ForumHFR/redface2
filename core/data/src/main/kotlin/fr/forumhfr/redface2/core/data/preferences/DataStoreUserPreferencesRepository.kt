@@ -9,7 +9,6 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import fr.forumhfr.redface2.core.domain.coroutines.ApplicationScope
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
-import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
 import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
 import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
@@ -36,8 +35,6 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
-import fr.forumhfr.redface2.core.domain.preferences.toAccentPreset
-import fr.forumhfr.redface2.core.domain.preferences.toLegacyAccentColor
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
@@ -309,50 +306,6 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             // Mirror for the synchronous cold-start read (#386) — DataStore stays the source
             // of truth, the mirror only seeds the first frame.
             themeBootstrapStore.writeThemeMode(mode)
-        }
-    }
-
-    @Suppress("DEPRECATION")
-    override fun observeAmoledEnabled(): Flow<Boolean> =
-        dataStore.data
-            // Default `false`: AMOLED is opt-in and only meaningful in dark (#286).
-            .map { prefs -> prefs[KEY_AMOLED_ENABLED] ?: false }
-            .distinctUntilChanged()
-            .onEach { enabled ->
-                if (themeBootstrapStore.read().darkSurfaceTone.isAmoled != enabled) {
-                    themeBootstrapStore.writeAmoledEnabled(enabled)
-                }
-            }
-            .catch { emit(false) }
-
-    @Suppress("DEPRECATION")
-    override suspend fun setAmoledEnabled(enabled: Boolean) {
-        persist {
-            dataStore.edit { prefs ->
-                prefs[KEY_AMOLED_ENABLED] = enabled
-            }
-            themeBootstrapStore.writeAmoledEnabled(enabled)
-        }
-    }
-
-    @Suppress("DEPRECATION")
-    override fun observeAccentColor(): Flow<AccentColor> =
-        dataStore.data
-            // Default ROSE (TU 2788511): the historical maroon/rose scheme until the user opts into red.
-            .map { prefs -> readThemeAccent(prefs).toLegacyAccentColor() }
-            // Keep the accent flow quiet unless it actually changes so RedfaceApp doesn't recompose
-            // the whole tree on unrelated edits — same stance as observeThemeMode. The full colour
-            // mirror is maintained by the complete ThemeColorPreferences flow and setters.
-            .distinctUntilChanged()
-            .catch { emit(AccentColor.ROSE) }
-
-    @Suppress("DEPRECATION")
-    override suspend fun setAccentColor(color: AccentColor) {
-        persist {
-            dataStore.edit { prefs ->
-                writeThemeAccent(prefs, ThemeAccent.Preset(color.toAccentPreset()))
-            }
-            themeBootstrapStore.writeThemeAccent(ThemeAccent.Preset(color.toAccentPreset()))
         }
     }
 
@@ -1402,8 +1355,5 @@ private val DEFAULT_ACCENT = ThemeAccent.Preset(AccentPreset.ROSE)
 private const val CUSTOM_ACCENT_STORAGE_VALUE = "CUSTOM"
 private const val MIN_RGB = 0x000000
 private const val MAX_RGB = 0xFFFFFF
-
-private val DarkSurfaceTone.isAmoled: Boolean
-    get() = this == DarkSurfaceTone.AMOLED
 
 private fun Int.isValidRgb(): Boolean = this in MIN_RGB..MAX_RGB

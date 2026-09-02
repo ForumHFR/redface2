@@ -99,7 +99,6 @@ class AppThemeViewModelTest {
 
         assertEquals(ThemeMode.DARK, vm.themeMode.value)
         assertEquals(bootstrap.colorPreferences, vm.themeColorPreferences.value)
-        assertTrue(vm.amoledEnabled.value)
     }
 
     @Test
@@ -180,7 +179,6 @@ class AppThemeViewModelTest {
 
         assertEquals(ThemeMode.LIGHT, vm.themeMode.value)
         assertEquals(ThemeColorPreferences(), vm.themeColorPreferences.value)
-        assertEquals(false, vm.amoledEnabled.value)
         assertTrue(vm.alwaysAskLinkApp.value)
     }
 

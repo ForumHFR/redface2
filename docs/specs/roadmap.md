@@ -74,7 +74,7 @@ Les dépôts en cylindre (`MPStorage2`, `hfr-redflag`) sont des **dépendances e
 
 - [x] Structure Gradle multi-modules (8 core + 8 features base déclarés ; certains modules conservent un `build.gradle.kts` vide en attente de leur cycle, cf. ADR-001)
 - [x] CI GitHub Actions (`detektAll`, `lintDebug`, `test`, `testDebugUnitTest`, `:app:assembleDebug`)
-- [x] Thème Material 3 dans `:core:ui` (clair, sombre, AMOLED — Material You + HFR Classique différés Phase 5)
+- [x] Thème Material 3 dans `:core:ui` (clair, sombre, AMOLED ; réglages couleurs avancés livrés en Phase 4)
 - [x] Navigation graph Compose Navigation 3 (bottom nav 4 onglets + back stacks par onglet, cf. [navigation.md]({{ site.baseurl }}/specs/navigation))
 - [x] Hilt wiring (`build-logic` convention plugins, KSP, `@HiltAndroidApp`)
 - [x] Design system de base (typographie, couleurs, composants thème)
@@ -211,6 +211,9 @@ Le PostRenderer sera développé de manière incrémentale : texte brut d'abord,
 Mandat de refonte des écrans chauds avant la 1.0 (post HFR XaTriX 2788560) :
 - [x] **Refonte de la vue Drapeaux** — #603 (livrée, bêta 0.18.0 — [ADR-017]({{ site.baseurl }}/adr/017-refonte-vue-drapeaux))
 - [x] **Refonte de la vue Topic** — #604 (livrée, bêta 0.37.0 : cinq vagues, moteur de pagination in-VM #895, loupe #182, passe images #876 ; reliquats en Vue · Topic 2)
+- [x] **Couleurs configurables** — #595/#883 : sous-page Réglages → Affichage → Couleurs, 8 presets
+  d'accent + RGB custom `#RRGGBB`, tons de fond clair/sombre persistés, couleurs du système
+  Android 12+ et aperçu live recordable par Roborazzi.
 - [x] **Hygiène repo / audit des dérives** — exécutée (2026-06) ; #605 requalifiée en ombrelle de suivi Phase 4
 - [ ] **Partage de la surface de lecture Topic → MP/DT** — [#1040](https://github.com/ForumHFR/redface2/issues/1040) (**en cours**, dev 0.42.x). Le chantier répond à un délaissement mesuré : 74 commits sur `feature/topic` contre 7 sur `feature/messages` entre le 20/06 et le 12/08, sans document pour tracer l'écart. **Huit lots (0 → 7)** ; les lots 0 à 6 sont clos et le lot 7 est en cours :
   - lot 0 — caractérisation MP, correction de la prose route-driven et création de la page canonique [Parité de lecture Topic ↔ MP]({{ site.baseurl }}/specs/reading-parity) ([#1041](https://github.com/ForumHFR/redface2/issues/1041)), rendue `[enforced]` par deux gardes machine en [#1045](https://github.com/ForumHFR/redface2/issues/1045) ;
@@ -240,7 +243,7 @@ Mandat de refonte des écrans chauds avant la 1.0 (post HFR XaTriX 2788560) :
 - [ ] Animations et transitions (raffinements continus)
 - [ ] Mode offline complet (lecture + file d'attente d'écriture)
 - [ ] Notifications push configurables
-- [ ] Thème dynamique (Material You)
+- [x] Thème dynamique (Material You) — livré via Réglages → Affichage → Couleurs en Phase 4 (#595/#883)
 - [ ] Thème "HFR classique"
 - [ ] Widgets Android
 - [ ] Tests de performance (scroll, cold start, mémoire)

@@ -1,12 +1,15 @@
 package fr.forumhfr.redface2.feature.settings
 
-import fr.forumhfr.redface2.core.domain.preferences.AccentColor
+import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
+import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
+import fr.forumhfr.redface2.core.domain.preferences.LightSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
+import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
@@ -78,25 +81,20 @@ data class SettingsState(
     val isUpdatingFlagsPerTabOverride: Boolean = false,
     val flagsPerTabOverrideError: Boolean = false,
     val flagsPerTabOverrideTouchedLocally: Boolean = false,
-    // Theme preferences (#286). Same optimistic-flip machinery as the flags toggles:
-    // `themeMode`/`amoledEnabled` are the displayed values, `isUpdating*` gates the control
-    // while DataStore writes, `*Error` surfaces a persist failure, and `*TouchedLocally` is a
-    // legacy write marker (no longer consulted — #788). Defaults match the DataStore defaults
-    // (SYSTEM, amoled off).
+    // Theme preferences (#286 / #595 / #883). `themeMode` stays independent from the colour bundle:
+    // the mode decides light/dark, while `themeColorPreferences` carries accent presets/custom RGB,
+    // light/dark surface tones and Android 12+ dynamic colours. The bundle is written atomically so
+    // one UI action cannot leave the accent and surface keys half-updated.
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val isUpdatingThemeMode: Boolean = false,
     val themeModeError: Boolean = false,
     val themeModeTouchedLocally: Boolean = false,
-    val amoledEnabled: Boolean = false,
-    val isUpdatingAmoled: Boolean = false,
-    val amoledError: Boolean = false,
-    val amoledTouchedLocally: Boolean = false,
-    // TU 2788511 — accent colour family (rose default ↔ vivid « REDFACE1 » red). Same enum
-    // optimistic-flip + startup-race-guard machinery as `immersiveNavBarReveal`.
-    val accentColor: AccentColor = AccentColor.ROSE,
-    val isUpdatingAccentColor: Boolean = false,
-    val accentColorError: Boolean = false,
-    val accentColorTouchedLocally: Boolean = false,
+    val themeColorPreferences: ThemeColorPreferences = ThemeColorPreferences(),
+    val isUpdatingThemeColors: Boolean = false,
+    val themeColorsError: Boolean = false,
+    val themeColorsTouchedLocally: Boolean = false,
+    val customAccentHexInput: String = AccentPreset.ROSE.seedRgb.toThemeAccentHex(),
+    val customAccentHexError: Boolean = false,
     // #1207 — force Android's « Ouvrir avec… » chooser for explicit external-link actions.
     // Default false preserves the direct-default-browser behaviour until the user opts in.
     val alwaysAskLinkApp: Boolean = false,
@@ -330,12 +328,11 @@ data class SettingsState(
     val canChangeThemeMode: Boolean
         get() = !isUpdatingThemeMode
 
-    val canToggleAmoled: Boolean
-        get() = !isUpdatingAmoled
+    val canChangeThemeColors: Boolean
+        get() = !isUpdatingThemeColors
 
-    // TU 2788511 — the accent colour control is gated only by its own in-flight write.
-    val canChangeAccentColor: Boolean
-        get() = !isUpdatingAccentColor
+    val customAccentPreviewRgb: Int?
+        get() = parseThemeAccentHexOrNull(customAccentHexInput)
 
     // Build 89 follow-up — the topic top-bar auto-hide toggle is gated only by its own write.
     val canToggleTopicTopBarAutoHide: Boolean
@@ -515,11 +512,14 @@ sealed interface SettingsIntent {
     // #309 — per-tab display override master switch.
     data class FlagsPerTabOverrideChanged(val enabled: Boolean) : SettingsIntent
 
-    // #286 — theme preferences. `mode` is the desired selection, `enabled` the desired AMOLED state;
-    // both applied optimistically with revert-on-failure, like the flags toggles.
+    // #286 — theme mode. Colour details live in the complete bundle below.
     data class ThemeModeChanged(val mode: ThemeMode) : SettingsIntent
-    data class AmoledEnabledChanged(val enabled: Boolean) : SettingsIntent
-    data class AccentColorChanged(val color: AccentColor) : SettingsIntent
+    data class ThemeAccentPresetChanged(val preset: AccentPreset) : SettingsIntent
+    data class CustomAccentHexChanged(val text: String) : SettingsIntent
+    data object CustomAccentHexCommitted : SettingsIntent
+    data class LightSurfaceToneChanged(val tone: LightSurfaceTone) : SettingsIntent
+    data class DarkSurfaceToneChanged(val tone: DarkSurfaceTone) : SettingsIntent
+    data class DynamicColorEnabledChanged(val enabled: Boolean) : SettingsIntent
 
     /** #1207 — use Android's app chooser for every explicit external-link opening. */
     data class AlwaysAskLinkAppChanged(val enabled: Boolean) : SettingsIntent

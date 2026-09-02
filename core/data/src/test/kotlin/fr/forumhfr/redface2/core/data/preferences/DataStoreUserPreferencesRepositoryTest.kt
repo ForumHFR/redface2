@@ -8,7 +8,6 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import app.cash.turbine.test
-import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
@@ -710,12 +709,16 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
-    @Suppress("DEPRECATION")
-    fun `setAmoledEnabled mirrors the flag without clobbering the mirrored theme mode`() = runTest(dispatcher) {
+    fun `setThemeColorPreferences mirrors AMOLED without clobbering the mirrored theme mode`() = runTest(dispatcher) {
         repository.setThemeMode(ThemeMode.DARK)
-        repository.setAmoledEnabled(true)
+        repository.setThemeColorPreferences(
+            ThemeColorPreferences(darkSurfaceTone = DarkSurfaceTone.AMOLED),
+        )
 
-        assertEquals(ThemeBootstrap(ThemeMode.DARK, amoledEnabled = true), themeBootstrapStore.read())
+        assertEquals(
+            ThemeBootstrap(themeMode = ThemeMode.DARK, darkSurfaceTone = DarkSurfaceTone.AMOLED),
+            themeBootstrapStore.read(),
+        )
     }
 
     @Test
@@ -789,21 +792,6 @@ class DataStoreUserPreferencesRepositoryTest {
         }
 
         assertEquals(StartScreenPreference(StartScreenChoice.MESSAGES), startScreenBootstrapStore.read())
-    }
-
-    @Test
-    @Suppress("DEPRECATION")
-    fun `observeAmoledEnabled defaults to false then persists true`() = runTest(dispatcher) {
-        repository.observeAmoledEnabled().test {
-            assertFalse(awaitItem())
-            cancelAndIgnoreRemainingEvents()
-        }
-
-        repository.setAmoledEnabled(true)
-        repository.observeAmoledEnabled().test {
-            assertTrue(awaitItem())
-            cancelAndIgnoreRemainingEvents()
-        }
     }
 
     @Test
@@ -1265,28 +1253,6 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
-    @Suppress("DEPRECATION")
-    fun `observeAccentColor defaults to ROSE then persists the chosen colour`() = runTest(dispatcher) {
-        // TU 2788511 — default ROSE (the historical maroon/rose scheme) on an empty store.
-        repository.observeAccentColor().test {
-            assertEquals(AccentColor.ROSE, awaitItem())
-            cancelAndIgnoreRemainingEvents()
-        }
-
-        repository.setAccentColor(AccentColor.ROUGE_REDFACE1)
-        repository.observeAccentColor().test {
-            assertEquals(AccentColor.ROUGE_REDFACE1, awaitItem())
-            cancelAndIgnoreRemainingEvents()
-        }
-
-        repository.setAccentColor(AccentColor.ROSE)
-        repository.observeAccentColor().test {
-            assertEquals(AccentColor.ROSE, awaitItem())
-            cancelAndIgnoreRemainingEvents()
-        }
-    }
-
-    @Test
     fun `saving disabled proxy removes optional fields from effective config`() = runTest(dispatcher) {
         repository.saveProxyConfig(
             ProxyConfig(
@@ -1553,13 +1519,12 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
-    @Suppress("DEPRECATION")
     fun `corrupt accent_color value falls back to ROSE instead of crashing`() = runTest(dispatcher) {
         // TU 2788511 — an unknown value (older build / manual edit) must degrade to ROSE, not crash valueOf.
         dataStore.edit { prefs -> prefs[stringPreferencesKey("accent_color")] = "BOGUS" }
 
-        repository.observeAccentColor().test {
-            assertEquals(AccentColor.ROSE, awaitItem())
+        repository.observeThemeColorPreferences().test {
+            assertEquals(ThemeColorPreferences(), awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
     }

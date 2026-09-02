@@ -7,14 +7,18 @@ import fr.forumhfr.redface2.core.domain.cache.ImageCacheMaintenance
 import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageContentCache
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageContentCacheException
-import fr.forumhfr.redface2.core.domain.preferences.AccentColor
+import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
+import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
+import fr.forumhfr.redface2.core.domain.preferences.LightSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
+import fr.forumhfr.redface2.core.domain.preferences.ThemeAccent
+import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
@@ -91,7 +95,11 @@ class SettingsViewModel @Inject constructor(
             isLocked = { it.isUpdatingThemeMode },
             apply = { state, value -> state.copy(themeMode = value) },
         )
-        observeLegacyAmoledPreference()
+        observePreference(
+            flow = userPreferencesRepository.observeThemeColorPreferences(),
+            isLocked = { it.isUpdatingThemeColors },
+            apply = { state, value -> state.withThemeColorPreferences(value) },
+        )
         observePreference(
             flow = userPreferencesRepository.observeTopicTopBarAutoHide(),
             isLocked = { it.isUpdatingTopicTopBarAutoHide },
@@ -193,7 +201,6 @@ class SettingsViewModel @Inject constructor(
             isLocked = { it.isUpdatingImmersiveNavBarReveal },
             apply = { state, value -> state.copy(immersiveNavBarReveal = value) },
         )
-        observeLegacyAccentPreference()
         observePreference(
             flow = userPreferencesRepository.observeAlwaysAskLinkApp(),
             isLocked = { it.isUpdatingAlwaysAskLinkApp },
@@ -302,21 +309,15 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    @Suppress("DEPRECATION")
-    private fun observeLegacyAmoledPreference() {
-        observePreference(
-            flow = userPreferencesRepository.observeAmoledEnabled(),
-            isLocked = { it.isUpdatingAmoled },
-            apply = { state, value -> state.copy(amoledEnabled = value) },
-        )
-    }
-
-    @Suppress("DEPRECATION")
-    private fun observeLegacyAccentPreference() {
-        observePreference(
-            flow = userPreferencesRepository.observeAccentColor(),
-            isLocked = { it.isUpdatingAccentColor },
-            apply = { state, value -> state.copy(accentColor = value) },
+    private fun SettingsState.withThemeColorPreferences(preferences: ThemeColorPreferences): SettingsState {
+        val customInput = when (val accent = preferences.accent) {
+            is ThemeAccent.Custom -> accent.rgb.toThemeAccentHex()
+            is ThemeAccent.Preset -> customAccentHexInput
+        }
+        return copy(
+            themeColorPreferences = preferences,
+            customAccentHexInput = customInput,
+            customAccentHexError = false,
         )
     }
 
@@ -359,8 +360,12 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.FlagsHideReadCategoriesChanged -> updateFlagsHideReadCategories(intent.enabled)
             is SettingsIntent.FlagsPerTabOverrideChanged -> updateFlagsPerTabOverride(intent.enabled)
             is SettingsIntent.ThemeModeChanged -> updateThemeMode(intent.mode)
-            is SettingsIntent.AmoledEnabledChanged -> updateAmoled(intent.enabled)
-            is SettingsIntent.AccentColorChanged -> updateAccentColor(intent.color)
+            is SettingsIntent.ThemeAccentPresetChanged -> updateThemeAccentPreset(intent.preset)
+            is SettingsIntent.CustomAccentHexChanged -> updateCustomAccentHex(intent.text)
+            SettingsIntent.CustomAccentHexCommitted -> commitCustomAccentHex()
+            is SettingsIntent.LightSurfaceToneChanged -> updateLightSurfaceTone(intent.tone)
+            is SettingsIntent.DarkSurfaceToneChanged -> updateDarkSurfaceTone(intent.tone)
+            is SettingsIntent.DynamicColorEnabledChanged -> updateDynamicColor(intent.enabled)
             is SettingsIntent.AlwaysAskLinkAppChanged -> updateAlwaysAskLinkApp(intent.enabled)
             is SettingsIntent.TopicTopBarAutoHideChanged -> updateTopicTopBarAutoHide(intent.enabled)
             is SettingsIntent.TopicPageFabsChanged -> updateTopicPageFabs(intent.enabled)
@@ -686,6 +691,85 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    private fun updateThemeAccentPreset(preset: AccentPreset) {
+        updateThemeColorPreferences { preferences ->
+            preferences.copy(accent = ThemeAccent.Preset(preset))
+        }
+    }
+
+    private fun updateCustomAccentHex(text: String) {
+        _state.update {
+            it.copy(
+                customAccentHexInput = text,
+                customAccentHexError = false,
+                themeColorsError = false,
+            )
+        }
+    }
+
+    private fun commitCustomAccentHex() {
+        val rgb = parseThemeAccentHexOrNull(_state.value.customAccentHexInput)
+        if (rgb == null) {
+            _state.update { it.copy(customAccentHexError = true) }
+            return
+        }
+        _state.update { it.copy(customAccentHexInput = rgb.toThemeAccentHex(), customAccentHexError = false) }
+        updateThemeColorPreferences { preferences ->
+            preferences.copy(accent = ThemeAccent.Custom(rgb))
+        }
+    }
+
+    private fun updateLightSurfaceTone(tone: LightSurfaceTone) {
+        updateThemeColorPreferences { preferences -> preferences.copy(lightSurfaceTone = tone) }
+    }
+
+    private fun updateDarkSurfaceTone(tone: DarkSurfaceTone) {
+        updateThemeColorPreferences { preferences -> preferences.copy(darkSurfaceTone = tone) }
+    }
+
+    private fun updateDynamicColor(enabled: Boolean) {
+        updateThemeColorPreferences { preferences -> preferences.copy(dynamicColorEnabled = enabled) }
+    }
+
+    private fun updateThemeColorPreferences(transform: (ThemeColorPreferences) -> ThemeColorPreferences) {
+        val previous = _state.value.themeColorPreferences
+        val desired = transform(previous)
+        if (desired == previous) return
+        _state.update {
+            it.copy(
+                themeColorPreferences = desired,
+                customAccentHexInput = desired.customAccentHexOrFallback(it.customAccentHexInput),
+                customAccentHexError = false,
+                isUpdatingThemeColors = true,
+                themeColorsError = false,
+                themeColorsTouchedLocally = true,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { userPreferencesRepository.setThemeColorPreferences(desired) }
+                .onSuccess {
+                    _state.update {
+                        it.copy(themeColorPreferences = desired, isUpdatingThemeColors = false)
+                    }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            themeColorPreferences = previous,
+                            isUpdatingThemeColors = false,
+                            themeColorsError = true,
+                        )
+                    }
+                }
+        }
+    }
+
+    private fun ThemeColorPreferences.customAccentHexOrFallback(fallback: String): String =
+        when (val accent = accent) {
+            is ThemeAccent.Custom -> accent.rgb.toThemeAccentHex()
+            is ThemeAccent.Preset -> fallback
+        }
+
     // #287 — display density is an enum, so it uses the bespoke optimistic-flip shape (like
     // updateThemeMode) rather than updateBooleanPreference. previous is captured for revert.
     private fun updateDisplayDensity(desired: DisplayDensity) {
@@ -950,29 +1034,6 @@ class SettingsViewModel @Inject constructor(
                     _state.update { it.copy(imgurClientIdError = true) }
                 }
         }
-    }
-
-    private fun updateAmoled(desired: Boolean) {
-        val previous = _state.value.amoledEnabled
-        updateBooleanPreference(
-            desired = desired,
-            optimistic = {
-                it.copy(
-                    amoledEnabled = desired,
-                    isUpdatingAmoled = true,
-                    amoledError = false,
-                    amoledTouchedLocally = true,
-                )
-            },
-            onSettled = { state, result ->
-                if (result.isSuccess) {
-                    state.copy(amoledEnabled = desired, isUpdatingAmoled = false)
-                } else {
-                    state.copy(amoledEnabled = previous, isUpdatingAmoled = false, amoledError = true)
-                }
-            },
-            persist = ::setLegacyAmoledEnabled,
-        )
     }
 
     private fun updateAlwaysAskLinkApp(desired: Boolean) {
@@ -1409,46 +1470,6 @@ class SettingsViewModel @Inject constructor(
                     }
                 }
         }
-    }
-
-    // TU 2788511 — enum preference; same bespoke optimistic-flip shape as updateImmersiveNavBarReveal.
-    private fun updateAccentColor(desired: AccentColor) {
-        val previous = _state.value.accentColor
-        _state.update {
-            it.copy(
-                accentColor = desired,
-                isUpdatingAccentColor = true,
-                accentColorError = false,
-                accentColorTouchedLocally = true,
-            )
-        }
-        viewModelScope.launch {
-            runCatching { setLegacyAccentColor(desired) }
-                .onSuccess {
-                    _state.update {
-                        it.copy(accentColor = desired, isUpdatingAccentColor = false)
-                    }
-                }
-                .onFailure {
-                    _state.update {
-                        it.copy(
-                            accentColor = previous,
-                            isUpdatingAccentColor = false,
-                            accentColorError = true,
-                        )
-                    }
-                }
-        }
-    }
-
-    @Suppress("DEPRECATION")
-    private suspend fun setLegacyAmoledEnabled(enabled: Boolean) {
-        userPreferencesRepository.setAmoledEnabled(enabled)
-    }
-
-    @Suppress("DEPRECATION")
-    private suspend fun setLegacyAccentColor(color: AccentColor) {
-        userPreferencesRepository.setAccentColor(color)
     }
 
     private fun updateMpUnreadBadge(desired: Boolean) {
