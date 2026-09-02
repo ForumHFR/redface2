@@ -1,9 +1,5 @@
-Redface 2 v0.51.0 — dev.
+Redface 2 v0.51.1 — dev.
 
-Tester feedback after the beta:
-- Replying with a quote lands on the quoted post (nicko).
-- Opening a flag shows the "last read" marker (nicko).
-- Flag tabs: no more stale tab after a quick switch (styx42).
-- "Pages to read" pill coloured by lag (thibw).
-- Accent-insensitive search, password eye, extra margin in the Forum view, offline empty-state smiley.
-- Technical: compileSdk 37, androidx/Compose updates.
+- Poll results as proportional bars (count, percentage, blank vote apart). Suggested by thibw.
+- Quick reply: the field grows up to 15 lines like RF1, reduced cap when the keyboard squeezes the screen. Suggested by tinc.
+- Plus the whole 0.51.0 lot: quote → back to the quoted post, visible "last read" marker, flag tabs, "pages to read" pill by lag, accent-insensitive search, compileSdk 37.

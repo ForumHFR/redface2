@@ -1,9 +1,5 @@
-Redface 2 v0.51.0 — dev.
+Redface 2 v0.51.1 — dev.
 
-Retours des testeurs après la bêta :
-- Répondre en citant ramène au message cité (nicko).
-- Ouvrir un drapeau montre le marqueur « dernier message lu » (nicko).
-- Onglets Drapeaux : plus d'onglet figé après un changement rapide (styx42).
-- Pastille « pages à lire » colorée selon le retard (thibw).
-- Recherche insensible aux accents, œil mot de passe, marge en trop en vue Forum, smiley d'état vide hors-ligne.
-- Technique : compileSdk 37, mises à jour androidx/Compose.
+- Résultats de sondage en barres proportionnelles (compteur, pourcentage, vote blanc à part). Suggestion de thibw.
+- Réponse rapide : le champ grandit jusqu'à 15 lignes comme RF1, plafond réduit quand le clavier serre l'écran. Suggestion de tinc.
+- Et tout le lot 0.51.0 : citation → retour au message cité, marqueur « dernier lu » visible, onglets Drapeaux, pastille « pages à lire » par retard, recherche sans accents, compileSdk 37.

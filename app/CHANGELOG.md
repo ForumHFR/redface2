@@ -16,6 +16,17 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.51.1` — `internal` (dev) — 2026-09-02
+
+Suite de la nuit du 01→02/09 : deux suggestions du fil DEV.
+
+### Ajouté
+
+- **Résultats de sondage en barres** ([#1182](https://github.com/ForumHFR/redface2/issues/1182)) — chaque réponse d'un sondage affiche une barre proportionnelle à sa part des votes, avec le compteur et le pourcentage ; la réponse en tête est accentuée, le vote blanc reste une ligne à part (il compte dans le total, comme sur HFR). Suggestion de thibw.
+- **Réponse rapide plus haute** ([#949](https://github.com/ForumHFR/redface2/issues/949)) — le champ de la réponse rapide (surface d'écriture optionnelle) grandit jusqu'à 15 lignes comme sur RF1, avec un plafond réduit quand le clavier ou le paysage serrent l'écran pour garder le bouton Envoyer visible. Suggestion de tinc.
+
+---
+
 ## `0.51.0` — `internal` (dev) — 2026-09-02
 
 Premier lot dev après la promotion bêta `0.50.2` : nuit de correctifs et de suggestions des testeurs (nicko, styx42, thibw, tinc), plus le passage à `compileSdk 37` qui débloque les mises à jour androidx / Compose.
