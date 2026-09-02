@@ -85,7 +85,8 @@ internal fun QuickReplySheet(
     LaunchedEffect(viewModel) {
         // Re-seed the field from the #405 row at EACH opening — the VM outlives the sheet and
         // its cached text can be stale after a full-screen edit of the same draft (gate #788).
-        viewModel.onSheetOpened(initialQuotes)
+        // The VM outlives the sheet (topic-scoped) : hand it the page of THIS opening (#1243 suite).
+        viewModel.onSheetOpened(currentPage = request.page, initialQuotes = initialQuotes)
         viewModel.effects.collect { effect ->
             when (effect) {
                 is QuickReplyEffect.SubmitSucceeded ->

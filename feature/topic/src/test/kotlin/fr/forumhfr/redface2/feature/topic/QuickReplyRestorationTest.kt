@@ -78,7 +78,7 @@ class QuickReplyRestorationTest {
                     // QuickReplySheet.kt), torn down with the composition like the real sheet.
                     Box(modifier = Modifier.testTag(SHEET_TAG))
                     LaunchedEffect(viewModel) {
-                        viewModel.onSheetOpened(launch.initialQuotes)
+                        viewModel.onSheetOpened(currentPage = launch.request.page, initialQuotes = launch.initialQuotes)
                         viewModel.effects.collect { effect ->
                             when (effect) {
                                 is QuickReplyEffect.SubmitSucceeded -> {

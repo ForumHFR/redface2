@@ -551,9 +551,9 @@ sealed interface TopicEffect {
     data object PostSubmitRefreshFailed : TopicEffect
 
     /**
-     * #1243 — HFR accepted a plain reply sent from an already-read, non-tail page. The page is
-     * refreshed in place so the read flag cannot be advanced by an automatic authenticated load of
-     * the tail; the screen surfaces a Snackbar with an explicit action to open [page].
+     * #1243 — HFR accepted a reply whose published post is on a later page than the one refreshed
+     * in place. The read flag cannot be advanced by an automatic authenticated load of the tail, so
+     * the screen surfaces a Snackbar with an explicit action to open [page].
      */
     data class PostSubmittedElsewhere(val page: Int, val scrollTo: Int? = null) : TopicEffect
 

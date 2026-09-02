@@ -135,15 +135,16 @@ class QuickReplyViewModel @AssistedInject constructor(
     private val _effects: Channel<QuickReplyEffect> = Channel(capacity = Channel.BUFFERED)
     val effects: Flow<QuickReplyEffect> = _effects.receiveAsFlow()
 
-    private val context = ReplyContext(
-        cat = request.cat,
-        subcat = request.subcat,
-        topicId = request.topicId,
-        page = request.page,
-    )
+    /**
+     * The VM is scoped to the topic nav entry, so [request] is the page of the FIRST sheet creation
+     * only. The actual reply page is refreshed on every opening and snapshotted for each fetch /
+     * submit so a second quick reply on another page posts the right HFR `page`.
+     */
+    private var currentPage: Int = request.page
 
     /** Same lifecycle as the full editor : hash_check stays here, never in the Compose state. */
     private var loadedForm: ReplyForm? = null
+    private var loadedFormPage: Int? = null
     private var formJob: Job? = null
     private var submitJob: Job? = null
     private var autosaveJob: Job? = null
@@ -211,8 +212,19 @@ class QuickReplyViewModel @AssistedInject constructor(
      * (never a replacement computed from the row — réserve Codex n°1).
      */
     fun onSheetOpened(initialQuotes: List<QuoteSelection> = emptyList()) {
+        onSheetOpened(currentPage = request.page, initialQuotes = initialQuotes)
+    }
+
+    /**
+     * [currentPage] is the topic page visible at this opening. It is intentionally not part of the
+     * Hilt key : the draft and in-flight submit contract remain scoped to the topic, while the HFR
+     * form context is rebuilt per opening and per submit.
+     */
+    fun onSheetOpened(currentPage: Int, initialQuotes: List<QuoteSelection> = emptyList()) {
         materializeJob?.cancel()
         openJob?.cancel()
+        updateCurrentPage(currentPage)
+        prefetchForm()
         // Gate Sol #953 F2 — seal the previous session : if its owner snapshot never resolved,
         // its still-pending draft tasks must no-op rather than adopt whatever account the late
         // currentOwner() read lands on (a no-op on an already-resolved session).
@@ -261,10 +273,11 @@ class QuickReplyViewModel @AssistedInject constructor(
     @Suppress("TooGenericExceptionCaught") // mapped to a typed error below; cancellation rethrown.
     private fun materializeInlineQuotes(quotes: List<QuoteSelection>) {
         materializeJob?.cancel()
+        val baseContext = replyContext()
         materializeJob = viewModelScope.launch {
             _state.update { it.copy(isPreparingQuotes = true, submitError = null) }
             try {
-                val quoteContext = context.copy(
+                val quoteContext = baseContext.copy(
                     quotedNumreponse = quotes.first().numreponse,
                     quoteRef = null,
                 )
@@ -272,7 +285,7 @@ class QuickReplyViewModel @AssistedInject constructor(
                     context = quoteContext,
                     extraQuoteNumreponses = quotes.drop(1).map { it.numreponse },
                 )
-                loadedForm = form
+                rememberLoadedForm(form, quoteContext.page)
                 val prefills = form.initialContent.trimEnd()
                 _state.update { current ->
                     val existing = current.text.text
@@ -416,9 +429,13 @@ class QuickReplyViewModel @AssistedInject constructor(
 
     /** Warm the hash_check early so the first submit doesn't pay the GET ; errors stay silent. */
     private fun prefetchForm() {
-        if (loadedForm != null || formJob?.isActive == true) return
+        val context = replyContext()
+        if (loadedFormFor(context.page) != null || formJob?.isActive == true) return
         formJob = viewModelScope.launch {
-            loadedForm = runCatching { replyRepository.fetchReplyForm(context) }.getOrNull()
+            val form = runCatching { replyRepository.fetchReplyForm(context) }.getOrNull()
+            if (form != null && currentPage == context.page) {
+                rememberLoadedForm(form, context.page)
+            }
         }
     }
 
@@ -433,12 +450,16 @@ class QuickReplyViewModel @AssistedInject constructor(
         // armed cards. Snapshotted here : the state is reset on success before the effect is sent.
         val quotes = _state.value.quotes
         val quotedNumreponses = QuotedNumreponses.of(_state.value.text.text, quotes)
+        val baseContext = replyContext()
         submitJob = viewModelScope.launch {
             val outcome = runCatching {
                 if (quotes.isEmpty()) {
-                    val form = loadedForm ?: replyRepository.fetchReplyForm(context).also { loadedForm = it }
+                    val form = loadedFormFor(baseContext.page)
+                        ?: replyRepository.fetchReplyForm(baseContext).also {
+                            rememberLoadedForm(it, baseContext.page)
+                        }
                     replyRepository.submitReply(
-                        context = context,
+                        context = baseContext,
                         form = form,
                         bbcodeContent = _state.value.text.text,
                         options = form.options,
@@ -449,7 +470,7 @@ class QuickReplyViewModel @AssistedInject constructor(
                     // rides). Card order = citation order ; the typed body follows the quotes.
                     // A network failure leaves body AND cards untouched (state only mutates on
                     // success), per the cadrage's partial-submit interdiction.
-                    val quoteContext = context.copy(
+                    val quoteContext = baseContext.copy(
                         quotedNumreponse = quotes.first().numreponse,
                         quoteRef = null,
                     )
@@ -477,6 +498,30 @@ class QuickReplyViewModel @AssistedInject constructor(
                 onFailure = ::handleSubmitFailure,
             )
         }
+    }
+
+    private fun updateCurrentPage(page: Int) {
+        if (page == currentPage) return
+        currentPage = page
+        loadedForm = null
+        loadedFormPage = null
+        formJob?.cancel()
+        formJob = null
+    }
+
+    private fun replyContext(): ReplyContext = ReplyContext(
+        cat = request.cat,
+        subcat = request.subcat,
+        topicId = request.topicId,
+        page = currentPage,
+    )
+
+    private fun loadedFormFor(page: Int): ReplyForm? =
+        loadedForm.takeIf { loadedFormPage == page }
+
+    private fun rememberLoadedForm(form: ReplyForm, page: Int) {
+        loadedForm = form
+        loadedFormPage = page
     }
 
     private suspend fun handleSubmitOutcome(
