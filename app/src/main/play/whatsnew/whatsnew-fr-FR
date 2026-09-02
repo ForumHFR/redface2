@@ -1,6 +1,6 @@
 Redface 2 v0.53.0 — dev.
 
-- Couleurs : sélecteur Clair / Système / Sombre directement dans la page, pour vérifier l'aperçu dans les deux thèmes.
-- Drapeaux : les bandeaux de catégories « Doux » et « Puce » prennent l'accent choisi, même avec le fond Blanc ou Gris RF1 ; l'icône du style « Minimal » aussi.
+- Couleurs : sélecteur Clair / Système / Sombre dans la page, pour vérifier l'aperçu dans les deux thèmes.
+- Drapeaux : les bandeaux « Doux » et « Puce » prennent l'accent choisi, même avec le fond Blanc ou Gris RF1 ; l'icône du style « Minimal » aussi.
 - Couleurs : un accent Neutre ou un hex gris donne un vrai gris, plus du vert.
-- Topic : répondre en citant reste sur la page et reprend sur le message cité ; la réponse rapide poste bien la page où elle est ouverte.
+- Topic : répondre en citant reprend sur le message cité ; la réponse rapide poste la page où elle est ouverte.

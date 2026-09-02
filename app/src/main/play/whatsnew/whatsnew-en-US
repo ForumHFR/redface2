@@ -1,6 +1,6 @@
 Redface 2 v0.53.0 — dev.
 
-- Colours: a Light / System / Dark selector right on the page, to check the preview in both themes.
-- Flags: the "Soft" and "Bullet" category bands now take the chosen accent, even with the White or RF1 Grey background; the "Minimal" style tints its icon too.
-- Colours: a Neutral accent or a grey hex now gives real grey instead of green.
-- Topic: replying with a quote stays on the page and resumes at the quoted post; quick reply posts the page it was opened on.
+- Colours: a Light / System / Dark selector on the page, to check the preview in both themes.
+- Flags: the "Soft" and "Bullet" category bands take the chosen accent, even with the White or RF1 Grey background; the "Minimal" icon too.
+- Colours: a Neutral accent or a grey hex gives real grey instead of green.
+- Topic: replying with a quote resumes at the quoted post; quick reply posts the page it was opened on.
