@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
+import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
@@ -12,17 +13,20 @@ import fr.forumhfr.redface2.core.domain.preferences.NavBarLabelsBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
+import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.preferences.toLegacyAccentColor
 import javax.inject.Inject
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
 /**
- * App-root theme state (#286). Exposes the persisted [ThemeMode] and AMOLED toggle so
- * [RedfaceApp] can compute the effective dark theme passed to `RedfaceTheme` (which previously
- * only read `isSystemInDarkTheme()`).
+ * App-root theme state (#286/#883). Exposes the persisted [ThemeMode] and complete colour
+ * preferences so [RedfaceApp] can compute the effective dark theme passed to `RedfaceTheme` and
+ * apply accent/surface choices atomically.
  *
  * [SharingStarted.Eagerly] so the first DataStore read starts as soon as the ViewModel is created.
  * Until it resolves, the initial value comes from the SYNCHRONOUS [ThemeBootstrapStore] mirror —
@@ -44,16 +48,21 @@ class AppThemeViewModel @Inject constructor(
         userPreferencesRepository.observeThemeMode()
             .stateIn(viewModelScope, SharingStarted.Eagerly, bootstrap.themeMode)
 
+    val themeColorPreferences: StateFlow<ThemeColorPreferences> =
+        userPreferencesRepository.observeThemeColorPreferences()
+            .stateIn(viewModelScope, SharingStarted.Eagerly, bootstrap.colorPreferences)
+
     val amoledEnabled: StateFlow<Boolean> =
-        userPreferencesRepository.observeAmoledEnabled()
+        themeColorPreferences
+            .map { it.darkSurfaceTone == DarkSurfaceTone.AMOLED }
             .stateIn(viewModelScope, SharingStarted.Eagerly, bootstrap.amoledEnabled)
 
-    // TU 2788511 — accent colour family (rose default ↔ vivid « REDFACE1 » red). Eager like the
-    // reading presets; ROSE seed. No bootstrap mirror: the accent re-tints only primary/secondary
-    // roles, NOT the window background, so there is no pre-first-frame window to seed (cf. density).
+    // Legacy rose/red projection kept for SettingsDisplayScreen until PR2 moves it to the complete
+    // colour model. Seeded from the same bootstrap mirror as [themeColorPreferences].
     val accentColor: StateFlow<AccentColor> =
-        userPreferencesRepository.observeAccentColor()
-            .stateIn(viewModelScope, SharingStarted.Eagerly, AccentColor.ROSE)
+        themeColorPreferences
+            .map { it.accent.toLegacyAccentColor() }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, bootstrap.accent.toLegacyAccentColor())
 
     // #1207 — app-root chooser policy, exposed through RedfaceTheme's CompositionLocal so every
     // explicit external-link menu observes one live global value without feature-level injection.

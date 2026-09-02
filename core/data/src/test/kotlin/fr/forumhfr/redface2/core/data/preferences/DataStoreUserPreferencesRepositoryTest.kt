@@ -5,27 +5,33 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import app.cash.turbine.test
-import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
-import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
-import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
-import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
-import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
+import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
-import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
-import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
-import fr.forumhfr.redface2.core.domain.preferences.NavBarLabelsBootstrapStore
+import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
+import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
+import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
+import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
+import fr.forumhfr.redface2.core.domain.preferences.LightSurfaceTone
+import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
+import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.NavBarLabelsBootstrapStore
+import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
+import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenChoice
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
+import fr.forumhfr.redface2.core.domain.preferences.ThemeAccent
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrap
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
+import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
@@ -68,8 +74,17 @@ class DataStoreUserPreferencesRepositoryTest {
         override fun writeThemeMode(mode: ThemeMode) {
             stored = stored.copy(themeMode = mode)
         }
-        override fun writeAmoledEnabled(enabled: Boolean) {
-            stored = stored.copy(amoledEnabled = enabled)
+        override fun writeThemeAccent(accent: ThemeAccent) {
+            stored = stored.copy(accent = accent)
+        }
+        override fun writeLightSurfaceTone(tone: LightSurfaceTone) {
+            stored = stored.copy(lightSurfaceTone = tone)
+        }
+        override fun writeDarkSurfaceTone(tone: DarkSurfaceTone) {
+            stored = stored.copy(darkSurfaceTone = tone)
+        }
+        override fun writeDynamicColorEnabled(enabled: Boolean) {
+            stored = stored.copy(dynamicColorEnabled = enabled)
         }
     }
 
@@ -93,6 +108,9 @@ class DataStoreUserPreferencesRepositoryTest {
 
     @Before
     fun setUp() {
+        themeBootstrapStore.stored = ThemeBootstrap()
+        startScreenBootstrapStore.stored = StartScreenPreference()
+        navBarLabelsBootstrapStore.stored = true
         dataStore = PreferenceDataStoreFactory.create(
             produceFile = { tempFolder.newFile("user.preferences_pb") },
         )
@@ -692,6 +710,7 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    @Suppress("DEPRECATION")
     fun `setAmoledEnabled mirrors the flag without clobbering the mirrored theme mode`() = runTest(dispatcher) {
         repository.setThemeMode(ThemeMode.DARK)
         repository.setAmoledEnabled(true)
@@ -773,6 +792,7 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    @Suppress("DEPRECATION")
     fun `observeAmoledEnabled defaults to false then persists true`() = runTest(dispatcher) {
         repository.observeAmoledEnabled().test {
             assertFalse(awaitItem())
@@ -782,6 +802,115 @@ class DataStoreUserPreferencesRepositoryTest {
         repository.setAmoledEnabled(true)
         repository.observeAmoledEnabled().test {
             assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `theme color preferences default to RF1 gray rose material surfaces without dynamic colour`() =
+        runTest(dispatcher) {
+            repository.observeThemeColorPreferences().test {
+                assertEquals(ThemeColorPreferences(), awaitItem())
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `legacy red accent key is read as a preset theme accent`() = runTest(dispatcher) {
+        dataStore.edit { prefs ->
+            prefs[stringPreferencesKey("accent_color")] = AccentPreset.ROUGE_REDFACE1.name
+        }
+
+        repository.observeThemeColorPreferences().test {
+            assertEquals(
+                ThemeColorPreferences(
+                    accent = ThemeAccent.Preset(AccentPreset.ROUGE_REDFACE1),
+                ),
+                awaitItem(),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `legacy AMOLED key is read as AMOLED dark surface tone`() = runTest(dispatcher) {
+        dataStore.edit { prefs ->
+            prefs[booleanPreferencesKey("amoled_enabled")] = true
+        }
+
+        repository.observeThemeColorPreferences().test {
+            assertEquals(
+                ThemeColorPreferences(
+                    darkSurfaceTone = DarkSurfaceTone.AMOLED,
+                ),
+                awaitItem(),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `custom RGB theme accent persists with surface tone and dynamic colour`() = runTest(dispatcher) {
+        val preferences = ThemeColorPreferences(
+            accent = ThemeAccent.Custom(rgb = 0x123456),
+            lightSurfaceTone = LightSurfaceTone.WHITE,
+            darkSurfaceTone = DarkSurfaceTone.AMOLED,
+            dynamicColorEnabled = true,
+        )
+
+        repository.setThemeColorPreferences(preferences)
+
+        repository.observeThemeColorPreferences().test {
+            assertEquals(preferences, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(preferences, themeBootstrapStore.read().colorPreferences)
+    }
+
+    @Test
+    fun `preset accent write removes a stale custom RGB value`() = runTest(dispatcher) {
+        repository.setThemeColorPreferences(
+            ThemeColorPreferences(accent = ThemeAccent.Custom(rgb = 0xFF00FF)),
+        )
+        repository.setThemeColorPreferences(
+            ThemeColorPreferences(accent = ThemeAccent.Preset(AccentPreset.GREEN)),
+        )
+
+        repository.observeThemeColorPreferences().test {
+            assertEquals(
+                ThemeColorPreferences(accent = ThemeAccent.Preset(AccentPreset.GREEN)),
+                awaitItem(),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(null, dataStore.data.first()[intPreferencesKey("accent_custom_rgb")])
+    }
+
+    @Test
+    fun `preset accent ignores stale custom RGB data`() = runTest(dispatcher) {
+        dataStore.edit { prefs ->
+            prefs[stringPreferencesKey("accent_color")] = AccentPreset.BLUE.name
+            prefs[intPreferencesKey("accent_custom_rgb")] = 0xFF00FF
+        }
+
+        repository.observeThemeColorPreferences().test {
+            assertEquals(
+                ThemeColorPreferences(accent = ThemeAccent.Preset(AccentPreset.BLUE)),
+                awaitItem(),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `unknown colour preference values fall back to defaults`() = runTest(dispatcher) {
+        dataStore.edit { prefs ->
+            prefs[stringPreferencesKey("accent_color")] = "MAGENTA"
+            prefs[stringPreferencesKey("light_surface_tone")] = "PAPER"
+        }
+
+        repository.observeThemeColorPreferences().test {
+            assertEquals(ThemeColorPreferences(), awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -1136,6 +1265,7 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    @Suppress("DEPRECATION")
     fun `observeAccentColor defaults to ROSE then persists the chosen colour`() = runTest(dispatcher) {
         // TU 2788511 — default ROSE (the historical maroon/rose scheme) on an empty store.
         repository.observeAccentColor().test {
@@ -1423,6 +1553,7 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    @Suppress("DEPRECATION")
     fun `corrupt accent_color value falls back to ROSE instead of crashing`() = runTest(dispatcher) {
         // TU 2788511 — an unknown value (older build / manual edit) must degrade to ROSE, not crash valueOf.
         dataStore.edit { prefs -> prefs[stringPreferencesKey("accent_color")] = "BOGUS" }

@@ -19,7 +19,7 @@ Chaque choix a été évalué, comparé et verrouillé. Voici le détail.
 |--------|-------|-------------------|--------|
 | Langage | **Kotlin** | Java | Standard Android depuis 2019, null safety, coroutines |
 | UI | **Jetpack Compose** (via compose-bom) | XML layouts | Direction officielle Google, déclaratif, plus maintenable |
-| Design system | **Material 3** + **Material 3 Adaptive 1.2+** | Material 2 | Standard 2026, dynamic color, canonical layouts (list-detail, supporting pane). Décisions design détaillées ci-dessous. |
+| Design system | **Material 3** + **Material 3 Adaptive 1.2+** + **Material Color Utilities 5.0.1** | Material 2 | Standard 2026, dynamic color opt-in, presets/custom RGB seedés, canonical layouts (list-detail, supporting pane). Décisions design détaillées ci-dessous. |
 | Architecture | **MVI** (MVVM+UDF) | MVVM classique | Flux unidirectionnel, état prévisible, idéal pour un forum reader |
 | Navigation | **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026) | Circuit, Decompose, Navigation 2.x | Compose-first : back stack en state (`NavBackStack<NavKey>`), rendu single-pane via `NavDisplay(backStack, onBack, entryDecorators, entryProvider { entry<…> })`, multi-pane via `ListDetailPaneScaffold` (M3 Adaptive). Cf. [ADR-008]({{ site.baseurl }}/adr/008-compose-navigation-3). |
 | DI | **Hilt (KSP)** | Koin | Erreurs à la compilation, intégration Jetpack, standard contributeurs |
@@ -72,7 +72,7 @@ fun PostBody(post: Post) {
 Pour un forum reader, Compose apporte :
 - **LazyColumn** : équivalent de RecyclerView mais déclaratif, gère des milliers de posts
 - **Recomposition intelligente** : seuls les composants dont l'état change sont redessinés
-- **Theming Material 3** : dark mode, dynamic colors, typographie
+- **Theming Material 3** : dark mode, dynamic colors opt-in, presets/custom RGB, typographie
 - **Preview** : voir le rendu directement dans l'IDE
 
 ### MVI plutôt que MVVM
@@ -92,15 +92,16 @@ Pour un forum reader, MVI est supérieur :
 
 ### Décisions design (tranchées [#9](https://github.com/ForumHFR/redface2/issues/9))
 
-Les 4 choix design de base sont actés pour Phase 0 :
+Les choix design de base sont actés et étendus en Phase 4 :
 
 | Décision | Valeur | Pourquoi |
 |---|---|---|
-| Seed color HFR | `#A62C2C` (rouge brique HFR) | Cohérent avec le nom "Redface". Material Theme Builder génère tout le `ColorScheme` depuis cette seed. À revoir si le naming final (#1) s'en écarte. |
-| Dynamic color par défaut | **OFF** (opt-in settings Phase 5) | Préserve l'identité visuelle HFR constante ; Material You reste disponible via toggle utilisateur |
+| Accents HFR | `ROSE` `#A62C2C` par défaut, `ROUGE_REDFACE1`, 6 presets froids/chauds/neutres et RGB custom | Les rôles chromatiques sont générés par `com.materialkolor:material-color-utilities`; les deux presets historiques restent manuels quand le ton M3 teinté legacy est choisi. |
+| Ton clair par défaut | **Gris RF1** `#F0F0F0` | Aligne le fond avec Redface 1 (#883) tout en gardant `Blanc` et `Teinté M3` comme sorties utilisateur. |
+| Dynamic color par défaut | **OFF** (libellé « Couleurs du système », Android 12+) | Préserve l'identité visuelle HFR constante ; Material You reste disponible via toggle utilisateur et laisse le ton du fond post-traiter les surfaces. |
 | Font family | **Roboto** (système Android) | 0 KB APK impact. Roboto Flex / Inter = trendy sans bénéfice technique pour une app forum |
 | Rendu de posts | **`PostContent` AST** + `AnnotatedString` inline + composables block | Contrat cible acté, implémentation Phase 1. HTML HFR et BBCode éditeur convergent vers la même AST, avec le parser BBCode différable jusqu'à l'éditeur Phase 2. Cf. [ADR-011]({{ site.baseurl }}/adr/011-postcontent-ast) et [#3](https://github.com/ForumHFR/redface2/issues/3). |
-| Thèmes v1 | **Clair, Sombre, AMOLED** | Material You et HFR Classique reportés Phase 5 polish (1-2 jours d'ajout chacun, pas d'imbrication architecturale) |
+| Thèmes v1 | **Clair, Sombre, AMOLED** | AMOLED est un ton de surface sombre true-black qui conserve l'accent actif ; seule la combinaison historique `ROSE + AMOLED` reste byte-identique. |
 
 Le draft `drafts/material3-ui-ux.md` contient les détails étendus (30 color roles, 15 typography styles, motion tokens, adaptive layouts) — c'est un document de référence pédagogique, pas une spec canonique.
 

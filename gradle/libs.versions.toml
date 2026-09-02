@@ -16,6 +16,7 @@ androidx-lifecycle = "2.10.0"
 compose-bom = "2026.08.00"
 navigation3 = "1.1.2"
 material3-adaptive = "1.2.0"
+materialKolor = "5.0.1"
 coroutines = "1.11.0"
 room = "2.8.4"
 datastore = "1.2.1"
@@ -83,6 +84,7 @@ androidx-navigation3-ui = { module = "androidx.navigation3:navigation3-ui", vers
 androidx-lifecycle-viewmodel-navigation3 = { module = "androidx.lifecycle:lifecycle-viewmodel-navigation3", version.ref = "androidx-lifecycle" }
 androidx-material3-adaptive = { module = "androidx.compose.material3.adaptive:adaptive", version.ref = "material3-adaptive" }
 androidx-material3-adaptive-navigation-suite = { module = "androidx.compose.material3:material3-adaptive-navigation-suite" }
+materialKolor-utilities = { module = "com.materialkolor:material-color-utilities", version.ref = "materialKolor" }
 kotlinx-serialization-core = { module = "org.jetbrains.kotlinx:kotlinx-serialization-core", version.ref = "kotlinx-serialization" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
 junit4 = { module = "junit:junit", version.ref = "junit4" }

@@ -91,11 +91,7 @@ class SettingsViewModel @Inject constructor(
             isLocked = { it.isUpdatingThemeMode },
             apply = { state, value -> state.copy(themeMode = value) },
         )
-        observePreference(
-            flow = userPreferencesRepository.observeAmoledEnabled(),
-            isLocked = { it.isUpdatingAmoled },
-            apply = { state, value -> state.copy(amoledEnabled = value) },
-        )
+        observeLegacyAmoledPreference()
         observePreference(
             flow = userPreferencesRepository.observeTopicTopBarAutoHide(),
             isLocked = { it.isUpdatingTopicTopBarAutoHide },
@@ -197,11 +193,7 @@ class SettingsViewModel @Inject constructor(
             isLocked = { it.isUpdatingImmersiveNavBarReveal },
             apply = { state, value -> state.copy(immersiveNavBarReveal = value) },
         )
-        observePreference(
-            flow = userPreferencesRepository.observeAccentColor(),
-            isLocked = { it.isUpdatingAccentColor },
-            apply = { state, value -> state.copy(accentColor = value) },
-        )
+        observeLegacyAccentPreference()
         observePreference(
             flow = userPreferencesRepository.observeAlwaysAskLinkApp(),
             isLocked = { it.isUpdatingAlwaysAskLinkApp },
@@ -308,6 +300,24 @@ class SettingsViewModel @Inject constructor(
                 _state.update { current -> if (isLocked(current)) current else apply(current, value) }
             }
         }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun observeLegacyAmoledPreference() {
+        observePreference(
+            flow = userPreferencesRepository.observeAmoledEnabled(),
+            isLocked = { it.isUpdatingAmoled },
+            apply = { state, value -> state.copy(amoledEnabled = value) },
+        )
+    }
+
+    @Suppress("DEPRECATION")
+    private fun observeLegacyAccentPreference() {
+        observePreference(
+            flow = userPreferencesRepository.observeAccentColor(),
+            isLocked = { it.isUpdatingAccentColor },
+            apply = { state, value -> state.copy(accentColor = value) },
+        )
     }
 
     @Suppress("CyclomaticComplexMethod") // MVI when-dispatch over the SettingsIntent variants ; flat by design.
@@ -961,7 +971,7 @@ class SettingsViewModel @Inject constructor(
                     state.copy(amoledEnabled = previous, isUpdatingAmoled = false, amoledError = true)
                 }
             },
-            persist = userPreferencesRepository::setAmoledEnabled,
+            persist = ::setLegacyAmoledEnabled,
         )
     }
 
@@ -1413,7 +1423,7 @@ class SettingsViewModel @Inject constructor(
             )
         }
         viewModelScope.launch {
-            runCatching { userPreferencesRepository.setAccentColor(desired) }
+            runCatching { setLegacyAccentColor(desired) }
                 .onSuccess {
                     _state.update {
                         it.copy(accentColor = desired, isUpdatingAccentColor = false)
@@ -1429,6 +1439,16 @@ class SettingsViewModel @Inject constructor(
                     }
                 }
         }
+    }
+
+    @Suppress("DEPRECATION")
+    private suspend fun setLegacyAmoledEnabled(enabled: Boolean) {
+        userPreferencesRepository.setAmoledEnabled(enabled)
+    }
+
+    @Suppress("DEPRECATION")
+    private suspend fun setLegacyAccentColor(color: AccentColor) {
+        userPreferencesRepository.setAccentColor(color)
     }
 
     private fun updateMpUnreadBadge(desired: Boolean) {

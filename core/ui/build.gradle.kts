@@ -50,6 +50,7 @@ dependencies {
     api(libs.androidx.compose.material3)
     // #1040 — androidx.core.net.toUri for the shared image-menu host label and browser Intent.
     implementation(libs.androidx.core.ktx)
+    implementation(libs.materialKolor.utilities)
     implementation(libs.coil.compose)
     // #959 — EXIF orientation read by the header-only intrinsic probe (ProbeMetadataDecoder).
     implementation(libs.androidx.exifinterface)

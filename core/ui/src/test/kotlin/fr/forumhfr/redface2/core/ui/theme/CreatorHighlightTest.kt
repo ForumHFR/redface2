@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.ui.theme
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -52,7 +53,25 @@ class CreatorHighlightTest {
         assertTrue(creatorSheenStops(1f, base, highlight).all { it.second == base })
     }
 
+    @Test
+    fun `creator gold keeps large-bold contrast on white RF1 gray and AMOLED surfaces`() {
+        listOf(Color.White, Color(0xFFF0F0F0), Color.Black).forEach { surface ->
+            val gold = creatorGoldColors(surface)
+
+            assertTrue(contrastRatio(gold.base, surface) >= MIN_LARGE_BOLD_CONTRAST)
+            assertTrue(contrastRatio(gold.highlight, surface) >= MIN_LARGE_BOLD_CONTRAST)
+        }
+    }
+
+    private fun contrastRatio(first: Color, second: Color): Float {
+        val light = maxOf(first.luminance(), second.luminance())
+        val dark = minOf(first.luminance(), second.luminance())
+        return (light + LUMINANCE_OFFSET) / (dark + LUMINANCE_OFFSET)
+    }
+
     private companion object {
         const val SAMPLES = 100
+        const val MIN_LARGE_BOLD_CONTRAST = 3f
+        const val LUMINANCE_OFFSET = 0.05f
     }
 }

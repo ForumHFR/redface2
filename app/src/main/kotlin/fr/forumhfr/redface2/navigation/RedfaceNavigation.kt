@@ -859,9 +859,8 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
     // keeps the historical isSystemInDarkTheme() behaviour; LIGHT/DARK force the app theme.
     val themeViewModel: AppThemeViewModel = hiltViewModel()
     val themeMode by themeViewModel.themeMode.collectAsStateWithLifecycle()
-    val amoledEnabled by themeViewModel.amoledEnabled.collectAsStateWithLifecycle()
-    // TU 2788511 — accent colour family (rose ↔ vivid « REDFACE1 » red), resolved at the root for RedfaceTheme.
-    val accentColor by themeViewModel.accentColor.collectAsStateWithLifecycle()
+    // #883/#978 — accent, Material You and surface tones are resolved as one atomic preference set.
+    val themeColorPreferences by themeViewModel.themeColorPreferences.collectAsStateWithLifecycle()
     // #1207 — force Android's « Ouvrir avec… » chooser for explicit external-link actions.
     val alwaysAskLinkApp by themeViewModel.alwaysAskLinkApp.collectAsStateWithLifecycle()
     // #287 — reading presets (density + font scale) resolved at the root and bundled for RedfaceTheme.
@@ -935,8 +934,7 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
     }
     RedfaceTheme(
         darkTheme = darkTheme,
-        amoledTheme = amoledEnabled,
-        accentColor = accentColor,
+        themeColorPreferences = themeColorPreferences,
         alwaysAskLinkApp = alwaysAskLinkApp,
         reading = ReadingDisplaySettings(
             density = displayDensity,

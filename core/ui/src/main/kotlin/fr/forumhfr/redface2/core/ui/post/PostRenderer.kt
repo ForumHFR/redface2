@@ -24,8 +24,9 @@ import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Card
-import androidx.compose.material3.Icon
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -1012,7 +1013,7 @@ private fun SpoilerBlock(
     var revealed by rememberSaveable(block) { mutableStateOf(false) }
     val readingColors = readingContentColors()
     val containerColor = LocalModerationHighlightColors.current?.subSurfaceContainer
-        ?: MaterialTheme.colorScheme.surfaceContainerLow
+        ?: spoilerContainerColor(MaterialTheme.colorScheme)
     Card(
         colors = CardDefaults.cardColors(
             containerColor = containerColor,
@@ -1058,6 +1059,9 @@ private fun SpoilerBlock(
         }
     }
 }
+
+internal fun spoilerContainerColor(scheme: ColorScheme): Color =
+    if (scheme.surface == Color.Black) scheme.surfaceBright else scheme.surfaceContainerLow
 
 @Composable
 private fun ImageBlock(block: PostBlock.Image) = BlockImage(url = block.url, description = block.description)

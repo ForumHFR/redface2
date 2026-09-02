@@ -19,13 +19,17 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextLinkStyles
+import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
+import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.theme.LocalEgoQuotePseudo
+import fr.forumhfr.redface2.core.ui.theme.RedfaceAmoledColorScheme
 import fr.forumhfr.redface2.core.ui.theme.RedfaceLightColorScheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -163,6 +167,28 @@ class PostRendererColorTest {
         assertEquals(palette.onModerationVariant, textColor("secret"))
         assertEquals(palette.onModerationVariant, textColor("kotlin"))
         assertEquals(palette.onModeration, textColor("println(42)"))
+    }
+
+    @Test
+    fun `AMOLED spoiler uses surfaceBright instead of the near-black low container`() {
+        val content = PostContent(
+            blocks = listOf(PostBlock.Spoiler(label = "secret", content = paragraph("masqué"))),
+        )
+
+        composeTestRule.setContent {
+            RedfaceTheme(
+                darkTheme = true,
+                themeColorPreferences = ThemeColorPreferences(darkSurfaceTone = DarkSurfaceTone.AMOLED),
+            ) {
+                PostRenderer(content)
+            }
+        }
+
+        val spoilerContainer = RedfaceAmoledColorScheme.surfaceBright
+        assertNotEquals(RedfaceAmoledColorScheme.surfaceContainerLow, spoilerContainer)
+        assertTrue(rgbDistance(spoilerContainer, Color.Black) >= MIN_AMOLED_SPOILER_DISTANCE)
+        composeTestRule.onNodeWithTag(POST_RENDERER_SPOILER_CONTAINER_TAG, useUnmergedTree = true)
+            .assert(SemanticsMatcher.expectValue(PostRendererContainerColorKey, spoilerContainer))
     }
 
     @Test
@@ -410,5 +436,16 @@ class PostRendererColorTest {
             else -> (r - g) / delta + 4f
         }
         return ((h * 60f) + 360f).toDouble() % 360.0
+    }
+
+    private fun rgbDistance(first: Color, second: Color): Float {
+        val red = first.red - second.red
+        val green = first.green - second.green
+        val blue = first.blue - second.blue
+        return kotlin.math.sqrt(red * red + green * green + blue * blue)
+    }
+
+    private companion object {
+        const val MIN_AMOLED_SPOILER_DISTANCE = 0.1f
     }
 }
