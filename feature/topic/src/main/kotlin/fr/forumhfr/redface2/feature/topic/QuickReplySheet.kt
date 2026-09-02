@@ -3,8 +3,10 @@ package fr.forumhfr.redface2.feature.topic
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -32,6 +34,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -104,6 +108,20 @@ internal fun QuickReplySheet(
     val sheetState = rememberModalBottomSheetState(
         skipPartiallyExpanded = true,
         confirmValueChange = { target -> target != SheetValue.Hidden || !submitting.value },
+    )
+    val density = LocalDensity.current
+    val screenHeightDp = LocalConfiguration.current.screenHeightDp.toFloat()
+    val imeHeightDp = with(density) { WindowInsets.ime.getBottom(density).toDp().value }
+    val bodyLineHeight = MaterialTheme.typography.bodyLarge.lineHeight
+    val fieldLineHeightDp = if (bodyLineHeight.isSp) {
+        with(density) { bodyLineHeight.toDp().value }
+    } else {
+        QUICK_REPLY_FIELD_FALLBACK_LINE_HEIGHT_DP
+    }
+    val fieldMaxLines = quickReplyFieldMaxLines(
+        windowHeightDp = screenHeightDp,
+        imeHeightDp = imeHeightDp,
+        lineHeightDp = fieldLineHeightDp,
     )
     ModalBottomSheet(
         sheetState = sheetState,
@@ -181,8 +199,8 @@ internal fun QuickReplySheet(
                     // default, the IME needs the explicit autoCap hint (surface regression, v220).
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                     placeholder = { Text(stringResource(R.string.quick_reply_hint)) },
-                    minLines = 3,
-                    maxLines = 6,
+                    minLines = QUICK_REPLY_FIELD_MIN_LINES,
+                    maxLines = fieldMaxLines,
                     modifier = Modifier
                         .fillMaxWidth()
                         .focusRequester(focusRequester),

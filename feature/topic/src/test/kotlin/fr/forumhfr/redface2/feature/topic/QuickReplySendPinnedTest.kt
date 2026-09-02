@@ -36,9 +36,9 @@ import org.robolectric.annotation.GraphicsMode
 /**
  * #855 — « Envoyer » is PINNED below the scrolling fields, never behind the keyboard fold. This
  * mounts the exact quick-reply layout skeleton (scrollable weight(1f, fill = false) fields column
- * + pinned send row, same card cap) inside a SHORT window — the h480dp qualifier plays the role
- * of the IME-shrunk viewport — and pins the contract : however tall the cards + field grow, the
- * send button stays inside the visible bounds without any scrolling.
+ * + pinned send row, same card cap, same dynamic line cap) inside a SHORT window and pins the
+ * contract : however tall the cards + field grow, the send button stays inside the visible bounds
+ * without any scrolling.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w360dp-h480dp-xxhdpi")
@@ -49,13 +49,16 @@ class QuickReplySendPinnedTest {
     val composeTestRule = createComposeRule()
 
     @Test
-    fun `send button stays visible on a short window despite five cards`() {
+    fun `send button stays visible on a short window despite five cards and a long draft`() {
         val quotes = (1..5).map { n ->
             QuoteSelection(
                 locator = QuoteLocator(page = 3, numreponse = n, ref = 1),
                 author = "author$n",
                 excerpt = "excerpt $n",
             )
+        }
+        val longDraft = (1..24).joinToString(separator = "\n") { line ->
+            "Long quick-reply draft line $line"
         }
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
@@ -76,10 +79,14 @@ class QuickReplySendPinnedTest {
                                 .verticalScroll(rememberScrollState()),
                         )
                         OutlinedTextField(
-                            value = "brouillon",
+                            value = longDraft,
                             onValueChange = {},
-                            minLines = 3,
-                            maxLines = 6,
+                            minLines = QUICK_REPLY_FIELD_MIN_LINES,
+                            maxLines = quickReplyFieldMaxLines(
+                                windowHeightDp = 640f,
+                                imeHeightDp = 300f,
+                                lineHeightDp = QUICK_REPLY_FIELD_FALLBACK_LINE_HEIGHT_DP,
+                            ),
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }

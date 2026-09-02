@@ -155,7 +155,17 @@ Accessible depuis la lecture topic via un tap sur l'avatar ou le pseudo d'un pos
 
 L'écran central de l'app. Affiche les posts d'un topic avec pagination.
 
-> **Refonte #604 en cours** (vagues 1-4 livrées en dev 0.19.x→0.24.x) — skeleton de chargement (`TopicLoadingSkeleton`), header dissous (pilule « page X / Y » cliquable → feuille de navigation), cartes de frontière de page (`PageBoundaryCard`/`EndOfTopicCard`), repère « dernier message lu » traversant (#600). Côté écriture, la surface par défaut est l'**éditeur plein écran** (#951) ; la réponse rapide en bottom sheet (`QuickReplySheet`) est un préréglage expérimental opt-in (réglage « Surface d'écriture », #806), avec escalade vers l'éditeur plein écran (le brouillon suit, #405) et bascule multi-quote en plein écran au-delà d'un seuil propre à ce préréglage. Le rendu des citations dans le composer est en arbitrage (#805 : BBCode inline par défaut, cartes en option). La navigation par pages ci-dessous (#282/#307) reste exacte.
+> **Refonte #604 en cours** (vagues 1-4 livrées en dev 0.19.x→0.24.x) — skeleton de chargement
+> (`TopicLoadingSkeleton`), header dissous (pilule « page X / Y » cliquable → feuille de navigation),
+> cartes de frontière de page (`PageBoundaryCard`/`EndOfTopicCard`), repère « dernier message lu »
+> traversant (#600). Côté écriture, la surface par défaut est l'**éditeur plein écran** (#951) ; la
+> réponse rapide en bottom sheet (`QuickReplySheet`) est un préréglage expérimental opt-in (réglage
+> « Surface d'écriture », #806), avec escalade vers l'éditeur plein écran (le brouillon suit, #405)
+> et bascule multi-quote en plein écran au-delà d'un seuil propre à ce préréglage. Depuis le
+> 2026-09-02 (#949), son champ BBCode grandit jusqu'à 15 lignes façon RF1, avec un plafond réduit par
+> la hauteur utile restante quand l'IME ou le paysage serrent la fenêtre afin de garder l'action
+> d'envoi visible. Le rendu des citations dans le composer est en arbitrage (#805 : BBCode inline par
+> défaut, cartes en option). La navigation par pages ci-dessous (#282/#307) reste exacte.
 
 **Navigation dans le topic :**
 - Scroll vertical pour lire les posts
