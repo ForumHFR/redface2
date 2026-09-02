@@ -35,7 +35,9 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
@@ -52,6 +54,11 @@ import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsChoice
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsChoiceGroup
 
 internal const val SETTINGS_COLORS_CUSTOM_HEX_FIELD_TAG = "settings_colors_custom_hex_field"
+internal const val SETTINGS_COLORS_CUSTOM_HEX_SWATCH_TAG = "settings_colors_custom_hex_swatch"
+internal const val SETTINGS_COLORS_CUSTOM_HEX_SWATCH_EMPTY_RGB = -1
+internal val SettingsColorsCustomHexSwatchRgbKey = SemanticsPropertyKey<Int>(
+    "SettingsColorsCustomHexSwatchRgb",
+)
 
 private const val OPAQUE_ARGB_MASK = -0x1000000
 private const val ARGB_LONG_MASK = 0xFFFF_FFFFL
@@ -195,6 +202,7 @@ private fun AccentSettings(
     CustomAccentField(
         state = CustomAccentFieldState(
             text = state.customAccentHexInput,
+            placeholder = state.customAccentHexPlaceholder,
             error = state.customAccentHexError,
             previewRgb = state.customAccentPreviewRgb,
         ),
@@ -332,6 +340,7 @@ private fun accentPresetLabel(preset: AccentPreset): String = when (preset) {
 
 private data class CustomAccentFieldState(
     val text: String,
+    val placeholder: String?,
     val error: Boolean,
     val previewRgb: Int?,
 )
@@ -370,6 +379,7 @@ private fun CustomAccentField(
         isError = state.error,
         singleLine = true,
         label = { Text(stringResource(R.string.settings_colors_custom_label)) },
+        placeholder = state.placeholder?.let { placeholder -> { Text(placeholder) } },
         supportingText = {
             val text = if (state.error) {
                 stringResource(R.string.settings_colors_custom_error)
@@ -379,7 +389,16 @@ private fun CustomAccentField(
             Text(text)
         },
         trailingIcon = {
-            ColorSwatch(rgb = state.previewRgb, enabled = enabled)
+            ColorSwatch(
+                rgb = state.previewRgb,
+                enabled = enabled,
+                modifier = Modifier
+                    .testTag(SETTINGS_COLORS_CUSTOM_HEX_SWATCH_TAG)
+                    .semantics {
+                        this[SettingsColorsCustomHexSwatchRgbKey] =
+                            state.previewRgb ?: SETTINGS_COLORS_CUSTOM_HEX_SWATCH_EMPTY_RGB
+                    },
+            )
         },
         keyboardOptions = KeyboardOptions(
             keyboardType = KeyboardType.Ascii,

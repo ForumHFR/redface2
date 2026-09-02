@@ -9,6 +9,7 @@ import fr.forumhfr.redface2.core.domain.preferences.LightSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
+import fr.forumhfr.redface2.core.domain.preferences.ThemeAccent
 import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
@@ -93,7 +94,8 @@ data class SettingsState(
     val isUpdatingThemeColors: Boolean = false,
     val themeColorsError: Boolean = false,
     val themeColorsTouchedLocally: Boolean = false,
-    val customAccentHexInput: String = AccentPreset.ROSE.seedRgb.toThemeAccentHex(),
+    val customAccentHexInput: String = "",
+    val customAccentHexSyncedInput: String = "",
     val customAccentHexError: Boolean = false,
     // #1207 — force Android's « Ouvrir avec… » chooser for explicit external-link actions.
     // Default false preserves the direct-default-browser behaviour until the user opts in.
@@ -333,6 +335,12 @@ data class SettingsState(
 
     val customAccentPreviewRgb: Int?
         get() = parseThemeAccentHexOrNull(customAccentHexInput)
+
+    val customAccentHexPlaceholder: String?
+        get() = when (val accent = themeColorPreferences.accent) {
+            is ThemeAccent.Custom -> null
+            is ThemeAccent.Preset -> accent.preset.seedRgb.toThemeAccentHex()
+        }
 
     // Build 89 follow-up — the topic top-bar auto-hide toggle is gated only by its own write.
     val canToggleTopicTopBarAutoHide: Boolean

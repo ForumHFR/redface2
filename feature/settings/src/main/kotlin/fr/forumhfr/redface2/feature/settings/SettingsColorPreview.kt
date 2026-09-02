@@ -15,7 +15,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -23,6 +26,10 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 
 internal const val SETTINGS_COLOR_PREVIEW_TAG = "settings_color_preview"
+internal const val SETTINGS_COLOR_PREVIEW_POST_TAG = "settings_color_preview_post"
+internal val SettingsColorPreviewPostContainerColorKey = SemanticsPropertyKey<Color>(
+    "SettingsColorPreviewPostContainerColor",
+)
 
 /** Live colour preview for Settings > Display > Colours. */
 @Composable
@@ -59,9 +66,15 @@ internal fun SettingsColorPreview(
 
 @Composable
 private fun PreviewPost() {
+    val postContainerColor = MaterialTheme.colorScheme.surfaceContainer
     Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(SETTINGS_COLOR_PREVIEW_POST_TAG)
+            .semantics {
+                this[SettingsColorPreviewPostContainerColorKey] = postContainerColor
+            },
+        color = postContainerColor,
         contentColor = MaterialTheme.colorScheme.onSurface,
         shape = MaterialTheme.shapes.small,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),

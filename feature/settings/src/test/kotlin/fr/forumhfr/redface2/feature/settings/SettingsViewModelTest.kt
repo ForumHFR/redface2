@@ -1661,6 +1661,23 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `init keeps preset accent input empty and exposes the preset seed as placeholder`() = runTest {
+        repository.emitThemeColorPreferences(
+            ThemeColorPreferences(accent = ThemeAccent.Preset(AccentPreset.BLUE)),
+        )
+
+        val viewModel = newViewModel()
+        val state = viewModel.state.value
+
+        assertEquals(ThemeAccent.Preset(AccentPreset.BLUE), state.themeColorPreferences.accent)
+        assertEquals("", state.customAccentHexInput)
+        assertEquals("", state.customAccentHexSyncedInput)
+        assertEquals("#1976D2", state.customAccentHexPlaceholder)
+        assertNull(state.customAccentPreviewRgb)
+        assertFalse(state.customAccentHexError)
+    }
+
+    @Test
     fun `ThemeAccentPresetChanged persists the chosen preset`() = runTest {
         val viewModel = newViewModel()
 
@@ -1671,6 +1688,23 @@ class SettingsViewModelTest {
         assertFalse(viewModel.state.value.isUpdatingThemeColors)
         assertEquals(1, repository.themeColorPreferencesSetCalls)
         assertEquals(expected, repository.lastThemeColorPreferencesSet)
+    }
+
+    @Test
+    fun `ThemeAccentPresetChanged clears the custom field and updates the placeholder`() = runTest {
+        repository.emitThemeColorPreferences(
+            ThemeColorPreferences(accent = ThemeAccent.Custom(rgb = 0x12ABEF)),
+        )
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.ThemeAccentPresetChanged(AccentPreset.ROUGE_REDFACE1))
+
+        val state = viewModel.state.value
+        assertEquals(ThemeAccent.Preset(AccentPreset.ROUGE_REDFACE1), state.themeColorPreferences.accent)
+        assertEquals("", state.customAccentHexInput)
+        assertEquals("", state.customAccentHexSyncedInput)
+        assertEquals("#F44336", state.customAccentHexPlaceholder)
+        assertNull(state.customAccentPreviewRgb)
     }
 
     @Test
@@ -1685,6 +1719,34 @@ class SettingsViewModelTest {
         assertEquals("#12ABEF", viewModel.state.value.customAccentHexInput)
         assertFalse(viewModel.state.value.customAccentHexError)
         assertEquals(expected, repository.lastThemeColorPreferencesSet)
+    }
+
+    @Test
+    fun `CustomAccentHexCommitted ignores an unchanged synchronized custom value`() = runTest {
+        repository.emitThemeColorPreferences(
+            ThemeColorPreferences(accent = ThemeAccent.Custom(rgb = 0x12ABEF)),
+        )
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.CustomAccentHexCommitted)
+
+        assertEquals(ThemeAccent.Custom(rgb = 0x12ABEF), viewModel.state.value.themeColorPreferences.accent)
+        assertEquals("#12ABEF", viewModel.state.value.customAccentHexInput)
+        assertFalse(viewModel.state.value.customAccentHexError)
+        assertEquals(0, repository.themeColorPreferencesSetCalls)
+    }
+
+    @Test
+    fun `CustomAccentHexCommitted ignores a value matching the effective preset seed`() = runTest {
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.CustomAccentHexChanged("#A62C2C"))
+        viewModel.submit(SettingsIntent.CustomAccentHexCommitted)
+
+        assertEquals(ThemeColorPreferences(), viewModel.state.value.themeColorPreferences)
+        assertEquals("", viewModel.state.value.customAccentHexInput)
+        assertFalse(viewModel.state.value.customAccentHexError)
+        assertEquals(0, repository.themeColorPreferencesSetCalls)
     }
 
     @Test
