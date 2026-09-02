@@ -46,6 +46,10 @@ import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -337,6 +341,7 @@ fun TopicScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val favoriteAtPostState by viewModel.favoriteAtPostState.collectAsStateWithLifecycle()
     val lazyListState = rememberLazyListState()
+    val snackbarHostState = remember { SnackbarHostState() }
     // #1137 — measured height (px) of the « Dernier message lu » separator, written from where the
     // marker is composed (onSizeChanged, inside the last-read post's item — cf. TopicLoadedContent)
     // and read by the flag landing below to put the marker's top edge on the landing line (the post
@@ -384,8 +389,8 @@ fun TopicScreen(
         viewModel.returnFromJump(alignedDepartureAnchor())
     }
     // #895 étape 4 (PR 2) — consume the pending full-editor submit outcome exactly once per
-    // eventId : hand it to the retained ViewModel (in-place force refresh + landing) and clear
-    // the :app slot. The quick-reply sheet path below calls applySubmitResult directly.
+    // eventId : hand it to the retained ViewModel (in-place force refresh + conditional landing)
+    // and clear the :app slot. The quick-reply sheet path below calls applySubmitResult directly.
     LaunchedEffect(pendingSubmitResult?.eventId) {
         pendingSubmitResult?.let { result ->
             viewModel.applySubmitResult(result.targetPage, result.scrollTo, result.quotedNumreponses)
@@ -419,6 +424,8 @@ fun TopicScreen(
     // suspending lambda but the surrounding scope is still a Composable). Capturing the message
     // upfront keeps the rule happy and avoids re-resolving on every effect.
     val refreshFailedMsg = stringResource(R.string.topic_post_submit_refresh_failed)
+    val submittedElsewhereMsg = stringResource(R.string.topic_post_submitted_elsewhere)
+    val submittedElsewhereAction = stringResource(R.string.topic_post_submitted_elsewhere_action)
     // #335 — manual pull-to-refresh failure message (resolved upfront, same rationale).
     val refreshManualFailedMsg = stringResource(R.string.topic_refresh_failed)
     // Chantier C (#546) — intra-topic search failure message (resolved upfront, same rationale).
@@ -586,15 +593,26 @@ fun TopicScreen(
                     // Issue #200 — HFR accepted the post but the local force refresh failed.
                     // Surface a Toast so the user knows the submit went through and can
                     // re-trigger the refresh manually (pull-to-refresh / Retry) instead of
-                    // assuming the post was silently lost. Toast picked over Snackbar to keep
-                    // this composable a plain Surface — wrapping the existing TopicContent in
-                    // a Scaffold + SnackbarHost is left for a follow-up if a richer feedback
-                    // surface is needed.
+                    // assuming the post was silently lost.
                     android.widget.Toast.makeText(
                         context,
                         refreshFailedMsg,
                         android.widget.Toast.LENGTH_LONG,
                     ).show()
+                }
+                is TopicEffect.PostSubmittedElsewhere -> {
+                    val result = snackbarHostState.showSnackbar(
+                        message = String.format(Locale.getDefault(), submittedElsewhereMsg, effect.page),
+                        actionLabel = submittedElsewhereAction,
+                        duration = SnackbarDuration.Long,
+                    )
+                    if (result == SnackbarResult.ActionPerformed) {
+                        viewModel.openSubmittedPostPage(
+                            page = effect.page,
+                            scrollTo = effect.scrollTo,
+                            departureAnchor = alignedDepartureAnchor(),
+                        )
+                    }
                 }
                 TopicEffect.RefreshFailed -> {
                     // #335 — manual pull-to-refresh could not reach HFR; the page stays on screen
@@ -704,6 +722,7 @@ fun TopicScreen(
     TopicContent(
         state = state,
         listState = lazyListState,
+        snackbarHostState = snackbarHostState,
         // #1137 — the marker's measured height feeds the flag landing's alignment (cf. above).
         onLastReadMarkerMeasured = { lastReadMarkerHeightPx.intValue = it },
         onIntent = viewModel::send,
@@ -711,7 +730,7 @@ fun TopicScreen(
         onReply = onReply,
         onEscalateToFullEditor = onEscalateToFullEditor,
         // Vague 4 (#604) lot 1 / #895 étape 4 — a reply POSTed from the quick-reply sheet goes
-        // straight to the retained ViewModel (in-place force refresh, #200/#226) : the sheet
+        // straight to the retained ViewModel (in-place force refresh, #200/#226/#1243) : the sheet
         // never entered the back stack and the topic entry no longer gets replaced.
         onQuickReplySubmitted = viewModel::applySubmitResult,
         onEdit = onEdit,
@@ -1190,6 +1209,7 @@ private const val REANCHOR_STABLE_FRAMES = 3
 internal fun TopicContent(
     state: TopicUiState,
     listState: LazyListState,
+    snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     onIntent: (TopicIntent) -> Unit,
     onBack: () -> Unit,
     onReply: (subcat: Int, page: Int, quotes: List<QuoteSelection>) -> Unit,
@@ -1233,8 +1253,9 @@ internal fun TopicContent(
     onClosePoll: () -> Unit = {},
     // Vague 4 (#604) lot 1 — HFR accepted a quick-reply POST. Since #895 étape 4 this feeds
     // `TopicViewModel.applySubmitResult` directly (wired at the stateful entry point): the retained
-    // engine force-refreshes and lands the submit — no route refresh (historically `:app` bumped a
-    // submitSignal on the route, the same path as the full editor's onSubmitSucceeded, #200).
+    // engine force-refreshes and conditionally lands the submit — no route refresh (historically
+    // `:app` bumped a submitSignal on the route, the same path as the full editor's
+    // onSubmitSucceeded, #200).
     onQuickReplySubmitted: (targetPage: Int?, scrollTo: Int?, quotedNumreponses: List<Int>) -> Unit =
         { _, _, _ -> },
     // #1137 — measured height (px) of the « Dernier message lu » separator, reported from where it is
@@ -1292,6 +1313,7 @@ internal fun TopicContent(
         } else {
             Modifier
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopicTopBar(
                 state = state,
@@ -2131,8 +2153,8 @@ private fun TopicLoadedContent(
     // LocalPostImageActions; remembered so providing it never invalidates the cards.
     val postImageActions = remember { PostImageActions(onLongPress = { imageMenuTarget = it }) }
     // #831 — « Enregistrer l'image » seam. A dedicated thin @HiltViewModel (precedent
-    // QuickReplyViewModel) so the save survives the sheet's dismissal; feedback = Toast
-    // (feature-topic convention, no SnackbarHost in TopicScreen).
+    // QuickReplyViewModel) so the save survives the sheet's dismissal; feedback stays a Toast
+    // because there is no follow-up action.
     val imageActionsViewModel: PostImageActionsViewModel = hiltViewModel()
     val imageActionsContext = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(imageActionsViewModel) {

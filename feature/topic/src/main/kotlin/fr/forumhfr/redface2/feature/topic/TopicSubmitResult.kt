@@ -14,7 +14,8 @@ package fr.forumhfr.redface2.feature.topic
  * @property targetPage page parsed from HFR's success URL, or `null` when it could not be
  *   extracted — the ViewModel then falls back on its CANONICAL current page.
  * @property scrollTo `numreponse` parsed from the `#t{N}` success-URL fragment (quote / edit), or
- *   `null` when HFR anchored `#bas` (plain reply → bottom landing).
+ *   `null` when HFR anchored `#bas`; the ViewModel decides whether that plain reply may land at
+ *   the bottom or must stay in place (#1243).
  * @property quotedNumreponses #974 — the `numreponse` of every post the submit cited (appearance
  *   order ; inline `[quotemsg]` tags and cards alike), empty for a plain reply or an edit. The
  *   ViewModel lands on the highest one when it is on the landing page (the reading resumes
