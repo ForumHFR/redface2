@@ -32,7 +32,7 @@ Pour la liste des capabilities et des non-goals, voir le [scope fonctionnel]({{ 
 | **1 — Core** | Lecture du forum (drapeaux, topics, forum, deep links) | XL | Phase 0 | ✅ Livrée (AAB `0.1.0-phase1.7` / `app-v38` / specs v0.8.4) |
 | **2 — Écriture** | Post / edit / quote / create topic / recherche / proxy alpha | L | Phase 1 | ✅ Livrée |
 | **3 — Messages** | MPs classiques + MultiMPs (lecture + écriture + DT + sync de position) | M | Phase 2 | ✅ Livrée (clôture #598 ; sync MPStorage bidirectionnelle complète + cache Room reportés → #6, Phase 4) |
-| **4 — Extensions + refonte UI pré-1.0** | Bookmarks, Qualitay, Redflag + refonte Drapeaux (#603) / Topic (#604) + hygiène repo (#605) ; Blacklist déjà livrée | L | Phase 3 + **hfr-redflag Worker** | 🚧 En cours |
+| **4 — Extensions + refonte UI pré-1.0** | Bookmarks, Qualitay, Redflag + refonte Drapeaux (#603) / Topic (#604) + hygiène repo (#605) ; Blacklist déjà livrée | L | Phase 3 + **hfr-redflag Worker** | ◐ Refonte UI livrée (bêtas 0.18.0 → 0.50.2) ; extensions communautaires non commencées hors Blacklist. Milestones de phase fermés en 06/2026 : le suivi se fait par **milestones de vue** |
 | **Polish & UX** | Animations, offline, thème dynamique, Play Store, raffinements UX | — | continu | ♾️ Backlog continu (pas une étape finale) |
 
 **Taille** : S = petit sous-chantier, M = quelques composants, L = plusieurs features indépendantes, XL = écran majeur + parseurs + cache (ex. `PostRenderer` natif).
@@ -189,7 +189,7 @@ Le PostRenderer sera développé de manière incrémentale : texte brut d'abord,
 
 ---
 
-## Phase 4 — Extensions communautaires + refonte UI pré-1.0 🚧 en cours
+## Phase 4 — Extensions communautaires + refonte UI pré-1.0 ◐ refonte UI livrée, extensions en attente
 
 **Objectif :** les features inspirées des userscripts HFR **et** la refonte UI avant la 1.0.
 
@@ -215,7 +215,7 @@ Mandat de refonte des écrans chauds avant la 1.0 (post HFR XaTriX 2788560) :
   d'accent + RGB custom `#RRGGBB`, tons de fond clair/sombre persistés, couleurs du système
   Android 12+ et aperçu live recordable par Roborazzi.
 - [x] **Hygiène repo / audit des dérives** — exécutée (2026-06) ; #605 requalifiée en ombrelle de suivi Phase 4
-- [ ] **Partage de la surface de lecture Topic → MP/DT** — [#1040](https://github.com/ForumHFR/redface2/issues/1040) (**en cours**, dev 0.42.x). Le chantier répond à un délaissement mesuré : 74 commits sur `feature/topic` contre 7 sur `feature/messages` entre le 20/06 et le 12/08, sans document pour tracer l'écart. **Huit lots (0 → 7)** ; les lots 0 à 6 sont clos et le lot 7 est en cours :
+- [x] **Partage de la surface de lecture Topic → MP/DT** — [#1040](https://github.com/ForumHFR/redface2/issues/1040) (**livré** : dev 0.42.8 puis bêta 0.43.0 ; les preuves serveur restantes de la matrice sont suivies par [#1107](https://github.com/ForumHFR/redface2/issues/1107)). Le chantier répond à un délaissement mesuré : 74 commits sur `feature/topic` contre 7 sur `feature/messages` entre le 20/06 et le 12/08, sans document pour tracer l'écart. **Huit lots (0 → 7)** ; les lots 0 à 6 sont clos et le lot 7 est en cours :
   - lot 0 — caractérisation MP, correction de la prose route-driven et création de la page canonique [Parité de lecture Topic ↔ MP]({{ site.baseurl }}/specs/reading-parity) ([#1041](https://github.com/ForumHFR/redface2/issues/1041)), rendue `[enforced]` par deux gardes machine en [#1045](https://github.com/ForumHFR/redface2/issues/1045) ;
   - lot 1 — `ReadingPostCard`, carte de lecture commune promue dans `:core:ui` ([#1042](https://github.com/ForumHFR/redface2/issues/1042)) : densité, sélection de texte, profil au tap ;
   - lot 2 — préférences de lecture transverses ([#1050](https://github.com/ForumHFR/redface2/issues/1050)) : pleine largeur, EgoQuote/EgoPost, liste noire, signatures ;
@@ -255,7 +255,7 @@ Mandat de refonte des écrans chauds avant la 1.0 (post HFR XaTriX 2788560) :
 
 ## Participation
 
-Chaque phase sera trackée via les [issues GitHub](https://github.com/ForumHFR/redface2/issues) et des milestones. Les contributions sont les bienvenues à partir de la Phase 1.
+Les phases ont été trackées par des milestones GitHub jusqu'en juin 2026 ; depuis, le pilotage courant se fait par **milestones de vue** (*Vue · Topic 2*, *Vue · Éditeur 2*, *Vue · Drapeaux 2*, *Vue · MP 1*, *Vue · Réglages 1*, *Vue · Compte HFR 1*, *Infra & dette*, *Méta / long terme*) dans les [issues GitHub](https://github.com/ForumHFR/redface2/issues). Les contributions sont les bienvenues.
 
 Pour contribuer :
 1. Choisir une issue non assignée
