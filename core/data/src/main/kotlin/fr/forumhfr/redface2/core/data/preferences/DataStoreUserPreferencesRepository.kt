@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.data.preferences
 
 import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
@@ -9,8 +10,10 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import fr.forumhfr.redface2.core.domain.coroutines.ApplicationScope
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
+import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
 import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
 import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
+import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
@@ -18,6 +21,7 @@ import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
+import fr.forumhfr.redface2.core.domain.preferences.LightSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.domain.preferences.NavBarLabelsBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
@@ -27,9 +31,13 @@ import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenChoice
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
+import fr.forumhfr.redface2.core.domain.preferences.ThemeAccent
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
+import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.preferences.toAccentPreset
+import fr.forumhfr.redface2.core.domain.preferences.toLegacyAccentColor
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
@@ -304,18 +312,20 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    @Suppress("DEPRECATION")
     override fun observeAmoledEnabled(): Flow<Boolean> =
         dataStore.data
             // Default `false`: AMOLED is opt-in and only meaningful in dark (#286).
             .map { prefs -> prefs[KEY_AMOLED_ENABLED] ?: false }
             .distinctUntilChanged()
             .onEach { enabled ->
-                if (themeBootstrapStore.read().amoledEnabled != enabled) {
+                if (themeBootstrapStore.read().darkSurfaceTone.isAmoled != enabled) {
                     themeBootstrapStore.writeAmoledEnabled(enabled)
                 }
             }
             .catch { emit(false) }
 
+    @Suppress("DEPRECATION")
     override suspend fun setAmoledEnabled(enabled: Boolean) {
         persist {
             dataStore.edit { prefs ->
@@ -325,21 +335,43 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    @Suppress("DEPRECATION")
     override fun observeAccentColor(): Flow<AccentColor> =
         dataStore.data
             // Default ROSE (TU 2788511): the historical maroon/rose scheme until the user opts into red.
-            .map(::readAccentColor)
+            .map { prefs -> readThemeAccent(prefs).toLegacyAccentColor() }
             // Keep the accent flow quiet unless it actually changes so RedfaceApp doesn't recompose
-            // the whole tree on unrelated edits — same stance as observeThemeMode. No bootstrap mirror:
-            // the accent does not paint the window background (cf. observeDisplayDensity).
+            // the whole tree on unrelated edits — same stance as observeThemeMode. The full colour
+            // mirror is maintained by the complete ThemeColorPreferences flow and setters.
             .distinctUntilChanged()
             .catch { emit(AccentColor.ROSE) }
 
+    @Suppress("DEPRECATION")
     override suspend fun setAccentColor(color: AccentColor) {
         persist {
             dataStore.edit { prefs ->
-                prefs[KEY_ACCENT_COLOR] = color.name
+                writeThemeAccent(prefs, ThemeAccent.Preset(color.toAccentPreset()))
             }
+            themeBootstrapStore.writeThemeAccent(ThemeAccent.Preset(color.toAccentPreset()))
+        }
+    }
+
+    override fun observeThemeColorPreferences(): Flow<ThemeColorPreferences> =
+        dataStore.data
+            .map(::readThemeColorPreferences)
+            .distinctUntilChanged()
+            .onEach(::backfillThemeColorBootstrap)
+            .catch { emit(ThemeColorPreferences()) }
+
+    override suspend fun setThemeColorPreferences(preferences: ThemeColorPreferences) {
+        persist {
+            dataStore.edit { prefs ->
+                writeThemeAccent(prefs, preferences.accent)
+                prefs[KEY_LIGHT_SURFACE_TONE] = preferences.lightSurfaceTone.name
+                prefs[KEY_AMOLED_ENABLED] = preferences.darkSurfaceTone == DarkSurfaceTone.AMOLED
+                prefs[KEY_DYNAMIC_COLOR_ENABLED] = preferences.dynamicColorEnabled
+            }
+            themeBootstrapStore.writeThemeColorPreferences(preferences)
         }
     }
 
@@ -1032,14 +1064,64 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             ?.let { stored -> runCatching { CategoryFlagFilter.valueOf(stored) }.getOrNull() }
             ?: CategoryFlagFilter.ALL
 
+    private fun readThemeColorPreferences(prefs: Preferences): ThemeColorPreferences =
+        ThemeColorPreferences(
+            accent = readThemeAccent(prefs),
+            lightSurfaceTone = readLightSurfaceTone(prefs),
+            darkSurfaceTone = readDarkSurfaceTone(prefs),
+            dynamicColorEnabled = prefs[KEY_DYNAMIC_COLOR_ENABLED] ?: false,
+        )
+
     /**
-     * Reads [KEY_ACCENT_COLOR] defensively (TU 2788511): an unknown / corrupt stored value falls back
-     * to [AccentColor.ROSE] instead of crashing on `AccentColor.valueOf`, same stance as [readThemeMode].
+     * Reads [KEY_ACCENT_COLOR] defensively. Unknown preset names fall back to ROSE; CUSTOM is valid
+     * only when paired with a strict 24-bit [KEY_ACCENT_CUSTOM_RGB].
      */
-    private fun readAccentColor(prefs: Preferences): AccentColor =
-        prefs[KEY_ACCENT_COLOR]
-            ?.let { stored -> runCatching { AccentColor.valueOf(stored) }.getOrNull() }
-            ?: AccentColor.ROSE
+    private fun readThemeAccent(prefs: Preferences): ThemeAccent {
+        val stored = prefs[KEY_ACCENT_COLOR]
+        return when {
+            stored == CUSTOM_ACCENT_STORAGE_VALUE -> readCustomAccent(prefs) ?: DEFAULT_ACCENT
+            stored != null -> readPresetAccent(stored)
+            else -> DEFAULT_ACCENT
+        }
+    }
+
+    private fun readPresetAccent(stored: String): ThemeAccent =
+        AccentPreset.entries
+            .firstOrNull { it.name == stored }
+            ?.let(ThemeAccent::Preset)
+            ?: DEFAULT_ACCENT
+
+    private fun readCustomAccent(prefs: Preferences): ThemeAccent.Custom? =
+        prefs[KEY_ACCENT_CUSTOM_RGB]
+            ?.takeIf { it.isValidRgb() }
+            ?.let(ThemeAccent::Custom)
+
+    private fun readLightSurfaceTone(prefs: Preferences): LightSurfaceTone =
+        prefs[KEY_LIGHT_SURFACE_TONE]
+            ?.let { stored -> LightSurfaceTone.entries.firstOrNull { it.name == stored } }
+            ?: LightSurfaceTone.REDFACE1_GRAY
+
+    private fun readDarkSurfaceTone(prefs: Preferences): DarkSurfaceTone =
+        if (prefs[KEY_AMOLED_ENABLED] == true) DarkSurfaceTone.AMOLED else DarkSurfaceTone.MATERIAL_TINTED
+
+    private fun writeThemeAccent(prefs: MutablePreferences, accent: ThemeAccent) {
+        when (accent) {
+            is ThemeAccent.Preset -> {
+                prefs[KEY_ACCENT_COLOR] = accent.preset.name
+                prefs.remove(KEY_ACCENT_CUSTOM_RGB)
+            }
+            is ThemeAccent.Custom -> {
+                prefs[KEY_ACCENT_COLOR] = CUSTOM_ACCENT_STORAGE_VALUE
+                prefs[KEY_ACCENT_CUSTOM_RGB] = accent.rgb
+            }
+        }
+    }
+
+    private fun backfillThemeColorBootstrap(preferences: ThemeColorPreferences) {
+        if (themeBootstrapStore.read().colorPreferences != preferences) {
+            themeBootstrapStore.writeThemeColorPreferences(preferences)
+        }
+    }
 
     /**
      * Reads [KEY_FONT_SCALE] defensively (#287): an unknown / corrupt stored value falls back to
@@ -1224,6 +1306,9 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
         val KEY_AMOLED_ENABLED = booleanPreferencesKey("amoled_enabled")
         val KEY_ACCENT_COLOR = stringPreferencesKey("accent_color")
+        val KEY_ACCENT_CUSTOM_RGB = intPreferencesKey("accent_custom_rgb")
+        val KEY_LIGHT_SURFACE_TONE = stringPreferencesKey("light_surface_tone")
+        val KEY_DYNAMIC_COLOR_ENABLED = booleanPreferencesKey("dynamic_color_enabled")
 
         // #1207 — opt-in Android chooser for every explicit external-link opening.
         val KEY_ALWAYS_ASK_LINK_APP = booleanPreferencesKey("always_ask_link_app")
@@ -1311,3 +1396,14 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val KEY_FORUM_CATEGORY_FLAG_FILTER = stringPreferencesKey("forum_category_flag_filter")
     }
 }
+
+private val DEFAULT_ACCENT = ThemeAccent.Preset(AccentPreset.ROSE)
+
+private const val CUSTOM_ACCENT_STORAGE_VALUE = "CUSTOM"
+private const val MIN_RGB = 0x000000
+private const val MAX_RGB = 0xFFFFFF
+
+private val DarkSurfaceTone.isAmoled: Boolean
+    get() = this == DarkSurfaceTone.AMOLED
+
+private fun Int.isValidRgb(): Boolean = this in MIN_RGB..MAX_RGB

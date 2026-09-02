@@ -2279,8 +2279,10 @@ class SettingsViewModelTest {
             themeMode.value = mode
         }
 
+        @Suppress("DEPRECATION")
         override fun observeAmoledEnabled(): Flow<Boolean> = amoledEnabled
 
+        @Suppress("DEPRECATION")
         override suspend fun setAmoledEnabled(enabled: Boolean) {
             amoledSetCalls += 1
             check(!failOnAmoledSet) { "boom" }
@@ -2891,8 +2893,10 @@ class SettingsViewModelTest {
             private set
         var failOnAccentColorSet: Boolean = false
 
+        @Suppress("DEPRECATION")
         override fun observeAccentColor(): Flow<AccentColor> = accentColor
 
+        @Suppress("DEPRECATION")
         override suspend fun setAccentColor(color: AccentColor) {
             accentColorSetCalls += 1
             check(!failOnAccentColorSet) { "boom" }

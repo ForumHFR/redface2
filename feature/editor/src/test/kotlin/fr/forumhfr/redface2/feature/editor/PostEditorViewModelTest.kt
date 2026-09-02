@@ -2323,7 +2323,10 @@ class PostEditorViewModelTest {
         override suspend fun setFlagsGlyphStyle(style: FlagGlyphStyle) = Unit
         override fun observeThemeMode(): Flow<ThemeMode> = MutableStateFlow(ThemeMode.SYSTEM)
         override suspend fun setThemeMode(mode: ThemeMode) = Unit
+        @Suppress("DEPRECATION")
         override fun observeAmoledEnabled(): Flow<Boolean> = MutableStateFlow(false)
+
+        @Suppress("DEPRECATION")
         override suspend fun setAmoledEnabled(enabled: Boolean) = Unit
         override fun observeTopicTopBarAutoHide(): Flow<Boolean> = MutableStateFlow(false)
         override suspend fun setTopicTopBarAutoHide(enabled: Boolean) = Unit
@@ -2468,7 +2471,10 @@ class PostEditorViewModelTest {
             MutableStateFlow(ImmersiveNavBarReveal.MANUAL)
 
         override suspend fun setImmersiveNavBarReveal(mode: ImmersiveNavBarReveal) = Unit
+        @Suppress("DEPRECATION")
         override fun observeAccentColor(): Flow<AccentColor> = MutableStateFlow(AccentColor.ROSE)
+
+        @Suppress("DEPRECATION")
         override suspend fun setAccentColor(color: AccentColor) = Unit
         override fun observeAlwaysAskLinkApp(): Flow<Boolean> = MutableStateFlow(false)
         override suspend fun setAlwaysAskLinkApp(enabled: Boolean) = Unit

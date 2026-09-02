@@ -2,15 +2,22 @@ package fr.forumhfr.redface2.core.ui
 
 import android.content.Context
 import android.os.Build
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
+import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
+import fr.forumhfr.redface2.core.domain.preferences.LightSurfaceTone
+import fr.forumhfr.redface2.core.domain.preferences.ThemeAccent
+import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
+import fr.forumhfr.redface2.core.domain.preferences.toAccentPreset
 import fr.forumhfr.redface2.core.ui.browser.LocalAlwaysAskLinkApp
 import fr.forumhfr.redface2.core.ui.theme.DisplayMetrics
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
@@ -20,26 +27,25 @@ import fr.forumhfr.redface2.core.ui.theme.LocalPostImageMaxWidth
 import fr.forumhfr.redface2.core.ui.theme.LocalSmileyPickerDecoration
 import fr.forumhfr.redface2.core.ui.theme.LocalShowScrollbar
 import fr.forumhfr.redface2.core.ui.theme.ReadingDisplaySettings
-import fr.forumhfr.redface2.core.ui.theme.RedfaceAmoledColorScheme
-import fr.forumhfr.redface2.core.ui.theme.RedfaceDarkColorScheme
-import fr.forumhfr.redface2.core.ui.theme.RedfaceLightColorScheme
-import fr.forumhfr.redface2.core.ui.theme.RedfaceRedDarkColorScheme
-import fr.forumhfr.redface2.core.ui.theme.RedfaceRedLightColorScheme
+import fr.forumhfr.redface2.core.ui.theme.RedfaceColorSchemeOptions
 import fr.forumhfr.redface2.core.ui.theme.RedfaceShapes
 import fr.forumhfr.redface2.core.ui.theme.RedfaceTypography
+import fr.forumhfr.redface2.core.ui.theme.buildRedfaceColorScheme
 import fr.forumhfr.redface2.core.ui.theme.scaledForReading
+import fr.forumhfr.redface2.core.ui.theme.withRedfaceSlateTertiary
+import fr.forumhfr.redface2.core.ui.theme.withRedfaceSurfaceTones
 
 @Composable
 // LongParameterList: a theme composable legitimately takes several orthogonal, defaulted inputs
-// (dark / amoled / accent / reading bundle / dynamic / content), each with a distinct call-site —
-// same stance as MaterialTheme. The reading presets are already bundled (#287); bundling the color
-// flags too would not improve clarity here.
+// (legacy dark/amoled/accent, colour bundle, reading bundle, chooser policy, content), each with
+// a distinct call-site. Same stance as MaterialTheme; PR2 can drop the legacy colour parameters.
 @Suppress("LongParameterList")
 fun RedfaceTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     amoledTheme: Boolean = false,
     // TU 2788511 — accent colour family (rose by default, vivid « REDFACE1 » red on request).
     accentColor: AccentColor = AccentColor.ROSE,
+    themeColorPreferences: ThemeColorPreferences? = null,
     // #287 — reading presets (density + font scale) bundled into one param to keep the parameter
     // list within detekt's LongParameterList budget.
     reading: ReadingDisplaySettings = ReadingDisplaySettings(),
@@ -49,7 +55,14 @@ fun RedfaceTheme(
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
-    val colorScheme = redfaceColorScheme(context, darkTheme, amoledTheme, accentColor, dynamicColor)
+    val resolvedColorPreferences = themeColorPreferences ?: legacyThemeColorPreferences(
+        amoledTheme = amoledTheme,
+        accentColor = accentColor,
+        dynamicColor = dynamicColor,
+    )
+    val colorScheme = remember(context, darkTheme, resolvedColorPreferences) {
+        redfaceColorScheme(context, darkTheme, resolvedColorPreferences)
+    }
 
     CompositionLocalProvider(
         LocalDisplayMetrics provides DisplayMetrics.of(reading.density),
@@ -82,35 +95,81 @@ fun RedfaceTheme(
 /**
  * Resolves the effective [ColorScheme] from the theme inputs. Extracted from [RedfaceTheme] to keep
  * the composable simple (detekt complexity) and the precedence explicit:
- * dynamic colour (Android 12+) wins, then AMOLED dark, then the [accentColor] family, then the
- * default rose scheme. AMOLED is intentionally accent-agnostic (it is its own near-black variant).
+ * dynamic colour (Android 12+) wins, then static legacy/manual or seeded colour generation, then
+ * the requested Redface surface tone.
  */
 private fun redfaceColorScheme(
     context: Context,
     darkTheme: Boolean,
-    amoledTheme: Boolean,
-    accentColor: AccentColor,
-    dynamicColor: Boolean,
+    preferences: ThemeColorPreferences,
 ): ColorScheme = when {
-    dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
-        if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-    else -> staticColorScheme(darkTheme, amoledTheme, accentColor)
+    preferences.dynamicColorEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
+        dynamicColorScheme(context, darkTheme, preferences)
+    else -> buildRedfaceColorScheme(
+        RedfaceColorSchemeOptions(
+            accent = preferences.accent,
+            darkTheme = darkTheme,
+            lightSurfaceTone = preferences.lightSurfaceTone,
+            darkSurfaceTone = preferences.darkSurfaceTone,
+        ),
+    )
 }
 
 /**
- * Static (non-dynamic) scheme resolution: AMOLED dark wins, then the [accentColor] family, then the
- * default rose scheme. AMOLED is intentionally accent-agnostic (it is its own near-black variant).
- * `internal` so it is unit-testable without an Android [Context] (the dynamic-colour branch, which
- * needs one, stays in [redfaceColorScheme]).
+ * Static (non-dynamic) scheme resolution kept for legacy callers and JVM tests.
+ *
+ * ROSE + AMOLED preserves the historical manual AMOLED scheme. Other AMOLED accents keep their
+ * chromatic seed and only replace the dark surfaces with true black.
  */
 internal fun staticColorScheme(
     darkTheme: Boolean,
     amoledTheme: Boolean,
     accentColor: AccentColor,
-): ColorScheme = when {
-    darkTheme && amoledTheme -> RedfaceAmoledColorScheme
-    accentColor == AccentColor.ROUGE_REDFACE1 ->
-        if (darkTheme) RedfaceRedDarkColorScheme else RedfaceRedLightColorScheme
-    darkTheme -> RedfaceDarkColorScheme
-    else -> RedfaceLightColorScheme
+): ColorScheme = buildRedfaceColorScheme(
+    RedfaceColorSchemeOptions(
+        accent = ThemeAccent.Preset(accentColor.toAccentPreset()),
+        darkTheme = darkTheme,
+        lightSurfaceTone = LightSurfaceTone.MATERIAL_TINTED,
+        darkSurfaceTone = if (amoledTheme) DarkSurfaceTone.AMOLED else DarkSurfaceTone.MATERIAL_TINTED,
+    ),
+)
+
+/**
+ * Dynamic colour supplies chromatic roles; Redface still owns the surface tone and slate tertiary.
+ */
+@RequiresApi(Build.VERSION_CODES.S)
+private fun dynamicColorScheme(
+    context: Context,
+    darkTheme: Boolean,
+    preferences: ThemeColorPreferences,
+): ColorScheme {
+    val scheme = if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+    return scheme
+        .withRedfaceSurfaceTones(
+            darkTheme = darkTheme,
+            lightSurfaceTone = preferences.lightSurfaceTone,
+            darkSurfaceTone = preferences.darkSurfaceTone,
+        )
+        .withRedfaceSlateTertiary(darkTheme)
 }
+
+private fun legacyThemeColorPreferences(
+    amoledTheme: Boolean,
+    accentColor: AccentColor,
+    dynamicColor: Boolean,
+): ThemeColorPreferences = ThemeColorPreferences(
+    accent = ThemeAccent.Preset(accentColor.toAccentPreset()),
+    lightSurfaceTone = LightSurfaceTone.MATERIAL_TINTED,
+    darkSurfaceTone = if (amoledTheme) DarkSurfaceTone.AMOLED else DarkSurfaceTone.MATERIAL_TINTED,
+    dynamicColorEnabled = dynamicColor,
+)
+
+/**
+ * MainActivity cold-start bridge: resolve the same first-frame background as [RedfaceTheme] from
+ * the synchronous bootstrap mirror before the first composition exists.
+ */
+fun redfaceBootstrapWindowBackground(
+    context: Context,
+    darkTheme: Boolean,
+    preferences: ThemeColorPreferences,
+): androidx.compose.ui.graphics.Color = redfaceColorScheme(context, darkTheme, preferences).background

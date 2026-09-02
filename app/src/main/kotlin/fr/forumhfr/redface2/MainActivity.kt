@@ -15,9 +15,7 @@ import androidx.core.view.WindowCompat
 import dagger.hilt.android.AndroidEntryPoint
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
-import fr.forumhfr.redface2.core.ui.theme.RedfaceAmoledColorScheme
-import fr.forumhfr.redface2.core.ui.theme.RedfaceDarkColorScheme
-import fr.forumhfr.redface2.core.ui.theme.RedfaceLightColorScheme
+import fr.forumhfr.redface2.core.ui.redfaceBootstrapWindowBackground
 import fr.forumhfr.redface2.navigation.IntentDelivery
 import fr.forumhfr.redface2.navigation.RedfaceApp
 import javax.inject.Inject
@@ -67,11 +65,7 @@ class MainActivity : ComponentActivity() {
             ThemeMode.LIGHT -> false
             ThemeMode.SYSTEM -> systemDark
         }
-        val background = when {
-            dark && bootstrap.amoledEnabled -> RedfaceAmoledColorScheme.background
-            dark -> RedfaceDarkColorScheme.background
-            else -> RedfaceLightColorScheme.background
-        }
+        val background = redfaceBootstrapWindowBackground(this, dark, bootstrap.colorPreferences)
         window.setBackgroundDrawable(ColorDrawable(background.toArgb()))
         // enableEdgeToEdge() derived the bar ICON contrast from the OS uiMode ; align it with the
         // bootstrap background right away — the #286 SideEffect re-asserts it once composed.

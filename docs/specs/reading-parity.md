@@ -61,8 +61,8 @@ Trois verdicts possibles :
   2026-08-25 ([#1107](https://github.com/ForumHFR/redface2/issues/1107)) ont tranché **trois** des
   quatre dernières lignes qui le portaient ; la quatrième attend une seconde sonde sur citation
   ancienne et un contrôle positif d'âge connu, la latence de tracking n'étant pas exclue. Décompte
-  de la matrice à ce jour : **31 « oui, livré » + 2 « non par nature » + 1 « oui mais absent » =
-  34 lignes**.
+  de la matrice à ce jour : **32 « oui, livré » + 2 « non par nature » + 1 « oui mais absent » =
+  35 lignes**.
 
 Contexte d'architecture : le partage se fait au niveau de la **primitive sans politique** dans
 `:core:ui` — `ReadingPostCard` au lot 1, puis la machine de zoom, `PageFab` et `PageNavigation` au
@@ -115,6 +115,7 @@ références sont des symboles, pas des numéros de ligne.
 | Ascenseur intra-page | #300/#351c, `PostListScaffold` + `LazyListScrollbar` | **oui, livré** | Arrive par le scaffold partagé, qui lit `LocalShowScrollbar` lui-même. Une recherche de symbole côté MP le rate — l'écart se mesure par lecture, pas au grep. |
 | Profil d'affichage des médias (GIF S/M/L) | #973, `LocalMediaDisplayProfile` | **oui, livré** | Fourni par `RedfaceTheme`, lu dans `PostRenderer.BlockImage`. |
 | Largeur maximale des images | #991, `LocalPostImageMaxWidth` | **oui, livré** | Voir note #991 ci-dessous. |
+| Tons de surfaces de lecture et spoiler AMOLED | #883/#978, `ThemeColorPreferences`, `RedfaceTheme`, `POST_RENDERER_SPOILER_CONTAINER_TAG` | **oui, livré** | Les surfaces configurables sont résolues à la racine par `RedfaceTheme` et donc reçues identiquement par Topic et MP/DT via le renderer partagé. En AMOLED, `PostRenderer` remonte le spoiler fermé sur un container visible au lieu du near-black historique ; même token, même test de rendu sémantique sur les deux surfaces. |
 | Retry unitaire d'un média en erreur | `PainterAttempt` (`PostRenderer`) | **oui, livré** | Le slot d'erreur + retry par image vit dans le renderer partagé. Le **retry en masse au refresh explicite** (#813/#960) est, lui, câblé côté topic seulement → « oui mais absent ». |
 | Pull-to-refresh | #335/#351a, `pullToRefresh` | **oui, livré** | Keep-content (la page reste affichée pendant le rechargement). Les deux lecteurs utilisent le montage bas niveau : le geste et son indicateur sont désarmés pendant le zoom, pas seulement le callback. |
 | Swipe de page horizontal | #282/#351b, `threadPageSwipe` | **oui, livré** | Géométrie, seuils, edge-hint et prédicat de dead-zone système partagés dans `core.ui.pager.PageSwipe`. Le MP adopte l'annulation multi-touch #936 et la dead-zone #752 (insets lus une fois au DOWN). Son commit suit deux transitions : cible chaude, scellée par le compte et la génération du cache RAM → latch fermé pendant tout le slide-out, puis sélection ; cible froide → retour à offset nul, puis sélection keep-content, ancienne page lisible sous l'indicateur. Le chargement lancé par la sélection passe `isRefreshing` à `true` avant toute émission de contenu : un re-key peut créer un latch neuf, mais le gate composite le garde inerte jusqu'à la fin du chargement. La transition terminale vers `isRefreshing=false` réarme le geste, y compris après un échec sans changement de page. Swipe et edge-hint sont en outre désarmés pendant un zoom ou une mutation de liste du zoom (geste, arrêt de fling, glide, settle), un drag d'ascenseur, un scroll natif en cours et la fenêtre d'atterrissage couverte par `PrivateMessageListAlignment`. La fonction était déjà « oui, livré » : cette PR retire seulement sa note « écart de durcissement ». |
