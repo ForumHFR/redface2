@@ -16,6 +16,24 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.51.2` — `internal` (dev) — 2026-09-02
+
+Deux chantiers en retard sur la bêta, produits par Sol (Codex) sous gate Fable.
+
+### Ajouté
+
+- **Réglage « Largeur maximale des images »** ([#991](https://github.com/ForumHFR/redface2/issues/991)) — dans Affichage, un choix 90 %, 95 % (défaut, identique à aujourd'hui), 99 % ou 100 % de la largeur du message pour les images de contenu, appliqué aux trois chemins (image inline mesurée, image bloc mesurée, slot bloc en attente), indépendamment des GIF et du mode pleine largeur. Demandé par thom@s et XaTriX.
+
+### Corrigé
+
+- **Zoom pincé interactif** ([#1106](https://github.com/ForumHFR/redface2/issues/1106)) — au-delà de 1×, les liens, images, boutons et la sélection de texte redeviennent utilisables dans les sujets comme dans les MP/DT ; le pan à un doigt ne s'engage qu'après un vrai déplacement et le double-tap de rafraîchissement est suspendu en zoomé. Signalé par antiseptiqueIncolore.
+
+### Technique
+
+- Dependabot `gradle-misc` ([#1222](https://github.com/ForumHFR/redface2/pull/1222)) : Gradle 9.7.1, KSP 2.3.11, Roborazzi 1.73.0, androidx-tracing 2.0.1, hilt-navigation-compose 1.4.0, JSpecify 1.0.1.
+
+---
+
 ## `0.51.1` — `internal` (dev) — 2026-09-02
 
 Suite de la nuit du 01→02/09 : deux suggestions du fil DEV.

@@ -1,5 +1,5 @@
-Redface 2 v0.51.1 — dev.
+Redface 2 v0.51.2 — dev.
 
-- Résultats de sondage en barres proportionnelles (compteur, pourcentage, vote blanc à part). Suggestion de thibw.
-- Réponse rapide : le champ grandit jusqu'à 15 lignes comme RF1, plafond réduit quand le clavier serre l'écran. Suggestion de tinc.
-- Et tout le lot 0.51.0 : citation → retour au message cité, marqueur « dernier lu » visible, onglets Drapeaux, pastille « pages à lire » par retard, recherche sans accents, compileSdk 37.
+- Réglage « Largeur maximale des images » (Affichage) : 90 %, 95 % (défaut), 99 % ou 100 % de la largeur du message, pour les trois chemins d'image. Demandé par thom@s et XaTriX.
+- Zoom pincé : liens, images, boutons et sélection redeviennent utilisables au-delà de 1×, dans les sujets et les MP. Signalé par antiseptiqueIncolore.
+- Gradle 9.7.1, Roborazzi 1.73.0, KSP 2.3.11.

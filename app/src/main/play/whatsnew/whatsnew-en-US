@@ -1,5 +1,5 @@
-Redface 2 v0.51.1 — dev.
+Redface 2 v0.51.2 — dev.
 
-- Poll results as proportional bars (count, percentage, blank vote apart). Suggested by thibw.
-- Quick reply: the field grows up to 15 lines like RF1, reduced cap when the keyboard squeezes the screen. Suggested by tinc.
-- Plus the whole 0.51.0 lot: quote → back to the quoted post, visible "last read" marker, flag tabs, "pages to read" pill by lag, accent-insensitive search, compileSdk 37.
+- "Maximum image width" setting (Display): 90%, 95% (default), 99% or 100% of the post width, on all three image paths. Requested by thom@s and XaTriX.
+- Pinch zoom: links, images, buttons and selection work again beyond 1x, in topics and private messages. Reported by antiseptiqueIncolore.
+- Gradle 9.7.1, Roborazzi 1.73.0, KSP 2.3.11.
