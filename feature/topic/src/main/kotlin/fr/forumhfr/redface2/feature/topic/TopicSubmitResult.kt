@@ -15,9 +15,14 @@ package fr.forumhfr.redface2.feature.topic
  *   extracted — the ViewModel then falls back on its CANONICAL current page.
  * @property scrollTo `numreponse` parsed from the `#t{N}` success-URL fragment (quote / edit), or
  *   `null` when HFR anchored `#bas` (plain reply → bottom landing).
+ * @property quotedNumreponses #974 — the `numreponse` of every post the submit cited (appearance
+ *   order ; inline `[quotemsg]` tags and cards alike), empty for a plain reply or an edit. The
+ *   ViewModel lands on the highest one when it is on the landing page (the reading resumes
+ *   there), at the bottom otherwise.
  */
 data class TopicSubmitResult(
     val eventId: Long,
     val targetPage: Int?,
     val scrollTo: Int?,
+    val quotedNumreponses: List<Int> = emptyList(),
 )

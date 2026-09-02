@@ -62,7 +62,7 @@ internal fun QuickReplySheet(
     // renders the same cards (mockup P3) and needs author + excerpt, which only the topic
     // surface can snapshot. Riding the callback (→ the :app handoff), never the route.
     onEscalate: (quotes: List<QuoteSelection>) -> Unit,
-    onSubmitted: (targetPage: Int?, scrollTo: Int?) -> Unit,
+    onSubmitted: (targetPage: Int?, scrollTo: Int?, quotedNumreponses: List<Int>) -> Unit,
     // #604 lots 2-3 — the cards this opening pre-arms : one for « Citer », the whole basket
     // for « Citer N » under the full-screen threshold (empty from the reply FAB).
     initialQuotes: List<QuoteSelection> = emptyList(),
@@ -84,7 +84,8 @@ internal fun QuickReplySheet(
         viewModel.onSheetOpened(initialQuotes)
         viewModel.effects.collect { effect ->
             when (effect) {
-                is QuickReplyEffect.SubmitSucceeded -> onSubmitted(effect.targetPage, effect.scrollTo)
+                is QuickReplyEffect.SubmitSucceeded ->
+                    onSubmitted(effect.targetPage, effect.scrollTo, effect.quotedNumreponses)
                 is QuickReplyEffect.EscalateToFullEditor -> onEscalate(effect.quotes)
             }
         }

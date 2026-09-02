@@ -14,11 +14,13 @@ sealed interface ReplySubmitResult {
      * reply, `…/sujet_X_PAGE.htm#t{numreponse}` for quote / edit / edit-FP). Callers
      * should treat it as opaque and just navigate there, optionally extracting
      * [targetPage] / [numreponse] from the URL when they need to refresh a known
-     * cache or scroll to the new post.
+     * cache or scroll to the anchored post.
      *
      * [numreponse] is non-null when HFR's refresh URL exposes a `#t{N}` fragment
-     * (quote, edit post, edit FP, and any future endpoint that anchors on the
-     * created/edited post). For a plain reply HFR anchors `#bas` instead, so
+     * (quote, edit post, edit FP, and any future endpoint that anchors on a post —
+     * the edited one, or for a quote the CITED post : HFR anchors a quoted reply on
+     * the post it quotes, not on the new post, cf. the
+     * `write_quote_form_bbcode_rich.html` fixture). For a plain reply HFR anchors `#bas` instead, so
      * [numreponse] is null and the screen falls back to scrolling to the end of
      * the refreshed page — issue #200.
      *

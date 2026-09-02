@@ -13,6 +13,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
+import fr.forumhfr.redface2.core.domain.write.QuotedNumreponses
 import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.model.write.ReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
@@ -84,8 +85,17 @@ sealed interface QuickReplySubmitError {
 
 /** One-shot events consumed by the sheet composable. */
 sealed interface QuickReplyEffect {
-    /** HFR accepted the reply — refresh the topic like the full editor does (#200). */
-    data class SubmitSucceeded(val targetPage: Int?, val scrollTo: Int?) : QuickReplyEffect
+    /**
+     * HFR accepted the reply — refresh the topic like the full editor does (#200).
+     * [quotedNumreponses] (#974) : the cited posts (appearance order ; inline `[quotemsg]` tags
+     * and cards alike), empty for a plain reply — the topic engine lands on the highest one when
+     * it is on the landing page, bottom otherwise.
+     */
+    data class SubmitSucceeded(
+        val targetPage: Int?,
+        val scrollTo: Int?,
+        val quotedNumreponses: List<Int> = emptyList(),
+    ) : QuickReplyEffect
 
     /**
      * The draft is persisted — the sheet can hand over to the full-screen editor. Emitted only
@@ -418,9 +428,13 @@ class QuickReplyViewModel @AssistedInject constructor(
         // #953 F2 — the post-success draft delete rides the owner of the session that SUBMITTED,
         // even if the sheet is reopened (and the owner re-snapshotted) while the POST is in flight.
         val session = sessionOwner
+        // #974 — the cited posts ride the success effect whatever the rendering mode : inline
+        // `[quotemsg]` tags of the field (cards OFF, the production default) unioned with the
+        // armed cards. Snapshotted here : the state is reset on success before the effect is sent.
+        val quotes = _state.value.quotes
+        val quotedNumreponses = QuotedNumreponses.of(_state.value.text.text, quotes)
         submitJob = viewModelScope.launch {
             val outcome = runCatching {
-                val quotes = _state.value.quotes
                 if (quotes.isEmpty()) {
                     val form = loadedForm ?: replyRepository.fetchReplyForm(context).also { loadedForm = it }
                     replyRepository.submitReply(
@@ -459,7 +473,7 @@ class QuickReplyViewModel @AssistedInject constructor(
                 }
             }
             outcome.fold(
-                onSuccess = { result -> handleSubmitOutcome(result, session) },
+                onSuccess = { result -> handleSubmitOutcome(result, session, quotedNumreponses) },
                 onFailure = ::handleSubmitFailure,
             )
         }
@@ -468,6 +482,7 @@ class QuickReplyViewModel @AssistedInject constructor(
     private suspend fun handleSubmitOutcome(
         result: ReplySubmitResult,
         session: CompletableDeferred<String?>,
+        quotedNumreponses: List<Int>,
     ) {
         when (result) {
             is ReplySubmitResult.Success -> {
@@ -490,6 +505,7 @@ class QuickReplyViewModel @AssistedInject constructor(
                     QuickReplyEffect.SubmitSucceeded(
                         targetPage = result.targetPage,
                         scrollTo = result.numreponse,
+                        quotedNumreponses = quotedNumreponses,
                     ),
                 )
             }

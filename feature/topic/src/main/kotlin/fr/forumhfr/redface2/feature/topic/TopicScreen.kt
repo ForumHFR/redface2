@@ -388,7 +388,7 @@ fun TopicScreen(
     // the :app slot. The quick-reply sheet path below calls applySubmitResult directly.
     LaunchedEffect(pendingSubmitResult?.eventId) {
         pendingSubmitResult?.let { result ->
-            viewModel.applySubmitResult(result.targetPage, result.scrollTo)
+            viewModel.applySubmitResult(result.targetPage, result.scrollTo, result.quotedNumreponses)
             onSubmitResultConsumed()
         }
     }
@@ -1235,7 +1235,8 @@ internal fun TopicContent(
     // `TopicViewModel.applySubmitResult` directly (wired at the stateful entry point): the retained
     // engine force-refreshes and lands the submit — no route refresh (historically `:app` bumped a
     // submitSignal on the route, the same path as the full editor's onSubmitSucceeded, #200).
-    onQuickReplySubmitted: (targetPage: Int?, scrollTo: Int?) -> Unit = { _, _ -> },
+    onQuickReplySubmitted: (targetPage: Int?, scrollTo: Int?, quotedNumreponses: List<Int>) -> Unit =
+        { _, _, _ -> },
     // #1137 — measured height (px) of the « Dernier message lu » separator, reported from where it is
     // composed so the flag landing can align on it. Threaded down to TopicLoadedContent.
     onLastReadMarkerMeasured: (heightPx: Int) -> Unit = {},
@@ -1589,14 +1590,14 @@ internal fun TopicContent(
                     launch.consumesBasket,
                 )
             },
-            onSubmitted = { targetPage, scrollTo ->
+            onSubmitted = { targetPage, scrollTo, quotedNumreponses ->
                 // #868/#869 — a SUCCESSFUL send of a basket-consuming session (« Citer N » ≤ 2)
                 // finally consumes the selection ; a dismiss/cancel above never does.
                 if (launch.consumesBasket) {
                     onClearMultiQuote()
                 }
                 quickReplyFor = null
-                onQuickReplySubmitted(targetPage, scrollTo)
+                onQuickReplySubmitted(targetPage, scrollTo, quotedNumreponses)
             },
         )
     }
