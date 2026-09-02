@@ -927,21 +927,24 @@ class PostEditorViewModel @AssistedInject constructor(
                         mode = snapshot.mode,
                         numreponse = snapshot.numreponse,
                         result = result,
-                        // #974 — the cited posts, whatever the rendering mode : inline `[quotemsg]`
-                        // tags typed or prefilled in the field (cards OFF, the production default)
-                        // unioned with the armed cards (cards ON). Empty for an edit (no cards, the
-                        // edited body's own quotes are not a landing hint — scrollTo owns it).
-                        quotedNumreponses = if (snapshot.mode == PostEditorMode.Edit) {
-                            emptyList()
-                        } else {
-                            QuotedNumreponses.of(snapshot.draft.text, snapshot.quotes)
-                        },
+                        quotedNumreponses = quotedNumreponsesFor(snapshot),
                     )
                 },
                 onFailure = ::handleSubmitFailure,
             )
         }
     }
+
+    /**
+     * #974 - Reply success carries quote landing hints from armed cards plus inline `[quotemsg]`
+     * tags. Edit returns none: there are no quote cards there, and `scrollTo` owns the landing.
+     */
+    private fun quotedNumreponsesFor(snapshot: PostEditorState): List<Int> =
+        if (snapshot.mode == PostEditorMode.Edit) {
+            emptyList()
+        } else {
+            QuotedNumreponses.of(snapshot.draft.text, snapshot.quotes)
+        }
 
     /**
      * #604 lot 3 (mockup P3) — the Reply POST, quotes-aware. Without cards the cached plain form
