@@ -164,6 +164,7 @@
     <!-- Portée affichée sous le titre : globale, ou onglet courant. %1$s = libellé de l'onglet. -->
     <string name="flags_view_settings_scope_global">S\'applique à tous les onglets</string>
     <string name="flags_view_settings_scope_per_tab">S\'applique à l\'onglet « %1$s »</string>
+    <string name="flags_view_settings_scope_super_global">Réglages globaux</string>
     <string name="flags_view_settings_per_tab_title">Réglages différents par onglet</string>
     <string name="flags_view_settings_per_tab_description">Chaque onglet garde son propre affichage. Sinon, un réglage unique partagé par tous les onglets.</string>
     <string name="flags_view_settings_group_title">Grouper par catégorie</string>

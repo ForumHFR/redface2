@@ -83,6 +83,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
@@ -714,13 +715,15 @@ private fun FlagsViewSettingsSheet(
                     style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
-                val scope = if (perTabOverride) {
-                    stringResource(
-                        R.string.flags_view_settings_scope_per_tab,
-                        stringResource(flagTabLabel(selectedTab)),
-                    )
-                } else {
-                    stringResource(R.string.flags_view_settings_scope_global)
+                val scope = when {
+                    selectedTab == FlagTab.Super -> stringResource(R.string.flags_view_settings_scope_super_global)
+                    perTabOverride -> {
+                        stringResource(
+                            R.string.flags_view_settings_scope_per_tab,
+                            stringResource(flagTabLabel(selectedTab)),
+                        )
+                    }
+                    else -> stringResource(R.string.flags_view_settings_scope_global)
                 }
                 Text(
                     text = scope,
@@ -751,13 +754,14 @@ private fun FlagsViewSettingsSheet(
                 enabled = settings.groupByCategory,
                 onCheckedChange = actions.onHideReadCategoriesChange,
             )
-            // #317 — « non-lus uniquement ». Always per-tab (not governed by the override above), so
-            // it's always enabled and its description says it applies to this tab only.
+            // #317 — « non-lus uniquement ». Always per-tab (not governed by the override above), but
+            // Super has no FlagType/unread oracle, so the ViewModel no-ops and the switch is disabled.
+            val unreadOnlyEnabled = selectedTab.flagType != null
             ViewSettingsSwitchRow(
                 title = stringResource(R.string.flags_view_settings_unread_only_title),
                 description = stringResource(R.string.flags_view_settings_unread_only_description),
                 checked = settings.unreadOnly,
-                enabled = true,
+                enabled = unreadOnlyEnabled,
                 onCheckedChange = actions.onUnreadOnlyChange,
             )
 
@@ -1001,8 +1005,7 @@ private fun ViewSettingsSwitchRow(
 /**
  * Human label for a real [FlagTab], used in the display-settings sheet scope caption (#309). RED
  * uses the full « Lus uniquement » (not the cramped « Lu » tab label) since the caption has room.
- * [FlagTab.Super] has no list to configure (the trigger is hidden there), so its label is only a
- * defensive fallback.
+ * [FlagTab.Super] renders a fixed global-scope caption instead of going through this helper.
  */
 private fun flagTabLabel(tab: FlagTab): Int = when (tab) {
     FlagTab.Cyan -> R.string.flags_tab_my_topics
@@ -1099,7 +1102,7 @@ private fun QuickConfigRequestEffect(
         // One-shot CONSUMED event: the host counter persists across FlagsRoute re-mounts (return from a
         // category/topic), so an unconsumed request > 0 would re-open the sheet on every recompose (the
         // reported bug, confirmed by Codex). Consume on ANY request > 0 — even when not configurable
-        // (Super tab) — so a stale event can't fire later; only open when the screen is configurable.
+        // (for example DT) — so a stale event can't fire later; only open when the screen is configurable.
         // onConsumed() resets the host counter to 0 → recompose → LaunchedEffect(0) no-ops (no loop).
         if (request > 0) {
             if (canConfigure) onOpen()
@@ -1123,7 +1126,6 @@ private fun flagsLoadingBarVisible(
     dtIsRefreshing: Boolean,
 ): Boolean = when (selectedTab) {
     FlagTab.Dt -> dtIsRefreshing || dtListState is DtListUiState.Loading
-    FlagTab.Super -> false
     else -> isRefreshing || flagsState == null || flagsState == FlagsListUiState.Loading
 }
 
@@ -1360,13 +1362,17 @@ private fun AuthenticatedBody(
             modifier = Modifier.fillMaxSize(),
         ) { bodyState ->
             when (bodyState.selectedTab) {
-                // #737 — Super is a local list now. No pull-to-refresh: there is no backend endpoint
-                // for the client-side pin store, and live flag enrichment is recomputed from the VM
-                // state when the store/list emits.
-                FlagTab.Super -> SuperFlagListBody(
+                // #737/#743 — Super is a local pin list, but an explicit refresh still fans out the
+                // backing real flag buckets so cached enrichment can catch up from the same gesture as
+                // the regular tabs. Fallback rows without a reliable category remain non-openable.
+                FlagTab.Super -> FlagListBody(
                     state = bodyState,
                     actions = actions,
                     listState = listStates.superFavorite,
+                    manualRefresh = manualRefresh,
+                    onManualRefresh = onManualRefresh,
+                    rowActionsEnabled = ::flagRowActionsEnabled,
+                    rowClickEnabled = ::flagRowClickEnabled,
                 )
                 // #6 — DT is a real list now: the user's MultiMP conversations, enriched best-effort
                 // with the MPStorage reading positions.
@@ -1535,18 +1541,21 @@ private fun FlagsPullIndicator(
 }
 
 /**
- * The real flag-list body of a [FlagTab] with a backend (Cyan/Red/Favorite) — extracted from
+ * The generic flag-list body for Cyan/Red/Favorite and the local Super list — extracted from
  * [AuthenticatedBody] when the #457 tab-swipe wrapper landed, so the swipe surface (placeholders
  * included) and the pull-to-refresh surface stay two distinct layers.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun FlagListBody(
+@Suppress("LongParameterList") // Body state + actions + list + pull-refresh + Super row gates.
+internal fun FlagListBody(
     state: FlagsBodyState,
     actions: AuthenticatedActions,
     listState: LazyListState,
     manualRefresh: Boolean,
     onManualRefresh: () -> Unit,
+    rowActionsEnabled: (FlagRowUiModel) -> Boolean = { true },
+    rowClickEnabled: (FlagRowUiModel) -> Boolean = { true },
 ) {
     val selectedTab = state.selectedTab
     // Pull-to-refresh (swipe down) replaces the legacy header « Actualiser » button, matching
@@ -1593,24 +1602,15 @@ private fun FlagListBody(
                         MAX_PULL_PUSH.toPx()
                 },
         ) {
-            FlagListContent(state = state, actions = actions, listState = listState)
+            FlagListContent(
+                state = state,
+                actions = actions,
+                listState = listState,
+                rowActionsEnabled = rowActionsEnabled,
+                rowClickEnabled = rowClickEnabled,
+            )
         }
     }
-}
-
-@Composable
-private fun SuperFlagListBody(
-    state: FlagsBodyState,
-    actions: AuthenticatedActions,
-    listState: LazyListState,
-) {
-    FlagListContent(
-        state = state,
-        actions = actions,
-        listState = listState,
-        rowActionsEnabled = ::flagRowActionsEnabled,
-        rowClickEnabled = ::flagRowClickEnabled,
-    )
 }
 
 @Composable
@@ -1796,6 +1796,7 @@ private fun FlagsSearchBackHandler(
 private const val CONTENT_TYPE_HEADER = "category_header"
 private const val CONTENT_TYPE_EMPTY = "empty_section"
 private const val CONTENT_TYPE_ROW = "flag_row"
+internal const val FLAGS_LIST_TEST_TAG = "flags-list"
 
 /**
  * Category-grouped flag list (#179). Renders one sticky band per [FlagCategorySection] in the
@@ -1834,7 +1835,8 @@ private fun CategorySectionedFlagList(
         state = listState,
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.surface),
+            .background(MaterialTheme.colorScheme.surface)
+            .testTag(FLAGS_LIST_TEST_TAG),
         // #665 — reserve the overlaid bar height so the first item/band sits below it and content
         // glides under the (translucent) bar. fillParentMaxSize empty items center within this padding.
         contentPadding = PaddingValues(top = LocalFlagsContentTopPadding.current),
@@ -2150,7 +2152,8 @@ private fun FlatFlagList(
         state = listState,
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.surface),
+            .background(MaterialTheme.colorScheme.surface)
+            .testTag(FLAGS_LIST_TEST_TAG),
         // #665 — reserve the overlaid bar height (content glides under the translucent bar).
         contentPadding = PaddingValues(top = LocalFlagsContentTopPadding.current),
     ) {
@@ -2830,7 +2833,7 @@ private fun DtUnreadDot(unread: Boolean) {
  * Read-only state bundle for [AuthenticatedBody], grouped so the composable stays under the
  * detekt parameter-count threshold and mirrors the [AuthenticatedActions] callback bundle.
  */
-private data class FlagsBodyState(
+internal data class FlagsBodyState(
     val selectedTab: FlagTab,
     val flagsState: FlagsListUiState?,
     /** Whether the Cyan tab currently shows read topics (« +lus » suffix), #317. */
@@ -2860,7 +2863,7 @@ private data class FlagsBodyState(
     val hideReadActive: Boolean = false,
 )
 
-private data class AuthenticatedActions(
+internal data class AuthenticatedActions(
     val onSelectTab: (FlagTab) -> Unit,
     val onOpenFlag: (Flag) -> Unit,
     val onRefresh: () -> Unit,

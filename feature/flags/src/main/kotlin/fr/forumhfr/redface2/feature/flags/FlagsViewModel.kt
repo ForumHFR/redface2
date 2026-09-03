@@ -142,7 +142,7 @@ class FlagsViewModel @Inject constructor(
     /**
      * Whether the opt-in « DT » tab is shown (Settings toggle, default off). The tab lists the user's
      * MultiMP conversations enriched with MPStorage reading positions (see [dtListState]) — it is a
-     * real backed list now (#6), NOT a placeholder like [FlagTab.Super].
+     * real private-message list now (#6), distinct from the local [FlagTab.Super] pin list.
      */
     val showDtTab: StateFlow<Boolean> = userPreferencesRepository.observeShowDtSection()
         .stateIn(
@@ -276,8 +276,9 @@ class FlagsViewModel @Inject constructor(
      *
      * - Anonymous → selected tab + `null` (the home tab shows the login intro instead of a list).
      * - [FlagTab.Dt] → DT tab + `null` (DT has its own [dtDisplayState]).
-     * - [FlagTab.Super] → local Super list backed by [SuperFavoriteRepository] (#737), no flag-bucket
-     *   observation and no pull-to-refresh.
+     * - [FlagTab.Super] → local Super list backed by [SuperFavoriteRepository] (#737), no direct
+     *   flag-bucket observation; an explicit refresh fans out the backing real tabs so cached
+     *   enrichment can catch up.
      * - Real [FlagType] tabs → the per-tab flag flow (« non-lus uniquement » filter #154/#317, then
      *   [keepContentDuringRefresh] #225) combined with the category catalogue and lazy subcategory
      *   labels (#741).
@@ -766,8 +767,8 @@ class FlagsViewModel @Inject constructor(
     /**
      * Bottom-sheet write (and CYAN re-tap shortcut) for « non-lus uniquement » (#317). Always writes
      * the CURRENT tab's per-type value — unlike the layout toggles, this filter is never global, so
-     * there is no override routing. Super has no real [FlagType], so it is a no-op there (the sheet
-     * trigger is hidden on Super anyway).
+     * there is no override routing. Super has no real [FlagType], so it is a no-op there; the sheet
+     * keeps the switch disabled while still exposing the global layout controls.
      */
     fun setFlagsUnreadOnly(enabled: Boolean) {
         val type = _selectedTab.value.flagType ?: return
