@@ -1,7 +1,4 @@
-Redface 2 v0.53.4 — dev.
+Redface 2 v0.53.5 — dev.
 
-- Flags: the Super tab makes no network calls; orphan pins can be removed; subcategory labels show up.
-- Polls: percentages match HFR.
-- "Post published on page N" snackbar no longer blocks scrolling.
-- HFR links inside a post open the right tab.
-- Colours: settings survive rapid taps, hex input is kept while typing.
+- Flags, Super tab: pull-to-refresh now works (refreshes the three lists), and group-by-category plus hide-read-categories are honoured.
+- Settings > Flags: with per-tab settings on, the global switches are disabled with an explanation.

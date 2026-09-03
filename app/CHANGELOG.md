@@ -16,6 +16,18 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.53.5` — `internal` (dev) — 2026-09-03
+
+Retour XaTriX sur la 0.53.4. Produit par Sol (Codex) sous gate Fable ; PR #1261.
+
+### Corrigé
+
+- **Drapeaux, onglet Super : pull-to-refresh** — le geste était sans effet ; il rafraîchit maintenant les trois listes (Cyan, Rouge, Favoris) puis re-résout les sujets marqués depuis le cache. Toujours aucun rafraîchissement automatique sur cet onglet.
+- **Drapeaux, onglet Super : « Grouper par catégorie » et « Masquer les catégories sans non-lu »** sont honorés comme sur les autres onglets.
+- **Réglages › Drapeaux** — quand « Réglages différents par onglet » est actif, les deux interrupteurs d'affichage globaux sont grisés avec un texte renvoyant à la feuille de configuration rapide des Drapeaux, au lieu d'écrire une valeur que les onglets n'utilisent pas.
+
+---
+
 ## `0.53.4` — `internal` (dev) — 2026-09-03
 
 Correctifs issus de la double revue LLM (Opus 5 + Codex) de la PR de promotion dev → main #1250. Produit par Sol (Codex) sous gate Fable ; PRs #1256, #1257, #1258.

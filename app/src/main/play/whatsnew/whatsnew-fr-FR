@@ -1,7 +1,4 @@
-Redface 2 v0.53.4 — dev.
+Redface 2 v0.53.5 — dev.
 
-- Drapeaux : l'onglet Super ne fait plus d'appels réseau ; épingles orphelines retirables ; sous-catégories affichées.
-- Sondages : pourcentages identiques à HFR.
-- Snackbar « Message publié en page N » ne bloque plus le défilement.
-- Liens HFR dans un post : le bon onglet s'ouvre.
-- Couleurs : réglages fiables en cas de taps rapides, saisie hex conservée.
+- Drapeaux, onglet Super : le pull-to-refresh fonctionne (rafraîchit les trois listes), et le groupement par catégorie ainsi que le masquage des catégories lues sont honorés.
+- Réglages › Drapeaux : en mode « réglages par onglet », les interrupteurs globaux sont grisés avec une explication.
