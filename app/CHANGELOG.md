@@ -16,6 +16,16 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.53.2` — `internal` (dev) — 2026-09-03
+
+Mandat de nuit, troisième lot. Produit par Sol (Codex) sous gate Fable ; PR #1249.
+
+### Ajouté
+
+- **Couleurs : option « En-tête des messages » Discret / Vif** (retours styx42, nicko, XaTriX) — « Vif » peint l'en-tête d'identité des messages (sujets et MP) avec la couleur d'accent choisie au lieu de la surface secondaire discrète ; défaut inchangé (Discret). L'aperçu de la page Couleurs suit l'option ; le message d'ancrage « dernier lu » et les messages de modération gardent leur traitement.
+
+---
+
 ## `0.53.1` — `internal` (dev) — 2026-09-03
 
 Mandat de nuit, second lot (issues anciennes du backlog). Produit par Sol (Codex) sous gate Fable ; PR #1247, PR #1248.

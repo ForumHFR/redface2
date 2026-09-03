@@ -1,5 +1,3 @@
-Redface 2 v0.53.1 — dev.
+Redface 2 v0.53.2 — dev.
 
-- Flags: swiping between tabs no longer jumps to the top; the "Super" tab finally lists super favourites; the subcategory shows in the topic row.
-- Editor: "Quote the beginning" inserts only the start of a long post.
-- Images: "Share" in the long-press menu.
+- Colours: "Post header" option, Subtle / Vivid. "Vivid" paints the post header (topics and PMs) with the chosen accent; default unchanged. The preview follows the option.

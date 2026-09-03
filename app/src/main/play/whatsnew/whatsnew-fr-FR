@@ -1,5 +1,3 @@
-Redface 2 v0.53.1 — dev.
+Redface 2 v0.53.2 — dev.
 
-- Drapeaux : le swipe entre onglets ne saute plus en haut de liste ; l'onglet « Super » liste enfin les super-favoris ; la sous-catégorie s'affiche dans la ligne du sujet.
-- Éditeur : « Citer le début » n'insère que le début d'un long message.
-- Images : « Partager » dans le menu d'appui long.
+- Couleurs : option « En-tête des messages » Discret / Vif. « Vif » peint l'en-tête des messages (sujets et MP) avec l'accent choisi ; défaut inchangé. L'aperçu suit l'option.
