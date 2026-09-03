@@ -1,4 +1,7 @@
-Redface 2 v0.53.6 — dev.
+Redface 2 v0.53.6 — bêta.
 
-- Drapeaux, onglet Super : le geste de rafraîchissement est enfin capté (indicateur, barre de chargement), même corps de liste que les autres onglets.
-- Feuille rapide sur Super : « Non-lus uniquement » désactivé, réglages indiqués comme globaux.
+Lot 0.51 → 0.53 :
+- Couleurs : accent (8 presets ou hexa), ton du fond, Clair/Système/Sombre, en-tête Discret/Vif, fond gris esprit RF1.
+- Drapeaux : onglet Super (super-favoris), sous-catégorie, swipe sans saut, pastille +N colorée, recherche sans accents.
+- Sujets : plus de téléportation en postant, retour au message cité, sondages en barres, réponse rapide 15 lignes, zoom interactif, largeur d'images.
+- Liens HFR : retour et destination cohérents.
