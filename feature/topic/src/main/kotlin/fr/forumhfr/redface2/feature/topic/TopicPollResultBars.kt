@@ -22,7 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.model.Poll
-import kotlin.math.floor
+import java.util.Locale
 import kotlin.math.roundToInt
 
 internal data class PollResultBars(
@@ -33,14 +33,14 @@ internal data class PollResultBars(
 internal data class PollOptionResultBar(
     val text: String,
     val votes: Int,
-    val percentage: Int,
+    val percentage: String,
     val widthFraction: Float,
     val isLeading: Boolean,
 )
 
 internal data class PollBlankVoteResultBar(
     val votes: Int,
-    val percentage: Int,
+    val percentage: String,
     val widthFraction: Float,
 )
 
@@ -75,7 +75,7 @@ private enum class PollResultRowRole { LEADING, REGULAR, BLANK }
 private fun TopicPollResultBarRow(
     label: String,
     votes: Int,
-    percentage: Int,
+    percentage: String,
     widthFraction: Float,
     role: PollResultRowRole,
 ) {
@@ -162,94 +162,80 @@ private data class PollResultRowColors(
     val contentColor: Color,
 )
 
-/**
- * #1182 — HFR's `Total` includes blank votes when it prints them: on
- * `topic_khakha_page_2.html`, option votes sum to 164 and `(12 votes blancs)` gives the total 176.
- * Bars therefore use `Poll.totalVotes` as the denominator, not the sum of option votes.
- */
+/** HFR exposes poll option percentages directly; use them before any defensive recomputation. */
 internal fun calculatePollResultBars(poll: Poll): PollResultBars {
     val totalVotes = poll.totalVotes.coerceAtLeast(0)
     val optionVotes = poll.options.map { option -> option.votes.coerceAtLeast(0) }
     val blankVotes = poll.blankVotes?.coerceAtLeast(0)
-    val percentages = roundedPercentages(optionVotes + listOfNotNull(blankVotes), totalVotes)
+    val fallbackPercentages = fallbackOptionPercentages(optionVotes)
     val leadingVoteCount = optionVotes.maxOrNull() ?: 0
 
     return PollResultBars(
         options = poll.options.mapIndexed { index, option ->
             val votes = optionVotes[index]
+            val percentage = parsedResultPercentage(option.percentage, votes)
+                ?: fallbackPercentages.getOrElse(index) { resultPercentage(0f) }
             PollOptionResultBar(
                 text = option.text,
                 votes = votes,
-                percentage = percentages.getOrElse(index) { 0 },
-                widthFraction = voteWidthFraction(votes, totalVotes),
+                percentage = percentage.label,
+                widthFraction = percentageWidthFraction(percentage.value),
                 isLeading = votes > 0 && votes == leadingVoteCount,
             )
         },
         blankVote = blankVotes?.let { votes ->
+            val percentage = resultPercentage(percentageFromVotes(votes, totalVotes))
             PollBlankVoteResultBar(
                 votes = votes,
-                percentage = percentages.getOrElse(optionVotes.size) { 0 },
-                widthFraction = voteWidthFraction(votes, totalVotes),
+                percentage = percentage.label,
+                widthFraction = percentageWidthFraction(percentage.value),
             )
         },
     )
 }
 
-private fun voteWidthFraction(votes: Int, totalVotes: Int): Float =
-    if (totalVotes <= 0) {
-        0f
+private data class PollResultPercentage(
+    val value: Float,
+    val label: String,
+)
+
+private fun parsedResultPercentage(percentage: Float, votes: Int): PollResultPercentage? {
+    if (!percentage.isFinite() || percentage < 0f) return null
+    return if (percentage > 0f || votes == 0) {
+        resultPercentage(percentage)
     } else {
-        (votes.toFloat() / totalVotes.toFloat()).coerceIn(0f, 1f)
+        null
     }
-
-/**
- * Largest-remainder integer percentages. The target is the rounded known share of the displayed rows,
- * capped to 100 so defensive/corrupt data cannot make the rendered percentage sum exceed 100.
- */
-private fun roundedPercentages(votes: List<Int>, totalVotes: Int): List<Int> {
-    if (totalVotes <= 0 || votes.isEmpty()) return List(votes.size) { 0 }
-
-    val exactPercentages = votes.map { vote -> vote.coerceAtLeast(0).toDouble() * PERCENT_SCALE / totalVotes }
-    val targetSum = exactPercentages.sum().roundToInt().coerceIn(0, PERCENT_SCALE)
-    val rounded = exactPercentages.map { exact -> floor(exact).toInt() }.toMutableList()
-    val delta = targetSum - rounded.sum()
-
-    if (delta > 0) {
-        val indicesByRemainder = exactPercentages.indices.sortedWith(
-            compareByDescending<Int> { index -> exactPercentages[index] - floor(exactPercentages[index]) }
-                .thenBy { index -> index },
-        )
-        repeat(delta) { step ->
-            rounded[indicesByRemainder[step % indicesByRemainder.size]] += 1
-        }
-    } else if (delta < 0) {
-        trimPercentages(rounded, exactPercentages, excess = -delta)
-    }
-
-    return rounded
 }
 
-private fun trimPercentages(
-    rounded: MutableList<Int>,
-    exactPercentages: List<Double>,
-    excess: Int,
-) {
-    val indicesByRemainder = exactPercentages.indices.sortedWith(
-        compareBy<Int> { index -> exactPercentages[index] - floor(exactPercentages[index]) }
-            .thenBy { index -> index },
+private fun fallbackOptionPercentages(votes: List<Int>): List<PollResultPercentage> {
+    val totalOptionVotes = votes.sum()
+    return votes.map { vote -> resultPercentage(percentageFromVotes(vote, totalOptionVotes)) }
+}
+
+private fun percentageFromVotes(votes: Int, totalVotes: Int): Float =
+    if (totalVotes <= 0) 0f else votes.coerceAtLeast(0).toFloat() * PERCENT_SCALE / totalVotes
+
+private fun resultPercentage(value: Float): PollResultPercentage {
+    val clamped = value.coerceIn(0f, PERCENT_SCALE)
+    return PollResultPercentage(
+        value = clamped,
+        label = formatPercentage(clamped),
     )
-    var remaining = excess
-    while (remaining > 0) {
-        var changed = false
-        indicesByRemainder.forEach { index ->
-            if (remaining > 0 && rounded[index] > 0) {
-                rounded[index] -= 1
-                remaining -= 1
-                changed = true
-            }
-        }
-        if (!changed) return
+}
+
+private fun formatPercentage(value: Float): String {
+    val roundedToTenth = (value * TENTH_SCALE).roundToInt().toFloat() / TENTH_SCALE
+    val roundedInteger = roundedToTenth.roundToInt()
+    return if (roundedToTenth == roundedInteger.toFloat()) {
+        roundedInteger.toString()
+    } else {
+        String.format(Locale.ROOT, "%.1f", roundedToTenth)
     }
 }
 
-private const val PERCENT_SCALE = 100
+private fun percentageWidthFraction(percentage: Float): Float =
+    (percentage / PERCENT_SCALE).coerceIn(0f, 1f)
+
+private const val PERCENT_SCALE = 100f
+private const val TENTH_SCALE = 10f

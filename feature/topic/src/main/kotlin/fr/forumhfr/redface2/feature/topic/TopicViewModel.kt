@@ -1613,15 +1613,20 @@ class TopicViewModel @AssistedInject constructor(
      */
     private fun submitRefreshPlan(target: Int, scrollTo: Int?, quotedNumreponse: Int?): SubmitRefreshPlan {
         val loadedMode = _state.value.mode as? TopicUiState.Mode.Loaded
-        val loadedTopic = loadedMode?.topic
-            ?.takeIf { it.page == target && !loadedMode.provisional }
-        val targetWasKnownTail = loadedTopic?.totalPages == target
+        val displayedTargetTopic = loadedMode?.topic?.takeIf { it.page == target }
+        val terminalTargetTopic = displayedTargetTopic?.takeIf { !loadedMode.provisional }
+        val targetWasKnownTail = terminalTargetTopic?.totalPages == target
+        // Bottom landing only from the known tail (contract above), also when the page is provisional.
+        val provisionalSamePagePlainReply = scrollTo == null &&
+            quotedNumreponse == null &&
+            loadedMode?.provisional == true &&
+            displayedTargetTopic?.totalPages == target
         return SubmitRefreshPlan(
             initialTarget = target,
             landing = when {
                 quotedNumreponse != null -> PendingLanding.PostOrBottom(quotedNumreponse)
                 scrollTo != null -> PendingLanding.Post(scrollTo)
-                targetWasKnownTail -> PendingLanding.Bottom
+                targetWasKnownTail || provisionalSamePagePlainReply -> PendingLanding.Bottom
                 else -> null
             },
             overflowRedirectAllowed = scrollTo == null && quotedNumreponse == null && targetWasKnownTail,

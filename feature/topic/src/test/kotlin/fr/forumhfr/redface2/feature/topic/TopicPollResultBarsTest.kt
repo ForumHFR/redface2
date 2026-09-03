@@ -8,30 +8,48 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** #1182 — pure distribution tests for poll result bars. */
+/** Pure distribution tests for poll result bars. */
 class TopicPollResultBarsTest {
 
     @Test
-    fun `result bars use HFR total as denominator including blank votes`() {
+    fun `result bars use parsed HFR percentages before recomputing`() {
         val bars = calculatePollResultBars(
             poll(
-                totalVotes = 10,
+                totalVotes = 176,
                 options = listOf(
-                    PollOption("Kotlin", votes = 7, percentage = 99f),
-                    PollOption("Java", votes = 2, percentage = 1f),
+                    PollOption("Kotlin", votes = 34, percentage = 20.7f),
+                    PollOption("Java", votes = 33, percentage = 20.1f),
                 ),
-                blankVotes = 1,
+                blankVotes = 12,
             ),
         )
         val blankVote = requireNotNull(bars.blankVote)
 
-        assertEquals(0.7f, bars.options[0].widthFraction, FLOAT_DELTA)
-        assertEquals(0.2f, bars.options[1].widthFraction, FLOAT_DELTA)
-        assertEquals(0.1f, blankVote.widthFraction, FLOAT_DELTA)
-        assertEquals(listOf(70, 20), bars.options.map { option -> option.percentage })
-        assertEquals(10, blankVote.percentage)
+        assertEquals(0.207f, bars.options[0].widthFraction, FLOAT_DELTA)
+        assertEquals(0.201f, bars.options[1].widthFraction, FLOAT_DELTA)
+        assertEquals(12f / 176f, blankVote.widthFraction, FLOAT_DELTA)
+        assertEquals(listOf("20.7", "20.1"), bars.options.map { option -> option.percentage })
+        assertEquals("6.8", blankVote.percentage)
         assertTrue(bars.options[0].isLeading)
         assertFalse(bars.options[1].isLeading)
+    }
+
+    @Test
+    fun `result bars fall back to option-vote recomputation when parsed percentage is absent`() {
+        val bars = calculatePollResultBars(
+            poll(
+                totalVotes = 176,
+                options = listOf(
+                    PollOption("Kotlin", votes = 33, percentage = 0f),
+                    PollOption("Java", votes = 131, percentage = 0f),
+                ),
+                blankVotes = 12,
+            ),
+        )
+
+        assertEquals(listOf("20.1", "79.9"), bars.options.map { option -> option.percentage })
+        assertEquals(33f / 164f, bars.options[0].widthFraction, FLOAT_DELTA)
+        assertEquals(131f / 164f, bars.options[1].widthFraction, FLOAT_DELTA)
     }
 
     @Test
@@ -49,14 +67,14 @@ class TopicPollResultBarsTest {
         val blankVote = requireNotNull(bars.blankVote)
 
         assertTrue(bars.options.all { option -> option.widthFraction == 0f })
-        assertTrue(bars.options.all { option -> option.percentage == 0 })
+        assertTrue(bars.options.all { option -> option.percentage == "0" })
         assertEquals(0f, blankVote.widthFraction, FLOAT_DELTA)
-        assertEquals(0, blankVote.percentage)
+        assertEquals("0", blankVote.percentage)
         assertTrue(bars.options.none { option -> option.isLeading })
     }
 
     @Test
-    fun `integer rounding uses largest remainder without exceeding one hundred`() {
+    fun `fractional parsed percentages keep one decimal`() {
         val bars = calculatePollResultBars(
             poll(
                 totalVotes = 3,
@@ -68,8 +86,7 @@ class TopicPollResultBarsTest {
             ),
         )
 
-        assertEquals(listOf(34, 33, 33), bars.options.map { option -> option.percentage })
-        assertEquals(100, bars.options.sumOf { option -> option.percentage })
+        assertEquals(listOf("33.3", "33.3", "33.3"), bars.options.map { option -> option.percentage })
     }
 
     @Test
@@ -84,26 +101,23 @@ class TopicPollResultBarsTest {
             ),
         )
 
-        assertEquals(listOf(30, 20), bars.options.map { option -> option.percentage })
-        assertEquals(50, bars.options.sumOf { option -> option.percentage })
+        assertEquals(listOf("30", "20"), bars.options.map { option -> option.percentage })
     }
 
     @Test
-    fun `defensive rounding caps inconsistent rows at one hundred`() {
+    fun `defensive parsed percentage caps inconsistent rows at one hundred`() {
         val bars = calculatePollResultBars(
             poll(
                 totalVotes = 10,
                 options = listOf(
-                    PollOption("Kotlin", votes = 9, percentage = 90f),
-                    PollOption("Java", votes = 9, percentage = 90f),
+                    PollOption("Kotlin", votes = 9, percentage = 150f),
+                    PollOption("Java", votes = 1, percentage = 10f),
                 ),
-                blankVotes = 9,
             ),
         )
 
-        val displayedTotal = bars.options.sumOf { option -> option.percentage } +
-            requireNotNull(bars.blankVote).percentage
-        assertEquals(100, displayedTotal)
+        assertEquals("100", bars.options[0].percentage)
+        assertEquals(1f, bars.options[0].widthFraction, FLOAT_DELTA)
     }
 
     @Test

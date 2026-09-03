@@ -3070,6 +3070,39 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `plain submit on a provisional same-page refresh lands after the fresh emission (#1250)`() = runTest {
+        val cached = fakeTopic(page = 2, totalPages = 2, title = "cached", posts = listOf(fakePost(100)))
+        val fresh = fakeTopic(
+            page = 2,
+            totalPages = 2,
+            title = "fresh",
+            posts = listOf(fakePost(100), fakePost(200)),
+        )
+        val emissions = MutableSharedFlow<TopicPageEmission>(replay = 1)
+        assertTrue(emissions.tryEmit(TopicPageEmission(cached, provisional = true)))
+        val repository = FakeStreamingEmissionTopicRepository(
+            source = emissions,
+            refreshTopicsToReturn = listOf(fresh),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+        advanceUntilIdle()
+        assertTrue(assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).provisional)
+
+        viewModel.effects.test {
+            viewModel.applySubmitResult(targetPage = 2, scrollTo = null)
+            assertEquals(TopicEffect.ScrollToEndOfPage(2), awaitItem())
+            val loaded = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+            assertEquals("fresh", loaded.topic.title)
+            assertFalse(loaded.provisional)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `a plain submit from a delayed origin refreshes only that page and offers the tail (#1243)`() = runTest {
         val repository = FakeTopicRepository(
             flowsToReturn = listOf(flow { emit(fakeTopic(page = 2, totalPages = 5, title = "loaded")) }),

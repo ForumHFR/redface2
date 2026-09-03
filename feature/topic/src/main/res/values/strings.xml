@@ -117,7 +117,7 @@
         <item quantity="one">%1$d vote</item>
         <item quantity="other">%1$d votes</item>
     </plurals>
-    <string name="topic_poll_result_percentage">%1$d&#160;%%</string>
+    <string name="topic_poll_result_percentage">%1$s&#160;%%</string>
     <string name="topic_poll_result_content_description">%1$s, %2$s, %3$s</string>
     <string name="topic_poll_summary">%1$d votes au total • %2$s</string>
     <string name="topic_poll_multiple_choices">multi-choix</string>
