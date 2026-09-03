@@ -49,6 +49,13 @@ class FlagPresentationTest {
         assertEquals(FlagType.FAVORITE, ui.effectiveColor)
     }
 
+    @Test
+    fun `row ui model carries the resolved subcategory name`() {
+        val ui = baseFlag.toFlagRowUiModel(MarkerStyle.STRIPE, subcatName = "Android")
+
+        assertEquals("Android", ui.subcatName)
+    }
+
     private val baseFlag = Flag(
         cat = 1,
         subcat = null,

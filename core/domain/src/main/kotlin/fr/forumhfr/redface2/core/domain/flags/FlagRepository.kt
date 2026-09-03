@@ -109,6 +109,12 @@ interface FlagRepository {
      * Returns the matching [Flag], or null when the topic is not flagged / unresolvable / anonymous.
      */
     suspend fun findFlag(cat: Int, topicId: Int): Flag?
+
+    /**
+     * Cache-only best-effort lookup for legacy callers that only know `topicId` (not `cat`). Never
+     * fetches cold buckets; ambiguity is resolved by the implementation's deterministic cache scan.
+     */
+    suspend fun findCachedFlag(topicId: Int): Flag? = null
 }
 
 /**

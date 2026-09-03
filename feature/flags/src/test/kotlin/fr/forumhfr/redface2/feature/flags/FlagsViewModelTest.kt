@@ -34,9 +34,11 @@ import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.SuperFavoriteRepository
+import fr.forumhfr.redface2.core.domain.preferences.SuperFavoriteTopic
 import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.preferences.matches
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.write.FlagAddContext
@@ -64,6 +66,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -188,6 +192,35 @@ class FlagsViewModelTest {
     }
 
     @Test
+    fun `flagsTabState never pairs a new tab with previous tab content (#742)`() = runTest {
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(autoEmit = false)
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository(groupByCategory = false)
+        val vm = viewModel(auth, flags, forum, prefs)
+
+        vm.flagsTabState.test {
+            val initial = awaitItem()
+            assertEquals(FlagTab.Cyan, initial.tab)
+            assertNull(initial.flagsState)
+
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN))))
+            val cyan = awaitItem()
+            assertEquals(FlagTab.Cyan, cyan.tab)
+            assertEquals(listOf(1), flatTopics(cyan.flagsState as FlagsListUiState.Success).map { it.topicId })
+
+            vm.selectTab(FlagTab.Red)
+            expectNoEvents()
+
+            flags.emit(FlagType.RED, FlagsResult.Success(listOf(stubFlag(2, FlagType.RED))))
+            val red = awaitItem()
+            assertEquals(FlagTab.Red, red.tab)
+            assertEquals(listOf(2), flatTopics(red.flagsState as FlagsListUiState.Success).map { it.topicId })
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `selectTab to a different tab recalls the list to the top (#106)`() = runTest {
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository(catIds = listOf(1))
@@ -260,29 +293,14 @@ class FlagsViewModelTest {
     }
 
     @Test
-    fun `selecting the Super tab is a placeholder with no fetch and null state`() = runTest {
+    fun `refresh on the Super tab is a no-op`() = runTest {
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository(catIds = listOf(1))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val vm = viewModel(auth, flags, forum)
 
-        vm.flagsState.test {
-            awaitItem() // initial null
-
-            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN))))
-            awaitItem() // CYAN content
-            val subscriptionsWhileOnCyan = forum.observeCategoriesSubscriptions
-
-            vm.selectTab(FlagTab.Super)
-            // Super maps to no FlagType: the state collapses back to null (placeholder body).
-            assertNull(awaitItem())
-
-            // Super must not start a new categories observation either.
-            assertEquals(subscriptionsWhileOnCyan, forum.observeCategoriesSubscriptions)
-            cancelAndIgnoreRemainingEvents()
-        }
-
-        // No FlagType is backing Super, so refresh() while on it must not hit the repository.
+        vm.selectTab(FlagTab.Super)
+        advanceUntilIdle()
         vm.refresh()
         assertTrue("Super refresh must be a no-op", flags.refreshCalls.isEmpty())
         assertEquals(false, vm.isRefreshing.value)
@@ -531,9 +549,9 @@ class FlagsViewModelTest {
                 FlagType.CYAN,
                 FlagsResult.Success(
                     listOf(
-                        stubFlag(1, FlagType.CYAN, hasUnread = true, cat = 1),
-                        stubFlag(2, FlagType.CYAN, hasUnread = false, cat = 1),
-                        stubFlag(3, FlagType.CYAN, hasUnread = true, cat = 10),
+                        stubFlag(1, FlagType.CYAN).copy(cat = 1),
+                        stubFlag(2, FlagType.CYAN).copy(hasUnread = false, cat = 1),
+                        stubFlag(3, FlagType.CYAN).copy(cat = 10),
                     ),
                 ),
             )
@@ -562,8 +580,8 @@ class FlagsViewModelTest {
                 FlagType.CYAN,
                 FlagsResult.Success(
                     listOf(
-                        stubFlag(1, FlagType.CYAN, hasUnread = true),
-                        stubFlag(2, FlagType.CYAN, hasUnread = false),
+                        stubFlag(1, FlagType.CYAN),
+                        stubFlag(2, FlagType.CYAN).copy(hasUnread = false),
                     ),
                 ),
             )
@@ -598,8 +616,8 @@ class FlagsViewModelTest {
                 FlagType.RED,
                 FlagsResult.Success(
                     listOf(
-                        stubFlag(10, FlagType.RED, hasUnread = true),
-                        stubFlag(11, FlagType.RED, hasUnread = false),
+                        stubFlag(10, FlagType.RED),
+                        stubFlag(11, FlagType.RED).copy(hasUnread = false),
                     ),
                 ),
             )
@@ -615,8 +633,8 @@ class FlagsViewModelTest {
                 FlagType.FAVORITE,
                 FlagsResult.Success(
                     listOf(
-                        stubFlag(20, FlagType.FAVORITE, hasUnread = false),
-                        stubFlag(21, FlagType.FAVORITE, hasUnread = true),
+                        stubFlag(20, FlagType.FAVORITE).copy(hasUnread = false),
+                        stubFlag(21, FlagType.FAVORITE),
                     ),
                 ),
             )
@@ -648,8 +666,8 @@ class FlagsViewModelTest {
                 FlagType.RED,
                 FlagsResult.Success(
                     listOf(
-                        stubFlag(10, FlagType.RED, hasUnread = true),
-                        stubFlag(11, FlagType.RED, hasUnread = false),
+                        stubFlag(10, FlagType.RED),
+                        stubFlag(11, FlagType.RED).copy(hasUnread = false),
                     ),
                 ),
             )
@@ -686,8 +704,8 @@ class FlagsViewModelTest {
                 FlagType.CYAN,
                 FlagsResult.Success(
                     listOf(
-                        stubFlag(100, FlagType.CYAN, cat = 13),
-                        stubFlag(200, FlagType.CYAN, cat = 1),
+                        stubFlag(100, FlagType.CYAN).copy(cat = 13),
+                        stubFlag(200, FlagType.CYAN).copy(cat = 1),
                     ),
                 ),
             )
@@ -712,7 +730,7 @@ class FlagsViewModelTest {
         vm.flagsState.test {
             awaitItem() // initial null
             // observeCategories has emitted nothing yet → fallback order is used.
-            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN, cat = 1))))
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN).copy(cat = 1))))
             val onFallback = awaitItem() as FlagsListUiState.Success
             assertEquals("fallback exposes the 19 hard-coded categories", 19, sections(onFallback).size)
             assertEquals(listOf(1), flatTopics(onFallback).map { it.topicId })
@@ -738,7 +756,7 @@ class FlagsViewModelTest {
         vm.flagsState.test {
             awaitItem() // initial null
             forum.emitCategories(ForumResult.Loading)
-            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(7, FlagType.CYAN, cat = 1))))
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(7, FlagType.CYAN).copy(cat = 1))))
             val onLoading = awaitItem() as FlagsListUiState.Success
             assertEquals(19, sections(onLoading).size)
             assertEquals(listOf(7), flatTopics(onLoading).map { it.topicId })
@@ -748,7 +766,7 @@ class FlagsViewModelTest {
             // the identical value — so we change the FLAGS too, proving the new distinct state
             // is still a Success (fallback order, flag kept) and never a Failure.
             forum.emitCategories(ForumResult.Failure(IllegalStateException("categories down")))
-            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(8, FlagType.CYAN, cat = 1))))
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(8, FlagType.CYAN).copy(cat = 1))))
             val onFailure = awaitItem() as FlagsListUiState.Success
             assertEquals(19, sections(onFailure).size)
             assertEquals(listOf(8), flatTopics(onFailure).map { it.topicId })
@@ -986,13 +1004,13 @@ class FlagsViewModelTest {
                 FlagType.CYAN,
                 FlagsResult.Success(
                     listOf(
-                        stubFlag(100, FlagType.CYAN, cat = 13),
-                        stubFlag(200, FlagType.CYAN, cat = 1),
+                        stubFlag(100, FlagType.CYAN).copy(cat = 13),
+                        stubFlag(200, FlagType.CYAN).copy(cat = 1),
                     ),
                 ),
             )
             val flat = (awaitItem() as FlagsListUiState.Success).content as FlagsContent.Flat
-            assertEquals(listOf(100, 200), flat.flags.map { it.topicId })
+            assertEquals(listOf(100, 200), flat.rows.map { it.topicId })
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -1007,7 +1025,7 @@ class FlagsViewModelTest {
 
         vm.flagsState.test {
             awaitItem() // initial null
-            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN, cat = 1))))
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN).copy(cat = 1))))
             assertTrue((awaitItem() as FlagsListUiState.Success).content is FlagsContent.Grouped)
 
             prefs.setGroupBy(false)
@@ -1037,8 +1055,8 @@ class FlagsViewModelTest {
                 FlagType.RED,
                 FlagsResult.Success(
                     listOf(
-                        stubFlag(1, FlagType.RED, hasUnread = true, cat = 1),
-                        stubFlag(2, FlagType.RED, hasUnread = false, cat = 10),
+                        stubFlag(1, FlagType.RED).copy(cat = 1),
+                        stubFlag(2, FlagType.RED).copy(hasUnread = false, cat = 10),
                     ),
                 ),
             )
@@ -1065,8 +1083,8 @@ class FlagsViewModelTest {
                 FlagType.CYAN,
                 FlagsResult.Success(
                     listOf(
-                        stubFlag(1, FlagType.CYAN, hasUnread = true, cat = 1),
-                        stubFlag(2, FlagType.CYAN, hasUnread = false, cat = 10),
+                        stubFlag(1, FlagType.CYAN).copy(cat = 1),
+                        stubFlag(2, FlagType.CYAN).copy(hasUnread = false, cat = 10),
                     ),
                 ),
             )
@@ -1096,8 +1114,8 @@ class FlagsViewModelTest {
                 FlagType.CYAN,
                 FlagsResult.Success(
                     listOf(
-                        stubFlag(1, FlagType.CYAN, hasUnread = true, cat = 1),
-                        stubFlag(2, FlagType.CYAN, hasUnread = false, cat = 10),
+                        stubFlag(1, FlagType.CYAN).copy(cat = 1),
+                        stubFlag(2, FlagType.CYAN).copy(hasUnread = false, cat = 10),
                     ),
                 ),
             )
@@ -1126,8 +1144,8 @@ class FlagsViewModelTest {
                 FlagType.RED,
                 FlagsResult.Success(
                     listOf(
-                        stubFlag(1, FlagType.RED, hasUnread = false, cat = 1),
-                        stubFlag(2, FlagType.RED, hasUnread = false, cat = 10),
+                        stubFlag(1, FlagType.RED).copy(hasUnread = false, cat = 1),
+                        stubFlag(2, FlagType.RED).copy(hasUnread = false, cat = 10),
                     ),
                 ),
             )
@@ -1157,8 +1175,8 @@ class FlagsViewModelTest {
                 FlagType.FAVORITE,
                 FlagsResult.Success(
                     listOf(
-                        stubFlag(1, FlagType.FAVORITE, hasUnread = false, cat = 1),
-                        stubFlag(2, FlagType.FAVORITE, hasUnread = false, cat = 10),
+                        stubFlag(1, FlagType.FAVORITE).copy(hasUnread = false, cat = 1),
+                        stubFlag(2, FlagType.FAVORITE).copy(hasUnread = false, cat = 10),
                     ),
                 ),
             )
@@ -1192,8 +1210,8 @@ class FlagsViewModelTest {
                 FlagType.CYAN,
                 FlagsResult.Success(
                     listOf(
-                        stubFlag(1, FlagType.CYAN, hasUnread = false, cat = 1),
-                        stubFlag(2, FlagType.CYAN, hasUnread = false, cat = 10),
+                        stubFlag(1, FlagType.CYAN).copy(hasUnread = false, cat = 1),
+                        stubFlag(2, FlagType.CYAN).copy(hasUnread = false, cat = 10),
                     ),
                 ),
             )
@@ -1219,14 +1237,14 @@ class FlagsViewModelTest {
 
         vm.flagsState.test {
             awaitItem() // initial null
-            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN, cat = 1))))
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN).copy(cat = 1))))
             assertTrue(
                 "CYAN's per-type override is flat",
                 (awaitItem() as FlagsListUiState.Success).content is FlagsContent.Flat,
             )
 
             vm.selectTab(FlagTab.Red)
-            flags.emit(FlagType.RED, FlagsResult.Success(listOf(stubFlag(2, FlagType.RED, cat = 1))))
+            flags.emit(FlagType.RED, FlagsResult.Success(listOf(stubFlag(2, FlagType.RED).copy(cat = 1))))
             assertTrue(
                 "RED has no override → falls back to the global grouped default",
                 (awaitItem() as FlagsListUiState.Success).content is FlagsContent.Grouped,
@@ -1247,7 +1265,7 @@ class FlagsViewModelTest {
 
         vm.flagsState.test {
             awaitItem() // initial null
-            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN, cat = 1))))
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN).copy(cat = 1))))
             assertTrue((awaitItem() as FlagsListUiState.Success).content is FlagsContent.Grouped)
 
             vm.setFlagsGroupByCategory(false)
@@ -1257,7 +1275,7 @@ class FlagsViewModelTest {
             )
 
             vm.selectTab(FlagTab.Red)
-            flags.emit(FlagType.RED, FlagsResult.Success(listOf(stubFlag(2, FlagType.RED, cat = 1))))
+            flags.emit(FlagType.RED, FlagsResult.Success(listOf(stubFlag(2, FlagType.RED).copy(cat = 1))))
             assertTrue(
                 "RED is flat too → the write landed on the global key, not a per-type one",
                 (awaitItem() as FlagsListUiState.Success).content is FlagsContent.Flat,
@@ -1278,7 +1296,7 @@ class FlagsViewModelTest {
 
         vm.flagsState.test {
             awaitItem() // initial null
-            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN, cat = 1))))
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN).copy(cat = 1))))
             assertTrue((awaitItem() as FlagsListUiState.Success).content is FlagsContent.Grouped)
 
             vm.setFlagsGroupByCategory(false) // CYAN selected → CYAN per-type only.
@@ -1288,7 +1306,7 @@ class FlagsViewModelTest {
             )
 
             vm.selectTab(FlagTab.Red)
-            flags.emit(FlagType.RED, FlagsResult.Success(listOf(stubFlag(2, FlagType.RED, cat = 1))))
+            flags.emit(FlagType.RED, FlagsResult.Success(listOf(stubFlag(2, FlagType.RED).copy(cat = 1))))
             assertTrue(
                 "RED stays grouped → the write did NOT touch the global default",
                 (awaitItem() as FlagsListUiState.Success).content is FlagsContent.Grouped,
@@ -1440,7 +1458,7 @@ class FlagsViewModelTest {
 
         vm.flagsState.test {
             awaitItem() // initial null
-            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN, cat = 1))))
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN).copy(cat = 1))))
             assertTrue((awaitItem() as FlagsListUiState.Success).content is FlagsContent.Grouped)
 
             vm.setFlagsPerTabOverride(true) // flip master…
@@ -1451,7 +1469,7 @@ class FlagsViewModelTest {
             )
 
             vm.selectTab(FlagTab.Red)
-            flags.emit(FlagType.RED, FlagsResult.Success(listOf(stubFlag(2, FlagType.RED, cat = 1))))
+            flags.emit(FlagType.RED, FlagsResult.Success(listOf(stubFlag(2, FlagType.RED).copy(cat = 1))))
             assertTrue(
                 "RED stays grouped → the toggle honoured the just-flipped master and wrote per-type",
                 (awaitItem() as FlagsListUiState.Success).content is FlagsContent.Grouped,
@@ -2448,11 +2466,134 @@ class FlagsViewModelTest {
 
         vm.toggleSuperFavorite(flag)
         advanceUntilIdle()
-        assertTrue(42 in vm.superFavoriteTopicIds.value)
+        assertTrue(vm.superFavoriteTopics.value.any { it.matches(flag) })
 
         vm.toggleSuperFavorite(flag)
         advanceUntilIdle()
-        assertFalse(42 in vm.superFavoriteTopicIds.value)
+        assertFalse(vm.superFavoriteTopics.value.any { it.matches(flag) })
+    }
+
+    @Test
+    fun `Super tab enriches live flags and keeps stable snapshot fallbacks (#737)`() = runTest {
+        val flags = FakeFlagRepository()
+        val liveExact = stubFlag(2, FlagType.CYAN).copy(cat = 23, title = "Live exact")
+        val cachedLegacy = stubFlag(3, FlagType.RED).copy(cat = 10, title = "Cached legacy")
+        flags.findFlagResults = mapOf((23 to 2) to liveExact)
+        flags.cachedFlags = listOf(cachedLegacy)
+        val favorites = setOf(
+            SuperFavoriteTopic(cat = null, topicId = 99, title = null, subcat = null),
+            SuperFavoriteTopic(cat = 23, topicId = 4, title = "Snapshot only", subcat = 550),
+            SuperFavoriteTopic(cat = null, topicId = 3, title = null, subcat = null),
+            SuperFavoriteTopic(cat = 23, topicId = 2, title = "Old title", subcat = null),
+        )
+        val forum = FakeForumRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = viewModel(
+            auth,
+            flags,
+            forum,
+            superFavorite = FakeSuperFavoriteRepository(favorites),
+        )
+
+        vm.selectTab(FlagTab.Super)
+        advanceUntilIdle()
+
+        val success = vm.flagsTabState.value.flagsState as FlagsListUiState.Success
+        val rows = (success.content as FlagsContent.Flat).rows
+        assertEquals(FlagTab.Super, vm.flagsTabState.value.tab)
+        assertEquals(listOf("Live exact", "Snapshot only", "Cached legacy", "Sujet #99"), rows.map { it.title })
+        assertEquals(listOf(23 to 2, 23 to 4), flags.findFlagCalls)
+        assertEquals(listOf(3, 99), flags.findCachedFlagCalls)
+    }
+
+    @Test
+    fun `Super tab drops a legacy orphan when an exact keyed favorite exists (#737)`() = runTest {
+        val favorite = SuperFavoriteTopic(cat = 23, topicId = 42, title = "Exact", subcat = null)
+        val legacyDuplicate = SuperFavoriteTopic(cat = null, topicId = 42, title = null, subcat = null)
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = viewModel(
+            auth,
+            flags,
+            forum,
+            superFavorite = FakeSuperFavoriteRepository(setOf(legacyDuplicate, favorite)),
+        )
+
+        vm.selectTab(FlagTab.Super)
+        advanceUntilIdle()
+
+        val success = vm.flagsTabState.value.flagsState as FlagsListUiState.Success
+        val rows = (success.content as FlagsContent.Flat).rows
+        assertEquals(listOf(42), rows.map { it.topicId })
+        assertEquals("Exact", rows.single().title)
+    }
+
+    @Test
+    fun `flag rows resolve subcategory names from visible cached categories only (#741)`() = runTest {
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(autoEmit = false)
+        forum.seedCachedSubcategories(23, listOf(SubCategory(id = 550, name = "Android", parentCategoryId = 23)))
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository(groupByCategory = false)
+        val vm = viewModel(auth, flags, forum, prefs)
+
+        vm.flagsState.test {
+            awaitItem()
+            flags.emit(
+                FlagType.CYAN,
+                FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN).copy(cat = 23, subcat = 550))),
+            )
+            val success = awaitItem() as FlagsListUiState.Success
+            val row = ((success.content as FlagsContent.Flat).rows).single()
+            assertEquals("Android", row.subcatName)
+            assertEquals(listOf(23), forum.observeCachedSubcategoriesCalls)
+            assertTrue(forum.refreshSubcategoriesCalls.isEmpty())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `flag rows without subcat do not subscribe to subcategory caches (#741)`() = runTest {
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(autoEmit = false)
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository(groupByCategory = false)
+        val vm = viewModel(auth, flags, forum, prefs)
+
+        vm.flagsState.test {
+            awaitItem()
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN).copy(cat = 23))))
+            val success = awaitItem() as FlagsListUiState.Success
+            val row = (success.content as FlagsContent.Flat).rows.single()
+            assertNull(row.subcatName)
+            assertTrue(forum.observeCachedSubcategoriesCalls.isEmpty())
+            assertTrue(forum.refreshSubcategoriesCalls.isEmpty())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `flag rows keep a null subcategory name when the visible cat cache is cold (#741)`() = runTest {
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(autoEmit = false)
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository(groupByCategory = false)
+        val vm = viewModel(auth, flags, forum, prefs)
+
+        vm.flagsState.test {
+            awaitItem()
+            flags.emit(
+                FlagType.CYAN,
+                FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN).copy(cat = 23, subcat = 550))),
+            )
+            val success = awaitItem() as FlagsListUiState.Success
+            val row = (success.content as FlagsContent.Flat).rows.single()
+            assertNull(row.subcatName)
+            assertEquals(listOf(23), forum.observeCachedSubcategoriesCalls)
+            assertTrue(forum.refreshSubcategoriesCalls.isEmpty())
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     @Suppress("LongParameterList") // test fake-builder: each repo fake is an independent collaborator
@@ -2468,7 +2609,18 @@ class FlagsViewModelTest {
         // the process-lifetime scope it mirrors.
         externalScope: CoroutineScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher()),
     ): FlagsViewModel =
-        FlagsViewModel(auth, flags, forum, prefs, superFavorite, messages, mpStorage, fixedClock, externalScope)
+        FlagsViewModel(
+            authRepository = auth,
+            flagRepository = flags,
+            forumRepository = forum,
+            userPreferencesRepository = prefs,
+            superFavoriteRepository = superFavorite,
+            superFavoriteListMapper = SuperFavoriteListMapper(flags, forum, prefs),
+            messagesRepository = messages,
+            mpStorageRepository = mpStorage,
+            clock = fixedClock,
+            externalScope = externalScope,
+        )
 
     /** Builds a ViewModel with a custom [clock] for the #378 throttle tests; everything else is a
      * fresh default fake. */
@@ -2476,32 +2628,49 @@ class FlagsViewModelTest {
         auth: FakeAuthRepository,
         flags: FakeFlagRepository,
         clock: Clock,
-    ): FlagsViewModel = FlagsViewModel(
-        auth,
-        flags,
-        FakeForumRepository(),
-        FakeUserPreferencesRepository(),
-        FakeSuperFavoriteRepository(),
-        FakeMessagesRepository(),
-        FakeMpStorageRepository(),
-        clock,
-        CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher()),
-    )
+    ): FlagsViewModel {
+        val forum = FakeForumRepository()
+        val prefs = FakeUserPreferencesRepository()
+        return FlagsViewModel(
+            authRepository = auth,
+            flagRepository = flags,
+            forumRepository = forum,
+            userPreferencesRepository = prefs,
+            superFavoriteRepository = FakeSuperFavoriteRepository(),
+            superFavoriteListMapper = SuperFavoriteListMapper(flags, forum, prefs),
+            messagesRepository = FakeMessagesRepository(),
+            mpStorageRepository = FakeMpStorageRepository(),
+            clock = clock,
+            externalScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher()),
+        )
+    }
 
     /** In-memory [SuperFavoriteRepository] (#603 PR5) — the local super-favorite set. */
-    private class FakeSuperFavoriteRepository : SuperFavoriteRepository {
-        private val ids = MutableStateFlow<Set<Int>>(emptySet())
-        override fun observeSuperFavoriteTopicIds(): Flow<Set<Int>> = ids.asStateFlow()
-        override suspend fun setSuperFavorite(topicId: Int, enabled: Boolean) {
-            ids.value = if (enabled) ids.value + topicId else ids.value - topicId
+    private class FakeSuperFavoriteRepository(
+        initial: Set<SuperFavoriteTopic> = emptySet(),
+    ) : SuperFavoriteRepository {
+        private val topics = MutableStateFlow(initial)
+        override fun observeSuperFavoriteTopics(): Flow<Set<SuperFavoriteTopic>> = topics.asStateFlow()
+        override suspend fun setSuperFavorite(flag: Flag, enabled: Boolean) {
+            val withoutFlag = topics.value.filterNot { it.matches(flag) }.toSet()
+            topics.value = if (enabled) {
+                withoutFlag + SuperFavoriteTopic(
+                    cat = flag.cat,
+                    topicId = flag.topicId,
+                    title = flag.title,
+                    subcat = flag.subcat,
+                )
+            } else {
+                withoutFlag
+            }
         }
     }
 
     /** Flattens whatever content shape into the topics order for assertions on flag content. */
     private fun flatTopics(state: FlagsListUiState.Success): List<Flag> =
         when (val content = state.content) {
-            is FlagsContent.Grouped -> content.sections.flatMap { it.topics }
-            is FlagsContent.Flat -> content.flags
+            is FlagsContent.Grouped -> content.sections.flatMap { section -> section.topics.map { it.flag } }
+            is FlagsContent.Flat -> content.rows.map { it.flag }
         }
 
     /** Extracts the grouped sections, failing the cast if the content was flat (test misuse). */
@@ -2514,17 +2683,15 @@ class FlagsViewModelTest {
     private fun stubFlag(
         topicId: Int,
         type: FlagType,
-        hasUnread: Boolean = true,
-        cat: Int = 1,
     ): Flag = Flag(
-        cat = cat,
+        cat = 1,
         subcat = null,
         topicId = topicId,
         title = "Topic $topicId",
         totalPages = 1,
         replyCount = 0,
         type = type,
-        hasUnread = hasUnread,
+        hasUnread = true,
         lastReadPage = 1,
         lastPostReadId = null,
         firstPostAuthor = "",
@@ -2574,6 +2741,12 @@ class FlagsViewModelTest {
         var clearSessionCacheCallCount: Int = 0
             private set
         var removeFlagCalls: List<Flag> = emptyList()
+            private set
+        var findFlagResults: Map<Pair<Int, Int>, Flag?> = emptyMap()
+        var cachedFlags: List<Flag> = emptyList()
+        var findFlagCalls: List<Pair<Int, Int>> = emptyList()
+            private set
+        var findCachedFlagCalls: List<Int> = emptyList()
             private set
 
         /**
@@ -2628,8 +2801,13 @@ class FlagsViewModelTest {
         }
 
         override suspend fun findFlag(cat: Int, topicId: Int): Flag? {
-            // #809 — not exercised by the Drapeaux-view tests (findFlag serves the topic screen).
-            return null
+            findFlagCalls = findFlagCalls + (cat to topicId)
+            return findFlagResults[cat to topicId]
+        }
+
+        override suspend fun findCachedFlag(topicId: Int): Flag? {
+            findCachedFlagCalls = findCachedFlagCalls + topicId
+            return cachedFlags.firstOrNull { it.topicId == topicId }
         }
 
         suspend fun emit(type: FlagType, result: FlagsResult) {
@@ -2654,10 +2832,16 @@ class FlagsViewModelTest {
             replay = 1,
             extraBufferCapacity = 8,
         )
+        private val cachedSubcategoryResults = mutableMapOf<Int, ForumResult<List<SubCategory>>?>()
+        private val cachedSubcategoryFlows = mutableMapOf<Int, MutableSharedFlow<ForumResult<List<SubCategory>>?>>()
 
         var observeCategoriesSubscriptions: Int = 0
             private set
         var refreshCategoriesCalls: Int = 0
+            private set
+        var observeCachedSubcategoriesCalls: List<Int> = emptyList()
+            private set
+        var refreshSubcategoriesCalls: List<Int> = emptyList()
             private set
 
         init {
@@ -2671,6 +2855,12 @@ class FlagsViewModelTest {
 
         suspend fun emitCategories(result: ForumResult<List<Category>>) {
             categoriesFlow.emit(result)
+        }
+
+        fun seedCachedSubcategories(cat: Int, subcategories: List<SubCategory>) {
+            val result = ForumResult.Success(subcategories)
+            cachedSubcategoryResults[cat] = result
+            subcategoryFlow(cat).tryEmit(result)
         }
 
         override fun observeCategories(): Flow<ForumResult<List<Category>>> =
@@ -2687,7 +2877,15 @@ class FlagsViewModelTest {
         override fun observeSubcategories(cat: Int): Flow<ForumResult<List<SubCategory>>> =
             MutableSharedFlow<ForumResult<List<SubCategory>>>(replay = 1).asSharedFlow()
 
-        override suspend fun refreshSubcategories(cat: Int) = Unit
+        override fun observeCachedSubcategories(cat: Int): Flow<ForumResult<List<SubCategory>>?> = flow {
+            observeCachedSubcategoriesCalls = observeCachedSubcategoriesCalls + cat
+            emit(cachedSubcategoryResults[cat])
+            emitAll(subcategoryFlow(cat).asSharedFlow())
+        }
+
+        override suspend fun refreshSubcategories(cat: Int) {
+            refreshSubcategoriesCalls = refreshSubcategoriesCalls + cat
+        }
 
         override fun observeTopicList(
             cat: Int,
@@ -2706,6 +2904,11 @@ class FlagsViewModelTest {
             subcat: Int?,
             bucket: FlagFilterBucket,
         ): ForumResult<TopicListPage> = ForumResult.Failure(UnsupportedOperationException())
+
+        private fun subcategoryFlow(cat: Int): MutableSharedFlow<ForumResult<List<SubCategory>>?> =
+            cachedSubcategoryFlows.getOrPut(cat) {
+                MutableSharedFlow(replay = 1, extraBufferCapacity = 8)
+            }
     }
 
     /**

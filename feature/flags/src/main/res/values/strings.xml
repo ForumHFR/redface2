@@ -16,7 +16,7 @@
          tenir sur le tab row). Utilisé hors tab row, ex. dans le dialog de confirmation de
          retrait (#99) où la place n'est pas contrainte et où « Lu » seul serait ambigu. -->
     <string name="flags_type_read_only">Lus uniquement</string>
-    <!-- 4e onglet placeholder : futurs « super favoris ». Aucun backend pour l'instant. -->
+    <!-- 4e onglet : super favoris locaux. Aucun backend HFR. -->
     <string name="flags_tab_super">Super</string>
 
     <!-- Indicateur discret sur l'onglet Cyan : suffixe ajouté au libellé quand les cyans
@@ -80,9 +80,9 @@
     <!-- Suffixe pages à lire, %1$d = nb. -->
     <string name="flags_sheet_meta_pages_to_read">+%1$d à lire</string>
 
-    <!-- Onglet « Super » : écran placeholder M3, futurs super favoris. Pas de fetch réseau. -->
-    <string name="flags_super_placeholder_title">Super favoris — à venir</string>
-    <string name="flags_super_placeholder_body">Les « super favoris » permettront d\'épingler les sujets les plus importants. Cette vue arrivera dans une prochaine version.</string>
+    <!-- Onglet « Super » : état vide de la liste locale. Pas de fetch réseau. -->
+    <string name="flags_super_placeholder_title">Aucun super favori</string>
+    <string name="flags_super_placeholder_body">Les sujets marqués « Super favori » apparaissent ici.</string>
 
     <!-- Onglet « DT » opt-in (toggle Réglages) : liste des conversations MultiMP enrichie via MPStorage (#6). -->
     <string name="flags_tab_dt">DT</string>

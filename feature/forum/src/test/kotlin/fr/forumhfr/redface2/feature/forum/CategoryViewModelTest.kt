@@ -1111,6 +1111,9 @@ class CategoryViewModelTest {
         override fun observeSubcategories(cat: Int): Flow<ForumResult<List<SubCategory>>> =
             subcategories.asSharedFlow()
 
+        override fun observeCachedSubcategories(cat: Int): Flow<ForumResult<List<SubCategory>>?> =
+            subcategories.asSharedFlow()
+
         override suspend fun refreshSubcategories(cat: Int) {
             suspendRefreshSubcategoriesUntil?.await()
             refreshSubcategoriesCalls = refreshSubcategoriesCalls + cat

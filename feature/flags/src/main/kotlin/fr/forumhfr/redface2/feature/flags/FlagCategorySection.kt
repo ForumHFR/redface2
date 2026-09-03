@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.flags
 
+import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.model.Flag
 
 /**
@@ -17,7 +18,7 @@ import fr.forumhfr.redface2.core.model.Flag
 data class FlagCategorySection(
     val catId: Int,
     val catName: String?,
-    val topics: List<Flag>,
+    val topics: List<FlagRowUiModel>,
 )
 
 /**
@@ -80,10 +81,19 @@ internal val FALLBACK_CATEGORY_ORDER: List<FlagCategoryOrderEntry> = listOf(
 fun groupFlagsByCategory(
     flags: List<Flag>,
     orderedCategories: List<FlagCategoryOrderEntry>,
+): List<FlagCategorySection> =
+    groupFlagRowsByCategory(
+        rows = flags.map { it.toFlagRowUiModel(MarkerStyle.STRIPE) },
+        orderedCategories = orderedCategories,
+    )
+
+fun groupFlagRowsByCategory(
+    rows: List<FlagRowUiModel>,
+    orderedCategories: List<FlagCategoryOrderEntry>,
 ): List<FlagCategorySection> {
     // Stable group-by: LinkedHashMap preserves first-seen order, and a list per bucket
     // preserves the input order of flags within a category (tie-break = original index).
-    val byCat: Map<Int, List<Flag>> = flags.groupByTo(LinkedHashMap()) { it.cat }
+    val byCat: Map<Int, List<FlagRowUiModel>> = rows.groupByTo(LinkedHashMap()) { it.cat }
 
     // Defensive dedup: a corrupt catalogue with two entries sharing the same id would otherwise
     // emit two sections with the same catId → duplicate LazyColumn keys (`cat-$catId-header`),

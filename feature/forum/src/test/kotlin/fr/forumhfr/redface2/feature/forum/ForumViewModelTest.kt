@@ -176,6 +176,9 @@ class ForumViewModelTest {
         override fun observeSubcategories(cat: Int): Flow<ForumResult<List<SubCategory>>> =
             MutableSharedFlow<ForumResult<List<SubCategory>>>(replay = 1).asSharedFlow()
 
+        override fun observeCachedSubcategories(cat: Int): Flow<ForumResult<List<SubCategory>>?> =
+            MutableSharedFlow<ForumResult<List<SubCategory>>?>(replay = 1).asSharedFlow()
+
         override suspend fun refreshSubcategories(cat: Int) = Unit
 
         override fun observeTopicList(

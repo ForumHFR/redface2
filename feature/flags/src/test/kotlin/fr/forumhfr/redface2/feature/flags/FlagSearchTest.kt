@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.flags
 
+import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageSummary
@@ -82,15 +83,15 @@ class FlagSearchTest {
 
     @Test
     fun `flat content with a blank query is unchanged`() {
-        val content = FlagsContent.Flat(listOf(flag("A"), flag("B")))
+        val content = FlagsContent.Flat(listOf(row("A"), row("B")))
         assertEquals(content, content.filteredBy(""))
     }
 
     @Test
     fun `flat content keeps only the matching flags`() {
-        val content = FlagsContent.Flat(listOf(flag("Kotlin"), flag("Rust")))
+        val content = FlagsContent.Flat(listOf(row("Kotlin"), row("Rust")))
         val filtered = content.filteredBy("kotlin") as FlagsContent.Flat
-        assertEquals(listOf("Kotlin"), filtered.flags.map { it.title })
+        assertEquals(listOf("Kotlin"), filtered.rows.map { it.title })
     }
 
     // --- FlagsContent.filteredBy (grouped) ---------------------------------------------------
@@ -99,7 +100,7 @@ class FlagSearchTest {
     fun `grouped content with a blank query keeps its sections (web-parity empties)`() {
         val content = FlagsContent.Grouped(
             listOf(
-                FlagCategorySection(1, "Hardware", listOf(flag("CPU"))),
+                FlagCategorySection(1, "Hardware", listOf(row("CPU"))),
                 FlagCategorySection(10, "Programmation", emptyList()),
             ),
         )
@@ -110,8 +111,8 @@ class FlagSearchTest {
     fun `grouped content filters within sections and drops the empty ones`() {
         val content = FlagsContent.Grouped(
             listOf(
-                FlagCategorySection(1, "Hardware", listOf(flag("Carte mère"), flag("CPU"))),
-                FlagCategorySection(10, "Programmation", listOf(flag("Kotlin"))),
+                FlagCategorySection(1, "Hardware", listOf(row("Carte mère"), row("CPU"))),
+                FlagCategorySection(10, "Programmation", listOf(row("Kotlin"))),
                 FlagCategorySection(13, "Discussions", emptyList()),
             ),
         )
@@ -127,8 +128,8 @@ class FlagSearchTest {
     fun `grouped content search is accent-insensitive (the FlagsRoute path)`() {
         val content = FlagsContent.Grouped(
             listOf(
-                FlagCategorySection(1, "Hardware", listOf(flag("Carte mère"), flag("CPU"))),
-                FlagCategorySection(13, "Discussions", listOf(flag("Le topic du café"))),
+                FlagCategorySection(1, "Hardware", listOf(row("Carte mère"), row("CPU"))),
+                FlagCategorySection(13, "Discussions", listOf(row("Le topic du café"))),
             ),
         )
 
@@ -147,7 +148,7 @@ class FlagSearchTest {
 
     @Test
     fun `isEmpty is false for a flat content with flags`() {
-        assertFalse(FlagsContent.Flat(listOf(flag("A"))).isEmpty())
+        assertFalse(FlagsContent.Flat(listOf(row("A"))).isEmpty())
     }
 
     @Test
@@ -166,7 +167,7 @@ class FlagSearchTest {
         val content = FlagsContent.Grouped(
             listOf(
                 FlagCategorySection(1, "Hardware", emptyList()),
-                FlagCategorySection(10, "Programmation", listOf(flag("Kotlin"))),
+                FlagCategorySection(10, "Programmation", listOf(row("Kotlin"))),
             ),
         )
         assertFalse(content.isEmpty())
@@ -176,8 +177,8 @@ class FlagSearchTest {
     fun `a grouped query matching nothing drops every section and is empty`() {
         val content = FlagsContent.Grouped(
             listOf(
-                FlagCategorySection(1, "Hardware", listOf(flag("CPU"))),
-                FlagCategorySection(10, "Programmation", listOf(flag("Kotlin"))),
+                FlagCategorySection(1, "Hardware", listOf(row("CPU"))),
+                FlagCategorySection(10, "Programmation", listOf(row("Kotlin"))),
             ),
         )
 
@@ -270,4 +271,7 @@ class FlagSearchTest {
         lastReplyAuthor = "last",
         lastReplyAt = "2026-06-24 12:00",
     )
+
+    private fun row(title: String): FlagRowUiModel =
+        flag(title).toFlagRowUiModel(MarkerStyle.STRIPE)
 }
