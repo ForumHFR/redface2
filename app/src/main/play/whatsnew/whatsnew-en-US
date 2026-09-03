@@ -1,4 +1,7 @@
-Redface 2 v0.53.6 — dev.
+Redface 2 v0.53.6 — beta.
 
-- Flags, Super tab: the refresh gesture is finally captured (indicator, loading bar), same list body as the other tabs.
-- Quick config on Super: "unread only" disabled, settings shown as global.
+Batch 0.51 → 0.53:
+- Colors: accent (8 presets or hex), background tone, Light/System/Dark, header Subtle/Vivid, RF1-style grey background.
+- Flags: Super tab (super favourites), subcategory, jump-free swipe, coloured +N badge, accent-insensitive search.
+- Topics: no more teleport when posting, return to quoted post, poll result bars, 15-line quick reply, interactive zoom, image width.
+- HFR links: consistent back and destination.

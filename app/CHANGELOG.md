@@ -16,7 +16,29 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
-## `0.53.6` — `internal` (dev) — 2026-09-03
+## `0.53.6` — `open` (bêta) — 2026-09-03
+
+Promotion bêta du lot développé en dev de `0.51.0` à `0.53.6`, depuis la précédente bêta `0.50.2`. Le détail par version dev figure dans les entrées ci-dessous. Les issues du lot restent ouvertes jusqu'à validation par les retours des testeurs.
+
+### Couleurs ([#296](https://github.com/ForumHFR/redface2/issues/296), [#883](https://github.com/ForumHFR/redface2/issues/883), [#978](https://github.com/ForumHFR/redface2/issues/978), [#1240](https://github.com/ForumHFR/redface2/issues/1240), [#1245](https://github.com/ForumHFR/redface2/issues/1245))
+
+- Nouvelle sous-page Réglages → Affichage → Couleurs : accent parmi 8 presets ou hexa personnalisé, ton du fond, sélecteur Clair / Système / Sombre, option d'en-tête des messages Discret / Vif, aperçu fidèle aux vraies couleurs de lecture. Fond gris « esprit RF1 » par défaut en clair. AMOLED garde l'accent et rend le spoiler visible.
+
+### Drapeaux ([#737](https://github.com/ForumHFR/redface2/issues/737), [#741](https://github.com/ForumHFR/redface2/issues/741), [#742](https://github.com/ForumHFR/redface2/issues/742), [#743](https://github.com/ForumHFR/redface2/issues/743), [#814](https://github.com/ForumHFR/redface2/issues/814), [#739](https://github.com/ForumHFR/redface2/issues/739), [#740](https://github.com/ForumHFR/redface2/issues/740))
+
+- Onglet « Super » des super-favoris (cache-only, zéro appel réseau, pull-to-refresh, groupement et réglages par onglet honorés), sous-catégorie dans la ligne du sujet, swipe entre onglets sans saut, pastille « +N » colorée selon le retard, recherche insensible aux accents, état vide hors-ligne.
+
+### Sujets et écriture ([#974](https://github.com/ForumHFR/redface2/issues/974), [#1137](https://github.com/ForumHFR/redface2/issues/1137), [#1243](https://github.com/ForumHFR/redface2/issues/1243), [#1246](https://github.com/ForumHFR/redface2/issues/1246), [#1182](https://github.com/ForumHFR/redface2/issues/1182), [#949](https://github.com/ForumHFR/redface2/issues/949), [#327](https://github.com/ForumHFR/redface2/issues/327), [#831](https://github.com/ForumHFR/redface2/issues/831), [#1106](https://github.com/ForumHFR/redface2/issues/1106), [#991](https://github.com/ForumHFR/redface2/issues/991))
+
+- Poster depuis une page en retard ne téléporte plus ; répondre en citant ramène au message cité ; marqueur « dernier message lu » visible à l'ouverture ; résultats de sondage en barres avec pourcentages HFR ; réponse rapide jusqu'à 15 lignes ; « Citer le début » ; « Partager » une image ; zoom pincé interactif ; largeur maximale des images réglable.
+
+### Liens HFR et navigation ([#1251](https://github.com/ForumHFR/redface2/issues/1251), [#1252](https://github.com/ForumHFR/redface2/issues/1252))
+
+- Retour cohérent depuis un topic ouvert par un lien dans un post ; destination du lien honorée (drapeaux, catégorie, topic) ; « Y aller » recharge la page cible depuis HFR.
+
+### Divers ([#969](https://github.com/ForumHFR/redface2/issues/969), [#1149](https://github.com/ForumHFR/redface2/issues/1149), [#1216](https://github.com/ForumHFR/redface2/issues/1216), [#1220](https://github.com/ForumHFR/redface2/issues/1220))
+
+- Œil « afficher le mot de passe » à la connexion ; marge corrigée sous la barre d'état en vue Forum ; compileSdk 37, AGP 9.3.1, Kotlin 2.4.10, Compose BOM 2026.08.00.
 
 Audit complet du câblage de l'onglet Super après le retour XaTriX sur la 0.53.5 (Opus 5 + Codex). Produit par Sol (Codex) sous gate Fable ; PR #1262.
 
