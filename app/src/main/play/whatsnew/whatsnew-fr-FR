@@ -1,3 +1,4 @@
-Redface 2 v0.53.2 — dev.
+Redface 2 v0.53.3 — dev.
 
-- Couleurs : option « En-tête des messages » Discret / Vif. « Vif » peint l'en-tête des messages (sujets et MP) avec l'accent choisi ; défaut inchangé. L'aperçu suit l'option.
+- Retour depuis un topic ouvert via un lien HFR dans un message revient au topic d'origine, plus à la liste des drapeaux (#1251).
+- « Y aller » après un envoi depuis une page en retard recharge la page cible : le nouveau message est visible sans rafraîchir (#1252).

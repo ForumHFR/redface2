@@ -16,6 +16,17 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.53.3` — `internal` (dev) — 2026-09-03
+
+Correctifs du matin sur les retours des testeurs de la nuit. Produit par Sol (Codex) sous gate Fable ; PR #1255.
+
+### Corrigé
+
+- **Retour depuis un topic ouvert par un lien HFR dans un post ramenait à la liste des drapeaux** (#1251, thibw) — les liens `forum.hardware.fr` tapés dans un message sortaient par le système et revenaient dans l'app comme un lien externe, dont la politique réinitialise la pile de l'onglet. Ils sont maintenant traités dans l'app et empilés sur l'onglet actif : Retour revient au topic d'origine, à la même page. Les liens ouverts depuis l'extérieur (navigateur, mail) gardent le comportement actuel.
+- **« Y aller » après un envoi depuis une page en retard ouvrait la page cible sans le nouveau message** (#1252, Dintr-un lemn) — la page était servie depuis le cache local encore frais ; elle est maintenant rechargée depuis HFR avant d'atterrir en bas (ou sur le message).
+
+---
+
 ## `0.53.2` — `internal` (dev) — 2026-09-03
 
 Mandat de nuit, troisième lot. Produit par Sol (Codex) sous gate Fable ; PR #1249.
