@@ -20,6 +20,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Local super-favorite store (#603). Reuses the shared `@UserPreferencesDataStore` Preferences store
@@ -32,6 +34,8 @@ class DataStoreSuperFavoriteRepository @Inject constructor(
     @param:UserPreferencesDataStore private val dataStore: DataStore<Preferences>,
     @param:ApplicationScope private val externalScope: CoroutineScope,
 ) : SuperFavoriteRepository {
+
+    private val writeMutex = Mutex()
 
     override fun observeSuperFavoriteTopics(): Flow<Set<SuperFavoriteTopic>> =
         dataStore.data
@@ -48,16 +52,37 @@ class DataStoreSuperFavoriteRepository @Inject constructor(
             }
 
     override suspend fun setSuperFavorite(flag: Flag, enabled: Boolean) {
+        updateSuperFavorites { current ->
+            val withoutFlag = current.filterNot { it.matches(flag) }.toSet()
+            if (enabled) withoutFlag + flag.toSuperFavoriteTopic() else withoutFlag
+        }
+    }
+
+    override suspend fun toggleSuperFavorite(flag: Flag) {
+        updateSuperFavorites { current ->
+            val withoutFlag = current.filterNot { it.matches(flag) }.toSet()
+            if (withoutFlag.size == current.size) {
+                withoutFlag + flag.toSuperFavoriteTopic()
+            } else {
+                withoutFlag
+            }
+        }
+    }
+
+    private suspend fun updateSuperFavorites(
+        transform: (Set<SuperFavoriteTopic>) -> Set<SuperFavoriteTopic>,
+    ) {
         // Parented to the process-lifetime scope (cf. DataStoreUserPreferencesRepository.persist) so a
-        // long-press sheet dismissed mid-write still commits the toggle.
+        // long-press sheet dismissed mid-write still commits the toggle. The mutex makes toggle a
+        // read-current-then-write operation even when two callers hit DataStore before its flow emits.
         externalScope.async {
-            dataStore.edit { prefs ->
-                val current = prefs[SUPER_FAVORITE_KEY].orEmpty()
-                    .mapNotNull(::decodeEntry)
-                    .filterNot { it.matches(flag) }
-                    .toMutableSet()
-                if (enabled) current.add(flag.toSuperFavoriteTopic())
-                prefs[SUPER_FAVORITE_KEY] = current.mapTo(mutableSetOf(), ::encodeEntry)
+            writeMutex.withLock {
+                dataStore.edit { prefs ->
+                    val current = prefs[SUPER_FAVORITE_KEY].orEmpty()
+                        .mapNotNull(::decodeEntry)
+                        .toSet()
+                    prefs[SUPER_FAVORITE_KEY] = transform(current).mapTo(mutableSetOf(), ::encodeEntry)
+                }
             }
         }.await()
     }

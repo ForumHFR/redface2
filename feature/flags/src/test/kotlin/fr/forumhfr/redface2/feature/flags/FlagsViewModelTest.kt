@@ -275,6 +275,23 @@ class FlagsViewModelTest {
     }
 
     @Test
+    fun `refresh ignores a second pull while the same tab is already refreshing`() = runTest {
+        val flags = FakeFlagRepository()
+        flags.refreshGate = CompletableDeferred()
+        val forum = FakeForumRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = viewModel(auth, flags, forum)
+
+        vm.refresh()
+        assertTrue(vm.isRefreshing.value)
+        vm.refresh()
+
+        assertEquals(listOf(FlagType.CYAN), flags.refreshCalls)
+        flags.refreshGate!!.complete(Unit)
+        assertFalse(vm.isRefreshing.value)
+    }
+
+    @Test
     fun `maybeAutoRefresh raises isRefreshing for the round-trip then clears it`() = runTest {
         // #603 — isRefreshing is the SINGLE loading cue (it drives the top bar; the PullToRefreshBox
         // circular indicator is hidden via indicator = {}). An auto-refresh must raise it during the
@@ -2478,8 +2495,7 @@ class FlagsViewModelTest {
         val flags = FakeFlagRepository()
         val liveExact = stubFlag(2, FlagType.CYAN).copy(cat = 23, title = "Live exact")
         val cachedLegacy = stubFlag(3, FlagType.RED).copy(cat = 10, title = "Cached legacy")
-        flags.findFlagResults = mapOf((23 to 2) to liveExact)
-        flags.cachedFlags = listOf(cachedLegacy)
+        flags.cachedFlags = listOf(liveExact, cachedLegacy)
         val favorites = setOf(
             SuperFavoriteTopic(cat = null, topicId = 99, title = null, subcat = null),
             SuperFavoriteTopic(cat = 23, topicId = 4, title = "Snapshot only", subcat = 550),
@@ -2502,7 +2518,8 @@ class FlagsViewModelTest {
         val rows = (success.content as FlagsContent.Flat).rows
         assertEquals(FlagTab.Super, vm.flagsTabState.value.tab)
         assertEquals(listOf("Live exact", "Snapshot only", "Cached legacy", "Sujet #99"), rows.map { it.title })
-        assertEquals(listOf(23 to 2, 23 to 4), flags.findFlagCalls)
+        assertTrue(flags.findFlagCalls.isEmpty())
+        assertEquals(listOf(23 to 2, 23 to 4), flags.findCachedFlagByKeyCalls)
         assertEquals(listOf(3, 99), flags.findCachedFlagCalls)
     }
 
@@ -2530,7 +2547,7 @@ class FlagsViewModelTest {
     }
 
     @Test
-    fun `flag rows resolve subcategory names from visible cached categories only (#741)`() = runTest {
+    fun `flag rows resolve subcategory names from visible cached categories without refreshing (#741)`() = runTest {
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository(autoEmit = false)
         forum.seedCachedSubcategories(23, listOf(SubCategory(id = 550, name = "Android", parentCategoryId = 23)))
@@ -2549,6 +2566,33 @@ class FlagsViewModelTest {
             assertEquals("Android", row.subcatName)
             assertEquals(listOf(23), forum.observeCachedSubcategoriesCalls)
             assertTrue(forum.refreshSubcategoriesCalls.isEmpty())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `flag rows refresh cold subcategory names once and reuse the filled cache (#741)`() = runTest {
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(autoEmit = false)
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository(groupByCategory = false)
+        val vm = viewModel(auth, flags, forum, prefs)
+        val rowFlag = stubFlag(1, FlagType.CYAN).copy(cat = 23, subcat = 550)
+
+        vm.flagsState.test {
+            awaitItem()
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(rowFlag)))
+            val cold = awaitItem() as FlagsListUiState.Success
+            assertNull((cold.content as FlagsContent.Flat).rows.single().subcatName)
+            assertEquals(listOf(23), forum.refreshSubcategoriesCalls)
+
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(rowFlag.copy(title = "Topic 1 bis"))))
+            awaitItem()
+            assertEquals(listOf(23), forum.refreshSubcategoriesCalls)
+
+            forum.seedCachedSubcategories(23, listOf(SubCategory(id = 550, name = "Android", parentCategoryId = 23)))
+            val warmed = awaitItem() as FlagsListUiState.Success
+            assertEquals("Android", (warmed.content as FlagsContent.Flat).rows.single().subcatName)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -2591,9 +2635,35 @@ class FlagsViewModelTest {
             val row = (success.content as FlagsContent.Flat).rows.single()
             assertNull(row.subcatName)
             assertEquals(listOf(23), forum.observeCachedSubcategoriesCalls)
-            assertTrue(forum.refreshSubcategoriesCalls.isEmpty())
+            assertEquals(listOf(23), forum.refreshSubcategoriesCalls)
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `toggleSuperFavorite before hydration uses the repository current value`() = runTest {
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository()
+        val auth = FakeAuthRepository(AuthState.Anonymous, flagRepository = flags)
+        val flag = stubFlag(42, FlagType.CYAN)
+        val storedFavorite = SuperFavoriteTopic(
+            cat = flag.cat,
+            topicId = flag.topicId,
+            title = flag.title,
+            subcat = flag.subcat,
+        )
+        val superFavorite = FakeSuperFavoriteRepository(
+            initial = setOf(storedFavorite),
+            observedInitial = emptySet(),
+        )
+        val vm = viewModel(auth, flags, forum, superFavorite = superFavorite)
+
+        assertFalse(vm.superFavoriteTopics.value.any { it.matches(flag) })
+        vm.toggleSuperFavorite(flag)
+        advanceUntilIdle()
+
+        assertFalse(superFavorite.currentTopics.any { it.matches(flag) })
+        assertFalse(vm.superFavoriteTopics.value.any { it.matches(flag) })
     }
 
     @Suppress("LongParameterList") // test fake-builder: each repo fake is an independent collaborator
@@ -2648,12 +2718,15 @@ class FlagsViewModelTest {
     /** In-memory [SuperFavoriteRepository] (#603 PR5) — the local super-favorite set. */
     private class FakeSuperFavoriteRepository(
         initial: Set<SuperFavoriteTopic> = emptySet(),
+        observedInitial: Set<SuperFavoriteTopic> = initial,
     ) : SuperFavoriteRepository {
-        private val topics = MutableStateFlow(initial)
+        private var storedTopics: Set<SuperFavoriteTopic> = initial
+        private val topics = MutableStateFlow(observedInitial)
+        val currentTopics: Set<SuperFavoriteTopic> get() = storedTopics
         override fun observeSuperFavoriteTopics(): Flow<Set<SuperFavoriteTopic>> = topics.asStateFlow()
         override suspend fun setSuperFavorite(flag: Flag, enabled: Boolean) {
-            val withoutFlag = topics.value.filterNot { it.matches(flag) }.toSet()
-            topics.value = if (enabled) {
+            val withoutFlag = storedTopics.filterNot { it.matches(flag) }.toSet()
+            storedTopics = if (enabled) {
                 withoutFlag + SuperFavoriteTopic(
                     cat = flag.cat,
                     topicId = flag.topicId,
@@ -2663,6 +2736,22 @@ class FlagsViewModelTest {
             } else {
                 withoutFlag
             }
+            topics.value = storedTopics
+        }
+
+        override suspend fun toggleSuperFavorite(flag: Flag) {
+            val withoutFlag = storedTopics.filterNot { it.matches(flag) }.toSet()
+            storedTopics = if (withoutFlag.size == storedTopics.size) {
+                withoutFlag + SuperFavoriteTopic(
+                    cat = flag.cat,
+                    topicId = flag.topicId,
+                    title = flag.title,
+                    subcat = flag.subcat,
+                )
+            } else {
+                withoutFlag
+            }
+            topics.value = storedTopics
         }
     }
 
@@ -2748,6 +2837,8 @@ class FlagsViewModelTest {
             private set
         var findCachedFlagCalls: List<Int> = emptyList()
             private set
+        var findCachedFlagByKeyCalls: List<Pair<Int, Int>> = emptyList()
+            private set
 
         /**
          * Result the next [removeFlag] call returns. A [CompletableDeferred] lets a test gate
@@ -2808,6 +2899,11 @@ class FlagsViewModelTest {
         override suspend fun findCachedFlag(topicId: Int): Flag? {
             findCachedFlagCalls = findCachedFlagCalls + topicId
             return cachedFlags.firstOrNull { it.topicId == topicId }
+        }
+
+        override suspend fun findCachedFlag(cat: Int, topicId: Int): Flag? {
+            findCachedFlagByKeyCalls = findCachedFlagByKeyCalls + (cat to topicId)
+            return cachedFlags.firstOrNull { it.cat == cat && it.topicId == topicId }
         }
 
         suspend fun emit(type: FlagType, result: FlagsResult) {

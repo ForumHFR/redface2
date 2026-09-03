@@ -1609,6 +1609,7 @@ private fun SuperFlagListBody(
         actions = actions,
         listState = listState,
         rowActionsEnabled = ::flagRowActionsEnabled,
+        rowClickEnabled = ::flagRowClickEnabled,
     )
 }
 
@@ -1618,6 +1619,7 @@ private fun FlagListContent(
     actions: AuthenticatedActions,
     listState: LazyListState,
     rowActionsEnabled: (FlagRowUiModel) -> Boolean = { true },
+    rowClickEnabled: (FlagRowUiModel) -> Boolean = { true },
 ) {
     val selectedTab = state.selectedTab
     when (val current = state.flagsState) {
@@ -1692,6 +1694,7 @@ private fun FlagListContent(
                         actions = actions,
                         listState = listState,
                         rowActionsEnabled = rowActionsEnabled,
+                        rowClickEnabled = rowClickEnabled,
                     )
 
                     is FlagsContent.Flat -> FlatFlagList(
@@ -1702,14 +1705,13 @@ private fun FlagListContent(
                         actions = actions,
                         listState = listState,
                         rowActionsEnabled = rowActionsEnabled,
+                        rowClickEnabled = rowClickEnabled,
                     )
                 }
             }
         }
     }
 }
-
-private fun flagRowActionsEnabled(row: FlagRowUiModel): Boolean = row.cat > 0
 
 /**
  * #695 — one [LazyListState] per flag tab so the scroll position of Mes sujets / Lu / Favoris does not
@@ -1826,6 +1828,7 @@ private fun CategorySectionedFlagList(
     actions: AuthenticatedActions,
     listState: LazyListState,
     rowActionsEnabled: (FlagRowUiModel) -> Boolean = { true },
+    rowClickEnabled: (FlagRowUiModel) -> Boolean = { true },
 ) {
     LazyColumn(
         state = listState,
@@ -1900,6 +1903,7 @@ private fun CategorySectionedFlagList(
                     RemovableFlagItem(
                         row = row,
                         removalInFlight = removalInFlight,
+                        clickEnabled = rowClickEnabled(row),
                         actionsEnabled = rowActionsEnabled(row),
                         onClick = { actions.onOpenFlag(row.flag) },
                         onLongPress = { actions.onLongPressFlag(row.flag) },
@@ -2140,6 +2144,7 @@ private fun FlatFlagList(
     actions: AuthenticatedActions,
     listState: LazyListState,
     rowActionsEnabled: (FlagRowUiModel) -> Boolean = { true },
+    rowClickEnabled: (FlagRowUiModel) -> Boolean = { true },
 ) {
     LazyColumn(
         state = listState,
@@ -2168,6 +2173,7 @@ private fun FlatFlagList(
                 RemovableFlagItem(
                     row = row,
                     removalInFlight = removalInFlight,
+                    clickEnabled = rowClickEnabled(row),
                     actionsEnabled = rowActionsEnabled(row),
                     onClick = { actions.onOpenFlag(row.flag) },
                     onLongPress = { actions.onLongPressFlag(row.flag) },
@@ -2385,6 +2391,7 @@ private fun flagCategoryName(catId: Int): String =
 private fun RemovableFlagItem(
     row: FlagRowUiModel,
     removalInFlight: Boolean,
+    clickEnabled: Boolean = true,
     actionsEnabled: Boolean = true,
     onClick: () -> Unit,
     onLongPress: () -> Unit,
@@ -2413,7 +2420,7 @@ private fun RemovableFlagItem(
     FlagItem(
         flag = row.flag,
         metadata = flagRowMetadata(row),
-        onClick = { if (actionsEnabled) onClick() },
+        onClick = { if (clickEnabled) onClick() },
         markerStyle = row.markerStyle,
         subcatName = row.subcatName,
         longPress = longPress,

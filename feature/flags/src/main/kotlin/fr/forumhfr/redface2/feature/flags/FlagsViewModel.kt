@@ -129,6 +129,7 @@ class FlagsViewModel @Inject constructor(
      */
     private var refreshingType: FlagType? = null
     private var deferredLandingType: FlagType? = null
+    private val subcategoryRefreshRequestedCats: MutableSet<Int> = mutableSetOf()
 
     private val _selectedTab = MutableStateFlow<FlagTab>(FlagTab.Cyan)
     val selectedTab: StateFlow<FlagTab> = _selectedTab.asStateFlow()
@@ -172,8 +173,7 @@ class FlagsViewModel @Inject constructor(
 
     /** Toggles the local super-favorite mark of [flag] (long-press sheet). */
     fun toggleSuperFavorite(flag: Flag) {
-        val enabled = superFavoriteTopics.value.none { it.matches(flag) }
-        viewModelScope.launch { superFavoriteRepository.setSuperFavorite(flag, enabled) }
+        viewModelScope.launch { superFavoriteRepository.toggleSuperFavorite(flag) }
     }
 
     /**
@@ -564,7 +564,10 @@ class FlagsViewModel @Inject constructor(
             .distinctUntilChanged()
 
         val filteredWithSubcategories = filteredFlags.flatMapLatest { filtered ->
-            forumRepository.subcategoryNamesForFlags((filtered.result as? FlagsResult.Success)?.flags.orEmpty())
+            forumRepository.subcategoryNamesForFlags(
+                flags = (filtered.result as? FlagsResult.Success)?.flags.orEmpty(),
+                refreshIfMissing = ::refreshSubcategoriesIfMissing,
+            )
                 .map { names -> filtered to names }
         }
 
@@ -868,18 +871,34 @@ class FlagsViewModel @Inject constructor(
     fun refresh() {
         // Super is a placeholder with no backing FlagType — pull-to-refresh is a no-op there.
         val type = _selectedTab.value.flagType ?: return
+        if (_isRefreshing.value && refreshingType == type) return
         // A manual refresh captures the post-reading state too, so the generations visible at this
         // call would only duplicate the fan-out on the next landing — consume them (#378 follow-up).
         flagOpenedGenerationConsumed = flagOpenedGeneration
         // #743 — a pull on the tab whose landing is waiting behind an in-flight refresh IS that
         // landing's fetch: drop the replay so it does not double the fan-out right after the pull.
         if (deferredLandingType == type) deferredLandingType = null
+        beginRefresh(type)
         viewModelScope.launch {
-            beginRefresh(type)
             try {
                 flagRepository.refresh(type)
             } finally {
                 endRefresh()
+            }
+        }
+    }
+
+    private fun refreshSubcategoriesIfMissing(cat: Int) {
+        if (!subcategoryRefreshRequestedCats.add(cat)) return
+        viewModelScope.launch {
+            try {
+                forumRepository.refreshSubcategories(cat)
+            } catch (cancellation: kotlinx.coroutines.CancellationException) {
+                throw cancellation
+            } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+                // Re-arm so the next list emission (or pull-to-refresh) can retry after a network error.
+                subcategoryRefreshRequestedCats.remove(cat)
+                android.util.Log.w(LOG_TAG, "Could not refresh subcategories for cat $cat", error)
             }
         }
     }
@@ -1350,6 +1369,8 @@ sealed interface FlagsContent {
      */
     data class Flat(val rows: List<FlagRowUiModel>) : FlagsContent
 }
+
+private const val LOG_TAG = "FlagsViewModel"
 
 /**
  * #378 — minimum delay between two auto-refreshes OF THE SAME [FlagType]

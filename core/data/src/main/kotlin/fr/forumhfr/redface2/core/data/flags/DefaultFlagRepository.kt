@@ -626,6 +626,9 @@ class DefaultFlagRepository @Inject constructor(
     override suspend fun findCachedFlag(topicId: Int): Flag? =
         synchronized(cachedSuccesses) { scanCachedFlags(topicId = topicId) }
 
+    override suspend fun findCachedFlag(cat: Int, topicId: Int): Flag? =
+        synchronized(cachedSuccesses) { scanCachedFlags(cat = cat, topicId = topicId) }
+
     /**
      * First flag matching `(cat, topicId)` across every warm per-type bucket, or null. Must be called
      * under the [cachedSuccesses] lock (#809). EnumMap iteration is CYAN → RED → FAVORITE, so a topic
