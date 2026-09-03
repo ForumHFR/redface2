@@ -32,7 +32,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.contentColorFor
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.pullToRefresh
@@ -85,6 +84,7 @@ import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.ego.deriveEgoCanonicalPseudo
 import fr.forumhfr.redface2.core.domain.ego.isEgoPost
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
+import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
 import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
@@ -111,6 +111,7 @@ import fr.forumhfr.redface2.core.ui.post.PostListScaffold
 import fr.forumhfr.redface2.core.ui.post.PostMediaDiskCachePolicy
 import fr.forumhfr.redface2.core.ui.post.ReadingPostCard
 import fr.forumhfr.redface2.core.ui.post.ReadingPostCardPresentation
+import fr.forumhfr.redface2.core.ui.post.postHeaderColors
 import fr.forumhfr.redface2.core.ui.post.readingContentColors
 import fr.forumhfr.redface2.core.ui.post.sharePostImageUrl
 import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
@@ -988,6 +989,7 @@ private fun PrivateMessageThreadReader(
                 page = state.page,
                 fullWidthPosts = state.fullWidthPosts,
                 showSignatures = state.showSignatures,
+                postHeaderEmphasis = state.postHeaderEmphasis,
                 egoQuoteEnabled = state.egoQuoteEnabled,
                 egoPostEnabled = state.egoPostEnabled,
                 connectedPseudo = state.connectedPseudo,
@@ -1614,6 +1616,7 @@ private fun ThreadMessages(
     page: Int,
     fullWidthPosts: Boolean,
     showSignatures: Boolean,
+    postHeaderEmphasis: PostHeaderEmphasis,
     egoQuoteEnabled: Boolean,
     egoPostEnabled: Boolean,
     connectedPseudo: String?,
@@ -1748,6 +1751,7 @@ private fun ThreadMessages(
                         egoQuoteCanonicalPseudo = egoQuoteCanonicalPseudo,
                         egoPostHighlighted = message.numreponse in egoPostNumreponses,
                     ),
+                    postHeaderEmphasis = postHeaderEmphasis,
                     // #1042 — same gate as the topic card (#208): a message whose page row carried no
                     // profile link ([Post.profileId] null) keeps its identity line inert.
                     onOpenProfile = message.profileId?.let { profileId ->
@@ -1880,6 +1884,7 @@ internal fun MessageCard(
     /** #221 — global canonical staff directory; empty keeps direct tests/previews neutral. */
     staffByPseudo: Map<String, AuthorRole> = emptyMap(),
     presentation: ReadingPostCardPresentation = ReadingPostCardPresentation(),
+    postHeaderEmphasis: PostHeaderEmphasis = PostHeaderEmphasis.SUBTLE,
     multiQuoteSelected: Boolean = false,
     onOpenProfile: (() -> Unit)? = null,
     onOpenMenu: (() -> Unit)? = null,
@@ -1923,16 +1928,18 @@ internal fun MessageCard(
         onImageLongPress = onImageLongPress,
         identity = { moderationOverride ->
             // An MP has no anchor/category tint, but still carries the same full-width identity band
-            // as a normal topic post. Its neutral secondaryContainer colour is independent from
+            // as a normal topic post. Its configurable neutral/vivid colour is independent from
             // EgoPost; a moderation row explicitly overrides it with the RF1 two-tone red header.
             // PostIdentityBand adds no padding, so the shared band rhythm is reinjected on the
             // header — MP-owned gutters at cardBodyHorizontal, shared symmetric vertical inset at
             // cardHeaderVertical; the header↔body gap remains the body slot's own cardBodyTop.
-            val bandContainerColor = moderationOverride?.containerColor
-                ?: MaterialTheme.colorScheme.secondaryContainer
-            val bandContentColor = moderationOverride?.contentColor
-                ?: contentColorFor(bandContainerColor)
-            val supportingContentColorOverride = moderationOverride?.let { bandContentColor }
+            val normalHeaderColors = postHeaderColors(postHeaderEmphasis)
+            val bandColors = moderationOverride ?: normalHeaderColors
+            val supportingContentColorOverride = when {
+                moderationOverride != null -> bandColors.contentColor
+                postHeaderEmphasis == PostHeaderEmphasis.VIVID -> bandColors.contentColor
+                else -> null
+            }
             PostIdentityBand(
                 modifier = Modifier.semantics {
                     when {
@@ -1944,8 +1951,8 @@ internal fun MessageCard(
                         }
                     }
                 },
-                containerColor = bandContainerColor,
-                contentColor = bandContentColor,
+                containerColor = bandColors.containerColor,
+                contentColor = bandColors.contentColor,
             ) {
                 // A creator supplies the shared gold pseudo leaf; a non-creator staff supplies a
                 // neutral Text beside its pill; everyone else uses the neutral fallback. Per the

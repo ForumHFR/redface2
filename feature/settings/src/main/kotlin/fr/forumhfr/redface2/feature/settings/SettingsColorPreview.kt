@@ -31,8 +31,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
 import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.core.ui.post.postHeaderColors
 import fr.forumhfr.redface2.core.ui.post.readingContentColors
 import fr.forumhfr.redface2.core.ui.theme.FlagPalette
 
@@ -88,14 +90,14 @@ internal fun SettingsColorPreview(
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onBackground,
                 )
-                PreviewPost()
+                PreviewPost(preferences.postHeaderEmphasis)
             }
         }
     }
 }
 
 @Composable
-private fun PreviewPost() {
+private fun PreviewPost(postHeaderEmphasis: PostHeaderEmphasis) {
     val postContainerColor = MaterialTheme.colorScheme.surfaceContainer
     Surface(
         modifier = Modifier
@@ -110,23 +112,23 @@ private fun PreviewPost() {
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            PreviewHeader()
+            PreviewHeader(postHeaderEmphasis)
             PreviewBody()
         }
     }
 }
 
 @Composable
-private fun PreviewHeader() {
-    val headerContainerColor = MaterialTheme.colorScheme.secondaryContainer
+private fun PreviewHeader(postHeaderEmphasis: PostHeaderEmphasis) {
+    val headerColors = postHeaderColors(postHeaderEmphasis)
     Surface(
         modifier = Modifier
             .testTag(SETTINGS_COLOR_PREVIEW_HEADER_TAG)
             .semantics {
-                this[SettingsColorPreviewHeaderContainerColorKey] = headerContainerColor
+                this[SettingsColorPreviewHeaderContainerColorKey] = headerColors.containerColor
             },
-        color = headerContainerColor,
-        contentColor = contentColorFor(headerContainerColor),
+        color = headerColors.containerColor,
+        contentColor = headerColors.contentColor,
     ) {
         Row(
             modifier = Modifier

@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.topic
 
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
+import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
 import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.Post
@@ -90,6 +91,8 @@ data class TopicUiState(
      * (consumed by the screen in a later wave), toggling never refetches.
      */
     val fullWidthPosts: Boolean = false,
+    /** Vivid/subtle identity-band colour preference, render-only like [fullWidthPosts]. */
+    val postHeaderEmphasis: PostHeaderEmphasis = PostHeaderEmphasis.SUBTLE,
     /**
      * #806 — mirrors `UserPreferencesRepository.observeWritingSurfacePreset()`. Feeds
      * [writingSurfaceFor] AT TAP TIME on the three write entry points (reply FAB, « Citer »,

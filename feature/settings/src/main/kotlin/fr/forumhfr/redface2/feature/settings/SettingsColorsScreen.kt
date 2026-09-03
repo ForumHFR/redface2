@@ -48,6 +48,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
 import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.LightSurfaceTone
+import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
 import fr.forumhfr.redface2.core.domain.preferences.ThemeAccent
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsChoice
@@ -156,6 +157,11 @@ internal fun SettingsColorsContent(
             if (state.themeModeError) {
                 PreferencePersistError(R.string.settings_theme_persist_failed)
             }
+            PostHeaderEmphasisSetting(
+                selected = state.themeColorPreferences.postHeaderEmphasis,
+                enabled = state.canChangeThemeColors,
+                onSelected = { callbacks.onIntent(SettingsIntent.PostHeaderEmphasisChanged(it)) },
+            )
             SystemColorsSetting(
                 state = state,
                 environment = environment,
@@ -176,6 +182,34 @@ internal fun SettingsColorsContent(
             }
         }
     }
+}
+
+@Composable
+private fun PostHeaderEmphasisSetting(
+    selected: PostHeaderEmphasis,
+    enabled: Boolean,
+    onSelected: (PostHeaderEmphasis) -> Unit,
+) {
+    Text(
+        text = stringResource(R.string.settings_colors_post_header_title),
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurface,
+    )
+    RedfaceSettingsChoiceGroup(
+        options = listOf(
+            RedfaceSettingsChoice(
+                PostHeaderEmphasis.SUBTLE,
+                stringResource(R.string.settings_colors_post_header_subtle),
+            ),
+            RedfaceSettingsChoice(
+                PostHeaderEmphasis.VIVID,
+                stringResource(R.string.settings_colors_post_header_vivid),
+            ),
+        ),
+        selected = selected,
+        onSelected = onSelected,
+        enabled = enabled,
+    )
 }
 
 @Composable

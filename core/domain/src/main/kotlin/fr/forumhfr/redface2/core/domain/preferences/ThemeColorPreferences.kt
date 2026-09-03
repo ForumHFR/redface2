@@ -6,4 +6,5 @@ data class ThemeColorPreferences(
     val lightSurfaceTone: LightSurfaceTone = LightSurfaceTone.REDFACE1_GRAY,
     val darkSurfaceTone: DarkSurfaceTone = DarkSurfaceTone.MATERIAL_TINTED,
     val dynamicColorEnabled: Boolean = false,
+    val postHeaderEmphasis: PostHeaderEmphasis = PostHeaderEmphasis.SUBTLE,
 )

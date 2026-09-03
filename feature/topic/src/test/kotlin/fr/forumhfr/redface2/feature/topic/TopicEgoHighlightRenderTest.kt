@@ -19,6 +19,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.text.TextLayoutResult
 import fr.forumhfr.redface2.core.domain.ego.deriveEgoCanonicalPseudo
 import fr.forumhfr.redface2.core.domain.ego.isEgoPost
+import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
 import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostBlock
@@ -89,6 +90,17 @@ class TopicEgoHighlightRenderTest {
         assertTextColor("⋯", Color.White)
         assertStateCount(MODERATION_STATE, 1)
         assertStateCount(OWN_POST_STATE, 0)
+    }
+
+    @Test
+    fun `vivid post header uses the primary band and content pair`() {
+        val post = samplePost()
+        setCard(post = post, postHeaderEmphasis = PostHeaderEmphasis.VIVID)
+
+        assertIdentityBandColor(RedfaceLightColorScheme.primary)
+        assertIdentityBandContentColor(RedfaceLightColorScheme.onPrimary)
+        assertTextColor(post.date.asTopicDate(), RedfaceLightColorScheme.onPrimary)
+        assertTextColor("⋯", RedfaceLightColorScheme.onPrimary)
     }
 
     @Test
@@ -300,6 +312,7 @@ class TopicEgoHighlightRenderTest {
         egoQuoteCanonicalPseudo: String? = null,
         highlighted: Boolean = false,
         flat: Boolean = false,
+        postHeaderEmphasis: PostHeaderEmphasis = PostHeaderEmphasis.SUBTLE,
         staffByPseudo: Map<String, AuthorRole> = emptyMap(),
     ) {
         composeTestRule.setContent {
@@ -311,6 +324,7 @@ class TopicEgoHighlightRenderTest {
                         highlighted = highlighted,
                         citedCount = 0,
                         flat = flat,
+                        postHeaderEmphasis = postHeaderEmphasis,
                         egoQuoteCanonicalPseudo = egoQuoteCanonicalPseudo,
                         egoPostHighlighted = egoPostHighlighted,
                         onQuote = null,

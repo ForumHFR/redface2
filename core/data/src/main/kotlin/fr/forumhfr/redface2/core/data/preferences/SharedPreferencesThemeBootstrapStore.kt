@@ -5,6 +5,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
 import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.LightSurfaceTone
+import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
 import fr.forumhfr.redface2.core.domain.preferences.ThemeAccent
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrap
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
@@ -44,6 +45,9 @@ class SharedPreferencesThemeBootstrapStore @Inject constructor(
             DarkSurfaceTone.MATERIAL_TINTED
         },
         dynamicColorEnabled = prefs.getBoolean(KEY_DYNAMIC_COLOR_ENABLED, false),
+        postHeaderEmphasis = prefs.getString(KEY_POST_HEADER_EMPHASIS, null)
+            ?.let { stored -> PostHeaderEmphasis.entries.firstOrNull { it.name == stored } }
+            ?: PostHeaderEmphasis.SUBTLE,
     )
 
     override fun writeThemeMode(mode: ThemeMode) {
@@ -68,12 +72,17 @@ class SharedPreferencesThemeBootstrapStore @Inject constructor(
         prefs.edit().putBoolean(KEY_DYNAMIC_COLOR_ENABLED, enabled).apply()
     }
 
+    override fun writePostHeaderEmphasis(emphasis: PostHeaderEmphasis) {
+        prefs.edit().putString(KEY_POST_HEADER_EMPHASIS, emphasis.name).apply()
+    }
+
     override fun writeThemeColorPreferences(preferences: ThemeColorPreferences) {
         prefs.edit().apply {
             putThemeAccent(preferences.accent)
             putString(KEY_LIGHT_SURFACE_TONE, preferences.lightSurfaceTone.name)
             putBoolean(KEY_AMOLED_ENABLED, preferences.darkSurfaceTone == DarkSurfaceTone.AMOLED)
             putBoolean(KEY_DYNAMIC_COLOR_ENABLED, preferences.dynamicColorEnabled)
+            putString(KEY_POST_HEADER_EMPHASIS, preferences.postHeaderEmphasis.name)
         }.apply()
     }
 
@@ -120,6 +129,7 @@ class SharedPreferencesThemeBootstrapStore @Inject constructor(
         const val KEY_ACCENT_CUSTOM_RGB = "accent_custom_rgb"
         const val KEY_LIGHT_SURFACE_TONE = "light_surface_tone"
         const val KEY_DYNAMIC_COLOR_ENABLED = "dynamic_color_enabled"
+        const val KEY_POST_HEADER_EMPHASIS = "post_header_emphasis"
         const val CUSTOM_ACCENT_STORAGE_VALUE = "CUSTOM"
         const val MIN_RGB = 0x000000
         const val MAX_RGB = 0xFFFFFF
