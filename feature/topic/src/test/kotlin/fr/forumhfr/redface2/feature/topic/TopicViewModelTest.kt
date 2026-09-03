@@ -3102,9 +3102,11 @@ class TopicViewModelTest {
         val repository = FakeTopicRepository(
             flowsToReturn = listOf(
                 flow { emit(fakeTopic(page = 2, totalPages = 5, title = "loaded")) },
-                flow { emit(fakeTopic(page = 5, totalPages = 5, title = "tail")) },
             ),
-            refreshTopicsToReturn = listOf(fakeTopic(page = 2, totalPages = 5, title = "refreshed")),
+            refreshTopicsToReturn = listOf(
+                fakeTopic(page = 2, totalPages = 5, title = "refreshed"),
+                fakeTopic(page = 5, totalPages = 5, title = "tail"),
+            ),
         )
         val viewModel = topicViewModel(
             request = topicRequest(page = 2),
@@ -3122,9 +3124,61 @@ class TopicViewModelTest {
         }
 
         assertEquals(5, viewModel.state.value.request.page)
-        assertEquals(listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)), repository.refreshCalls)
+        assertEquals("tail", (viewModel.state.value.mode as TopicUiState.Mode.Loaded).topic.title)
         assertEquals(
             listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2), Triple(SAMPLE_CAT, SAMPLE_POST, 5)),
+            repository.refreshCalls,
+        )
+        assertEquals(
+            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)),
+            repository.calls,
+        )
+    }
+
+    @Test
+    fun `the submitted-elsewhere action refreshes the offered page before landing (#1252)`() = runTest {
+        val staleTail = fakeTopic(page = 5, totalPages = 5, title = "stale-tail", posts = listOf(fakePost(500)))
+        val freshTail = fakeTopic(
+            page = 5,
+            totalPages = 5,
+            title = "fresh-tail",
+            posts = listOf(fakePost(500), fakePost(999)),
+        )
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flow { emit(fakeTopic(page = 2, totalPages = 5, title = "loaded")) },
+                flow { emit(staleTail) },
+            ),
+            refreshTopicsToReturn = listOf(
+                fakeTopic(page = 2, totalPages = 5, title = "refreshed"),
+                freshTail,
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            viewModel.applySubmitResult(targetPage = 2, scrollTo = null)
+            assertEquals(TopicEffect.PostSubmittedElsewhere(page = 5), awaitItem())
+
+            viewModel.openSubmittedPostPage(page = 5)
+            assertEquals(TopicEffect.ScrollToEndOfPage(5), awaitItem())
+            val loaded = viewModel.state.value.mode as TopicUiState.Mode.Loaded
+            assertEquals("fresh-tail", loaded.topic.title)
+            assertEquals(listOf(500, 999), loaded.topic.posts.map { it.numreponse })
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertEquals(
+            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2), Triple(SAMPLE_CAT, SAMPLE_POST, 5)),
+            repository.refreshCalls,
+        )
+        assertEquals(
+            "the stale Room-shaped observe flow must not drive the snackbar landing",
+            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)),
             repository.calls,
         )
     }

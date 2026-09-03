@@ -267,6 +267,58 @@ class HfrDeepLinkTest {
     }
 
     @Test
+    fun `resolveHfrUri resolves legacy topic URL with an anchor`() {
+        val uri = Uri.parse("https://forum.hardware.fr/forum2.php?cat=23&post=35395&page=7#t999")
+
+        assertEquals(
+            HfrDeepLinkResolution.Route(
+                ParsedDeepLink(
+                    destination = TopLevelDestination.Flags,
+                    route = TopicRoute(cat = 23, post = 35_395, page = 7, scrollTo = 999),
+                ),
+            ),
+            resolveHfrUri(uri),
+        )
+    }
+
+    @Test
+    fun `resolveHfrUri resolves legacy topic URL without an anchor`() {
+        val uri = Uri.parse("https://forum.hardware.fr/forum2.php?cat=23&post=35395&page=7")
+
+        assertEquals(
+            HfrDeepLinkResolution.Route(
+                ParsedDeepLink(
+                    destination = TopLevelDestination.Flags,
+                    route = TopicRoute(cat = 23, post = 35_395, page = 7),
+                ),
+            ),
+            resolveHfrUri(uri),
+        )
+    }
+
+    @Test
+    fun `resolveHfrUri resolves pretty topic URLs`() {
+        val uri = Uri.parse("https://forum.hardware.fr/hfr/GSMGPSPDA/android/redface-dev-sujet_35421_3.htm")
+
+        assertEquals(
+            HfrDeepLinkResolution.Route(
+                ParsedDeepLink(
+                    destination = TopLevelDestination.Flags,
+                    route = TopicRoute(cat = 23, post = 35_421, page = 3),
+                ),
+            ),
+            resolveHfrUri(uri),
+        )
+    }
+
+    @Test
+    fun `resolveHfrUri ignores non HFR hosts`() {
+        val uri = Uri.parse("https://example.com/forum2.php?cat=23&post=35395&page=7#t999")
+
+        assertEquals(HfrDeepLinkResolution.Ignore, resolveHfrUri(uri))
+    }
+
+    @Test
     fun `unknown pretty category falls back to the browser`() {
         val uri = Uri.parse("https://forum.hardware.fr/hfr/Unknown/topic-sujet_123_2.htm#t456")
 

@@ -62,4 +62,36 @@ class TabBackStackTest {
         assertEquals(flags, back2.target)
         assertEquals(emptyList<TopLevelDestination>(), back2.history)
     }
+
+    @Test
+    fun `in-app HFR topic link pushes onto the active stack`() {
+        val topicA = TopicRoute(cat = 23, post = 100, page = 4)
+        val topicB = TopicRoute(cat = 23, post = 200, page = 7)
+
+        assertEquals(
+            listOf(FlagsListRoute, topicA, topicB),
+            inAppRouteBackStackAfterOpen(listOf(FlagsListRoute, topicA), topicB),
+        )
+    }
+
+    @Test
+    fun `in-app HFR route already on top is a no-op`() {
+        val topic = TopicRoute(cat = 23, post = 100, page = 4)
+
+        assertEquals(
+            listOf(FlagsListRoute, topic),
+            inAppRouteBackStackAfterOpen(listOf(FlagsListRoute, topic), topic),
+        )
+    }
+
+    @Test
+    fun `in-app HFR route already lower in the stack pops back to it`() {
+        val topicA = TopicRoute(cat = 23, post = 100, page = 4)
+        val topicB = TopicRoute(cat = 23, post = 200, page = 7)
+
+        assertEquals(
+            listOf(FlagsListRoute, topicA),
+            inAppRouteBackStackAfterOpen(listOf(FlagsListRoute, topicA, topicB), topicA),
+        )
+    }
 }

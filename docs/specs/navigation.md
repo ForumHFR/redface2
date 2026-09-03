@@ -605,6 +605,7 @@ le parseur JVM pur de la forme jolie vit dans `:core:parser` et ne dépend pas d
 Le `TopicScreen` reçoit le `scrollTo` (numreponse cible) via la `TopicRoute` et scroll jusqu'au bon post après chargement de la page. Un `scrollTo` non nul prime toujours sur la position de lecture sauvegardée (#307) — cf. § Topic (lecture).
 
 > **Politique de back stack sur deep link** : on **réinitialise** le back stack de l'onglet cible (`resetStack`) plutôt qu'on n'empile sur l'historique courant. Rationale : un deep link entrant doit poser un état de navigation **prévisible** — back ramène à la racine de l'onglet, pas à un mélange d'écrans visités avant le deep link. Cf. § Back Stack ci-dessous.
+> Les liens HFR tapés dans un post déjà rendu par l'app sont traités in-app et empilés sur le back stack de l'onglet actif ; ce reset ne concerne que les intents externes.
 
 ### Predictive back
 
@@ -709,6 +710,7 @@ Nav 3 expose le back stack comme un `NavBackStack<NavKey>` observable, puis `Nav
 - **Retour depuis un topic** : retour à la liste (drapeaux, forum, recherche) à la même position de scroll — l'entrée précédente est conservée dans la liste tant qu'elle est dans le back stack.
 - **Retour depuis reply/edit** : retour au topic à la même page.
 - **Deep link** : on identifie l'onglet cible et on **réinitialise** son back stack via `resetStack(root, route)` (cf. § Cas particulier : lien vers un post spécifique). Conséquence prévisible : back depuis le deep link ramène à la racine de l'onglet (drapeaux, forum, …), pas à un état pré-deep-link arbitraire.
+- Les liens HFR tapés dans un post de l'app ne suivent pas cette règle : ils sont résolus in-app et empilés sur l'onglet actif, donc Retour revient à l'entrée précédente de cet onglet.
 
 ```mermaid
 graph LR

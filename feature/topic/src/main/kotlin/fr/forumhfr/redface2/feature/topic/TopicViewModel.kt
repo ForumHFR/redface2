@@ -1586,14 +1586,18 @@ class TopicViewModel @AssistedInject constructor(
      */
     fun openSubmittedPostPage(page: Int, scrollTo: Int? = null, departureAnchor: TopicScrollAnchor? = null) {
         if (page < 1) return
+        departureAnchor?.let { pageAnchors[request.page] = it }
         postSubmitRedirectBudget = 0
         pageSnapshots.remove(page)
         jumpStack.clear()
         syncJumpAvailability()
-        internalSwitch(
-            target = page,
-            departureAnchor = departureAnchor,
-            landing = scrollTo?.let { PendingLanding.Post(it) } ?: PendingLanding.Bottom,
+        performSubmitRefresh(
+            SubmitRefreshPlan(
+                initialTarget = page,
+                landing = scrollTo?.let { PendingLanding.Post(it) } ?: PendingLanding.Bottom,
+                overflowRedirectAllowed = false,
+                submittedElsewhereNotificationAllowed = false,
+            ),
         )
     }
 
