@@ -41,6 +41,7 @@ import fr.forumhfr.redface2.core.domain.upload.UploadedImage
 import fr.forumhfr.redface2.core.domain.upload.UploadedImageRecord
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
+import fr.forumhfr.redface2.core.domain.write.truncateQuote
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.PostBlock
@@ -1785,6 +1786,21 @@ class PostEditorViewModelTest {
     }
 
     @Test
+    fun `cards OFF - a truncated quote prefill is inserted when the selection requests it`() = runTest {
+        val prefill = "[quotemsg=101,1,9]${longQuoteBody()}[/quotemsg]"
+        replyRepository.formResultsByNumrep = mapOf(
+            101 to Result.success(authenticatedForm(initialContent = prefill)),
+        )
+        val viewModel = newReplyViewModel(
+            initialQuotes = listOf(card(101).copy(truncate = true)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false),
+        )
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(truncateQuote(prefill) + "\n", viewModel.state.value.draft.text)
+    }
+
+    @Test
     fun `cards OFF - a quote prepended onto typed text keeps the plain double-newline separator`() = runTest {
         // #881 réserve gate — the prepend branch adds NO extra newline : the "\n\n" separator
         // already puts the existing typing under the citation. The fetch is gated so the
@@ -2087,6 +2103,8 @@ class PostEditorViewModelTest {
             author = author,
             excerpt = "extrait $numreponse",
         )
+
+    private fun longQuoteBody(): String = (1..120).joinToString(separator = " ") { "mot" }
 
     private fun authenticatedForm(initialContent: String = ""): ReplyForm = ReplyForm(
         hashCheck = "FAKE_HASH",

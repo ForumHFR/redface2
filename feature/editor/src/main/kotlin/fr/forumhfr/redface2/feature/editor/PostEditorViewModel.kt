@@ -253,6 +253,7 @@ class PostEditorViewModel @AssistedInject constructor(
                 quoteMaterializer.fetchFormWithQuotes(
                     context = quoteContext,
                     extraQuoteNumreponses = quotes.drop(1).map { it.numreponse },
+                    truncate = quotes.any { it.truncate },
                 )
             }
             outcome.fold(
@@ -977,6 +978,7 @@ class PostEditorViewModel @AssistedInject constructor(
         val quoteForm = quoteMaterializer.fetchFormWithQuotes(
             context = quoteContext,
             extraQuoteNumreponses = quotes.drop(1).map { it.numreponse },
+            truncate = quotes.any { it.truncate },
         )
         val body = snapshot.draft.text
         return replyRepository.submitReply(

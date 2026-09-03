@@ -112,6 +112,7 @@ import fr.forumhfr.redface2.core.ui.post.PostMediaDiskCachePolicy
 import fr.forumhfr.redface2.core.ui.post.ReadingPostCard
 import fr.forumhfr.redface2.core.ui.post.ReadingPostCardPresentation
 import fr.forumhfr.redface2.core.ui.post.readingContentColors
+import fr.forumhfr.redface2.core.ui.post.sharePostImageUrl
 import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 import fr.forumhfr.redface2.core.ui.zoom.PinchZoomState
@@ -189,6 +190,9 @@ fun PrivateMessageThreadScreen(
     // page on screen and surfaces a Toast inviting a retry (pull again / tap the pager again).
     val context = LocalContext.current
     val refreshFailedMsg = stringResource(R.string.messages_thread_refresh_failed)
+    val imageShareFailedMsg = stringResource(
+        fr.forumhfr.redface2.core.ui.R.string.post_image_menu_share_failed,
+    )
     LaunchedEffect(Unit) {
         viewModel.effects.collect { effect ->
             when (effect) {
@@ -226,6 +230,9 @@ fun PrivateMessageThreadScreen(
                         R.string.messages_image_menu_save_failed_too_large,
                         android.widget.Toast.LENGTH_SHORT,
                     ).show()
+                }
+                is PrivateMessageThreadEffect.ShareImage -> {
+                    sharePostImageUrl(context, effect.url, imageShareFailedMsg)
                 }
             }
         }
@@ -267,6 +274,7 @@ fun PrivateMessageThreadScreen(
             onOpenProfile = onOpenProfile,
             onSetAuthorBlocked = viewModel::setAuthorBlocked,
             onSaveImage = viewModel::saveImage,
+            onShareImage = viewModel::shareImage,
         ),
         presentation = PrivateMessageThreadPresentation(
             multiQuoteSelections = multiQuoteSelections,
@@ -497,6 +505,8 @@ internal data class PrivateMessageThreadCallbacks(
     val onSetAuthorBlocked: (author: String, blocked: Boolean) -> Unit = { _, _ -> },
     // #831/#1051 — the ViewModel-owned save survives dismissal of the local image sheet.
     val onSaveImage: (url: String) -> Unit = {},
+    // #831 — host-side share runs through an effect so the menu can close immediately.
+    val onShareImage: (url: String) -> Unit = {},
 )
 
 /**
@@ -737,6 +747,7 @@ internal fun PrivateMessageThreadContent(
         mode = mode,
         target = imageMenuTarget,
         onSave = callbacks.onSaveImage,
+        onShare = callbacks.onShareImage,
         onClear = { imageMenuTarget = null },
     )
 }
@@ -1165,6 +1176,7 @@ private fun ThreadImageMenuHost(
     mode: PrivateMessageThreadUiState.Mode,
     target: PostImageTarget?,
     onSave: (String) -> Unit,
+    onShare: (String) -> Unit,
     onClear: () -> Unit,
 ) {
     // Unlike TopicLoadedContent, this host must explicitly forget the private target when its content
@@ -1179,6 +1191,7 @@ private fun ThreadImageMenuHost(
             PostImageMenuSheet(
                 target = imageTarget,
                 onSave = onSave,
+                onShare = onShare,
                 onDismiss = onClear,
                 // The thumbnail is a second request for the same private PostContent URL and
                 // lives outside ReadingPostCard's provider, so carry the policy explicitly.

@@ -54,6 +54,8 @@
     <!-- #831/#1040 : menu image partagé entre les surfaces de lecture. Les valeurs restent celles
          livrées côté topic ; les noms neutres permettent leur réemploi côté MP sans host flag. -->
     <string name="post_image_menu_save">Enregistrer l\'image</string>
+    <string name="post_image_menu_share">Partager</string>
+    <string name="post_image_menu_share_failed">Aucune application pour partager cette image</string>
     <string name="post_image_menu_copy_url">Copier l\'URL de l\'image</string>
     <string name="post_image_menu_url_copied">URL copiée</string>
     <string name="post_image_menu_full_size_soon">Afficher en taille réelle (à venir)</string>

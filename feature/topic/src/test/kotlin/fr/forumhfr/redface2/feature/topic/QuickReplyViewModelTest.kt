@@ -5,6 +5,7 @@ import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
+import fr.forumhfr.redface2.core.domain.write.truncateQuote
 import fr.forumhfr.redface2.core.model.write.ReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
@@ -487,6 +488,19 @@ class QuickReplyViewModelTest {
     }
 
     @Test
+    fun `inline mode inserts the truncated quote prefill when the selection requests it`() = runTest {
+        val prefill = "[quotemsg=101]${longQuoteBody()}[/quotemsg]"
+        val repository = FakeQuickReplyRepository(quotePrefills = mapOf(101 to prefill))
+        val viewModel = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
+
+        viewModel.onSheetOpened(listOf(preview(101, "alice", truncate = true)))
+        advanceUntilIdle()
+
+        assertEquals(truncateQuote(prefill) + "\n", viewModel.state.value.text.text)
+        assertEquals(listOf(null, 101), repository.fetchedQuotedNumreponses)
+    }
+
+    @Test
     fun `inline mode merges a small basket in citation order`() = runTest {
         val repository = FakeQuickReplyRepository()
         val viewModel = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
@@ -640,11 +654,18 @@ class QuickReplyViewModelTest {
         )
     }
 
-    private fun preview(numreponse: Int, author: String): QuoteSelection = QuoteSelection(
+    private fun preview(
+        numreponse: Int,
+        author: String,
+        truncate: Boolean = false,
+    ): QuoteSelection = QuoteSelection(
         locator = QuoteLocator(page = 3, numreponse = numreponse, ref = 1),
         author = author,
         excerpt = "extrait",
+        truncate = truncate,
     )
+
+    private fun longQuoteBody(): String = (1..120).joinToString(separator = " ") { "mot" }
 
     private fun quickReplyViewModel(
         replyRepository: ReplyRepository = FakeQuickReplyRepository(),
@@ -755,6 +776,7 @@ private class GatedQuoteFormRepository(
 
 private class FakeQuickReplyRepository(
     private val results: MutableList<ReplySubmitResult> = mutableListOf(),
+    private val quotePrefills: Map<Int, String> = emptyMap(),
 ) : ReplyRepository {
     var fetchCalls = 0
     var submitCalls = 0
@@ -767,7 +789,9 @@ private class FakeQuickReplyRepository(
         fetchCalls++
         fetchedPages += context.page
         fetchedQuotedNumreponses += context.quotedNumreponse
-        val prefill = context.quotedNumreponse?.let { "[quotemsg=$it]corps[/quotemsg]" }.orEmpty()
+        val prefill = context.quotedNumreponse
+            ?.let { quotePrefills[it] ?: "[quotemsg=$it]corps[/quotemsg]" }
+            .orEmpty()
         return ReplyForm(
             hashCheck = "hash",
             sujet = "sujet",

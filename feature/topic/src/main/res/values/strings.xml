@@ -72,6 +72,7 @@
     <string name="topic_post_menu_text_copied">Texte copié</string>
     <string name="topic_post_menu_copy_link">Copier le lien de ce post</string>
     <string name="topic_post_menu_link_copied">Lien copié</string>
+    <string name="topic_post_menu_quote_start">Citer le début</string>
     <string name="topic_post_menu_report_soon">Alerter (à venir)</string>
     <!-- #792 — entrée « Envoyer un MP » du menu contextuel de post (composeur MP pré-rempli). -->
     <string name="topic_post_menu_send_private_message">Envoyer un MP</string>

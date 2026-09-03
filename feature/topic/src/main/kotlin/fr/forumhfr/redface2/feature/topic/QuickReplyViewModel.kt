@@ -284,6 +284,7 @@ class QuickReplyViewModel @AssistedInject constructor(
                 val form = quoteMaterializer.fetchFormWithQuotes(
                     context = quoteContext,
                     extraQuoteNumreponses = quotes.drop(1).map { it.numreponse },
+                    truncate = quotes.any { it.truncate },
                 )
                 rememberLoadedForm(form, quoteContext.page)
                 val prefills = form.initialContent.trimEnd()
@@ -477,6 +478,7 @@ class QuickReplyViewModel @AssistedInject constructor(
                     val form = quoteMaterializer.fetchFormWithQuotes(
                         context = quoteContext,
                         extraQuoteNumreponses = quotes.drop(1).map { it.numreponse },
+                        truncate = quotes.any { it.truncate },
                     )
                     val body = _state.value.text.text
                     replyRepository.submitReply(

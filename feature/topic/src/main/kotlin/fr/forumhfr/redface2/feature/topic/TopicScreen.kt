@@ -149,6 +149,7 @@ import fr.forumhfr.redface2.core.ui.post.ReadingPostCardPresentation
 import fr.forumhfr.redface2.core.ui.post.collectPostMediaUrls
 import fr.forumhfr.redface2.core.ui.post.readingContentColors
 import fr.forumhfr.redface2.core.ui.post.retryFailedPostMedia
+import fr.forumhfr.redface2.core.ui.post.sharePostImageUrl
 import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 import java.time.ZoneId
@@ -2152,11 +2153,14 @@ private fun TopicLoadedContent(
     // #831 — one stable handler instance provided (via TopicPostCard) to the post bodies'
     // LocalPostImageActions; remembered so providing it never invalidates the cards.
     val postImageActions = remember { PostImageActions(onLongPress = { imageMenuTarget = it }) }
-    // #831 — « Enregistrer l'image » seam. A dedicated thin @HiltViewModel (precedent
-    // QuickReplyViewModel) so the save survives the sheet's dismissal; feedback stays a Toast
-    // because there is no follow-up action.
+    // #831 — image-menu actions. A dedicated thin @HiltViewModel (precedent QuickReplyViewModel)
+    // so the save survives the sheet's dismissal; share is emitted back to this host for the
+    // Android chooser.
     val imageActionsViewModel: PostImageActionsViewModel = hiltViewModel()
     val imageActionsContext = androidx.compose.ui.platform.LocalContext.current
+    val imageShareFailedFeedback = stringResource(
+        fr.forumhfr.redface2.core.ui.R.string.post_image_menu_share_failed,
+    )
     LaunchedEffect(imageActionsViewModel) {
         imageActionsViewModel.effects.collect { effect ->
             val messageRes = when (effect) {
@@ -2168,7 +2172,12 @@ private fun TopicLoadedContent(
                     R.string.topic_image_menu_save_failed_storage
                 PostImageActionsViewModel.SaveImageEffect.FAILED_TOO_LARGE ->
                     R.string.topic_image_menu_save_failed_too_large
+                is PostImageActionsViewModel.ShareImageEffect -> {
+                    sharePostImageUrl(imageActionsContext, effect.url, imageShareFailedFeedback)
+                    null
+                }
             }
+            if (messageRes == null) return@collect
             // The @StringRes overload resolves at show() time — no LocalContext resource query
             // (LocalContextGetResourceValueCall) for a one-shot Toast.
             android.widget.Toast.makeText(
@@ -2638,6 +2647,11 @@ private fun TopicLoadedContent(
             } else {
                 null
             },
+            onQuoteStart = if (shouldShowQuoteAction(topic, state.isAuthenticated)) {
+                { onQuoteRequested(post.toQuoteSelection(topic.page, truncate = true)) }
+            } else {
+                null
+            },
             // #509 — a post reachable through the menu is either not blocked, or blocked-but-revealed;
             // either way `numreponse in hiddenNumreponses` tells whether the author is blacklisted, so
             // the entry flips between Masquer / Ne plus masquer. Hidden for the user's own posts.
@@ -2658,6 +2672,7 @@ private fun TopicLoadedContent(
         PostImageMenuSheet(
             target = target,
             onSave = imageActionsViewModel::saveImage,
+            onShare = imageActionsViewModel::shareImage,
             onDismiss = { imageMenuTarget = null },
         )
     }
@@ -4166,8 +4181,8 @@ internal fun rememberQuickReplyLaunch(): MutableState<QuickReplyLaunch?> =
 
 /**
  * #953 (F3) — explicit [Saver] for the (non-Parcelable) [QuickReplyLaunch] : the flat list is
- * `[cat, subcat, topicId, page, consumesBasket, then page/numreponse/ref/author/excerpt per quote]` —
- * primitives only, all Bundle-safe. A null launch (sheet closed) is handled by [listSaver]
+ * `[cat, subcat, topicId, page, consumesBasket, then page/numreponse/ref/author/excerpt/truncate
+ * per quote]` — primitives only, all Bundle-safe. A null launch (sheet closed) is handled by [listSaver]
  * itself : the empty list it produces is stored as null, restored as null, and this saver's
  * `restore` only ever sees non-empty lists.
  */
@@ -4188,6 +4203,7 @@ internal val QuickReplyLaunchSaver: Saver<QuickReplyLaunch?, Any> = listSaver<Qu
                     add(quote.locator.ref ?: QUICK_REPLY_SAVER_REF_ABSENT)
                     add(quote.author)
                     add(quote.excerpt)
+                    add(quote.truncate)
                 }
             }
         }
@@ -4205,13 +4221,16 @@ internal val QuickReplyLaunchSaver: Saver<QuickReplyLaunch?, Any> = listSaver<Qu
                 ),
                 initialQuotes = saved
                     .drop(QUICK_REPLY_SAVER_HEADER_SIZE)
-                    .chunked(QUICK_REPLY_SAVER_QUOTE_FIELDS)
+                    .let { quoteFields ->
+                        quoteFields.chunked(quickReplySaverQuoteFields(quoteFields.size))
+                    }
                     .map { fields ->
                         val page = fields[0] as Int
                         val numreponse = fields[1] as Int
                         val ref = fields[2] as Int
                         val author = fields[3] as String
                         val excerpt = fields[4] as String
+                        val truncate = fields.getOrNull(5) as? Boolean ?: false
                         QuoteSelection(
                             locator = QuoteLocator(
                                 page = page,
@@ -4220,6 +4239,7 @@ internal val QuickReplyLaunchSaver: Saver<QuickReplyLaunch?, Any> = listSaver<Qu
                             ),
                             author = author,
                             excerpt = excerpt,
+                            truncate = truncate,
                         )
                     },
                 consumesBasket = saved[4] as Boolean,
@@ -4231,8 +4251,11 @@ internal val QuickReplyLaunchSaver: Saver<QuickReplyLaunch?, Any> = listSaver<Qu
 /** [QuickReplyLaunchSaver] layout: request Ints + consumesBasket before the quote fields. */
 private const val QUICK_REPLY_SAVER_HEADER_SIZE = 5
 
-/** [QuickReplyLaunchSaver] layout : page, numreponse, ref, author, excerpt per armed quote. */
-private const val QUICK_REPLY_SAVER_QUOTE_FIELDS = 5
+/** [QuickReplyLaunchSaver] layout : page, numreponse, ref, author, excerpt, truncate per quote. */
+private const val QUICK_REPLY_SAVER_QUOTE_FIELDS = 6
+
+/** Pre-#327 saved launches did not carry the truncate flag. */
+private const val QUICK_REPLY_SAVER_QUOTE_FIELDS_LEGACY = 5
 
 /** Bundle-safe encoding of a nullable quote ref; real HFR refs are non-negative. */
 private const val QUICK_REPLY_SAVER_REF_ABSENT = -1
@@ -4271,11 +4294,19 @@ internal const val MULTI_QUOTE_FULL_EDITOR_THRESHOLD = 3
 // #604/#1074 — typed locator + quote-card snapshot, built AT SELECTION TIME where the full Post and
 // its page are in scope (the cards never re-parse a post; the exact [quotemsg] is fetched at
 // materialisation). The app-level basket completes identity with QuoteScope.
-internal fun Post.toQuoteSelection(page: Int): QuoteSelection = QuoteSelection(
+internal fun Post.toQuoteSelection(page: Int, truncate: Boolean = false): QuoteSelection = QuoteSelection(
     locator = QuoteLocator(page = page, numreponse = numreponse, ref = quoteRef),
     author = author,
     excerpt = postContentExcerpt(content),
+    truncate = truncate,
 )
+
+private fun quickReplySaverQuoteFields(size: Int): Int =
+    if (size % QUICK_REPLY_SAVER_QUOTE_FIELDS == 0) {
+        QUICK_REPLY_SAVER_QUOTE_FIELDS
+    } else {
+        QUICK_REPLY_SAVER_QUOTE_FIELDS_LEGACY
+    }
 
 internal fun shouldEnableReply(topic: Topic, isAuthenticated: Boolean): Boolean =
     topic.canReply && isAuthenticated

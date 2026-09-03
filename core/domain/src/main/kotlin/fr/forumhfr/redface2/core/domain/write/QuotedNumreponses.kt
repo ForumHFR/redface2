@@ -19,7 +19,7 @@ object QuotedNumreponses {
      * carry three, some materialised forms only one). Case-insensitive like HFR's BBCode. A
      * missing `[/quotemsg]` is not the extractor's concern — the post was still cited.
      */
-    private val QUOTEMSG_OPEN_TAG: Regex =
+    internal val QUOTEMSG_OPEN_TAG: Regex =
         Regex("""\[quotemsg=\s*(\d+)\s*(?:,[^\]]*)?]""", RegexOption.IGNORE_CASE)
 
     /** Cited `numreponse`s found in [bbcode], first-appearance order, deduplicated. */
