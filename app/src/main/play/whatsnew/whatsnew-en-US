@@ -1,4 +1,7 @@
-Redface 2 v0.53.3 — dev.
+Redface 2 v0.53.4 — dev.
 
-- Back from a topic opened through an HFR link inside a post returns to the original topic, not the flags list (#1251).
-- "Go there" after posting from a late page reloads the target page: the new post shows up without a manual refresh (#1252).
+- Flags: the Super tab makes no network calls; orphan pins can be removed; subcategory labels show up.
+- Polls: percentages match HFR.
+- "Post published on page N" snackbar no longer blocks scrolling.
+- HFR links inside a post open the right tab.
+- Colours: settings survive rapid taps, hex input is kept while typing.

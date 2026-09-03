@@ -16,6 +16,21 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.53.4` — `internal` (dev) — 2026-09-03
+
+Correctifs issus de la double revue LLM (Opus 5 + Codex) de la PR de promotion dev → main #1250. Produit par Sol (Codex) sous gate Fable ; PRs #1256, #1257, #1258.
+
+### Corrigé
+
+- **Drapeaux, onglet Super : zéro appel réseau** — chaque épingle déclenchait un fan-out REST par catégorie (onglet blanc, ~150 requêtes) ; la résolution est maintenant cache-only avec repli sur le titre stocké. Une épingle orpheline (catégorie inconnue) peut de nouveau être retirée par appui long. Les libellés de sous-catégorie (#741) sont rafraîchis une fois par catégorie au démarrage. Un second pull pendant un rafraîchissement en vol est ignoré ; le toggle super favori est transactionnel.
+- **Sondages : pourcentages HFR** — les barres affichent le pourcentage parsé (votes exprimés) au lieu d'un recalcul incluant les votes blancs (19 % au lieu de 20.1 % sur un cas réel).
+- **Snackbar « Message publié en page N » non bloquante** — elle suspendait la file d'effets de l'écran pendant 10 s, retardant les défilements. Après une réponse simple depuis une page servie provisoirement, le défilement en bas de page est de nouveau armé.
+- **Liens HFR dans un post : destination honorée** — un lien vers la liste des drapeaux ou une catégorie bascule sur le bon onglet ; un lien vers un topic reste sur l'onglet courant (#1251). `page<=0` dans un lien externe est ramené à 1.
+- **Couleurs** — l'écriture groupée des préférences passe sous mutex (deux taps rapprochés ne persistent plus l'ancien accent) ; la saisie hexadécimale en cours n'est plus écrasée par une émission de préférences.
+- **Specs** — `mvi.md`, `navigation.md`, `reading-parity.md` alignées sur le code.
+
+---
+
 ## `0.53.3` — `internal` (dev) — 2026-09-03
 
 Correctifs du matin sur les retours des testeurs de la nuit. Produit par Sol (Codex) sous gate Fable ; PR #1255.

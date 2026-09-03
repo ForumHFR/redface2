@@ -1,4 +1,7 @@
-Redface 2 v0.53.3 — dev.
+Redface 2 v0.53.4 — dev.
 
-- Retour depuis un topic ouvert via un lien HFR dans un message revient au topic d'origine, plus à la liste des drapeaux (#1251).
-- « Y aller » après un envoi depuis une page en retard recharge la page cible : le nouveau message est visible sans rafraîchir (#1252).
+- Drapeaux : l'onglet Super ne fait plus d'appels réseau ; épingles orphelines retirables ; sous-catégories affichées.
+- Sondages : pourcentages identiques à HFR.
+- Snackbar « Message publié en page N » ne bloque plus le défilement.
+- Liens HFR dans un post : le bon onglet s'ouvre.
+- Couleurs : réglages fiables en cas de taps rapides, saisie hex conservée.
