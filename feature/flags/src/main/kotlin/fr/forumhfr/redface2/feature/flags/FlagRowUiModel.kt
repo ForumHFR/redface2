@@ -22,6 +22,8 @@ import fr.forumhfr.redface2.core.model.pagesToRead
  * @property effectiveColor see [Flag.effectiveFlagColor] — the bucket color, favori-overridden.
  * @property dimmed `true` for a fully-read flag (`!hasUnread`): the marker is rendered desaturated.
  * @property markerStyle the configured marker shape for this view ([MarkerStyle], default STRIPE).
+ * @property subcatName resolved subcategory label displayed in the row metadata, or `null` when the
+ *   topic has no subcategory / the catalogue is not loaded yet.
  */
 data class FlagRowUiModel(
     val flag: Flag,
@@ -29,13 +31,21 @@ data class FlagRowUiModel(
     val effectiveColor: FlagType,
     val dimmed: Boolean,
     val markerStyle: MarkerStyle,
-)
+    val subcatName: String? = null,
+) {
+    val cat: Int get() = flag.cat
+    val topicId: Int get() = flag.topicId
+    val title: String get() = flag.title
+    val hasUnread: Boolean get() = flag.hasUnread
+    val subcat: Int? get() = flag.subcat
+}
 
 /** Builds the [FlagRowUiModel] for this flag under the given [markerStyle]. Pure. */
-fun Flag.toFlagRowUiModel(markerStyle: MarkerStyle): FlagRowUiModel = FlagRowUiModel(
+fun Flag.toFlagRowUiModel(markerStyle: MarkerStyle, subcatName: String? = null): FlagRowUiModel = FlagRowUiModel(
     flag = this,
     pagesToRead = pagesToRead(),
     effectiveColor = effectiveFlagColor(),
     dimmed = !hasUnread,
     markerStyle = markerStyle,
+    subcatName = subcatName,
 )

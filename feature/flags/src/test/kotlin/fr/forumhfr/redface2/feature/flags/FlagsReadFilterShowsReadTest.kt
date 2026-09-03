@@ -7,7 +7,8 @@ import org.junit.Test
 /**
  * #661 → #751 — the picker dropdown's contextual « +lus » entry exists for every tab that carries a
  * read filter (all real tabs since #751 — Cyan / Red / Favori / DT) and its label follows their
- * current state; only the Super placeholder gets no entry (null). Pure mapping → unit-tested.
+ * current state; only Super gets no entry (null) because it is a local snapshot list without unread
+ * filter. Pure mapping → unit-tested.
  */
 class FlagsReadFilterShowsReadTest {
 
@@ -44,7 +45,7 @@ class FlagsReadFilterShowsReadTest {
     }
 
     @Test
-    fun `the Super placeholder has no entry`() {
+    fun `the Super tab has no read-filter entry`() {
         assertNull(showsRead(FlagTab.Super, cyan = true, dt = true, red = true, favorite = true))
     }
 }

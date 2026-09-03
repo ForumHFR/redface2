@@ -623,6 +623,9 @@ class DefaultFlagRepository @Inject constructor(
         return synchronized(cachedSuccesses) { scanCachedFlags(cat = cat, topicId = topicId) }
     }
 
+    override suspend fun findCachedFlag(topicId: Int): Flag? =
+        synchronized(cachedSuccesses) { scanCachedFlags(topicId = topicId) }
+
     /**
      * First flag matching `(cat, topicId)` across every warm per-type bucket, or null. Must be called
      * under the [cachedSuccesses] lock (#809). EnumMap iteration is CYAN → RED → FAVORITE, so a topic
@@ -633,6 +636,16 @@ class DefaultFlagRepository @Inject constructor(
             .asSequence()
             .flatMap { it.flags.asSequence() }
             .firstOrNull { it.cat == cat && it.topicId == topicId }
+
+    /**
+     * Legacy super-favorites only stored `topicId`, so they can only be resolved from already-warm
+     * caches. No cold bucket fetch here: missing `cat` makes network resolution ambiguous.
+     */
+    private fun scanCachedFlags(topicId: Int): Flag? =
+        cachedSuccesses.values
+            .asSequence()
+            .flatMap { it.flags.asSequence() }
+            .firstOrNull { it.topicId == topicId }
 
     /**
      * Drops [flag] from the in-memory success cache and Room, then re-emits the trimmed

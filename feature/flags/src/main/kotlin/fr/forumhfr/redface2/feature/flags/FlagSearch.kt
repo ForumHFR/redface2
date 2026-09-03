@@ -25,6 +25,12 @@ fun filterFlagsByQuery(flags: List<Flag>, query: String): List<Flag> {
     return flags.filter { it.title.containsFolded(q) }
 }
 
+fun filterFlagRowsByQuery(rows: List<FlagRowUiModel>, query: String): List<FlagRowUiModel> {
+    val q = query.trim()
+    if (q.isEmpty()) return rows
+    return rows.filter { it.title.containsFolded(q) }
+}
+
 /**
  * Applies [filterFlagsByQuery] to a whole [FlagsContent].
  *
@@ -36,10 +42,10 @@ fun filterFlagsByQuery(flags: List<Flag>, query: String): List<Flag> {
 fun FlagsContent.filteredBy(query: String): FlagsContent {
     if (query.isBlank()) return this
     return when (this) {
-        is FlagsContent.Flat -> FlagsContent.Flat(filterFlagsByQuery(flags, query))
+        is FlagsContent.Flat -> FlagsContent.Flat(filterFlagRowsByQuery(rows, query))
         is FlagsContent.Grouped -> FlagsContent.Grouped(
             sections.mapNotNull { section ->
-                val kept = filterFlagsByQuery(section.topics, query)
+                val kept = filterFlagRowsByQuery(section.topics, query)
                 if (kept.isEmpty()) null else section.copy(topics = kept)
             },
         )
@@ -48,7 +54,7 @@ fun FlagsContent.filteredBy(query: String): FlagsContent {
 
 /** True when this content holds no topic at all (every section empty, or a flat empty list). */
 fun FlagsContent.isEmpty(): Boolean = when (this) {
-    is FlagsContent.Flat -> flags.isEmpty()
+    is FlagsContent.Flat -> rows.isEmpty()
     is FlagsContent.Grouped -> sections.all { it.topics.isEmpty() }
 }
 

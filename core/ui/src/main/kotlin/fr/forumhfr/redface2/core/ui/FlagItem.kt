@@ -79,6 +79,7 @@ fun FlagItem(
     modifier: Modifier = Modifier,
     longPress: FlagItemLongPress? = null,
     markerStyle: MarkerStyle = MarkerStyle.STRIPE,
+    subcatName: String? = null,
 ) {
     // FlagItem is a thin `Flag`-typed binding over the shared [ForumListRow]. #603 refonte: the leading
     // slot is now the configurable [FlagMarker] (default barre de couleur, ADR-017) and the trailing
@@ -90,7 +91,7 @@ fun FlagItem(
     val pagesToRead = flag.pagesToRead()
     ForumListRow(
         title = flag.title,
-        metadata = metadata,
+        metadata = metadata.withSubcategory(subcatName),
         onClick = onClick,
         modifier = modifier,
         emphasized = flag.hasUnread,
@@ -110,6 +111,12 @@ fun FlagItem(
             null
         },
     )
+}
+
+private fun FlagMetadata.withSubcategory(subcatName: String?): FlagMetadata {
+    val cleanSubcat = subcatName?.takeIf { it.isNotBlank() } ?: return this
+    val cleanStart = start.takeIf { it.isNotBlank() }
+    return copy(start = listOfNotNull(cleanStart, cleanSubcat).joinToString(" · "))
 }
 
 /**

@@ -49,6 +49,14 @@ interface ForumRepository {
 
     fun observeSubcategories(cat: Int): Flow<ForumResult<List<SubCategory>>>
 
+    /**
+     * Cache-only subcategory stream for list adornments that must not fan out across every category
+     * on screen start. Emits the current in-memory/DB value when known, `null` when cold, then future
+     * refresh emissions. It never performs a network request by itself; callers that decide a visible
+     * category needs names must call [refreshSubcategories] explicitly.
+     */
+    fun observeCachedSubcategories(cat: Int): Flow<ForumResult<List<SubCategory>>?>
+
     suspend fun refreshSubcategories(cat: Int)
 
     fun observeTopicList(
