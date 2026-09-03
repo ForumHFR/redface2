@@ -100,10 +100,16 @@ class DataStoreUserPreferencesRepository @Inject constructor(
     // could otherwise return the pre-write disk value).
     private val forumCategoryFlagFilterCache = MutableStateFlow<CategoryFlagFilter?>(null)
 
+    // Same cache-first contract for the grouped theme-colour bundle (#1250 H3). Each UI action
+    // persists five DataStore keys; the cache is the in-session source of truth while queued disk
+    // commits converge on the latest complete bundle, not a stale caller snapshot.
+    private val themeColorPreferencesCache = MutableStateFlow<ThemeColorPreferences?>(null)
+
     // #1132 — serialises the disk writes of THIS key so two rapid choices cannot interleave; combined
     // with persisting the LATEST cache value inside the lock (below), the stored value converges to
     // the last choice (strict last-wins) regardless of the order the async commits execute.
     private val forumCategoryFlagFilterWriteMutex = Mutex()
+    private val themeColorPreferencesWriteMutex = Mutex()
 
     override fun observeProxyConfig(): Flow<ProxyConfig> =
         dataStore.data
@@ -311,22 +317,42 @@ class DataStoreUserPreferencesRepository @Inject constructor(
     }
 
     override fun observeThemeColorPreferences(): Flow<ThemeColorPreferences> =
-        dataStore.data
-            .map(::readThemeColorPreferences)
+        themeColorPreferencesCache
+            .onStart {
+                if (themeColorPreferencesCache.value == null) {
+                    val fromDisk = runCatching { readThemeColorPreferences(dataStore.data.first()) }
+                        .getOrDefault(ThemeColorPreferences())
+                    themeColorPreferencesCache.compareAndSet(null, fromDisk)
+                }
+            }
+            .filterNotNull()
             .distinctUntilChanged()
             .onEach(::backfillThemeColorBootstrap)
             .catch { emit(ThemeColorPreferences()) }
 
     override suspend fun setThemeColorPreferences(preferences: ThemeColorPreferences) {
-        persist {
-            dataStore.edit { prefs ->
-                writeThemeAccent(prefs, preferences.accent)
-                prefs[KEY_LIGHT_SURFACE_TONE] = preferences.lightSurfaceTone.name
-                prefs[KEY_AMOLED_ENABLED] = preferences.darkSurfaceTone == DarkSurfaceTone.AMOLED
-                prefs[KEY_DYNAMIC_COLOR_ENABLED] = preferences.dynamicColorEnabled
-                prefs[KEY_POST_HEADER_EMPHASIS] = preferences.postHeaderEmphasis.name
+        val stale = themeColorPreferencesCache.value
+        themeColorPreferencesCache.value = preferences
+        try {
+            persist {
+                themeColorPreferencesWriteMutex.withLock {
+                    val latest = themeColorPreferencesCache.value ?: preferences
+                    dataStore.edit { prefs ->
+                        writeThemeAccent(prefs, latest.accent)
+                        prefs[KEY_LIGHT_SURFACE_TONE] = latest.lightSurfaceTone.name
+                        prefs[KEY_AMOLED_ENABLED] = latest.darkSurfaceTone == DarkSurfaceTone.AMOLED
+                        prefs[KEY_DYNAMIC_COLOR_ENABLED] = latest.dynamicColorEnabled
+                        prefs[KEY_POST_HEADER_EMPHASIS] = latest.postHeaderEmphasis.name
+                    }
+                    themeBootstrapStore.writeThemeColorPreferences(latest)
+                }
             }
-            themeBootstrapStore.writeThemeColorPreferences(preferences)
+        } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+            // The cache is the in-session source of truth: an unpersisted bundle must not survive a
+            // failed commit (theme vs. settings divergence, bootstrap mirror backfilled with it). The
+            // CAS keeps a newer bundle written meanwhile (Opus review of #1250 H3).
+            themeColorPreferencesCache.compareAndSet(preferences, stale)
+            throw error
         }
     }
 

@@ -312,11 +312,14 @@ class SettingsViewModel @Inject constructor(
 
     private fun SettingsState.withThemeColorPreferences(preferences: ThemeColorPreferences): SettingsState {
         val customInput = preferences.customAccentSyncedInput()
+        val accentChanged = preferences.accent != themeColorPreferences.accent
+        val dirtyInput = customAccentHexInput != customAccentHexSyncedInput
+        val syncInput = accentChanged || !dirtyInput
         return copy(
             themeColorPreferences = preferences,
-            customAccentHexInput = customInput,
+            customAccentHexInput = if (syncInput) customInput else customAccentHexInput,
             customAccentHexSyncedInput = customInput,
-            customAccentHexError = false,
+            customAccentHexError = if (syncInput) false else customAccentHexError,
         )
     }
 

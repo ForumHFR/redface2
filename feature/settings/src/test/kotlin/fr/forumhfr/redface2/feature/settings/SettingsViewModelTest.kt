@@ -1690,6 +1690,20 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `theme colour emission keeps dirty custom accent input`() = runTest {
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.CustomAccentHexChanged("#12"))
+        repository.emitThemeColorPreferences(ThemeColorPreferences(dynamicColorEnabled = true))
+
+        val state = viewModel.state.value
+        assertEquals("#12", state.customAccentHexInput)
+        assertEquals("", state.customAccentHexSyncedInput)
+        assertEquals(ThemeColorPreferences(dynamicColorEnabled = true), state.themeColorPreferences)
+        assertFalse(state.customAccentHexError)
+    }
+
+    @Test
     fun `ThemeAccentPresetChanged persists the chosen preset`() = runTest {
         val viewModel = newViewModel()
 

@@ -75,12 +75,83 @@ class TabBackStackTest {
     }
 
     @Test
+    fun `in-app topic link keeps the active tab continuity`() {
+        val category = CategoryRoute(cat = 23)
+        val topic = TopicRoute(cat = 23, post = 100, page = 4)
+        val stacks = mapOf(
+            flags to listOf(FlagsListRoute),
+            forum to listOf(ForumRoute, category),
+        )
+
+        val result = inAppRouteBackStackAfterOpen(
+            currentDestination = forum,
+            parsed = ParsedDeepLink(destination = flags, route = topic),
+            backStackFor = { destination -> stacks.getValue(destination) },
+        )
+
+        assertEquals(forum, result.destination)
+        assertEquals(listOf(ForumRoute, category, topic), result.backStack)
+    }
+
+    @Test
+    fun `in-app flags link switches to Flags and pops that tab to root`() {
+        val topic = TopicRoute(cat = 23, post = 100, page = 4)
+        val stacks = mapOf(
+            flags to listOf(FlagsListRoute, topic),
+            forum to listOf(ForumRoute),
+        )
+
+        val result = inAppRouteBackStackAfterOpen(
+            currentDestination = forum,
+            parsed = ParsedDeepLink(destination = flags, route = FlagsListRoute),
+            backStackFor = { destination -> stacks.getValue(destination) },
+        )
+
+        assertEquals(flags, result.destination)
+        assertEquals(listOf(FlagsListRoute), result.backStack)
+    }
+
+    @Test
+    fun `in-app category link switches to Forum and pushes on the Forum stack`() {
+        val category = CategoryRoute(cat = 23, subcat = 550, page = 2)
+        val stacks = mapOf(
+            flags to listOf(FlagsListRoute),
+            forum to listOf(ForumRoute),
+        )
+
+        val result = inAppRouteBackStackAfterOpen(
+            currentDestination = flags,
+            parsed = ParsedDeepLink(destination = forum, route = category),
+            backStackFor = { destination -> stacks.getValue(destination) },
+        )
+
+        assertEquals(forum, result.destination)
+        assertEquals(listOf(ForumRoute, category), result.backStack)
+    }
+
+    @Test
     fun `in-app HFR route already on top is a no-op`() {
         val topic = TopicRoute(cat = 23, post = 100, page = 4)
 
         assertEquals(
             listOf(FlagsListRoute, topic),
             inAppRouteBackStackAfterOpen(listOf(FlagsListRoute, topic), topic),
+        )
+    }
+
+    @Test
+    fun `in-app HFR same topic with different page or anchor is pushed as a distinct key`() {
+        val topic = TopicRoute(cat = 23, post = 100, page = 4, scrollTo = 123)
+        val sameTopicDifferentPage = TopicRoute(cat = 23, post = 100, page = 5, scrollTo = 123)
+        val sameTopicDifferentAnchor = TopicRoute(cat = 23, post = 100, page = 4, scrollTo = 456)
+
+        assertEquals(
+            listOf(FlagsListRoute, topic, sameTopicDifferentPage),
+            inAppRouteBackStackAfterOpen(listOf(FlagsListRoute, topic), sameTopicDifferentPage),
+        )
+        assertEquals(
+            listOf(FlagsListRoute, topic, sameTopicDifferentAnchor),
+            inAppRouteBackStackAfterOpen(listOf(FlagsListRoute, topic), sameTopicDifferentAnchor),
         )
     }
 

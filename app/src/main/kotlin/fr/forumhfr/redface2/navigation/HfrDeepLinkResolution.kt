@@ -78,7 +78,7 @@ internal fun parseHfrDeepLink(uri: Uri): ParsedDeepLink? = when (uri.path) {
     "/forum2.php" -> {
         val cat = uri.getQueryParameter("cat")?.toIntOrNull() ?: return null
         val post = uri.getQueryParameter("post")?.toIntOrNull() ?: return null
-        val page = uri.getQueryParameter("page")?.toIntOrNull() ?: 1
+        val page = uri.getQueryParameter("page")?.toIntOrNull()?.coerceAtLeast(1) ?: 1
         // #750 — the `numreponse` QUERY param is the fallback target: HFR email-notification
         // links carry it alongside the fragment, and some mail clients strip the fragment.
         val scrollTo = uri.fragment?.removePrefix("t")?.toIntOrNull()

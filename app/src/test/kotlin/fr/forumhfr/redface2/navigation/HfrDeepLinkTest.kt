@@ -90,6 +90,18 @@ class HfrDeepLinkTest {
     }
 
     @Test
+    fun `forum2 php with page below one clamps to page 1`() {
+        val uri = Uri.parse("https://forum.hardware.fr/forum2.php?cat=23&post=35395&page=0")
+
+        val parsed = parseHfrDeepLink(uri)
+
+        assertEquals(
+            TopicRoute(cat = 23, post = 35395, page = 1, scrollTo = null),
+            parsed?.route,
+        )
+    }
+
+    @Test
     fun `forum2 php email link with page 1 and an anchor marks the page for resolution (#750)`() {
         // Real-world email-notification shape (issue #750): page=1 is a lie, the target
         // travels both as the `numreponse` query param and the `#t` fragment.
