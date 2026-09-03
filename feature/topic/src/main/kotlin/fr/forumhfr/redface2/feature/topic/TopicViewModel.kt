@@ -462,6 +462,11 @@ class TopicViewModel @AssistedInject constructor(
                 _state.update { it.copy(fullWidthPosts = fullWidth) }
             }
             .launchIn(viewModelScope)
+        userPreferencesRepository.observeThemeColorPreferences()
+            .onEach { preferences ->
+                _state.update { it.copy(postHeaderEmphasis = preferences.postHeaderEmphasis) }
+            }
+            .launchIn(viewModelScope)
         // #874 Q4/P1 — render-only Ego switches. They remain independent so an own post can keep
         // its blue container while an auto-citation inside it independently keeps the purple one.
         userPreferencesRepository.observeTopicEgoQuoteEnabled()

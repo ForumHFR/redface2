@@ -8,12 +8,14 @@ import com.materialkolor.scheme.SchemeTonalSpot
 import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
 import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.LightSurfaceTone
+import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
 import fr.forumhfr.redface2.core.domain.preferences.ThemeAccent
 import fr.forumhfr.redface2.core.domain.preferences.seedArgb
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.LagTone
 import fr.forumhfr.redface2.core.ui.post.ModerationHighlightColors
 import fr.forumhfr.redface2.core.ui.post.moderationHighlightColors
+import fr.forumhfr.redface2.core.ui.post.postHeaderColors
 import fr.forumhfr.redface2.core.ui.post.spoilerContainerColor
 import kotlin.math.sqrt
 import org.junit.Assert.assertEquals
@@ -137,6 +139,19 @@ class RedfaceColorSchemeTest {
             )
             assertContrast("$name primary/surface", scheme.primary, scheme.surface, MIN_ACCENT_CONTRAST)
             assertContrast("$name primary/post", scheme.primary, scheme.surfaceContainer, MIN_LINK_CONTRAST)
+        }
+    }
+
+    @Test
+    fun `vivid post header uses the solid primary pair with readable contrast`() {
+        allSchemes().forEach { (name, scheme) ->
+            val subtle = postHeaderColors(PostHeaderEmphasis.SUBTLE, scheme)
+            val vivid = postHeaderColors(PostHeaderEmphasis.VIVID, scheme)
+
+            assertNotEquals("$name vivid/subtle container", subtle.containerColor, vivid.containerColor)
+            assertEquals("$name vivid container", scheme.primary, vivid.containerColor)
+            assertEquals("$name vivid content", scheme.onPrimary, vivid.contentColor)
+            assertContrast("$name vivid post header", vivid.contentColor, vivid.containerColor, MIN_TEXT_CONTRAST)
         }
     }
 

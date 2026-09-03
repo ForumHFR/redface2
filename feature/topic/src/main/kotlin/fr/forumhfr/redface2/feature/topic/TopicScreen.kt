@@ -56,7 +56,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.contentColorFor
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
@@ -116,6 +115,7 @@ import fr.forumhfr.redface2.core.domain.author.isRf2Creator
 import fr.forumhfr.redface2.core.domain.author.resolveAuthorRolePill
 import fr.forumhfr.redface2.core.domain.ego.deriveEgoCanonicalPseudo
 import fr.forumhfr.redface2.core.domain.ego.isEgoPost
+import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
 import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.Poll
@@ -147,6 +147,7 @@ import fr.forumhfr.redface2.core.ui.post.PostListScaffold
 import fr.forumhfr.redface2.core.ui.post.ReadingPostCard
 import fr.forumhfr.redface2.core.ui.post.ReadingPostCardPresentation
 import fr.forumhfr.redface2.core.ui.post.collectPostMediaUrls
+import fr.forumhfr.redface2.core.ui.post.postHeaderColors
 import fr.forumhfr.redface2.core.ui.post.readingContentColors
 import fr.forumhfr.redface2.core.ui.post.retryFailedPostMedia
 import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
@@ -2497,6 +2498,7 @@ private fun TopicLoadedContent(
                         onImageLongPress = postImageActions.onLongPress,
                         // #884 — « posts en pleine largeur »: boundary-less card, full bleed.
                         flat = state.fullWidthPosts,
+                        postHeaderEmphasis = state.postHeaderEmphasis,
                         // #983 — who closes this post's bottom edge (derived above).
                         flatBottomEdge = flatBottomEdge,
                         // #874 — Q4 and P1 are independent: an own post carrying an auto-citation
@@ -3225,6 +3227,8 @@ internal fun TopicPostCard(
      * Default `false`: the historical card.
      */
     flat: Boolean = false,
+    /** #595 nuit F — optional vivid accent identity band; default keeps historical subtle tint. */
+    postHeaderEmphasis: PostHeaderEmphasis = PostHeaderEmphasis.SUBTLE,
     /**
      * #983 — forwarded to [ReadingPostCard]: whether this flat post draws its own closing hairline, or
      * draws none — because what follows brings its own boundary (separator rule, island border), or
@@ -3333,17 +3337,21 @@ internal fun TopicPostCard(
         // PostIdentityBand (#351) receives both roles explicitly; the enclosing Card clips the strip
         // to its rounded corners. The #104 tint logic stays the topic's decision.
         identity = { moderationOverride ->
-            val bandContainerColor = when {
+            val normalHeaderColors = postHeaderColors(postHeaderEmphasis)
+            val bandColors = when {
                 // #1112 (retour device XaTriX) : un post de modération garde son header rouge même
                 // quand il est la cible d'ancrage — le rouge persistant prime sur la teinte d'ancrage transitoire.
-                moderationOverride != null -> moderationOverride.containerColor
-                highlighted -> MaterialTheme.colorScheme.tertiaryContainer
-                else -> MaterialTheme.colorScheme.secondaryContainer
+                moderationOverride != null -> moderationOverride
+                highlighted -> normalHeaderColors.copy(
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+                else -> normalHeaderColors
             }
-            val bandContentColor = when {
-                moderationOverride != null -> moderationOverride.contentColor
-                highlighted -> contentColorFor(MaterialTheme.colorScheme.tertiaryContainer)
-                else -> contentColorFor(MaterialTheme.colorScheme.secondaryContainer)
+            val supportingContentColorOverride = when {
+                moderationOverride != null -> bandColors.contentColor
+                !highlighted && postHeaderEmphasis == PostHeaderEmphasis.VIVID -> bandColors.contentColor
+                else -> null
             }
             PostIdentityBand(
                 // #874/#1112 — colour is not the sole signal: the active intrinsic marker sits on
@@ -3357,16 +3365,16 @@ internal fun TopicPostCard(
                                 stateDescription = moderationPostStateDescription
                             }
                         }
-                    },
-                containerColor = bandContainerColor,
-                contentColor = bandContentColor,
+                },
+                containerColor = bandColors.containerColor,
+                contentColor = bandColors.contentColor,
             ) {
                 TopicPostIdentityHeader(
                     post = post,
                     authorRole = authorRole,
                     onOpenProfile = onOpenProfile,
                     onOpenMenu = onOpenMenu,
-                    supportingContentColorOverride = moderationOverride?.let { bandContentColor },
+                    supportingContentColorOverride = supportingContentColorOverride,
                     // #287 — the band's header padding (12.dp horizontal, m.cardHeaderVertical vertical)
                     // is reinjected on the header slot's modifier (densities stay feature-owned, #351).
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = m.cardHeaderVertical),

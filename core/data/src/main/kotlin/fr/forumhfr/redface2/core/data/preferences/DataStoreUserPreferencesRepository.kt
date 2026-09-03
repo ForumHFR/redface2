@@ -24,6 +24,7 @@ import fr.forumhfr.redface2.core.domain.preferences.LightSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.domain.preferences.NavBarLabelsBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
+import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
@@ -323,6 +324,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
                 prefs[KEY_LIGHT_SURFACE_TONE] = preferences.lightSurfaceTone.name
                 prefs[KEY_AMOLED_ENABLED] = preferences.darkSurfaceTone == DarkSurfaceTone.AMOLED
                 prefs[KEY_DYNAMIC_COLOR_ENABLED] = preferences.dynamicColorEnabled
+                prefs[KEY_POST_HEADER_EMPHASIS] = preferences.postHeaderEmphasis.name
             }
             themeBootstrapStore.writeThemeColorPreferences(preferences)
         }
@@ -1023,6 +1025,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             lightSurfaceTone = readLightSurfaceTone(prefs),
             darkSurfaceTone = readDarkSurfaceTone(prefs),
             dynamicColorEnabled = prefs[KEY_DYNAMIC_COLOR_ENABLED] ?: false,
+            postHeaderEmphasis = readPostHeaderEmphasis(prefs),
         )
 
     /**
@@ -1056,6 +1059,11 @@ class DataStoreUserPreferencesRepository @Inject constructor(
 
     private fun readDarkSurfaceTone(prefs: Preferences): DarkSurfaceTone =
         if (prefs[KEY_AMOLED_ENABLED] == true) DarkSurfaceTone.AMOLED else DarkSurfaceTone.MATERIAL_TINTED
+
+    private fun readPostHeaderEmphasis(prefs: Preferences): PostHeaderEmphasis =
+        prefs[KEY_POST_HEADER_EMPHASIS]
+            ?.let { stored -> PostHeaderEmphasis.entries.firstOrNull { it.name == stored } }
+            ?: PostHeaderEmphasis.SUBTLE
 
     private fun writeThemeAccent(prefs: MutablePreferences, accent: ThemeAccent) {
         when (accent) {
@@ -1262,6 +1270,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val KEY_ACCENT_CUSTOM_RGB = intPreferencesKey("accent_custom_rgb")
         val KEY_LIGHT_SURFACE_TONE = stringPreferencesKey("light_surface_tone")
         val KEY_DYNAMIC_COLOR_ENABLED = booleanPreferencesKey("dynamic_color_enabled")
+        val KEY_POST_HEADER_EMPHASIS = stringPreferencesKey("post_header_emphasis")
 
         // #1207 — opt-in Android chooser for every explicit external-link opening.
         val KEY_ALWAYS_ASK_LINK_APP = booleanPreferencesKey("always_ask_link_app")

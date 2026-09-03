@@ -23,10 +23,12 @@ import androidx.compose.ui.test.requestFocus
 import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
 import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.LightSurfaceTone
+import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
 import fr.forumhfr.redface2.core.domain.preferences.ThemeAccent
 import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.core.ui.post.postHeaderColors
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -105,6 +107,34 @@ class SettingsColorsScreenTest {
         composeTestRule.onNodeWithText("Sombre").performScrollTo().performClick()
 
         assertEquals(listOf(SettingsIntent.ThemeModeChanged(ThemeMode.DARK)), intents)
+    }
+
+    @Test
+    fun `post header emphasis group is shown and selecting vivid emits PostHeaderEmphasisChanged`() {
+        val intents = mutableListOf<SettingsIntent>()
+
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, dynamicColor = false) {
+                SettingsColorsContent(
+                    state = SettingsState(),
+                    callbacks = SettingsColorsCallbacks(
+                        onBack = {},
+                        onIntent = { intents += it },
+                    ),
+                    environment = SettingsColorsEnvironment(
+                        effectiveDark = false,
+                        systemColorsAvailable = true,
+                    ),
+                )
+            }
+        }
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithText("En-tête des messages").assertExists()
+        composeTestRule.onNodeWithText("Discret").assertExists()
+        composeTestRule.onNodeWithText("Vif").performScrollTo().performClick()
+
+        assertEquals(listOf(SettingsIntent.PostHeaderEmphasisChanged(PostHeaderEmphasis.VIVID)), intents)
     }
 
     @Test
@@ -197,6 +227,22 @@ class SettingsColorsScreenTest {
         )
 
         assertPreviewReadingTokens(expected)
+    }
+
+    @Test
+    fun `preview header follows vivid post header emphasis`() {
+        val expected = mountPreviewForTokenAssertions(
+            preferences = ThemeColorPreferences(postHeaderEmphasis = PostHeaderEmphasis.VIVID),
+            darkTheme = false,
+        )
+
+        composeTestRule.onNodeWithTag(SETTINGS_COLOR_PREVIEW_HEADER_TAG, useUnmergedTree = true)
+            .assert(
+                SemanticsMatcher.expectValue(
+                    SettingsColorPreviewHeaderContainerColorKey,
+                    expected.headerContainer,
+                ),
+            )
     }
 
     @Test
@@ -308,7 +354,7 @@ class SettingsColorsScreenTest {
         var expected: PreviewExpectedColors? = null
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = darkTheme, themeColorPreferences = preferences) {
-                expected = previewExpectedColors()
+                expected = previewExpectedColors(preferences.postHeaderEmphasis)
             }
             SettingsColorPreview(preferences = preferences, darkTheme = darkTheme)
         }
@@ -380,6 +426,10 @@ class SettingsColorsScreenTest {
             customAccentHexError = false,
         )
         SettingsIntent.CustomAccentHexCommitted -> commitCustomHexForTest(onPersist)
+        is SettingsIntent.PostHeaderEmphasisChanged -> persistForTest(
+            themeColorPreferences.copy(postHeaderEmphasis = intent.emphasis),
+            onPersist,
+        )
         is SettingsIntent.LightSurfaceToneChanged -> persistForTest(
             themeColorPreferences.copy(lightSurfaceTone = intent.tone),
             onPersist,
@@ -455,10 +505,11 @@ class SettingsColorsScreenTest {
 
     // Reads MaterialTheme in place: the Konsist rule keeps the material3 ColorScheme type in core ui.
     @Composable
-    private fun previewExpectedColors(): PreviewExpectedColors {
+    private fun previewExpectedColors(postHeaderEmphasis: PostHeaderEmphasis): PreviewExpectedColors {
         val scheme = MaterialTheme.colorScheme
+        val headerColors = postHeaderColors(postHeaderEmphasis)
         return PreviewExpectedColors(
-            headerContainer = scheme.secondaryContainer,
+            headerContainer = headerColors.containerColor,
             quoteContainer = scheme.surfaceContainerHighest,
             quoteAccent = scheme.primary,
             spoilerContainer = if (scheme.surface == Color.Black) {

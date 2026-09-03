@@ -14,6 +14,7 @@ import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.LightSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
@@ -361,6 +362,7 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.ThemeAccentPresetChanged -> updateThemeAccentPreset(intent.preset)
             is SettingsIntent.CustomAccentHexChanged -> updateCustomAccentHex(intent.text)
             SettingsIntent.CustomAccentHexCommitted -> commitCustomAccentHex()
+            is SettingsIntent.PostHeaderEmphasisChanged -> updatePostHeaderEmphasis(intent.emphasis)
             is SettingsIntent.LightSurfaceToneChanged -> updateLightSurfaceTone(intent.tone)
             is SettingsIntent.DarkSurfaceToneChanged -> updateDarkSurfaceTone(intent.tone)
             is SettingsIntent.DynamicColorEnabledChanged -> updateDynamicColor(intent.enabled)
@@ -733,6 +735,10 @@ class SettingsViewModel @Inject constructor(
 
     private fun updateDarkSurfaceTone(tone: DarkSurfaceTone) {
         updateThemeColorPreferences { preferences -> preferences.copy(darkSurfaceTone = tone) }
+    }
+
+    private fun updatePostHeaderEmphasis(emphasis: PostHeaderEmphasis) {
+        updateThemeColorPreferences { preferences -> preferences.copy(postHeaderEmphasis = emphasis) }
     }
 
     private fun updateDynamicColor(enabled: Boolean) {

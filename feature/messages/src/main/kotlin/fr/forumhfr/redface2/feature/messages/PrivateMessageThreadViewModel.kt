@@ -183,6 +183,11 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
         userPreferencesRepository.observeTopicSignatures()
             .onEach { show -> _state.update { it.copy(showSignatures = show) } }
             .launchIn(viewModelScope)
+        userPreferencesRepository.observeThemeColorPreferences()
+            .onEach { preferences ->
+                _state.update { it.copy(postHeaderEmphasis = preferences.postHeaderEmphasis) }
+            }
+            .launchIn(viewModelScope)
         // #1050 — the two #874 Ego preferences are deliberately independent flows (a message can
         // keep its EgoPost background while an auto-quote inside keeps its own EgoQuote marker).
         userPreferencesRepository.observeTopicEgoQuoteEnabled()
@@ -459,6 +464,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     ) {
         val fullWidthPosts = _state.value.fullWidthPosts
         val showSignatures = _state.value.showSignatures
+        val postHeaderEmphasis = _state.value.postHeaderEmphasis
         val egoQuoteEnabled = _state.value.egoQuoteEnabled
         val egoPostEnabled = _state.value.egoPostEnabled
         val showPageFabs = _state.value.showPageFabs
@@ -486,6 +492,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
                 mode = nextMode,
                 fullWidthPosts = fullWidthPosts,
                 showSignatures = showSignatures,
+                postHeaderEmphasis = postHeaderEmphasis,
                 egoQuoteEnabled = egoQuoteEnabled,
                 egoPostEnabled = egoPostEnabled,
                 showPageFabs = showPageFabs,

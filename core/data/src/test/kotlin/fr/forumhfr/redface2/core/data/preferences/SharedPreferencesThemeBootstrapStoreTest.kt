@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
 import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.LightSurfaceTone
+import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
 import fr.forumhfr.redface2.core.domain.preferences.ThemeAccent
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrap
 import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
@@ -72,6 +73,7 @@ class SharedPreferencesThemeBootstrapStoreTest {
             lightSurfaceTone = LightSurfaceTone.WHITE,
             darkSurfaceTone = DarkSurfaceTone.AMOLED,
             dynamicColorEnabled = true,
+            postHeaderEmphasis = PostHeaderEmphasis.VIVID,
         )
 
         store.writeThemeColorPreferences(preferences)
@@ -93,6 +95,7 @@ class SharedPreferencesThemeBootstrapStoreTest {
             .edit()
             .putString("accent_color", "MAGENTA")
             .putString("light_surface_tone", "PAPER")
+            .putString("post_header_emphasis", "LOUD")
             .putBoolean("dynamic_color_enabled", true)
             .commit()
 

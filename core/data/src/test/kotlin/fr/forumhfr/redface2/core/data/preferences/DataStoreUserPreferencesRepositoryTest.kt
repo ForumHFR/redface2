@@ -21,6 +21,7 @@ import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.NavBarLabelsBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
+import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
@@ -84,6 +85,9 @@ class DataStoreUserPreferencesRepositoryTest {
         }
         override fun writeDynamicColorEnabled(enabled: Boolean) {
             stored = stored.copy(dynamicColorEnabled = enabled)
+        }
+        override fun writePostHeaderEmphasis(emphasis: PostHeaderEmphasis) {
+            stored = stored.copy(postHeaderEmphasis = emphasis)
         }
     }
 
@@ -799,6 +803,7 @@ class DataStoreUserPreferencesRepositoryTest {
         runTest(dispatcher) {
             repository.observeThemeColorPreferences().test {
                 assertEquals(ThemeColorPreferences(), awaitItem())
+                assertEquals(PostHeaderEmphasis.SUBTLE, themeBootstrapStore.read().postHeaderEmphasis)
                 cancelAndIgnoreRemainingEvents()
             }
         }
@@ -844,6 +849,7 @@ class DataStoreUserPreferencesRepositoryTest {
             lightSurfaceTone = LightSurfaceTone.WHITE,
             darkSurfaceTone = DarkSurfaceTone.AMOLED,
             dynamicColorEnabled = true,
+            postHeaderEmphasis = PostHeaderEmphasis.VIVID,
         )
 
         repository.setThemeColorPreferences(preferences)
@@ -853,6 +859,10 @@ class DataStoreUserPreferencesRepositoryTest {
             cancelAndIgnoreRemainingEvents()
         }
         assertEquals(preferences, themeBootstrapStore.read().colorPreferences)
+        assertEquals(
+            PostHeaderEmphasis.VIVID.name,
+            dataStore.data.first()[stringPreferencesKey("post_header_emphasis")],
+        )
     }
 
     @Test
@@ -895,6 +905,7 @@ class DataStoreUserPreferencesRepositoryTest {
         dataStore.edit { prefs ->
             prefs[stringPreferencesKey("accent_color")] = "MAGENTA"
             prefs[stringPreferencesKey("light_surface_tone")] = "PAPER"
+            prefs[stringPreferencesKey("post_header_emphasis")] = "LOUD"
         }
 
         repository.observeThemeColorPreferences().test {

@@ -28,6 +28,7 @@ import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
+import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.post.PostCardShellContainerColorKey
 import fr.forumhfr.redface2.core.ui.post.PostIdentityBandContainerColorKey
@@ -49,7 +50,7 @@ import org.robolectric.annotation.GraphicsMode
 
 /**
  * #1040 — MP identity-band contract on the real [MessageCard]:
- *  - the fixed `secondaryContainer` band spans the card in inset and full-width modes;
+ *  - the default `secondaryContainer` band spans the card in inset and full-width modes;
  *  - it remains inside the shell, whose Card clips it with the active rounded/rectangular shape;
  *  - the band adds no spacing: horizontal gutters stay MP-owned while its header uses the same
  *    symmetric `cardHeaderVertical` inset as the topic (6.dp Comfort / 4.dp Compact);
@@ -183,10 +184,30 @@ class MessageCardIdentityBandTest {
         assertTextColor("Citer", MODERATION_LINK_LIGHT)
     }
 
+    @Test
+    fun `vivid message header uses the primary band and content pair`() {
+        setCard(postHeaderEmphasis = PostHeaderEmphasis.VIVID)
+
+        compose.onNode(
+            SemanticsMatcher.expectValue(
+                PostIdentityBandContainerColorKey,
+                RedfaceLightColorScheme.primary,
+            ),
+            useUnmergedTree = true,
+        ).assert(
+            SemanticsMatcher.expectValue(
+                PostIdentityBandContentColorKey,
+                RedfaceLightColorScheme.onPrimary,
+            ),
+        )
+        assertTextColor(sampleMessage().date.asMessageDate(), RedfaceLightColorScheme.onPrimary)
+    }
+
     private fun setCard(
         metrics: DisplayMetrics = DisplayMetrics.Comfort,
         flat: Boolean = false,
         horizontalInset: Dp = 0.dp,
+        postHeaderEmphasis: PostHeaderEmphasis = PostHeaderEmphasis.SUBTLE,
     ) {
         compose.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
@@ -199,6 +220,7 @@ class MessageCardIdentityBandTest {
                         MessageCard(
                             message = sampleMessage(),
                             presentation = ReadingPostCardPresentation(flat = flat),
+                            postHeaderEmphasis = postHeaderEmphasis,
                         )
                     }
                 }

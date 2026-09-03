@@ -15,6 +15,7 @@ data class ThemeBootstrap(
     val lightSurfaceTone: LightSurfaceTone = LightSurfaceTone.REDFACE1_GRAY,
     val darkSurfaceTone: DarkSurfaceTone = DarkSurfaceTone.MATERIAL_TINTED,
     val dynamicColorEnabled: Boolean = false,
+    val postHeaderEmphasis: PostHeaderEmphasis = PostHeaderEmphasis.SUBTLE,
 ) {
     constructor(
         themeMode: ThemeMode,
@@ -33,6 +34,7 @@ data class ThemeBootstrap(
             lightSurfaceTone = lightSurfaceTone,
             darkSurfaceTone = darkSurfaceTone,
             dynamicColorEnabled = dynamicColorEnabled,
+            postHeaderEmphasis = postHeaderEmphasis,
         )
 }
 
@@ -55,12 +57,14 @@ interface ThemeBootstrapStore {
     fun writeLightSurfaceTone(tone: LightSurfaceTone) = Unit
     fun writeDarkSurfaceTone(tone: DarkSurfaceTone) = Unit
     fun writeDynamicColorEnabled(enabled: Boolean) = Unit
+    fun writePostHeaderEmphasis(emphasis: PostHeaderEmphasis) = Unit
 
     fun writeThemeColorPreferences(preferences: ThemeColorPreferences) {
         writeThemeAccent(preferences.accent)
         writeLightSurfaceTone(preferences.lightSurfaceTone)
         writeDarkSurfaceTone(preferences.darkSurfaceTone)
         writeDynamicColorEnabled(preferences.dynamicColorEnabled)
+        writePostHeaderEmphasis(preferences.postHeaderEmphasis)
     }
 
     fun writeAmoledEnabled(enabled: Boolean) {

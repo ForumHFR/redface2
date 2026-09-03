@@ -7,6 +7,7 @@ import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.LightSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.ThemeAccent
@@ -525,6 +526,7 @@ sealed interface SettingsIntent {
     data class ThemeAccentPresetChanged(val preset: AccentPreset) : SettingsIntent
     data class CustomAccentHexChanged(val text: String) : SettingsIntent
     data object CustomAccentHexCommitted : SettingsIntent
+    data class PostHeaderEmphasisChanged(val emphasis: PostHeaderEmphasis) : SettingsIntent
     data class LightSurfaceToneChanged(val tone: LightSurfaceTone) : SettingsIntent
     data class DarkSurfaceToneChanged(val tone: DarkSurfaceTone) : SettingsIntent
     data class DynamicColorEnabledChanged(val enabled: Boolean) : SettingsIntent

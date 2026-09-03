@@ -291,6 +291,9 @@
     <string name="settings_theme_system">Système</string>
     <string name="settings_theme_dark">Sombre</string>
     <string name="settings_theme_persist_failed">Impossible de mémoriser le thème. Réessayez.</string>
+    <string name="settings_colors_post_header_title">En-tête des messages</string>
+    <string name="settings_colors_post_header_subtle">Discret</string>
+    <string name="settings_colors_post_header_vivid">Vif</string>
 
     <!-- #595 / #883 — sous-page Couleurs : accent, RGB custom, dynamic color et tons de surface. -->
     <string name="settings_colors_persist_failed">Impossible de mémoriser les couleurs. Réessayez.</string>

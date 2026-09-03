@@ -8,6 +8,7 @@ import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
 import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
@@ -900,6 +901,17 @@ class SettingsViewModelTest {
         viewModel.submit(SettingsIntent.DynamicColorEnabledChanged(true))
 
         val expected = ThemeColorPreferences(dynamicColorEnabled = true)
+        assertEquals(expected, viewModel.state.value.themeColorPreferences)
+        assertEquals(expected, repository.lastThemeColorPreferencesSet)
+    }
+
+    @Test
+    fun `PostHeaderEmphasisChanged persists the header emphasis in the complete colour bundle`() = runTest {
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.PostHeaderEmphasisChanged(PostHeaderEmphasis.VIVID))
+
+        val expected = ThemeColorPreferences(postHeaderEmphasis = PostHeaderEmphasis.VIVID)
         assertEquals(expected, viewModel.state.value.themeColorPreferences)
         assertEquals(expected, repository.lastThemeColorPreferencesSet)
     }
