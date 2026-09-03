@@ -16,6 +16,22 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.53.6` — `internal` (dev) — 2026-09-03
+
+Audit complet du câblage de l'onglet Super après le retour XaTriX sur la 0.53.5 (Opus 5 + Codex). Produit par Sol (Codex) sous gate Fable ; PR #1262.
+
+### Corrigé
+
+- **Drapeaux, onglet Super : pull-to-refresh réellement câblé** — le corps dédié de l'onglet n'avait aucun `PullToRefreshBox`, le geste n'était jamais capté (pas d'animation) et le rafraîchissement livré en 0.53.5 restait inatteignable depuis l'écran. L'onglet Super passe par le même corps de liste que les autres onglets : geste, indicateur, barre de chargement, rendu groupé, tous les réglages d'affichage.
+- **Feuille de configuration rapide sur Super** — « Non-lus uniquement » est désactivé (sans effet sur cet onglet) et l'en-tête indique que les réglages sont globaux.
+- **Premier test d'interface du corps de liste** (Robolectric Compose) : le geste de rafraîchissement déclenche bien le rechargement, le rendu groupé affiche les en-têtes, l'état vide affiche le placeholder.
+
+### Note
+
+« Masquer les catégories sans non-lu » suit sur Super la convention des vues « +lus » (#825) : seules les sections vides disparaissent, un super favori entièrement lu reste visible.
+
+---
+
 ## `0.53.5` — `internal` (dev) — 2026-09-03
 
 Retour XaTriX sur la 0.53.4. Produit par Sol (Codex) sous gate Fable ; PR #1261.

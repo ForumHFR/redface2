@@ -1,4 +1,4 @@
-Redface 2 v0.53.5 — dev.
+Redface 2 v0.53.6 — dev.
 
-- Flags, Super tab: pull-to-refresh now works (refreshes the three lists), and group-by-category plus hide-read-categories are honoured.
-- Settings > Flags: with per-tab settings on, the global switches are disabled with an explanation.
+- Flags, Super tab: the refresh gesture is finally captured (indicator, loading bar), same list body as the other tabs.
+- Quick config on Super: "unread only" disabled, settings shown as global.

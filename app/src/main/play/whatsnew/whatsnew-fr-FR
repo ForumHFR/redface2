@@ -1,4 +1,4 @@
-Redface 2 v0.53.5 — dev.
+Redface 2 v0.53.6 — dev.
 
-- Drapeaux, onglet Super : le pull-to-refresh fonctionne (rafraîchit les trois listes), et le groupement par catégorie ainsi que le masquage des catégories lues sont honorés.
-- Réglages › Drapeaux : en mode « réglages par onglet », les interrupteurs globaux sont grisés avec une explication.
+- Drapeaux, onglet Super : le geste de rafraîchissement est enfin capté (indicateur, barre de chargement), même corps de liste que les autres onglets.
+- Feuille rapide sur Super : « Non-lus uniquement » désactivé, réglages indiqués comme globaux.
