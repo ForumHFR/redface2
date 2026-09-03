@@ -1,6 +1,5 @@
-Redface 2 v0.53.0 — dev.
+Redface 2 v0.53.1 — dev.
 
-- Couleurs : sélecteur Clair / Système / Sombre dans la page, pour vérifier l'aperçu dans les deux thèmes.
-- Drapeaux : les bandeaux « Doux » et « Puce » prennent l'accent choisi, même avec le fond Blanc ou Gris RF1 ; l'icône du style « Minimal » aussi.
-- Couleurs : un accent Neutre ou un hex gris donne un vrai gris, plus du vert.
-- Topic : répondre en citant reprend sur le message cité ; la réponse rapide poste la page où elle est ouverte.
+- Drapeaux : le swipe entre onglets ne saute plus en haut de liste ; l'onglet « Super » liste enfin les super-favoris ; la sous-catégorie s'affiche dans la ligne du sujet.
+- Éditeur : « Citer le début » n'insère que le début d'un long message.
+- Images : « Partager » dans le menu d'appui long.

@@ -16,6 +16,23 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.53.1` — `internal` (dev) — 2026-09-03
+
+Mandat de nuit, second lot (issues anciennes du backlog). Produit par Sol (Codex) sous gate Fable ; PR #1247, PR #1248.
+
+### Ajouté
+
+- **Drapeaux : l'onglet « Super » liste enfin les super-favoris** ([#737](https://github.com/ForumHFR/redface2/issues/737)) — l'action « Super favori » de l'appui long persistait des sujets que rien n'affichait. Stockage `(cat, topicId)` avec un instantané du titre (les anciens marquages sont migrés, rien n'est perdu), métadonnées live quand le sujet est encore flaggé, sinon l'instantané.
+- **Drapeaux : la sous-catégorie apparaît dans la ligne du sujet** ([#741](https://github.com/ForumHFR/redface2/issues/741)) — résolue depuis le cache des sous-catégories uniquement (aucun appel réseau au démarrage) ; rien n'est affiché tant que le cache est froid.
+- **Éditeur : « Citer le début »** ([#327](https://github.com/ForumHFR/redface2/issues/327), demande Dintr-un lemn) — seconde entrée du menu de message qui n'insère que le début d'un long message (300 caractères, coupe en fin de mot, `[...]`, jamais au milieu d'une balise) ; « Citer » et le panier multi-citation sont inchangés.
+- **Images : « Partager » dans le menu d'appui long** ([#831](https://github.com/ForumHFR/redface2/issues/831), retour Jungledede) — à côté de Enregistrer / Copier l'URL / Ouvrir dans le navigateur. « Afficher en taille réelle » reste lié à #182.
+
+### Corrigé
+
+- **Drapeaux : le swipe entre onglets ne saute plus en haut de liste avant de se recaler** ([#742](https://github.com/ForumHFR/redface2/issues/742), retour nicko, présent depuis des dizaines de builds) — l'onglet et sa liste sont désormais exposés d'un seul tenant au rendu ; un panneau ne peut plus se composer une frame avec les données de l'onglet précédent.
+
+---
+
 ## `0.53.0` — `internal` (dev) — 2026-09-03
 
 Mandat de nuit (retours du fil DEV du 02/09). Produit par Sol (Codex) sous gate Fable ; PR #1245, #1246.
