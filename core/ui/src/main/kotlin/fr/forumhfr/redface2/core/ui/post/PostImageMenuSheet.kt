@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.ui.post
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
@@ -40,10 +41,12 @@ import kotlinx.coroutines.launch
 /**
  * #831/#1040 — shared contextual menu of a post image, opened by a long-press on the image
  * (inline `[img]`, block image or promoted gallery image). The sheet owns its neutral labels and
- * delegates the host-specific save operation through [onSave]. Its layout is a hero row identifying
- * the target followed by stacked full-width actions:
+ * delegates host-specific operations through [onSave] / [onShare]. Its layout is a hero row
+ * identifying the target followed by stacked full-width actions:
  *
  * - « Enregistrer l'image » (filled, primary action) — delegates to [onSave];
+ * - « Partager » — delegates to [onShare] so the host can launch Android's chooser from its
+ *   effect pipeline;
  * - « Copier l'URL de l'image » — clipboard write, Diagnostics feedback pattern (system overlay
  *   on Android 13+, Toast below);
  * - « Ouvrir dans le navigateur » — `ACTION_VIEW` on the image URL (the DIRECT image, not the
@@ -60,6 +63,7 @@ import kotlinx.coroutines.launch
 fun PostImageMenuSheet(
     target: PostImageTarget,
     onSave: (url: String) -> Unit,
+    onShare: (url: String) -> Unit,
     onDismiss: () -> Unit,
     mediaDiskCachePolicy: PostMediaDiskCachePolicy = PostMediaDiskCachePolicy.ENABLED,
 ) {
@@ -93,6 +97,18 @@ fun PostImageMenuSheet(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(stringResource(R.string.post_image_menu_save))
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            OutlinedButton(
+                onClick = {
+                    onShare(target.url)
+                    hideThenDismiss(coroutineScope, sheetState, onDismiss)
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.post_image_menu_share))
             }
 
             Spacer(Modifier.height(8.dp))
@@ -133,6 +149,19 @@ fun PostImageMenuSheet(
 
             Spacer(Modifier.height(8.dp))
         }
+    }
+}
+
+/** Shares [url] as text through Android's chooser, surfacing [failureFeedback] when none handles it. */
+fun sharePostImageUrl(context: Context, url: String, failureFeedback: String) {
+    val send = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_TEXT, url)
+    }
+    runCatching {
+        context.startActivity(Intent.createChooser(send, context.getString(R.string.post_image_menu_share)))
+    }.onFailure {
+        Toast.makeText(context, failureFeedback, Toast.LENGTH_SHORT).show()
     }
 }
 

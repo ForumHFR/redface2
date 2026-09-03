@@ -1460,6 +1460,19 @@ class PrivateMessageThreadViewModelTest {
     }
 
     @Test
+    fun `share image emits the direct image URL`() = runTest {
+        val viewModel = threadViewModel(loadedRepository())
+
+        viewModel.effects.test {
+            viewModel.shareImage("https://images.example/vacances.png")
+            assertEquals(
+                PrivateMessageThreadEffect.ShareImage("https://images.example/vacances.png"),
+                awaitItem(),
+            )
+        }
+    }
+
+    @Test
     fun `refresh is a no-op without loaded content`() = runTest {
         val repository = mockk<MessagesRepository>()
         coEvery {

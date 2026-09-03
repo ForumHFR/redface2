@@ -179,4 +179,7 @@ sealed interface PrivateMessageThreadEffect {
 
     /** The image exceeded the saver's bounded download size. */
     data object ImageSaveFailedTooLarge : PrivateMessageThreadEffect
+
+    /** #831 — share the direct post-image URL through Android's chooser. */
+    data class ShareImage(val url: String) : PrivateMessageThreadEffect
 }

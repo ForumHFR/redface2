@@ -25,6 +25,8 @@ data class QuoteSelection(
     val locator: QuoteLocator,
     val author: String,
     val excerpt: String,
+    /** True when the quote must be materialised as "beginning only" instead of the full HFR prefill. */
+    val truncate: Boolean = false,
 ) {
     val numreponse: Int get() = locator.numreponse
 }

@@ -17,9 +17,9 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * #831 — pins the effect mapping of the « Enregistrer l'image » ViewModel: one one-shot effect
- * per save request, typed failure → typed Toast message (fetch / storage / too-large), and the
- * saver called with the exact image URL. The saver is faked (interface in `:core:domain`), same
+ * #831 — pins the effect mapping of the image-menu ViewModel: one one-shot effect per host-owned
+ * request, typed save failure → typed Toast message (fetch / storage / too-large), and the saver
+ * called with the exact image URL. The saver is faked (interface in `:core:domain`), same
  * seam-testing stance as the upload reader.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -86,6 +86,21 @@ class PostImageActionsViewModelTest {
         viewModel.effects.test {
             viewModel.saveImage("https://images.example/huge.png")
             assertEquals(SaveImageEffect.FAILED_TOO_LARGE, awaitItem())
+        }
+    }
+
+    @Test
+    fun `share emits a chooser effect with the image URL`() = runTest {
+        val viewModel = PostImageActionsViewModel(
+            FakePostImageSaver { SavedPostImage(displayName = "unused.png") },
+        )
+
+        viewModel.effects.test {
+            viewModel.shareImage("https://images.example/vacances.png")
+            assertEquals(
+                PostImageActionsViewModel.ShareImageEffect("https://images.example/vacances.png"),
+                awaitItem(),
+            )
         }
     }
 }

@@ -40,6 +40,7 @@ import fr.forumhfr.redface2.core.model.postContentPlainText
 import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
 import fr.forumhfr.redface2.core.ui.browser.LocalAlwaysAskLinkApp
 import fr.forumhfr.redface2.core.ui.browser.openUrlInExternalBrowser
+import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.post.hideThenDismiss
 import fr.forumhfr.redface2.core.ui.R as CoreUiR
 
@@ -121,6 +122,11 @@ internal fun PostMenuSheet(
      * as « Citer » (`shouldShowQuoteAction`): locked topic or anonymous session.
      */
     onToggleMultiQuote: (() -> Unit)? = null,
+    /**
+     * #327 — quote only the beginning of this post. Null hides the entry under the same gate as
+     * « Citer » (locked topic / anonymous session).
+     */
+    onQuoteStart: (() -> Unit)? = null,
     /**
      * #509 — whether this post's author is currently blacklisted; flips the entry's label between
      * « Masquer cet utilisateur » and « Ne plus masquer cet utilisateur ».
@@ -278,6 +284,26 @@ internal fun PostMenuSheet(
                             },
                         ),
                     )
+                }
+            }
+
+            if (onQuoteStart != null) {
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = {
+                        hideThenDismiss(coroutineScope, sheetState) {
+                            onDismiss()
+                            onQuoteStart()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    RedfaceVectorIcon(
+                        resId = CoreUiR.drawable.ic_ms_article,
+                        modifier = Modifier.padding(end = 8.dp),
+                        size = 18.dp,
+                    )
+                    Text(stringResource(R.string.topic_post_menu_quote_start))
                 }
             }
 

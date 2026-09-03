@@ -334,6 +334,13 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
         }
     }
 
+    /** #831 — request host-side Android sharing for a direct post-image URL. */
+    fun shareImage(url: String) {
+        viewModelScope.launch {
+            _effects.send(PrivateMessageThreadEffect.ShareImage(url))
+        }
+    }
+
     /**
      * #1051 — block/unblock an author from the private-message menu. The independent blacklist
      * collector rebuilds [PrivateMessageThreadUiState.Mode.Content] through [contentMode], so the
