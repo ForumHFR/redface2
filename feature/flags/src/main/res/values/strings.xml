@@ -58,6 +58,7 @@
     <string name="flags_sheet_action_copy">Copier le lien</string>
     <string name="flags_sheet_action_browser">Ouvrir dans le navigateur</string>
     <string name="flags_sheet_action_remove">Retirer le drapeau</string>
+    <string name="flags_sheet_action_remove_super_favorite">Retirer des super favoris</string>
     <!-- #15 — dialog « aller à une page » -->
     <string name="flags_sheet_goto_page_title">Aller à une page</string>
     <string name="flags_sheet_goto_page_label">Numéro de page</string>

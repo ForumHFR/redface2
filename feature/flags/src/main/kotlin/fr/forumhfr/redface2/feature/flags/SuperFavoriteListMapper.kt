@@ -17,8 +17,8 @@ import kotlinx.coroutines.flow.mapLatest
 
 /**
  * Builds the local Super tab list (#737). It never observes the flag buckets directly and has no
- * refresh endpoint; exact `(cat, topicId)` snapshots are enriched through [FlagRepository.findFlag],
- * while legacy topic-id-only orphans only scan warm caches through [FlagRepository.findCachedFlag].
+ * refresh endpoint; every stored topic only scans warm caches through [FlagRepository.findCachedFlag].
+ * Missing rows fall back to their local snapshot so opening the tab never fans out REST requests.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class SuperFavoriteListMapper @Inject constructor(
@@ -53,7 +53,7 @@ class SuperFavoriteListMapper @Inject constructor(
         // Local copy : `cat` is a public property of another module, so no smart cast across it.
         val cat = favorite.cat
         return if (cat != null) {
-            flagRepository.findFlag(cat = cat, topicId = favorite.topicId)
+            flagRepository.findCachedFlag(cat = cat, topicId = favorite.topicId)
         } else {
             flagRepository.findCachedFlag(topicId = favorite.topicId)
         }

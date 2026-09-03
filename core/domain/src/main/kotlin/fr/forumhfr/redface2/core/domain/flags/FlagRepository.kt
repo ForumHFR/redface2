@@ -115,6 +115,12 @@ interface FlagRepository {
      * fetches cold buckets; ambiguity is resolved by the implementation's deterministic cache scan.
      */
     suspend fun findCachedFlag(topicId: Int): Flag? = null
+
+    /**
+     * Cache-only lookup for callers that know the exact `(cat, topicId)` pair but must not trigger
+     * cold-bucket fetches. Returns a warm cached row or `null`.
+     */
+    suspend fun findCachedFlag(cat: Int, topicId: Int): Flag? = null
 }
 
 /**

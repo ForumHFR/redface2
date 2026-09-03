@@ -10,8 +10,12 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 
-internal fun ForumRepository.subcategoryNamesForFlags(flags: List<Flag>): Flow<Map<SubcategoryKey, String>> {
+internal fun ForumRepository.subcategoryNamesForFlags(
+    flags: List<Flag>,
+    refreshIfMissing: (Int) -> Unit = {},
+): Flow<Map<SubcategoryKey, String>> {
     val cats = flags.asSequence()
         .filter { it.subcat != null }
         .map { it.cat }
@@ -19,15 +23,21 @@ internal fun ForumRepository.subcategoryNamesForFlags(flags: List<Flag>): Flow<M
         .sorted()
         .toList()
     if (cats.isEmpty()) return flowOf(emptyMap())
-    return combine(cats.map(::subcategoryNamesForCat)) { perCat ->
+    return combine(cats.map { cat -> subcategoryNamesForCat(cat, refreshIfMissing) }) { perCat ->
         perCat.fold(mutableMapOf<SubcategoryKey, String>()) { merged, names ->
             merged.apply { putAll(names) }
         }
     }
 }
 
-private fun ForumRepository.subcategoryNamesForCat(cat: Int): Flow<Map<SubcategoryKey, String>> =
+private fun ForumRepository.subcategoryNamesForCat(
+    cat: Int,
+    refreshIfMissing: (Int) -> Unit,
+): Flow<Map<SubcategoryKey, String>> =
     observeCachedSubcategories(cat)
+        .onEach { result ->
+            if (result == null) refreshIfMissing(cat)
+        }
         .map { result -> result.toSubcategoryNameMap(cat) }
         .distinctUntilChanged()
 

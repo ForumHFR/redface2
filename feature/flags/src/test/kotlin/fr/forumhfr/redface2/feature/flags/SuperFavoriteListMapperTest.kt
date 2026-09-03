@@ -24,7 +24,7 @@ import org.junit.Test
 class SuperFavoriteListMapperTest {
 
     @Test
-    fun `exact favorites resolve by category while legacy orphans use cache-only fallback`() = runTest {
+    fun `all favorites resolve cache-only and keep snapshot fallbacks`() = runTest {
         val flagRepository = mockk<FlagRepository>()
         val forumRepository = mockk<ForumRepository>()
         val preferences = mockk<UserPreferencesRepository>()
@@ -50,8 +50,8 @@ class SuperFavoriteListMapperTest {
         every { forumRepository.observeCachedSubcategories(23) } returns flowOf(
             ForumResult.Success(listOf(SubCategory(id = 550, name = "Android", parentCategoryId = 23))),
         )
-        coEvery { flagRepository.findFlag(cat = 23, topicId = 2) } returns liveExact
-        coEvery { flagRepository.findFlag(cat = 23, topicId = 4) } returns null
+        coEvery { flagRepository.findCachedFlag(cat = 23, topicId = 2) } returns liveExact
+        coEvery { flagRepository.findCachedFlag(cat = 23, topicId = 4) } returns null
         coEvery { flagRepository.findCachedFlag(topicId = 3) } returns cachedLegacy
         coEvery { flagRepository.findCachedFlag(topicId = 99) } returns null
 
@@ -61,9 +61,9 @@ class SuperFavoriteListMapperTest {
         assertEquals(listOf("Live exact", "Snapshot only", "Cached legacy", "Sujet #99"), rows.map { it.title })
         assertEquals(List(rows.size) { MarkerStyle.PASTILLE }, rows.map { it.markerStyle })
         assertEquals("Android", rows[1].subcatName)
-        coVerify(exactly = 1) { flagRepository.findFlag(cat = 23, topicId = 2) }
-        coVerify(exactly = 1) { flagRepository.findFlag(cat = 23, topicId = 4) }
-        coVerify(exactly = 0) { flagRepository.findCachedFlag(topicId = 4) }
+        coVerify(exactly = 0) { flagRepository.findFlag(any(), any()) }
+        coVerify(exactly = 1) { flagRepository.findCachedFlag(cat = 23, topicId = 2) }
+        coVerify(exactly = 1) { flagRepository.findCachedFlag(cat = 23, topicId = 4) }
         coVerify(exactly = 1) { flagRepository.findCachedFlag(topicId = 3) }
         coVerify(exactly = 1) { flagRepository.findCachedFlag(topicId = 99) }
         verify(exactly = 1) { forumRepository.observeCachedSubcategories(23) }

@@ -105,6 +105,19 @@ class DataStoreSuperFavoriteRepositoryTest {
         )
     }
 
+    @Test
+    fun `toggleSuperFavorite flips against the persisted current value`() = runTest(dispatcher) {
+        val other = flag(topicId = 7, title = "Other")
+        val target = flag(topicId = 42, title = "Topic RF2")
+        repository.setSuperFavorite(other, enabled = true)
+        val initial = repository.observeSuperFavoriteTopics().first()
+
+        repository.toggleSuperFavorite(target)
+        repository.toggleSuperFavorite(target)
+
+        assertEquals(initial, repository.observeSuperFavoriteTopics().first())
+    }
+
     private fun flag(
         topicId: Int,
         title: String = "Topic $topicId",

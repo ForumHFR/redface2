@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
@@ -82,6 +81,7 @@ fun FlagActionsSheet(
     val linkCopied = stringResource(R.string.flags_sheet_link_copied)
     val browserFailed = stringResource(R.string.flags_sheet_browser_failed)
     val shareFailed = stringResource(R.string.flags_sheet_share_failed)
+    val canOpenTopic = flag.cat > 0
     // #15 — the « Aller à une page » dialog state is hoisted here, above the sheet content (Codex), so
     // Back closes the dialog before the sheet and the input survives recompositions.
     var showPageDialog by remember { mutableStateOf(false) }
@@ -117,6 +117,7 @@ fun FlagActionsSheet(
                 items = quickActions(
                     flag = flag,
                     isSuperFavorite = isSuperFavorite,
+                    canOpenTopic = canOpenTopic,
                     actions = actions,
                     onShare = { shareTopic(context, flagTopicUrl(flag), flag.title, shareFailed) },
                 ),
@@ -127,6 +128,8 @@ fun FlagActionsSheet(
             FlagActionsList(
                 items = menuActions(
                     flag = flag,
+                    isSuperFavorite = isSuperFavorite,
+                    canOpenTopic = canOpenTopic,
                     actions = actions,
                     onGoToPage = { showPageDialog = true },
                     onCopyLink = { copyTopicLink(context, flagTopicUrl(flag), linkCopied) },
@@ -209,6 +212,7 @@ internal fun flagFirstUnreadPage(flag: Flag): Int = flag.pageToOpen()
 private fun quickActions(
     flag: Flag,
     isSuperFavorite: Boolean,
+    canOpenTopic: Boolean,
     actions: FlagSheetActions,
     onShare: () -> Unit,
 ): List<SheetActionItem> {
@@ -219,6 +223,7 @@ private fun quickActions(
             label = stringResource(R.string.flags_sheet_quick_open),
             onClick = { actions.onOpen(flagLastReadPage(flag.lastReadPage)) },
             iconTint = variant,
+            enabled = canOpenTopic,
         ),
         SheetActionItem(
             iconRes = CoreUiR.drawable.ic_ms_arrow_downward,
@@ -230,7 +235,7 @@ private fun quickActions(
             // arrêtée en milieu de page, où le premier non-lu est bien sur la page du repère. La
             // garantie « ne duplique jamais Ouvrir » de #676 ne tient donc plus, et c'est voulu :
             // les deux chemins partagent une règle unique (`pageToOpen`).
-            enabled = flag.hasUnread,
+            enabled = canOpenTopic && flag.hasUnread,
         ),
         SheetActionItem(
             iconRes = CoreUiR.drawable.ic_ms_star,
@@ -238,12 +243,14 @@ private fun quickActions(
             onClick = actions.onToggleSuperFavorite,
             // Amber icon when the local super-favorite is active.
             iconTint = if (isSuperFavorite) FlagPalette.Favorite else variant,
+            enabled = canOpenTopic || isSuperFavorite,
         ),
         SheetActionItem(
             iconRes = CoreUiR.drawable.ic_ms_share,
             label = stringResource(R.string.flags_sheet_quick_share),
             onClick = onShare,
             iconTint = variant,
+            enabled = canOpenTopic,
         ),
     )
 }
@@ -256,9 +263,12 @@ private fun quickActions(
  * [onGoToPage] opens the in-sheet page-number dialog ([PageInputDialog]); the « Aller à une page » row
  * is omitted for single-page topics (nothing to choose). [actions.onReply] opens the reply editor.
  */
+@Suppress("LongParameterList") // Sheet inputs: flag, two states, actions, three page callbacks.
 @Composable
 private fun menuActions(
     flag: Flag,
+    isSuperFavorite: Boolean,
+    canOpenTopic: Boolean,
     actions: FlagSheetActions,
     onGoToPage: () -> Unit,
     onCopyLink: () -> Unit,
@@ -266,58 +276,74 @@ private fun menuActions(
 ): List<SheetActionItem> {
     val variant = MaterialTheme.colorScheme.onSurfaceVariant
     return buildList {
-        add(
-            SheetActionItem(
-                iconRes = CoreUiR.drawable.ic_ms_last_page,
-                label = stringResource(R.string.flags_sheet_action_last_page),
-                onClick = { actions.onOpen(flagLastPage(flag.totalPages)) },
-                iconTint = variant,
-            ),
-        )
-        // « Aller à une page » only makes sense when there is more than one page (Codex).
-        if (flag.totalPages > 1) {
+        if (canOpenTopic) {
             add(
                 SheetActionItem(
-                    iconRes = CoreUiR.drawable.ic_ms_article,
-                    label = stringResource(R.string.flags_sheet_action_goto_page),
-                    onClick = onGoToPage,
+                    iconRes = CoreUiR.drawable.ic_ms_last_page,
+                    label = stringResource(R.string.flags_sheet_action_last_page),
+                    onClick = { actions.onOpen(flagLastPage(flag.totalPages)) },
                     iconTint = variant,
                 ),
             )
+            // « Aller à une page » only makes sense when there is more than one page (Codex).
+            if (flag.totalPages > 1) {
+                add(
+                    SheetActionItem(
+                        iconRes = CoreUiR.drawable.ic_ms_article,
+                        label = stringResource(R.string.flags_sheet_action_goto_page),
+                        onClick = onGoToPage,
+                        iconTint = variant,
+                    ),
+                )
+            }
+            add(
+                SheetActionItem(
+                    iconRes = CoreUiR.drawable.ic_ms_edit_square,
+                    label = stringResource(R.string.flags_sheet_action_reply),
+                    onClick = actions.onReply,
+                    iconTint = variant,
+                ),
+            )
+            add(
+                SheetActionItem(
+                    iconRes = CoreUiR.drawable.ic_ms_content_copy,
+                    label = stringResource(R.string.flags_sheet_action_copy),
+                    onClick = onCopyLink,
+                    iconTint = variant,
+                ),
+            )
+            add(
+                SheetActionItem(
+                    iconRes = CoreUiR.drawable.ic_ms_open_in_new,
+                    label = stringResource(R.string.flags_sheet_action_browser),
+                    onClick = onOpenBrowser,
+                    iconTint = variant,
+                ),
+            )
+            add(
+                SheetActionItem(
+                    iconRes = CoreUiR.drawable.ic_ms_delete,
+                    label = stringResource(R.string.flags_sheet_action_remove),
+                    onClick = actions.onRemove,
+                    iconTint = MaterialTheme.colorScheme.error,
+                    destructive = true,
+                ),
+            )
+        } else if (isSuperFavorite) {
+            add(
+                SheetActionItem(
+                    iconRes = CoreUiR.drawable.ic_ms_star,
+                    label = stringResource(R.string.flags_sheet_action_remove_super_favorite),
+                    // Close the sheet: an orphan row disappears with its pin and has no other action.
+                    onClick = {
+                        actions.onToggleSuperFavorite()
+                        actions.onDismiss()
+                    },
+                    iconTint = MaterialTheme.colorScheme.error,
+                    destructive = true,
+                ),
+            )
         }
-        add(
-            SheetActionItem(
-                iconRes = CoreUiR.drawable.ic_ms_edit_square,
-                label = stringResource(R.string.flags_sheet_action_reply),
-                onClick = actions.onReply,
-                iconTint = variant,
-            ),
-        )
-        add(
-            SheetActionItem(
-                iconRes = CoreUiR.drawable.ic_ms_content_copy,
-                label = stringResource(R.string.flags_sheet_action_copy),
-                onClick = onCopyLink,
-                iconTint = variant,
-            ),
-        )
-        add(
-            SheetActionItem(
-                iconRes = CoreUiR.drawable.ic_ms_open_in_new,
-                label = stringResource(R.string.flags_sheet_action_browser),
-                onClick = onOpenBrowser,
-                iconTint = variant,
-            ),
-        )
-        add(
-            SheetActionItem(
-                iconRes = CoreUiR.drawable.ic_ms_delete,
-                label = stringResource(R.string.flags_sheet_action_remove),
-                onClick = actions.onRemove,
-                iconTint = MaterialTheme.colorScheme.error,
-                destructive = true,
-            ),
-        )
     }
 }
 
@@ -373,7 +399,7 @@ private fun QuickActionButton(
     val effectiveTint = if (enabled) tint else tint.copy(alpha = DISABLED_ALPHA)
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
+            .clip(MaterialTheme.shapes.medium)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(horizontal = 2.dp, vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,

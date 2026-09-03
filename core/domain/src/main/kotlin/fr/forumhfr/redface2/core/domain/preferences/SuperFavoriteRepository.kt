@@ -25,6 +25,9 @@ interface SuperFavoriteRepository {
 
     /** Adds ([enabled] = true) or removes [flag] from the super-favorite set. Idempotent. */
     suspend fun setSuperFavorite(flag: Flag, enabled: Boolean)
+
+    /** Atomically flips [flag]'s local super-favorite mark against the persisted current value. */
+    suspend fun toggleSuperFavorite(flag: Flag)
 }
 
 data class SuperFavoriteTopic(
