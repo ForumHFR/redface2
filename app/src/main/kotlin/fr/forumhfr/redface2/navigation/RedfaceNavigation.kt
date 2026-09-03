@@ -755,8 +755,10 @@ internal fun tabBackTarget(
     }
 
 /**
- * #1251 — HFR links tapped from rendered app content stay inside the active tab. Re-opening the
- * top entry is a no-op; targeting an older entry pops back to it so nav3 keeps one owner per key.
+ * #1251 — HFR links tapped from rendered app content reuse the target tab's existing stack. Re-opening
+ * the exact top [NavKey] is a no-op. Targeting an older key returns to it by dropping the entries above
+ * it, matching Back semantics and keeping a single nav3 owner for that key. A same-topic link with a
+ * different page or anchor is a distinct [TopicRoute] key, so it is pushed instead of collapsed.
  */
 internal fun inAppRouteBackStackAfterOpen(
     backStack: List<NavKey>,
@@ -768,6 +770,35 @@ internal fun inAppRouteBackStackAfterOpen(
         existingIndex >= 0 -> backStack.take(existingIndex + 1)
         else -> backStack + route
     }
+}
+
+internal data class InAppRouteBackStackResult(
+    val destination: TopLevelDestination,
+    val backStack: List<NavKey>,
+)
+
+/**
+ * Resolves the destination tab for an in-app HFR link without resetting any tab stack. Topic links keep
+ * the reader's current tab continuity; flags and category links honor their canonical destination.
+ */
+internal fun inAppRouteBackStackAfterOpen(
+    currentDestination: TopLevelDestination,
+    parsed: ParsedDeepLink,
+    backStackFor: (TopLevelDestination) -> List<NavKey>,
+): InAppRouteBackStackResult {
+    val destination = when (parsed.route) {
+        is TopicRoute -> currentDestination
+        is CategoryRoute -> TopLevelDestination.Forum
+        FlagsListRoute -> TopLevelDestination.Flags
+        else -> parsed.destination
+    }
+    val targetBackStack = backStackFor(destination)
+    val updatedBackStack = if (parsed.route == FlagsListRoute) {
+        targetBackStack.take(1).ifEmpty { listOf(destination.rootRoute) }
+    } else {
+        inAppRouteBackStackAfterOpen(targetBackStack, parsed.route)
+    }
+    return InAppRouteBackStackResult(destination, updatedBackStack)
 }
 
 /**
@@ -1294,10 +1325,19 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                 Surface(modifier = contentInsetModifier) {
                     val platformUriHandler = LocalUriHandler.current
                     val alwaysAskLinkApp = LocalAlwaysAskLinkApp.current
-                    val inAppUriHandler = remember(context, activeBackStack, platformUriHandler, alwaysAskLinkApp) {
+                    val inAppUriHandler = remember(
+                        context,
+                        currentDestination,
+                        backStacks,
+                        switchTab,
+                        platformUriHandler,
+                        alwaysAskLinkApp,
+                    ) {
                         HfrInAppUriHandler(
                             context = context,
-                            backStack = activeBackStack,
+                            currentDestination = currentDestination,
+                            backStacks = backStacks,
+                            switchTab = switchTab,
                             platformUriHandler = platformUriHandler,
                             alwaysAskExternalApp = alwaysAskLinkApp,
                         )
@@ -3136,14 +3176,16 @@ private fun popToRoot(backStack: NavBackStack<NavKey>) {
 
 private class HfrInAppUriHandler(
     private val context: Context,
-    private val backStack: NavBackStack<NavKey>,
+    private val currentDestination: TopLevelDestination,
+    private val backStacks: Map<TopLevelDestination, NavBackStack<NavKey>>,
+    private val switchTab: (TopLevelDestination) -> Unit,
     private val platformUriHandler: UriHandler,
     private val alwaysAskExternalApp: Boolean,
 ) : UriHandler {
     override fun openUri(uri: String) {
         val parsedUri = uri.toUri()
         when (val resolution = resolveHfrUri(parsedUri)) {
-            is HfrDeepLinkResolution.Route -> openRouteInActiveStack(resolution.parsed.route)
+            is HfrDeepLinkResolution.Route -> openRouteInApp(resolution.parsed)
             // HFR host but no in-app route: the exclude-Redface launcher avoids the self-deep-link loop.
             is HfrDeepLinkResolution.BrowserFallback -> openExternally(resolution.uri, uri)
             // Non-HFR link: plain platform resolution, so App Links still hand off to native apps
@@ -3152,15 +3194,23 @@ private class HfrInAppUriHandler(
         }
     }
 
-    private fun openRouteInActiveStack(route: NavKey) {
-        val updated = inAppRouteBackStackAfterOpen(backStack, route)
+    private fun openRouteInApp(parsed: ParsedDeepLink) {
+        val result = inAppRouteBackStackAfterOpen(
+            currentDestination = currentDestination,
+            parsed = parsed,
+            backStackFor = { destination -> backStacks.getValue(destination) },
+        )
+        switchTab(result.destination)
+        applyInAppBackStackUpdate(backStacks.getValue(result.destination), result.backStack)
+    }
+
+    private fun applyInAppBackStackUpdate(backStack: NavBackStack<NavKey>, updated: List<NavKey>) {
         if (updated == backStack) return
-        if (updated.size < backStack.size) {
-            while (backStack.size > updated.size) {
-                backStack.removeAt(backStack.lastIndex)
-            }
-        } else {
-            backStack.add(route)
+        while (backStack.size > updated.size) {
+            backStack.removeAt(backStack.lastIndex)
+        }
+        for (index in backStack.size until updated.size) {
+            backStack.add(updated[index])
         }
     }
 

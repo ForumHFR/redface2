@@ -866,6 +866,63 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `two rapid theme colour writes are cache-visible before commit and persist last-wins`() = runTest {
+        val ioDispatcher = StandardTestDispatcher(testScheduler)
+        val dataStoreScope = CoroutineScope(ioDispatcher + Job())
+        val appScope = CoroutineScope(ioDispatcher + SupervisorJob())
+        val store = PreferenceDataStoreFactory.create(
+            scope = dataStoreScope,
+            produceFile = { tempFolder.newFile("theme_color_ordering.preferences_pb") },
+        )
+        val repo = DataStoreUserPreferencesRepository(
+            dataStore = store,
+            themeBootstrapStore = themeBootstrapStore,
+            startScreenBootstrapStore = startScreenBootstrapStore,
+            navBarLabelsBootstrapStore = navBarLabelsBootstrapStore,
+            ioDispatcher = ioDispatcher,
+            externalScope = appScope,
+        )
+        val first = ThemeColorPreferences(
+            accent = ThemeAccent.Custom(rgb = 0x123456),
+            lightSurfaceTone = LightSurfaceTone.WHITE,
+            darkSurfaceTone = DarkSurfaceTone.AMOLED,
+            dynamicColorEnabled = false,
+            postHeaderEmphasis = PostHeaderEmphasis.VIVID,
+        )
+        val second = ThemeColorPreferences(
+            accent = ThemeAccent.Preset(AccentPreset.BLUE),
+            lightSurfaceTone = LightSurfaceTone.MATERIAL_TINTED,
+            darkSurfaceTone = DarkSurfaceTone.MATERIAL_TINTED,
+            dynamicColorEnabled = true,
+            postHeaderEmphasis = PostHeaderEmphasis.SUBTLE,
+        )
+
+        val callers = CoroutineScope(ioDispatcher + Job())
+        callers.launch { repo.setThemeColorPreferences(first) }
+        callers.launch { repo.setThemeColorPreferences(second) }
+        runCurrent()
+
+        assertEquals(second, repo.observeThemeColorPreferences().first())
+
+        advanceUntilIdle()
+
+        val fresh = DataStoreUserPreferencesRepository(
+            dataStore = store,
+            themeBootstrapStore = themeBootstrapStore,
+            startScreenBootstrapStore = startScreenBootstrapStore,
+            navBarLabelsBootstrapStore = navBarLabelsBootstrapStore,
+            ioDispatcher = ioDispatcher,
+            externalScope = appScope,
+        )
+        assertEquals(second, fresh.observeThemeColorPreferences().first())
+        assertEquals(second, themeBootstrapStore.read().colorPreferences)
+
+        callers.cancel()
+        appScope.cancel()
+        dataStoreScope.cancel()
+    }
+
+    @Test
     fun `preset accent write removes a stale custom RGB value`() = runTest(dispatcher) {
         repository.setThemeColorPreferences(
             ThemeColorPreferences(accent = ThemeAccent.Custom(rgb = 0xFF00FF)),
