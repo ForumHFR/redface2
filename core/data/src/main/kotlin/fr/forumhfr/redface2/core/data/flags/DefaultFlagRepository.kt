@@ -44,6 +44,8 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -115,6 +117,12 @@ class DefaultFlagRepository @Inject constructor(
             FlagType.entries.forEach { put(it, 0) }
         }
     private val cacheWriteMutexes: Map<FlagType, Mutex> = FlagType.entries.associateWith { Mutex() }
+
+    private val cacheUpdates = MutableSharedFlow<FlagType>(
+        replay = 0,
+        extraBufferCapacity = FlagType.entries.size,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
 
     // Bumped by [clearSessionCache] on logout / account switch, read+written under the cachedSuccesses
     // lock. A fetch that began before a switch must not write its result into the (type-keyed)
@@ -254,8 +262,8 @@ class DefaultFlagRepository @Inject constructor(
         // bucket rows with this pull's fresh supplement. Sharing is reserved for the natural burst
         // that exists in the app today : the per-type observe() fan-in at screen load (no refresh
         // involved, one generation by construction — the only two refresh call-sites are per-tab,
-        // FlagsViewModel). If #743 ever introduces a GLOBAL multi-type pull, it must open ONE
-        // generation for the pull (a repository-level refreshAll), not call this per type.
+        // FlagsViewModel). Multi-type callers must serialize calls; concurrent refresh(type) calls
+        // would still race their generation barriers.
         synchronized(stickySweeps) { sweepGeneration++ }
         val refreshesForType = refreshes.getValue(type)
         refreshesForType.emit(FlagsResult.Loading)
@@ -267,6 +275,12 @@ class DefaultFlagRepository @Inject constructor(
                 fetchDeduplicated(type = type, userId = userId)
             },
         )
+    }
+
+    override fun observeCacheUpdates(types: Set<FlagType>): Flow<FlagType> {
+        if (types.isEmpty()) return emptyFlow()
+        val observedTypes = types.toSet()
+        return cacheUpdates.asSharedFlow().filter { it in observedTypes }
     }
 
     override fun clearSessionCache() {
@@ -293,6 +307,7 @@ class DefaultFlagRepository @Inject constructor(
             stickySweeps.values.forEach { it.cancel() }
             stickySweeps.clear()
         }
+        FlagType.entries.forEach(::publishCacheUpdate)
     }
 
     /**
@@ -682,6 +697,7 @@ class DefaultFlagRepository @Inject constructor(
         // (mirrors the optimistic-free contract : the cache is the source of truth and the
         // network deletion already confirmed).
         if (updated != null) {
+            publishCacheUpdate(flag.type)
             refreshes.getValue(flag.type).emit(updated)
         }
     }
@@ -740,7 +756,11 @@ class DefaultFlagRepository @Inject constructor(
             }
         }
 
-        updated.forEach { (type, success) -> refreshes.getValue(type).emit(success) }
+        publishCacheUpdate(FlagType.FAVORITE)
+        updated.forEach { (type, success) ->
+            publishCacheUpdate(type)
+            refreshes.getValue(type).emit(success)
+        }
 
         // A destination kept STARTED under another navigation pane may still be collecting the old
         // list. Refresh it authoritatively; with no active collector, the purge above is sufficient
@@ -758,6 +778,10 @@ class DefaultFlagRepository @Inject constructor(
     /** Must be called under [cachedSuccesses]' monitor. */
     private fun bumpCacheGeneration(type: FlagType) {
         cacheGenerations[type] = cacheGenerations.getValue(type) + 1
+    }
+
+    private fun publishCacheUpdate(type: FlagType) {
+        cacheUpdates.tryEmit(type)
     }
 
     /**
@@ -888,6 +912,7 @@ class DefaultFlagRepository @Inject constructor(
         startSessionGeneration: Int,
         startCacheGeneration: Int,
     ) {
+        var committed = false
         cacheWriteMutexes.getValue(type).withLock {
             val ownsWrite = currentUserId() == userId && synchronized(cachedSuccesses) {
                 sessionGeneration == startSessionGeneration &&
@@ -902,9 +927,11 @@ class DefaultFlagRepository @Inject constructor(
                     cacheGenerations.getValue(type) == startCacheGeneration
                 ) {
                     cachedSuccesses[type] = result
+                    committed = true
                 }
             }
         }
+        if (committed) publishCacheUpdate(type)
     }
 
     private suspend fun persistFlags(userId: String, type: FlagType, flags: List<Flag>) {

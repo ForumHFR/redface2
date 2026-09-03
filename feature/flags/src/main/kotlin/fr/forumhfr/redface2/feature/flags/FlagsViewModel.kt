@@ -65,7 +65,10 @@ import kotlinx.coroutines.launch
 // Hilt-injected dependency cluster : flags + forum + messages + MPStorage + prefs + auth + clock,
 // each provided independently by the graph — there is no cohesive bundle to extract (a wrapper
 // would only relay them). Same pragmatic exception as the hoisted-composable suppressions elsewhere.
-@Suppress("LongParameterList")
+// LargeClass — one ViewModel owns the whole Drapeaux screen (tabs, per-tab list state, refresh and
+// landing sequencing, preference writers); splitting it would only relocate state plumbing between
+// pieces that must stay in lockstep (same call as DefaultFlagRepository, #1250 H4).
+@Suppress("LongParameterList", "LargeClass")
 class FlagsViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val flagRepository: FlagRepository,
@@ -115,19 +118,21 @@ class FlagsViewModel @Inject constructor(
     private var flagOpenedGenerationConsumed = 0L
 
     /**
-     * #743 — the [FlagType] whose refresh (manual or auto) is currently behind [isRefreshing], and
-     * the landing that met that in-flight refresh while it was running for ANOTHER type. Refreshes
-     * stay strictly sequential — the repository treats every `refresh(type)` as a generation barrier
-     * for its shared sticky sweep, so two concurrent per-type refreshes would degrade the older one
-     * to a bucket-only result (cf. `DefaultFlagRepository.refresh`) — so a tab switched to while a
-     * refresh runs cannot start its own fan-out; its landing is REPLAYED once the in-flight refresh
-     * settles, if that tab is still the selected one (a tab left meanwhile lands again on its own).
-     * Latest landing wins; a landing on the type already in flight clears it (nothing to replay —
-     * the running refresh covers it, and its throttle window absorbs the resume/tab-effect double
-     * fire). Without this, « relancer l'app puis changer tout de suite d'onglet » still showed the
-     * new tab's cache whenever the first tab's fan-out was in flight at the switch.
+     * #743 — the [FlagType] currently being refreshed behind [isRefreshing], the set of types this
+     * refresh covers, and the landing that met it while it was running for ANOTHER uncovered type.
+     * A normal refresh covers one type; a Super pull covers CYAN, RED and FAVORITE sequentially.
+     * Refreshes stay strictly sequential — the repository treats every `refresh(type)` as a
+     * generation barrier for its shared sticky sweep, so two concurrent per-type refreshes would
+     * degrade the older one to a bucket-only result (cf. `DefaultFlagRepository.refresh`) — so a tab
+     * switched to while a refresh runs cannot start its own fan-out; its landing is REPLAYED once the
+     * in-flight refresh settles, if that tab is still the selected one (a tab left meanwhile lands
+     * again on its own). Latest landing wins; a landing on a covered type clears it (nothing to
+     * replay — the running refresh covers it, and its throttle window absorbs the resume/tab-effect
+     * double fire). Without this, « relancer l'app puis changer tout de suite d'onglet » still showed
+     * the new tab's cache whenever the first tab's fan-out was in flight at the switch.
      */
     private var refreshingType: FlagType? = null
+    private var refreshingCoveredTypes: Set<FlagType> = emptySet()
     private var deferredLandingType: FlagType? = null
     private val subcategoryRefreshRequestedCats: MutableSet<Int> = mutableSetOf()
 
@@ -869,9 +874,13 @@ class FlagsViewModel @Inject constructor(
     }
 
     fun refresh() {
-        // Super is a placeholder with no backing FlagType — pull-to-refresh is a no-op there.
-        val type = _selectedTab.value.flagType ?: return
-        if (_isRefreshing.value && refreshingType == type) return
+        val selected = _selectedTab.value
+        val type = selected.flagType
+        if (type == null) {
+            if (selected == FlagTab.Super) refreshSuperFavorites()
+            return
+        }
+        if (_isRefreshing.value && type in refreshingCoveredTypes) return
         // A manual refresh captures the post-reading state too, so the generations visible at this
         // call would only duplicate the fan-out on the next landing — consume them (#378 follow-up).
         flagOpenedGenerationConsumed = flagOpenedGeneration
@@ -882,6 +891,26 @@ class FlagsViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 flagRepository.refresh(type)
+            } finally {
+                endRefresh()
+            }
+        }
+    }
+
+    private fun refreshSuperFavorites() {
+        if (_isRefreshing.value) return
+        flagOpenedGenerationConsumed = flagOpenedGeneration
+        if (deferredLandingType?.let { it in SUPER_FAVORITE_BACKING_TYPES } == true) deferredLandingType = null
+        beginRefresh(
+            type = SUPER_FAVORITE_BACKING_TYPES.first(),
+            coveredTypes = SUPER_FAVORITE_BACKING_TYPES.toSet(),
+        )
+        viewModelScope.launch {
+            try {
+                SUPER_FAVORITE_BACKING_TYPES.forEach { type ->
+                    refreshingType = type
+                    flagRepository.refresh(type)
+                }
             } finally {
                 endRefresh()
             }
@@ -980,18 +1009,19 @@ class FlagsViewModel @Inject constructor(
     /**
      * #743 — in-flight guard shared by the two [maybeAutoRefresh] checkpoints. `true` when a refresh
      * is running (the landing must not start a concurrent fan-out); the landing is then remembered
-     * for replay in [endRefresh] if it targets ANOTHER type than the one in flight, and cleared
-     * otherwise (latest landing wins, cf. [deferredLandingType]).
+     * for replay in [endRefresh] if it targets an uncovered type, and cleared otherwise (latest
+     * landing wins, cf. [deferredLandingType]).
      */
     private fun deferLandingIfRefreshing(type: FlagType): Boolean {
         if (!_isRefreshing.value) return false
-        deferredLandingType = type.takeIf { it != refreshingType }
+        deferredLandingType = type.takeIf { it !in refreshingCoveredTypes }
         return true
     }
 
-    /** Raises the single loading cue ([isRefreshing]) for [type]'s round-trip, manual or auto. */
-    private fun beginRefresh(type: FlagType) {
+    /** Raises the single loading cue ([isRefreshing]) for a refresh covering [coveredTypes]. */
+    private fun beginRefresh(type: FlagType, coveredTypes: Set<FlagType> = setOf(type)) {
         refreshingType = type
+        refreshingCoveredTypes = coveredTypes
         _isRefreshing.value = true
     }
 
@@ -1002,6 +1032,7 @@ class FlagsViewModel @Inject constructor(
      */
     private fun endRefresh() {
         refreshingType = null
+        refreshingCoveredTypes = emptySet()
         _isRefreshing.value = false
         val deferred = deferredLandingType ?: return
         deferredLandingType = null

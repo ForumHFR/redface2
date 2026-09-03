@@ -86,6 +86,11 @@ class DefaultForumRepository @Inject constructor(
         emitAll(categoriesRefresh.asSharedFlow())
     }
 
+    override fun observeCachedCategories(): Flow<ForumResult<List<Category>>?> = flow {
+        emit(cachedCategories?.let { ForumResult.Success(it.value) })
+        emitAll(categoriesRefresh.asSharedFlow())
+    }
+
     override suspend fun getCategories(forceRefreshIfStale: Boolean): ForumResult<List<Category>> {
         val now = clock.instant()
         val cached = cachedCategories

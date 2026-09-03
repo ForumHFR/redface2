@@ -316,13 +316,12 @@ data class SettingsState(
         get() = !isUpdatingDebugBoundsOverlay
 
     val canToggleFlagsGroupByCategory: Boolean
-        get() = !isUpdatingFlagsGroupByCategory
+        get() = !flagsPerTabOverride && !isUpdatingFlagsGroupByCategory
 
-    // The global hide-read toggle is meaningful when the global grouped view is on, OR when the
-    // per-tab override is on (it still serves as the fallback for a tab that is grouped per-type but
-    // has no per-type hide-read value). #309 Codex review.
+    // When per-tab override is on, the readable editing point is the Drapeaux quick config sheet.
+    // The global value remains a persisted fallback, but Settings no longer exposes it as editable.
     val canToggleFlagsHideReadCategories: Boolean
-        get() = (flagsGroupByCategory || flagsPerTabOverride) && !isUpdatingFlagsHideReadCategories
+        get() = !flagsPerTabOverride && flagsGroupByCategory && !isUpdatingFlagsHideReadCategories
 
     val canToggleFlagsPerTabOverride: Boolean
         get() = !isUpdatingFlagsPerTabOverride

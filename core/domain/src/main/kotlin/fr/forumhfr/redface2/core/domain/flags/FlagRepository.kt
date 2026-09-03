@@ -4,6 +4,7 @@ import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.write.FlagAddContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 
 /**
  * Read access to the user's drapeaux. Phase 1D-1 (#110) ships a REST per-category
@@ -18,6 +19,8 @@ import kotlinx.coroutines.flow.Flow
  *   from the current auth session so tab switches do not implicitly mutate HFR read state.
  * - [refresh] always fetches the network, updates the in-memory success cache, and
  *   broadcasts the result to active observers.
+ * - [observeCacheUpdates] is invalidation-only: it never fetches and never emits an initial
+ *   snapshot by itself.
  * - [clearSessionCache] must run when the auth session ends or changes user; cached
  *   drapeaux are user-private.
  * - On a fetch error, the [Result] in [FlagsResult.Failure] carries the cause; the flow
@@ -38,6 +41,13 @@ interface FlagRepository {
      * observers. Active observers receive [FlagsResult.Loading] before the fresh result.
      */
     suspend fun refresh(type: FlagType)
+
+    /**
+     * Passive cache invalidation signal for cache-only consumers. Unlike [observe], subscribing here
+     * never triggers an initial fetch; emissions only mean one of [types]' in-memory snapshots changed
+     * or was invalidated.
+     */
+    fun observeCacheUpdates(types: Set<FlagType>): Flow<FlagType> = emptyFlow()
 
     /** Drop all per-tab in-memory results tied to the current auth session. */
     fun clearSessionCache()
