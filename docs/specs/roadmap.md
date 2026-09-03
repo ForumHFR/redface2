@@ -32,7 +32,7 @@ Pour la liste des capabilities et des non-goals, voir le [scope fonctionnel]({{ 
 | **1 — Core** | Lecture du forum (drapeaux, topics, forum, deep links) | XL | Phase 0 | ✅ Livrée (AAB `0.1.0-phase1.7` / `app-v38` / specs v0.8.4) |
 | **2 — Écriture** | Post / edit / quote / create topic / recherche / proxy alpha | L | Phase 1 | ✅ Livrée |
 | **3 — Messages** | MPs classiques + MultiMPs (lecture + écriture + DT + sync de position) | M | Phase 2 | ✅ Livrée (clôture #598 ; sync MPStorage bidirectionnelle complète + cache Room reportés → #6, Phase 4) |
-| **4 — Extensions + refonte UI pré-1.0** | Bookmarks, Qualitay, Redflag + refonte Drapeaux (#603) / Topic (#604) + hygiène repo (#605) ; Blacklist déjà livrée | L | Phase 3 + **hfr-redflag Worker** | 🚧 En cours |
+| **4 — Extensions + refonte UI pré-1.0** | Bookmarks, Qualitay, Redflag + refonte Drapeaux (#603) / Topic (#604) + hygiène repo (#605) ; Blacklist déjà livrée | L | Phase 3 + **hfr-redflag Worker** | ◐ Refonte UI livrée (bêtas 0.18.0 → 0.50.2) ; extensions communautaires non commencées hors Blacklist. Milestones de phase fermés en 06/2026 : le suivi se fait par **milestones de vue** |
 | **Polish & UX** | Animations, offline, thème dynamique, Play Store, raffinements UX | — | continu | ♾️ Backlog continu (pas une étape finale) |
 
 **Taille** : S = petit sous-chantier, M = quelques composants, L = plusieurs features indépendantes, XL = écran majeur + parseurs + cache (ex. `PostRenderer` natif).
@@ -74,7 +74,7 @@ Les dépôts en cylindre (`MPStorage2`, `hfr-redflag`) sont des **dépendances e
 
 - [x] Structure Gradle multi-modules (8 core + 8 features base déclarés ; certains modules conservent un `build.gradle.kts` vide en attente de leur cycle, cf. ADR-001)
 - [x] CI GitHub Actions (`detektAll`, `lintDebug`, `test`, `testDebugUnitTest`, `:app:assembleDebug`)
-- [x] Thème Material 3 dans `:core:ui` (clair, sombre, AMOLED — Material You + HFR Classique différés Phase 5)
+- [x] Thème Material 3 dans `:core:ui` (clair, sombre, AMOLED ; réglages couleurs avancés livrés en Phase 4)
 - [x] Navigation graph Compose Navigation 3 (bottom nav 4 onglets + back stacks par onglet, cf. [navigation.md]({{ site.baseurl }}/specs/navigation))
 - [x] Hilt wiring (`build-logic` convention plugins, KSP, `@HiltAndroidApp`)
 - [x] Design system de base (typographie, couleurs, composants thème)
@@ -101,6 +101,11 @@ Les dépôts en cylindre (`MPStorage2`, `hfr-redflag`) sont des **dépendances e
 - [x] Deep linking (URLs HFR → app) — formes legacy `forum1.php` / `forum2.php` corrigées et branchées en 1C-A ; URLs jolies `…-sujet_<post>_<page>.htm#tN`, mapping des 20 slugs de catégorie et fallback navigateur livrés en Phase 4 (#1032 PR2)
 - [x] **Prefetch pages suivantes Phase 1D-4 (#108)** — topic `page + 1` persisté en `ANONYMOUS` sans écraser l'authentifié, listing forum `page + 1` warm-up anonyme sans exposer le payload ; annulation au changement de page / sortie d'écran
 - [x] **Images + smileys (Coil 3) — Phase 1D-5 (#109)** — `SingletonImageLoader.Factory` côté `:app` avec `AnimatedImageDecoder.Factory()` (autoplay GIFs builtins + perso). `:core:ui` `PostMediaDisplayPolicy` centralise les tailles : builtin 18×18, perso 70×50 (`ContentScale.Fit`, bucket aligné sur la distribution wikismilies), inline image 240×180 borné (`ContentScale.Inside`), block image largeur parent + hauteur max 480dp + arrondi + état loading/error. Pas de mesure intrinsèque async ni `FlowRow` — décision B+ verrouillée par Codex (re-évaluable Phase 2/4 si le bucket fixe reste insuffisant). **MAJ Phase 2F : le bucket fixe des smileys a été remplacé par un rendu intrinsèque (mesure native Coil, no-upscale, cap abs 70sp/240sp + cap relatif 0.9×largeur, `AboveBaseline`+line-growth) en #175 / PR #222 — cf. `protocol-hfr.md` § Smileys. Les images inline `[img]` restent en bucket fixe (migration intrinsèque suivie en #224 ; validation visuelle smileys app↔web en #131).**
+- [x] **Réglage largeur maximale des images (#991, Phase 4)** — choix `90 %` / `95 % (défaut)` /
+  `99 %` / `100 %` dans Réglages → Affichage, persisté en DataStore. Le défaut conserve le cap
+  historique `0,95 × conteneur`; la valeur passe par `RedfaceTheme` / `LocalPostImageMaxWidth` et
+  gouverne ensemble les trois chemins d'image de contenu (`ParagraphProse`, `BlockImage` mesuré,
+  `coldBlockSlotDp`) sans toucher le cap smiley `0,9` ni le mode pleine largeur.
 - [x] **Blocs monospace `[fixed]` / `[code]` (#79)** — `PostBlock.Fixed(text)` et `PostBlock.CodeBlock(text, language?)` parsés depuis `<table class="fixed">` / `<table class="code">` ; `PostRenderer` rend chaque bloc dans une `Card surfaceContainerHighest` à police monospace avec scroll horizontal sur overflow. Coloration syntaxique aplatie en texte brut (Phase 2).
 
 **Livrable :** une app utilisable pour **lire** le forum au quotidien. Pas encore de possibilité d'écrire.
@@ -184,7 +189,7 @@ Le PostRenderer sera développé de manière incrémentale : texte brut d'abord,
 
 ---
 
-## Phase 4 — Extensions communautaires + refonte UI pré-1.0 🚧 en cours
+## Phase 4 — Extensions communautaires + refonte UI pré-1.0 ◐ refonte UI livrée, extensions en attente
 
 **Objectif :** les features inspirées des userscripts HFR **et** la refonte UI avant la 1.0.
 
@@ -206,8 +211,11 @@ Le PostRenderer sera développé de manière incrémentale : texte brut d'abord,
 Mandat de refonte des écrans chauds avant la 1.0 (post HFR XaTriX 2788560) :
 - [x] **Refonte de la vue Drapeaux** — #603 (livrée, bêta 0.18.0 — [ADR-017]({{ site.baseurl }}/adr/017-refonte-vue-drapeaux))
 - [x] **Refonte de la vue Topic** — #604 (livrée, bêta 0.37.0 : cinq vagues, moteur de pagination in-VM #895, loupe #182, passe images #876 ; reliquats en Vue · Topic 2)
+- [x] **Couleurs configurables** — #595/#883 : sous-page Réglages → Affichage → Couleurs, 8 presets
+  d'accent + RGB custom `#RRGGBB`, tons de fond clair/sombre persistés, couleurs du système
+  Android 12+ et aperçu live recordable par Roborazzi.
 - [x] **Hygiène repo / audit des dérives** — exécutée (2026-06) ; #605 requalifiée en ombrelle de suivi Phase 4
-- [ ] **Partage de la surface de lecture Topic → MP/DT** — [#1040](https://github.com/ForumHFR/redface2/issues/1040) (**en cours**, dev 0.42.x). Le chantier répond à un délaissement mesuré : 74 commits sur `feature/topic` contre 7 sur `feature/messages` entre le 20/06 et le 12/08, sans document pour tracer l'écart. **Huit lots (0 → 7)** ; les lots 0 à 6 sont clos et le lot 7 est en cours :
+- [x] **Partage de la surface de lecture Topic → MP/DT** — [#1040](https://github.com/ForumHFR/redface2/issues/1040) (**livré** : dev 0.42.8 puis bêta 0.43.0 ; les preuves serveur restantes de la matrice sont suivies par [#1107](https://github.com/ForumHFR/redface2/issues/1107)). Le chantier répond à un délaissement mesuré : 74 commits sur `feature/topic` contre 7 sur `feature/messages` entre le 20/06 et le 12/08, sans document pour tracer l'écart. **Huit lots (0 → 7)** ; les lots 0 à 6 sont clos et le lot 7 est en cours :
   - lot 0 — caractérisation MP, correction de la prose route-driven et création de la page canonique [Parité de lecture Topic ↔ MP]({{ site.baseurl }}/specs/reading-parity) ([#1041](https://github.com/ForumHFR/redface2/issues/1041)), rendue `[enforced]` par deux gardes machine en [#1045](https://github.com/ForumHFR/redface2/issues/1045) ;
   - lot 1 — `ReadingPostCard`, carte de lecture commune promue dans `:core:ui` ([#1042](https://github.com/ForumHFR/redface2/issues/1042)) : densité, sélection de texte, profil au tap ;
   - lot 2 — préférences de lecture transverses ([#1050](https://github.com/ForumHFR/redface2/issues/1050)) : pleine largeur, EgoQuote/EgoPost, liste noire, signatures ;
@@ -235,7 +243,7 @@ Mandat de refonte des écrans chauds avant la 1.0 (post HFR XaTriX 2788560) :
 - [ ] Animations et transitions (raffinements continus)
 - [ ] Mode offline complet (lecture + file d'attente d'écriture)
 - [ ] Notifications push configurables
-- [ ] Thème dynamique (Material You)
+- [x] Thème dynamique (Material You) — livré via Réglages → Affichage → Couleurs en Phase 4 (#595/#883)
 - [ ] Thème "HFR classique"
 - [ ] Widgets Android
 - [ ] Tests de performance (scroll, cold start, mémoire)
@@ -247,7 +255,7 @@ Mandat de refonte des écrans chauds avant la 1.0 (post HFR XaTriX 2788560) :
 
 ## Participation
 
-Chaque phase sera trackée via les [issues GitHub](https://github.com/ForumHFR/redface2/issues) et des milestones. Les contributions sont les bienvenues à partir de la Phase 1.
+Les phases ont été trackées par des milestones GitHub jusqu'en juin 2026 ; depuis, le pilotage courant se fait par **milestones de vue** (*Vue · Topic 2*, *Vue · Éditeur 2*, *Vue · Drapeaux 2*, *Vue · MP 1*, *Vue · Réglages 1*, *Vue · Compte HFR 1*, *Infra & dette*, *Méta / long terme*) dans les [issues GitHub](https://github.com/ForumHFR/redface2/issues). Les contributions sont les bienvenues.
 
 Pour contribuer :
 1. Choisir une issue non assignée

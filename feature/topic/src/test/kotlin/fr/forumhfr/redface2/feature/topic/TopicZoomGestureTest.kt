@@ -2,6 +2,9 @@ package fr.forumhfr.redface2.feature.topic
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -15,14 +18,19 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import org.junit.Assert.assertEquals
@@ -186,7 +194,7 @@ class TopicZoomGestureTest {
     }
 
     @Test
-    fun `taps are inert while zoomed and work again after the reset`() {
+    fun `taps propagate while zoomed and after the reset`() {
         var taps = 0
         compose.setContent {
             val scope = rememberCoroutineScope()
@@ -222,10 +230,10 @@ class TopicZoomGestureTest {
 
         compose.onNodeWithTag("zoom").performTouchInput { down(0, center); up(0) }
         compose.waitForIdle()
-        assertEquals("a tap at >1x must be inert (replied mode)", 1, taps)
+        assertEquals("a tap at >1x must still reach the child target", 2, taps)
 
-        // Reset by GESTURE (the proven snap path) : the programmatic settle is covered by the
-        // dedicated settle test — here only the tap recovery matters.
+        // Reset by GESTURE (the proven snap path): the programmatic settle is covered by the
+        // dedicated settle test; here only the transparent tap path matters.
         compose.onNodeWithTag("zoom").performTouchInput {
             down(0, center - Offset(0f, 400f))
             down(1, center + Offset(0f, 400f))
@@ -242,7 +250,159 @@ class TopicZoomGestureTest {
         assertEquals("the gesture snap must land at rest", 1f, zoomState.scale.floatValue, 0.001f)
         compose.onNodeWithTag("zoom").performTouchInput { down(0, center); up(0) }
         compose.waitForIdle()
-        assertEquals("after the reset the tap must reach the child again", 2, taps)
+        assertEquals("after the reset the tap must keep reaching the child", 3, taps)
+    }
+
+    @Test
+    fun `direct child target works while zoomed with the reader gesture stack`() {
+        var taps = 0
+        var refreshes = 0
+        compose.setContent {
+            val scope = rememberCoroutineScope()
+            listState = remember { LazyListState() }
+            zoomState = rememberTopicZoomState(pageKey = 1, animationScope = scope)
+            val dragOffset = remember { mutableFloatStateOf(0f) }
+            val haptics = LocalHapticFeedback.current
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .size(360.dp, 600.dp)
+                    .testTag("zoom")
+                    .topicMagnifier(zoomState, listState)
+                    .topicPageSwipe(
+                        currentPage = 5,
+                        totalPages = { 10 },
+                        dragOffset = dragOffset,
+                        handlers = TopicSwipeHandlers(
+                            haptics = haptics,
+                            onOpenPage = {},
+                            enabled = { !zoomState.zoomed },
+                            leftGestureInsetPx = { 0 },
+                            rightGestureInsetPx = { 0 },
+                        ),
+                    )
+                    .topicDoubleTapRefresh(enabled = !zoomState.zoomed) { refreshes++ }
+                    .topicZoomTransform(zoomState),
+            ) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(600.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Box(
+                            Modifier
+                                .size(72.dp)
+                                .background(Color.Transparent)
+                                .clickable { taps++ }
+                                .testTag("target"),
+                        )
+                    }
+                }
+                items(count = 20) { i -> Text("post $i", Modifier.fillMaxWidth().height(48.dp)) }
+            }
+        }
+        compose.onNodeWithTag("target").performTouchInput { click() }
+        compose.waitForIdle()
+        assertEquals("harness: the direct target must work at rest", 1, taps)
+
+        pinchOut()
+        compose.waitForIdle()
+        assertTrue(zoomState.zoomed)
+        compose.onNodeWithTag("target").performTouchInput { click() }
+        compose.waitForIdle()
+
+        assertEquals("the zoomed reader stack must let taps reach child targets", 2, taps)
+        assertEquals("a zoomed tap must not trigger list-level refresh", 0, refreshes)
+    }
+
+    @Test
+    fun `long presses propagate while zoomed`() {
+        var longPresses = 0
+        compose.setContent {
+            val scope = rememberCoroutineScope()
+            listState = remember { LazyListState() }
+            zoomState = rememberTopicZoomState(pageKey = 1, animationScope = scope)
+            Box(
+                Modifier
+                    .size(360.dp, 600.dp)
+                    .testTag("zoom")
+                    .topicMagnifier(zoomState, listState),
+            ) {
+                LazyColumn(state = listState) {
+                    items(count = 200) { i -> Text("post $i", Modifier.fillMaxWidth().height(48.dp)) }
+                }
+                Box(
+                    Modifier
+                        .size(360.dp, 600.dp)
+                        .background(Color.Transparent)
+                        .pointerInput(Unit) {
+                            detectTapGestures(onLongPress = { longPresses++ })
+                        },
+                )
+            }
+        }
+
+        pinchOut()
+        compose.waitForIdle()
+        assertTrue(zoomState.zoomed)
+
+        compose.onNodeWithTag("zoom").performTouchInput { longClick(center) }
+        compose.waitForIdle()
+
+        assertEquals("a long press at >1x must still reach the child target", 1, longPresses)
+    }
+
+    @Test
+    fun `one finger pan while zoomed consumes movement before child detectors`() {
+        var childUnconsumedMoves = 0
+        compose.setContent {
+            val scope = rememberCoroutineScope()
+            listState = remember { LazyListState() }
+            zoomState = rememberTopicZoomState(pageKey = 1, animationScope = scope)
+            Box(
+                Modifier
+                    .size(360.dp, 600.dp)
+                    .testTag("zoom")
+                    .topicMagnifier(zoomState, listState),
+            ) {
+                LazyColumn(state = listState) {
+                    items(count = 200) { i -> Text("post $i", Modifier.fillMaxWidth().height(48.dp)) }
+                }
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .pointerInput(Unit) {
+                            awaitEachGesture {
+                                awaitFirstDown(requireUnconsumed = false)
+                                while (true) {
+                                    val event = awaitPointerEvent(PointerEventPass.Main)
+                                    if (event.changes.none { it.pressed }) return@awaitEachGesture
+                                    if (event.changes.any { it.positionChange() != Offset.Zero && !it.isConsumed }) {
+                                        childUnconsumedMoves++
+                                    }
+                                }
+                            }
+                        },
+                )
+            }
+        }
+        pinchOut()
+        compose.waitForIdle()
+        assertTrue(zoomState.zoomed)
+        val itemBefore = listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
+
+        compose.onNodeWithTag("zoom").performTouchInput {
+            down(0, center)
+            repeat(8) { moveBy(0, Offset(0f, -80f)) }
+            up(0)
+        }
+        compose.waitForIdle()
+
+        val itemAfter = listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
+        assertEquals("zoomed pan movement must be consumed on Initial", 0, childUnconsumedMoves)
+        assertNotEquals("the consumed movement must still drive the zoom pan", itemBefore, itemAfter)
     }
 
     @Test

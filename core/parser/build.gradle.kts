@@ -5,8 +5,10 @@ plugins {
 dependencies {
     api(project(":core:model"))
     implementation(libs.jsoup)
+    compileOnly(libs.jspecify)
     // MPStorage (#6/ADR-014) : tolerant JsonElement-level parsing of the v0.1 envelope.
     implementation(libs.kotlinx.serialization.json)
 
     testImplementation(libs.junit4)
+    testCompileOnly(libs.jspecify)
 }

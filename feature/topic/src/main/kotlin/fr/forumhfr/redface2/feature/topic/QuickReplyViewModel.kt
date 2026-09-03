@@ -13,6 +13,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
+import fr.forumhfr.redface2.core.domain.write.QuotedNumreponses
 import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.model.write.ReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
@@ -84,8 +85,17 @@ sealed interface QuickReplySubmitError {
 
 /** One-shot events consumed by the sheet composable. */
 sealed interface QuickReplyEffect {
-    /** HFR accepted the reply — refresh the topic like the full editor does (#200). */
-    data class SubmitSucceeded(val targetPage: Int?, val scrollTo: Int?) : QuickReplyEffect
+    /**
+     * HFR accepted the reply — refresh the topic like the full editor does (#200).
+     * [quotedNumreponses] (#974) : the cited posts (appearance order ; inline `[quotemsg]` tags
+     * and cards alike), empty for a plain reply — the topic engine lands on the highest one when
+     * it is on the landing page, bottom otherwise.
+     */
+    data class SubmitSucceeded(
+        val targetPage: Int?,
+        val scrollTo: Int?,
+        val quotedNumreponses: List<Int> = emptyList(),
+    ) : QuickReplyEffect
 
     /**
      * The draft is persisted — the sheet can hand over to the full-screen editor. Emitted only
@@ -125,15 +135,16 @@ class QuickReplyViewModel @AssistedInject constructor(
     private val _effects: Channel<QuickReplyEffect> = Channel(capacity = Channel.BUFFERED)
     val effects: Flow<QuickReplyEffect> = _effects.receiveAsFlow()
 
-    private val context = ReplyContext(
-        cat = request.cat,
-        subcat = request.subcat,
-        topicId = request.topicId,
-        page = request.page,
-    )
+    /**
+     * The VM is scoped to the topic nav entry, so [request] is the page of the FIRST sheet creation
+     * only. The actual reply page is refreshed on every opening and snapshotted for each fetch /
+     * submit so a second quick reply on another page posts the right HFR `page`.
+     */
+    private var currentPage: Int = request.page
 
     /** Same lifecycle as the full editor : hash_check stays here, never in the Compose state. */
     private var loadedForm: ReplyForm? = null
+    private var loadedFormPage: Int? = null
     private var formJob: Job? = null
     private var submitJob: Job? = null
     private var autosaveJob: Job? = null
@@ -201,8 +212,19 @@ class QuickReplyViewModel @AssistedInject constructor(
      * (never a replacement computed from the row — réserve Codex n°1).
      */
     fun onSheetOpened(initialQuotes: List<QuoteSelection> = emptyList()) {
+        onSheetOpened(currentPage = request.page, initialQuotes = initialQuotes)
+    }
+
+    /**
+     * [currentPage] is the topic page visible at this opening. It is intentionally not part of the
+     * Hilt key : the draft and in-flight submit contract remain scoped to the topic, while the HFR
+     * form context is rebuilt per opening and per submit.
+     */
+    fun onSheetOpened(currentPage: Int, initialQuotes: List<QuoteSelection> = emptyList()) {
         materializeJob?.cancel()
         openJob?.cancel()
+        updateCurrentPage(currentPage)
+        prefetchForm()
         // Gate Sol #953 F2 — seal the previous session : if its owner snapshot never resolved,
         // its still-pending draft tasks must no-op rather than adopt whatever account the late
         // currentOwner() read lands on (a no-op on an already-resolved session).
@@ -251,18 +273,20 @@ class QuickReplyViewModel @AssistedInject constructor(
     @Suppress("TooGenericExceptionCaught") // mapped to a typed error below; cancellation rethrown.
     private fun materializeInlineQuotes(quotes: List<QuoteSelection>) {
         materializeJob?.cancel()
+        val baseContext = replyContext()
         materializeJob = viewModelScope.launch {
             _state.update { it.copy(isPreparingQuotes = true, submitError = null) }
             try {
-                val quoteContext = context.copy(
+                val quoteContext = baseContext.copy(
                     quotedNumreponse = quotes.first().numreponse,
                     quoteRef = null,
                 )
                 val form = quoteMaterializer.fetchFormWithQuotes(
                     context = quoteContext,
                     extraQuoteNumreponses = quotes.drop(1).map { it.numreponse },
+                    truncate = quotes.any { it.truncate },
                 )
-                loadedForm = form
+                rememberLoadedForm(form, quoteContext.page)
                 val prefills = form.initialContent.trimEnd()
                 _state.update { current ->
                     val existing = current.text.text
@@ -406,9 +430,13 @@ class QuickReplyViewModel @AssistedInject constructor(
 
     /** Warm the hash_check early so the first submit doesn't pay the GET ; errors stay silent. */
     private fun prefetchForm() {
-        if (loadedForm != null || formJob?.isActive == true) return
+        val context = replyContext()
+        if (loadedFormFor(context.page) != null || formJob?.isActive == true) return
         formJob = viewModelScope.launch {
-            loadedForm = runCatching { replyRepository.fetchReplyForm(context) }.getOrNull()
+            val form = runCatching { replyRepository.fetchReplyForm(context) }.getOrNull()
+            if (form != null && currentPage == context.page) {
+                rememberLoadedForm(form, context.page)
+            }
         }
     }
 
@@ -418,13 +446,21 @@ class QuickReplyViewModel @AssistedInject constructor(
         // #953 F2 — the post-success draft delete rides the owner of the session that SUBMITTED,
         // even if the sheet is reopened (and the owner re-snapshotted) while the POST is in flight.
         val session = sessionOwner
+        // #974 — the cited posts ride the success effect whatever the rendering mode : inline
+        // `[quotemsg]` tags of the field (cards OFF, the production default) unioned with the
+        // armed cards. Snapshotted here : the state is reset on success before the effect is sent.
+        val quotes = _state.value.quotes
+        val quotedNumreponses = QuotedNumreponses.of(_state.value.text.text, quotes)
+        val baseContext = replyContext()
         submitJob = viewModelScope.launch {
             val outcome = runCatching {
-                val quotes = _state.value.quotes
                 if (quotes.isEmpty()) {
-                    val form = loadedForm ?: replyRepository.fetchReplyForm(context).also { loadedForm = it }
+                    val form = loadedFormFor(baseContext.page)
+                        ?: replyRepository.fetchReplyForm(baseContext).also {
+                            rememberLoadedForm(it, baseContext.page)
+                        }
                     replyRepository.submitReply(
-                        context = context,
+                        context = baseContext,
                         form = form,
                         bbcodeContent = _state.value.text.text,
                         options = form.options,
@@ -435,13 +471,14 @@ class QuickReplyViewModel @AssistedInject constructor(
                     // rides). Card order = citation order ; the typed body follows the quotes.
                     // A network failure leaves body AND cards untouched (state only mutates on
                     // success), per the cadrage's partial-submit interdiction.
-                    val quoteContext = context.copy(
+                    val quoteContext = baseContext.copy(
                         quotedNumreponse = quotes.first().numreponse,
                         quoteRef = null,
                     )
                     val form = quoteMaterializer.fetchFormWithQuotes(
                         context = quoteContext,
                         extraQuoteNumreponses = quotes.drop(1).map { it.numreponse },
+                        truncate = quotes.any { it.truncate },
                     )
                     val body = _state.value.text.text
                     replyRepository.submitReply(
@@ -459,15 +496,40 @@ class QuickReplyViewModel @AssistedInject constructor(
                 }
             }
             outcome.fold(
-                onSuccess = { result -> handleSubmitOutcome(result, session) },
+                onSuccess = { result -> handleSubmitOutcome(result, session, quotedNumreponses) },
                 onFailure = ::handleSubmitFailure,
             )
         }
     }
 
+    private fun updateCurrentPage(page: Int) {
+        if (page == currentPage) return
+        currentPage = page
+        loadedForm = null
+        loadedFormPage = null
+        formJob?.cancel()
+        formJob = null
+    }
+
+    private fun replyContext(): ReplyContext = ReplyContext(
+        cat = request.cat,
+        subcat = request.subcat,
+        topicId = request.topicId,
+        page = currentPage,
+    )
+
+    private fun loadedFormFor(page: Int): ReplyForm? =
+        loadedForm.takeIf { loadedFormPage == page }
+
+    private fun rememberLoadedForm(form: ReplyForm, page: Int) {
+        loadedForm = form
+        loadedFormPage = page
+    }
+
     private suspend fun handleSubmitOutcome(
         result: ReplySubmitResult,
         session: CompletableDeferred<String?>,
+        quotedNumreponses: List<Int>,
     ) {
         when (result) {
             is ReplySubmitResult.Success -> {
@@ -490,6 +552,7 @@ class QuickReplyViewModel @AssistedInject constructor(
                     QuickReplyEffect.SubmitSucceeded(
                         targetPage = result.targetPage,
                         scrollTo = result.numreponse,
+                        quotedNumreponses = quotedNumreponses,
                     ),
                 )
             }

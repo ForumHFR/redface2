@@ -3,8 +3,10 @@ package fr.forumhfr.redface2.feature.topic
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -32,6 +34,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -62,7 +66,7 @@ internal fun QuickReplySheet(
     // renders the same cards (mockup P3) and needs author + excerpt, which only the topic
     // surface can snapshot. Riding the callback (→ the :app handoff), never the route.
     onEscalate: (quotes: List<QuoteSelection>) -> Unit,
-    onSubmitted: (targetPage: Int?, scrollTo: Int?) -> Unit,
+    onSubmitted: (targetPage: Int?, scrollTo: Int?, quotedNumreponses: List<Int>) -> Unit,
     // #604 lots 2-3 — the cards this opening pre-arms : one for « Citer », the whole basket
     // for « Citer N » under the full-screen threshold (empty from the reply FAB).
     initialQuotes: List<QuoteSelection> = emptyList(),
@@ -81,10 +85,12 @@ internal fun QuickReplySheet(
     LaunchedEffect(viewModel) {
         // Re-seed the field from the #405 row at EACH opening — the VM outlives the sheet and
         // its cached text can be stale after a full-screen edit of the same draft (gate #788).
-        viewModel.onSheetOpened(initialQuotes)
+        // The VM outlives the sheet (topic-scoped) : hand it the page of THIS opening (#1243 suite).
+        viewModel.onSheetOpened(currentPage = request.page, initialQuotes = initialQuotes)
         viewModel.effects.collect { effect ->
             when (effect) {
-                is QuickReplyEffect.SubmitSucceeded -> onSubmitted(effect.targetPage, effect.scrollTo)
+                is QuickReplyEffect.SubmitSucceeded ->
+                    onSubmitted(effect.targetPage, effect.scrollTo, effect.quotedNumreponses)
                 is QuickReplyEffect.EscalateToFullEditor -> onEscalate(effect.quotes)
             }
         }
@@ -103,6 +109,20 @@ internal fun QuickReplySheet(
     val sheetState = rememberModalBottomSheetState(
         skipPartiallyExpanded = true,
         confirmValueChange = { target -> target != SheetValue.Hidden || !submitting.value },
+    )
+    val density = LocalDensity.current
+    val screenHeightDp = LocalConfiguration.current.screenHeightDp.toFloat()
+    val imeHeightDp = with(density) { WindowInsets.ime.getBottom(density).toDp().value }
+    val bodyLineHeight = MaterialTheme.typography.bodyLarge.lineHeight
+    val fieldLineHeightDp = if (bodyLineHeight.isSp) {
+        with(density) { bodyLineHeight.toDp().value }
+    } else {
+        QUICK_REPLY_FIELD_FALLBACK_LINE_HEIGHT_DP
+    }
+    val fieldMaxLines = quickReplyFieldMaxLines(
+        windowHeightDp = screenHeightDp,
+        imeHeightDp = imeHeightDp,
+        lineHeightDp = fieldLineHeightDp,
     )
     ModalBottomSheet(
         sheetState = sheetState,
@@ -180,8 +200,8 @@ internal fun QuickReplySheet(
                     // default, the IME needs the explicit autoCap hint (surface regression, v220).
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                     placeholder = { Text(stringResource(R.string.quick_reply_hint)) },
-                    minLines = 3,
-                    maxLines = 6,
+                    minLines = QUICK_REPLY_FIELD_MIN_LINES,
+                    maxLines = fieldMaxLines,
                     modifier = Modifier
                         .fillMaxWidth()
                         .focusRequester(focusRequester),

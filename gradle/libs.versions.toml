@@ -1,27 +1,29 @@
 [versions]
-agp = "9.2.0"
-kotlin = "2.3.21"
-ksp = "2.3.9"
-hilt = "2.59.2"
-hilt-navigation-compose = "1.3.0"
+agp = "9.3.1"
+kotlin = "2.4.10"
+ksp = "2.3.11"
+hilt = "2.60.1"
+hilt-navigation-compose = "1.4.0"
 android-minSdk = "29"
 android-targetSdk = "36"
-android-compileSdk = "36"
-androidx-core = "1.18.0"
+android-compileSdk = "37"
+androidx-core = "1.19.0"
 androidx-test-core = "1.7.0"
 androidx-test-runner = "1.7.0"
 androidx-test-ext-junit = "1.3.0"
 androidx-activity = "1.13.0"
 androidx-lifecycle = "2.10.0"
-compose-bom = "2026.05.01"
+compose-bom = "2026.08.00"
 navigation3 = "1.1.2"
 material3-adaptive = "1.2.0"
+materialKolor = "5.0.1"
 coroutines = "1.11.0"
 room = "2.8.4"
 datastore = "1.2.1"
-okhttp = "5.3.2"
-jsoup = "1.22.2"
-coil = "3.4.0"
+okhttp = "5.5.0"
+jsoup = "1.23.2"
+jspecify = "1.0.1"
+coil = "3.6.0"
 kotlinx-serialization = "1.11.0"
 detekt = "1.23.8"
 junit4 = "4.13.2"
@@ -30,7 +32,7 @@ robolectric = "4.16.1"
 turbine = "1.2.1"
 konsist = "0.17.3"
 javax-inject = "1"
-androidx-tracing = "1.3.0"
+androidx-tracing = "2.0.1"
 # Roborazzi 1.63.0 — JVM screenshot testing on top of Robolectric. Used **without** the
 # Gradle plugin because the latter is not yet AGP 9 compatible (cf.
 # https://github.com/takahirom/roborazzi/pull/781). We consume `roborazzi` +
@@ -39,7 +41,7 @@ androidx-tracing = "1.3.0"
 # `@GraphicsMode(NATIVE)` is required on test classes that call `captureRoboImage`. Wired
 # only in `:core:ui` for the moment as a diagnostic channel for AMOLED quote rendering
 # (cf. PR #207).
-roborazzi = "1.63.0"
+roborazzi = "1.73.0"
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
@@ -82,6 +84,7 @@ androidx-navigation3-ui = { module = "androidx.navigation3:navigation3-ui", vers
 androidx-lifecycle-viewmodel-navigation3 = { module = "androidx.lifecycle:lifecycle-viewmodel-navigation3", version.ref = "androidx-lifecycle" }
 androidx-material3-adaptive = { module = "androidx.compose.material3.adaptive:adaptive", version.ref = "material3-adaptive" }
 androidx-material3-adaptive-navigation-suite = { module = "androidx.compose.material3:material3-adaptive-navigation-suite" }
+materialKolor-utilities = { module = "com.materialkolor:material-color-utilities", version.ref = "materialKolor" }
 kotlinx-serialization-core = { module = "org.jetbrains.kotlinx:kotlinx-serialization-core", version.ref = "kotlinx-serialization" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
 junit4 = { module = "junit:junit", version.ref = "junit4" }
@@ -116,6 +119,7 @@ okhttp-logging = { module = "com.squareup.okhttp3:logging-interceptor", version.
 okhttp-mockwebserver = { module = "com.squareup.okhttp3:mockwebserver", version.ref = "okhttp" }
 
 jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
+jspecify = { module = "org.jspecify:jspecify", version.ref = "jspecify" }
 
 coil-core = { module = "io.coil-kt.coil3:coil", version.ref = "coil" }
 coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" }

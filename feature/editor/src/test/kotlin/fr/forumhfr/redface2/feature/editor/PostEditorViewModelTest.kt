@@ -13,6 +13,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
@@ -20,10 +21,10 @@ import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
 import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
-import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
+import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
@@ -40,6 +41,7 @@ import fr.forumhfr.redface2.core.domain.upload.UploadedImage
 import fr.forumhfr.redface2.core.domain.upload.UploadedImageRecord
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
+import fr.forumhfr.redface2.core.domain.write.truncateQuote
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.PostBlock
@@ -658,16 +660,18 @@ class PostEditorViewModelTest {
             val effect = awaitItem() as PostEditorEffect.SubmitSucceeded
             assertEquals(20, effect.targetPage)
             assertNull("Reply must keep scrollTo null — anchor is #bas", effect.scrollTo)
+            // #974 — a body without any `[quotemsg]` cites nothing : the topic lands at the bottom.
+            assertEquals(emptyList<Int>(), effect.quotedNumreponses)
             cancelAndIgnoreRemainingEvents()
         }
     }
 
     @Test
     fun `Quote success forwards the parser-extracted numreponse as scrollTo (issue #200)`() = runTest {
-        // Issue #200 — quote anchors `#t{numreponse}` on the success URL so the parser
-        // surfaces the new post id directly. The ViewModel must propagate it as scrollTo
-        // so the topic screen scrolls to the freshly-created quote post after the
-        // post-submit force refresh.
+        // Issue #200 — quote anchors `#t{numreponse}` on the success URL, and that numreponse is
+        // the CITED post (HFR anchors on the quote form's `numrep` : 2523833 is the post quoted
+        // by `write_quote_form_bbcode_rich.html`, not the freshly-created reply). The ViewModel
+        // must propagate it as scrollTo — the topic engine's landing hint (#974).
         replyRepository.formResult = Result.success(authenticatedForm())
         replyRepository.submitResult = ReplySubmitResult.Success(
             refreshUrl = "/hfr/foo/bar-sujet_148750_1.htm#t2523833",
@@ -683,9 +687,41 @@ class PostEditorViewModelTest {
             val effect = awaitItem() as PostEditorEffect.SubmitSucceeded
             assertEquals(1, effect.targetPage)
             assertEquals(
-                "quote success must scroll to the new quote post id from the parser",
+                "quote success must forward the CITED post id from the parser as scrollTo",
                 2_523_833,
                 effect.scrollTo,
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `Reply with cards forwards the cited numreponses for the topic landing (#974)`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
+        replyRepository.formResultsByNumrep = mapOf(
+            101 to Result.success(authenticatedForm(initialContent = "[quotemsg=101,1,9]a[/quotemsg]\n\n")),
+            303 to Result.success(authenticatedForm(initialContent = "[quotemsg=303,3,9]c[/quotemsg]\n\n")),
+        )
+        // HFR anchors the success on the FIRST cited post (`numrep`) ; the topic engine picks the
+        // landing itself from the full card list, in card order.
+        replyRepository.submitResult = ReplySubmitResult.Success(
+            refreshUrl = "/hfr/foo/bar-sujet_35395_20.htm#t101",
+            targetPage = 20,
+            numreponse = 101,
+        )
+        val viewModel = newReplyViewModel(initialQuotes = listOf(card(101), card(303)))
+        testScheduler.advanceUntilIdle()
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("Reply")))
+
+        viewModel.effects.test {
+            viewModel.submit(PostEditorIntent.SubmitClicked)
+            assertEquals(
+                PostEditorEffect.SubmitSucceeded(
+                    targetPage = 20,
+                    scrollTo = 101,
+                    quotedNumreponses = listOf(101, 303),
+                ),
+                awaitItem(),
             )
             cancelAndIgnoreRemainingEvents()
         }
@@ -1750,6 +1786,21 @@ class PostEditorViewModelTest {
     }
 
     @Test
+    fun `cards OFF - a truncated quote prefill is inserted when the selection requests it`() = runTest {
+        val prefill = "[quotemsg=101,1,9]${longQuoteBody()}[/quotemsg]"
+        replyRepository.formResultsByNumrep = mapOf(
+            101 to Result.success(authenticatedForm(initialContent = prefill)),
+        )
+        val viewModel = newReplyViewModel(
+            initialQuotes = listOf(card(101).copy(truncate = true)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false),
+        )
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(truncateQuote(prefill) + "\n", viewModel.state.value.draft.text)
+    }
+
+    @Test
     fun `cards OFF - a quote prepended onto typed text keeps the plain double-newline separator`() = runTest {
         // #881 réserve gate — the prepend branch adds NO extra newline : the "\n\n" separator
         // already puts the existing typing under the citation. The fetch is gated so the
@@ -1834,6 +1885,47 @@ class PostEditorViewModelTest {
             "plain submit context — the quote already lives in the content",
             replyRepository.lastSubmittedContext?.quotedNumreponse,
         )
+    }
+
+    @Test
+    fun `cards OFF - submit forwards the inline quotemsg numreponses for the topic landing (#974)`() = runTest {
+        // Production default : no card is armed, the citations live as `[quotemsg]` BBCode in the
+        // field (one prefilled at opening, one typed by hand). The success effect must still name
+        // every cited post — the topic engine lands on the highest one (#974).
+        replyRepository.formResultsByNumrep = mapOf(
+            101 to Result.success(authenticatedForm(initialContent = "[quotemsg=101,1,9]a[/quotemsg]\n\n")),
+        )
+        replyRepository.submitResult = ReplySubmitResult.Success(
+            refreshUrl = "/hfr/foo/bar-sujet_35395_20.htm#t101",
+            targetPage = 20,
+            numreponse = 101,
+        )
+        val viewModel = newReplyViewModel(
+            initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false),
+        )
+        testScheduler.advanceUntilIdle()
+        assertTrue("inline mode arms no card", viewModel.state.value.quotes.isEmpty())
+        viewModel.submit(
+            PostEditorIntent.ContentChanged(
+                TextFieldValue(
+                    "[quotemsg=101,1,9]a[/quotemsg]\n\n[quotemsg=303,3,9]c[/quotemsg]\n\nma réponse",
+                ),
+            ),
+        )
+
+        viewModel.effects.test {
+            viewModel.submit(PostEditorIntent.SubmitClicked)
+            assertEquals(
+                PostEditorEffect.SubmitSucceeded(
+                    targetPage = 20,
+                    scrollTo = 101,
+                    quotedNumreponses = listOf(101, 303),
+                ),
+                awaitItem(),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     // ----- #604 lot 3 : cartes de citation dans l'éditeur ---------------------
@@ -2011,6 +2103,8 @@ class PostEditorViewModelTest {
             author = author,
             excerpt = "extrait $numreponse",
         )
+
+    private fun longQuoteBody(): String = (1..120).joinToString(separator = " ") { "mot" }
 
     private fun authenticatedForm(initialContent: String = ""): ReplyForm = ReplyForm(
         hashCheck = "FAKE_HASH",
@@ -2247,8 +2341,11 @@ class PostEditorViewModelTest {
         override suspend fun setFlagsGlyphStyle(style: FlagGlyphStyle) = Unit
         override fun observeThemeMode(): Flow<ThemeMode> = MutableStateFlow(ThemeMode.SYSTEM)
         override suspend fun setThemeMode(mode: ThemeMode) = Unit
-        override fun observeAmoledEnabled(): Flow<Boolean> = MutableStateFlow(false)
-        override suspend fun setAmoledEnabled(enabled: Boolean) = Unit
+
+        override fun observeThemeColorPreferences(): Flow<ThemeColorPreferences> =
+            MutableStateFlow(ThemeColorPreferences())
+
+        override suspend fun setThemeColorPreferences(preferences: ThemeColorPreferences) = Unit
         override fun observeTopicTopBarAutoHide(): Flow<Boolean> = MutableStateFlow(false)
         override suspend fun setTopicTopBarAutoHide(enabled: Boolean) = Unit
         override fun observeConfirmBeforePosting(): Flow<Boolean> = confirmBeforePosting
@@ -2365,6 +2462,11 @@ class PostEditorViewModelTest {
 
         override suspend fun setMediaDisplayProfile(profile: MediaDisplayProfile) = Unit
 
+        override fun observePostImageMaxWidth(): Flow<PostImageMaxWidth> =
+            MutableStateFlow(PostImageMaxWidth.DEFAULT)
+
+        override suspend fun setPostImageMaxWidth(width: PostImageMaxWidth) = Unit
+
         // #989 — délimiteur du picker : non exercé ici, présent pour satisfaire l'interface.
         override fun observeSmileyPickerDecoration(): Flow<SmileyPickerDecoration> =
             flowOf(SmileyPickerDecoration.NONE)
@@ -2387,8 +2489,6 @@ class PostEditorViewModelTest {
             MutableStateFlow(ImmersiveNavBarReveal.MANUAL)
 
         override suspend fun setImmersiveNavBarReveal(mode: ImmersiveNavBarReveal) = Unit
-        override fun observeAccentColor(): Flow<AccentColor> = MutableStateFlow(AccentColor.ROSE)
-        override suspend fun setAccentColor(color: AccentColor) = Unit
         override fun observeAlwaysAskLinkApp(): Flow<Boolean> = MutableStateFlow(false)
         override suspend fun setAlwaysAskLinkApp(enabled: Boolean) = Unit
 

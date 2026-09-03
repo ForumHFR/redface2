@@ -19,7 +19,7 @@ Chaque choix a été évalué, comparé et verrouillé. Voici le détail.
 |--------|-------|-------------------|--------|
 | Langage | **Kotlin** | Java | Standard Android depuis 2019, null safety, coroutines |
 | UI | **Jetpack Compose** (via compose-bom) | XML layouts | Direction officielle Google, déclaratif, plus maintenable |
-| Design system | **Material 3** + **Material 3 Adaptive 1.2+** | Material 2 | Standard 2026, dynamic color, canonical layouts (list-detail, supporting pane). Décisions design détaillées ci-dessous. |
+| Design system | **Material 3** + **Material 3 Adaptive 1.2+** + **Material Color Utilities 5.0.1** | Material 2 | Standard 2026, dynamic color opt-in, presets/custom RGB seedés, canonical layouts (list-detail, supporting pane). Décisions design détaillées ci-dessous. |
 | Architecture | **MVI** (MVVM+UDF) | MVVM classique | Flux unidirectionnel, état prévisible, idéal pour un forum reader |
 | Navigation | **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026) | Circuit, Decompose, Navigation 2.x | Compose-first : back stack en state (`NavBackStack<NavKey>`), rendu single-pane via `NavDisplay(backStack, onBack, entryDecorators, entryProvider { entry<…> })`, multi-pane via `ListDetailPaneScaffold` (M3 Adaptive). Cf. [ADR-008]({{ site.baseurl }}/adr/008-compose-navigation-3). |
 | DI | **Hilt (KSP)** | Koin | Erreurs à la compilation, intégration Jetpack, standard contributeurs |
@@ -36,7 +36,7 @@ Chaque choix a été évalué, comparé et verrouillé. Voici le détail.
 | Screenshot testing | **Roborazzi adopté (Phase 4)** | [ADR-016]({{ site.baseurl }}/adr/016-roborazzi-screenshot-testing) | JVM via Robolectric, sans device ; **record-only** (record + inspection, pas de `verify` sous AGP 9) ; Compose Preview pour le design |
 | minSdk | **29** | 26, 31 | Android 10 : Scoped Storage, TLS 1.3, dark thème natif, ~88-90% parc 04/2026 |
 
-> **Versions précises** : le Gradle version catalog `gradle/libs.versions.toml` sera créé en Phase 0 comme source de vérité unique. Ce tableau garde les versions **major.minor** quand elles sont structurelles (Material 3 Adaptive 1.2+ pour les canonical layouts, Compose Navigation 3 pour les back stacks en state, OkHttp 5 pour le client HTTP + `CookieJar`). Les patches stables 2026 sont à résoudre via Context7/Docfork quand on interroge les docs officielles (cf. [#19](https://github.com/ForumHFR/redface2/issues/19)).
+> **Versions précises** : le Gradle version catalog `gradle/libs.versions.toml` est la source de vérité unique. Ce tableau garde les versions **major.minor** quand elles sont structurelles (Material 3 Adaptive 1.2+ pour les canonical layouts, Compose Navigation 3 pour les back stacks en state, OkHttp 5 pour le client HTTP + `CookieJar`). Les patches stables 2026 sont à résoudre via Context7/Docfork quand on interroge les docs officielles (cf. [#19](https://github.com/ForumHFR/redface2/issues/19)).
 
 ---
 
@@ -72,7 +72,7 @@ fun PostBody(post: Post) {
 Pour un forum reader, Compose apporte :
 - **LazyColumn** : équivalent de RecyclerView mais déclaratif, gère des milliers de posts
 - **Recomposition intelligente** : seuls les composants dont l'état change sont redessinés
-- **Theming Material 3** : dark mode, dynamic colors, typographie
+- **Theming Material 3** : dark mode, dynamic colors opt-in, presets/custom RGB, typographie
 - **Preview** : voir le rendu directement dans l'IDE
 
 ### MVI plutôt que MVVM
@@ -92,15 +92,16 @@ Pour un forum reader, MVI est supérieur :
 
 ### Décisions design (tranchées [#9](https://github.com/ForumHFR/redface2/issues/9))
 
-Les 4 choix design de base sont actés pour Phase 0 :
+Les choix design de base sont actés et étendus en Phase 4 :
 
 | Décision | Valeur | Pourquoi |
 |---|---|---|
-| Seed color HFR | `#A62C2C` (rouge brique HFR) | Cohérent avec le nom "Redface". Material Theme Builder génère tout le `ColorScheme` depuis cette seed. À revoir si le naming final (#1) s'en écarte. |
-| Dynamic color par défaut | **OFF** (opt-in settings Phase 5) | Préserve l'identité visuelle HFR constante ; Material You reste disponible via toggle utilisateur |
+| Accents HFR | `ROSE` `#A62C2C` par défaut, `ROUGE_REDFACE1`, 6 presets froids/chauds/neutres et RGB custom | Les rôles chromatiques sont générés par `com.materialkolor:material-color-utilities`; les deux presets historiques restent manuels quand le ton M3 teinté legacy est choisi. |
+| Ton clair par défaut | **Gris RF1** `#F0F0F0` | Aligne le fond avec Redface 1 (#883) tout en gardant `Blanc` et `Teinté M3` comme sorties utilisateur. |
+| Dynamic color par défaut | **OFF** (libellé « Couleurs du système », Android 12+) | Préserve l'identité visuelle HFR constante ; Material You reste disponible via toggle utilisateur et laisse le ton du fond post-traiter les surfaces. |
 | Font family | **Roboto** (système Android) | 0 KB APK impact. Roboto Flex / Inter = trendy sans bénéfice technique pour une app forum |
 | Rendu de posts | **`PostContent` AST** + `AnnotatedString` inline + composables block | Contrat cible acté, implémentation Phase 1. HTML HFR et BBCode éditeur convergent vers la même AST, avec le parser BBCode différable jusqu'à l'éditeur Phase 2. Cf. [ADR-011]({{ site.baseurl }}/adr/011-postcontent-ast) et [#3](https://github.com/ForumHFR/redface2/issues/3). |
-| Thèmes v1 | **Clair, Sombre, AMOLED** | Material You et HFR Classique reportés Phase 5 polish (1-2 jours d'ajout chacun, pas d'imbrication architecturale) |
+| Thèmes v1 | **Clair, Sombre, AMOLED** | AMOLED est un ton de surface sombre true-black qui conserve l'accent actif ; seule la combinaison historique `ROSE + AMOLED` reste byte-identique. |
 
 Le draft `drafts/material3-ui-ux.md` contient les détails étendus (30 color roles, 15 typography styles, motion tokens, adaptive layouts) — c'est un document de référence pédagogique, pas une spec canonique.
 
@@ -110,7 +111,7 @@ Depuis Material 3 Adaptive 1.0 stable (oct. 2024, actuellement 1.2.0), Google ex
 
 | API | Usage dans Redface 2 |
 |---|---|
-| `NavigationSuiteScaffold` (artifact `material3-adaptive-navigation-suite`) | Remplace conditionnellement `NavigationBar` (Compact) / `NavigationRail` (Medium) / `PermanentNavigationDrawer` (Expanded) en fonction de `WindowSizeClass`. Utilisé dans `MainActivity`. **Caveat** : ce scaffold ne consomme pas les status bars en mode edge-to-edge — les écrans contenus doivent ajouter `Modifier.statusBarsPadding()` (ou un `Scaffold` interne qui consomme les insets) sinon le contenu passe sous la barre de statut. |
+| `NavigationSuiteScaffold` (artifact `material3-adaptive-navigation-suite`) | Remplace conditionnellement `NavigationBar` (Compact) / `NavigationRail` (Medium) / `PermanentNavigationDrawer` (Expanded) en fonction de `WindowSizeClass`. Utilisé dans `MainActivity`. **Caveat** : ce scaffold ne consomme pas les status bars en mode edge-to-edge — les écrans contenus doivent ajouter `Modifier.statusBarsPadding()` **ou** un `Scaffold` interne (son `paddingValues` porte déjà status + navigation bars), jamais les deux : cumuler `.padding(innerPadding)` et `statusBarsPadding()` / `navigationBarsPadding()` double l'inset (corrigé sur le Topic en #285, sur la Vue Forum en #1149). Sans l'un des deux, le contenu passe sous la barre de statut. |
 | `ListDetailPaneScaffold` | Écran Drapeaux → Topic : liste à gauche + détail à droite en Medium/Expanded, stack classique en Compact. |
 | `SupportingPaneScaffold` | Éditeur Compact : contenu à gauche + preview BBCode à droite sur tablette. |
 | `WindowSizeClass` | Breakpoints standards : Compact (< 600dp), Medium (600–840dp), Expanded (≥ 840dp). |
@@ -169,7 +170,7 @@ Voir `docs/specs/navigation.md` pour les exemples concrets (`NavDisplay`, `entry
 
 Hilt avec KSP (pas KAPT) résout le problème historique de build time. La sécurité à la compilation et l'intégration native avec Jetpack font la différence pour un projet open-source.
 
-Le bootstrap de code Phase 0 s'aligne actuellement sur **Hilt 2.59.2** dans le version catalog. Cette version sert de référence d'implémentation tant que le couple Kotlin/AGP 9 reste en place.
+Le version catalog épingle **Hilt 2.60.1** (état au 2 septembre 2026, avec Kotlin 2.4.10 et AGP 9.3.1) ; `gradle/libs.versions.toml` fait foi pour la version exacte.
 
 **Note** : Koin a évolué significativement. Le [compiler plugin K2](https://insert-koin.io/docs/reference/koin-annotations/start) (1.0.0-RC1) permet la génération du graphe de DI à la compilation, éliminant le risque de crash runtime. Koin est également KMP-natif. Si le projet évolue vers KMP, Koin deviendra le choix naturel. Hilt reste le choix pour la v1 Android-only grâce à son intégration Jetpack et sa base de contributeurs plus large.
 

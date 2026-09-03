@@ -1,14 +1,16 @@
 package fr.forumhfr.redface2.navigation
 
-import fr.forumhfr.redface2.core.domain.preferences.AccentColor
+import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.NavBarLabelsBootstrapStore
+import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrap
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
+import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import io.mockk.coEvery
@@ -59,7 +61,7 @@ class AppThemeViewModelTest {
         val repository = mockk<UserPreferencesRepository> {
             // A SharedFlow that never emits = DataStore still hydrating on a cold start.
             every { observeThemeMode() } returns MutableSharedFlow()
-            every { observeAmoledEnabled() } returns MutableSharedFlow()
+            every { observeThemeColorPreferences() } returns MutableSharedFlow()
             // #287 — eagerly collected by the VM; defaults are enough for this theme-focused test.
             every { observeDisplayDensity() } returns MutableStateFlow(DisplayDensity.COMFORT)
             every { observeFontScale() } returns MutableStateFlow(FontScalePreference.M)
@@ -76,10 +78,11 @@ class AppThemeViewModelTest {
             // #518 follow-up — eagerly collected by the VM constructor; default on is enough here.
             every { observeImmersiveBackButton() } returns MutableStateFlow(true)
             every { observeImmersiveNavBarReveal() } returns MutableStateFlow(ImmersiveNavBarReveal.MANUAL)
-            every { observeAccentColor() } returns MutableStateFlow(AccentColor.ROSE)
             every { observeAlwaysAskLinkApp() } returns MutableStateFlow(false)
             // #973 — eagerly collected by the VM constructor; default M is enough here.
             every { observeMediaDisplayProfile() } returns MutableStateFlow(MediaDisplayProfile.M)
+            // #991 — eagerly collected by the VM constructor; default P95 is enough here.
+            every { observePostImageMaxWidth() } returns MutableStateFlow(PostImageMaxWidth.DEFAULT)
             // #989 — nouveau flow de l'interface : à stubber sinon MockK échoue au premier collect.
             every { observeSmileyPickerDecoration() } returns MutableStateFlow(SmileyPickerDecoration.NONE)
             // #1170 — explicit interface defaults keep this wide repository mock future-proof.
@@ -87,14 +90,15 @@ class AppThemeViewModelTest {
             coEvery { setTopicUnansweredPollsExpanded(any()) } returns Unit
         }
 
+        val bootstrap = ThemeBootstrap(ThemeMode.DARK, amoledEnabled = true)
         val vm = AppThemeViewModel(
             userPreferencesRepository = repository,
-            themeBootstrapStore = bootstrapStore(ThemeBootstrap(ThemeMode.DARK, amoledEnabled = true)),
+            themeBootstrapStore = bootstrapStore(bootstrap),
             navBarLabelsBootstrapStore = navBarLabelsStore(true),
         )
 
         assertEquals(ThemeMode.DARK, vm.themeMode.value)
-        assertTrue(vm.amoledEnabled.value)
+        assertEquals(bootstrap.colorPreferences, vm.themeColorPreferences.value)
     }
 
     @Test
@@ -106,7 +110,7 @@ class AppThemeViewModelTest {
             // A SharedFlow that never emits = DataStore still hydrating on a cold start.
             every { observeNavBarLabels() } returns MutableSharedFlow()
             every { observeThemeMode() } returns MutableStateFlow(ThemeMode.SYSTEM)
-            every { observeAmoledEnabled() } returns MutableStateFlow(false)
+            every { observeThemeColorPreferences() } returns MutableStateFlow(ThemeColorPreferences())
             every { observeDisplayDensity() } returns MutableStateFlow(DisplayDensity.COMFORT)
             every { observeFontScale() } returns MutableStateFlow(FontScalePreference.M)
             every { observeDebugBoundsOverlay() } returns MutableStateFlow(false)
@@ -115,9 +119,9 @@ class AppThemeViewModelTest {
             every { observeHideSystemNavBar() } returns MutableStateFlow(false)
             every { observeImmersiveBackButton() } returns MutableStateFlow(true)
             every { observeImmersiveNavBarReveal() } returns MutableStateFlow(ImmersiveNavBarReveal.MANUAL)
-            every { observeAccentColor() } returns MutableStateFlow(AccentColor.ROSE)
             every { observeAlwaysAskLinkApp() } returns MutableStateFlow(false)
             every { observeMediaDisplayProfile() } returns MutableStateFlow(MediaDisplayProfile.M)
+            every { observePostImageMaxWidth() } returns MutableStateFlow(PostImageMaxWidth.DEFAULT)
             every { observeSmileyPickerDecoration() } returns MutableStateFlow(SmileyPickerDecoration.NONE)
             every { observeTopicUnansweredPollsExpanded() } returns MutableStateFlow(false)
             coEvery { setTopicUnansweredPollsExpanded(any()) } returns Unit
@@ -138,7 +142,9 @@ class AppThemeViewModelTest {
         // Partial restore / cleared mirror : DataStore stays the source of truth.
         val repository = mockk<UserPreferencesRepository> {
             every { observeThemeMode() } returns MutableStateFlow(ThemeMode.LIGHT)
-            every { observeAmoledEnabled() } returns MutableStateFlow(false)
+            every { observeThemeColorPreferences() } returns MutableStateFlow(
+                ThemeColorPreferences(darkSurfaceTone = DarkSurfaceTone.MATERIAL_TINTED),
+            )
             every { observeDisplayDensity() } returns MutableStateFlow(DisplayDensity.COMFORT)
             every { observeFontScale() } returns MutableStateFlow(FontScalePreference.M)
             // #445 — eagerly collected by the VM constructor; default off is enough here.
@@ -154,10 +160,11 @@ class AppThemeViewModelTest {
             // #518 follow-up — eagerly collected by the VM constructor; default on is enough here.
             every { observeImmersiveBackButton() } returns MutableStateFlow(true)
             every { observeImmersiveNavBarReveal() } returns MutableStateFlow(ImmersiveNavBarReveal.MANUAL)
-            every { observeAccentColor() } returns MutableStateFlow(AccentColor.ROSE)
             every { observeAlwaysAskLinkApp() } returns MutableStateFlow(true)
             // #973 — eagerly collected by the VM constructor; default M is enough here.
             every { observeMediaDisplayProfile() } returns MutableStateFlow(MediaDisplayProfile.M)
+            // #991 — eagerly collected by the VM constructor; default P95 is enough here.
+            every { observePostImageMaxWidth() } returns MutableStateFlow(PostImageMaxWidth.DEFAULT)
             // #989 — nouveau flow de l'interface : à stubber sinon MockK échoue au premier collect.
             every { observeSmileyPickerDecoration() } returns MutableStateFlow(SmileyPickerDecoration.NONE)
             every { observeTopicUnansweredPollsExpanded() } returns MutableStateFlow(false)
@@ -171,7 +178,7 @@ class AppThemeViewModelTest {
         )
 
         assertEquals(ThemeMode.LIGHT, vm.themeMode.value)
-        assertEquals(false, vm.amoledEnabled.value)
+        assertEquals(ThemeColorPreferences(), vm.themeColorPreferences.value)
         assertTrue(vm.alwaysAskLinkApp.value)
     }
 
@@ -182,7 +189,7 @@ class AppThemeViewModelTest {
         // window), the DataStore value wins once hydrated.
         val repository = mockk<UserPreferencesRepository> {
             every { observeThemeMode() } returns MutableStateFlow(ThemeMode.LIGHT)
-            every { observeAmoledEnabled() } returns MutableStateFlow(false)
+            every { observeThemeColorPreferences() } returns MutableStateFlow(ThemeColorPreferences())
             every { observeDisplayDensity() } returns MutableStateFlow(DisplayDensity.COMFORT)
             every { observeFontScale() } returns MutableStateFlow(FontScalePreference.M)
             every { observeDebugBoundsOverlay() } returns MutableStateFlow(false)
@@ -192,9 +199,9 @@ class AppThemeViewModelTest {
             every { observeHideSystemNavBar() } returns MutableStateFlow(false)
             every { observeImmersiveBackButton() } returns MutableStateFlow(true)
             every { observeImmersiveNavBarReveal() } returns MutableStateFlow(ImmersiveNavBarReveal.MANUAL)
-            every { observeAccentColor() } returns MutableStateFlow(AccentColor.ROSE)
             every { observeAlwaysAskLinkApp() } returns MutableStateFlow(false)
             every { observeMediaDisplayProfile() } returns MutableStateFlow(MediaDisplayProfile.L)
+            every { observePostImageMaxWidth() } returns MutableStateFlow(PostImageMaxWidth.DEFAULT)
             // #989 — nouveau flow de l'interface : à stubber sinon MockK échoue au premier collect.
             every { observeSmileyPickerDecoration() } returns MutableStateFlow(SmileyPickerDecoration.NONE)
             every { observeTopicUnansweredPollsExpanded() } returns MutableStateFlow(false)
@@ -208,5 +215,36 @@ class AppThemeViewModelTest {
         )
 
         assertEquals(MediaDisplayProfile.L, vm.mediaDisplayProfile.value)
+    }
+
+    @Test
+    fun `the post image max width hydrates from the repository`() = runTest {
+        val repository = mockk<UserPreferencesRepository> {
+            every { observeThemeMode() } returns MutableStateFlow(ThemeMode.LIGHT)
+            every { observeThemeColorPreferences() } returns MutableStateFlow(ThemeColorPreferences())
+            every { observeDisplayDensity() } returns MutableStateFlow(DisplayDensity.COMFORT)
+            every { observeFontScale() } returns MutableStateFlow(FontScalePreference.M)
+            every { observeDebugBoundsOverlay() } returns MutableStateFlow(false)
+            every { observeFoldLongQuotes() } returns MutableStateFlow(true)
+            every { observeShowScrollbar() } returns MutableStateFlow(true)
+            every { observeNavBarLabels() } returns MutableStateFlow(true)
+            every { observeHideSystemNavBar() } returns MutableStateFlow(false)
+            every { observeImmersiveBackButton() } returns MutableStateFlow(true)
+            every { observeImmersiveNavBarReveal() } returns MutableStateFlow(ImmersiveNavBarReveal.MANUAL)
+            every { observeAlwaysAskLinkApp() } returns MutableStateFlow(false)
+            every { observeMediaDisplayProfile() } returns MutableStateFlow(MediaDisplayProfile.M)
+            every { observePostImageMaxWidth() } returns MutableStateFlow(PostImageMaxWidth.P90)
+            every { observeSmileyPickerDecoration() } returns MutableStateFlow(SmileyPickerDecoration.NONE)
+            every { observeTopicUnansweredPollsExpanded() } returns MutableStateFlow(false)
+            coEvery { setTopicUnansweredPollsExpanded(any()) } returns Unit
+        }
+
+        val vm = AppThemeViewModel(
+            userPreferencesRepository = repository,
+            themeBootstrapStore = bootstrapStore(ThemeBootstrap()),
+            navBarLabelsBootstrapStore = navBarLabelsStore(true),
+        )
+
+        assertEquals(PostImageMaxWidth.P90, vm.postImageMaxWidth.value)
     }
 }

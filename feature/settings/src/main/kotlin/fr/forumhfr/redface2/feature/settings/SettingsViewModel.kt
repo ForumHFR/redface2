@@ -7,13 +7,19 @@ import fr.forumhfr.redface2.core.domain.cache.ImageCacheMaintenance
 import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageContentCache
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageContentCacheException
-import fr.forumhfr.redface2.core.domain.preferences.AccentColor
+import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
+import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
+import fr.forumhfr.redface2.core.domain.preferences.LightSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
-import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
+import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
+import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
+import fr.forumhfr.redface2.core.domain.preferences.ThemeAccent
+import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
@@ -91,9 +97,9 @@ class SettingsViewModel @Inject constructor(
             apply = { state, value -> state.copy(themeMode = value) },
         )
         observePreference(
-            flow = userPreferencesRepository.observeAmoledEnabled(),
-            isLocked = { it.isUpdatingAmoled },
-            apply = { state, value -> state.copy(amoledEnabled = value) },
+            flow = userPreferencesRepository.observeThemeColorPreferences(),
+            isLocked = { it.isUpdatingThemeColors },
+            apply = { state, value -> state.withThemeColorPreferences(value) },
         )
         observePreference(
             flow = userPreferencesRepository.observeTopicTopBarAutoHide(),
@@ -197,11 +203,6 @@ class SettingsViewModel @Inject constructor(
             apply = { state, value -> state.copy(immersiveNavBarReveal = value) },
         )
         observePreference(
-            flow = userPreferencesRepository.observeAccentColor(),
-            isLocked = { it.isUpdatingAccentColor },
-            apply = { state, value -> state.copy(accentColor = value) },
-        )
-        observePreference(
             flow = userPreferencesRepository.observeAlwaysAskLinkApp(),
             isLocked = { it.isUpdatingAlwaysAskLinkApp },
             apply = { state, value -> state.copy(alwaysAskLinkApp = value) },
@@ -246,6 +247,12 @@ class SettingsViewModel @Inject constructor(
             flow = userPreferencesRepository.observeMediaDisplayProfile(),
             isLocked = { it.isUpdatingMediaDisplayProfile },
             apply = { state, value -> state.copy(mediaDisplayProfile = value) },
+        )
+        // #991 — largeur maximale fImage des images de contenu (enum), même forme de collecte.
+        observePreference(
+            flow = userPreferencesRepository.observePostImageMaxWidth(),
+            isLocked = { it.isUpdatingPostImageMaxWidth },
+            apply = { state, value -> state.copy(postImageMaxWidth = value) },
         )
         // #989 — délimiteur du picker de smileys (enum), même forme de collecte.
         observePreference(
@@ -303,6 +310,19 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    private fun SettingsState.withThemeColorPreferences(preferences: ThemeColorPreferences): SettingsState {
+        val customInput = preferences.customAccentSyncedInput()
+        val accentChanged = preferences.accent != themeColorPreferences.accent
+        val dirtyInput = customAccentHexInput != customAccentHexSyncedInput
+        val syncInput = accentChanged || !dirtyInput
+        return copy(
+            themeColorPreferences = preferences,
+            customAccentHexInput = if (syncInput) customInput else customAccentHexInput,
+            customAccentHexSyncedInput = customInput,
+            customAccentHexError = if (syncInput) false else customAccentHexError,
+        )
+    }
+
     @Suppress("CyclomaticComplexMethod") // MVI when-dispatch over the SettingsIntent variants ; flat by design.
     fun submit(intent: SettingsIntent) {
         when (intent) {
@@ -342,8 +362,13 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.FlagsHideReadCategoriesChanged -> updateFlagsHideReadCategories(intent.enabled)
             is SettingsIntent.FlagsPerTabOverrideChanged -> updateFlagsPerTabOverride(intent.enabled)
             is SettingsIntent.ThemeModeChanged -> updateThemeMode(intent.mode)
-            is SettingsIntent.AmoledEnabledChanged -> updateAmoled(intent.enabled)
-            is SettingsIntent.AccentColorChanged -> updateAccentColor(intent.color)
+            is SettingsIntent.ThemeAccentPresetChanged -> updateThemeAccentPreset(intent.preset)
+            is SettingsIntent.CustomAccentHexChanged -> updateCustomAccentHex(intent.text)
+            SettingsIntent.CustomAccentHexCommitted -> commitCustomAccentHex()
+            is SettingsIntent.PostHeaderEmphasisChanged -> updatePostHeaderEmphasis(intent.emphasis)
+            is SettingsIntent.LightSurfaceToneChanged -> updateLightSurfaceTone(intent.tone)
+            is SettingsIntent.DarkSurfaceToneChanged -> updateDarkSurfaceTone(intent.tone)
+            is SettingsIntent.DynamicColorEnabledChanged -> updateDynamicColor(intent.enabled)
             is SettingsIntent.AlwaysAskLinkAppChanged -> updateAlwaysAskLinkApp(intent.enabled)
             is SettingsIntent.TopicTopBarAutoHideChanged -> updateTopicTopBarAutoHide(intent.enabled)
             is SettingsIntent.TopicPageFabsChanged -> updateTopicPageFabs(intent.enabled)
@@ -379,6 +404,7 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.DisplayDensityChanged -> updateDisplayDensity(intent.density)
             is SettingsIntent.FontScaleChanged -> updateFontScale(intent.scale)
             is SettingsIntent.MediaDisplayProfileChanged -> updateMediaDisplayProfile(intent.profile)
+            is SettingsIntent.PostImageMaxWidthChanged -> updatePostImageMaxWidth(intent.width)
             is SettingsIntent.SmileyPickerDecorationChanged ->
                 updateSmileyPickerDecoration(intent.decoration)
             is SettingsIntent.SetUploadProvider -> updateUploadProvider(intent.provider)
@@ -668,6 +694,118 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    private fun updateThemeAccentPreset(preset: AccentPreset) {
+        updateThemeColorPreferences { preferences ->
+            preferences.copy(accent = ThemeAccent.Preset(preset))
+        }
+    }
+
+    private fun updateCustomAccentHex(text: String) {
+        _state.update {
+            it.copy(
+                customAccentHexInput = text,
+                customAccentHexError = false,
+                themeColorsError = false,
+            )
+        }
+    }
+
+    private fun commitCustomAccentHex() {
+        val snapshot = _state.value
+        if (snapshot.customAccentHexInput == snapshot.customAccentHexSyncedInput) return
+        val rgb = parseThemeAccentHexOrNull(snapshot.customAccentHexInput)
+        if (rgb == null) {
+            _state.update { it.copy(customAccentHexError = true) }
+        } else if (rgb == snapshot.themeColorPreferences.accent.effectiveRgb()) {
+            val customInput = snapshot.themeColorPreferences.customAccentSyncedInput()
+            _state.update {
+                it.copy(
+                    customAccentHexInput = customInput,
+                    customAccentHexSyncedInput = customInput,
+                    customAccentHexError = false,
+                )
+            }
+        } else {
+            updateThemeColorPreferences { preferences ->
+                preferences.copy(accent = ThemeAccent.Custom(rgb))
+            }
+        }
+    }
+
+    private fun updateLightSurfaceTone(tone: LightSurfaceTone) {
+        updateThemeColorPreferences { preferences -> preferences.copy(lightSurfaceTone = tone) }
+    }
+
+    private fun updateDarkSurfaceTone(tone: DarkSurfaceTone) {
+        updateThemeColorPreferences { preferences -> preferences.copy(darkSurfaceTone = tone) }
+    }
+
+    private fun updatePostHeaderEmphasis(emphasis: PostHeaderEmphasis) {
+        updateThemeColorPreferences { preferences -> preferences.copy(postHeaderEmphasis = emphasis) }
+    }
+
+    private fun updateDynamicColor(enabled: Boolean) {
+        updateThemeColorPreferences { preferences -> preferences.copy(dynamicColorEnabled = enabled) }
+    }
+
+    private fun updateThemeColorPreferences(transform: (ThemeColorPreferences) -> ThemeColorPreferences) {
+        val snapshot = _state.value
+        val previous = snapshot.themeColorPreferences
+        val desired = transform(previous)
+        if (desired == previous) return
+        val accentChanged = desired.accent != previous.accent
+        val desiredInput = desired.customAccentSyncedInput()
+        _state.update {
+            it.copy(
+                themeColorPreferences = desired,
+                customAccentHexInput = if (accentChanged) desiredInput else it.customAccentHexInput,
+                customAccentHexSyncedInput = if (accentChanged) desiredInput else it.customAccentHexSyncedInput,
+                customAccentHexError = false,
+                isUpdatingThemeColors = true,
+                themeColorsError = false,
+                themeColorsTouchedLocally = true,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { userPreferencesRepository.setThemeColorPreferences(desired) }
+                .onSuccess {
+                    _state.update {
+                        it.copy(
+                            themeColorPreferences = desired,
+                            customAccentHexInput = if (accentChanged) desiredInput else it.customAccentHexInput,
+                            customAccentHexSyncedInput =
+                                if (accentChanged) desiredInput else it.customAccentHexSyncedInput,
+                            isUpdatingThemeColors = false,
+                        )
+                    }
+                }
+                .onFailure {
+                    val previousInput = previous.customAccentSyncedInput()
+                    _state.update {
+                        it.copy(
+                            themeColorPreferences = previous,
+                            customAccentHexInput = if (accentChanged) previousInput else it.customAccentHexInput,
+                            customAccentHexSyncedInput =
+                                if (accentChanged) previousInput else it.customAccentHexSyncedInput,
+                            isUpdatingThemeColors = false,
+                            themeColorsError = true,
+                        )
+                    }
+                }
+        }
+    }
+
+    private fun ThemeColorPreferences.customAccentSyncedInput(): String =
+        when (val accent = accent) {
+            is ThemeAccent.Custom -> accent.rgb.toThemeAccentHex()
+            is ThemeAccent.Preset -> ""
+        }
+
+    private fun ThemeAccent.effectiveRgb(): Int = when (this) {
+        is ThemeAccent.Custom -> rgb
+        is ThemeAccent.Preset -> preset.seedRgb
+    }
+
     // #287 — display density is an enum, so it uses the bespoke optimistic-flip shape (like
     // updateThemeMode) rather than updateBooleanPreference. previous is captured for revert.
     private fun updateDisplayDensity(desired: DisplayDensity) {
@@ -727,6 +865,63 @@ class SettingsViewModel @Inject constructor(
 
     // #973 — block-GIF display profile is an enum too; same bespoke optimistic-flip shape as
     // updateDisplayDensity. previous is captured for revert.
+    private fun updateMediaDisplayProfile(desired: MediaDisplayProfile) {
+        val previous = _state.value.mediaDisplayProfile
+        _state.update {
+            it.copy(
+                mediaDisplayProfile = desired,
+                isUpdatingMediaDisplayProfile = true,
+                mediaDisplayProfileError = false,
+                mediaDisplayProfileTouchedLocally = true,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { userPreferencesRepository.setMediaDisplayProfile(desired) }
+                .onSuccess {
+                    _state.update { it.copy(mediaDisplayProfile = desired, isUpdatingMediaDisplayProfile = false) }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            mediaDisplayProfile = previous,
+                            isUpdatingMediaDisplayProfile = false,
+                            mediaDisplayProfileError = true,
+                        )
+                    }
+                }
+        }
+    }
+
+    // #991 — content-image max width is an enum too; same optimistic-flip shape as GIF profile.
+    private fun updatePostImageMaxWidth(desired: PostImageMaxWidth) {
+        val previous = _state.value.postImageMaxWidth
+        _state.update {
+            it.copy(
+                postImageMaxWidth = desired,
+                isUpdatingPostImageMaxWidth = true,
+                postImageMaxWidthError = false,
+                postImageMaxWidthTouchedLocally = true,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { userPreferencesRepository.setPostImageMaxWidth(desired) }
+                .onSuccess {
+                    _state.update {
+                        it.copy(postImageMaxWidth = desired, isUpdatingPostImageMaxWidth = false)
+                    }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            postImageMaxWidth = previous,
+                            isUpdatingPostImageMaxWidth = false,
+                            postImageMaxWidthError = true,
+                        )
+                    }
+                }
+        }
+    }
+
     /** #989 — délimiteur du picker : même forme optimiste + rollback que le profil GIF (#973). */
     private fun updateSmileyPickerDecoration(desired: SmileyPickerDecoration) {
         val previous = _state.value.smileyPickerDecoration
@@ -754,33 +949,6 @@ class SettingsViewModel @Inject constructor(
                             smileyPickerDecoration = previous,
                             isUpdatingSmileyPickerDecoration = false,
                             smileyPickerDecorationError = true,
-                        )
-                    }
-                }
-        }
-    }
-
-    private fun updateMediaDisplayProfile(desired: MediaDisplayProfile) {
-        val previous = _state.value.mediaDisplayProfile
-        _state.update {
-            it.copy(
-                mediaDisplayProfile = desired,
-                isUpdatingMediaDisplayProfile = true,
-                mediaDisplayProfileError = false,
-                mediaDisplayProfileTouchedLocally = true,
-            )
-        }
-        viewModelScope.launch {
-            runCatching { userPreferencesRepository.setMediaDisplayProfile(desired) }
-                .onSuccess {
-                    _state.update { it.copy(mediaDisplayProfile = desired, isUpdatingMediaDisplayProfile = false) }
-                }
-                .onFailure {
-                    _state.update {
-                        it.copy(
-                            mediaDisplayProfile = previous,
-                            isUpdatingMediaDisplayProfile = false,
-                            mediaDisplayProfileError = true,
                         )
                     }
                 }
@@ -902,29 +1070,6 @@ class SettingsViewModel @Inject constructor(
                     _state.update { it.copy(imgurClientIdError = true) }
                 }
         }
-    }
-
-    private fun updateAmoled(desired: Boolean) {
-        val previous = _state.value.amoledEnabled
-        updateBooleanPreference(
-            desired = desired,
-            optimistic = {
-                it.copy(
-                    amoledEnabled = desired,
-                    isUpdatingAmoled = true,
-                    amoledError = false,
-                    amoledTouchedLocally = true,
-                )
-            },
-            onSettled = { state, result ->
-                if (result.isSuccess) {
-                    state.copy(amoledEnabled = desired, isUpdatingAmoled = false)
-                } else {
-                    state.copy(amoledEnabled = previous, isUpdatingAmoled = false, amoledError = true)
-                }
-            },
-            persist = userPreferencesRepository::setAmoledEnabled,
-        )
     }
 
     private fun updateAlwaysAskLinkApp(desired: Boolean) {
@@ -1357,36 +1502,6 @@ class SettingsViewModel @Inject constructor(
                             immersiveNavBarReveal = previous,
                             isUpdatingImmersiveNavBarReveal = false,
                             immersiveNavBarRevealError = true,
-                        )
-                    }
-                }
-        }
-    }
-
-    // TU 2788511 — enum preference; same bespoke optimistic-flip shape as updateImmersiveNavBarReveal.
-    private fun updateAccentColor(desired: AccentColor) {
-        val previous = _state.value.accentColor
-        _state.update {
-            it.copy(
-                accentColor = desired,
-                isUpdatingAccentColor = true,
-                accentColorError = false,
-                accentColorTouchedLocally = true,
-            )
-        }
-        viewModelScope.launch {
-            runCatching { userPreferencesRepository.setAccentColor(desired) }
-                .onSuccess {
-                    _state.update {
-                        it.copy(accentColor = desired, isUpdatingAccentColor = false)
-                    }
-                }
-                .onFailure {
-                    _state.update {
-                        it.copy(
-                            accentColor = previous,
-                            isUpdatingAccentColor = false,
-                            accentColorError = true,
                         )
                     }
                 }

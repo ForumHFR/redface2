@@ -59,7 +59,7 @@ fun QuoteCard(
                 text = stringResource(
                     R.string.editor_quote_line,
                     quote.author,
-                    quote.excerpt.ifBlank { stringResource(R.string.editor_quote_no_text) },
+                    quote.displayExcerpt(),
                 ),
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 1,
@@ -89,6 +89,12 @@ fun QuoteCard(
             )
         }
     }
+}
+
+@Composable
+private fun QuoteSelection.displayExcerpt(): String {
+    val renderedExcerpt = excerpt.ifBlank { stringResource(R.string.editor_quote_no_text) }
+    return if (truncate && !renderedExcerpt.endsWith(" [...]")) "$renderedExcerpt [...]" else renderedExcerpt
 }
 
 /** Reorder/remove affordances of one card, bundled for detekt's parameter budget. */

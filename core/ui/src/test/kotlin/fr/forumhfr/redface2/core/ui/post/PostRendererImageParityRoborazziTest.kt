@@ -22,10 +22,12 @@ import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import coil3.test.FakeImageLoaderEngine
 import com.github.takahirom.roborazzi.captureRoboImage
+import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.core.ui.theme.ReadingDisplaySettings
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -35,7 +37,8 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * #610/#842 — diagnostic-only Roborazzi captures of the `[img]` sizing (`max-width: 90%`, no upscale).
+ * #610/#842/#991 — diagnostic-only Roborazzi captures of `[img]` sizing
+ * (`PostImageMaxWidth.DEFAULT` = 95 %, no upscale).
  *
  * Visual proof of the current properties (config `w360dp-h780dp` → block height cap
  * [blockImageMaxHeightDp] = `max(400, 0.5×780)` = 400 dp):
@@ -121,9 +124,23 @@ class PostRendererImageParityRoborazziTest {
 
     @Test
     fun largePhotoBlockStaysBounded() {
-        // #842 — 4000×3000 stays bounded by the 90 % width cap → ~295×221 here (not the legacy
+        // #842/#991 — 4000×3000 stays bounded by the default 95 % width cap → ~312×234 here.
         // 480 dp letterbox, not a full-screen blow-up). The recalibrated height cap never upscales.
         capture("img_842_large_block_bounded", widthDp = 360) {
+            PostRenderer(content = standaloneBlockContent(photoUrl))
+        }
+    }
+
+    @Test
+    fun largePhotoBlockP90() {
+        capture("img_991_large_block_p90", widthDp = 360, postImageMaxWidth = PostImageMaxWidth.P90) {
+            PostRenderer(content = standaloneBlockContent(photoUrl))
+        }
+    }
+
+    @Test
+    fun largePhotoBlockP100() {
+        capture("img_991_large_block_p100", widthDp = 360, postImageMaxWidth = PostImageMaxWidth.P100) {
             PostRenderer(content = standaloneBlockContent(photoUrl))
         }
     }
@@ -144,10 +161,20 @@ class PostRendererImageParityRoborazziTest {
         blocks = listOf(PostBlock.Image(url = url, description = "photo")),
     )
 
-    private fun capture(name: String, widthDp: Int, content: @Composable () -> Unit) {
+    private fun capture(
+        name: String,
+        widthDp: Int,
+        postImageMaxWidth: PostImageMaxWidth = PostImageMaxWidth.DEFAULT,
+        content: @Composable () -> Unit,
+    ) {
         composeTestRule.setContent {
             CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides seededCache()) {
-                RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                RedfaceTheme(
+                    darkTheme = false,
+                    amoledTheme = false,
+                    dynamicColor = false,
+                    reading = ReadingDisplaySettings(postImageMaxWidth = postImageMaxWidth),
+                ) {
                     Surface(color = MaterialTheme.colorScheme.surface) {
                         Box(
                             modifier = Modifier

@@ -86,6 +86,11 @@ class DefaultForumRepository @Inject constructor(
         emitAll(categoriesRefresh.asSharedFlow())
     }
 
+    override fun observeCachedCategories(): Flow<ForumResult<List<Category>>?> = flow {
+        emit(cachedCategories?.let { ForumResult.Success(it.value) })
+        emitAll(categoriesRefresh.asSharedFlow())
+    }
+
     override suspend fun getCategories(forceRefreshIfStale: Boolean): ForumResult<List<Category>> {
         val now = clock.instant()
         val cached = cachedCategories
@@ -126,6 +131,11 @@ class DefaultForumRepository @Inject constructor(
             emit(ForumResult.Loading)
             emit(fetchSubcategories(cat))
         }
+        emitAll(subcategoriesFlow(cat).asSharedFlow())
+    }
+
+    override fun observeCachedSubcategories(cat: Int): Flow<ForumResult<List<SubCategory>>?> = flow {
+        emit(synchronized(subcategoriesLock) { cachedSubcategories[cat] }?.let { ForumResult.Success(it.value) })
         emitAll(subcategoriesFlow(cat).asSharedFlow())
     }
 

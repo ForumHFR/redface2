@@ -5,6 +5,7 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
+import android.net.Uri
 import android.view.View
 import android.view.Window
 import android.widget.Toast
@@ -37,7 +38,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
@@ -107,6 +110,7 @@ import fr.forumhfr.redface2.core.domain.preferences.StartScreenChoice
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.account.RedfaceAccountMenu
+import fr.forumhfr.redface2.core.ui.browser.LocalAlwaysAskLinkApp
 import fr.forumhfr.redface2.core.ui.browser.openUrlInExternalBrowser
 import fr.forumhfr.redface2.core.ui.debug.DebugBoundsOverlay
 import fr.forumhfr.redface2.core.ui.theme.ReadingDisplaySettings
@@ -134,6 +138,7 @@ import fr.forumhfr.redface2.feature.profile.ProfileViewModel
 import fr.forumhfr.redface2.feature.search.SearchScreen
 import fr.forumhfr.redface2.feature.settings.MyImagesScreen
 import fr.forumhfr.redface2.feature.settings.SettingsAccountAboutScreen
+import fr.forumhfr.redface2.feature.settings.SettingsColorsScreen
 import fr.forumhfr.redface2.feature.settings.SettingsCategoryDetailScreen
 import fr.forumhfr.redface2.feature.settings.SettingsDisplayScreen
 import fr.forumhfr.redface2.feature.settings.SettingsImagesScreen
@@ -414,6 +419,9 @@ data object SettingsMaintenanceRoute : RedfaceNavKey
 
 @Serializable
 data object SettingsDisplayRoute : RedfaceNavKey
+
+@Serializable
+data object SettingsColorsRoute : RedfaceNavKey
 
 @Serializable
 data object SettingsImagesRoute : RedfaceNavKey
@@ -747,6 +755,53 @@ internal fun tabBackTarget(
     }
 
 /**
+ * #1251 — HFR links tapped from rendered app content reuse the target tab's existing stack. Re-opening
+ * the exact top [NavKey] is a no-op. Targeting an older key returns to it by dropping the entries above
+ * it, matching Back semantics and keeping a single nav3 owner for that key. A same-topic link with a
+ * different page or anchor is a distinct [TopicRoute] key, so it is pushed instead of collapsed.
+ */
+internal fun inAppRouteBackStackAfterOpen(
+    backStack: List<NavKey>,
+    route: NavKey,
+): List<NavKey> {
+    val existingIndex = backStack.indexOf(route)
+    return when {
+        existingIndex >= 0 && existingIndex == backStack.lastIndex -> backStack
+        existingIndex >= 0 -> backStack.take(existingIndex + 1)
+        else -> backStack + route
+    }
+}
+
+internal data class InAppRouteBackStackResult(
+    val destination: TopLevelDestination,
+    val backStack: List<NavKey>,
+)
+
+/**
+ * Resolves the destination tab for an in-app HFR link without resetting any tab stack. Topic links keep
+ * the reader's current tab continuity; flags and category links honor their canonical destination.
+ */
+internal fun inAppRouteBackStackAfterOpen(
+    currentDestination: TopLevelDestination,
+    parsed: ParsedDeepLink,
+    backStackFor: (TopLevelDestination) -> List<NavKey>,
+): InAppRouteBackStackResult {
+    val destination = when (parsed.route) {
+        is TopicRoute -> currentDestination
+        is CategoryRoute -> TopLevelDestination.Forum
+        FlagsListRoute -> TopLevelDestination.Flags
+        else -> parsed.destination
+    }
+    val targetBackStack = backStackFor(destination)
+    val updatedBackStack = if (parsed.route == FlagsListRoute) {
+        targetBackStack.take(1).ifEmpty { listOf(destination.rootRoute) }
+    } else {
+        inAppRouteBackStackAfterOpen(targetBackStack, parsed.route)
+    }
+    return InAppRouteBackStackResult(destination, updatedBackStack)
+}
+
+/**
  * #667 — back at a secondary tab's root returns to the previous tab instead of letting the system
  * finish the Activity. Extracted from [RedfaceApp] to keep it under detekt's complexity threshold.
  * Enabled only at the ROOT (size == 1) of a tab other than the home Flags tab.
@@ -859,9 +914,8 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
     // keeps the historical isSystemInDarkTheme() behaviour; LIGHT/DARK force the app theme.
     val themeViewModel: AppThemeViewModel = hiltViewModel()
     val themeMode by themeViewModel.themeMode.collectAsStateWithLifecycle()
-    val amoledEnabled by themeViewModel.amoledEnabled.collectAsStateWithLifecycle()
-    // TU 2788511 — accent colour family (rose ↔ vivid « REDFACE1 » red), resolved at the root for RedfaceTheme.
-    val accentColor by themeViewModel.accentColor.collectAsStateWithLifecycle()
+    // #883/#978 — accent, Material You and surface tones are resolved as one atomic preference set.
+    val themeColorPreferences by themeViewModel.themeColorPreferences.collectAsStateWithLifecycle()
     // #1207 — force Android's « Ouvrir avec… » chooser for explicit external-link actions.
     val alwaysAskLinkApp by themeViewModel.alwaysAskLinkApp.collectAsStateWithLifecycle()
     // #287 — reading presets (density + font scale) resolved at the root and bundled for RedfaceTheme.
@@ -873,6 +927,8 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
     val showScrollbar by themeViewModel.showScrollbar.collectAsStateWithLifecycle()
     // #973 — block-GIF display profile (S/M/L), provided to the post renderer via RedfaceTheme.
     val mediaDisplayProfile by themeViewModel.mediaDisplayProfile.collectAsStateWithLifecycle()
+    // #991 — maximum fImage width, provided to all post image paths via RedfaceTheme.
+    val postImageMaxWidth by themeViewModel.postImageMaxWidth.collectAsStateWithLifecycle()
     // #989 — cell delimiter of the smiley picker, seeded into the theme below.
     val smileyPickerDecoration by themeViewModel.smileyPickerDecoration.collectAsStateWithLifecycle()
     // #666 — show/hide the labels under the bottom-nav icons (resolved at the shell for the suite below).
@@ -933,8 +989,7 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
     }
     RedfaceTheme(
         darkTheme = darkTheme,
-        amoledTheme = amoledEnabled,
-        accentColor = accentColor,
+        themeColorPreferences = themeColorPreferences,
         alwaysAskLinkApp = alwaysAskLinkApp,
         reading = ReadingDisplaySettings(
             density = displayDensity,
@@ -942,6 +997,7 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
             foldLongQuotes = foldLongQuotes,
             showScrollbar = showScrollbar,
             mediaDisplayProfile = mediaDisplayProfile,
+            postImageMaxWidth = postImageMaxWidth,
             smileyPickerDecoration = smileyPickerDecoration,
         ),
     ) {
@@ -1267,6 +1323,25 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
             )
             Box(modifier = Modifier.fillMaxSize()) {
                 Surface(modifier = contentInsetModifier) {
+                    val platformUriHandler = LocalUriHandler.current
+                    val alwaysAskLinkApp = LocalAlwaysAskLinkApp.current
+                    val inAppUriHandler = remember(
+                        context,
+                        currentDestination,
+                        backStacks,
+                        switchTab,
+                        platformUriHandler,
+                        alwaysAskLinkApp,
+                    ) {
+                        HfrInAppUriHandler(
+                            context = context,
+                            currentDestination = currentDestination,
+                            backStacks = backStacks,
+                            switchTab = switchTab,
+                            platformUriHandler = platformUriHandler,
+                            alwaysAskExternalApp = alwaysAskLinkApp,
+                        )
+                    }
                     val accountMenu: @Composable () -> Unit = {
                         RedfaceAccountMenu(
                             authState = authState,
@@ -1282,185 +1357,188 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                             avatarAppearance = accountAvatarAppearance,
                         )
                     }
-                    RedfaceNavHost(
-                        backStack = activeBackStack,
-                        // #667 — invoked if NavDisplay ever calls onBack at the root (defensive; the
-                        // parent BackHandler above handles it in the current nav3 where it does not).
-                        onRootBack = onRootTabBack,
-                        accountMenu = accountMenu,
-                        flagsQuickConfigRequest = flagsQuickConfigRequest,
-                        // #603 bug fix — reset the counter once FlagsRoute handled it, so a re-mount
-                        // (return from a category/topic) does not replay the sheet open (Codex review).
-                        onFlagsQuickConfigConsumed = { flagsQuickConfigRequest = 0 },
-                        onReportContent = {
-                            startReportEmail(context, reportEmailSubject, reportNoEmailClient)
-                        },
-                        privateMessageNavState = PrivateMessageNavState(
-                            // #531 — the screen only needs membership, so it gets the marked thread ids;
-                            // the dates stay nav-internal, consumed by reconcileReadMarks below.
-                            readThreadIds = readPrivateMessageThreadIds.keys,
-                            multiRecipientThreadIds = multiRecipientThreadIds,
-                            onThreadLoaded = { threadId ->
-                                // #453 (Codex review) — decrement the badge ONLY when the conversation was
-                                // unread when opened AND this is its first read of the session (predicate
-                                // extracted to keep this composable under detekt's complexity threshold).
-                                val decrement = shouldDecrementUnreadBadge(
-                                    threadId = threadId,
-                                    unreadOnOpen = unreadOnOpenThreadIds,
-                                    alreadyRead = readPrivateMessageThreadIds.keys,
-                                )
-                                if (decrement) {
-                                    mpBadgeViewModel.onThreadRead(threadId)
-                                }
-                                // (C1, 4-flavor MAJOR) the per-open unread flag is a PER-OPEN pending
-                                // too: CONSUME it here once the decrement decision is made. Without
-                                // this, a later re-fire / re-open keeps `threadId in unreadOnOpen`,
-                                // and after #531 drops the read mark the thread re-decrements the
-                                // badge from a stale unread state. A genuinely-unread re-open rearms
-                                // it via onThreadOpenedUnread.
-                                unreadOnOpenThreadIds = unreadOnOpenThreadIds - threadId
-                                // #531 — record the mark keyed by the conversation date captured at
-                                // open-time (openThreadDates). reconcileReadMarks later compares the
-                                // server date against it. (Codex MAJOR 3) the open-time date is a
-                                // PER-OPEN pending: CONSUME it here so a later re-open of the same
-                                // thread WITHOUT a fresh inbox date can't reuse this stale baseline —
-                                // (W1) but withReadMark now preserves an already-stored real baseline
-                                // before falling back to the MAX sentinel.
-                                readPrivateMessageThreadIds = readPrivateMessageThreadIds
-                                    .withReadMark(threadId, openThreadDates)
-                                openThreadDates = openThreadDates - threadId
+                    CompositionLocalProvider(LocalUriHandler provides inAppUriHandler) {
+                        RedfaceNavHost(
+                            backStack = activeBackStack,
+                            // #667 — invoked if NavDisplay ever calls onBack at the root (defensive; the
+                            // parent BackHandler above handles it in the current nav3 where it does not).
+                            onRootBack = onRootTabBack,
+                            accountMenu = accountMenu,
+                            flagsQuickConfigRequest = flagsQuickConfigRequest,
+                            // #603 bug fix — reset the counter once FlagsRoute handled it, so a re-mount
+                            // (return from a category/topic) does not replay the sheet open (Codex review).
+                            onFlagsQuickConfigConsumed = { flagsQuickConfigRequest = 0 },
+                            onReportContent = {
+                                startReportEmail(context, reportEmailSubject, reportNoEmailClient)
                             },
-                            // #531 — fresh page-1 network result: drop the marks HFR now reports as
-                            // genuinely unread again (server date strictly newer than the open-time date).
-                            // (Codex BLOCKER 1) dedupe by generation OUTSIDE the screen composition: the
-                            // reconcile effect can refire for the same generation on a stale page-1
-                            // Content, so ignore an already-reconciled generation; otherwise record it
-                            // BEFORE reconciling.
-                            onReconcileReadMarks = { generation, conversations ->
-                                val pass = reconcilePass(
-                                    marks = readPrivateMessageThreadIds,
-                                    lastReconciled = lastReconciledGeneration,
-                                    generation = generation,
-                                    freshConversations = conversations,
-                                )
-                                lastReconciledGeneration = pass.lastReconciled
-                                readPrivateMessageThreadIds = pass.marks
-                            },
-                            onThreadOpenedAsMulti = { threadId ->
-                                multiRecipientThreadIds = multiRecipientThreadIds + threadId
-                            },
-                            onThreadOpenedUnread = { threadId ->
-                                unreadOnOpenThreadIds = unreadOnOpenThreadIds + threadId
-                            },
-                            onThreadOpenedAt = { threadId, date ->
-                                openThreadDates = openThreadDates + (threadId to date)
-                            },
-                            sentSignal = privateMessageSentSignal,
-                            onConversationSent = {
-                                privateMessageSentSignal = System.currentTimeMillis()
-                            },
-                        ),
-                        privateMessageSubmitNavState = PrivateMessageSubmitNavState(
-                            account = authenticatedCanonicalPseudo,
-                            pending = privateMessagePendingSubmit,
-                            onPublish = { threadId, page ->
-                                authenticatedCanonicalPseudo?.let { account ->
-                                    // A retained nav-entry ViewModel survives activity recreation,
-                                    // while this plain remember counter does not. Seed from wall time
-                                    // so the first post-recreation event cannot reuse the last small
-                                    // id remembered by that ViewModel; maxOf keeps rapid sends strict.
-                                    privateMessageSubmitEventId = maxOf(
-                                        privateMessageSubmitEventId + 1,
-                                        System.currentTimeMillis(),
-                                    )
-                                    privateMessagePendingSubmit = PrivateMessagePendingSubmit(
-                                        account = account,
+                            privateMessageNavState = PrivateMessageNavState(
+                                // #531 — the screen only needs membership, so it gets the marked thread ids;
+                                // the dates stay nav-internal, consumed by reconcileReadMarks below.
+                                readThreadIds = readPrivateMessageThreadIds.keys,
+                                multiRecipientThreadIds = multiRecipientThreadIds,
+                                onThreadLoaded = { threadId ->
+                                    // #453 (Codex review) — decrement the badge ONLY when the conversation was
+                                    // unread when opened AND this is its first read of the session (predicate
+                                    // extracted to keep this composable under detekt's complexity threshold).
+                                    val decrement = shouldDecrementUnreadBadge(
                                         threadId = threadId,
-                                        result = PrivateMessageSubmitResult(
-                                            eventId = privateMessageSubmitEventId,
-                                            page = page,
+                                        unreadOnOpen = unreadOnOpenThreadIds,
+                                        alreadyRead = readPrivateMessageThreadIds.keys,
+                                    )
+                                    if (decrement) {
+                                        mpBadgeViewModel.onThreadRead(threadId)
+                                    }
+                                    // (C1, 4-flavor MAJOR) the per-open unread flag is a PER-OPEN pending
+                                    // too: CONSUME it here once the decrement decision is made. Without
+                                    // this, a later re-fire / re-open keeps `threadId in unreadOnOpen`,
+                                    // and after #531 drops the read mark the thread re-decrements the
+                                    // badge from a stale unread state. A genuinely-unread re-open rearms
+                                    // it via onThreadOpenedUnread.
+                                    unreadOnOpenThreadIds = unreadOnOpenThreadIds - threadId
+                                    // #531 — record the mark keyed by the conversation date captured at
+                                    // open-time (openThreadDates). reconcileReadMarks later compares the
+                                    // server date against it. (Codex MAJOR 3) the open-time date is a
+                                    // PER-OPEN pending: CONSUME it here so a later re-open of the same
+                                    // thread WITHOUT a fresh inbox date can't reuse this stale baseline —
+                                    // (W1) but withReadMark now preserves an already-stored real baseline
+                                    // before falling back to the MAX sentinel.
+                                    readPrivateMessageThreadIds = readPrivateMessageThreadIds
+                                        .withReadMark(threadId, openThreadDates)
+                                    openThreadDates = openThreadDates - threadId
+                                },
+                                // #531 — fresh page-1 network result: drop the marks HFR now reports as
+                                // genuinely unread again (server date strictly newer than the open-time date).
+                                // (Codex BLOCKER 1) dedupe by generation OUTSIDE the screen composition: the
+                                // reconcile effect can refire for the same generation on a stale page-1
+                                // Content, so ignore an already-reconciled generation; otherwise record it
+                                // BEFORE reconciling.
+                                onReconcileReadMarks = { generation, conversations ->
+                                    val pass = reconcilePass(
+                                        marks = readPrivateMessageThreadIds,
+                                        lastReconciled = lastReconciledGeneration,
+                                        generation = generation,
+                                        freshConversations = conversations,
+                                    )
+                                    lastReconciledGeneration = pass.lastReconciled
+                                    readPrivateMessageThreadIds = pass.marks
+                                },
+                                onThreadOpenedAsMulti = { threadId ->
+                                    multiRecipientThreadIds = multiRecipientThreadIds + threadId
+                                },
+                                onThreadOpenedUnread = { threadId ->
+                                    unreadOnOpenThreadIds = unreadOnOpenThreadIds + threadId
+                                },
+                                onThreadOpenedAt = { threadId, date ->
+                                    openThreadDates = openThreadDates + (threadId to date)
+                                },
+                                sentSignal = privateMessageSentSignal,
+                                onConversationSent = {
+                                    privateMessageSentSignal = System.currentTimeMillis()
+                                },
+                            ),
+                            privateMessageSubmitNavState = PrivateMessageSubmitNavState(
+                                account = authenticatedCanonicalPseudo,
+                                pending = privateMessagePendingSubmit,
+                                onPublish = { threadId, page ->
+                                    authenticatedCanonicalPseudo?.let { account ->
+                                        // A retained nav-entry ViewModel survives activity recreation,
+                                        // while this plain remember counter does not. Seed from wall time
+                                        // so the first post-recreation event cannot reuse the last small
+                                        // id remembered by that ViewModel; maxOf keeps rapid sends strict.
+                                        privateMessageSubmitEventId = maxOf(
+                                            privateMessageSubmitEventId + 1,
+                                            System.currentTimeMillis(),
+                                        )
+                                        privateMessagePendingSubmit = PrivateMessagePendingSubmit(
+                                            account = account,
+                                            threadId = threadId,
+                                            result = PrivateMessageSubmitResult(
+                                                eventId = privateMessageSubmitEventId,
+                                                page = page,
+                                            ),
+                                        )
+                                    }
+                                },
+                                onConsumed = { eventId ->
+                                    if (privateMessagePendingSubmit?.result?.eventId == eventId) {
+                                        privateMessagePendingSubmit = null
+                                    }
+                                },
+                            ),
+                            topicTitleNavState = TopicTitleNavState(
+                                titles = topicTitleCache,
+                                onTitleLoaded = { cat, post, title ->
+                                    topicTitleCache = topicTitleCache.withTitle(TopicTitleKey(cat, post), title)
+                                },
+                            ),
+                            topicScrollNavState = TopicScrollNavState(
+                                anchors = topicScrollAnchorCache,
+                                onAnchorSaved = { cat, post, page, anchor ->
+                                    topicScrollAnchorCache = topicScrollAnchorCache.withScrollAnchor(
+                                        TopicScrollKey(cat, post, page),
+                                        anchor,
+                                    )
+                                },
+                            ),
+                            topicSubmitNavState = TopicSubmitNavState(
+                                pending = topicPendingSubmit,
+                                onPublish = { cat, post, targetPage, scrollTo, quotedNumreponses ->
+                                    topicSubmitEventId += 1
+                                    topicPendingSubmit = TopicPendingSubmit(
+                                        cat = cat,
+                                        post = post,
+                                        result = TopicSubmitResult(
+                                            eventId = topicSubmitEventId,
+                                            targetPage = targetPage,
+                                            scrollTo = scrollTo,
+                                            quotedNumreponses = quotedNumreponses,
                                         ),
                                     )
-                                }
-                            },
-                            onConsumed = { eventId ->
-                                if (privateMessagePendingSubmit?.result?.eventId == eventId) {
-                                    privateMessagePendingSubmit = null
-                                }
-                            },
-                        ),
-                        topicTitleNavState = TopicTitleNavState(
-                            titles = topicTitleCache,
-                            onTitleLoaded = { cat, post, title ->
-                                topicTitleCache = topicTitleCache.withTitle(TopicTitleKey(cat, post), title)
-                            },
-                        ),
-                        topicScrollNavState = TopicScrollNavState(
-                            anchors = topicScrollAnchorCache,
-                            onAnchorSaved = { cat, post, page, anchor ->
-                                topicScrollAnchorCache = topicScrollAnchorCache.withScrollAnchor(
-                                    TopicScrollKey(cat, post, page),
-                                    anchor,
+                                },
+                                onConsumed = { topicPendingSubmit = null },
+                            ),
+                            multiQuoteNavState = MultiQuoteNavState(
+                                basket = multiQuoteBasket,
+                                onToggle = { scope, selection ->
+                                    multiQuoteBasket = multiQuoteBasket.toggled(scope, selection)
+                                },
+                                onRemove = { scope, numreponses ->
+                                    multiQuoteBasket = multiQuoteBasket.withoutSelections(scope, numreponses)
+                                },
+                                onClear = { multiQuoteBasket = null },
+                                pendingEditorQuotes = pendingEditorQuotes,
+                                onEditorQuotesHandoff = { pendingEditorQuotes = it },
+                            ),
+                            topicPollNavState = TopicPollNavState(
+                                expansions = topicPollExpansionCache,
+                                onExpansionChanged = { cat, post, expanded ->
+                                    topicPollExpansionCache = topicPollExpansionCache.withPollExpansion(
+                                        TopicPollKey(cat, post),
+                                        expanded,
+                                    )
+                                },
+                            ),
+                            immersiveNavBarNavState = ImmersiveNavBarNavState(
+                                // #518 follow-up — observe scroll only when immersive is on AND a scroll-driven
+                                // mode is selected (helper keeps the && out of RedfaceApp's complexity budget).
+                                active = immersiveScrollReportActive(hideSystemNavBar, immersiveNavBarReveal),
+                                onScrollFacts = { atBottom, scrollingUp ->
+                                    topicNavBarScroll = NavBarScrollFacts(atBottom, scrollingUp)
+                                },
+                            ),
+                            onOpenProfile = { userId, pseudo, avatarUrl ->
+                                // Review feedback I3: capture the **origin** tab so that
+                                // « Voir le profil complet » lands on the correct back stack
+                                // even if the user switches tabs while the sheet is open.
+                                profileSheetRequest = ProfileSheetRequest(
+                                    userId = userId,
+                                    pseudo = pseudo,
+                                    avatarUrl = avatarUrl,
+                                    origin = currentDestination,
                                 )
                             },
-                        ),
-                        topicSubmitNavState = TopicSubmitNavState(
-                            pending = topicPendingSubmit,
-                            onPublish = { cat, post, targetPage, scrollTo ->
-                                topicSubmitEventId += 1
-                                topicPendingSubmit = TopicPendingSubmit(
-                                    cat = cat,
-                                    post = post,
-                                    result = TopicSubmitResult(
-                                        eventId = topicSubmitEventId,
-                                        targetPage = targetPage,
-                                        scrollTo = scrollTo,
-                                    ),
-                                )
-                            },
-                            onConsumed = { topicPendingSubmit = null },
-                        ),
-                        multiQuoteNavState = MultiQuoteNavState(
-                            basket = multiQuoteBasket,
-                            onToggle = { scope, selection ->
-                                multiQuoteBasket = multiQuoteBasket.toggled(scope, selection)
-                            },
-                            onRemove = { scope, numreponses ->
-                                multiQuoteBasket = multiQuoteBasket.withoutSelections(scope, numreponses)
-                            },
-                            onClear = { multiQuoteBasket = null },
-                            pendingEditorQuotes = pendingEditorQuotes,
-                            onEditorQuotesHandoff = { pendingEditorQuotes = it },
-                        ),
-                        topicPollNavState = TopicPollNavState(
-                            expansions = topicPollExpansionCache,
-                            onExpansionChanged = { cat, post, expanded ->
-                                topicPollExpansionCache = topicPollExpansionCache.withPollExpansion(
-                                    TopicPollKey(cat, post),
-                                    expanded,
-                                )
-                            },
-                        ),
-                        immersiveNavBarNavState = ImmersiveNavBarNavState(
-                            // #518 follow-up — observe scroll only when immersive is on AND a scroll-driven
-                            // mode is selected (helper keeps the && out of RedfaceApp's complexity budget).
-                            active = immersiveScrollReportActive(hideSystemNavBar, immersiveNavBarReveal),
-                            onScrollFacts = { atBottom, scrollingUp ->
-                                topicNavBarScroll = NavBarScrollFacts(atBottom, scrollingUp)
-                            },
-                        ),
-                        onOpenProfile = { userId, pseudo, avatarUrl ->
-                            // Review feedback I3: capture the **origin** tab so that
-                            // « Voir le profil complet » lands on the correct back stack
-                            // even if the user switches tabs while the sheet is open.
-                            profileSheetRequest = ProfileSheetRequest(
-                                userId = userId,
-                                pseudo = pseudo,
-                                avatarUrl = avatarUrl,
-                                origin = currentDestination,
-                            )
-                        },
-                    )
+                        )
+                    }
                 }
                 // #518 follow-up — in-app back affordance for immersive mode: a discreet FAB that
                 // fires the SAME back action as the system button (OnBackPressedDispatcher), so the
@@ -1846,7 +1924,7 @@ private fun isTopicEntryFor(below: Any?, cat: Int, topicId: Int): Boolean {
  */
 private data class TopicSubmitNavState(
     val pending: TopicPendingSubmit?,
-    val onPublish: (cat: Int, post: Int, targetPage: Int?, scrollTo: Int?) -> Unit,
+    val onPublish: (cat: Int, post: Int, targetPage: Int?, scrollTo: Int?, quotedNumreponses: List<Int>) -> Unit,
     val onConsumed: () -> Unit,
 )
 
@@ -2538,6 +2616,17 @@ private fun RedfaceNavHost(
                             backStack.removeAt(backStack.lastIndex)
                         }
                     },
+                    onOpenColors = { backStack.add(SettingsColorsRoute) },
+                    topBarActions = accountMenu,
+                )
+            }
+            entry<SettingsColorsRoute> {
+                SettingsColorsScreen(
+                    onBack = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
                     topBarActions = accountMenu,
                 )
             }
@@ -2903,21 +2992,28 @@ private fun RedfaceNavHost(
                             backStack.removeAt(backStack.lastIndex)
                         }
                     },
-                    onSubmitSucceeded = { targetPage, scrollTo ->
+                    onSubmitSucceeded = { targetPage, scrollTo, quotedNumreponses ->
                         // #895 étape 4 (PR 2) — publish the outcome BEFORE the pop, so the revealed
                         // topic entry finds it on first recomposition and hands it to its RETAINED
                         // ViewModel (in-place force refresh + landing, #200/#226 — the historical
                         // route-replace + submitSignal rebuild is gone). `targetPage` is parsed
                         // from HFR's success URL; `scrollTo` is the numreponse from the `#t{N}`
                         // fragment (quote / edit), or null when HFR anchored `#bas` (plain reply →
-                        // bottom landing). Guarded on the entry below actually being THIS topic —
-                        // an editor opened from the Flags list (onReplyFlag) pops back to the list,
-                        // and a pending outcome armed there would fire on a LATER unrelated open
-                        // of the topic.
+                        // bottom landing) ; `quotedNumreponses` (#974) lets the engine land on the
+                        // cited post instead of the fresh one. Guarded on the entry below actually
+                        // being THIS topic — an editor opened from the Flags list (onReplyFlag) pops
+                        // back to the list, and a pending outcome armed there would fire on a LATER
+                        // unrelated open of the topic.
                         val topicId = route.topicId
                         val below = backStack.getOrNull(backStack.lastIndex - 1)
                         if (topicId != null && isTopicEntryFor(below, route.cat, topicId)) {
-                            topicSubmitNavState.onPublish(route.cat, topicId, targetPage, scrollTo)
+                            topicSubmitNavState.onPublish(
+                                route.cat,
+                                topicId,
+                                targetPage,
+                                scrollTo,
+                                quotedNumreponses,
+                            )
                         }
                         // #868/#869 — the selection's intent is consumed by the SUCCESSFUL submit
                         // of a basket-consuming session (« Citer N » / its escalation), and only
@@ -2968,7 +3064,8 @@ private fun RedfaceNavHost(
                         val cat = route.cat
                         val below = backStack.getOrNull(backStack.lastIndex - 1)
                         if (cat != null && topicId != null && isTopicEntryFor(below, cat, topicId)) {
-                            topicSubmitNavState.onPublish(cat, topicId, targetPage, scrollTo)
+                            // An FP edit never cites anything : no #974 quote landing to forward.
+                            topicSubmitNavState.onPublish(cat, topicId, targetPage, scrollTo, emptyList())
                         }
                         if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)
@@ -3074,6 +3171,53 @@ private fun resetStack(
 private fun popToRoot(backStack: NavBackStack<NavKey>) {
     while (backStack.size > 1) {
         backStack.removeAt(backStack.lastIndex)
+    }
+}
+
+private class HfrInAppUriHandler(
+    private val context: Context,
+    private val currentDestination: TopLevelDestination,
+    private val backStacks: Map<TopLevelDestination, NavBackStack<NavKey>>,
+    private val switchTab: (TopLevelDestination) -> Unit,
+    private val platformUriHandler: UriHandler,
+    private val alwaysAskExternalApp: Boolean,
+) : UriHandler {
+    override fun openUri(uri: String) {
+        val parsedUri = uri.toUri()
+        when (val resolution = resolveHfrUri(parsedUri)) {
+            is HfrDeepLinkResolution.Route -> openRouteInApp(resolution.parsed)
+            // HFR host but no in-app route: the exclude-Redface launcher avoids the self-deep-link loop.
+            is HfrDeepLinkResolution.BrowserFallback -> openExternally(resolution.uri, uri)
+            // Non-HFR link: plain platform resolution, so App Links still hand off to native apps
+            // (YouTube, GitHub, ...) exactly as before this handler existed (Fable review).
+            HfrDeepLinkResolution.Ignore -> platformUriHandler.openUri(uri)
+        }
+    }
+
+    private fun openRouteInApp(parsed: ParsedDeepLink) {
+        val result = inAppRouteBackStackAfterOpen(
+            currentDestination = currentDestination,
+            parsed = parsed,
+            backStackFor = { destination -> backStacks.getValue(destination) },
+        )
+        switchTab(result.destination)
+        applyInAppBackStackUpdate(backStacks.getValue(result.destination), result.backStack)
+    }
+
+    private fun applyInAppBackStackUpdate(backStack: NavBackStack<NavKey>, updated: List<NavKey>) {
+        if (updated == backStack) return
+        while (backStack.size > updated.size) {
+            backStack.removeAt(backStack.lastIndex)
+        }
+        for (index in backStack.size until updated.size) {
+            backStack.add(updated[index])
+        }
+    }
+
+    private fun openExternally(uri: Uri, original: String) {
+        if (!openUrlInExternalBrowser(context, uri, alwaysAskExternalApp)) {
+            platformUriHandler.openUri(original)
+        }
     }
 }
 

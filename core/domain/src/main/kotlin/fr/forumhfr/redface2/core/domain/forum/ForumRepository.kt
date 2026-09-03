@@ -4,6 +4,7 @@ import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.SubCategory
 import fr.forumhfr.redface2.core.model.TopicListPage
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 
 /**
  * Read access to the HFR forum browsing layer (categories, subcategories, topic lists).
@@ -20,6 +21,13 @@ import kotlinx.coroutines.flow.Flow
 interface ForumRepository {
 
     fun observeCategories(): Flow<ForumResult<List<Category>>>
+
+    /**
+     * Cache-only category stream for adornments that need ordering/labels but must not trigger the
+     * categories TTL fetch on screen start. Emits `null` when the cache is cold, then any explicit
+     * [refreshCategories] emissions. Default stays cold for tests/fakes that do not model the cache.
+     */
+    fun observeCachedCategories(): Flow<ForumResult<List<Category>>?> = flowOf(null)
 
     /**
      * One-shot categories read for callers that ENUMERATE the catalogue (the flags
@@ -48,6 +56,14 @@ interface ForumRepository {
     suspend fun refreshCategories()
 
     fun observeSubcategories(cat: Int): Flow<ForumResult<List<SubCategory>>>
+
+    /**
+     * Cache-only subcategory stream for list adornments that must not fan out across every category
+     * on screen start. Emits the current in-memory/DB value when known, `null` when cold, then future
+     * refresh emissions. It never performs a network request by itself; callers that decide a visible
+     * category needs names must call [refreshSubcategories] explicitly.
+     */
+    fun observeCachedSubcategories(cat: Int): Flow<ForumResult<List<SubCategory>>?>
 
     suspend fun refreshSubcategories(cat: Int)
 

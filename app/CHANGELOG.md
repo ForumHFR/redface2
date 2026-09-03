@@ -16,6 +16,231 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.53.6` — `open` (bêta) — 2026-09-03
+
+Promotion bêta du lot développé en dev de `0.51.0` à `0.53.6`, depuis la précédente bêta `0.50.2`. Le détail par version dev figure dans les entrées ci-dessous. Les issues du lot restent ouvertes jusqu'à validation par les retours des testeurs.
+
+### Couleurs ([#296](https://github.com/ForumHFR/redface2/issues/296), [#883](https://github.com/ForumHFR/redface2/issues/883), [#978](https://github.com/ForumHFR/redface2/issues/978), [#1240](https://github.com/ForumHFR/redface2/issues/1240), [#1245](https://github.com/ForumHFR/redface2/issues/1245))
+
+- Nouvelle sous-page Réglages → Affichage → Couleurs : accent parmi 8 presets ou hexa personnalisé, ton du fond, sélecteur Clair / Système / Sombre, option d'en-tête des messages Discret / Vif, aperçu fidèle aux vraies couleurs de lecture. Fond gris « esprit RF1 » par défaut en clair. AMOLED garde l'accent et rend le spoiler visible.
+
+### Drapeaux ([#737](https://github.com/ForumHFR/redface2/issues/737), [#741](https://github.com/ForumHFR/redface2/issues/741), [#742](https://github.com/ForumHFR/redface2/issues/742), [#743](https://github.com/ForumHFR/redface2/issues/743), [#814](https://github.com/ForumHFR/redface2/issues/814), [#739](https://github.com/ForumHFR/redface2/issues/739), [#740](https://github.com/ForumHFR/redface2/issues/740))
+
+- Onglet « Super » des super-favoris (cache-only, zéro appel réseau, pull-to-refresh, groupement et réglages par onglet honorés), sous-catégorie dans la ligne du sujet, swipe entre onglets sans saut, pastille « +N » colorée selon le retard, recherche insensible aux accents, état vide hors-ligne.
+
+### Sujets et écriture ([#974](https://github.com/ForumHFR/redface2/issues/974), [#1137](https://github.com/ForumHFR/redface2/issues/1137), [#1243](https://github.com/ForumHFR/redface2/issues/1243), [#1246](https://github.com/ForumHFR/redface2/issues/1246), [#1182](https://github.com/ForumHFR/redface2/issues/1182), [#949](https://github.com/ForumHFR/redface2/issues/949), [#327](https://github.com/ForumHFR/redface2/issues/327), [#831](https://github.com/ForumHFR/redface2/issues/831), [#1106](https://github.com/ForumHFR/redface2/issues/1106), [#991](https://github.com/ForumHFR/redface2/issues/991))
+
+- Poster depuis une page en retard ne téléporte plus ; répondre en citant ramène au message cité ; marqueur « dernier message lu » visible à l'ouverture ; résultats de sondage en barres avec pourcentages HFR ; réponse rapide jusqu'à 15 lignes ; « Citer le début » ; « Partager » une image ; zoom pincé interactif ; largeur maximale des images réglable.
+
+### Liens HFR et navigation ([#1251](https://github.com/ForumHFR/redface2/issues/1251), [#1252](https://github.com/ForumHFR/redface2/issues/1252))
+
+- Retour cohérent depuis un topic ouvert par un lien dans un post ; destination du lien honorée (drapeaux, catégorie, topic) ; « Y aller » recharge la page cible depuis HFR.
+
+### Divers ([#969](https://github.com/ForumHFR/redface2/issues/969), [#1149](https://github.com/ForumHFR/redface2/issues/1149), [#1216](https://github.com/ForumHFR/redface2/issues/1216), [#1220](https://github.com/ForumHFR/redface2/issues/1220))
+
+- Œil « afficher le mot de passe » à la connexion ; marge corrigée sous la barre d'état en vue Forum ; compileSdk 37, AGP 9.3.1, Kotlin 2.4.10, Compose BOM 2026.08.00.
+
+Audit complet du câblage de l'onglet Super après le retour XaTriX sur la 0.53.5 (Opus 5 + Codex). Produit par Sol (Codex) sous gate Fable ; PR #1262.
+
+### Corrigé
+
+- **Drapeaux, onglet Super : pull-to-refresh réellement câblé** — le corps dédié de l'onglet n'avait aucun `PullToRefreshBox`, le geste n'était jamais capté (pas d'animation) et le rafraîchissement livré en 0.53.5 restait inatteignable depuis l'écran. L'onglet Super passe par le même corps de liste que les autres onglets : geste, indicateur, barre de chargement, rendu groupé, tous les réglages d'affichage.
+- **Feuille de configuration rapide sur Super** — « Non-lus uniquement » est désactivé (sans effet sur cet onglet) et l'en-tête indique que les réglages sont globaux.
+- **Premier test d'interface du corps de liste** (Robolectric Compose) : le geste de rafraîchissement déclenche bien le rechargement, le rendu groupé affiche les en-têtes, l'état vide affiche le placeholder.
+
+### Note
+
+« Masquer les catégories sans non-lu » suit sur Super la convention des vues « +lus » (#825) : seules les sections vides disparaissent, un super favori entièrement lu reste visible.
+
+---
+
+## `0.53.5` — `internal` (dev) — 2026-09-03
+
+Retour XaTriX sur la 0.53.4. Produit par Sol (Codex) sous gate Fable ; PR #1261.
+
+### Corrigé
+
+- **Drapeaux, onglet Super : pull-to-refresh** — le geste était sans effet ; il rafraîchit maintenant les trois listes (Cyan, Rouge, Favoris) puis re-résout les sujets marqués depuis le cache. Toujours aucun rafraîchissement automatique sur cet onglet.
+- **Drapeaux, onglet Super : « Grouper par catégorie » et « Masquer les catégories sans non-lu »** sont honorés comme sur les autres onglets.
+- **Réglages › Drapeaux** — quand « Réglages différents par onglet » est actif, les deux interrupteurs d'affichage globaux sont grisés avec un texte renvoyant à la feuille de configuration rapide des Drapeaux, au lieu d'écrire une valeur que les onglets n'utilisent pas.
+
+---
+
+## `0.53.4` — `internal` (dev) — 2026-09-03
+
+Correctifs issus de la double revue LLM (Opus 5 + Codex) de la PR de promotion dev → main #1250. Produit par Sol (Codex) sous gate Fable ; PRs #1256, #1257, #1258.
+
+### Corrigé
+
+- **Drapeaux, onglet Super : zéro appel réseau** — chaque épingle déclenchait un fan-out REST par catégorie (onglet blanc, ~150 requêtes) ; la résolution est maintenant cache-only avec repli sur le titre stocké. Une épingle orpheline (catégorie inconnue) peut de nouveau être retirée par appui long. Les libellés de sous-catégorie (#741) sont rafraîchis une fois par catégorie au démarrage. Un second pull pendant un rafraîchissement en vol est ignoré ; le toggle super favori est transactionnel.
+- **Sondages : pourcentages HFR** — les barres affichent le pourcentage parsé (votes exprimés) au lieu d'un recalcul incluant les votes blancs (19 % au lieu de 20.1 % sur un cas réel).
+- **Snackbar « Message publié en page N » non bloquante** — elle suspendait la file d'effets de l'écran pendant 10 s, retardant les défilements. Après une réponse simple depuis une page servie provisoirement, le défilement en bas de page est de nouveau armé.
+- **Liens HFR dans un post : destination honorée** — un lien vers la liste des drapeaux ou une catégorie bascule sur le bon onglet ; un lien vers un topic reste sur l'onglet courant (#1251). `page<=0` dans un lien externe est ramené à 1.
+- **Couleurs** — l'écriture groupée des préférences passe sous mutex (deux taps rapprochés ne persistent plus l'ancien accent) ; la saisie hexadécimale en cours n'est plus écrasée par une émission de préférences.
+- **Specs** — `mvi.md`, `navigation.md`, `reading-parity.md` alignées sur le code.
+
+---
+
+## `0.53.3` — `internal` (dev) — 2026-09-03
+
+Correctifs du matin sur les retours des testeurs de la nuit. Produit par Sol (Codex) sous gate Fable ; PR #1255.
+
+### Corrigé
+
+- **Retour depuis un topic ouvert par un lien HFR dans un post ramenait à la liste des drapeaux** (#1251, thibw) — les liens `forum.hardware.fr` tapés dans un message sortaient par le système et revenaient dans l'app comme un lien externe, dont la politique réinitialise la pile de l'onglet. Ils sont maintenant traités dans l'app et empilés sur l'onglet actif : Retour revient au topic d'origine, à la même page. Les liens ouverts depuis l'extérieur (navigateur, mail) gardent le comportement actuel.
+- **« Y aller » après un envoi depuis une page en retard ouvrait la page cible sans le nouveau message** (#1252, Dintr-un lemn) — la page était servie depuis le cache local encore frais ; elle est maintenant rechargée depuis HFR avant d'atterrir en bas (ou sur le message).
+
+---
+
+## `0.53.2` — `internal` (dev) — 2026-09-03
+
+Mandat de nuit, troisième lot. Produit par Sol (Codex) sous gate Fable ; PR #1249.
+
+### Ajouté
+
+- **Couleurs : option « En-tête des messages » Discret / Vif** (retours styx42, nicko, XaTriX) — « Vif » peint l'en-tête d'identité des messages (sujets et MP) avec la couleur d'accent choisie au lieu de la surface secondaire discrète ; défaut inchangé (Discret). L'aperçu de la page Couleurs suit l'option ; le message d'ancrage « dernier lu » et les messages de modération gardent leur traitement.
+
+---
+
+## `0.53.1` — `internal` (dev) — 2026-09-03
+
+Mandat de nuit, second lot (issues anciennes du backlog). Produit par Sol (Codex) sous gate Fable ; PR #1247, PR #1248.
+
+### Ajouté
+
+- **Drapeaux : l'onglet « Super » liste enfin les super-favoris** ([#737](https://github.com/ForumHFR/redface2/issues/737)) — l'action « Super favori » de l'appui long persistait des sujets que rien n'affichait. Stockage `(cat, topicId)` avec un instantané du titre (les anciens marquages sont migrés, rien n'est perdu), métadonnées live quand le sujet est encore flaggé, sinon l'instantané.
+- **Drapeaux : la sous-catégorie apparaît dans la ligne du sujet** ([#741](https://github.com/ForumHFR/redface2/issues/741)) — résolue depuis le cache des sous-catégories uniquement (aucun appel réseau au démarrage) ; rien n'est affiché tant que le cache est froid.
+- **Éditeur : « Citer le début »** ([#327](https://github.com/ForumHFR/redface2/issues/327), demande Dintr-un lemn) — seconde entrée du menu de message qui n'insère que le début d'un long message (300 caractères, coupe en fin de mot, `[...]`, jamais au milieu d'une balise) ; « Citer » et le panier multi-citation sont inchangés.
+- **Images : « Partager » dans le menu d'appui long** ([#831](https://github.com/ForumHFR/redface2/issues/831), retour Jungledede) — à côté de Enregistrer / Copier l'URL / Ouvrir dans le navigateur. « Afficher en taille réelle » reste lié à #182.
+
+### Corrigé
+
+- **Drapeaux : le swipe entre onglets ne saute plus en haut de liste avant de se recaler** ([#742](https://github.com/ForumHFR/redface2/issues/742), retour nicko, présent depuis des dizaines de builds) — l'onglet et sa liste sont désormais exposés d'un seul tenant au rendu ; un panneau ne peut plus se composer une frame avec les données de l'onglet précédent.
+
+---
+
+## `0.53.0` — `internal` (dev) — 2026-09-03
+
+Mandat de nuit (retours du fil DEV du 02/09). Produit par Sol (Codex) sous gate Fable ; PR #1245, #1246.
+
+### Ajouté
+
+- **Couleurs : sélecteur Clair / Système / Sombre dans la page** — plus besoin d'aller dans Affichage pour voir l'aperçu dans l'autre thème ; le réglage d'Affichage reste (même préférence). Retour XaTriX.
+
+### Corrigé
+
+- **Drapeaux : l'accent choisi se voit enfin dans la liste** ([#1245](https://github.com/ForumHFR/redface2/pull/1245), retour CharLee build 298) — le style de bandeau « Doux » et la puce du style « Puce » utilisent la surface secondaire du thème, qui survit aux fonds « Blanc » et « Gris RF1 » (avant : `surfaceContainer`, aplati en blanc par ces deux fonds, d'où des en-têtes invisibles). Le style par défaut « Minimal » garde son fond mais teinte l'icône de catégorie avec l'accent. Style réglable dans les réglages d'affichage des Drapeaux.
+- **Couleurs : un accent « Neutre » ou un hex gris ne donne plus un schéma vert** (retour styx42) — une graine de faible chroma (HCT ≤ 12) construit un schéma monochrome au lieu de recevoir une teinte arbitraire.
+- **Topic : répondre en citant ne téléporte plus en bas** ([#1246](https://github.com/ForumHFR/redface2/pull/1246), retour nicko build 297, suite de #974/#1243) — avec les cartes de citation désactivées (défaut) la citation partait comme une réponse simple et suivait la règle de débordement vers la dernière page. Désormais une réponse qui cite reste sur sa page et reprend sur le message cité ; si la réponse a créé une page de plus, la snackbar « Message publié en page N » propose d'y aller. Message cité absent de la page d'arrivée : la position de lecture est conservée (plus de saut en bas).
+- **Réponse rapide : la page envoyée à HFR est celle où le volet est ouvert** — le ViewModel, scopé au sujet, gardait la page de sa première ouverture ; les envois suivants depuis une autre page postaient une page périmée et atterrissaient au mauvais endroit.
+
+---
+
+## `0.52.3` — `internal` (dev) — 2026-09-02
+
+Hotfix issu du topic bêta (Eife, thom@s). Produit par Sol (Codex) sous gate Fable.
+
+### Corrigé
+
+- **Poster depuis une page en retard ne téléporte plus en dernière page** ([#1243](https://github.com/ForumHFR/redface2/issues/1243)) — quand on rédige un message depuis une page qui n'est pas la dernière, l'app reste sur la page lue, à la même position, et affiche « Message publié en page N » avec une action pour y aller. La dernière page n'est plus chargée à l'insu du lecteur : les pages non lues gardent leur drapeau (le POST seul ne déplace pas le drapeau côté HFR, seul le chargement d'une page le fait). Le cas « ma réponse crée une nouvelle page alors que j'étais en dernière page » garde son saut automatique (#226) ; citation et édition inchangées.
+
+---
+
+## `0.52.2` — `internal` (dev) — 2026-09-02
+
+Retour testeurs sur le fil DEV (nicko, XaTriX) après 0.52.1. Produit par Sol (Codex) sous gate Fable.
+
+### Corrigé
+
+- **Couleurs : l'aperçu reprend les vraies couleurs de lecture** ([#1240](https://github.com/ForumHFR/redface2/issues/1240)) — l'en-tête du faux message utilisait la surface primaire (rouge vif en Rouge RF1 sombre) alors que les vrais posts ont un bandeau sur la surface secondaire (brun). L'en-tête, la citation (avec son rail d'accent), le spoiler, le lien, le bouton Répondre et la pastille drapeau de l'aperçu utilisent désormais exactement les tokens du rendu réel. Le rendu de lecture lui-même est inchangé.
+
+---
+
+## `0.52.1` — `internal` (dev) — 2026-09-02
+
+Correctifs issus de la recette visuelle de 0.52.0 (émulateur API 34, rapport : https://forumhfr.github.io/artifacts/couleurs-296-recette/). Produit par Sol (Codex) sous gate Fable.
+
+### Corrigé
+
+- **Couleurs : le champ hexa ne s'active plus tout seul** ([#296](https://github.com/ForumHFR/redface2/issues/296)) — valider (Entrée ou perte de focus) le champ « Couleur personnalisée » sans l'avoir modifié ne bascule plus l'accent en personnalisé et ne désélectionne plus le preset. Quand un preset est actif, le champ est vide et sa couleur graine s'affiche en indication ; saisir exactement cette valeur ne change rien.
+- **Couleurs : aperçu fidèle en Gris RF1** ([#296](https://github.com/ForumHFR/redface2/issues/296)) — le faux message de l'aperçu utilise la même surface que les vraies cartes de posts (blanche sur fond gris RF1) au lieu d'un gris sur gris.
+
+---
+
+## `0.52.0` — `internal` (dev) — 2026-09-02
+
+Lot « Couleurs » (#296), demandé de longue date par les testeurs (Lt Ripley, Stylken, Azgor, antiseptiqueIncolore) et par XaTriX (#883). Produit par Sol (Codex) sous gate Fable, en deux PR (#1237 moteur, #1238 réglages).
+
+### Ajouté
+
+- **Réglages → Affichage → Couleurs** ([#296](https://github.com/ForumHFR/redface2/issues/296)) — nouvelle sous-page : **accent** parmi 8 presets (Rose, Rouge RF1, Bleu, Vert, Violet, Orange, Sarcelle, Neutre) ou **couleur personnalisée en hexa** (`#RRGGBB`) ; **ton du fond** en clair (Teinté M3, Blanc, Gris RF1) et en sombre (Teinté M3, AMOLED) ; **Couleurs du système** (Material You, Android 12+) ; **aperçu en direct** d'un faux message en tête de page ([#595](https://github.com/ForumHFR/redface2/issues/595) pour les couleurs). Le choix rose/rouge et l'interrupteur AMOLED déménagent dans cette sous-page.
+- **Fond gris « esprit RF1 » par défaut en thème clair** ([#883](https://github.com/ForumHFR/redface2/issues/883)) — page légèrement grisée, messages sur cartes blanches. S'applique aussi aux installations existantes ; pour retrouver l'ancien rendu : Couleurs → Ton du fond → Teinté M3 (ou Blanc pour du blanc pur).
+
+### Corrigé
+
+- **AMOLED : spoiler visible** ([#978](https://github.com/ForumHFR/redface2/issues/978)) — le bloc spoiler fermé ne se confond plus avec le fond noir. Plus largement, l'AMOLED garde désormais la couleur d'accent choisie (Rouge RF1 + AMOLED affiche enfin du rouge) ; Rose + AMOLED est inchangé.
+
+### Technique
+
+- Schémas Material 3 générés depuis une couleur graine avec `material-color-utilities` 5.0.1 (sans dépendance Compose) ; tertiaire slate forcé (pas de retour du jaune). Rose et Rouge RF1 gardent leurs schémas manuels à l'identique en clair/sombre teinté. Tests de contraste sur chaque preset × mode × ton, palettes fixes comprises. Préférences `ThemeColorPreferences` (migration tolérante, mirror anti-flash au démarrage).
+
+---
+
+## `0.51.2` — `internal` (dev) — 2026-09-02
+
+Deux chantiers en retard sur la bêta, produits par Sol (Codex) sous gate Fable.
+
+### Ajouté
+
+- **Réglage « Largeur maximale des images »** ([#991](https://github.com/ForumHFR/redface2/issues/991)) — dans Affichage, un choix 90 %, 95 % (défaut, identique à aujourd'hui), 99 % ou 100 % de la largeur du message pour les images de contenu, appliqué aux trois chemins (image inline mesurée, image bloc mesurée, slot bloc en attente), indépendamment des GIF et du mode pleine largeur. Demandé par thom@s et XaTriX.
+
+### Corrigé
+
+- **Zoom pincé interactif** ([#1106](https://github.com/ForumHFR/redface2/issues/1106)) — au-delà de 1×, les liens, images, boutons et la sélection de texte redeviennent utilisables dans les sujets comme dans les MP/DT ; le pan à un doigt ne s'engage qu'après un vrai déplacement et le double-tap de rafraîchissement est suspendu en zoomé. Signalé par antiseptiqueIncolore.
+
+### Technique
+
+- Dependabot `gradle-misc` ([#1222](https://github.com/ForumHFR/redface2/pull/1222)) : Gradle 9.7.1, KSP 2.3.11, Roborazzi 1.73.0, androidx-tracing 2.0.1, hilt-navigation-compose 1.4.0, JSpecify 1.0.1.
+
+---
+
+## `0.51.1` — `internal` (dev) — 2026-09-02
+
+Suite de la nuit du 01→02/09 : deux suggestions du fil DEV.
+
+### Ajouté
+
+- **Résultats de sondage en barres** ([#1182](https://github.com/ForumHFR/redface2/issues/1182)) — chaque réponse d'un sondage affiche une barre proportionnelle à sa part des votes, avec le compteur et le pourcentage ; la réponse en tête est accentuée, le vote blanc reste une ligne à part (il compte dans le total, comme sur HFR). Suggestion de thibw.
+- **Réponse rapide plus haute** ([#949](https://github.com/ForumHFR/redface2/issues/949)) — le champ de la réponse rapide (surface d'écriture optionnelle) grandit jusqu'à 15 lignes comme sur RF1, avec un plafond réduit quand le clavier ou le paysage serrent l'écran pour garder le bouton Envoyer visible. Suggestion de tinc.
+
+---
+
+## `0.51.0` — `internal` (dev) — 2026-09-02
+
+Premier lot dev après la promotion bêta `0.50.2` : nuit de correctifs et de suggestions des testeurs (nicko, styx42, thibw, tinc), plus le passage à `compileSdk 37` qui débloque les mises à jour androidx / Compose.
+
+### Ajouté
+
+- **Pastille « pages à lire » colorée selon le retard** ([#814](https://github.com/ForumHFR/redface2/issues/814)) — dans la liste des drapeaux, la pastille « +N » prend sa couleur du nombre de pages en retard (1-2 : neutre, 3-9 : accentuée, 10 et plus : alerte) et non plus de la couleur du drapeau ; identique en clair, sombre et AMOLED. Suggestion de thibw.
+- **Œil « afficher le mot de passe » sur l'écran de connexion** ([#969](https://github.com/ForumHFR/redface2/issues/969)) — un bouton dans le champ mot de passe bascule son affichage en clair pour vérifier sa saisie.
+- **Recherche insensible aux accents** ([#739](https://github.com/ForumHFR/redface2/issues/739)) — la recherche dans les drapeaux et les discussions (et le filtre de sujets de la vue Forum, la recherche des réglages) ignore désormais accents, ligatures (œ, æ) et casse : « Élément » trouve « element » et inversement.
+
+### Corrigé
+
+- **Répondre en citant ramène au message cité quand il est sur la page d'arrivée** ([#974](https://github.com/ForumHFR/redface2/issues/974)) — après l'envoi d'une réponse avec citation(s), inline ou en cartes, la lecture reprend au niveau du message cité le plus récent lorsqu'il se trouve sur la page où la réponse a été publiée ; sans citation, ou si le message cité est sur une autre page, l'arrivée en bas de page est conservée (cas suivi dans [#1224](https://github.com/ForumHFR/redface2/issues/1224)). Signalé par nicko.
+- **Ouvrir un drapeau montre le marqueur « dernier message lu »** ([#1137](https://github.com/ForumHFR/redface2/issues/1137)) — quand le dernier post lu est plus haut que l'écran, l'arrivée ne s'aligne plus sur son haut (qui laissait tous les non-lus hors champ) mais sur le marqueur, la fin du post juste au-dessus ; l'ajustement suit le chargement des images. Signalé par nicko.
+- **Onglets Drapeaux : plus d'onglet figé après un changement rapide** ([#743](https://github.com/ForumHFR/redface2/issues/743)) — la fenêtre anti-rafale de l'actualisation automatique est désormais par onglet, et un onglet ouvert pendant l'actualisation d'un autre est rafraîchi dès que celle-ci se termine. Signalé par styx42.
+- **Vue Forum : marge doublée sous la barre d'état** ([#1149](https://github.com/ForumHFR/redface2/issues/1149)) — la liste d'une catégorie appliquait deux fois les marges des barres système (haut partout, bas et côtés selon la navigation) ; elles sont appliquées une seule fois.
+- **État vide « humoristique » des Drapeaux hors-ligne** ([#740](https://github.com/ForumHFR/redface2/issues/740)) — le smiley de l'état vide est désormais embarqué dans l'application au lieu d'être chargé depuis le forum, il s'affiche donc aussi sans réseau.
+
+### Technique
+
+- **compileSdk 37** ([#1216](https://github.com/ForumHFR/redface2/issues/1216)) — prérequis des mises à jour androidx / Compose / coil depuis août 2026 ; `targetSdk` reste 36. L'outillage local (`docker-dev.sh`) installe lui-même les plateformes SDK dans son cache ; `:core:ui` épingle Robolectric sur l'API 34.
+- **Toolchain** ([#1220](https://github.com/ForumHFR/redface2/pull/1220)) — AGP 9.3.1, Kotlin 2.4.10, KSP 2.3.10, Hilt 2.60.1 (jspecify en `compileOnly` pour KTLC-363).
+- **Dépendances** — androidx.core 1.19 ([#747](https://github.com/ForumHFR/redface2/pull/747)), Compose BOM 2026.08.00 ([#1009](https://github.com/ForumHFR/redface2/pull/1009)), coil 3.6 et groupe réseau/imagerie ([#1218](https://github.com/ForumHFR/redface2/pull/1218)).
+
+---
+
 ## `0.50.2` — `open` (bêta) — 2026-09-01
 
 Promotion bêta du lot développé en dev de `0.44.0` à `0.50.2`, depuis la précédente bêta `0.43.0` (parité de lecture MP). Le détail par version dev figure dans les entrées ci-dessous.

@@ -1,8 +1,7 @@
-Redface 2 v0.50.2 — beta.
+Redface 2 v0.53.6 — beta.
 
-Big update since 0.43.0:
-- Polls: vote in the app, see closed polls and their deadline, and (as topic owner) close yours from any page.
-- Links: external links open without bouncing, app chooser, Firefox hint.
-- Moderation posts highlighted, staff role pills.
-- Forum view: remembered filter, search, separated pinned topics.
-- Clickable "quoted N times" badge, plus various reading fixes.
+Batch 0.51 → 0.53:
+- Colors: accent (8 presets or hex), background tone, Light/System/Dark, header Subtle/Vivid, RF1-style grey background.
+- Flags: Super tab (super favourites), subcategory, jump-free swipe, coloured +N badge, accent-insensitive search.
+- Topics: no more teleport when posting, return to quoted post, poll result bars, 15-line quick reply, interactive zoom, image width.
+- HFR links: consistent back and destination.

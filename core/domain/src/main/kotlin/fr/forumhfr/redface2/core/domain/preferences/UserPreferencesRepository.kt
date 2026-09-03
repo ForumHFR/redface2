@@ -192,25 +192,11 @@ interface UserPreferencesRepository {
     /** Persists [observeThemeMode]. Default [ThemeMode.SYSTEM] until the first call. */
     suspend fun setThemeMode(mode: ThemeMode)
 
-    /**
-     * AMOLED (true-black) theme toggle (#286): only takes effect when the effective theme is dark
-     * (forced [ThemeMode.DARK] or [ThemeMode.SYSTEM] while the OS is in dark mode). Default `false`.
-     */
-    fun observeAmoledEnabled(): Flow<Boolean>
+    /** Complete app colour preferences (#595/#883): accent, surface tones and Android 12+ dynamic color. */
+    fun observeThemeColorPreferences(): Flow<ThemeColorPreferences>
 
-    /** Persists [observeAmoledEnabled]. Default `false` until the first call. */
-    suspend fun setAmoledEnabled(enabled: Boolean)
-
-    /**
-     * Accent colour family (TU 2788511): [AccentColor.ROSE] (default) keeps the historical muted
-     * maroon/rose scheme; [AccentColor.ROUGE_REDFACE1] switches to the vivid Redface 1 red. Observed
-     * at the app root and passed to `RedfaceTheme`, and mirrored in Settings. Compose-only (does not
-     * paint the window background), so no cold-start mirror — same stance as the display density.
-     */
-    fun observeAccentColor(): Flow<AccentColor>
-
-    /** Persists [observeAccentColor]. Default [AccentColor.ROSE] until the first call. */
-    suspend fun setAccentColor(color: AccentColor)
+    /** Persists [observeThemeColorPreferences] atomically. */
+    suspend fun setThemeColorPreferences(preferences: ThemeColorPreferences)
 
     /**
      * External-link app selection (#1207): when `true`, every explicit « ouvrir dans le
@@ -512,6 +498,16 @@ interface UserPreferencesRepository {
 
     /** Persists [observeMediaDisplayProfile]. Default [MediaDisplayProfile.M] until the first call. */
     suspend fun setMediaDisplayProfile(profile: MediaDisplayProfile)
+
+    /**
+     * Maximum content image width (#991): [PostImageMaxWidth.P95] (default) keeps the historical
+     * fImage cap, while P90 / P99 / P100 let the user tighten or relax content images. This is
+     * independent from GIF enlargement and full-width posts.
+     */
+    fun observePostImageMaxWidth(): Flow<PostImageMaxWidth>
+
+    /** Persists [observePostImageMaxWidth]. Default [PostImageMaxWidth.P95] until the first call. */
+    suspend fun setPostImageMaxWidth(width: PostImageMaxWidth)
 
     /**
      * Smiley picker cell delimiter (#989): [SmileyPickerDecoration.NONE] (default) keeps the

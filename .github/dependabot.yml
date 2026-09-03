@@ -49,6 +49,12 @@ updates:
         patterns:
           - "*"
         exclude-patterns:
+          # The Gradle wrapper rides alone: a wrapper bump drags the matching
+          # `org.gradle.kotlin.kotlin-dsl` plugin version, which may not be on the
+          # Plugin Portal yet (#1222, 9.7.1 → kotlin-dsl 6.7.3 not found). Keeping it
+          # out of the group lets the other bumps merge while the wrapper waits.
+          - "gradle"
+          - "gradle-wrapper"
           - "com.android.*"
           - "com.android.tools.build:gradle"
           - "com.google.dagger:*"

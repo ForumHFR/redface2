@@ -52,9 +52,11 @@ class ReplySubmitResponseParserTest {
     }
 
     @Test
-    fun `quote success extracts the new post numreponse from the URL fragment`() {
-        // Issue #200 — quote anchors `#t{numreponse}` (the freshly-created quote post)
-        // so the topic screen can scroll directly to it after the force refresh.
+    fun `quote success extracts the cited post numreponse from the URL fragment`() {
+        // Issue #200 / #974 — a quote success anchors `#t{numreponse}` on the CITED post, not on
+        // the freshly-created reply : 2523833 is the `numrep` of the quote form captured in the
+        // same session (`write_quote_form_bbcode_rich.html`, prefill `[quotemsg=2523833,1,1214571]`).
+        // The topic engine uses it as its landing hint after the force refresh.
         val html = readFixture("write_quote_success_response.html")
         val result = parser.parse(html)
         assertTrue("quote success must classify as Success — got $result", result is ReplySubmitResult.Success)

@@ -34,12 +34,10 @@ import fr.forumhfr.redface2.core.ui.motion.rememberAnimationsEnabled
  */
 @Composable
 fun rememberCreatorPseudoBrush(): Brush {
-    val dark = MaterialTheme.colorScheme.surface.luminance() < DARK_SURFACE_LUMINANCE
-    val base = if (dark) CreatorGoldBaseDark else CreatorGoldBaseLight
-    val highlight = if (dark) CreatorGoldHighlightDark else CreatorGoldHighlightLight
+    val gold = creatorGoldColors(MaterialTheme.colorScheme.surface)
 
     if (!rememberAnimationsEnabled()) {
-        return remember(base, highlight) { Brush.linearGradient(listOf(base, highlight, base)) }
+        return remember(gold) { Brush.linearGradient(listOf(gold.base, gold.highlight, gold.base)) }
     }
 
     val transition = rememberInfiniteTransition(label = "creator_gold")
@@ -52,8 +50,15 @@ fun rememberCreatorPseudoBrush(): Brush {
         ),
         label = "creator_gold_sheen",
     )
-    return creatorSheenBrush(travel, base, highlight)
+    return creatorSheenBrush(travel, gold.base, gold.highlight)
 }
+
+internal fun creatorGoldColors(surface: Color): CreatorGoldColors =
+    if (surface.luminance() < DARK_SURFACE_LUMINANCE) {
+        CreatorGoldColors(base = CreatorGoldBaseDark, highlight = CreatorGoldHighlightDark)
+    } else {
+        CreatorGoldColors(base = CreatorGoldBaseLight, highlight = CreatorGoldHighlightLight)
+    }
 
 /**
  * A base-gold gradient carrying a narrow [highlight] band centred at the swept position. [travel] in

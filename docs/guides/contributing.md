@@ -13,11 +13,11 @@ Comment participer au projet.
 
 ---
 
-## Phase actuelle : Phase 4 — UI & extensions
+## Où en est le projet
 
-Phases 0 à 3 sont livrées (bootstrap ; lecture du forum ; écriture : poster/citer/`[img]`/upload ; messages : MP + DT/MultiMP), bêta **0.18.0** publiée (Play open testing + F-Droid ; refonte vue Drapeaux [#603](https://github.com/ForumHFR/redface2/issues/603) livrée). Phase 4 en cours : refonte vue Topic ([#604](https://github.com/ForumHFR/redface2/issues/604)), aide & réglages, et architecture d'extensions ([#6](https://github.com/ForumHFR/redface2/issues/6), [#7](https://github.com/ForumHFR/redface2/issues/7)). Voir [roadmap]({{ site.baseurl }}/specs/roadmap). Les contributions utiles maintenant :
+Bêta publique **0.50.2** (Play test ouvert + F-Droid) et canal dev **0.52.x**. Les phases 0 à 3 de la [roadmap]({{ site.baseurl }}/specs/roadmap) sont livrées, la refonte UI de la phase 4 aussi (Drapeaux [#603](https://github.com/ForumHFR/redface2/issues/603), Topic [#604](https://github.com/ForumHFR/redface2/issues/604), surface de lecture partagée [#1040](https://github.com/ForumHFR/redface2/issues/1040)). Le travail courant est suivi par **milestones de vue** (*Vue · Topic 2*, *Vue · Éditeur 2*, *Vue · Drapeaux 2*, *Vue · MP 1*, *Vue · Réglages 1*, *Vue · Compte HFR 1*, *Infra & dette*). Pour contribuer :
 
-- **Implémenter une issue Phase 4** ouverte (refonte Drapeaux/Topic, extensions, polish UX)
+- **Implémenter une issue** d'un milestone de vue ouvert (l'issue décrit le contrat HFR mesuré, la spec touchée et la preuve attendue)
 - **Proposer des features** : ouvrir une issue avec le label `feature`
 - **Signaler des oublis ou divergences spec/code** : skill `/spec-reality` ou commentaire d'issue
 - **Capturer des fixtures HFR réelles** via `hfr-mcp` (skill `/parse-fixture`)
@@ -39,9 +39,9 @@ Phases 0 à 3 sont livrées (bootstrap ; lecture du forum ; écriture : poster/c
 
 Le chemin de référence mainteneur repose sur **`ghcr.io/cirruslabs/android-sdk:36@sha256:f9b3ea9ed2b5fc9522adae82c7b4622ab7aa54207ef532c8e615a347dca08f31`**. L'image a servi à valider `:app:assembleDebug` pendant [#4](https://github.com/ForumHFR/redface2/issues/4) et [#5](https://github.com/ForumHFR/redface2/issues/5), puis a été **épinglée** et codifiée dans [#35](https://github.com/ForumHFR/redface2/issues/35).
 
-- **Image de base** : `ghcr.io/cirruslabs/android-sdk:36@sha256:f9b3ea9ed2b5fc9522adae82c7b4622ab7aa54207ef532c8e615a347dca08f31` (manifest list multi-arch vérifiée le 2026-04-20 : `amd64` + `arm64`, JDK 21 + Android SDK 36)
-- **Dockerfile** : [Dockerfile](https://github.com/ForumHFR/redface2/blob/main/Dockerfile) à la racine, volontairement minimal
-- **Wrapper local** : `scripts/docker-dev.sh`
+- **Image de base** : `ghcr.io/cirruslabs/android-sdk:36@sha256:f9b3ea9ed2b5fc9522adae82c7b4622ab7aa54207ef532c8e615a347dca08f31` (manifest list multi-arch vérifiée le 2026-04-20 : `amd64` + `arm64`, JDK 21 + Android SDK 36 dans l'image brute)
+- **Dockerfile** : [Dockerfile](https://github.com/ForumHFR/redface2/blob/main/Dockerfile) à la racine, ajoute `platforms;android-37.0` pour le dev container
+- **Wrapper local** : `scripts/docker-dev.sh`, avec cache SDK plateformes sous `.gradle-user/.../android-sdk/`
 - **Dev container** : `.devcontainer/devcontainer.json`
 
 Exemples :
@@ -55,6 +55,8 @@ Exemples :
 ```
 
 Le script monte le repo dans `/workspace`, persiste les caches Gradle / Android dans `.gradle-user/` et exécute le container avec l'UID/GID de l'utilisateur hôte pour éviter les fichiers root-owned sur Linux. En rootless Podman, `--userns keep-id` est ajouté automatiquement pour garder le mapping d'identité.
+
+Pour `compileSdk 37`, le wrapper monte aussi `.gradle-user/<cache>/android-sdk/platforms` sur `/opt/android-sdk-linux/platforms` et `.gradle-user/<cache>/android-sdk/temp` sur `/opt/android-sdk-linux/temp`. En local, AGP refuse d'installer une plateforme si la racine SDK `/opt/android-sdk-linux` n'est pas inscriptible ; le seed one-shot de `scripts/docker-dev.sh` provisionne donc toutes les plateformes requises (`android-36`, `android-37.0`) dans le cache utilisateur avant de lancer Gradle. Les workflows GitHub Actions restent sur l'image brute : leurs jobs tournent en root, donc l'auto-download AGP peut écrire directement dans le SDK du container.
 
 #### Signature debug canonique et `adb install -r`
 
@@ -110,10 +112,10 @@ redface2/
     domain/               # Interfaces de repositories, règles métier
     data/                 # Implémentations de repositories
     network/              # OkHttp, session HFR
-    parser/               # Jsoup, HTML HFR → modèles + PostContent ; BBCode éditeur en Phase 2
+    parser/               # Jsoup, HTML HFR → modèles + PostContent ; BBCode de l'éditeur
     database/             # Room, cache, sync MPStorage
     ui/                   # Thème, composants partagés, PostRenderer
-    extension/            # Points d'extension (Phase 4)
+    extension/            # Coquille vide réservée à l'architecture d'extensions (#7) ; 8 modules feature d'extension restent commentés dans settings.gradle.kts
   feature/
     flags/                # Écran d'accueil (drapeaux)
     forum/                # Catégories, topics
@@ -252,7 +254,7 @@ Cas particulier : toute contribution qui ajoute ou modifie une fonction de la **
 
 **Rendu visuel (Roborazzi) :**
 
-Screenshot testing **JVM** (sur Robolectric, sans device) via Roborazzi 1.63, consommé comme artefact de test simple (pas le plugin Gradle), avec `roborazzi.test.record=true` forcé.
+Screenshot testing **JVM** (sur Robolectric, sans device) via Roborazzi 1.73, consommé comme artefact de test simple (pas le plugin Gradle), avec `roborazzi.test.record=true` forcé.
 
 - **Mode `record`** (par défaut ici) : un test `captureRoboImage` génère un PNG dans `<module>/build/outputs/roborazzi/` (non versionné) → **inspection visuelle** rapide (~40 s). Lancer via l'env Docker, ex. `./scripts/docker-dev.sh ./gradlew :core:ui:testDebugUnitTest`. (Il n'existe **pas** de tâche `recordRoborazzi` : le plugin Gradle Roborazzi n'est pas appliqué — record forcé via `roborazzi.test.record=true`.)
 - **Quand l'utiliser** : `record` est réservé aux **changements de rendu intentionnels** (PostRenderer, écrans refondus) — on régénère puis on regarde l'image. `verifyRoborazzi` (compare) existe mais les **baselines ne sont pas versionnées** en V1 (elles bougeraient à chaque itération des refontes #603/#604).

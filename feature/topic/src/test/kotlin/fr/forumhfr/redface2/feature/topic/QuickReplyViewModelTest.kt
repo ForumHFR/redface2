@@ -5,6 +5,7 @@ import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
+import fr.forumhfr.redface2.core.domain.write.truncateQuote
 import fr.forumhfr.redface2.core.model.write.ReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
@@ -191,6 +192,39 @@ class QuickReplyViewModelTest {
     }
 
     @Test
+    fun `the context page follows the current opening at the second submit`() = runTest {
+        val repository = FakeQuickReplyRepository(
+            results = mutableListOf(
+                ReplySubmitResult.Success(refreshUrl = null, targetPage = 3, numreponse = 301),
+                ReplySubmitResult.Success(refreshUrl = null, targetPage = 5, numreponse = 501),
+            ),
+        )
+        val viewModel = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
+        advanceUntilIdle() // init prefetch for the assisted request page (3).
+
+        viewModel.onSheetOpened(currentPage = 3)
+        viewModel.onTextChanged(TextFieldValue("premier"))
+        viewModel.onSubmitClicked()
+        advanceUntilIdle()
+        assertEquals(QuickReplyEffect.SubmitSucceeded(targetPage = 3, scrollTo = 301), viewModel.effects.first())
+
+        viewModel.onSheetOpened(currentPage = 5, initialQuotes = listOf(preview(202, "bob")))
+        advanceUntilIdle()
+        assertEquals("[quotemsg=202]corps[/quotemsg]\n", viewModel.state.value.text.text)
+        viewModel.onTextChanged(TextFieldValue(viewModel.state.value.text.text + "\nsecond"))
+        viewModel.onSubmitClicked()
+        advanceUntilIdle()
+
+        assertEquals(listOf(3, 5), repository.submittedPages)
+        assertEquals(listOf(3, 5, 5), repository.fetchedPages)
+        assertEquals(listOf(null, null, 202), repository.fetchedQuotedNumreponses)
+        assertEquals(
+            QuickReplyEffect.SubmitSucceeded(targetPage = 5, scrollTo = 501, quotedNumreponses = listOf(202)),
+            viewModel.effects.first(),
+        )
+    }
+
+    @Test
     fun `a typed HFR failure surfaces the error and keeps the draft`() = runTest {
         val store = FakeQuickReplyDraftStore()
         val repository = FakeQuickReplyRepository(
@@ -323,7 +357,11 @@ class QuickReplyViewModelTest {
             "[quotemsg=101]corps[/quotemsg]\n\n[quotemsg=202]corps[/quotemsg]\n\nmon avis",
             repository.submittedBodies.single(),
         )
-        assertEquals(QuickReplyEffect.SubmitSucceeded(targetPage = 9, scrollTo = 77), viewModel.effects.first())
+        // #974 — the cited posts (card order) ride the effect so the topic engine can land on them.
+        assertEquals(
+            QuickReplyEffect.SubmitSucceeded(targetPage = 9, scrollTo = 77, quotedNumreponses = listOf(101, 202)),
+            viewModel.effects.first(),
+        )
         assertTrue(viewModel.state.value.quotes.isEmpty())
     }
 
@@ -446,6 +484,19 @@ class QuickReplyViewModelTest {
         // #881 réserve gate — the autosave persists the field verbatim, trailing newline included.
         assertEquals(state.text.text, draftStore.savedBodies.last())
         // Prefetch (plain) then the quote form — whose hash the later submit rides.
+        assertEquals(listOf(null, 101), repository.fetchedQuotedNumreponses)
+    }
+
+    @Test
+    fun `inline mode inserts the truncated quote prefill when the selection requests it`() = runTest {
+        val prefill = "[quotemsg=101]${longQuoteBody()}[/quotemsg]"
+        val repository = FakeQuickReplyRepository(quotePrefills = mapOf(101 to prefill))
+        val viewModel = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
+
+        viewModel.onSheetOpened(listOf(preview(101, "alice", truncate = true)))
+        advanceUntilIdle()
+
+        assertEquals(truncateQuote(prefill) + "\n", viewModel.state.value.text.text)
         assertEquals(listOf(null, 101), repository.fetchedQuotedNumreponses)
     }
 
@@ -578,11 +629,43 @@ class QuickReplyViewModelTest {
         assertEquals(listOf(null, 101), repository.fetchedQuotedNumreponses)
     }
 
-    private fun preview(numreponse: Int, author: String): QuoteSelection = QuoteSelection(
+    @Test
+    fun `inline mode forwards every quotemsg numreponse of the field for the topic landing (#974)`() = runTest {
+        // Production default : no card, the citations are `[quotemsg]` BBCode in the field (one
+        // materialised at opening, one typed by hand). HFR anchors the success on the FIRST cited
+        // post ; the effect must still carry them all so the topic engine can pick the landing.
+        val repository = FakeQuickReplyRepository(
+            results = mutableListOf(ReplySubmitResult.Success(refreshUrl = null, targetPage = 9, numreponse = 101)),
+        )
+        val viewModel = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
+        viewModel.onSheetOpened(listOf(preview(101, "alice")))
+        advanceUntilIdle()
+        assertTrue("inline mode arms no card", viewModel.state.value.quotes.isEmpty())
+        viewModel.onTextChanged(
+            TextFieldValue("[quotemsg=101]corps[/quotemsg]\n\n[quotemsg=303,3,9]suite[/quotemsg]\n\nmon ajout"),
+        )
+
+        viewModel.onSubmitClicked()
+        advanceUntilIdle()
+
+        assertEquals(
+            QuickReplyEffect.SubmitSucceeded(targetPage = 9, scrollTo = 101, quotedNumreponses = listOf(101, 303)),
+            viewModel.effects.first(),
+        )
+    }
+
+    private fun preview(
+        numreponse: Int,
+        author: String,
+        truncate: Boolean = false,
+    ): QuoteSelection = QuoteSelection(
         locator = QuoteLocator(page = 3, numreponse = numreponse, ref = 1),
         author = author,
         excerpt = "extrait",
+        truncate = truncate,
     )
+
+    private fun longQuoteBody(): String = (1..120).joinToString(separator = " ") { "mot" }
 
     private fun quickReplyViewModel(
         replyRepository: ReplyRepository = FakeQuickReplyRepository(),
@@ -693,16 +776,22 @@ private class GatedQuoteFormRepository(
 
 private class FakeQuickReplyRepository(
     private val results: MutableList<ReplySubmitResult> = mutableListOf(),
+    private val quotePrefills: Map<Int, String> = emptyMap(),
 ) : ReplyRepository {
     var fetchCalls = 0
     var submitCalls = 0
     val submittedBodies = mutableListOf<String>()
+    val submittedPages = mutableListOf<Int>()
+    val fetchedPages = mutableListOf<Int>()
     val fetchedQuotedNumreponses = mutableListOf<Int?>()
 
     override suspend fun fetchReplyForm(context: ReplyContext): ReplyForm {
         fetchCalls++
+        fetchedPages += context.page
         fetchedQuotedNumreponses += context.quotedNumreponse
-        val prefill = context.quotedNumreponse?.let { "[quotemsg=$it]corps[/quotemsg]" }.orEmpty()
+        val prefill = context.quotedNumreponse
+            ?.let { quotePrefills[it] ?: "[quotemsg=$it]corps[/quotemsg]" }
+            .orEmpty()
         return ReplyForm(
             hashCheck = "hash",
             sujet = "sujet",
@@ -720,6 +809,7 @@ private class FakeQuickReplyRepository(
     ): ReplySubmitResult {
         submitCalls++
         submittedBodies += bbcodeContent
+        submittedPages += context.page
         return results.removeFirstOrNull() ?: ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
     }
 }

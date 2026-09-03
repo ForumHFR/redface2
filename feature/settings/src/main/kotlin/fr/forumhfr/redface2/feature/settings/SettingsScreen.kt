@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -432,14 +431,35 @@ internal fun buildSettingsCatalogue(
                 description = stringResource(R.string.settings_nav_display_description),
                 keywords = listOf(
                     "thème",
+                    "couleurs",
+                    "accent",
+                    "hexa",
+                    "hexadécimal",
+                    "Material You",
                     "amoled",
+                    "fond",
+                    "blanc",
+                    "gris",
                     "sombre",
                     "clair",
                     "densité",
                     "police",
                     "taille",
+                    "image",
+                    "largeur",
+                    "90",
+                    "95",
+                    "99",
+                    "100",
                     stringResource(R.string.settings_theme_title),
-                    stringResource(R.string.settings_theme_amoled_title),
+                    stringResource(R.string.settings_nav_colors),
+                    stringResource(R.string.settings_colors_accent_title),
+                    stringResource(R.string.settings_colors_custom_label),
+                    stringResource(R.string.settings_colors_system_title),
+                    stringResource(R.string.settings_colors_surface_title),
+                    stringResource(R.string.settings_colors_surface_amoled),
+                    stringResource(R.string.settings_colors_surface_white),
+                    stringResource(R.string.settings_colors_surface_redface1_gray),
                     stringResource(R.string.settings_display_title),
                     // Visible choice labels (theme / density / font scale) so e.g. « Système »,
                     // « Confort », « Compact » route to this page instead of the empty state.
@@ -451,16 +471,13 @@ internal fun buildSettingsCatalogue(
                     stringResource(R.string.settings_display_font_scale_small),
                     stringResource(R.string.settings_display_font_scale_medium),
                     stringResource(R.string.settings_display_font_scale_large),
+                    stringResource(R.string.settings_display_post_image_max_width_title),
+                    stringResource(R.string.settings_display_post_image_max_width_90),
+                    stringResource(R.string.settings_display_post_image_max_width_95),
+                    stringResource(R.string.settings_display_post_image_max_width_99),
+                    stringResource(R.string.settings_display_post_image_max_width_100),
                 ),
                 onClick = onOpenDisplay,
-            ),
-            futureRow(
-                id = "future_material_you",
-                title = stringResource(R.string.settings_future_material_you),
-            ),
-            futureRow(
-                id = "future_ui_colors",
-                title = stringResource(R.string.settings_future_ui_colors),
             ),
             futureRow(
                 id = "future_classic_theme",
@@ -492,7 +509,11 @@ internal fun buildSettingsCatalogue(
             toggleRow(
                 id = "flags_group_by_category",
                 title = stringResource(R.string.settings_flags_group_by_category_title),
-                description = stringResource(R.string.settings_flags_group_by_category_description),
+                description = if (state.flagsPerTabOverride) {
+                    stringResource(R.string.settings_flags_global_layout_disabled_by_per_tab_override)
+                } else {
+                    stringResource(R.string.settings_flags_group_by_category_description)
+                },
                 checked = state.flagsGroupByCategory,
                 enabled = state.canToggleFlagsGroupByCategory,
                 errorRes = R.string.settings_flags_group_by_category_persist_failed
@@ -502,7 +523,11 @@ internal fun buildSettingsCatalogue(
             toggleRow(
                 id = "flags_hide_read",
                 title = stringResource(R.string.settings_flags_hide_read_categories_title),
-                description = stringResource(R.string.settings_flags_hide_read_categories_description),
+                description = if (state.flagsPerTabOverride) {
+                    stringResource(R.string.settings_flags_global_layout_disabled_by_per_tab_override)
+                } else {
+                    stringResource(R.string.settings_flags_hide_read_categories_description)
+                },
                 checked = state.flagsHideReadCategories,
                 enabled = state.canToggleFlagsHideReadCategories,
                 errorRes = R.string.settings_flags_hide_read_categories_persist_failed
@@ -1066,6 +1091,7 @@ private fun toggleRow(
             RedfaceSettingsListItem(
                 title = title,
                 description = description,
+                enabled = enabled,
                 trailingContent = {
                     Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
                 },
@@ -1250,7 +1276,7 @@ private fun futureRow(
 @Composable
 private fun FutureBadge() {
     Surface(
-        shape = RoundedCornerShape(8.dp),
+        shape = MaterialTheme.shapes.small,
         color = MaterialTheme.colorScheme.secondaryContainer,
         contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
     ) {

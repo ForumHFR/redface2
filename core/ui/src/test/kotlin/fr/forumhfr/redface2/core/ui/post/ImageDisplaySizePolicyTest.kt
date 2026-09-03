@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.ui.post
 
 import androidx.compose.ui.unit.IntSize
+import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -88,11 +89,37 @@ class ImageDisplaySizePolicyTest {
     }
 
     @Test
-    fun `the dedicated image width fraction is 95 percent and the cold alias is locked on it`() {
-        // [AMENDEMENT-v1.5-1] — D1 approved: fImage = 0.95, DISTINCT from the smiley 0.9 cap;
-        // the cold-slot fraction is a locked alias (any drift between the two breaks here).
-        assertEquals(0.95f, IMAGE_RELATIVE_MAX_WIDTH_FRACTION)
-        assertEquals(IMAGE_RELATIVE_MAX_WIDTH_FRACTION, COLD_BLOCK_WIDTH_FRACTION)
+    fun `post image width presets expose the four fImage fractions and keep P95 as default`() {
+        val expected = mapOf(
+            PostImageMaxWidth.P90 to (90 to 0.9f),
+            PostImageMaxWidth.P95 to (95 to 0.95f),
+            PostImageMaxWidth.P99 to (99 to 0.99f),
+            PostImageMaxWidth.P100 to (100 to 1f),
+        )
+
+        assertEquals(expected.keys, PostImageMaxWidth.entries.toSet())
+        expected.forEach { (width, values) ->
+            val (percent, fraction) = values
+            assertEquals(percent, width.percent)
+            assertEquals(fraction, width.fraction, 0f)
+        }
+        assertEquals(PostImageMaxWidth.P95, PostImageMaxWidth.DEFAULT)
         assertEquals(0.9f, SMILEY_RELATIVE_MAX_WIDTH_FRACTION)
+    }
+
+    @Test
+    fun `image max width px follows the selected preset`() {
+        assertEquals(900, imageMaxWidthPx(1000f, PostImageMaxWidth.P90))
+        assertEquals(950, imageMaxWidthPx(1000f, PostImageMaxWidth.P95))
+        assertEquals(990, imageMaxWidthPx(1000f, PostImageMaxWidth.P99))
+        assertEquals(1000, imageMaxWidthPx(1000f, PostImageMaxWidth.P100))
+    }
+
+    @Test
+    fun `inline image max width reserves horizontal placeholder padding at high presets`() {
+        assertEquals(324, inlineImageMaxWidthPx(360f, PostImageMaxWidth.P90, horizontalPaddingPx = 8))
+        assertEquals(342, inlineImageMaxWidthPx(360f, PostImageMaxWidth.P95, horizontalPaddingPx = 8))
+        assertEquals(352, inlineImageMaxWidthPx(360f, PostImageMaxWidth.P99, horizontalPaddingPx = 8))
+        assertEquals(352, inlineImageMaxWidthPx(360f, PostImageMaxWidth.P100, horizontalPaddingPx = 8))
     }
 }

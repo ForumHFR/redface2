@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.topic
 
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
+import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
 import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.Post
@@ -90,6 +91,8 @@ data class TopicUiState(
      * (consumed by the screen in a later wave), toggling never refetches.
      */
     val fullWidthPosts: Boolean = false,
+    /** Vivid/subtle identity-band colour preference, render-only like [fullWidthPosts]. */
+    val postHeaderEmphasis: PostHeaderEmphasis = PostHeaderEmphasis.SUBTLE,
     /**
      * #806 — mirrors `UserPreferencesRepository.observeWritingSurfacePreset()`. Feeds
      * [writingSurfaceFor] AT TAP TIME on the three write entry points (reply FAB, « Citer »,
@@ -487,8 +490,16 @@ sealed interface TopicEffect {
      * rendered. The ViewModel only emits this when the post is present in the loaded
      * page, so the screen can blindly trust `numreponse` and resolve the index from
      * the current `Topic.posts` list.
+     *
+     * [lastRead] (#1137) — `true` when this landing is the ENTRY of a flag tap : `numreponse` is
+     * the reader's last-read post, rendered with the « Dernier message lu » marker, and the screen
+     * may align on that marker when the post overflows the viewport. Decided by the PRODUCER, never
+     * re-derived from the request on the screen side : the request keeps `forceRefresh`/`scrollTo`
+     * across in-VM navigations (#953/F4), so a same-page cited jump or a search hit targeting the
+     * very same `numreponse` would otherwise be mistaken for a last-read landing — those land
+     * top-of-post (`false`, the default).
      */
-    data class ScrollToPost(val numreponse: Int) : TopicEffect
+    data class ScrollToPost(val numreponse: Int, val lastRead: Boolean = false) : TopicEffect
 
     /**
      * #879 (gate finding 2) — a NEW page of filtered search results replaced the list content in
@@ -543,6 +554,13 @@ sealed interface TopicEffect {
     data object PostSubmitRefreshFailed : TopicEffect
 
     /**
+     * #1243 — HFR accepted a reply whose published post is on a later page than the one refreshed
+     * in place. The read flag cannot be advanced by an automatic authenticated load of the tail, so
+     * the screen surfaces a Snackbar with an explicit action to open [page].
+     */
+    data class PostSubmittedElsewhere(val page: Int, val scrollTo: Int? = null) : TopicEffect
+
+    /**
      * #335 — emitted when a manual pull-to-refresh (`Refresh` intent) failed to reach HFR. The
      * current page stays on screen (cache-first); the screen surfaces a Toast inviting a retry.
      */
@@ -576,7 +594,7 @@ sealed interface TopicEffect {
     data object SearchResultsEnd : TopicEffect
 
     // ─── #809 — one-shot outcomes of the title long-press flag removal. They ride THIS channel
-    // (the screen's single effects collector + Toast surface, like PostDeleted) rather than a
+    // (the screen's single effects collector + transient feedback surface, like PostDeleted) rather than a
     // parallel consumable StateFlow — one one-shot mechanism per screen (review finding).
 
     /** #809 — `delflag.php` confirmed the removal ; the Drapeaux caches are already reconciled. */

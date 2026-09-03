@@ -24,6 +24,7 @@ import fr.forumhfr.redface2.core.domain.upload.UploadException
 import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import fr.forumhfr.redface2.core.domain.write.EditPostRepository
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
+import fr.forumhfr.redface2.core.domain.write.QuotedNumreponses
 import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.PostContent
@@ -252,6 +253,7 @@ class PostEditorViewModel @AssistedInject constructor(
                 quoteMaterializer.fetchFormWithQuotes(
                     context = quoteContext,
                     extraQuoteNumreponses = quotes.drop(1).map { it.numreponse },
+                    truncate = quotes.any { it.truncate },
                 )
             }
             outcome.fold(
@@ -921,11 +923,29 @@ class PostEditorViewModel @AssistedInject constructor(
                 }
             }
             outcome.fold(
-                onSuccess = { result -> handleSubmitOutcome(snapshot.mode, snapshot.numreponse, result) },
+                onSuccess = { result ->
+                    handleSubmitOutcome(
+                        mode = snapshot.mode,
+                        numreponse = snapshot.numreponse,
+                        result = result,
+                        quotedNumreponses = quotedNumreponsesFor(snapshot),
+                    )
+                },
                 onFailure = ::handleSubmitFailure,
             )
         }
     }
+
+    /**
+     * #974 - Reply success carries quote landing hints from armed cards plus inline `[quotemsg]`
+     * tags. Edit returns none: there are no quote cards there, and `scrollTo` owns the landing.
+     */
+    private fun quotedNumreponsesFor(snapshot: PostEditorState): List<Int> =
+        if (snapshot.mode == PostEditorMode.Edit) {
+            emptyList()
+        } else {
+            QuotedNumreponses.of(snapshot.draft.text, snapshot.quotes)
+        }
 
     /**
      * #604 lot 3 (mockup P3) — the Reply POST, quotes-aware. Without cards the cached plain form
@@ -958,6 +978,7 @@ class PostEditorViewModel @AssistedInject constructor(
         val quoteForm = quoteMaterializer.fetchFormWithQuotes(
             context = quoteContext,
             extraQuoteNumreponses = quotes.drop(1).map { it.numreponse },
+            truncate = quotes.any { it.truncate },
         )
         val body = snapshot.draft.text
         return replyRepository.submitReply(
@@ -976,6 +997,7 @@ class PostEditorViewModel @AssistedInject constructor(
         mode: PostEditorMode,
         numreponse: Int?,
         result: ReplySubmitResult,
+        quotedNumreponses: List<Int>,
     ) {
         when (result) {
             is ReplySubmitResult.Success -> {
@@ -994,7 +1016,11 @@ class PostEditorViewModel @AssistedInject constructor(
                 autosaveJob?.cancel()
                 draftKey?.let { key -> draftStore.delete(draftOwner, key) }
                 _effects.trySend(
-                    PostEditorEffect.SubmitSucceeded(targetPage = result.targetPage, scrollTo = scrollTo),
+                    PostEditorEffect.SubmitSucceeded(
+                        targetPage = result.targetPage,
+                        scrollTo = scrollTo,
+                        quotedNumreponses = quotedNumreponses,
+                    ),
                 )
                 _state.update { it.copy(isSubmitting = false, submitError = null) }
             }

@@ -20,6 +20,7 @@ import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
@@ -27,15 +28,17 @@ import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
 import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
-import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.SuperFavoriteRepository
+import fr.forumhfr.redface2.core.domain.preferences.SuperFavoriteTopic
+import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.preferences.matches
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.write.FlagAddContext
@@ -63,12 +66,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.onSubscription
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -187,6 +193,35 @@ class FlagsViewModelTest {
     }
 
     @Test
+    fun `flagsTabState never pairs a new tab with previous tab content (#742)`() = runTest {
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(autoEmit = false)
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository(groupByCategory = false)
+        val vm = viewModel(auth, flags, forum, prefs)
+
+        vm.flagsTabState.test {
+            val initial = awaitItem()
+            assertEquals(FlagTab.Cyan, initial.tab)
+            assertNull(initial.flagsState)
+
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN))))
+            val cyan = awaitItem()
+            assertEquals(FlagTab.Cyan, cyan.tab)
+            assertEquals(listOf(1), flatTopics(cyan.flagsState as FlagsListUiState.Success).map { it.topicId })
+
+            vm.selectTab(FlagTab.Red)
+            expectNoEvents()
+
+            flags.emit(FlagType.RED, FlagsResult.Success(listOf(stubFlag(2, FlagType.RED))))
+            val red = awaitItem()
+            assertEquals(FlagTab.Red, red.tab)
+            assertEquals(listOf(2), flatTopics(red.flagsState as FlagsListUiState.Success).map { it.topicId })
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `selectTab to a different tab recalls the list to the top (#106)`() = runTest {
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository(catIds = listOf(1))
@@ -241,6 +276,23 @@ class FlagsViewModelTest {
     }
 
     @Test
+    fun `refresh ignores a second pull while the same tab is already refreshing`() = runTest {
+        val flags = FakeFlagRepository()
+        flags.refreshGate = CompletableDeferred()
+        val forum = FakeForumRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = viewModel(auth, flags, forum)
+
+        vm.refresh()
+        assertTrue(vm.isRefreshing.value)
+        vm.refresh()
+
+        assertEquals(listOf(FlagType.CYAN), flags.refreshCalls)
+        flags.refreshGate!!.complete(Unit)
+        assertFalse(vm.isRefreshing.value)
+    }
+
+    @Test
     fun `maybeAutoRefresh raises isRefreshing for the round-trip then clears it`() = runTest {
         // #603 — isRefreshing is the SINGLE loading cue (it drives the top bar; the PullToRefreshBox
         // circular indicator is hidden via indicator = {}). An auto-refresh must raise it during the
@@ -259,32 +311,42 @@ class FlagsViewModelTest {
     }
 
     @Test
-    fun `selecting the Super tab is a placeholder with no fetch and null state`() = runTest {
+    fun `refresh on the Super tab refreshes backing lists in order and ignores reentrant pulls`() = runTest {
         val flags = FakeFlagRepository()
+        flags.refreshGate = CompletableDeferred()
         val forum = FakeForumRepository(catIds = listOf(1))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val vm = viewModel(auth, flags, forum)
+        advanceUntilIdle()
+        // The initial (Cyan) tab legitimately subscribes once; Super must not add a subscription.
+        val categoriesSubscriptionsBeforeSuper = forum.observeCategoriesSubscriptions
 
-        vm.flagsState.test {
-            awaitItem() // initial null
+        vm.selectTab(FlagTab.Super)
+        advanceUntilIdle()
+        assertEquals(
+            "opening Super must not observe the categories catalogue",
+            categoriesSubscriptionsBeforeSuper,
+            forum.observeCategoriesSubscriptions,
+        )
+        assertEquals("opening Super must not refresh the categories catalogue", 0, forum.refreshCategoriesCalls)
+        vm.isRefreshing.test {
+            assertFalse(awaitItem())
 
-            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN))))
-            awaitItem() // CYAN content
-            val subscriptionsWhileOnCyan = forum.observeCategoriesSubscriptions
+            vm.refresh()
+            assertTrue(awaitItem())
+            vm.refresh()
 
-            vm.selectTab(FlagTab.Super)
-            // Super maps to no FlagType: the state collapses back to null (placeholder body).
-            assertNull(awaitItem())
+            expectNoEvents()
+            assertEquals(listOf(FlagType.CYAN), flags.refreshCalls)
 
-            // Super must not start a new categories observation either.
-            assertEquals(subscriptionsWhileOnCyan, forum.observeCategoriesSubscriptions)
+            flags.refreshGate!!.complete(Unit)
+            assertFalse(awaitItem())
+            assertEquals(listOf(FlagType.CYAN, FlagType.RED, FlagType.FAVORITE), flags.refreshCalls)
+            expectNoEvents()
             cancelAndIgnoreRemainingEvents()
         }
-
-        // No FlagType is backing Super, so refresh() while on it must not hit the repository.
-        vm.refresh()
-        assertTrue("Super refresh must be a no-op", flags.refreshCalls.isEmpty())
-        assertEquals(false, vm.isRefreshing.value)
+        assertEquals(categoriesSubscriptionsBeforeSuper, forum.observeCategoriesSubscriptions)
+        assertEquals(0, forum.refreshCategoriesCalls)
     }
 
     @Test
@@ -530,9 +592,9 @@ class FlagsViewModelTest {
                 FlagType.CYAN,
                 FlagsResult.Success(
                     listOf(
-                        stubFlag(1, FlagType.CYAN, hasUnread = true, cat = 1),
-                        stubFlag(2, FlagType.CYAN, hasUnread = false, cat = 1),
-                        stubFlag(3, FlagType.CYAN, hasUnread = true, cat = 10),
+                        stubFlag(1, FlagType.CYAN).copy(cat = 1),
+                        stubFlag(2, FlagType.CYAN).copy(hasUnread = false, cat = 1),
+                        stubFlag(3, FlagType.CYAN).copy(cat = 10),
                     ),
                 ),
             )
@@ -561,8 +623,8 @@ class FlagsViewModelTest {
                 FlagType.CYAN,
                 FlagsResult.Success(
                     listOf(
-                        stubFlag(1, FlagType.CYAN, hasUnread = true),
-                        stubFlag(2, FlagType.CYAN, hasUnread = false),
+                        stubFlag(1, FlagType.CYAN),
+                        stubFlag(2, FlagType.CYAN).copy(hasUnread = false),
                     ),
                 ),
             )
@@ -597,8 +659,8 @@ class FlagsViewModelTest {
                 FlagType.RED,
                 FlagsResult.Success(
                     listOf(
-                        stubFlag(10, FlagType.RED, hasUnread = true),
-                        stubFlag(11, FlagType.RED, hasUnread = false),
+                        stubFlag(10, FlagType.RED),
+                        stubFlag(11, FlagType.RED).copy(hasUnread = false),
                     ),
                 ),
             )
@@ -614,8 +676,8 @@ class FlagsViewModelTest {
                 FlagType.FAVORITE,
                 FlagsResult.Success(
                     listOf(
-                        stubFlag(20, FlagType.FAVORITE, hasUnread = false),
-                        stubFlag(21, FlagType.FAVORITE, hasUnread = true),
+                        stubFlag(20, FlagType.FAVORITE).copy(hasUnread = false),
+                        stubFlag(21, FlagType.FAVORITE),
                     ),
                 ),
             )
@@ -647,8 +709,8 @@ class FlagsViewModelTest {
                 FlagType.RED,
                 FlagsResult.Success(
                     listOf(
-                        stubFlag(10, FlagType.RED, hasUnread = true),
-                        stubFlag(11, FlagType.RED, hasUnread = false),
+                        stubFlag(10, FlagType.RED),
+                        stubFlag(11, FlagType.RED).copy(hasUnread = false),
                     ),
                 ),
             )
@@ -685,8 +747,8 @@ class FlagsViewModelTest {
                 FlagType.CYAN,
                 FlagsResult.Success(
                     listOf(
-                        stubFlag(100, FlagType.CYAN, cat = 13),
-                        stubFlag(200, FlagType.CYAN, cat = 1),
+                        stubFlag(100, FlagType.CYAN).copy(cat = 13),
+                        stubFlag(200, FlagType.CYAN).copy(cat = 1),
                     ),
                 ),
             )
@@ -711,7 +773,7 @@ class FlagsViewModelTest {
         vm.flagsState.test {
             awaitItem() // initial null
             // observeCategories has emitted nothing yet → fallback order is used.
-            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN, cat = 1))))
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN).copy(cat = 1))))
             val onFallback = awaitItem() as FlagsListUiState.Success
             assertEquals("fallback exposes the 19 hard-coded categories", 19, sections(onFallback).size)
             assertEquals(listOf(1), flatTopics(onFallback).map { it.topicId })
@@ -737,7 +799,7 @@ class FlagsViewModelTest {
         vm.flagsState.test {
             awaitItem() // initial null
             forum.emitCategories(ForumResult.Loading)
-            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(7, FlagType.CYAN, cat = 1))))
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(7, FlagType.CYAN).copy(cat = 1))))
             val onLoading = awaitItem() as FlagsListUiState.Success
             assertEquals(19, sections(onLoading).size)
             assertEquals(listOf(7), flatTopics(onLoading).map { it.topicId })
@@ -747,7 +809,7 @@ class FlagsViewModelTest {
             // the identical value — so we change the FLAGS too, proving the new distinct state
             // is still a Success (fallback order, flag kept) and never a Failure.
             forum.emitCategories(ForumResult.Failure(IllegalStateException("categories down")))
-            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(8, FlagType.CYAN, cat = 1))))
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(8, FlagType.CYAN).copy(cat = 1))))
             val onFailure = awaitItem() as FlagsListUiState.Success
             assertEquals(19, sections(onFailure).size)
             assertEquals(listOf(8), flatTopics(onFailure).map { it.topicId })
@@ -985,13 +1047,13 @@ class FlagsViewModelTest {
                 FlagType.CYAN,
                 FlagsResult.Success(
                     listOf(
-                        stubFlag(100, FlagType.CYAN, cat = 13),
-                        stubFlag(200, FlagType.CYAN, cat = 1),
+                        stubFlag(100, FlagType.CYAN).copy(cat = 13),
+                        stubFlag(200, FlagType.CYAN).copy(cat = 1),
                     ),
                 ),
             )
             val flat = (awaitItem() as FlagsListUiState.Success).content as FlagsContent.Flat
-            assertEquals(listOf(100, 200), flat.flags.map { it.topicId })
+            assertEquals(listOf(100, 200), flat.rows.map { it.topicId })
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -1006,7 +1068,7 @@ class FlagsViewModelTest {
 
         vm.flagsState.test {
             awaitItem() // initial null
-            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN, cat = 1))))
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN).copy(cat = 1))))
             assertTrue((awaitItem() as FlagsListUiState.Success).content is FlagsContent.Grouped)
 
             prefs.setGroupBy(false)
@@ -1036,8 +1098,8 @@ class FlagsViewModelTest {
                 FlagType.RED,
                 FlagsResult.Success(
                     listOf(
-                        stubFlag(1, FlagType.RED, hasUnread = true, cat = 1),
-                        stubFlag(2, FlagType.RED, hasUnread = false, cat = 10),
+                        stubFlag(1, FlagType.RED).copy(cat = 1),
+                        stubFlag(2, FlagType.RED).copy(hasUnread = false, cat = 10),
                     ),
                 ),
             )
@@ -1064,8 +1126,8 @@ class FlagsViewModelTest {
                 FlagType.CYAN,
                 FlagsResult.Success(
                     listOf(
-                        stubFlag(1, FlagType.CYAN, hasUnread = true, cat = 1),
-                        stubFlag(2, FlagType.CYAN, hasUnread = false, cat = 10),
+                        stubFlag(1, FlagType.CYAN).copy(cat = 1),
+                        stubFlag(2, FlagType.CYAN).copy(hasUnread = false, cat = 10),
                     ),
                 ),
             )
@@ -1095,8 +1157,8 @@ class FlagsViewModelTest {
                 FlagType.CYAN,
                 FlagsResult.Success(
                     listOf(
-                        stubFlag(1, FlagType.CYAN, hasUnread = true, cat = 1),
-                        stubFlag(2, FlagType.CYAN, hasUnread = false, cat = 10),
+                        stubFlag(1, FlagType.CYAN).copy(cat = 1),
+                        stubFlag(2, FlagType.CYAN).copy(hasUnread = false, cat = 10),
                     ),
                 ),
             )
@@ -1125,8 +1187,8 @@ class FlagsViewModelTest {
                 FlagType.RED,
                 FlagsResult.Success(
                     listOf(
-                        stubFlag(1, FlagType.RED, hasUnread = false, cat = 1),
-                        stubFlag(2, FlagType.RED, hasUnread = false, cat = 10),
+                        stubFlag(1, FlagType.RED).copy(hasUnread = false, cat = 1),
+                        stubFlag(2, FlagType.RED).copy(hasUnread = false, cat = 10),
                     ),
                 ),
             )
@@ -1156,8 +1218,8 @@ class FlagsViewModelTest {
                 FlagType.FAVORITE,
                 FlagsResult.Success(
                     listOf(
-                        stubFlag(1, FlagType.FAVORITE, hasUnread = false, cat = 1),
-                        stubFlag(2, FlagType.FAVORITE, hasUnread = false, cat = 10),
+                        stubFlag(1, FlagType.FAVORITE).copy(hasUnread = false, cat = 1),
+                        stubFlag(2, FlagType.FAVORITE).copy(hasUnread = false, cat = 10),
                     ),
                 ),
             )
@@ -1191,8 +1253,8 @@ class FlagsViewModelTest {
                 FlagType.CYAN,
                 FlagsResult.Success(
                     listOf(
-                        stubFlag(1, FlagType.CYAN, hasUnread = false, cat = 1),
-                        stubFlag(2, FlagType.CYAN, hasUnread = false, cat = 10),
+                        stubFlag(1, FlagType.CYAN).copy(hasUnread = false, cat = 1),
+                        stubFlag(2, FlagType.CYAN).copy(hasUnread = false, cat = 10),
                     ),
                 ),
             )
@@ -1218,14 +1280,14 @@ class FlagsViewModelTest {
 
         vm.flagsState.test {
             awaitItem() // initial null
-            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN, cat = 1))))
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN).copy(cat = 1))))
             assertTrue(
                 "CYAN's per-type override is flat",
                 (awaitItem() as FlagsListUiState.Success).content is FlagsContent.Flat,
             )
 
             vm.selectTab(FlagTab.Red)
-            flags.emit(FlagType.RED, FlagsResult.Success(listOf(stubFlag(2, FlagType.RED, cat = 1))))
+            flags.emit(FlagType.RED, FlagsResult.Success(listOf(stubFlag(2, FlagType.RED).copy(cat = 1))))
             assertTrue(
                 "RED has no override → falls back to the global grouped default",
                 (awaitItem() as FlagsListUiState.Success).content is FlagsContent.Grouped,
@@ -1246,7 +1308,7 @@ class FlagsViewModelTest {
 
         vm.flagsState.test {
             awaitItem() // initial null
-            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN, cat = 1))))
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN).copy(cat = 1))))
             assertTrue((awaitItem() as FlagsListUiState.Success).content is FlagsContent.Grouped)
 
             vm.setFlagsGroupByCategory(false)
@@ -1256,7 +1318,7 @@ class FlagsViewModelTest {
             )
 
             vm.selectTab(FlagTab.Red)
-            flags.emit(FlagType.RED, FlagsResult.Success(listOf(stubFlag(2, FlagType.RED, cat = 1))))
+            flags.emit(FlagType.RED, FlagsResult.Success(listOf(stubFlag(2, FlagType.RED).copy(cat = 1))))
             assertTrue(
                 "RED is flat too → the write landed on the global key, not a per-type one",
                 (awaitItem() as FlagsListUiState.Success).content is FlagsContent.Flat,
@@ -1277,7 +1339,7 @@ class FlagsViewModelTest {
 
         vm.flagsState.test {
             awaitItem() // initial null
-            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN, cat = 1))))
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN).copy(cat = 1))))
             assertTrue((awaitItem() as FlagsListUiState.Success).content is FlagsContent.Grouped)
 
             vm.setFlagsGroupByCategory(false) // CYAN selected → CYAN per-type only.
@@ -1287,7 +1349,7 @@ class FlagsViewModelTest {
             )
 
             vm.selectTab(FlagTab.Red)
-            flags.emit(FlagType.RED, FlagsResult.Success(listOf(stubFlag(2, FlagType.RED, cat = 1))))
+            flags.emit(FlagType.RED, FlagsResult.Success(listOf(stubFlag(2, FlagType.RED).copy(cat = 1))))
             assertTrue(
                 "RED stays grouped → the write did NOT touch the global default",
                 (awaitItem() as FlagsListUiState.Success).content is FlagsContent.Grouped,
@@ -1439,7 +1501,7 @@ class FlagsViewModelTest {
 
         vm.flagsState.test {
             awaitItem() // initial null
-            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN, cat = 1))))
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN).copy(cat = 1))))
             assertTrue((awaitItem() as FlagsListUiState.Success).content is FlagsContent.Grouped)
 
             vm.setFlagsPerTabOverride(true) // flip master…
@@ -1450,7 +1512,7 @@ class FlagsViewModelTest {
             )
 
             vm.selectTab(FlagTab.Red)
-            flags.emit(FlagType.RED, FlagsResult.Success(listOf(stubFlag(2, FlagType.RED, cat = 1))))
+            flags.emit(FlagType.RED, FlagsResult.Success(listOf(stubFlag(2, FlagType.RED).copy(cat = 1))))
             assertTrue(
                 "RED stays grouped → the toggle honoured the just-flipped master and wrote per-type",
                 (awaitItem() as FlagsListUiState.Success).content is FlagsContent.Grouped,
@@ -1546,6 +1608,157 @@ class FlagsViewModelTest {
         clock.now = clock.now.plusSeconds(16) // past the 15 s window
         vm.maybeAutoRefresh()
         assertEquals(2, flags.refreshCalls.size)
+    }
+
+    // #743 (styx42) — the throttle window is PER TAB (per FlagType), no longer shared across tabs,
+    // and a landing that meets another tab's in-flight refresh is replayed instead of dropped.
+
+    @Test
+    fun `the throttle is per tab, landing on another tab inside the window still fetches it (#743)`() = runTest {
+        // Bug report: relaunching the app refreshed the open tab, but switching tab right away showed
+        // the new tab's cache — the single shared window swallowed its landing.
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
+        val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
+        val vm = viewModelWithClock(auth, flags, clock)
+
+        vm.maybeAutoRefresh() // Cyan lands at t0 and arms ITS window
+        clock.now = clock.now.plusSeconds(2)
+        vm.selectTab(FlagTab.Red)
+        vm.maybeAutoRefresh() // the screen's LaunchedEffect(selectedTab) re-fires on the switch
+
+        assertEquals(listOf(FlagType.CYAN, FlagType.RED), flags.refreshCalls)
+    }
+
+    @Test
+    fun `each tab keeps its own throttle window (#743)`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
+        val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
+        val vm = viewModelWithClock(auth, flags, clock)
+
+        vm.maybeAutoRefresh() // Cyan @ t0
+        clock.now = clock.now.plusSeconds(2)
+        vm.selectTab(FlagTab.Red)
+        vm.maybeAutoRefresh() // Red @ t0+2
+        assertEquals(listOf(FlagType.CYAN, FlagType.RED), flags.refreshCalls)
+
+        clock.now = clock.now.plusSeconds(3) // t0+5 — back on Cyan, inside Cyan's own window
+        vm.selectTab(FlagTab.Cyan)
+        vm.maybeAutoRefresh()
+        assertEquals(
+            "Cyan's window (armed at t0) is still open",
+            listOf(FlagType.CYAN, FlagType.RED),
+            flags.refreshCalls,
+        )
+
+        clock.now = clock.now.plusSeconds(11) // t0+16 — Cyan's window elapsed, Red's (t0+2) has not
+        vm.maybeAutoRefresh()
+        assertEquals(listOf(FlagType.CYAN, FlagType.RED, FlagType.CYAN), flags.refreshCalls)
+        vm.selectTab(FlagTab.Red)
+        vm.maybeAutoRefresh()
+        assertEquals(
+            "Red's window runs until t0+17",
+            listOf(FlagType.CYAN, FlagType.RED, FlagType.CYAN),
+            flags.refreshCalls,
+        )
+
+        clock.now = clock.now.plusSeconds(2) // t0+18 — Red's window elapsed too
+        vm.maybeAutoRefresh()
+        assertEquals(listOf(FlagType.CYAN, FlagType.RED, FlagType.CYAN, FlagType.RED), flags.refreshCalls)
+    }
+
+    @Test
+    fun `a manual refresh is never throttled by the per-tab window either (#743)`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
+        val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
+        val vm = viewModelWithClock(auth, flags, clock)
+
+        vm.maybeAutoRefresh() // Cyan @ t0
+        clock.now = clock.now.plusSeconds(2)
+        vm.selectTab(FlagTab.Red)
+        vm.maybeAutoRefresh() // Red @ t0+2, arms Red's window
+        clock.now = clock.now.plusSeconds(1)
+        vm.refresh() // user pull on Red inside its window — goes straight through
+
+        assertEquals(listOf(FlagType.CYAN, FlagType.RED, FlagType.RED), flags.refreshCalls)
+    }
+
+    @Test
+    fun `a landing on another tab during an in-flight refresh is replayed once it settles (#743)`() = runTest {
+        // Second half of the report: switching tab WHILE the first tab's fan-out is still running.
+        // Refreshes stay sequential (a concurrent per-type refresh would degrade the older one through
+        // the repository's sweep generation), so the Red landing waits for Cyan, then runs.
+        val flags = FakeFlagRepository()
+        flags.refreshGate = CompletableDeferred()
+        val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
+        val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
+        val vm = viewModelWithClock(auth, flags, clock)
+
+        vm.maybeAutoRefresh() // Cyan landing, suspended at the gate
+        vm.selectTab(FlagTab.Red)
+        vm.maybeAutoRefresh() // meets the in-flight refresh: no concurrent fan-out…
+        assertEquals(listOf(FlagType.CYAN), flags.refreshCalls)
+        assertTrue(vm.isRefreshing.value)
+
+        flags.refreshGate!!.complete(Unit) // …Cyan settles → the Red landing is replayed
+        assertEquals(listOf(FlagType.CYAN, FlagType.RED), flags.refreshCalls)
+        assertFalse(vm.isRefreshing.value)
+    }
+
+    @Test
+    fun `only the latest deferred landing is replayed (#743)`() = runTest {
+        val flags = FakeFlagRepository()
+        flags.refreshGate = CompletableDeferred()
+        val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
+        val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
+        val vm = viewModelWithClock(auth, flags, clock)
+
+        vm.maybeAutoRefresh() // Cyan, gated
+        vm.selectTab(FlagTab.Red)
+        vm.maybeAutoRefresh() // deferred: Red…
+        vm.selectTab(FlagTab.Favorite)
+        vm.maybeAutoRefresh() // …superseded by Favori, the tab actually on screen when Cyan settles
+
+        flags.refreshGate!!.complete(Unit)
+        assertEquals(listOf(FlagType.CYAN, FlagType.FAVORITE), flags.refreshCalls)
+    }
+
+    @Test
+    fun `a same-tab landing during an in-flight refresh stays a no-op (#743 non-regression)`() = runTest {
+        // ON_RESUME + LaunchedEffect(selectedTab) double fire on the same tab: still ONE fan-out, and
+        // nothing is replayed once it settles (the running refresh already covers that tab).
+        val flags = FakeFlagRepository()
+        flags.refreshGate = CompletableDeferred()
+        val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
+        val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
+        val vm = viewModelWithClock(auth, flags, clock)
+
+        vm.maybeAutoRefresh()
+        vm.maybeAutoRefresh()
+        flags.refreshGate!!.complete(Unit)
+
+        assertEquals(listOf(FlagType.CYAN), flags.refreshCalls)
+    }
+
+    @Test
+    fun `a pull on the deferred tab supersedes its replay (#743)`() = runTest {
+        // The user switches to Red during Cyan's fan-out and pulls right away: that pull IS Red's
+        // fetch — the deferred landing must not add a third fan-out once Cyan settles.
+        val flags = FakeFlagRepository()
+        flags.refreshGate = CompletableDeferred()
+        val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
+        val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
+        val vm = viewModelWithClock(auth, flags, clock)
+
+        vm.maybeAutoRefresh() // Cyan, gated
+        vm.selectTab(FlagTab.Red)
+        vm.maybeAutoRefresh() // deferred behind Cyan
+        vm.refresh() // manual pull on Red (gated too)
+        flags.refreshGate!!.complete(Unit)
+
+        assertEquals(listOf(FlagType.CYAN, FlagType.RED), flags.refreshCalls)
     }
 
     @Test
@@ -2296,11 +2509,191 @@ class FlagsViewModelTest {
 
         vm.toggleSuperFavorite(flag)
         advanceUntilIdle()
-        assertTrue(42 in vm.superFavoriteTopicIds.value)
+        assertTrue(vm.superFavoriteTopics.value.any { it.matches(flag) })
 
         vm.toggleSuperFavorite(flag)
         advanceUntilIdle()
-        assertFalse(42 in vm.superFavoriteTopicIds.value)
+        assertFalse(vm.superFavoriteTopics.value.any { it.matches(flag) })
+    }
+
+    @Test
+    fun `Super tab enriches live flags and keeps stable snapshot fallbacks (#737)`() = runTest {
+        val flags = FakeFlagRepository()
+        val liveExact = stubFlag(2, FlagType.CYAN).copy(cat = 23, title = "Live exact")
+        val cachedLegacy = stubFlag(3, FlagType.RED).copy(cat = 10, title = "Cached legacy")
+        flags.cachedFlags = listOf(liveExact, cachedLegacy)
+        val favorites = setOf(
+            SuperFavoriteTopic(cat = null, topicId = 99, title = null, subcat = null),
+            SuperFavoriteTopic(cat = 23, topicId = 4, title = "Snapshot only", subcat = 550),
+            SuperFavoriteTopic(cat = null, topicId = 3, title = null, subcat = null),
+            SuperFavoriteTopic(cat = 23, topicId = 2, title = "Old title", subcat = null),
+        )
+        val forum = FakeForumRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = viewModel(
+            auth,
+            flags,
+            forum,
+            // Flat content: these tests inspect rows, not the default category sections.
+            prefs = FakeUserPreferencesRepository(groupByCategory = false),
+            superFavorite = FakeSuperFavoriteRepository(favorites),
+        )
+
+        vm.selectTab(FlagTab.Super)
+        advanceUntilIdle()
+
+        val success = vm.flagsTabState.value.flagsState as FlagsListUiState.Success
+        val rows = (success.content as FlagsContent.Flat).rows
+        assertEquals(FlagTab.Super, vm.flagsTabState.value.tab)
+        assertEquals(listOf("Live exact", "Snapshot only", "Cached legacy", "Sujet #99"), rows.map { it.title })
+        assertTrue(flags.findFlagCalls.isEmpty())
+        assertEquals(listOf(23 to 2, 23 to 4), flags.findCachedFlagByKeyCalls)
+        assertEquals(listOf(3, 99), flags.findCachedFlagCalls)
+    }
+
+    @Test
+    fun `Super tab drops a legacy orphan when an exact keyed favorite exists (#737)`() = runTest {
+        val favorite = SuperFavoriteTopic(cat = 23, topicId = 42, title = "Exact", subcat = null)
+        val legacyDuplicate = SuperFavoriteTopic(cat = null, topicId = 42, title = null, subcat = null)
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = viewModel(
+            auth,
+            flags,
+            forum,
+            // Flat content: these tests inspect rows, not the default category sections.
+            prefs = FakeUserPreferencesRepository(groupByCategory = false),
+            superFavorite = FakeSuperFavoriteRepository(setOf(legacyDuplicate, favorite)),
+        )
+
+        vm.selectTab(FlagTab.Super)
+        advanceUntilIdle()
+
+        val success = vm.flagsTabState.value.flagsState as FlagsListUiState.Success
+        val rows = (success.content as FlagsContent.Flat).rows
+        assertEquals(listOf(42), rows.map { it.topicId })
+        assertEquals("Exact", rows.single().title)
+    }
+
+    @Test
+    fun `flag rows resolve subcategory names from visible cached categories without refreshing (#741)`() = runTest {
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(autoEmit = false)
+        forum.seedCachedSubcategories(23, listOf(SubCategory(id = 550, name = "Android", parentCategoryId = 23)))
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository(groupByCategory = false)
+        val vm = viewModel(auth, flags, forum, prefs)
+
+        vm.flagsState.test {
+            awaitItem()
+            flags.emit(
+                FlagType.CYAN,
+                FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN).copy(cat = 23, subcat = 550))),
+            )
+            val success = awaitItem() as FlagsListUiState.Success
+            val row = ((success.content as FlagsContent.Flat).rows).single()
+            assertEquals("Android", row.subcatName)
+            assertEquals(listOf(23), forum.observeCachedSubcategoriesCalls)
+            assertTrue(forum.refreshSubcategoriesCalls.isEmpty())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `flag rows refresh cold subcategory names once and reuse the filled cache (#741)`() = runTest {
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(autoEmit = false)
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository(groupByCategory = false)
+        val vm = viewModel(auth, flags, forum, prefs)
+        val rowFlag = stubFlag(1, FlagType.CYAN).copy(cat = 23, subcat = 550)
+
+        vm.flagsState.test {
+            awaitItem()
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(rowFlag)))
+            val cold = awaitItem() as FlagsListUiState.Success
+            assertNull((cold.content as FlagsContent.Flat).rows.single().subcatName)
+            assertEquals(listOf(23), forum.refreshSubcategoriesCalls)
+
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(rowFlag.copy(title = "Topic 1 bis"))))
+            awaitItem()
+            assertEquals(listOf(23), forum.refreshSubcategoriesCalls)
+
+            forum.seedCachedSubcategories(23, listOf(SubCategory(id = 550, name = "Android", parentCategoryId = 23)))
+            val warmed = awaitItem() as FlagsListUiState.Success
+            assertEquals("Android", (warmed.content as FlagsContent.Flat).rows.single().subcatName)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `flag rows without subcat do not subscribe to subcategory caches (#741)`() = runTest {
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(autoEmit = false)
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository(groupByCategory = false)
+        val vm = viewModel(auth, flags, forum, prefs)
+
+        vm.flagsState.test {
+            awaitItem()
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN).copy(cat = 23))))
+            val success = awaitItem() as FlagsListUiState.Success
+            val row = (success.content as FlagsContent.Flat).rows.single()
+            assertNull(row.subcatName)
+            assertTrue(forum.observeCachedSubcategoriesCalls.isEmpty())
+            assertTrue(forum.refreshSubcategoriesCalls.isEmpty())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `flag rows keep a null subcategory name when the visible cat cache is cold (#741)`() = runTest {
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(autoEmit = false)
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository(groupByCategory = false)
+        val vm = viewModel(auth, flags, forum, prefs)
+
+        vm.flagsState.test {
+            awaitItem()
+            flags.emit(
+                FlagType.CYAN,
+                FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN).copy(cat = 23, subcat = 550))),
+            )
+            val success = awaitItem() as FlagsListUiState.Success
+            val row = (success.content as FlagsContent.Flat).rows.single()
+            assertNull(row.subcatName)
+            assertEquals(listOf(23), forum.observeCachedSubcategoriesCalls)
+            assertEquals(listOf(23), forum.refreshSubcategoriesCalls)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `toggleSuperFavorite before hydration uses the repository current value`() = runTest {
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository()
+        val auth = FakeAuthRepository(AuthState.Anonymous, flagRepository = flags)
+        val flag = stubFlag(42, FlagType.CYAN)
+        val storedFavorite = SuperFavoriteTopic(
+            cat = flag.cat,
+            topicId = flag.topicId,
+            title = flag.title,
+            subcat = flag.subcat,
+        )
+        val superFavorite = FakeSuperFavoriteRepository(
+            initial = setOf(storedFavorite),
+            observedInitial = emptySet(),
+        )
+        val vm = viewModel(auth, flags, forum, superFavorite = superFavorite)
+
+        assertFalse(vm.superFavoriteTopics.value.any { it.matches(flag) })
+        vm.toggleSuperFavorite(flag)
+        advanceUntilIdle()
+
+        assertFalse(superFavorite.currentTopics.any { it.matches(flag) })
+        assertFalse(vm.superFavoriteTopics.value.any { it.matches(flag) })
     }
 
     @Suppress("LongParameterList") // test fake-builder: each repo fake is an independent collaborator
@@ -2316,7 +2709,18 @@ class FlagsViewModelTest {
         // the process-lifetime scope it mirrors.
         externalScope: CoroutineScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher()),
     ): FlagsViewModel =
-        FlagsViewModel(auth, flags, forum, prefs, superFavorite, messages, mpStorage, fixedClock, externalScope)
+        FlagsViewModel(
+            authRepository = auth,
+            flagRepository = flags,
+            forumRepository = forum,
+            userPreferencesRepository = prefs,
+            superFavoriteRepository = superFavorite,
+            superFavoriteListMapper = SuperFavoriteListMapper(flags, forum, prefs),
+            messagesRepository = messages,
+            mpStorageRepository = mpStorage,
+            clock = fixedClock,
+            externalScope = externalScope,
+        )
 
     /** Builds a ViewModel with a custom [clock] for the #378 throttle tests; everything else is a
      * fresh default fake. */
@@ -2324,32 +2728,68 @@ class FlagsViewModelTest {
         auth: FakeAuthRepository,
         flags: FakeFlagRepository,
         clock: Clock,
-    ): FlagsViewModel = FlagsViewModel(
-        auth,
-        flags,
-        FakeForumRepository(),
-        FakeUserPreferencesRepository(),
-        FakeSuperFavoriteRepository(),
-        FakeMessagesRepository(),
-        FakeMpStorageRepository(),
-        clock,
-        CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher()),
-    )
+    ): FlagsViewModel {
+        val forum = FakeForumRepository()
+        val prefs = FakeUserPreferencesRepository()
+        return FlagsViewModel(
+            authRepository = auth,
+            flagRepository = flags,
+            forumRepository = forum,
+            userPreferencesRepository = prefs,
+            superFavoriteRepository = FakeSuperFavoriteRepository(),
+            superFavoriteListMapper = SuperFavoriteListMapper(flags, forum, prefs),
+            messagesRepository = FakeMessagesRepository(),
+            mpStorageRepository = FakeMpStorageRepository(),
+            clock = clock,
+            externalScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher()),
+        )
+    }
 
     /** In-memory [SuperFavoriteRepository] (#603 PR5) — the local super-favorite set. */
-    private class FakeSuperFavoriteRepository : SuperFavoriteRepository {
-        private val ids = MutableStateFlow<Set<Int>>(emptySet())
-        override fun observeSuperFavoriteTopicIds(): Flow<Set<Int>> = ids.asStateFlow()
-        override suspend fun setSuperFavorite(topicId: Int, enabled: Boolean) {
-            ids.value = if (enabled) ids.value + topicId else ids.value - topicId
+    private class FakeSuperFavoriteRepository(
+        initial: Set<SuperFavoriteTopic> = emptySet(),
+        observedInitial: Set<SuperFavoriteTopic> = initial,
+    ) : SuperFavoriteRepository {
+        private var storedTopics: Set<SuperFavoriteTopic> = initial
+        private val topics = MutableStateFlow(observedInitial)
+        val currentTopics: Set<SuperFavoriteTopic> get() = storedTopics
+        override fun observeSuperFavoriteTopics(): Flow<Set<SuperFavoriteTopic>> = topics.asStateFlow()
+        override suspend fun setSuperFavorite(flag: Flag, enabled: Boolean) {
+            val withoutFlag = storedTopics.filterNot { it.matches(flag) }.toSet()
+            storedTopics = if (enabled) {
+                withoutFlag + SuperFavoriteTopic(
+                    cat = flag.cat,
+                    topicId = flag.topicId,
+                    title = flag.title,
+                    subcat = flag.subcat,
+                )
+            } else {
+                withoutFlag
+            }
+            topics.value = storedTopics
+        }
+
+        override suspend fun toggleSuperFavorite(flag: Flag) {
+            val withoutFlag = storedTopics.filterNot { it.matches(flag) }.toSet()
+            storedTopics = if (withoutFlag.size == storedTopics.size) {
+                withoutFlag + SuperFavoriteTopic(
+                    cat = flag.cat,
+                    topicId = flag.topicId,
+                    title = flag.title,
+                    subcat = flag.subcat,
+                )
+            } else {
+                withoutFlag
+            }
+            topics.value = storedTopics
         }
     }
 
     /** Flattens whatever content shape into the topics order for assertions on flag content. */
     private fun flatTopics(state: FlagsListUiState.Success): List<Flag> =
         when (val content = state.content) {
-            is FlagsContent.Grouped -> content.sections.flatMap { it.topics }
-            is FlagsContent.Flat -> content.flags
+            is FlagsContent.Grouped -> content.sections.flatMap { section -> section.topics.map { it.flag } }
+            is FlagsContent.Flat -> content.rows.map { it.flag }
         }
 
     /** Extracts the grouped sections, failing the cast if the content was flat (test misuse). */
@@ -2362,17 +2802,15 @@ class FlagsViewModelTest {
     private fun stubFlag(
         topicId: Int,
         type: FlagType,
-        hasUnread: Boolean = true,
-        cat: Int = 1,
     ): Flag = Flag(
-        cat = cat,
+        cat = 1,
         subcat = null,
         topicId = topicId,
         title = "Topic $topicId",
         totalPages = 1,
         replyCount = 0,
         type = type,
-        hasUnread = hasUnread,
+        hasUnread = true,
         lastReadPage = 1,
         lastPostReadId = null,
         firstPostAuthor = "",
@@ -2417,11 +2855,20 @@ class FlagsViewModelTest {
     private class FakeFlagRepository : FlagRepository {
         private val perType: Map<FlagType, MutableSharedFlow<FlagsResult>> = FlagType.entries
             .associateWith { MutableSharedFlow(replay = 1, extraBufferCapacity = 4) }
+        private val cacheUpdates = MutableSharedFlow<FlagType>(extraBufferCapacity = 8)
         var refreshCalls: List<FlagType> = emptyList()
             private set
         var clearSessionCacheCallCount: Int = 0
             private set
         var removeFlagCalls: List<Flag> = emptyList()
+            private set
+        var findFlagResults: Map<Pair<Int, Int>, Flag?> = emptyMap()
+        var cachedFlags: List<Flag> = emptyList()
+        var findFlagCalls: List<Pair<Int, Int>> = emptyList()
+            private set
+        var findCachedFlagCalls: List<Int> = emptyList()
+            private set
+        var findCachedFlagByKeyCalls: List<Pair<Int, Int>> = emptyList()
             private set
 
         /**
@@ -2435,6 +2882,9 @@ class FlagsViewModelTest {
         override fun observe(type: FlagType): Flow<FlagsResult> =
             perType.getValue(type).asSharedFlow()
 
+        override fun observeCacheUpdates(types: Set<FlagType>): Flow<FlagType> =
+            cacheUpdates.asSharedFlow().filter { it in types }
+
         /**
          * Optional gate to suspend a [refresh] round-trip so a test can assert the intermediate
          * `isRefreshing` state before the call resolves. Null = the refresh returns immediately (the
@@ -2445,6 +2895,7 @@ class FlagsViewModelTest {
         override suspend fun refresh(type: FlagType) {
             refreshCalls = refreshCalls + type
             refreshGate?.await()
+            cacheUpdates.emit(type)
         }
 
         override fun clearSessionCache() {
@@ -2476,8 +2927,18 @@ class FlagsViewModelTest {
         }
 
         override suspend fun findFlag(cat: Int, topicId: Int): Flag? {
-            // #809 — not exercised by the Drapeaux-view tests (findFlag serves the topic screen).
-            return null
+            findFlagCalls = findFlagCalls + (cat to topicId)
+            return findFlagResults[cat to topicId]
+        }
+
+        override suspend fun findCachedFlag(topicId: Int): Flag? {
+            findCachedFlagCalls = findCachedFlagCalls + topicId
+            return cachedFlags.firstOrNull { it.topicId == topicId }
+        }
+
+        override suspend fun findCachedFlag(cat: Int, topicId: Int): Flag? {
+            findCachedFlagByKeyCalls = findCachedFlagByKeyCalls + (cat to topicId)
+            return cachedFlags.firstOrNull { it.cat == cat && it.topicId == topicId }
         }
 
         suspend fun emit(type: FlagType, result: FlagsResult) {
@@ -2502,10 +2963,16 @@ class FlagsViewModelTest {
             replay = 1,
             extraBufferCapacity = 8,
         )
+        private val cachedSubcategoryResults = mutableMapOf<Int, ForumResult<List<SubCategory>>?>()
+        private val cachedSubcategoryFlows = mutableMapOf<Int, MutableSharedFlow<ForumResult<List<SubCategory>>?>>()
 
         var observeCategoriesSubscriptions: Int = 0
             private set
         var refreshCategoriesCalls: Int = 0
+            private set
+        var observeCachedSubcategoriesCalls: List<Int> = emptyList()
+            private set
+        var refreshSubcategoriesCalls: List<Int> = emptyList()
             private set
 
         init {
@@ -2519,6 +2986,12 @@ class FlagsViewModelTest {
 
         suspend fun emitCategories(result: ForumResult<List<Category>>) {
             categoriesFlow.emit(result)
+        }
+
+        fun seedCachedSubcategories(cat: Int, subcategories: List<SubCategory>) {
+            val result = ForumResult.Success(subcategories)
+            cachedSubcategoryResults[cat] = result
+            subcategoryFlow(cat).tryEmit(result)
         }
 
         override fun observeCategories(): Flow<ForumResult<List<Category>>> =
@@ -2535,7 +3008,15 @@ class FlagsViewModelTest {
         override fun observeSubcategories(cat: Int): Flow<ForumResult<List<SubCategory>>> =
             MutableSharedFlow<ForumResult<List<SubCategory>>>(replay = 1).asSharedFlow()
 
-        override suspend fun refreshSubcategories(cat: Int) = Unit
+        override fun observeCachedSubcategories(cat: Int): Flow<ForumResult<List<SubCategory>>?> = flow {
+            observeCachedSubcategoriesCalls = observeCachedSubcategoriesCalls + cat
+            emit(cachedSubcategoryResults[cat])
+            emitAll(subcategoryFlow(cat).asSharedFlow())
+        }
+
+        override suspend fun refreshSubcategories(cat: Int) {
+            refreshSubcategoriesCalls = refreshSubcategoriesCalls + cat
+        }
 
         override fun observeTopicList(
             cat: Int,
@@ -2554,6 +3035,11 @@ class FlagsViewModelTest {
             subcat: Int?,
             bucket: FlagFilterBucket,
         ): ForumResult<TopicListPage> = ForumResult.Failure(UnsupportedOperationException())
+
+        private fun subcategoryFlow(cat: Int): MutableSharedFlow<ForumResult<List<SubCategory>>?> =
+            cachedSubcategoryFlows.getOrPut(cat) {
+                MutableSharedFlow(replay = 1, extraBufferCapacity = 8)
+            }
     }
 
     /**
@@ -2707,9 +3193,10 @@ class FlagsViewModelTest {
 
         override suspend fun setThemeMode(mode: ThemeMode) = Unit
 
-        override fun observeAmoledEnabled(): Flow<Boolean> = MutableStateFlow(false)
+        override fun observeThemeColorPreferences(): Flow<ThemeColorPreferences> =
+            MutableStateFlow(ThemeColorPreferences())
 
-        override suspend fun setAmoledEnabled(enabled: Boolean) = Unit
+        override suspend fun setThemeColorPreferences(preferences: ThemeColorPreferences) = Unit
 
         override fun observeTopicTopBarAutoHide(): Flow<Boolean> = MutableStateFlow(false)
 
@@ -2844,6 +3331,11 @@ class FlagsViewModelTest {
 
         override suspend fun setMediaDisplayProfile(profile: MediaDisplayProfile) = Unit
 
+        override fun observePostImageMaxWidth(): Flow<PostImageMaxWidth> =
+            MutableStateFlow(PostImageMaxWidth.DEFAULT)
+
+        override suspend fun setPostImageMaxWidth(width: PostImageMaxWidth) = Unit
+
         // #989 — délimiteur du picker : non exercé ici, présent pour satisfaire l'interface.
         override fun observeSmileyPickerDecoration(): Flow<SmileyPickerDecoration> =
             flowOf(SmileyPickerDecoration.NONE)
@@ -2866,8 +3358,6 @@ class FlagsViewModelTest {
             MutableStateFlow(ImmersiveNavBarReveal.MANUAL)
 
         override suspend fun setImmersiveNavBarReveal(mode: ImmersiveNavBarReveal) = Unit
-        override fun observeAccentColor(): Flow<AccentColor> = MutableStateFlow(AccentColor.ROSE)
-        override suspend fun setAccentColor(color: AccentColor) = Unit
         override fun observeAlwaysAskLinkApp(): Flow<Boolean> = MutableStateFlow(false)
         override suspend fun setAlwaysAskLinkApp(enabled: Boolean) = Unit
 

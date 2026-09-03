@@ -24,8 +24,9 @@ import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Card
-import androidx.compose.material3.Icon
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -109,6 +110,7 @@ import fr.forumhfr.redface2.core.ui.theme.LocalEgoQuotePseudo
 import fr.forumhfr.redface2.core.ui.theme.LocalFoldLongQuotes
 import fr.forumhfr.redface2.core.ui.theme.LocalIgnoreInlineColors
 import fr.forumhfr.redface2.core.ui.theme.LocalMediaDisplayProfile
+import fr.forumhfr.redface2.core.ui.theme.LocalPostImageMaxWidth
 import fr.forumhfr.redface2.core.ui.theme.egoHighlightColors
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
@@ -521,11 +523,16 @@ private fun ParagraphProse(
         val maxMediaWidthSp = with(density) {
             (maxWidth.toSp().value * SMILEY_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
         }
-        // #959 (§3) — the CONTENT-IMAGE caps, in PHYSICAL px (the sizing equation works px-only,
-        // cadrage Sol r1): fImage × container width, and the 200 sp inline height cap at the
+        // #959 (§3) + #991 — the CONTENT-IMAGE caps, in PHYSICAL px (the sizing equation works
+        // px-only): fImage × container width, reduced when needed by the inline placeholder padding
+        // so the padded inline node still fits the column, and the 200 sp inline height cap at the
         // current density × fontScale. Converted once here — the only place density is known.
+        val postImageMaxWidth = LocalPostImageMaxWidth.current
+        val inlineImageHorizontalPaddingPx = with(density) {
+            (INLINE_IMAGE_HORIZONTAL_PADDING * 2).roundToPx()
+        }
         val maxImageWidthPx = with(density) {
-            (maxWidth.toPx() * IMAGE_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
+            inlineImageMaxWidthPx(maxWidth.toPx(), postImageMaxWidth, inlineImageHorizontalPaddingPx)
         }
         val maxImageHeightPx = with(density) { INLINE_IMAGE_MAX_HEIGHT_SP.sp.toPx() }.roundToInt()
         // §4 v1.4 (#957) — total horizontal placeholder padding of a content image (4 dp/side),
@@ -1006,7 +1013,7 @@ private fun SpoilerBlock(
     var revealed by rememberSaveable(block) { mutableStateOf(false) }
     val readingColors = readingContentColors()
     val containerColor = LocalModerationHighlightColors.current?.subSurfaceContainer
-        ?: MaterialTheme.colorScheme.surfaceContainerLow
+        ?: spoilerContainerColor(MaterialTheme.colorScheme)
     Card(
         colors = CardDefaults.cardColors(
             containerColor = containerColor,
@@ -1052,6 +1059,9 @@ private fun SpoilerBlock(
         }
     }
 }
+
+internal fun spoilerContainerColor(scheme: ColorScheme): Color =
+    if (scheme.surface == Color.Black) scheme.surfaceBright else scheme.surfaceContainerLow
 
 @Composable
 private fun ImageBlock(block: PostBlock.Image) = BlockImage(url = block.url, description = block.description)
@@ -1138,6 +1148,7 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
     // The COLD path below is untouched by construction: no metadata → no measured box, the §6
     // slot is deterministic (no dimensions, no MIME — no factor).
     val mediaDisplayProfile = LocalMediaDisplayProfile.current
+    val postImageMaxWidth = LocalPostImageMaxWidth.current
     val gifCeiling = if (metadata?.mimeType == GIF_MIME_TYPE) mediaDisplayProfile.factor else 1f
     // #876 (§8 [AMENDEMENT-v1.5-4]) — `mApercu`: an eligible LINKED PREVIEW (a thumbnail wrapped
     // in a link to a DISTINCT resource of the SAME host, native axis ≤ 400 px — the pure guard
@@ -1163,7 +1174,7 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
         // the reserved loading slot. Cold falls back to the deterministic §6 slot below.
         val displayPx = measured?.let {
             with(blockDensity) {
-                val maxWidthPx = (maxWidth.toPx() * IMAGE_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
+                val maxWidthPx = imageMaxWidthPx(maxWidth.toPx(), postImageMaxWidth)
                 val maxHeightPx = capBlocDp.dp.roundToPx()
                 imageDisplaySizePx(it, maxWidthPx, maxHeightPx, scaleCeiling)
             }
@@ -1173,7 +1184,7 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
         } else {
             // §6 COLD slot (v1.4, [AMENDEMENT-Lot0-3]) : deterministic box before any dimension is
             // known — width fImage × available, height min(capBloc, max(160 dp, 0,75 × width)).
-            val (coldWidth, coldHeight) = coldBlockSlotDp(maxWidth.value, capBlocDp)
+            val (coldWidth, coldHeight) = coldBlockSlotDp(maxWidth.value, capBlocDp, postImageMaxWidth)
             Modifier.size(coldWidth.dp, coldHeight.dp)
         }
         // #831/#958 (Lot 2, §5) — contextual image menu on long-press + linked-image tap, BOTH gated
@@ -1980,9 +1991,10 @@ private fun smileyDisplayBox(
  * density-aware and works entirely in PHYSICAL pixels through [imageDisplaySizePx] (no-upscale =
  * 1 source px never spreads past 1 screen px; the pre-#959 "native px as sp" model upscaled every
  * bitmap by ×density): the caller passes the caps in px ([maxImageWidthPx] = fImage × container,
- * [maxImageHeightPx] = 200 sp in px) and the result converts back to sp HERE, through [density]
- * (÷ density × fontScale), so the physical size is stable under any density/fontScale. The
- * legibility floor is GONE from the measured path (cadrage Sol r1):
+ * or the inline padding-reserved cap from [inlineImageMaxWidthPx], [maxImageHeightPx] = 200 sp in
+ * px) and the result converts back to sp HERE, through [density] (÷ density × fontScale), so the
+ * physical size is stable under any density/fontScale. The legibility floor is GONE from the
+ * measured path (cadrage Sol r1):
  * [INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP] only shapes the placeholder SLOTS below.
  *
  * #253 — while the measurement is in flight (cold cache / miss) the SLOT falls back to a small

@@ -68,8 +68,8 @@ import kotlinx.coroutines.withTimeoutOrNull
  * ([switchToPage] / [goToPost] / [returnFromJump] / [applySubmitResult]) : departure anchor saved,
  * owner generation bumped (latest-wins), in-flight work cancelled, LRU memory snapshot activated
  * atomically when available (no Loading flash), landing resolved by priority (explicit post >
- * post-submit bottom > saved anchor > `page - 1` bottom step (#412) > top) and dispatched on the
- * first matching Loaded. Since PR 2 (`4248c22d`), `RedfaceNavigation` routes every in-topic page
+ * eligible post-submit bottom > saved anchor > `page - 1` bottom step (#412) > top) and dispatched
+ * on the first matching Loaded. Since PR 2 (`4248c22d`), `RedfaceNavigation` routes every in-topic page
  * change through this engine — the `TopicRoute` is frozen at entry (single nav entry).
  */
 @HiltViewModel(assistedFactory = TopicViewModel.Factory::class)
@@ -238,10 +238,11 @@ class TopicViewModel @AssistedInject constructor(
     )
 
     /**
-     * #226 anti-chase as an internal budget (Sol point 3) : [applySubmitResult] arms ONE redirect ;
-     * the overflow detection consumes it BEFORE switching to the freshly-created last page, and
-     * that landing is terminal — a concurrent post bumping `totalPages` during the refresh can
-     * never start a moving-tail chase.
+     * #226 anti-chase as an internal budget (Sol point 3) : [applySubmitResult] arms ONE redirect
+     * only for a plain reply whose source page was the known tail before the submit (#1243). The
+     * overflow detection consumes it BEFORE switching to the freshly-created last page, and that
+     * landing is terminal — a concurrent post bumping `totalPages` during the refresh can never
+     * start a moving-tail chase.
      */
     private var postSubmitRedirectBudget: Int = 0
 
@@ -261,16 +262,35 @@ class TopicViewModel @AssistedInject constructor(
      * per switch/entry, dispatched by [dispatchPendingLanding] on the first matching Loaded :
      * - [Post] → [TopicEffect.ScrollToPost] once the numreponse is on the page (stays pending
      *   through emissions of the same generation otherwise — historical scrollTo behaviour) ;
+     * - [PostOrBottom] → [TopicEffect.ScrollToPost] when the numreponse is on the page, else no
+     *   scroll — terminal on the first Loaded either way (#974/#1243 : a submit that carried quotes
+     *   resumes on the cited post when visible and otherwise preserves the reader's position) ;
      * - [Anchor] → [TopicEffect.ScrollToAnchor] (revisit / #782 return / process restore) ;
      * - [Bottom] → [TopicEffect.ScrollToEndOfPage] (post-submit `#bas`, #412 `page - 1` step) ;
      * - [Top] → [TopicEffect.ScrollToTop] (default landing of a fresh page).
      */
     private sealed interface PendingLanding {
-        data class Post(val numreponse: Int) : PendingLanding
+        /**
+         * [lastRead] (#1137) — `true` ONLY for the entry landing of a flag tap (#231 `forceRefresh`
+         * + route `scrollTo`), whose target is the reader's last-read post : the screen may then
+         * align on the « Dernier message lu » marker. Every other producer (cited jump, search hit,
+         * post-submit) lands to READ the post and leaves the default. The semantics travel WITH the
+         * landing, never re-derived from `request` (which keeps forceRefresh/scrollTo across in-VM
+         * navigations, #953/F4 — a same-page jump to that very numreponse must land top-of-post).
+         */
+        data class Post(val numreponse: Int, val lastRead: Boolean = false) : PendingLanding
+        data class PostOrBottom(val numreponse: Int) : PendingLanding
         data class Anchor(val anchor: TopicScrollAnchor) : PendingLanding
         data object Bottom : PendingLanding
         data object Top : PendingLanding
     }
+
+    private data class SubmitRefreshPlan(
+        val initialTarget: Int,
+        val landing: PendingLanding?,
+        val overflowRedirectAllowed: Boolean,
+        val submittedElsewhereNotificationAllowed: Boolean,
+    )
 
     /** #782 — one frame of the quote-jump return stack : the departure page + tap-time anchor. */
     private data class TopicJumpFrame(val page: Int, val anchor: TopicScrollAnchor?)
@@ -327,7 +347,9 @@ class TopicViewModel @AssistedInject constructor(
         // The entry landing (armed by the chosen load path AFTER it takes ownership — arming
         // before the ownership bump would tag it with a stale generation).
         val entryLanding: PendingLanding? = when {
-            initialScrollTo != null -> PendingLanding.Post(initialScrollTo)
+            // #1137 — the flag tap (#231's forceRefresh) is the ONE entry whose scrollTo is the
+            // last-read post ; a deep link / search entry lands to read the post.
+            initialScrollTo != null -> PendingLanding.Post(initialScrollTo, lastRead = request.forceRefresh)
             // Process restore : land back on the persisted reading position, if any.
             canonicalPage != null -> pageAnchors[request.page]?.let { PendingLanding.Anchor(it) }
             else -> null
@@ -438,6 +460,11 @@ class TopicViewModel @AssistedInject constructor(
         userPreferencesRepository.observeTopicFullWidthPosts()
             .onEach { fullWidth ->
                 _state.update { it.copy(fullWidthPosts = fullWidth) }
+            }
+            .launchIn(viewModelScope)
+        userPreferencesRepository.observeThemeColorPreferences()
+            .onEach { preferences ->
+                _state.update { it.copy(postHeaderEmphasis = preferences.postHeaderEmphasis) }
             }
             .launchIn(viewModelScope)
         // #874 Q4/P1 — render-only Ego switches. They remain independent so an own post can keep
@@ -1375,8 +1402,8 @@ class TopicViewModel @AssistedInject constructor(
      * #895 étape 4 — dispatch the landing owed to the page on screen, once, on the first Loaded
      * of the owning generation. A [PendingLanding.Post] whose numreponse is not on [topic] stays
      * pending (the next emission of the SAME generation may contain it — the historical scrollTo
-     * retry) ; every other landing dispatches unconditionally. A landing armed by a superseded
-     * owner is dropped without effect.
+     * retry) ; [PendingLanding.PostOrBottom] is terminal even when silent, while every other landing
+     * dispatches unconditionally. A landing armed by a superseded owner is dropped without effect.
      */
     private fun dispatchPendingLanding(topic: Topic) {
         // Gate Sol PR1 (bloquant 2) — refuse a stale pair : a dispatch reached from an untagged
@@ -1389,8 +1416,17 @@ class TopicViewModel @AssistedInject constructor(
             // A Post target absent from the page stays pending : the next emission of the same
             // owner may contain it (historical scrollTo retry) — hence the nullable effect.
             is PendingLanding.Post ->
-                TopicEffect.ScrollToPost(landing.numreponse)
+                TopicEffect.ScrollToPost(landing.numreponse, lastRead = landing.lastRead)
                     .takeIf { topic.posts.any { post -> post.numreponse == landing.numreponse } }
+            // #974/#1243 — a cited post absent from the landing page is terminal but silent :
+            // do not jump to the bottom of a different page and rip the reader away from context.
+            is PendingLanding.PostOrBottom ->
+                if (topic.posts.any { post -> post.numreponse == landing.numreponse }) {
+                    TopicEffect.ScrollToPost(landing.numreponse)
+                } else {
+                    clearLanding()
+                    null
+                }
             is PendingLanding.Anchor -> TopicEffect.ScrollToAnchor(landing.anchor, armed.page)
             PendingLanding.Bottom -> TopicEffect.ScrollToEndOfPage(armed.page)
             PendingLanding.Top -> TopicEffect.ScrollToTop(armed.page)
@@ -1514,19 +1550,88 @@ class TopicViewModel @AssistedInject constructor(
 
     /**
      * Post-submit result delivered to THIS retained ViewModel (Sol GO, option A) : the editor /
-     * quick-reply sheet publishes `{targetPage, scrollTo}` after a successful POST ; the target
-     * falls back on the CANONICAL current page (never the route page). Arms the single #226
-     * redirect budget, dirties the target snapshot and force-fetches it — landing `scrollTo`
-     * (quote / edit) or bottom (`#bas`, plain reply).
+     * quick-reply sheet publishes `{targetPage, scrollTo, quotedNumreponses}` after a successful
+     * POST ; the target falls back on the CANONICAL current page (never the route page). Dirties the
+     * target snapshot and force-fetches it. The single #226 redirect budget is armed only when that
+     * target was the known tail before the submit (#1243). Landing, by priority :
+     * - [quotedNumreponses] non-empty (#974/#1243) → the HIGHEST cited post (the one closest to
+     *   the end, where the reading resumes) when it is on the landing page ; if absent, no scroll
+     *   is emitted, because a reply to an older post must not throw the reader onto the fresh post
+     *   at the bottom ;
+     * - `scrollTo` (edit, HFR's `#t{N}`) → that post ;
+     * - bottom (`#bas`, plain reply) only from the known tail; otherwise the current reading
+     *   position is left untouched and a Snackbar offers the tail as an explicit action.
+     *
+     * @param quotedNumreponses the `numreponse` of every post the submit cited (appearance order,
+     *   inline `[quotemsg]` tags and cards alike), empty for a plain reply or an edit.
      */
-    fun applySubmitResult(targetPage: Int?, scrollTo: Int?) {
-        postSubmitRedirectBudget = 1
+    fun applySubmitResult(targetPage: Int?, scrollTo: Int?, quotedNumreponses: List<Int> = emptyList()) {
         val target = targetPage ?: request.page
+        val plan = submitRefreshPlan(
+            target = target,
+            scrollTo = scrollTo,
+            quotedNumreponse = quotedNumreponses.maxOrNull(),
+        )
+        postSubmitRedirectBudget = if (plan.overflowRedirectAllowed) 1 else 0
         // F2 — the submitted-to page is dirty : its snapshot must never serve again as terminal.
         pageSnapshots.remove(target)
         jumpStack.clear()
         syncJumpAvailability()
-        performSubmitRefresh(target, scrollTo)
+        performSubmitRefresh(plan)
+    }
+
+    /**
+     * #1243 — explicit Snackbar action after the refreshed submit page reports a later published
+     * page. This is now a user gesture, so opening the post page may advance HFR's read flag.
+     */
+    fun openSubmittedPostPage(page: Int, scrollTo: Int? = null, departureAnchor: TopicScrollAnchor? = null) {
+        if (page < 1) return
+        departureAnchor?.let { pageAnchors[request.page] = it }
+        postSubmitRedirectBudget = 0
+        pageSnapshots.remove(page)
+        jumpStack.clear()
+        syncJumpAvailability()
+        performSubmitRefresh(
+            SubmitRefreshPlan(
+                initialTarget = page,
+                landing = scrollTo?.let { PendingLanding.Post(it) } ?: PendingLanding.Bottom,
+                overflowRedirectAllowed = false,
+                submittedElsewhereNotificationAllowed = false,
+            ),
+        )
+    }
+
+    /**
+     * Build the post-submit refresh policy from the pre-refresh screen state only where it is
+     * genuinely stable :
+     * - the #226 overflow redirect is allowed only for a plain reply from the known tail. A quote
+     *   submit never chases the new tail, because the user is resuming from the cited post ;
+     * - the "published on page N" Snackbar is decided after the refresh, when the refreshed
+     *   [Topic.totalPages] is known and no redirect has already happened. This keeps stale-origin,
+     *   unknown-count and quote-overflow submits on their source page while still offering an
+     *   explicit jump to the published message.
+     */
+    private fun submitRefreshPlan(target: Int, scrollTo: Int?, quotedNumreponse: Int?): SubmitRefreshPlan {
+        val loadedMode = _state.value.mode as? TopicUiState.Mode.Loaded
+        val displayedTargetTopic = loadedMode?.topic?.takeIf { it.page == target }
+        val terminalTargetTopic = displayedTargetTopic?.takeIf { !loadedMode.provisional }
+        val targetWasKnownTail = terminalTargetTopic?.totalPages == target
+        // Bottom landing only from the known tail (contract above), also when the page is provisional.
+        val provisionalSamePagePlainReply = scrollTo == null &&
+            quotedNumreponse == null &&
+            loadedMode?.provisional == true &&
+            displayedTargetTopic?.totalPages == target
+        return SubmitRefreshPlan(
+            initialTarget = target,
+            landing = when {
+                quotedNumreponse != null -> PendingLanding.PostOrBottom(quotedNumreponse)
+                scrollTo != null -> PendingLanding.Post(scrollTo)
+                targetWasKnownTail || provisionalSamePagePlainReply -> PendingLanding.Bottom
+                else -> null
+            },
+            overflowRedirectAllowed = scrollTo == null && quotedNumreponse == null && targetWasKnownTail,
+            submittedElsewhereNotificationAllowed = scrollTo == null || quotedNumreponse != null,
+        )
     }
 
     /**
@@ -1608,15 +1713,16 @@ class TopicViewModel @AssistedInject constructor(
      * submit result ; ownership taken via [becomePageOwner] (which cancels the anonymous warmup),
      * never an anonymous prefetch escalating to authenticated.
      */
-    private fun performSubmitRefresh(initialTarget: Int, scrollTo: Int?) {
+    private fun performSubmitRefresh(plan: SubmitRefreshPlan) {
         becomePageOwner()
         savedStateHandle[KEY_FORCE_REFRESH_DONE] = true
-        adoptSubmitTarget(initialTarget, scrollTo)
+        adoptSubmitTarget(plan.initialTarget, plan.landing)
         val generation = ownerGeneration
         loadJob = viewModelScope.launch {
             // Gate Sol PR1 (récursion fragile → ITÉRATIF) : the #226 redirect continues INSIDE
             // this job under the SAME ownership — no self-cancelling re-own mid-coroutine.
-            var target = initialTarget
+            var target = plan.initialTarget
+            var redirected = false
             while (true) {
                 try {
                     val topic = topicRepository.refreshTopicPage(request.cat, request.post, target)
@@ -1632,16 +1738,28 @@ class TopicViewModel @AssistedInject constructor(
                     // Consume the single redirect budget and land on the real last page ; that
                     // landing can never redirect again (anti-chase), whatever a concurrent
                     // poster does.
-                    if (scrollTo == null && topic.totalPages > target && postSubmitRedirectBudget > 0) {
+                    if (
+                        plan.overflowRedirectAllowed &&
+                        topic.totalPages > target &&
+                        postSubmitRedirectBudget > 0
+                    ) {
                         postSubmitRedirectBudget = 0
+                        redirected = true
                         pageSnapshots.remove(target)
                         pageSnapshots.remove(topic.totalPages)
                         target = topic.totalPages
-                        adoptSubmitTarget(target, scrollTo = null)
+                        adoptSubmitTarget(target, plan.landing)
                         continue
                     }
                     recordSnapshot(topic)
                     dispatchPendingLanding(topic)
+                    if (
+                        plan.submittedElsewhereNotificationAllowed &&
+                        !redirected &&
+                        topic.totalPages > target
+                    ) {
+                        _effects.trySend(TopicEffect.PostSubmittedElsewhere(page = topic.totalPages))
+                    }
                 } catch (cancellation: CancellationException) {
                     throw cancellation
                 } catch (@Suppress("TooGenericExceptionCaught") refreshError: Exception) {
@@ -1664,7 +1782,7 @@ class TopicViewModel @AssistedInject constructor(
      * on screen when it already shows something (zero-flash on the common same-page reply), the
      * skeleton only when the target's content is unknown, landing re-armed for the new page.
      */
-    private fun adoptSubmitTarget(target: Int, scrollTo: Int?) {
+    private fun adoptSubmitTarget(target: Int, landing: PendingLanding?) {
         if (target != request.page) {
             updateCanonicalPage(target)
             // A cross-page submit landing shows the skeleton unless a snapshot can bridge the
@@ -1675,7 +1793,7 @@ class TopicViewModel @AssistedInject constructor(
         } else if (_state.value.mode !is TopicUiState.Mode.Loaded) {
             _state.update { it.copy(mode = TopicUiState.Mode.Loading) }
         }
-        armLanding(scrollTo?.let { PendingLanding.Post(it) } ?: PendingLanding.Bottom)
+        armLanding(landing)
     }
 
     /**

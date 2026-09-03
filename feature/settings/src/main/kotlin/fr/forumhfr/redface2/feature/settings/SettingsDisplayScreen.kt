@@ -1,6 +1,5 @@
 package fr.forumhfr.redface2.feature.settings
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,37 +20,32 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
-import fr.forumhfr.redface2.core.domain.preferences.AccentColor
-import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsChoice
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsChoiceGroup
+import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsListItem
 
 /**
- * #494 — « Affichage » sub-page. Extracts the theme (#286: 3-way Clair / Système / Sombre + AMOLED,
- * only meaningful when the effective theme is dark) and the reading presets (#287: density + font
- * scale) from the former root catalogue, using the shared [RedfaceSettingsChoiceGroup]. Binds its
- * own [SettingsViewModel] instance (DataStore source of truth — same trade-off as `SettingsProxyScreen`).
+ * #494 — « Affichage » sub-page. Extracts the theme mode (#286), the colours sub-page (#595), and
+ * the reading presets (#287: density + font scale) from the former root catalogue, using the shared
+ * [RedfaceSettingsChoiceGroup]. Binds its own [SettingsViewModel] instance (DataStore source of truth
+ * — same trade-off as `SettingsProxyScreen`).
  */
 @Composable
 fun SettingsDisplayScreen(
     onBack: () -> Unit,
+    onOpenColors: () -> Unit = {},
     modifier: Modifier = Modifier,
     topBarActions: @Composable (() -> Unit)? = null,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    // The AMOLED toggle is only meaningful when the app will actually render dark — forced DARK, or
-    // SYSTEM while the OS is in dark mode. Computed here so the switch is disabled otherwise.
-    val effectiveDark = when (state.themeMode) {
-        ThemeMode.LIGHT -> false
-        ThemeMode.DARK -> true
-        ThemeMode.SYSTEM -> isSystemInDarkTheme()
-    }
     val themeOptions = listOf(
         RedfaceSettingsChoice(ThemeMode.LIGHT, stringResource(R.string.settings_theme_light)),
         RedfaceSettingsChoice(ThemeMode.SYSTEM, stringResource(R.string.settings_theme_system)),
@@ -119,23 +113,11 @@ fun SettingsDisplayScreen(
             if (state.themeModeError) {
                 PreferencePersistError(R.string.settings_theme_persist_failed)
             }
-            DisplayToggleRow(
-                title = stringResource(R.string.settings_theme_amoled_title),
-                description = stringResource(R.string.settings_theme_amoled_description),
-                checked = state.amoledEnabled,
-                enabled = state.canToggleAmoled && effectiveDark,
-                onCheckedChange = { viewModel.submit(SettingsIntent.AmoledEnabledChanged(it)) },
-            )
-            if (state.amoledError) {
-                PreferencePersistError(R.string.settings_theme_amoled_persist_failed)
-            }
-            // TU 2788511 — accent colour family (rose ↔ vivid « REDFACE1 » red). Extracted to keep
-            // SettingsDisplayScreen under detekt's cyclomatic-complexity budget.
-            AccentColorSetting(
-                selected = state.accentColor,
-                enabled = state.canChangeAccentColor,
-                error = state.accentColorError,
-                onSelected = { viewModel.submit(SettingsIntent.AccentColorChanged(it)) },
+            RedfaceSettingsListItem(
+                title = stringResource(R.string.settings_nav_colors),
+                description = stringResource(R.string.settings_nav_colors_description),
+                onClick = onOpenColors,
+                trailingContent = { ChevronTrailing() },
             )
 
             // Reading presets (#287).
@@ -179,6 +161,13 @@ fun SettingsDisplayScreen(
                 enabled = state.canChangeMediaDisplayProfile,
                 error = state.mediaDisplayProfileError,
                 onSelected = { viewModel.submit(SettingsIntent.MediaDisplayProfileChanged(it)) },
+            )
+
+            PostImageMaxWidthSetting(
+                selected = state.postImageMaxWidth,
+                enabled = state.canChangePostImageMaxWidth,
+                error = state.postImageMaxWidthError,
+                onSelected = { viewModel.submit(SettingsIntent.PostImageMaxWidthChanged(it)) },
             )
 
             SmileyPickerDecorationSetting(
@@ -235,7 +224,7 @@ fun SettingsDisplayScreen(
             }
 
             // #666 — bottom navigation bar labels. Extracted to keep SettingsDisplayScreen under
-            // detekt's cyclomatic-complexity budget (same rationale as AccentColorSetting).
+            // detekt's cyclomatic-complexity budget.
             NavBarLabelsSetting(
                 checked = state.navBarLabels,
                 enabled = state.canToggleNavBarLabels,
@@ -308,6 +297,60 @@ private fun DisplayToggleRow(
 }
 
 /**
+ * #991 — largeur maximale fImage des images de contenu. Extrait pour garder l'écran hôte sous les
+ * seuils de complexité et conserver ce levier indépendant de l'agrandissement GIF et du mode
+ * pleine largeur des posts.
+ */
+@Composable
+private fun PostImageMaxWidthSetting(
+    selected: PostImageMaxWidth,
+    enabled: Boolean,
+    error: Boolean,
+    onSelected: (PostImageMaxWidth) -> Unit,
+) {
+    val intro = stringResource(R.string.settings_img_width_intro_start) +
+        " " +
+        stringResource(R.string.settings_img_width_b)
+    val options = listOf(
+        RedfaceSettingsChoice(
+            PostImageMaxWidth.P90,
+            stringResource(R.string.settings_display_post_image_max_width_90),
+        ),
+        RedfaceSettingsChoice(
+            PostImageMaxWidth.P95,
+            stringResource(R.string.settings_display_post_image_max_width_95),
+        ),
+        RedfaceSettingsChoice(
+            PostImageMaxWidth.P99,
+            stringResource(R.string.settings_display_post_image_max_width_99),
+        ),
+        RedfaceSettingsChoice(
+            PostImageMaxWidth.P100,
+            stringResource(R.string.settings_display_post_image_max_width_100),
+        ),
+    )
+    Text(
+        text = stringResource(R.string.settings_display_post_image_max_width_title),
+        style = MaterialTheme.typography.titleMedium,
+        color = MaterialTheme.colorScheme.onSurface,
+    )
+    Text(
+        text = intro,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    RedfaceSettingsChoiceGroup(
+        options = options,
+        selected = selected,
+        onSelected = onSelected,
+        enabled = enabled,
+    )
+    if (error) {
+        PreferencePersistError(R.string.settings_img_width_persist_failed)
+    }
+}
+
+/**
  * #989 — délimiteur des cellules du picker de smileys. Extrait comme ses voisins pour garder l'écran
  * hôte sous le budget de complexité de detekt. « Aucun » est le défaut : le délimiteur aide à
  * repérer une vignette sur un corpus très hétérogène, il ne change PAS la taille des smileys — le
@@ -360,7 +403,7 @@ private fun SmileyPickerDecorationSetting(
  * #973 ([AMENDEMENT-v1.5-2], exigence XaTriX) — block-GIF display profile setting. The S/M/L
  * labels carry the NUMERIC factors visibly (« S (×1, net) », « M (×1,5) », « L (×2,5) »).
  * Extracted from [SettingsDisplayScreen] so the host stays under detekt's cyclomatic-complexity
- * budget (same rationale as [AccentColorSetting]); emits a section title, the intro text, the
+ * budget; emits a section title, the intro text, the
  * three-choice group and the persist-error line into the caller's Column.
  */
 @Composable
@@ -393,40 +436,5 @@ private fun MediaDisplayProfileSetting(
     )
     if (error) {
         PreferencePersistError(R.string.settings_display_media_profile_persist_failed)
-    }
-}
-
-/**
- * TU 2788511 — accent colour family setting (rose ↔ vivid « REDFACE1 » red). Extracted from
- * [SettingsDisplayScreen] so the host stays under detekt's cyclomatic-complexity budget; emits the
- * intro text, the two-choice group and the persist-error line into the caller's Column.
- */
-@Composable
-private fun AccentColorSetting(
-    selected: AccentColor,
-    enabled: Boolean,
-    error: Boolean,
-    onSelected: (AccentColor) -> Unit,
-) {
-    val options = listOf(
-        RedfaceSettingsChoice(AccentColor.ROSE, stringResource(R.string.settings_theme_accent_rose)),
-        RedfaceSettingsChoice(
-            AccentColor.ROUGE_REDFACE1,
-            stringResource(R.string.settings_theme_accent_rouge_redface1),
-        ),
-    )
-    Text(
-        text = stringResource(R.string.settings_theme_accent_intro),
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    RedfaceSettingsChoiceGroup(
-        options = options,
-        selected = selected,
-        onSelected = onSelected,
-        enabled = enabled,
-    )
-    if (error) {
-        PreferencePersistError(R.string.settings_theme_accent_persist_failed)
     }
 }

@@ -4,8 +4,12 @@ import fr.forumhfr.redface2.core.domain.cache.ImageCacheMaintenance
 import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageContentCache
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageContentCacheException
+import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
+import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
+import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
@@ -13,10 +17,12 @@ import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
 import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
-import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
+import fr.forumhfr.redface2.core.domain.preferences.LightSurfaceTone
+import fr.forumhfr.redface2.core.domain.preferences.ThemeAccent
+import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
@@ -728,20 +734,22 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun `hide-read switch stays enabled under per-tab override even when global grouped is off`() = runTest {
-        // #309 Codex review: with the per-tab override on, the global hide-read still serves as the
-        // fallback for a tab grouped per-type, so the Settings switch must NOT be disabled just
-        // because the GLOBAL grouped toggle is off.
+    fun `global flags layout switches are disabled under per-tab override`() = runTest {
         repository.emitFlagsPerTabOverride(true)
         val viewModel = newViewModel()
 
         viewModel.submit(SettingsIntent.FlagsGroupByCategoryChanged(false))
 
         assertFalse(viewModel.state.value.flagsGroupByCategory)
-        assertTrue(
-            "per-tab override keeps the global hide-read editable as a fallback",
+        assertFalse(
+            "global grouped is edited from the Drapeaux quick config when per-tab override is on",
+            viewModel.state.value.canToggleFlagsGroupByCategory,
+        )
+        assertFalse(
+            "global hide-read is edited from the Drapeaux quick config when per-tab override is on",
             viewModel.state.value.canToggleFlagsHideReadCategories,
         )
+        assertTrue(viewModel.state.value.canToggleFlagsPerTabOverride)
     }
 
     @Test
@@ -821,13 +829,19 @@ class SettingsViewModelTest {
     @Test
     fun `init hydrates theme preferences from storage`() = runTest {
         repository.emitThemeMode(ThemeMode.DARK)
-        repository.emitAmoledEnabled(true)
+        val colors = ThemeColorPreferences(
+            accent = ThemeAccent.Preset(AccentPreset.BLUE),
+            lightSurfaceTone = LightSurfaceTone.WHITE,
+            darkSurfaceTone = DarkSurfaceTone.AMOLED,
+            dynamicColorEnabled = true,
+        )
+        repository.emitThemeColorPreferences(colors)
 
         val viewModel = newViewModel()
         val state = viewModel.state.value
 
         assertEquals(ThemeMode.DARK, state.themeMode)
-        assertTrue(state.amoledEnabled)
+        assertEquals(colors, state.themeColorPreferences)
     }
 
     @Test
@@ -859,27 +873,65 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun `AmoledEnabledChanged persists the flip`() = runTest {
+    fun `DarkSurfaceToneChanged persists AMOLED in the complete colour bundle`() = runTest {
         val viewModel = newViewModel()
-        assertFalse("AMOLED is off by default", viewModel.state.value.amoledEnabled)
 
-        viewModel.submit(SettingsIntent.AmoledEnabledChanged(true))
+        viewModel.submit(SettingsIntent.DarkSurfaceToneChanged(DarkSurfaceTone.AMOLED))
 
-        assertTrue(viewModel.state.value.amoledEnabled)
-        assertFalse(viewModel.state.value.isUpdatingAmoled)
-        assertEquals(1, repository.amoledSetCalls)
+        val expected = ThemeColorPreferences(darkSurfaceTone = DarkSurfaceTone.AMOLED)
+        assertEquals(expected, viewModel.state.value.themeColorPreferences)
+        assertFalse(viewModel.state.value.isUpdatingThemeColors)
+        assertEquals(1, repository.themeColorPreferencesSetCalls)
+        assertEquals(expected, repository.lastThemeColorPreferencesSet)
     }
 
     @Test
-    fun `AmoledEnabledChanged reverts and raises the error flag on persist failure`() = runTest {
-        repository.failOnAmoledSet = true
+    fun `LightSurfaceToneChanged persists the light surface tone`() = runTest {
         val viewModel = newViewModel()
 
-        viewModel.submit(SettingsIntent.AmoledEnabledChanged(true))
+        viewModel.submit(SettingsIntent.LightSurfaceToneChanged(LightSurfaceTone.WHITE))
 
-        assertFalse("must revert to the previous value on failure", viewModel.state.value.amoledEnabled)
-        assertFalse(viewModel.state.value.isUpdatingAmoled)
-        assertTrue(viewModel.state.value.amoledError)
+        val expected = ThemeColorPreferences(lightSurfaceTone = LightSurfaceTone.WHITE)
+        assertEquals(expected, viewModel.state.value.themeColorPreferences)
+        assertEquals(expected, repository.lastThemeColorPreferencesSet)
+    }
+
+    @Test
+    fun `DynamicColorEnabledChanged persists the system colour toggle`() = runTest {
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.DynamicColorEnabledChanged(true))
+
+        val expected = ThemeColorPreferences(dynamicColorEnabled = true)
+        assertEquals(expected, viewModel.state.value.themeColorPreferences)
+        assertEquals(expected, repository.lastThemeColorPreferencesSet)
+    }
+
+    @Test
+    fun `PostHeaderEmphasisChanged persists the header emphasis in the complete colour bundle`() = runTest {
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.PostHeaderEmphasisChanged(PostHeaderEmphasis.VIVID))
+
+        val expected = ThemeColorPreferences(postHeaderEmphasis = PostHeaderEmphasis.VIVID)
+        assertEquals(expected, viewModel.state.value.themeColorPreferences)
+        assertEquals(expected, repository.lastThemeColorPreferencesSet)
+    }
+
+    @Test
+    fun `theme colour update reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnThemeColorPreferencesSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.DarkSurfaceToneChanged(DarkSurfaceTone.AMOLED))
+
+        assertEquals(
+            "must revert to the previous colour bundle on failure",
+            ThemeColorPreferences(),
+            viewModel.state.value.themeColorPreferences,
+        )
+        assertFalse(viewModel.state.value.isUpdatingThemeColors)
+        assertTrue(viewModel.state.value.themeColorsError)
     }
 
     @Test
@@ -986,6 +1038,44 @@ class SettingsViewModelTest {
                 MediaDisplayProfile.L,
                 viewModel.state.value.mediaDisplayProfile,
             )
+        }
+
+    @Test
+    fun `init hydrates the post image max width from storage`() = runTest {
+        repository.emitPostImageMaxWidth(PostImageMaxWidth.P90)
+
+        val viewModel = newViewModel()
+
+        assertEquals(PostImageMaxWidth.P90, viewModel.state.value.postImageMaxWidth)
+    }
+
+    @Test
+    fun `PostImageMaxWidthChanged persists the new width and clears the updating flag`() = runTest {
+        val viewModel = newViewModel()
+        assertEquals(PostImageMaxWidth.DEFAULT, viewModel.state.value.postImageMaxWidth)
+
+        viewModel.submit(SettingsIntent.PostImageMaxWidthChanged(PostImageMaxWidth.P100))
+
+        val state = viewModel.state.value
+        assertEquals(PostImageMaxWidth.P100, state.postImageMaxWidth)
+        assertFalse(state.isUpdatingPostImageMaxWidth)
+        assertFalse(state.postImageMaxWidthError)
+        assertEquals(1, repository.postImageMaxWidthSetCalls)
+        assertEquals(PostImageMaxWidth.P100, repository.lastPostImageMaxWidthSet)
+    }
+
+    @Test
+    fun `PostImageMaxWidthChanged reverts to the previous width and raises the error flag on persist failure`() =
+        runTest {
+            repository.failOnPostImageMaxWidthSet = true
+            val viewModel = newViewModel()
+
+            viewModel.submit(SettingsIntent.PostImageMaxWidthChanged(PostImageMaxWidth.P90))
+
+            val state = viewModel.state.value
+            assertEquals(PostImageMaxWidth.DEFAULT, state.postImageMaxWidth)
+            assertFalse(state.isUpdatingPostImageMaxWidth)
+            assertTrue(state.postImageMaxWidthError)
         }
 
     @Test
@@ -1572,41 +1662,147 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun `init hydrates accentColor from a persisted value`() = runTest {
-        repository.emitAccentColor(AccentColor.ROUGE_REDFACE1)
+    fun `init hydrates custom accent input from a persisted custom RGB`() = runTest {
+        repository.emitThemeColorPreferences(
+            ThemeColorPreferences(accent = ThemeAccent.Custom(rgb = 0x12ABEF)),
+        )
 
         val viewModel = newViewModel()
 
-        assertEquals(AccentColor.ROUGE_REDFACE1, viewModel.state.value.accentColor)
-        assertFalse(viewModel.state.value.accentColorError)
+        assertEquals(ThemeAccent.Custom(rgb = 0x12ABEF), viewModel.state.value.themeColorPreferences.accent)
+        assertEquals("#12ABEF", viewModel.state.value.customAccentHexInput)
+        assertFalse(viewModel.state.value.customAccentHexError)
     }
 
     @Test
-    fun `AccentColorChanged persists the chosen colour`() = runTest {
+    fun `init keeps preset accent input empty and exposes the preset seed as placeholder`() = runTest {
+        repository.emitThemeColorPreferences(
+            ThemeColorPreferences(accent = ThemeAccent.Preset(AccentPreset.BLUE)),
+        )
+
         val viewModel = newViewModel()
-        assertEquals(AccentColor.ROSE, viewModel.state.value.accentColor)
+        val state = viewModel.state.value
 
-        viewModel.submit(SettingsIntent.AccentColorChanged(AccentColor.ROUGE_REDFACE1))
-
-        assertEquals(AccentColor.ROUGE_REDFACE1, viewModel.state.value.accentColor)
-        assertFalse(viewModel.state.value.isUpdatingAccentColor)
-        assertEquals(1, repository.accentColorSetCalls)
+        assertEquals(ThemeAccent.Preset(AccentPreset.BLUE), state.themeColorPreferences.accent)
+        assertEquals("", state.customAccentHexInput)
+        assertEquals("", state.customAccentHexSyncedInput)
+        assertEquals("#1976D2", state.customAccentHexPlaceholder)
+        assertNull(state.customAccentPreviewRgb)
+        assertFalse(state.customAccentHexError)
     }
 
     @Test
-    fun `AccentColorChanged reverts and raises the error flag on persist failure`() = runTest {
-        repository.failOnAccentColorSet = true
+    fun `theme colour emission keeps dirty custom accent input`() = runTest {
         val viewModel = newViewModel()
 
-        viewModel.submit(SettingsIntent.AccentColorChanged(AccentColor.ROUGE_REDFACE1))
+        viewModel.submit(SettingsIntent.CustomAccentHexChanged("#12"))
+        repository.emitThemeColorPreferences(ThemeColorPreferences(dynamicColorEnabled = true))
+
+        val state = viewModel.state.value
+        assertEquals("#12", state.customAccentHexInput)
+        assertEquals("", state.customAccentHexSyncedInput)
+        assertEquals(ThemeColorPreferences(dynamicColorEnabled = true), state.themeColorPreferences)
+        assertFalse(state.customAccentHexError)
+    }
+
+    @Test
+    fun `ThemeAccentPresetChanged persists the chosen preset`() = runTest {
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.ThemeAccentPresetChanged(AccentPreset.ROUGE_REDFACE1))
+
+        val expected = ThemeColorPreferences(accent = ThemeAccent.Preset(AccentPreset.ROUGE_REDFACE1))
+        assertEquals(expected, viewModel.state.value.themeColorPreferences)
+        assertFalse(viewModel.state.value.isUpdatingThemeColors)
+        assertEquals(1, repository.themeColorPreferencesSetCalls)
+        assertEquals(expected, repository.lastThemeColorPreferencesSet)
+    }
+
+    @Test
+    fun `ThemeAccentPresetChanged clears the custom field and updates the placeholder`() = runTest {
+        repository.emitThemeColorPreferences(
+            ThemeColorPreferences(accent = ThemeAccent.Custom(rgb = 0x12ABEF)),
+        )
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.ThemeAccentPresetChanged(AccentPreset.ROUGE_REDFACE1))
+
+        val state = viewModel.state.value
+        assertEquals(ThemeAccent.Preset(AccentPreset.ROUGE_REDFACE1), state.themeColorPreferences.accent)
+        assertEquals("", state.customAccentHexInput)
+        assertEquals("", state.customAccentHexSyncedInput)
+        assertEquals("#F44336", state.customAccentHexPlaceholder)
+        assertNull(state.customAccentPreviewRgb)
+    }
+
+    @Test
+    fun `CustomAccentHexCommitted persists a normalized RGB value`() = runTest {
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.CustomAccentHexChanged("12abef"))
+        viewModel.submit(SettingsIntent.CustomAccentHexCommitted)
+
+        val expected = ThemeColorPreferences(accent = ThemeAccent.Custom(rgb = 0x12ABEF))
+        assertEquals(expected, viewModel.state.value.themeColorPreferences)
+        assertEquals("#12ABEF", viewModel.state.value.customAccentHexInput)
+        assertFalse(viewModel.state.value.customAccentHexError)
+        assertEquals(expected, repository.lastThemeColorPreferencesSet)
+    }
+
+    @Test
+    fun `CustomAccentHexCommitted ignores an unchanged synchronized custom value`() = runTest {
+        repository.emitThemeColorPreferences(
+            ThemeColorPreferences(accent = ThemeAccent.Custom(rgb = 0x12ABEF)),
+        )
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.CustomAccentHexCommitted)
+
+        assertEquals(ThemeAccent.Custom(rgb = 0x12ABEF), viewModel.state.value.themeColorPreferences.accent)
+        assertEquals("#12ABEF", viewModel.state.value.customAccentHexInput)
+        assertFalse(viewModel.state.value.customAccentHexError)
+        assertEquals(0, repository.themeColorPreferencesSetCalls)
+    }
+
+    @Test
+    fun `CustomAccentHexCommitted ignores a value matching the effective preset seed`() = runTest {
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.CustomAccentHexChanged("#A62C2C"))
+        viewModel.submit(SettingsIntent.CustomAccentHexCommitted)
+
+        assertEquals(ThemeColorPreferences(), viewModel.state.value.themeColorPreferences)
+        assertEquals("", viewModel.state.value.customAccentHexInput)
+        assertFalse(viewModel.state.value.customAccentHexError)
+        assertEquals(0, repository.themeColorPreferencesSetCalls)
+    }
+
+    @Test
+    fun `CustomAccentHexCommitted rejects invalid hex without writing repository`() = runTest {
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.CustomAccentHexChanged("#12GG00"))
+        viewModel.submit(SettingsIntent.CustomAccentHexCommitted)
+
+        assertEquals(ThemeColorPreferences(), viewModel.state.value.themeColorPreferences)
+        assertTrue(viewModel.state.value.customAccentHexError)
+        assertEquals(0, repository.themeColorPreferencesSetCalls)
+    }
+
+    @Test
+    fun `theme accent preset reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnThemeColorPreferencesSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.ThemeAccentPresetChanged(AccentPreset.BLUE))
 
         assertEquals(
-            "failed persist must revert to the previous colour",
-            AccentColor.ROSE,
-            viewModel.state.value.accentColor,
+            "failed persist must revert to the previous colour bundle",
+            ThemeColorPreferences(),
+            viewModel.state.value.themeColorPreferences,
         )
-        assertFalse(viewModel.state.value.isUpdatingAccentColor)
-        assertTrue(viewModel.state.value.accentColorError)
+        assertFalse(viewModel.state.value.isUpdatingThemeColors)
+        assertTrue(viewModel.state.value.themeColorsError)
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -2218,7 +2414,7 @@ class SettingsViewModelTest {
             flagsPerTabOverride.value = enabled
         }
 
-        // #286 — theme preferences. Same optimistic-flip seams as the flags toggles.
+        // #286/#595 — theme preferences. Same optimistic-flip seams as the flags toggles.
         private val themeMode = MutableStateFlow(ThemeMode.SYSTEM)
         var themeModeSetCalls: Int = 0
             private set
@@ -2226,10 +2422,12 @@ class SettingsViewModelTest {
             private set
         var failOnThemeModeSet: Boolean = false
 
-        private val amoledEnabled = MutableStateFlow(false)
-        var amoledSetCalls: Int = 0
+        private val themeColorPreferences = MutableStateFlow(ThemeColorPreferences())
+        var themeColorPreferencesSetCalls: Int = 0
             private set
-        var failOnAmoledSet: Boolean = false
+        var lastThemeColorPreferencesSet: ThemeColorPreferences? = null
+            private set
+        var failOnThemeColorPreferencesSet: Boolean = false
 
         override fun observeThemeMode(): Flow<ThemeMode> = themeMode
 
@@ -2240,12 +2438,13 @@ class SettingsViewModelTest {
             themeMode.value = mode
         }
 
-        override fun observeAmoledEnabled(): Flow<Boolean> = amoledEnabled
+        override fun observeThemeColorPreferences(): Flow<ThemeColorPreferences> = themeColorPreferences
 
-        override suspend fun setAmoledEnabled(enabled: Boolean) {
-            amoledSetCalls += 1
-            check(!failOnAmoledSet) { "boom" }
-            amoledEnabled.value = enabled
+        override suspend fun setThemeColorPreferences(preferences: ThemeColorPreferences) {
+            themeColorPreferencesSetCalls += 1
+            check(!failOnThemeColorPreferencesSet) { "boom" }
+            lastThemeColorPreferencesSet = preferences
+            themeColorPreferences.value = preferences
         }
 
         // #287 — reading display presets. Same optimistic-flip seams as the theme controls.
@@ -2317,6 +2516,27 @@ class SettingsViewModelTest {
 
         fun emitMediaDisplayProfile(value: MediaDisplayProfile) {
             mediaDisplayProfile.value = value
+        }
+
+        // #991 — content-image fImage cap. Same optimistic-flip seam as the GIF profile.
+        private val postImageMaxWidth = MutableStateFlow(PostImageMaxWidth.DEFAULT)
+        var postImageMaxWidthSetCalls: Int = 0
+            private set
+        var lastPostImageMaxWidthSet: PostImageMaxWidth? = null
+            private set
+        var failOnPostImageMaxWidthSet: Boolean = false
+
+        override fun observePostImageMaxWidth(): Flow<PostImageMaxWidth> = postImageMaxWidth
+
+        override suspend fun setPostImageMaxWidth(width: PostImageMaxWidth) {
+            postImageMaxWidthSetCalls += 1
+            check(!failOnPostImageMaxWidthSet) { "boom" }
+            lastPostImageMaxWidthSet = width
+            postImageMaxWidth.value = width
+        }
+
+        fun emitPostImageMaxWidth(value: PostImageMaxWidth) {
+            postImageMaxWidth.value = value
         }
 
         // Build 89 follow-up — topic top-bar auto-hide. Same optimistic-flip seam as amoled.
@@ -2705,8 +2925,8 @@ class SettingsViewModelTest {
             themeMode.value = value
         }
 
-        fun emitAmoledEnabled(value: Boolean) {
-            amoledEnabled.value = value
+        fun emitThemeColorPreferences(value: ThemeColorPreferences) {
+            themeColorPreferences.value = value
         }
 
         fun emitTopicTopBarAutoHide(value: Boolean) {
@@ -2823,24 +3043,6 @@ class SettingsViewModelTest {
 
         fun emitImmersiveNavBarReveal(value: ImmersiveNavBarReveal) {
             immersiveNavBarReveal.value = value
-        }
-
-        // TU 2788511 — accent colour family. Default ROSE, enum optimistic-flip seam.
-        private val accentColor = MutableStateFlow(AccentColor.ROSE)
-        var accentColorSetCalls: Int = 0
-            private set
-        var failOnAccentColorSet: Boolean = false
-
-        override fun observeAccentColor(): Flow<AccentColor> = accentColor
-
-        override suspend fun setAccentColor(color: AccentColor) {
-            accentColorSetCalls += 1
-            check(!failOnAccentColorSet) { "boom" }
-            accentColor.value = color
-        }
-
-        fun emitAccentColor(value: AccentColor) {
-            accentColor.value = value
         }
 
         // #1132 — Forum flag-filter preference has no Settings UI; a plain in-memory seam keeps the

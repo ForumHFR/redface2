@@ -89,6 +89,7 @@ class PostMenuSheetTest {
             "Mettre un favori HFR ici",
             "Modifier le premier message",
             "Ajouter à la citation multiple",
+            "Citer le début",
             "Envoyer un MP",
             "Masquer cet utilisateur",
             "Alerter (à venir)",
@@ -99,6 +100,17 @@ class PostMenuSheetTest {
             compose.onNodeWithText(label).assertExists()
         }
         compose.onNodeWithText("Alerter (à venir)").assertIsNotEnabled()
+    }
+
+    @Test
+    fun `quote-start entry routes to its callback`() {
+        var called = 0
+        mount(withAllActions = true, onQuoteStart = { called += 1 })
+
+        compose.onNodeWithText("Citer le début").performClick()
+        compose.waitUntil(timeoutMillis = 5_000) { called == 1 }
+
+        assertEquals(1, called)
     }
 
     @Test
@@ -125,7 +137,11 @@ class PostMenuSheetTest {
         assertEquals(PERMALINK, started.data.toString())
     }
 
-    private fun mount(post: Post, withAllActions: Boolean = false) {
+    private fun mount(
+        post: Post = samplePost(),
+        withAllActions: Boolean = false,
+        onQuoteStart: () -> Unit = {},
+    ) {
         compose.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 PostMenuSheet(
@@ -145,6 +161,7 @@ class PostMenuSheetTest {
                     onFavoriteClick = {},
                     multiQuoteSelected = false,
                     onToggleMultiQuote = if (withAllActions) ({}) else null,
+                    onQuoteStart = if (withAllActions) onQuoteStart else null,
                     authorBlocked = false,
                     onToggleBlockAuthor = if (withAllActions) ({}) else null,
                 )

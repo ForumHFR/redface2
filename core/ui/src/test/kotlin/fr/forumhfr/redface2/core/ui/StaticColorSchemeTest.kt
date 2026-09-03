@@ -6,14 +6,17 @@ import fr.forumhfr.redface2.core.ui.theme.RedfaceDarkColorScheme
 import fr.forumhfr.redface2.core.ui.theme.RedfaceLightColorScheme
 import fr.forumhfr.redface2.core.ui.theme.RedfaceRedDarkColorScheme
 import fr.forumhfr.redface2.core.ui.theme.RedfaceRedLightColorScheme
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertSame
 import org.junit.Test
 
 /**
  * TU 2788511 — pure-JVM guard on [staticColorScheme]: the accent family must pick the right scheme,
- * AMOLED dark must win over the accent (it is its own near-black variant), and the default rose
- * accent must keep the historical light/dark schemes. The dynamic-colour branch (needing a Context)
- * lives in the composable and is out of scope here.
+ * `ROSE + AMOLED` must keep the historical manual scheme, and other AMOLED accents must stay
+ * chromatic over black surfaces. The dynamic-colour branch (needing a Context) lives in the
+ * composable and is out of scope here.
  */
 class StaticColorSchemeTest {
 
@@ -42,15 +45,24 @@ class StaticColorSchemeTest {
     }
 
     @Test
-    fun `AMOLED dark wins over the accent family`() {
+    fun `ROSE AMOLED keeps the historical manual AMOLED scheme`() {
         assertSame(
             RedfaceAmoledColorScheme,
             staticColorScheme(darkTheme = true, amoledTheme = true, accentColor = AccentColor.ROSE),
         )
-        assertSame(
-            RedfaceAmoledColorScheme,
-            staticColorScheme(darkTheme = true, amoledTheme = true, accentColor = AccentColor.ROUGE_REDFACE1),
+    }
+
+    @Test
+    fun `ROUGE REDFACE1 AMOLED keeps the red accent over black surfaces`() {
+        val scheme = staticColorScheme(
+            darkTheme = true,
+            amoledTheme = true,
+            accentColor = AccentColor.ROUGE_REDFACE1,
         )
+
+        assertNotSame(RedfaceAmoledColorScheme, scheme)
+        assertNotEquals(RedfaceAmoledColorScheme.primary, scheme.primary)
+        assertEquals(RedfaceAmoledColorScheme.surface, scheme.surface)
     }
 
     @Test

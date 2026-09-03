@@ -7,7 +7,7 @@ mermaid: true
 # Redface 2
 {: .fs-9 }
 
-Le futur client Android pour Hardware.fr.
+Le client Android communautaire pour Hardware.fr, en bêta publique.
 {: .fs-6 .fw-300 }
 
 [Voir les spécifications]({{ site.baseurl }}/specs){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
@@ -71,11 +71,14 @@ graph TB
 
 ## État du projet
 
-Phase courante : **Phase 4 — Extensions + refonte UI** ([roadmap]({{ site.baseurl }}/specs/roadmap)). Phases 1 (lecture), 2 (écriture) et 3 (messages) sont **livrées** : login, drapeaux, forum, topics, cache, deep links, recherche, écriture/édition/citation/création, MPs classiques et MultiMPs (lecture, réponse ; citation simple **et multiple** par message, livrées en 1:1 comme en DT — GET de formulaire mesuré dans les deux cas, aucun POST live, et pour la citation multiple ni l'enchaînement des récupérations ni un POST portant plusieurs blocs `[quotemsg]` n'ont encore été observés côté serveur ; **ni l'une ni l'autre n'est proposée sur le premier message des pages 2 et suivantes**, où HFR insère une « Reprise du message précédent » sans rang (`ref=0`) que le contrat MP fail-closed refuse — [#1110](https://github.com/ForumHFR/redface2/issues/1110)), onglet DT, MPStorage lecture **et écriture** (opt-in). La dernière **bêta publiée est la 0.41.0** (2026-08-11, Play open testing + F-Droid) : elle ajoute EgoQuote et EgoPost (#874) par-dessus la 0.40.0 (sélecteur de smileys #989, correctifs de drapeaux #638, favori posé sur un message #986) et la 0.37.0 (refontes des vues Drapeaux #603 et Topic #604, passe images #876) ; seule la sync MPStorage bidirectionnelle complète reste reportée (#6). En cours : le chantier de **partage de la surface de lecture Topic → MP/DT** ([#1040](https://github.com/ForumHFR/redface2/issues/1040), lots 0 à 6 clos ; lot 7 PR 2 : substrat Room dormant, activation UI réservée à la PR 3) — son état fonction par fonction se lit dans la [matrice de parité]({{ site.baseurl }}/specs/reading-parity). Les itérations 2 des vues Topic et Éditeur (milestones *Vue · Topic 2* et *Vue · Éditeur 2*) restent au backlog.
+- **Bêta publique 0.50.2** (1er septembre 2026, Play test ouvert + F-Droid) : sondages (vote, clôture par le créateur), liens HFR (ouverture externe sans rebond, gestionnaire par défaut), modération et rôles du staff, vue forum, citations et fiabilité. Détail par version dans [`app/CHANGELOG.md`](https://github.com/ForumHFR/redface2/blob/main/app/CHANGELOG.md).
+- **Canal dev 0.52.x** : Réglages → Affichage → Couleurs (huit presets d'accent, hexa, tons de fond clair et sombre, AMOLED, couleurs du système), zoom pincé interactif, largeur maximale des images.
+- **Livré** : les phases 0 à 3 de la [roadmap]({{ site.baseurl }}/specs/roadmap) (bootstrap ; lecture ; écriture ; messages privés et MultiMP, MPStorage en lecture et en écriture opt-in) et la refonte UI de la phase 4 (vues Drapeaux [#603](https://github.com/ForumHFR/redface2/issues/603) et Topic [#604](https://github.com/ForumHFR/redface2/issues/604), passe images [#876](https://github.com/ForumHFR/redface2/issues/876), EgoQuote et EgoPost [#874](https://github.com/ForumHFR/redface2/issues/874), surface de lecture partagée Topic → MP/DT [#1040](https://github.com/ForumHFR/redface2/issues/1040)). L'état fonction par fonction côté MP se lit dans la [matrice de parité]({{ site.baseurl }}/specs/reading-parity).
+- **Pilotage** : depuis juin 2026 le travail est suivi par milestones de vue (*Vue · Topic 2*, *Vue · Éditeur 2*, *Vue · Drapeaux 2*, *Vue · MP 1*, *Vue · Réglages 1*, *Vue · Compte HFR 1*, *Infra & dette*), les phases restant des épics thématiques. Restent ouverts en fond : l'architecture d'extensions ([#7](https://github.com/ForumHFR/redface2/issues/7)) et la sync MPStorage entre appareils ([#6](https://github.com/ForumHFR/redface2/issues/6)).
 
-Les specs restent la source de vérité du projet, mais elles doivent désormais refléter le code réel : tout écart entre une page canonique et le repo est traité comme un bug de spec, pas comme une dette future. Voir [`/spec-reality`](https://github.com/ForumHFR/redface2/blob/main/.agents/skills/spec-reality/SKILL.md) pour la procédure d'audit cross-fichier.
+Les specs restent la source de vérité du projet, mais elles doivent refléter le code réel : tout écart entre une page canonique et le repo est traité comme un bug de spec, pas comme une dette future. Voir [`/spec-reality`](https://github.com/ForumHFR/redface2/blob/main/.agents/skills/spec-reality/SKILL.md) pour la procédure d'audit cross-fichier.
 
-Les contributions sont les bienvenues : ouvrez une issue, commentez les existantes ou proposez une PR sur le slice courant.
+Les contributions sont les bienvenues : ouvrez une issue, commentez les existantes ou proposez une PR sur `dev`. Les retours de test passent par le [topic bêta](https://forum.hardware.fr/forum2.php?config=hfr.inc&cat=23&post=35395&page=1) et le [topic dev](https://forum.hardware.fr/forum2.php?config=hfr.inc&cat=23&post=35421&page=1) sur HFR.
 
 ---
 
@@ -98,8 +101,14 @@ Les contributions sont les bienvenues : ouvrez une issue, commentez les existant
 
 ### Guides
 
-- [Contribuer]({{ site.baseurl }}/guides/contributing) — Comment participer
+- [Installation]({{ site.baseurl }}/guides/installation) — Play, F-Droid (bêta et dev), GitHub Releases, signatures et cohabitation
+- [Contribuer]({{ site.baseurl }}/guides/contributing) — Environnement, tests, rendu visuel, Git
+- [Release]({{ site.baseurl }}/guides/release) — Canaux bêta et dev, registre `app-v<N>`, promotion `dev → main`
+- [Limitations connues]({{ site.baseurl }}/guides/known-issues) — Compromis assumés et limites plateforme
 - [Pourquoi Redface 2 ?]({{ site.baseurl }}/guides/rationale) — Le contexte et les doutes assumés
-- [Nommage]({{ site.baseurl }}/guides/naming) — Le futur nom de l'app
+- [Nommage]({{ site.baseurl }}/guides/naming) — Historique du choix du nom
 - [Références écosystème HFR]({{ site.baseurl }}/guides/references) — Clients tiers, docs MesDiscussions, outillage compagnon
 - [Proxy utilisateur]({{ site.baseurl }}/guides/proxy) — Router le trafic HFR via un proxy configurable dans l'app
+- [Profiling]({{ site.baseurl }}/guides/profiling) — Mesurer avant d'optimiser
+- [Icône de l'application]({{ site.baseurl }}/guides/app-icon) — Sources et déclinaisons de l'icône
+- [Capturer une fixture de citation MP]({{ site.baseurl }}/guides/capture-fixture-citation-mp) — Procédure de capture live

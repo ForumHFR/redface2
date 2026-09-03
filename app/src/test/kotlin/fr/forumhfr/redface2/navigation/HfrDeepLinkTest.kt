@@ -90,6 +90,18 @@ class HfrDeepLinkTest {
     }
 
     @Test
+    fun `forum2 php with page below one clamps to page 1`() {
+        val uri = Uri.parse("https://forum.hardware.fr/forum2.php?cat=23&post=35395&page=0")
+
+        val parsed = parseHfrDeepLink(uri)
+
+        assertEquals(
+            TopicRoute(cat = 23, post = 35395, page = 1, scrollTo = null),
+            parsed?.route,
+        )
+    }
+
+    @Test
     fun `forum2 php email link with page 1 and an anchor marks the page for resolution (#750)`() {
         // Real-world email-notification shape (issue #750): page=1 is a lie, the target
         // travels both as the `numreponse` query param and the `#t` fragment.
@@ -264,6 +276,58 @@ class HfrDeepLinkTest {
             ),
             resolveHfrDeepLink(viewIntent(uri)),
         )
+    }
+
+    @Test
+    fun `resolveHfrUri resolves legacy topic URL with an anchor`() {
+        val uri = Uri.parse("https://forum.hardware.fr/forum2.php?cat=23&post=35395&page=7#t999")
+
+        assertEquals(
+            HfrDeepLinkResolution.Route(
+                ParsedDeepLink(
+                    destination = TopLevelDestination.Flags,
+                    route = TopicRoute(cat = 23, post = 35_395, page = 7, scrollTo = 999),
+                ),
+            ),
+            resolveHfrUri(uri),
+        )
+    }
+
+    @Test
+    fun `resolveHfrUri resolves legacy topic URL without an anchor`() {
+        val uri = Uri.parse("https://forum.hardware.fr/forum2.php?cat=23&post=35395&page=7")
+
+        assertEquals(
+            HfrDeepLinkResolution.Route(
+                ParsedDeepLink(
+                    destination = TopLevelDestination.Flags,
+                    route = TopicRoute(cat = 23, post = 35_395, page = 7),
+                ),
+            ),
+            resolveHfrUri(uri),
+        )
+    }
+
+    @Test
+    fun `resolveHfrUri resolves pretty topic URLs`() {
+        val uri = Uri.parse("https://forum.hardware.fr/hfr/GSMGPSPDA/android/redface-dev-sujet_35421_3.htm")
+
+        assertEquals(
+            HfrDeepLinkResolution.Route(
+                ParsedDeepLink(
+                    destination = TopLevelDestination.Flags,
+                    route = TopicRoute(cat = 23, post = 35_421, page = 3),
+                ),
+            ),
+            resolveHfrUri(uri),
+        )
+    }
+
+    @Test
+    fun `resolveHfrUri ignores non HFR hosts`() {
+        val uri = Uri.parse("https://example.com/forum2.php?cat=23&post=35395&page=7#t999")
+
+        assertEquals(HfrDeepLinkResolution.Ignore, resolveHfrUri(uri))
     }
 
     @Test

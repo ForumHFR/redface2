@@ -14,6 +14,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -22,6 +23,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -31,9 +35,11 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 
 @Composable
 fun LoginScreen(
@@ -62,6 +68,8 @@ internal fun LoginContent(
     val keyboardController = LocalSoftwareKeyboardController.current
     val isSubmitting = state.mode is LoginUiState.Mode.Submitting
     val canSubmit = state.pseudo.isNotBlank() && state.password.isNotBlank() && !isSubmitting
+
+    var passwordVisible by remember { mutableStateOf(false) }
 
     val submitAction: () -> Unit = {
         keyboardController?.hide()
@@ -110,7 +118,11 @@ internal fun LoginContent(
                 label = { Text(stringResource(R.string.login_password)) },
                 singleLine = true,
                 enabled = !isSubmitting,
-                visualTransformation = PasswordVisualTransformation(),
+                visualTransformation = if (passwordVisible) {
+                    VisualTransformation.None
+                } else {
+                    PasswordVisualTransformation()
+                },
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Password,
                     imeAction = ImeAction.Done,
@@ -118,6 +130,18 @@ internal fun LoginContent(
                 keyboardActions = KeyboardActions(
                     onDone = { if (canSubmit) submitAction() },
                 ),
+                trailingIcon = {
+                    IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                        RedfaceVectorIcon(
+                            resId = if (passwordVisible) fr.forumhfr.redface2.core.ui.R.drawable.ic_ms_visibility_off
+                            else fr.forumhfr.redface2.core.ui.R.drawable.ic_ms_visibility,
+                            contentDescription = stringResource(
+                                if (passwordVisible) R.string.login_password_hide
+                                else R.string.login_password_show
+                            ),
+                        )
+                    }
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .semantics { contentType = ContentType.Password },

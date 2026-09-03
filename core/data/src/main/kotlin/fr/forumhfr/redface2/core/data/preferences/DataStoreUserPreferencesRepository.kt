@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.data.preferences
 
 import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
@@ -8,9 +9,10 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import fr.forumhfr.redface2.core.domain.coroutines.ApplicationScope
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
-import fr.forumhfr.redface2.core.domain.preferences.AccentColor
+import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
 import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
 import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
+import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
@@ -18,15 +20,20 @@ import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
+import fr.forumhfr.redface2.core.domain.preferences.LightSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.domain.preferences.NavBarLabelsBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
+import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
+import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenChoice
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
+import fr.forumhfr.redface2.core.domain.preferences.ThemeAccent
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
+import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
@@ -93,10 +100,16 @@ class DataStoreUserPreferencesRepository @Inject constructor(
     // could otherwise return the pre-write disk value).
     private val forumCategoryFlagFilterCache = MutableStateFlow<CategoryFlagFilter?>(null)
 
+    // Same cache-first contract for the grouped theme-colour bundle (#1250 H3). Each UI action
+    // persists five DataStore keys; the cache is the in-session source of truth while queued disk
+    // commits converge on the latest complete bundle, not a stale caller snapshot.
+    private val themeColorPreferencesCache = MutableStateFlow<ThemeColorPreferences?>(null)
+
     // #1132 — serialises the disk writes of THIS key so two rapid choices cannot interleave; combined
     // with persisting the LATEST cache value inside the lock (below), the stored value converges to
     // the last choice (strict last-wins) regardless of the order the async commits execute.
     private val forumCategoryFlagFilterWriteMutex = Mutex()
+    private val themeColorPreferencesWriteMutex = Mutex()
 
     override fun observeProxyConfig(): Flow<ProxyConfig> =
         dataStore.data
@@ -303,42 +316,43 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
-    override fun observeAmoledEnabled(): Flow<Boolean> =
-        dataStore.data
-            // Default `false`: AMOLED is opt-in and only meaningful in dark (#286).
-            .map { prefs -> prefs[KEY_AMOLED_ENABLED] ?: false }
-            .distinctUntilChanged()
-            .onEach { enabled ->
-                if (themeBootstrapStore.read().amoledEnabled != enabled) {
-                    themeBootstrapStore.writeAmoledEnabled(enabled)
+    override fun observeThemeColorPreferences(): Flow<ThemeColorPreferences> =
+        themeColorPreferencesCache
+            .onStart {
+                if (themeColorPreferencesCache.value == null) {
+                    val fromDisk = runCatching { readThemeColorPreferences(dataStore.data.first()) }
+                        .getOrDefault(ThemeColorPreferences())
+                    themeColorPreferencesCache.compareAndSet(null, fromDisk)
                 }
             }
-            .catch { emit(false) }
-
-    override suspend fun setAmoledEnabled(enabled: Boolean) {
-        persist {
-            dataStore.edit { prefs ->
-                prefs[KEY_AMOLED_ENABLED] = enabled
-            }
-            themeBootstrapStore.writeAmoledEnabled(enabled)
-        }
-    }
-
-    override fun observeAccentColor(): Flow<AccentColor> =
-        dataStore.data
-            // Default ROSE (TU 2788511): the historical maroon/rose scheme until the user opts into red.
-            .map(::readAccentColor)
-            // Keep the accent flow quiet unless it actually changes so RedfaceApp doesn't recompose
-            // the whole tree on unrelated edits — same stance as observeThemeMode. No bootstrap mirror:
-            // the accent does not paint the window background (cf. observeDisplayDensity).
+            .filterNotNull()
             .distinctUntilChanged()
-            .catch { emit(AccentColor.ROSE) }
+            .onEach(::backfillThemeColorBootstrap)
+            .catch { emit(ThemeColorPreferences()) }
 
-    override suspend fun setAccentColor(color: AccentColor) {
-        persist {
-            dataStore.edit { prefs ->
-                prefs[KEY_ACCENT_COLOR] = color.name
+    override suspend fun setThemeColorPreferences(preferences: ThemeColorPreferences) {
+        val stale = themeColorPreferencesCache.value
+        themeColorPreferencesCache.value = preferences
+        try {
+            persist {
+                themeColorPreferencesWriteMutex.withLock {
+                    val latest = themeColorPreferencesCache.value ?: preferences
+                    dataStore.edit { prefs ->
+                        writeThemeAccent(prefs, latest.accent)
+                        prefs[KEY_LIGHT_SURFACE_TONE] = latest.lightSurfaceTone.name
+                        prefs[KEY_AMOLED_ENABLED] = latest.darkSurfaceTone == DarkSurfaceTone.AMOLED
+                        prefs[KEY_DYNAMIC_COLOR_ENABLED] = latest.dynamicColorEnabled
+                        prefs[KEY_POST_HEADER_EMPHASIS] = latest.postHeaderEmphasis.name
+                    }
+                    themeBootstrapStore.writeThemeColorPreferences(latest)
+                }
             }
+        } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+            // The cache is the in-session source of truth: an unpersisted bundle must not survive a
+            // failed commit (theme vs. settings divergence, bootstrap mirror backfilled with it). The
+            // CAS keeps a newer bundle written meanwhile (Opus review of #1250 H3).
+            themeColorPreferencesCache.compareAndSet(preferences, stale)
+            throw error
         }
     }
 
@@ -775,6 +789,21 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observePostImageMaxWidth(): Flow<PostImageMaxWidth> =
+        dataStore.data
+            // Default P95 (#991): preserves the historical fImage cap unless the user opts in.
+            .map(::readPostImageMaxWidth)
+            .distinctUntilChanged()
+            .catch { emit(PostImageMaxWidth.DEFAULT) }
+
+    override suspend fun setPostImageMaxWidth(width: PostImageMaxWidth) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_POST_IMAGE_MAX_WIDTH] = width.name
+            }
+        }
+    }
+
     override fun observeSmileyPickerDecoration(): Flow<SmileyPickerDecoration> =
         dataStore.data
             // Default NONE (#989): delimiters are opt-in selection aids, not thumbnail resizing.
@@ -977,6 +1006,16 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             ?: MediaDisplayProfile.M
 
     /**
+     * Reads [KEY_POST_IMAGE_MAX_WIDTH] defensively (#991): an unknown / corrupt stored value
+     * (older build, manual edit) falls back to [PostImageMaxWidth.DEFAULT] instead of crashing on
+     * `PostImageMaxWidth.valueOf`, same stance as [readMediaDisplayProfile].
+     */
+    private fun readPostImageMaxWidth(prefs: Preferences): PostImageMaxWidth =
+        prefs[KEY_POST_IMAGE_MAX_WIDTH]
+            ?.let { stored -> runCatching { PostImageMaxWidth.valueOf(stored) }.getOrNull() }
+            ?: PostImageMaxWidth.DEFAULT
+
+    /**
      * Reads [KEY_SMILEY_PICKER_DECORATION] defensively (#989): an unknown / corrupt stored value
      * (older build, manual edit) falls back to [SmileyPickerDecoration.NONE] instead of crashing on
      * `SmileyPickerDecoration.valueOf`, same stance as [readMediaDisplayProfile].
@@ -1006,14 +1045,70 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             ?.let { stored -> runCatching { CategoryFlagFilter.valueOf(stored) }.getOrNull() }
             ?: CategoryFlagFilter.ALL
 
+    private fun readThemeColorPreferences(prefs: Preferences): ThemeColorPreferences =
+        ThemeColorPreferences(
+            accent = readThemeAccent(prefs),
+            lightSurfaceTone = readLightSurfaceTone(prefs),
+            darkSurfaceTone = readDarkSurfaceTone(prefs),
+            dynamicColorEnabled = prefs[KEY_DYNAMIC_COLOR_ENABLED] ?: false,
+            postHeaderEmphasis = readPostHeaderEmphasis(prefs),
+        )
+
     /**
-     * Reads [KEY_ACCENT_COLOR] defensively (TU 2788511): an unknown / corrupt stored value falls back
-     * to [AccentColor.ROSE] instead of crashing on `AccentColor.valueOf`, same stance as [readThemeMode].
+     * Reads [KEY_ACCENT_COLOR] defensively. Unknown preset names fall back to ROSE; CUSTOM is valid
+     * only when paired with a strict 24-bit [KEY_ACCENT_CUSTOM_RGB].
      */
-    private fun readAccentColor(prefs: Preferences): AccentColor =
-        prefs[KEY_ACCENT_COLOR]
-            ?.let { stored -> runCatching { AccentColor.valueOf(stored) }.getOrNull() }
-            ?: AccentColor.ROSE
+    private fun readThemeAccent(prefs: Preferences): ThemeAccent {
+        val stored = prefs[KEY_ACCENT_COLOR]
+        return when {
+            stored == CUSTOM_ACCENT_STORAGE_VALUE -> readCustomAccent(prefs) ?: DEFAULT_ACCENT
+            stored != null -> readPresetAccent(stored)
+            else -> DEFAULT_ACCENT
+        }
+    }
+
+    private fun readPresetAccent(stored: String): ThemeAccent =
+        AccentPreset.entries
+            .firstOrNull { it.name == stored }
+            ?.let(ThemeAccent::Preset)
+            ?: DEFAULT_ACCENT
+
+    private fun readCustomAccent(prefs: Preferences): ThemeAccent.Custom? =
+        prefs[KEY_ACCENT_CUSTOM_RGB]
+            ?.takeIf { it.isValidRgb() }
+            ?.let(ThemeAccent::Custom)
+
+    private fun readLightSurfaceTone(prefs: Preferences): LightSurfaceTone =
+        prefs[KEY_LIGHT_SURFACE_TONE]
+            ?.let { stored -> LightSurfaceTone.entries.firstOrNull { it.name == stored } }
+            ?: LightSurfaceTone.REDFACE1_GRAY
+
+    private fun readDarkSurfaceTone(prefs: Preferences): DarkSurfaceTone =
+        if (prefs[KEY_AMOLED_ENABLED] == true) DarkSurfaceTone.AMOLED else DarkSurfaceTone.MATERIAL_TINTED
+
+    private fun readPostHeaderEmphasis(prefs: Preferences): PostHeaderEmphasis =
+        prefs[KEY_POST_HEADER_EMPHASIS]
+            ?.let { stored -> PostHeaderEmphasis.entries.firstOrNull { it.name == stored } }
+            ?: PostHeaderEmphasis.SUBTLE
+
+    private fun writeThemeAccent(prefs: MutablePreferences, accent: ThemeAccent) {
+        when (accent) {
+            is ThemeAccent.Preset -> {
+                prefs[KEY_ACCENT_COLOR] = accent.preset.name
+                prefs.remove(KEY_ACCENT_CUSTOM_RGB)
+            }
+            is ThemeAccent.Custom -> {
+                prefs[KEY_ACCENT_COLOR] = CUSTOM_ACCENT_STORAGE_VALUE
+                prefs[KEY_ACCENT_CUSTOM_RGB] = accent.rgb
+            }
+        }
+    }
+
+    private fun backfillThemeColorBootstrap(preferences: ThemeColorPreferences) {
+        if (themeBootstrapStore.read().colorPreferences != preferences) {
+            themeBootstrapStore.writeThemeColorPreferences(preferences)
+        }
+    }
 
     /**
      * Reads [KEY_FONT_SCALE] defensively (#287): an unknown / corrupt stored value falls back to
@@ -1198,6 +1293,10 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
         val KEY_AMOLED_ENABLED = booleanPreferencesKey("amoled_enabled")
         val KEY_ACCENT_COLOR = stringPreferencesKey("accent_color")
+        val KEY_ACCENT_CUSTOM_RGB = intPreferencesKey("accent_custom_rgb")
+        val KEY_LIGHT_SURFACE_TONE = stringPreferencesKey("light_surface_tone")
+        val KEY_DYNAMIC_COLOR_ENABLED = booleanPreferencesKey("dynamic_color_enabled")
+        val KEY_POST_HEADER_EMPHASIS = stringPreferencesKey("post_header_emphasis")
 
         // #1207 — opt-in Android chooser for every explicit external-link opening.
         val KEY_ALWAYS_ASK_LINK_APP = booleanPreferencesKey("always_ask_link_app")
@@ -1270,6 +1369,8 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val KEY_FONT_SCALE = stringPreferencesKey("font_scale")
         // #973 — block-GIF display profile (MediaDisplayProfile.name, defensively parsed).
         val KEY_MEDIA_DISPLAY_PROFILE = stringPreferencesKey("media_display_profile")
+        // #991 — post content image max width (PostImageMaxWidth.name, defensively parsed).
+        val KEY_POST_IMAGE_MAX_WIDTH = stringPreferencesKey("post_image_max_width")
         // #989 — smiley picker cell delimiter (SmileyPickerDecoration.name, defensively parsed).
         val KEY_SMILEY_PICKER_DECORATION = stringPreferencesKey("smiley_picker_decoration")
 
@@ -1283,3 +1384,11 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val KEY_FORUM_CATEGORY_FLAG_FILTER = stringPreferencesKey("forum_category_flag_filter")
     }
 }
+
+private val DEFAULT_ACCENT = ThemeAccent.Preset(AccentPreset.ROSE)
+
+private const val CUSTOM_ACCENT_STORAGE_VALUE = "CUSTOM"
+private const val MIN_RGB = 0x000000
+private const val MAX_RGB = 0xFFFFFF
+
+private fun Int.isValidRgb(): Boolean = this in MIN_RGB..MAX_RGB

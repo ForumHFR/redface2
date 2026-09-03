@@ -20,6 +20,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -64,6 +65,41 @@ class DefaultForumRepositoryTest {
             assertEquals(19, cached.value.size)
             cancelAndIgnoreRemainingEvents()
         }
+        coVerify(exactly = 1) { apiClient.getCategories(any()) }
+    }
+
+    @Test
+    fun `observeCachedCategories emits null on cold cache without fetching`() = runTest {
+        val apiClient = mockk<HfrApiClient>(relaxed = true)
+        val repo = repository(apiClient)
+
+        repo.observeCachedCategories().test {
+            assertNull(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify(exactly = 0) { apiClient.getCategories(any()) }
+    }
+
+    @Test
+    fun `observeCachedCategories emits a warmed cache without fetching again`() = runTest {
+        val apiClient = mockk<HfrApiClient> {
+            coEvery { getCategories(any()) } returns fixture("rest_categories.json")
+        }
+        val repo = repository(apiClient)
+
+        repo.observeCategories().test {
+            awaitItem() // Loading
+            awaitItem() // Success
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repo.observeCachedCategories().test {
+            val cached = awaitItem() as ForumResult.Success
+            assertEquals(19, cached.value.size)
+            cancelAndIgnoreRemainingEvents()
+        }
+
         coVerify(exactly = 1) { apiClient.getCategories(any()) }
     }
 
@@ -126,6 +162,42 @@ class DefaultForumRepositoryTest {
             assertTrue(awaitItem() is ForumResult.Success)
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `observeCachedSubcategories emits null on cold cache without fetching`() = runTest {
+        val apiClient = mockk<HfrApiClient>(relaxed = true)
+        val repo = repository(apiClient)
+
+        repo.observeCachedSubcategories(13).test {
+            assertNull(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify(exactly = 0) { apiClient.getSubcategories(any()) }
+    }
+
+    @Test
+    fun `observeCachedSubcategories emits a warmed cache without fetching again`() = runTest {
+        val apiClient = mockk<HfrApiClient> {
+            coEvery { getSubcategories(cat = 13) } returns fixture("rest_subcategories_cat13.json")
+        }
+        val repo = repository(apiClient)
+
+        repo.observeSubcategories(13).test {
+            assertEquals(ForumResult.Loading, awaitItem())
+            val success = awaitItem() as ForumResult.Success
+            assertEquals(15, success.value.size)
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repo.observeCachedSubcategories(13).test {
+            val cached = awaitItem() as ForumResult.Success
+            assertEquals(15, cached.value.size)
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify(exactly = 1) { apiClient.getSubcategories(cat = 13) }
     }
 
     @Test

@@ -8,7 +8,7 @@ permalink: /guides/naming
 # Choix du nom
 {: .fs-8 }
 
-Le nom définitif de l'app n'est pas encore décidé. Voici les candidats.
+L'app est distribuée sous le nom « Redface 2 » (Play, F-Droid, GitHub) ; cette page garde l'historique des candidats et des critères. Aucun renommage n'est engagé.
 {: .fs-5 .fw-300 }
 
 ---

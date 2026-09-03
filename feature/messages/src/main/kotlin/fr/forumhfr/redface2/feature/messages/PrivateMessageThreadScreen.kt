@@ -32,7 +32,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.contentColorFor
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.pullToRefresh
@@ -85,6 +84,7 @@ import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.ego.deriveEgoCanonicalPseudo
 import fr.forumhfr.redface2.core.domain.ego.isEgoPost
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
+import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
 import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
@@ -111,7 +111,9 @@ import fr.forumhfr.redface2.core.ui.post.PostListScaffold
 import fr.forumhfr.redface2.core.ui.post.PostMediaDiskCachePolicy
 import fr.forumhfr.redface2.core.ui.post.ReadingPostCard
 import fr.forumhfr.redface2.core.ui.post.ReadingPostCardPresentation
+import fr.forumhfr.redface2.core.ui.post.postHeaderColors
 import fr.forumhfr.redface2.core.ui.post.readingContentColors
+import fr.forumhfr.redface2.core.ui.post.sharePostImageUrl
 import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 import fr.forumhfr.redface2.core.ui.zoom.PinchZoomState
@@ -189,6 +191,9 @@ fun PrivateMessageThreadScreen(
     // page on screen and surfaces a Toast inviting a retry (pull again / tap the pager again).
     val context = LocalContext.current
     val refreshFailedMsg = stringResource(R.string.messages_thread_refresh_failed)
+    val imageShareFailedMsg = stringResource(
+        fr.forumhfr.redface2.core.ui.R.string.post_image_menu_share_failed,
+    )
     LaunchedEffect(Unit) {
         viewModel.effects.collect { effect ->
             when (effect) {
@@ -226,6 +231,9 @@ fun PrivateMessageThreadScreen(
                         R.string.messages_image_menu_save_failed_too_large,
                         android.widget.Toast.LENGTH_SHORT,
                     ).show()
+                }
+                is PrivateMessageThreadEffect.ShareImage -> {
+                    sharePostImageUrl(context, effect.url, imageShareFailedMsg)
                 }
             }
         }
@@ -267,6 +275,7 @@ fun PrivateMessageThreadScreen(
             onOpenProfile = onOpenProfile,
             onSetAuthorBlocked = viewModel::setAuthorBlocked,
             onSaveImage = viewModel::saveImage,
+            onShareImage = viewModel::shareImage,
         ),
         presentation = PrivateMessageThreadPresentation(
             multiQuoteSelections = multiQuoteSelections,
@@ -497,6 +506,8 @@ internal data class PrivateMessageThreadCallbacks(
     val onSetAuthorBlocked: (author: String, blocked: Boolean) -> Unit = { _, _ -> },
     // #831/#1051 — the ViewModel-owned save survives dismissal of the local image sheet.
     val onSaveImage: (url: String) -> Unit = {},
+    // #831 — host-side share runs through an effect so the menu can close immediately.
+    val onShareImage: (url: String) -> Unit = {},
 )
 
 /**
@@ -737,6 +748,7 @@ internal fun PrivateMessageThreadContent(
         mode = mode,
         target = imageMenuTarget,
         onSave = callbacks.onSaveImage,
+        onShare = callbacks.onShareImage,
         onClear = { imageMenuTarget = null },
     )
 }
@@ -880,9 +892,9 @@ private fun PrivateMessageThreadReader(
     val pageInteraction = runtime.pageInteraction
     val isZoomed by remember(zoomState) { derivedStateOf { zoomState.zoomed } }
     val haptics = LocalHapticFeedback.current
-    // #382/#1103 — one refresh authority for the single list-level detector. PinchZoom already
-    // consumes the first down on Initial while zoomed; the explicit zoom guard is defense in depth,
-    // matching the topic contract even if the modifier order changes later.
+    // #382/#1103 — one refresh authority for the single list-level detector. PinchZoom leaves
+    // child taps and long-presses transparent while zoomed; this explicit zoom guard owns the
+    // double-tap refresh suspension, matching the topic contract.
     val onDoubleTapRefresh = remember(haptics, zoomState) {
         {
             if (!zoomState.zoomed) {
@@ -977,6 +989,7 @@ private fun PrivateMessageThreadReader(
                 page = state.page,
                 fullWidthPosts = state.fullWidthPosts,
                 showSignatures = state.showSignatures,
+                postHeaderEmphasis = state.postHeaderEmphasis,
                 egoQuoteEnabled = state.egoQuoteEnabled,
                 egoPostEnabled = state.egoPostEnabled,
                 connectedPseudo = state.connectedPseudo,
@@ -1165,6 +1178,7 @@ private fun ThreadImageMenuHost(
     mode: PrivateMessageThreadUiState.Mode,
     target: PostImageTarget?,
     onSave: (String) -> Unit,
+    onShare: (String) -> Unit,
     onClear: () -> Unit,
 ) {
     // Unlike TopicLoadedContent, this host must explicitly forget the private target when its content
@@ -1179,6 +1193,7 @@ private fun ThreadImageMenuHost(
             PostImageMenuSheet(
                 target = imageTarget,
                 onSave = onSave,
+                onShare = onShare,
                 onDismiss = onClear,
                 // The thumbnail is a second request for the same private PostContent URL and
                 // lives outside ReadingPostCard's provider, so carry the policy explicitly.
@@ -1565,12 +1580,19 @@ private data class ThreadScrollSession(
  * #382/#1103 — the topic detector reused as the single MP double-tap arbiter on the LazyColumn.
  * Since #1117 removed the card-wide long press, free card surfaces and list interstices reach this
  * one owner. Explicit child targets consume their up, which cancels the detector; drags beyond
- * touch slop cancel through [detectTapGestures].
+ * touch slop cancel through [detectTapGestures]. While zoomed, the detector is removed entirely
+ * because `detectTapGestures` consumes tap events before its callback-level guard can decline them.
  */
-private fun Modifier.privateMessageDoubleTapRefresh(onDoubleTapRefresh: () -> Unit): Modifier =
+private fun Modifier.privateMessageDoubleTapRefresh(
+    enabled: Boolean,
+    onDoubleTapRefresh: () -> Unit,
+): Modifier = if (enabled) {
     pointerInput(Unit) {
         detectTapGestures(onDoubleTap = { onDoubleTapRefresh() })
     }
+} else {
+    this
+}
 
 /** Quote callbacks travel together so the hot list cannot grow a third independent capability. */
 private data class MessageQuoteCallbacks(
@@ -1594,6 +1616,7 @@ private fun ThreadMessages(
     page: Int,
     fullWidthPosts: Boolean,
     showSignatures: Boolean,
+    postHeaderEmphasis: PostHeaderEmphasis,
     egoQuoteEnabled: Boolean,
     egoPostEnabled: Boolean,
     connectedPseudo: String?,
@@ -1668,7 +1691,10 @@ private fun ThreadMessages(
             .pinchZoom(scrollSession.zoomState, scrollSession.listState)
             .then(scrollSession.swipeModifier)
             // One owner covers free card surfaces and interstices; child clickables consume their up.
-            .privateMessageDoubleTapRefresh(scrollSession.onDoubleTapRefresh)
+            .privateMessageDoubleTapRefresh(
+                enabled = !zoomSuspendsScroll,
+                onDoubleTapRefresh = scrollSession.onDoubleTapRefresh,
+            )
             .pinchZoomTransform(scrollSession.zoomState),
     ) {
         itemsIndexed(
@@ -1725,6 +1751,7 @@ private fun ThreadMessages(
                         egoQuoteCanonicalPseudo = egoQuoteCanonicalPseudo,
                         egoPostHighlighted = message.numreponse in egoPostNumreponses,
                     ),
+                    postHeaderEmphasis = postHeaderEmphasis,
                     // #1042 — same gate as the topic card (#208): a message whose page row carried no
                     // profile link ([Post.profileId] null) keeps its identity line inert.
                     onOpenProfile = message.profileId?.let { profileId ->
@@ -1857,6 +1884,7 @@ internal fun MessageCard(
     /** #221 — global canonical staff directory; empty keeps direct tests/previews neutral. */
     staffByPseudo: Map<String, AuthorRole> = emptyMap(),
     presentation: ReadingPostCardPresentation = ReadingPostCardPresentation(),
+    postHeaderEmphasis: PostHeaderEmphasis = PostHeaderEmphasis.SUBTLE,
     multiQuoteSelected: Boolean = false,
     onOpenProfile: (() -> Unit)? = null,
     onOpenMenu: (() -> Unit)? = null,
@@ -1900,16 +1928,18 @@ internal fun MessageCard(
         onImageLongPress = onImageLongPress,
         identity = { moderationOverride ->
             // An MP has no anchor/category tint, but still carries the same full-width identity band
-            // as a normal topic post. Its neutral secondaryContainer colour is independent from
+            // as a normal topic post. Its configurable neutral/vivid colour is independent from
             // EgoPost; a moderation row explicitly overrides it with the RF1 two-tone red header.
             // PostIdentityBand adds no padding, so the shared band rhythm is reinjected on the
             // header — MP-owned gutters at cardBodyHorizontal, shared symmetric vertical inset at
             // cardHeaderVertical; the header↔body gap remains the body slot's own cardBodyTop.
-            val bandContainerColor = moderationOverride?.containerColor
-                ?: MaterialTheme.colorScheme.secondaryContainer
-            val bandContentColor = moderationOverride?.contentColor
-                ?: contentColorFor(bandContainerColor)
-            val supportingContentColorOverride = moderationOverride?.let { bandContentColor }
+            val normalHeaderColors = postHeaderColors(postHeaderEmphasis)
+            val bandColors = moderationOverride ?: normalHeaderColors
+            val supportingContentColorOverride = when {
+                moderationOverride != null -> bandColors.contentColor
+                postHeaderEmphasis == PostHeaderEmphasis.VIVID -> bandColors.contentColor
+                else -> null
+            }
             PostIdentityBand(
                 modifier = Modifier.semantics {
                     when {
@@ -1921,8 +1951,8 @@ internal fun MessageCard(
                         }
                     }
                 },
-                containerColor = bandContainerColor,
-                contentColor = bandContentColor,
+                containerColor = bandColors.containerColor,
+                contentColor = bandColors.contentColor,
             ) {
                 // A creator supplies the shared gold pseudo leaf; a non-creator staff supplies a
                 // neutral Text beside its pill; everyone else uses the neutral fallback. Per the

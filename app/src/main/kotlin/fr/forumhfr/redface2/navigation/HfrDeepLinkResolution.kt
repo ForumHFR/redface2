@@ -15,14 +15,19 @@ internal sealed interface HfrDeepLinkResolution {
 @Suppress("ReturnCount") // Ignore-guards (data/scheme/action/host) + legacy route + pretty-url route/fallback.
 internal fun resolveHfrDeepLink(intent: Intent): HfrDeepLinkResolution {
     val uri = intent.data ?: return HfrDeepLinkResolution.Ignore
-    val scheme = uri.scheme?.lowercase() ?: return HfrDeepLinkResolution.Ignore
     if (
         intent.action != Intent.ACTION_VIEW ||
-        scheme !in WEB_SCHEMES ||
-        uri.host?.equals(HFR_HOST, ignoreCase = true) != true
+        !isSupportedHfrUri(uri)
     ) {
         return HfrDeepLinkResolution.Ignore
     }
+
+    return resolveHfrUri(uri)
+}
+
+@Suppress("ReturnCount") // Ignore-guards + legacy route + pretty-url route/fallback.
+internal fun resolveHfrUri(uri: Uri): HfrDeepLinkResolution {
+    if (!isSupportedHfrUri(uri)) return HfrDeepLinkResolution.Ignore
 
     parseHfrDeepLink(uri)?.let { return HfrDeepLinkResolution.Route(it) }
 
@@ -42,6 +47,12 @@ internal fun resolveHfrDeepLink(intent: Intent): HfrDeepLinkResolution {
             ),
         ),
     )
+}
+
+private fun isSupportedHfrUri(uri: Uri): Boolean {
+    val scheme = uri.scheme?.lowercase() ?: return false
+    return scheme in WEB_SCHEMES &&
+        uri.host?.equals(HFR_HOST, ignoreCase = true) == true
 }
 
 internal fun parseHfrDeepLink(uri: Uri): ParsedDeepLink? = when (uri.path) {
@@ -67,7 +78,7 @@ internal fun parseHfrDeepLink(uri: Uri): ParsedDeepLink? = when (uri.path) {
     "/forum2.php" -> {
         val cat = uri.getQueryParameter("cat")?.toIntOrNull() ?: return null
         val post = uri.getQueryParameter("post")?.toIntOrNull() ?: return null
-        val page = uri.getQueryParameter("page")?.toIntOrNull() ?: 1
+        val page = uri.getQueryParameter("page")?.toIntOrNull()?.coerceAtLeast(1) ?: 1
         // #750 — the `numreponse` QUERY param is the fallback target: HFR email-notification
         // links carry it alongside the fragment, and some mail clients strip the fragment.
         val scrollTo = uri.fragment?.removePrefix("t")?.toIntOrNull()

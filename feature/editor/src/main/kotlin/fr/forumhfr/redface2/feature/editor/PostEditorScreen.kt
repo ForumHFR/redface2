@@ -81,7 +81,7 @@ import fr.forumhfr.redface2.core.ui.editor.QuoteCardsColumn
 @Composable
 fun PostEditorScreen(
     request: PostEditorRequest,
-    onSubmitSucceeded: (targetPage: Int?, scrollTo: Int?) -> Unit,
+    onSubmitSucceeded: (targetPage: Int?, scrollTo: Int?, quotedNumreponses: List<Int>) -> Unit,
     // #604 lot 4a — pops this editor AFTER the ViewModel flushed the draft (CloseCommitted).
     // Default keeps callers without the wiring on the platform back (no flush) — `:app` wires it.
     onClose: (() -> Unit)? = null,
@@ -95,7 +95,7 @@ fun PostEditorScreen(
         viewModel.effects.collect { effect ->
             when (effect) {
                 is PostEditorEffect.SubmitSucceeded ->
-                    onSubmitSucceeded(effect.targetPage, effect.scrollTo)
+                    onSubmitSucceeded(effect.targetPage, effect.scrollTo, effect.quotedNumreponses)
                 PostEditorEffect.CloseCommitted -> onClose?.invoke()
             }
         }

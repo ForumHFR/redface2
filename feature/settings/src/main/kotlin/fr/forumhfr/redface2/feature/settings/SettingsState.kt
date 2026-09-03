@@ -1,11 +1,17 @@
 package fr.forumhfr.redface2.feature.settings
 
-import fr.forumhfr.redface2.core.domain.preferences.AccentColor
+import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
+import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
+import fr.forumhfr.redface2.core.domain.preferences.LightSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
+import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
+import fr.forumhfr.redface2.core.domain.preferences.ThemeAccent
+import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
@@ -77,25 +83,21 @@ data class SettingsState(
     val isUpdatingFlagsPerTabOverride: Boolean = false,
     val flagsPerTabOverrideError: Boolean = false,
     val flagsPerTabOverrideTouchedLocally: Boolean = false,
-    // Theme preferences (#286). Same optimistic-flip machinery as the flags toggles:
-    // `themeMode`/`amoledEnabled` are the displayed values, `isUpdating*` gates the control
-    // while DataStore writes, `*Error` surfaces a persist failure, and `*TouchedLocally` is a
-    // legacy write marker (no longer consulted — #788). Defaults match the DataStore defaults
-    // (SYSTEM, amoled off).
+    // Theme preferences (#286 / #595 / #883). `themeMode` stays independent from the colour bundle:
+    // the mode decides light/dark, while `themeColorPreferences` carries accent presets/custom RGB,
+    // light/dark surface tones and Android 12+ dynamic colours. The bundle is written atomically so
+    // one UI action cannot leave the accent and surface keys half-updated.
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val isUpdatingThemeMode: Boolean = false,
     val themeModeError: Boolean = false,
     val themeModeTouchedLocally: Boolean = false,
-    val amoledEnabled: Boolean = false,
-    val isUpdatingAmoled: Boolean = false,
-    val amoledError: Boolean = false,
-    val amoledTouchedLocally: Boolean = false,
-    // TU 2788511 — accent colour family (rose default ↔ vivid « REDFACE1 » red). Same enum
-    // optimistic-flip + startup-race-guard machinery as `immersiveNavBarReveal`.
-    val accentColor: AccentColor = AccentColor.ROSE,
-    val isUpdatingAccentColor: Boolean = false,
-    val accentColorError: Boolean = false,
-    val accentColorTouchedLocally: Boolean = false,
+    val themeColorPreferences: ThemeColorPreferences = ThemeColorPreferences(),
+    val isUpdatingThemeColors: Boolean = false,
+    val themeColorsError: Boolean = false,
+    val themeColorsTouchedLocally: Boolean = false,
+    val customAccentHexInput: String = "",
+    val customAccentHexSyncedInput: String = "",
+    val customAccentHexError: Boolean = false,
     // #1207 — force Android's « Ouvrir avec… » chooser for explicit external-link actions.
     // Default false preserves the direct-default-browser behaviour until the user opts in.
     val alwaysAskLinkApp: Boolean = false,
@@ -264,6 +266,11 @@ data class SettingsState(
     val isUpdatingMediaDisplayProfile: Boolean = false,
     val mediaDisplayProfileError: Boolean = false,
     val mediaDisplayProfileTouchedLocally: Boolean = false,
+    // #991 — largeur maximale fImage des images de contenu (P95 par défaut).
+    val postImageMaxWidth: PostImageMaxWidth = PostImageMaxWidth.DEFAULT,
+    val isUpdatingPostImageMaxWidth: Boolean = false,
+    val postImageMaxWidthError: Boolean = false,
+    val postImageMaxWidthTouchedLocally: Boolean = false,
     // #989 — délimiteur des cellules du picker de smileys (NONE par défaut).
     val smileyPickerDecoration: SmileyPickerDecoration = SmileyPickerDecoration.NONE,
     val isUpdatingSmileyPickerDecoration: Boolean = false,
@@ -309,13 +316,12 @@ data class SettingsState(
         get() = !isUpdatingDebugBoundsOverlay
 
     val canToggleFlagsGroupByCategory: Boolean
-        get() = !isUpdatingFlagsGroupByCategory
+        get() = !flagsPerTabOverride && !isUpdatingFlagsGroupByCategory
 
-    // The global hide-read toggle is meaningful when the global grouped view is on, OR when the
-    // per-tab override is on (it still serves as the fallback for a tab that is grouped per-type but
-    // has no per-type hide-read value). #309 Codex review.
+    // When per-tab override is on, the readable editing point is the Drapeaux quick config sheet.
+    // The global value remains a persisted fallback, but Settings no longer exposes it as editable.
     val canToggleFlagsHideReadCategories: Boolean
-        get() = (flagsGroupByCategory || flagsPerTabOverride) && !isUpdatingFlagsHideReadCategories
+        get() = !flagsPerTabOverride && flagsGroupByCategory && !isUpdatingFlagsHideReadCategories
 
     val canToggleFlagsPerTabOverride: Boolean
         get() = !isUpdatingFlagsPerTabOverride
@@ -324,12 +330,17 @@ data class SettingsState(
     val canChangeThemeMode: Boolean
         get() = !isUpdatingThemeMode
 
-    val canToggleAmoled: Boolean
-        get() = !isUpdatingAmoled
+    val canChangeThemeColors: Boolean
+        get() = !isUpdatingThemeColors
 
-    // TU 2788511 — the accent colour control is gated only by its own in-flight write.
-    val canChangeAccentColor: Boolean
-        get() = !isUpdatingAccentColor
+    val customAccentPreviewRgb: Int?
+        get() = parseThemeAccentHexOrNull(customAccentHexInput)
+
+    val customAccentHexPlaceholder: String?
+        get() = when (val accent = themeColorPreferences.accent) {
+            is ThemeAccent.Custom -> null
+            is ThemeAccent.Preset -> accent.preset.seedRgb.toThemeAccentHex()
+        }
 
     // Build 89 follow-up — the topic top-bar auto-hide toggle is gated only by its own write.
     val canToggleTopicTopBarAutoHide: Boolean
@@ -433,6 +444,9 @@ data class SettingsState(
     val canChangeMediaDisplayProfile: Boolean
         get() = !isUpdatingMediaDisplayProfile
 
+    val canChangePostImageMaxWidth: Boolean
+        get() = !isUpdatingPostImageMaxWidth
+
     val canChangeSmileyPickerDecoration: Boolean
         get() = !isUpdatingSmileyPickerDecoration
 
@@ -506,11 +520,15 @@ sealed interface SettingsIntent {
     // #309 — per-tab display override master switch.
     data class FlagsPerTabOverrideChanged(val enabled: Boolean) : SettingsIntent
 
-    // #286 — theme preferences. `mode` is the desired selection, `enabled` the desired AMOLED state;
-    // both applied optimistically with revert-on-failure, like the flags toggles.
+    // #286 — theme mode. Colour details live in the complete bundle below.
     data class ThemeModeChanged(val mode: ThemeMode) : SettingsIntent
-    data class AmoledEnabledChanged(val enabled: Boolean) : SettingsIntent
-    data class AccentColorChanged(val color: AccentColor) : SettingsIntent
+    data class ThemeAccentPresetChanged(val preset: AccentPreset) : SettingsIntent
+    data class CustomAccentHexChanged(val text: String) : SettingsIntent
+    data object CustomAccentHexCommitted : SettingsIntent
+    data class PostHeaderEmphasisChanged(val emphasis: PostHeaderEmphasis) : SettingsIntent
+    data class LightSurfaceToneChanged(val tone: LightSurfaceTone) : SettingsIntent
+    data class DarkSurfaceToneChanged(val tone: DarkSurfaceTone) : SettingsIntent
+    data class DynamicColorEnabledChanged(val enabled: Boolean) : SettingsIntent
 
     /** #1207 — use Android's app chooser for every explicit external-link opening. */
     data class AlwaysAskLinkAppChanged(val enabled: Boolean) : SettingsIntent
@@ -607,6 +625,9 @@ sealed interface SettingsIntent {
     // #973 — block-GIF display profile. `profile` is the desired selection, applied optimistically
     // with revert-on-failure, like DisplayDensityChanged.
     data class MediaDisplayProfileChanged(val profile: MediaDisplayProfile) : SettingsIntent
+
+    // #991 — maximum fImage width for content images, applied optimistically like the GIF profile.
+    data class PostImageMaxWidthChanged(val width: PostImageMaxWidth) : SettingsIntent
 
     /** #989 — l'utilisateur choisit le délimiteur des cellules du picker de smileys. */
     data class SmileyPickerDecorationChanged(val decoration: SmileyPickerDecoration) : SettingsIntent

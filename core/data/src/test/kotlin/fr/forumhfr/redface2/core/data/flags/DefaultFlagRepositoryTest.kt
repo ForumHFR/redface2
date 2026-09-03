@@ -1902,6 +1902,37 @@ class DefaultFlagRepositoryTest {
     }
 
     @Test
+    fun `findCachedFlag scans warm caches without fetching cold buckets - 737`() = runTest {
+        // Legacy Super favorites only know topicId. They may be resolved from already-warm memory,
+        // but must not fan out RED/FAVORITES buckets just to decorate a local snapshot list.
+        val (apiClient, forumRepository) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+        }
+        val repo = buildRepository(apiClient, forumRepository)
+        repo.observe(FlagType.CYAN).first { it is FlagsResult.Success }
+
+        val found = repo.findCachedFlag(topicId = 35395)
+        assertEquals(35395, found?.topicId)
+        assertEquals(23, found?.cat)
+
+        coVerify(exactly = 0) {
+            apiClient.getCategoryFlagTopics(
+                cat = any(), bucket = HfrRestFlagBucket.READ, page = any(), resultsPerPage = any(), useAuth = any(),
+            )
+        }
+        coVerify(exactly = 0) {
+            apiClient.getCategoryFlagTopics(
+                cat = any(),
+                bucket = HfrRestFlagBucket.FAVORITES,
+                page = any(),
+                resultsPerPage = any(),
+                useAuth = any(),
+            )
+        }
+    }
+
+    @Test
     fun `findFlag resolves a cold FAVORITE behind a warm CYAN miss - 809`() = runTest {
         // Review finding #809 — the Drapeaux screen warms ONE tab at a time : a warm-but-missing
         // CYAN bucket says nothing about a never-loaded FAVORITE bucket. The cold buckets — and

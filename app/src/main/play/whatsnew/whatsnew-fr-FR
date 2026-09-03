@@ -1,8 +1,7 @@
-Redface 2 v0.50.2 — bêta.
+Redface 2 v0.53.6 — bêta.
 
-Grosse mise à jour depuis la 0.43.0 :
-- Sondages : voter dans l'app, voir les sondages clos et leur échéance, et clore le vôtre depuis n'importe quelle page.
-- Liens : ouverture externe sans rebond, choix de l'app, aide Firefox.
-- Posts de modération surlignés et pastilles de rôle du staff.
-- Vue Forum : filtre mémorisé, recherche, sujets épinglés séparés.
-- Badge « cité N fois » cliquable, plus divers correctifs de lecture.
+Lot 0.51 → 0.53 :
+- Couleurs : accent (8 presets ou hexa), ton du fond, Clair/Système/Sombre, en-tête Discret/Vif, fond gris esprit RF1.
+- Drapeaux : onglet Super (super-favoris), sous-catégorie, swipe sans saut, pastille +N colorée, recherche sans accents.
+- Sujets : plus de téléportation en postant, retour au message cité, sondages en barres, réponse rapide 15 lignes, zoom interactif, largeur d'images.
+- Liens HFR : retour et destination cohérents.

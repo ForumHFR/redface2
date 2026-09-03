@@ -15,6 +15,8 @@ import fr.forumhfr.redface2.core.domain.messages.PrivateMessageReadPositionStore
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageWritePreview
+import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
+import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.model.write.ReplyForm
@@ -100,15 +102,18 @@ class PrivateMessageThreadViewModelTest {
         postImageSaver = postImageSaver,
     )
 
+    @Suppress("LongParameterList") // test helper: every param is an optional, defaulted preference flow.
     private fun userPreferences(
         fullWidthPosts: Flow<Boolean> = MutableStateFlow(false),
         showSignatures: Flow<Boolean> = MutableStateFlow(false),
+        themeColorPreferences: Flow<ThemeColorPreferences> = MutableStateFlow(ThemeColorPreferences()),
         egoQuoteEnabled: Flow<Boolean> = MutableStateFlow(true),
         egoPostEnabled: Flow<Boolean> = MutableStateFlow(true),
         showPageFabs: Flow<Boolean> = MutableStateFlow(true),
     ): UserPreferencesRepository = mockk {
         every { observeTopicFullWidthPosts() } returns fullWidthPosts
         every { observeTopicSignatures() } returns showSignatures
+        every { observeThemeColorPreferences() } returns themeColorPreferences
         every { observeTopicEgoQuoteEnabled() } returns egoQuoteEnabled
         every { observeTopicEgoPostEnabled() } returns egoPostEnabled
         every { observeTopicPageFabs() } returns showPageFabs
@@ -254,20 +259,28 @@ class PrivateMessageThreadViewModelTest {
         val repository = loadedRepository()
         val fullWidthPosts = MutableStateFlow(false)
         val showSignatures = MutableStateFlow(false)
+        val themeColorPreferences = MutableStateFlow(ThemeColorPreferences())
         val viewModel = threadViewModel(
             repository = repository,
-            userPreferencesRepository = userPreferences(fullWidthPosts, showSignatures),
+            userPreferencesRepository = userPreferences(
+                fullWidthPosts = fullWidthPosts,
+                showSignatures = showSignatures,
+                themeColorPreferences = themeColorPreferences,
+            ),
         )
 
         assertFalse(viewModel.state.value.fullWidthPosts)
         assertFalse(viewModel.state.value.showSignatures)
+        assertEquals(PostHeaderEmphasis.SUBTLE, viewModel.state.value.postHeaderEmphasis)
 
         fullWidthPosts.value = true
         showSignatures.value = true
+        themeColorPreferences.value = ThemeColorPreferences(postHeaderEmphasis = PostHeaderEmphasis.VIVID)
         advanceUntilIdle()
 
         assertTrue(viewModel.state.value.fullWidthPosts)
         assertTrue(viewModel.state.value.showSignatures)
+        assertEquals(PostHeaderEmphasis.VIVID, viewModel.state.value.postHeaderEmphasis)
         coVerify(exactly = 1) {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
         }
@@ -1456,6 +1469,19 @@ class PrivateMessageThreadViewModelTest {
         viewModel.effects.test {
             viewModel.saveImage("https://images.example/huge.png")
             assertEquals(PrivateMessageThreadEffect.ImageSaveFailedTooLarge, awaitItem())
+        }
+    }
+
+    @Test
+    fun `share image emits the direct image URL`() = runTest {
+        val viewModel = threadViewModel(loadedRepository())
+
+        viewModel.effects.test {
+            viewModel.shareImage("https://images.example/vacances.png")
+            assertEquals(
+                PrivateMessageThreadEffect.ShareImage("https://images.example/vacances.png"),
+                awaitItem(),
+            )
         }
     }
 

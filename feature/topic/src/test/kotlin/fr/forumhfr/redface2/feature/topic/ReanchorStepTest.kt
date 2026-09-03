@@ -22,7 +22,7 @@ class ReanchorStepTest {
         val step = reanchorStep(
             current = ReanchorFrame(target, 0),
             previous = null,
-            target = target,
+            goal = ReanchorGoal(target),
             stableFrames = 99,
             stableThreshold = threshold,
         )
@@ -38,7 +38,7 @@ class ReanchorStepTest {
         val step = reanchorStep(
             frame,
             previous = frame,
-            target = target,
+            goal = ReanchorGoal(target),
             stableFrames = threshold - 1,
             stableThreshold = threshold,
         )
@@ -51,7 +51,7 @@ class ReanchorStepTest {
         val step = reanchorStep(
             frame,
             previous = frame,
-            target = target,
+            goal = ReanchorGoal(target),
             stableFrames = threshold,
             stableThreshold = Int.MAX_VALUE,
         )
@@ -67,7 +67,7 @@ class ReanchorStepTest {
         val step = reanchorStep(
             current = ReanchorFrame(target, 60),
             previous = ReanchorFrame(target, 0),
-            target = target,
+            goal = ReanchorGoal(target),
             stableFrames = threshold - 1,
             stableThreshold = threshold,
         )
@@ -85,7 +85,7 @@ class ReanchorStepTest {
         val step = reanchorStep(
             resting,
             previous = resting,
-            target = target,
+            goal = ReanchorGoal(target),
             stableFrames = threshold - 1,
             stableThreshold = threshold,
         )
@@ -98,7 +98,7 @@ class ReanchorStepTest {
         val step = reanchorStep(
             resting,
             previous = resting,
-            target = target,
+            goal = ReanchorGoal(target),
             stableFrames = 0,
             stableThreshold = threshold,
         )
@@ -112,12 +112,34 @@ class ReanchorStepTest {
     fun `staggered image growth resets stability so it never stops between two decodes`() {
         val a = ReanchorFrame(target, 0)
         // Two still frames accrue while image A holds.
-        var stable = (reanchorStep(a, a, target, 0, threshold) as ReanchorStep.Continue).stableFrames
-        stable = (reanchorStep(a, a, target, stable, threshold) as ReanchorStep.Continue).stableFrames
+        var stable = (
+            reanchorStep(
+                current = a,
+                previous = a,
+                goal = ReanchorGoal(target),
+                stableFrames = 0,
+                stableThreshold = threshold,
+            ) as ReanchorStep.Continue
+        ).stableFrames
+        stable = (
+            reanchorStep(
+                current = a,
+                previous = a,
+                goal = ReanchorGoal(target),
+                stableFrames = stable,
+                stableThreshold = threshold,
+            ) as ReanchorStep.Continue
+        ).stableFrames
         assertEquals(2, stable)
         // Image B now decodes and grows → the position moves → stability must reset, not stop.
         val b = ReanchorFrame(target, 80)
-        val step = reanchorStep(b, previous = a, target = target, stableFrames = stable, stableThreshold = threshold)
+        val step = reanchorStep(
+            b,
+            previous = a,
+            goal = ReanchorGoal(target),
+            stableFrames = stable,
+            stableThreshold = threshold,
+        )
         assertTrue(step is ReanchorStep.Continue)
         assertEquals("staggered growth resets stability", 0, (step as ReanchorStep.Continue).stableFrames)
     }
@@ -127,11 +149,89 @@ class ReanchorStepTest {
         val step = reanchorStep(
             current = ReanchorFrame(target - 1, 10),
             previous = ReanchorFrame(target, 0),
-            target = target,
+            goal = ReanchorGoal(target),
             stableFrames = 0,
             stableThreshold = threshold,
         )
         assertTrue(step is ReanchorStep.Continue)
+        assertTrue((step as ReanchorStep.Continue).repin)
+    }
+
+    // #1137 — marker alignment : the pin is « target at targetOffset », not « target at 0 ».
+
+    @Test
+    fun `resting at the marker offset is not a drift`() {
+        val markerOffset = 1728
+        val resting = ReanchorFrame(target, markerOffset, targetSize = 1800)
+        val step = reanchorStep(
+            current = resting,
+            previous = resting,
+            goal = ReanchorGoal(target, markerOffset),
+            stableFrames = 0,
+            stableThreshold = threshold,
+        )
+        assertTrue(step is ReanchorStep.Continue)
+        step as ReanchorStep.Continue
+        assertFalse("at the wanted offset → no re-pin", step.repin)
+        assertEquals(1, step.stableFrames)
+    }
+
+    @Test
+    fun `the target growing under a marker landing counts as movement and re-pins to the new offset`() {
+        // The first visible item inflates (its own image decoded) : Lazy keeps index/offset, so the
+        // marker at its bottom drifted down by 480 px. The size change alone must reset stability,
+        // and the caller's recomputed goal (old + 480) must trigger the re-pin.
+        val step = reanchorStep(
+            current = ReanchorFrame(target, 1728, targetSize = 1800 + 480),
+            previous = ReanchorFrame(target, 1728, targetSize = 1800),
+            goal = ReanchorGoal(target, 1728 + 480),
+            stableFrames = threshold - 1,
+            stableThreshold = threshold,
+        )
+        assertTrue(step is ReanchorStep.Continue)
+        step as ReanchorStep.Continue
+        assertEquals("size change resets stability instead of stopping", 0, step.stableFrames)
+        assertTrue("offset no longer matches the recomputed goal → re-pin", step.repin)
+    }
+
+    @Test
+    fun `a marker landing that settled at a non-zero offset stops on stillness like a top pin`() {
+        val resting = ReanchorFrame(target, 1728, targetSize = 1800)
+        val step = reanchorStep(
+            current = resting,
+            previous = resting,
+            goal = ReanchorGoal(target, 1728),
+            stableFrames = threshold - 1,
+            stableThreshold = threshold,
+        )
+        assertEquals(ReanchorStep.Stop, step)
+    }
+
+    @Test
+    fun `an unmeasured marker snaps the item fully off and the normalised reading asks for a harmless re-pin`() {
+        // markerHeight 0 → targetOffset == the item's size : Lazy normalises the position to the next
+        // item at offset 0. The reading differs from the goal, so the step asks for a re-pin (a
+        // no-op scroll, same stance as a tail post resting at max scroll) and stillness stops it.
+        val step = reanchorStep(
+            current = ReanchorFrame(target + 1, 0, targetSize = 1800),
+            previous = ReanchorFrame(target, 0, targetSize = 1800),
+            goal = ReanchorGoal(target, 1800),
+            stableFrames = 0,
+            stableThreshold = threshold,
+        )
+        assertTrue(step is ReanchorStep.Continue)
+        assertTrue((step as ReanchorStep.Continue).repin)
+    }
+
+    @Test
+    fun `goal offset defaults to the historical top pin`() {
+        val step = reanchorStep(
+            current = ReanchorFrame(target, 60),
+            previous = ReanchorFrame(target, 0),
+            goal = ReanchorGoal(target),
+            stableFrames = 0,
+            stableThreshold = threshold,
+        )
         assertTrue((step as ReanchorStep.Continue).repin)
     }
 }

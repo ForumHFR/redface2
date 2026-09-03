@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -30,10 +31,10 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * #831/#1040 — pins the four entries of the shared image contextual menu: « Enregistrer » routes
- * to the save callback, « Copier l'URL » writes the clipboard, « Ouvrir dans le navigateur » fires
- * an ACTION_VIEW on the DIRECT image URL, and « Afficher en taille réelle » stays a DISABLED
- * placeholder until the fullscreen viewer (#182).
+ * #831/#1040 — pins the entries of the shared image contextual menu: « Enregistrer » routes
+ * to the save callback, « Partager » routes to the share callback, « Copier l'URL » writes the
+ * clipboard, « Ouvrir dans le navigateur » fires an ACTION_VIEW on the DIRECT image URL, and
+ * « Afficher en taille réelle » stays a DISABLED placeholder until the fullscreen viewer (#182).
  *
  * The target URL uses the reserved `.invalid` TLD so the hero thumbnail's Coil request fails
  * fast without touching the network — the sheet never blocks on the bitmap by design.
@@ -55,6 +56,7 @@ class PostImageMenuSheetTest {
 
     private fun mount(
         onSave: (String) -> Unit = {},
+        onShare: (String) -> Unit = {},
         onDismiss: () -> Unit = {},
         mediaDiskCachePolicy: PostMediaDiskCachePolicy = PostMediaDiskCachePolicy.ENABLED,
     ) {
@@ -63,6 +65,7 @@ class PostImageMenuSheetTest {
                 PostImageMenuSheet(
                     target = target,
                     onSave = onSave,
+                    onShare = onShare,
                     onDismiss = onDismiss,
                     mediaDiskCachePolicy = mediaDiskCachePolicy,
                 )
@@ -109,6 +112,41 @@ class PostImageMenuSheetTest {
         composeTestRule.onNodeWithText("Enregistrer l'image").performClick()
 
         assertEquals(listOf(target.url), saved)
+    }
+
+    @Test
+    fun `the share entry routes the image URL to the share callback`() {
+        val shared = mutableListOf<String>()
+        mount(onShare = { shared += it })
+
+        composeTestRule.onNodeWithText("Partager").performClick()
+
+        assertEquals(listOf(target.url), shared)
+    }
+
+    @Test
+    fun `the share helper opens an ACTION_SEND chooser with the image URL`() {
+        val application = ApplicationProvider.getApplicationContext<Application>()
+        composeTestRule.setContent {
+            val context = LocalContext.current
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                PostImageMenuSheet(
+                    target = target,
+                    onSave = {},
+                    onShare = { url -> sharePostImageUrl(context, url, "échec") },
+                    onDismiss = {},
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("Partager").performClick()
+
+        val started = Shadows.shadowOf(application).nextStartedActivity
+        assertEquals(Intent.ACTION_CHOOSER, started.action)
+        val send = requireNotNull(started.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java))
+        assertEquals(Intent.ACTION_SEND, send.action)
+        assertEquals("text/plain", send.type)
+        assertEquals(target.url, send.getStringExtra(Intent.EXTRA_TEXT))
     }
 
     @Test

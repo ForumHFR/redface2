@@ -15,6 +15,7 @@ import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
@@ -22,10 +23,10 @@ import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
 import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
-import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
+import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
@@ -1211,6 +1212,44 @@ class TopicViewModelTest {
             true,
             repository.lastForceRefresh,
         )
+    }
+
+    @Test
+    fun `a flag-tap entry lands with lastRead so the screen may align on the marker (#1137)`() = runTest {
+        val target = 55
+        val page = fakeTopic(2, 5, posts = listOf(fakePost(target)))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2, scrollTo = target).copy(forceRefresh = true),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(page) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.ScrollToPost(target, lastRead = true), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a same-page cited jump to the flag's own scrollTo is not a last-read landing (#1137)`() = runTest {
+        // The request still carries forceRefresh + scrollTo after the entry (#953/F4 : the engine
+        // preserves them), so deriving the alignment from the request would re-apply the marker
+        // alignment here. The PRODUCER decides : only the flag entry is « last read » ; a cited jump
+        // to the very same numreponse lands top-of-post.
+        val target = 55
+        val page = fakeTopic(2, 5, posts = listOf(fakePost(target), fakePost(56)))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2, scrollTo = target).copy(forceRefresh = true),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(page) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.ScrollToPost(target, lastRead = true), awaitItem())
+            viewModel.goToPost(targetPage = 2, numreponse = target)
+            assertEquals(TopicEffect.ScrollToPost(target, lastRead = false), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     // Construction seam: the ViewModel now also takes a UserPreferencesRepository (for the build 89
@@ -3028,6 +3067,329 @@ class TopicViewModelTest {
             assertEquals(TopicEffect.ScrollToPost(777), awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `plain submit on a provisional same-page refresh lands after the fresh emission (#1250)`() = runTest {
+        val cached = fakeTopic(page = 2, totalPages = 2, title = "cached", posts = listOf(fakePost(100)))
+        val fresh = fakeTopic(
+            page = 2,
+            totalPages = 2,
+            title = "fresh",
+            posts = listOf(fakePost(100), fakePost(200)),
+        )
+        val emissions = MutableSharedFlow<TopicPageEmission>(replay = 1)
+        assertTrue(emissions.tryEmit(TopicPageEmission(cached, provisional = true)))
+        val repository = FakeStreamingEmissionTopicRepository(
+            source = emissions,
+            refreshTopicsToReturn = listOf(fresh),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+        advanceUntilIdle()
+        assertTrue(assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).provisional)
+
+        viewModel.effects.test {
+            viewModel.applySubmitResult(targetPage = 2, scrollTo = null)
+            assertEquals(TopicEffect.ScrollToEndOfPage(2), awaitItem())
+            val loaded = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+            assertEquals("fresh", loaded.topic.title)
+            assertFalse(loaded.provisional)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a plain submit from a delayed origin refreshes only that page and offers the tail (#1243)`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(fakeTopic(page = 2, totalPages = 5, title = "loaded")) }),
+            refreshTopicsToReturn = listOf(fakeTopic(page = 2, totalPages = 5, title = "refreshed")),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            viewModel.applySubmitResult(targetPage = 2, scrollTo = null)
+            assertEquals(TopicEffect.PostSubmittedElsewhere(page = 5), awaitItem())
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertEquals(2, viewModel.state.value.request.page)
+        assertEquals("refreshed", (viewModel.state.value.mode as TopicUiState.Mode.Loaded).topic.title)
+        assertEquals(listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)), repository.refreshCalls)
+        assertEquals(listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)), repository.calls)
+        assertFalse("the tail must not be warmed or fetched without a user action", repository.prefetches.any {
+            it.third == 5
+        })
+    }
+
+    @Test
+    fun `the submitted-elsewhere action opens the offered page at the bottom (#1243)`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flow { emit(fakeTopic(page = 2, totalPages = 5, title = "loaded")) },
+            ),
+            refreshTopicsToReturn = listOf(
+                fakeTopic(page = 2, totalPages = 5, title = "refreshed"),
+                fakeTopic(page = 5, totalPages = 5, title = "tail"),
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            viewModel.applySubmitResult(targetPage = 2, scrollTo = null)
+            assertEquals(TopicEffect.PostSubmittedElsewhere(page = 5), awaitItem())
+
+            viewModel.openSubmittedPostPage(page = 5, departureAnchor = TopicScrollAnchor(index = 3, offset = 12))
+            assertEquals(TopicEffect.ScrollToEndOfPage(5), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertEquals(5, viewModel.state.value.request.page)
+        assertEquals("tail", (viewModel.state.value.mode as TopicUiState.Mode.Loaded).topic.title)
+        assertEquals(
+            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2), Triple(SAMPLE_CAT, SAMPLE_POST, 5)),
+            repository.refreshCalls,
+        )
+        assertEquals(
+            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)),
+            repository.calls,
+        )
+    }
+
+    @Test
+    fun `the submitted-elsewhere action refreshes the offered page before landing (#1252)`() = runTest {
+        val staleTail = fakeTopic(page = 5, totalPages = 5, title = "stale-tail", posts = listOf(fakePost(500)))
+        val freshTail = fakeTopic(
+            page = 5,
+            totalPages = 5,
+            title = "fresh-tail",
+            posts = listOf(fakePost(500), fakePost(999)),
+        )
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flow { emit(fakeTopic(page = 2, totalPages = 5, title = "loaded")) },
+                flow { emit(staleTail) },
+            ),
+            refreshTopicsToReturn = listOf(
+                fakeTopic(page = 2, totalPages = 5, title = "refreshed"),
+                freshTail,
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            viewModel.applySubmitResult(targetPage = 2, scrollTo = null)
+            assertEquals(TopicEffect.PostSubmittedElsewhere(page = 5), awaitItem())
+
+            viewModel.openSubmittedPostPage(page = 5)
+            assertEquals(TopicEffect.ScrollToEndOfPage(5), awaitItem())
+            val loaded = viewModel.state.value.mode as TopicUiState.Mode.Loaded
+            assertEquals("fresh-tail", loaded.topic.title)
+            assertEquals(listOf(500, 999), loaded.topic.posts.map { it.numreponse })
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertEquals(
+            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2), Triple(SAMPLE_CAT, SAMPLE_POST, 5)),
+            repository.refreshCalls,
+        )
+        assertEquals(
+            "the stale Room-shaped observe flow must not drive the snackbar landing",
+            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)),
+            repository.calls,
+        )
+    }
+
+    @Test
+    fun `a plain submit from an unknown page count stays on the source page (#1243)`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { }),
+            refreshTopicsToReturn = listOf(fakeTopic(page = 2, totalPages = 5, title = "refreshed")),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            viewModel.applySubmitResult(targetPage = 2, scrollTo = null)
+            assertEquals(TopicEffect.PostSubmittedElsewhere(page = 5), awaitItem())
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertEquals(2, viewModel.state.value.request.page)
+        assertEquals("refreshed", (viewModel.state.value.mode as TopicUiState.Mode.Loaded).topic.title)
+        assertEquals(listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)), repository.refreshCalls)
+    }
+
+    @Test
+    fun `a plain submit from the known tail still follows a legitimate overflow (#1243)`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(fakeTopic(page = 2, totalPages = 2)) }),
+            refreshTopicsToReturn = listOf(
+                fakeTopic(page = 2, totalPages = 3),
+                fakeTopic(page = 3, totalPages = 3),
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            viewModel.applySubmitResult(targetPage = 2, scrollTo = null)
+            assertEquals(TopicEffect.ScrollToEndOfPage(3), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertEquals(3, viewModel.state.value.request.page)
+        assertEquals(
+            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2), Triple(SAMPLE_CAT, SAMPLE_POST, 3)),
+            repository.refreshCalls,
+        )
+    }
+
+    @Test
+    fun `a quick-reply submit from a delayed origin uses the same stay-in-place rule (#1243)`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(fakeTopic(page = 3, totalPages = 7, title = "loaded")) }),
+            refreshTopicsToReturn = listOf(fakeTopic(page = 3, totalPages = 7, title = "refreshed")),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 3),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            viewModel.applySubmitResult(targetPage = 3, scrollTo = null)
+            assertEquals(TopicEffect.PostSubmittedElsewhere(page = 7), awaitItem())
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertEquals(3, viewModel.state.value.request.page)
+        assertEquals(listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 3)), repository.refreshCalls)
+    }
+
+    @Test
+    fun `a submit with a quote lands on the cited post when it is on the landing page (#974)`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(fakeTopic(2, 2)) }),
+            // The refreshed page carries the cited post (640) AND the fresh reply (777) after it.
+            refreshTopicsToReturn = listOf(
+                fakeTopic(2, 2, posts = listOf(fakePost(600), fakePost(640), fakePost(777))),
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            // HFR anchors a quote success on the cited post (`#t{numreponse_cité}`), so scrollTo
+            // carries it too : the reading resumes on the cited post, never at the bottom.
+            viewModel.applySubmitResult(targetPage = 2, scrollTo = 640, quotedNumreponses = listOf(640))
+            assertEquals(TopicEffect.ScrollToPost(640), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a multi-quote submit lands on the highest cited post (#974)`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(fakeTopic(2, 2)) }),
+            refreshTopicsToReturn = listOf(
+                fakeTopic(2, 2, posts = listOf(fakePost(600), fakePost(640), fakePost(655), fakePost(777))),
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            // Card order is citation order (640 first) and HFR anchors on the FIRST cited post ;
+            // the landing is the cited post closest to the end of the page (655), where the
+            // reading resumes.
+            viewModel.applySubmitResult(targetPage = 2, scrollTo = 640, quotedNumreponses = listOf(640, 655, 600))
+            assertEquals(TopicEffect.ScrollToPost(655), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a quote whose cited post is not on the landing page keeps the current position (#974 #1243)`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(fakeTopic(2, 3)) }),
+            // The reply landed on page 3 ; the cited post (640) lives on page 2. No cross-page
+            // navigation, and no bottom fallback : preserve the reader's position (#1243).
+            refreshTopicsToReturn = listOf(fakeTopic(3, 3, posts = listOf(fakePost(900), fakePost(901)))),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            viewModel.applySubmitResult(targetPage = 3, scrollTo = 640, quotedNumreponses = listOf(640))
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(3, viewModel.state.value.request.page)
+    }
+
+    @Test
+    fun `a cards-off quote submit from the tail stays on the cited post after an overflow (#974 #1243)`() = runTest {
+        // Production default : cards OFF materialises `[quotemsg]` in the field and HFR answers
+        // with `#bas` (scrollTo null). The submit still carries quotedNumreponses, so it must not
+        // chase the freshly-created tail page.
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(fakeTopic(2, 2)) }),
+            refreshTopicsToReturn = listOf(
+                fakeTopic(2, 3, posts = listOf(fakePost(640))),
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            viewModel.applySubmitResult(targetPage = 2, scrollTo = null, quotedNumreponses = listOf(640))
+            assertEquals(TopicEffect.ScrollToPost(640), awaitItem())
+            assertEquals(TopicEffect.PostSubmittedElsewhere(page = 3), awaitItem())
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(2, viewModel.state.value.request.page)
+        assertEquals(
+            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)),
+            repository.refreshCalls,
+        )
     }
 
     @Test
@@ -5609,9 +5971,10 @@ internal class FakeUserPreferencesRepository(
 
     override suspend fun setThemeMode(mode: ThemeMode) = Unit
 
-    override fun observeAmoledEnabled(): Flow<Boolean> = MutableStateFlow(false)
+    override fun observeThemeColorPreferences(): Flow<ThemeColorPreferences> =
+        MutableStateFlow(ThemeColorPreferences())
 
-    override suspend fun setAmoledEnabled(enabled: Boolean) = Unit
+    override suspend fun setThemeColorPreferences(preferences: ThemeColorPreferences) = Unit
 
     override fun observeTopicTopBarAutoHide(): Flow<Boolean> = MutableStateFlow(topicTopBarAutoHide)
 
@@ -5727,6 +6090,11 @@ internal class FakeUserPreferencesRepository(
 
     override suspend fun setMediaDisplayProfile(profile: MediaDisplayProfile) = Unit
 
+    override fun observePostImageMaxWidth(): Flow<PostImageMaxWidth> =
+        MutableStateFlow(PostImageMaxWidth.DEFAULT)
+
+    override suspend fun setPostImageMaxWidth(width: PostImageMaxWidth) = Unit
+
     // #989 — délimiteur du picker : non exercé ici, présent pour satisfaire l'interface.
     override fun observeSmileyPickerDecoration(): Flow<SmileyPickerDecoration> =
         flowOf(SmileyPickerDecoration.NONE)
@@ -5749,8 +6117,6 @@ internal class FakeUserPreferencesRepository(
         MutableStateFlow(ImmersiveNavBarReveal.MANUAL)
 
     override suspend fun setImmersiveNavBarReveal(mode: ImmersiveNavBarReveal) = Unit
-    override fun observeAccentColor(): Flow<AccentColor> = MutableStateFlow(AccentColor.ROSE)
-    override suspend fun setAccentColor(color: AccentColor) = Unit
     override fun observeAlwaysAskLinkApp(): Flow<Boolean> = MutableStateFlow(false)
     override suspend fun setAlwaysAskLinkApp(enabled: Boolean) = Unit
 

@@ -19,7 +19,9 @@ import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.SuperFavoriteRepository
+import fr.forumhfr.redface2.core.domain.preferences.SuperFavoriteTopic
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.preferences.matches
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.Flag
@@ -63,13 +65,17 @@ import kotlinx.coroutines.launch
 // Hilt-injected dependency cluster : flags + forum + messages + MPStorage + prefs + auth + clock,
 // each provided independently by the graph — there is no cohesive bundle to extract (a wrapper
 // would only relay them). Same pragmatic exception as the hoisted-composable suppressions elsewhere.
-@Suppress("LongParameterList")
+// LargeClass — one ViewModel owns the whole Drapeaux screen (tabs, per-tab list state, refresh and
+// landing sequencing, preference writers); splitting it would only relocate state plumbing between
+// pieces that must stay in lockstep (same call as DefaultFlagRepository, #1250 H4).
+@Suppress("LongParameterList", "LargeClass")
 class FlagsViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val flagRepository: FlagRepository,
     private val forumRepository: ForumRepository,
     private val userPreferencesRepository: UserPreferencesRepository,
     private val superFavoriteRepository: SuperFavoriteRepository,
+    private val superFavoriteListMapper: SuperFavoriteListMapper,
     private val messagesRepository: MessagesRepository,
     private val mpStorageRepository: MpStorageRepository,
     private val clock: Clock,
@@ -83,12 +89,21 @@ class FlagsViewModel @Inject constructor(
     private var observedPseudo: String? = null
 
     /**
-     * #378 — instant of the last refresh triggered through [maybeAutoRefresh], for the
-     * throttle. ViewModel-scoped on purpose: the ViewModel survives the screen leaving the
-     * composition (tab switch, topic push), so rapid back-and-forth shares one window, while
-     * a cold app start (fresh ViewModel) always allows the first auto-refresh.
+     * #378 — instant of the last refresh triggered through [maybeAutoRefresh], PER [FlagType], for
+     * the throttle. ViewModel-scoped on purpose: the ViewModel survives the screen leaving the
+     * composition (tab switch, topic push), so rapid back-and-forth on the SAME tab shares one
+     * window, while a cold app start (fresh ViewModel) always allows the first auto-refresh.
+     *
+     * One window per type since #743 (styx42): a single shared instant meant that landing on another
+     * tab right after this one's refresh was swallowed by the window, so the freshly shown tab kept
+     * its cache — the throttle is now consulted for the landing tab's own type. Keyed on [FlagType]
+     * rather than [FlagTab] because the throttled unit is `flagRepository.refresh(type)` — the
+     * per-category REST fan-out of ONE type — and every tab that fetches maps 1:1 to a type
+     * (Super/DT carry none and return before the throttle). A future multi-type tab (#668) would
+     * re-decide this key together with the repository-level pull it needs (cf.
+     * `DefaultFlagRepository.refresh`).
      */
-    private var lastAutoRefreshAt: Instant? = null
+    private val lastAutoRefreshAt: MutableMap<FlagType, Instant> = mutableMapOf()
 
     /**
      * #378 follow-up — generation counter incremented by [onFlagOpened] (a topic was opened from
@@ -102,13 +117,32 @@ class FlagsViewModel @Inject constructor(
     private var flagOpenedGeneration = 0L
     private var flagOpenedGenerationConsumed = 0L
 
+    /**
+     * #743 — the [FlagType] currently being refreshed behind [isRefreshing], the set of types this
+     * refresh covers, and the landing that met it while it was running for ANOTHER uncovered type.
+     * A normal refresh covers one type; a Super pull covers CYAN, RED and FAVORITE sequentially.
+     * Refreshes stay strictly sequential — the repository treats every `refresh(type)` as a
+     * generation barrier for its shared sticky sweep, so two concurrent per-type refreshes would
+     * degrade the older one to a bucket-only result (cf. `DefaultFlagRepository.refresh`) — so a tab
+     * switched to while a refresh runs cannot start its own fan-out; its landing is REPLAYED once the
+     * in-flight refresh settles, if that tab is still the selected one (a tab left meanwhile lands
+     * again on its own). Latest landing wins; a landing on a covered type clears it (nothing to
+     * replay — the running refresh covers it, and its throttle window absorbs the resume/tab-effect
+     * double fire). Without this, « relancer l'app puis changer tout de suite d'onglet » still showed
+     * the new tab's cache whenever the first tab's fan-out was in flight at the switch.
+     */
+    private var refreshingType: FlagType? = null
+    private var refreshingCoveredTypes: Set<FlagType> = emptySet()
+    private var deferredLandingType: FlagType? = null
+    private val subcategoryRefreshRequestedCats: MutableSet<Int> = mutableSetOf()
+
     private val _selectedTab = MutableStateFlow<FlagTab>(FlagTab.Cyan)
     val selectedTab: StateFlow<FlagTab> = _selectedTab.asStateFlow()
 
     /**
      * Whether the opt-in « DT » tab is shown (Settings toggle, default off). The tab lists the user's
      * MultiMP conversations enriched with MPStorage reading positions (see [dtListState]) — it is a
-     * real backed list now (#6), NOT a placeholder like [FlagTab.Super].
+     * real private-message list now (#6), distinct from the local [FlagTab.Super] pin list.
      */
     val showDtTab: StateFlow<Boolean> = userPreferencesRepository.observeShowDtSection()
         .stateIn(
@@ -130,12 +164,12 @@ class FlagsViewModel @Inject constructor(
         )
 
     /**
-     * #603 PR5 — local « super favori » topic ids (ADR-017 decision 5), a client-side pin distinct
-     * from the server `isFavorite`. Eager so the long-press sheet reflects the current state without a
-     * subscription warm-up. Backed by [SuperFavoriteRepository] (its own store, not user prefs).
+     * #603 PR5 / #737 — local « super favori » topics (ADR-017 decision 5), a client-side pin
+     * distinct from the server `isFavorite`. Eager so the long-press sheet and the Super tab reflect
+     * the current state without a subscription warm-up.
      */
-    val superFavoriteTopicIds: StateFlow<Set<Int>> =
-        superFavoriteRepository.observeSuperFavoriteTopicIds()
+    val superFavoriteTopics: StateFlow<Set<SuperFavoriteTopic>> =
+        superFavoriteRepository.observeSuperFavoriteTopics()
             .stateIn(
                 scope = viewModelScope,
                 started = SharingStarted.Eagerly,
@@ -144,8 +178,7 @@ class FlagsViewModel @Inject constructor(
 
     /** Toggles the local super-favorite mark of [flag] (long-press sheet). */
     fun toggleSuperFavorite(flag: Flag) {
-        val enabled = flag.topicId !in superFavoriteTopicIds.value
-        viewModelScope.launch { superFavoriteRepository.setSuperFavorite(flag.topicId, enabled) }
+        viewModelScope.launch { superFavoriteRepository.toggleSuperFavorite(flag) }
     }
 
     /**
@@ -237,49 +270,46 @@ class FlagsViewModel @Inject constructor(
         )
 
     /**
-     * UI state for the currently selected tab (#179). Replaces the former flat `FlagsResult?`
-     * exposure: the screen renders either one section per forum category in canonical order
-     * (empty sections included for HFR web parity) or — when the persisted « grouper par
-     * catégorie » preference is off — the legacy flat list, grouping the already-loaded flat list
-     * client-side either way (no extra authenticated fetch, prefetch-non-auth invariant). The
-     * « masquer les catégories sans non-lu » preference further trims the grouped sections.
+     * UI state for the tab whose list content is ready to render (#179/#742). The tab and list travel
+     * as one emission so Compose can never observe « newly selected tab + previous tab content » and
+     * bind that stale content to the new tab's [LazyListState].
      *
-     * - Anonymous → `null` (the home tab shows the login intro instead of a list).
-     * - [FlagTab.Super] → `null` (placeholder body, no backend, **no** repository observation —
-     *   neither flags NOR categories are observed, cf. §5 « no double-fetch »).
-     * - Authenticated + a real [FlagType] → the per-tab flag flow (« non-lus uniquement » filter
-     *   #154/#317, then [keepContentDuringRefresh] #225) is combined with
-     *   [ForumRepository.observeCategories] to build [FlagsListUiState]. Categories are observed
-     *   **only** in this branch so we never trigger a spurious public categories fetch for
-     *   Anonymous/Super.
+     * - Anonymous → selected tab + `null` (the home tab shows the login intro instead of a list).
+     * - [FlagTab.Dt] → DT tab + `null` (DT has its own [dtDisplayState]).
+     * - [FlagTab.Super] → local Super list backed by [SuperFavoriteRepository] (#737), no direct
+     *   flag-bucket observation; an explicit refresh fans out the backing real tabs so cached
+     *   enrichment can catch up.
+     * - Real [FlagType] tabs → the per-tab flag flow (« non-lus uniquement » filter #154/#317, then
+     *   [keepContentDuringRefresh] #225) combined with the category catalogue and lazy subcategory
+     *   labels (#741).
      *
-     * Ordering of the mapping is load-bearing: unread filter → `keepContentDuringRefresh` →
-     * combine with categories → map to sections. Reversing the first two would regress #225
-     * (the list blanks to a cold spinner during a pull-to-refresh).
-     *
-     * A [ForumResult.Failure]/[ForumResult.Loading] — or an EMPTY [ForumResult.Success] — on the
-     * categories side NEVER turns a `FlagsResult.Success` into a [FlagsListUiState.Failure]: the
-     * hard-coded [FALLBACK_CATEGORY_ORDER] is used so the sections still render and no flag is lost
-     * (an empty Success is treated as « no catalogue yet », guarding the double-empty blank body).
-     *
-     * Empty sections are kept for **all** tabs (web parity, MVP); the per-tab empty wording is
-     * chosen in Compose. `refreshCategories()` is **never** called from here (the 24h memory
-     * cache of [ForumRepository] is enough; pull-to-refresh refreshes flags only).
+     * Ordering of the real-tab mapping is load-bearing: unread filter → `keepContentDuringRefresh` →
+     * lazy subcategory names → combine with categories/layout → sections. Reversing the first two
+     * would regress #225 (the list blanks to a cold spinner during a pull-to-refresh).
      */
-    val flagsState: StateFlow<FlagsListUiState?> = authState
+    val flagsTabState: StateFlow<FlagsTabListUiState> = authState
         .onEach(::clearFlagsCacheIfSessionChanged)
         .flatMapLatest { state ->
             when (state) {
-                null -> flowOf<FlagsListUiState?>(null)
-                AuthState.Anonymous -> flowOf<FlagsListUiState?>(null)
+                null, AuthState.Anonymous -> selectedTab.map { tab ->
+                    FlagsTabListUiState(tab = tab, flagsState = null)
+                }
                 is AuthState.Authenticated -> selectedTab.flatMapLatest { tab ->
-                    when (val type = tab.flagType) {
-                        null -> flowOf<FlagsListUiState?>(null) // Super placeholder: no fetch.
-                        else -> authenticatedFlagsListState(type)
+                    authenticatedFlagsListState(tab).map { flagsState ->
+                        FlagsTabListUiState(tab = tab, flagsState = flagsState)
                     }
                 }
             }
         }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = FlagsTabListUiState(tab = _selectedTab.value, flagsState = null),
+        )
+
+    /** Backward-compatible projection for tests/callers that only care about the list payload. */
+    val flagsState: StateFlow<FlagsListUiState?> = flagsTabState
+        .map { it.flagsState }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.Eagerly,
@@ -289,9 +319,9 @@ class FlagsViewModel @Inject constructor(
     /**
      * Display-settings bottom sheet state (#309). Tracks the RESOLVED view settings for the
      * currently selected tab so the sheet's two switches reflect what the list is actually using
-     * (global, or this tab's override). The DT and [FlagTab.Super] placeholders have no real
+     * (global, or this tab's override). The DT tab and local [FlagTab.Super] list have no real
      * [FlagType], so they resolve the GLOBAL appearance fields (via the CYAN path) plus the global
-     * group/hide pair — the per-list sheet trigger is hidden there anyway (no list to configure).
+     * group/hide pair.
      */
     val flagsViewSettings: StateFlow<FlagsViewSettings> = selectedTab
         .flatMapLatest { tab ->
@@ -467,10 +497,16 @@ class FlagsViewModel @Inject constructor(
             initialValue = false,
         )
 
+    private fun authenticatedFlagsListState(tab: FlagTab): Flow<FlagsListUiState?> = when (tab) {
+        FlagTab.Super -> superFavoriteListMapper.superFavoriteListState(superFavoriteTopics)
+        FlagTab.Dt -> flowOf(null)
+        else -> authenticatedFlagsListState(requireNotNull(tab.flagType))
+    }
+
     /**
-     * Builds the UI state for an authenticated tab with a real [type]. Kept as a dedicated method
-     * so the `flatMapLatest` chain stays readable. Both `observe(type)` and `observeCategories()`
-     * are subscribed here — and only here.
+     * Builds the UI state for an authenticated tab with a real [type]. Kept as a dedicated method so
+     * the `flatMapLatest` chain stays readable. Both `observe(type)` and `observeCategories()` are
+     * subscribed here — and only here.
      *
      * The « non-lus uniquement » decision ([FlagsViewSettings.unreadOnly], #317) travels INSIDE
      * [FilteredFlags] rather than only as part of the outer `combine` source. This is load-bearing:
@@ -519,25 +555,41 @@ class FlagsViewModel @Inject constructor(
         val categories = forumRepository.observeCategories()
             .onStart { emit(ForumResult.Loading) }
 
-        // #309 — resolved per-tab LAYOUT pair (global, or this tab's override). Projected to
+        // #309 — resolved per-tab LAYOUT fields (global, or this tab's override). Projected to
         // layout-only + distinctUntilChanged so an `unreadOnly` flip re-fires ONLY the inner
         // [unreadOnlyFlow] (→ filteredFlags), never this outer source — keeping the « toggling
         // re-emits exactly once » property exact (cf. KDoc above).
         val layoutFlow = userPreferencesRepository.observeFlagsViewSettings(type)
-            .map { it.groupByCategory to it.hideReadCategories }
+            .map { settings ->
+                FlagsListLayout(
+                    groupByCategory = settings.groupByCategory,
+                    hideReadCategories = settings.hideReadCategories,
+                    markerStyle = settings.markerStyle,
+                )
+            }
             .distinctUntilChanged()
 
+        val filteredWithSubcategories = filteredFlags.flatMapLatest { filtered ->
+            forumRepository.subcategoryNamesForFlags(
+                flags = (filtered.result as? FlagsResult.Success)?.flags.orEmpty(),
+                refreshIfMissing = ::refreshSubcategoriesIfMissing,
+            )
+                .map { names -> filtered to names }
+        }
+
         return combine(
-            filteredFlags,
+            filteredWithSubcategories,
             categories,
             layoutFlow,
-        ) { filtered, catsResult, (groupByCategory, hideReadCategories) ->
+        ) { (filtered, subcategoryNames), catsResult, layout ->
             toFlagsListUiState(
                 flagsResult = filtered.result,
                 categoriesResult = catsResult,
-                groupByCategory = groupByCategory,
-                hideReadCategories = hideReadCategories,
+                groupByCategory = layout.groupByCategory,
+                hideReadCategories = layout.hideReadCategories,
                 keepFullyReadSections = filtered.keepFullyReadSections,
+                markerStyle = layout.markerStyle,
+                subcategoryNames = subcategoryNames,
             )
         }
     }
@@ -551,6 +603,12 @@ class FlagsViewModel @Inject constructor(
     private data class FilteredFlags(
         val result: FlagsResult,
         val keepFullyReadSections: Boolean,
+    )
+
+    private data class FlagsListLayout(
+        val groupByCategory: Boolean,
+        val hideReadCategories: Boolean,
+        val markerStyle: MarkerStyle,
     )
 
     /**
@@ -633,7 +691,7 @@ class FlagsViewModel @Inject constructor(
      * filter (the « +lus » shortcut) — Cyan/Red/Favori through the persisted [setFlagsUnreadOnly]
      * write (reading their optimistic resolved values — #751, thibw : the shortcut used to no-op
      * outside Cyan), DT through the in-memory [_dtUnreadOnly] (per-session, not persisted). Only the
-     * Super placeholder keeps the #106 no-op (no list, nothing to flip).
+     * Super keeps the #106 no-op (no unread filter to flip).
      * Never raises [_recallListToTop]: a filter flip is not a tab transition (the screen's
      * FilterFlipScrollResetEffect handles the scroll — it watches the ATOMIC per-type
      * [tabUnreadFilter], so Red/Favori flips reset the scroll exactly like Cyan's).
@@ -644,7 +702,7 @@ class FlagsViewModel @Inject constructor(
             FlagTab.Red -> setFlagsUnreadOnly(!redUnreadOnly.value)
             FlagTab.Favorite -> setFlagsUnreadOnly(!favoriteUnreadOnly.value)
             FlagTab.Dt -> _dtUnreadOnly.value = !_dtUnreadOnly.value
-            FlagTab.Super -> Unit // #106 — placeholder tab, nothing to flip.
+            FlagTab.Super -> Unit // #106 — local list, but no unread filter to flip.
         }
     }
 
@@ -709,8 +767,8 @@ class FlagsViewModel @Inject constructor(
     /**
      * Bottom-sheet write (and CYAN re-tap shortcut) for « non-lus uniquement » (#317). Always writes
      * the CURRENT tab's per-type value — unlike the layout toggles, this filter is never global, so
-     * there is no override routing. Super has no real [FlagType], so it is a no-op there (the sheet
-     * trigger is hidden on Super anyway).
+     * there is no override routing. Super has no real [FlagType], so it is a no-op there; the sheet
+     * keeps the switch disabled while still exposing the global layout controls.
      */
     fun setFlagsUnreadOnly(enabled: Boolean) {
         val type = _selectedTab.value.flagType ?: return
@@ -817,17 +875,60 @@ class FlagsViewModel @Inject constructor(
     }
 
     fun refresh() {
-        // Super is a placeholder with no backing FlagType — pull-to-refresh is a no-op there.
-        val type = _selectedTab.value.flagType ?: return
+        val selected = _selectedTab.value
+        val type = selected.flagType
+        if (type == null) {
+            if (selected == FlagTab.Super) refreshSuperFavorites()
+            return
+        }
+        if (_isRefreshing.value && type in refreshingCoveredTypes) return
         // A manual refresh captures the post-reading state too, so the generations visible at this
         // call would only duplicate the fan-out on the next landing — consume them (#378 follow-up).
         flagOpenedGenerationConsumed = flagOpenedGeneration
+        // #743 — a pull on the tab whose landing is waiting behind an in-flight refresh IS that
+        // landing's fetch: drop the replay so it does not double the fan-out right after the pull.
+        if (deferredLandingType == type) deferredLandingType = null
+        beginRefresh(type)
         viewModelScope.launch {
-            _isRefreshing.value = true
             try {
                 flagRepository.refresh(type)
             } finally {
-                _isRefreshing.value = false
+                endRefresh()
+            }
+        }
+    }
+
+    private fun refreshSuperFavorites() {
+        if (_isRefreshing.value) return
+        flagOpenedGenerationConsumed = flagOpenedGeneration
+        if (deferredLandingType?.let { it in SUPER_FAVORITE_BACKING_TYPES } == true) deferredLandingType = null
+        beginRefresh(
+            type = SUPER_FAVORITE_BACKING_TYPES.first(),
+            coveredTypes = SUPER_FAVORITE_BACKING_TYPES.toSet(),
+        )
+        viewModelScope.launch {
+            try {
+                SUPER_FAVORITE_BACKING_TYPES.forEach { type ->
+                    refreshingType = type
+                    flagRepository.refresh(type)
+                }
+            } finally {
+                endRefresh()
+            }
+        }
+    }
+
+    private fun refreshSubcategoriesIfMissing(cat: Int) {
+        if (!subcategoryRefreshRequestedCats.add(cat)) return
+        viewModelScope.launch {
+            try {
+                forumRepository.refreshSubcategories(cat)
+            } catch (cancellation: kotlinx.coroutines.CancellationException) {
+                throw cancellation
+            } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+                // Re-arm so the next list emission (or pull-to-refresh) can retry after a network error.
+                subcategoryRefreshRequestedCats.remove(cat)
+                android.util.Log.w(LOG_TAG, "Could not refresh subcategories for cat $cat", error)
             }
         }
     }
@@ -853,18 +954,19 @@ class FlagsViewModel @Inject constructor(
      * - the « auto-refresh » preference is on (default; the Settings toggle is the opt-out),
      * - the user is authenticated (an anonymous landing has no flags to refresh),
      * - the selected tab has a real [FlagType] (Super/DT placeholders have no backend),
-     * - no refresh is already in flight,
-     * - the last auto-refresh is older than [AUTO_REFRESH_THROTTLE] — the per-tab REST fan-out
-     *   is ~one GET per public category, so rapid back-and-forth between a topic and the list
-     *   must not multiply it. A manual pull-to-refresh is never throttled and does not arm the
-     *   throttle (it goes straight through [refresh]).
+     * - no refresh is already in flight — a landing on ANOTHER tab that meets one is not dropped
+     *   but replayed once it settles (#743, cf. [deferredLandingType]),
+     * - the last auto-refresh OF THAT TAB'S TYPE is older than [AUTO_REFRESH_THROTTLE] (one window
+     *   per type, #743) — the per-tab REST fan-out is ~one GET per public category, so rapid
+     *   back-and-forth between a topic and the list must not multiply it. A manual pull-to-refresh
+     *   is never throttled and does not arm the throttle (it goes straight through [refresh]).
      */
     fun maybeAutoRefresh() {
         // Snapshot the tab at CALL time (the landing being refreshed) — re-reading it after the
         // suspension points below could refresh a different tab than the one that landed, or
         // no-op on a placeholder while still arming the throttle (Codex review on PR #421).
         val type = _selectedTab.value.flagType ?: return
-        if (_isRefreshing.value) return
+        if (deferLandingIfRefreshing(type)) return
         // Snapshot at CALL time (same rationale as the tab snapshot above): a read armed AFTER
         // this landing's call belongs to the NEXT landing. The launch suspends on the pref/auth
         // gates below — reading the generation there would let this refresh consume a reading it
@@ -874,7 +976,8 @@ class FlagsViewModel @Inject constructor(
             if (!userPreferencesRepository.observeFlagsAutoRefresh().first()) return@launch
             if (authRepository.observeAuthState().first() !is AuthState.Authenticated) return@launch
             val now = clock.instant()
-            val last = lastAutoRefreshAt
+            // #743 — this tab's OWN window: another tab's recent refresh never throttles this landing.
+            val last = lastAutoRefreshAt[type]
             // Throttle SKIPPED when a topic was opened since the last consuming refresh (see
             // [onFlagOpened]): that landing is a return from a read, the state most worth
             // refreshing.
@@ -883,13 +986,14 @@ class FlagsViewModel @Inject constructor(
                 return@launch
             }
             // Re-check after the suspensions: a manual pull-to-refresh may have started while
-            // the pref/auth reads were in flight — don't double the REST fan-out.
-            if (_isRefreshing.value) return@launch
+            // the pref/auth reads were in flight — don't double the REST fan-out (same type), or
+            // defer this landing behind it (other type, #743).
+            if (deferLandingIfRefreshing(type)) return@launch
             // Consume ONLY the generations visible at call time — a read armed during the
             // suspensions above stays pending for the next landing.
             flagOpenedGenerationConsumed = maxOf(flagOpenedGenerationConsumed, openedGenerationAtCall)
-            lastAutoRefreshAt = now
-            _isRefreshing.value = true
+            lastAutoRefreshAt[type] = now
+            beginRefresh(type)
             try {
                 flagRepository.refresh(type)
                 // #546 — a genuine landing / tab-switch / resume refresh: recall the list to the top
@@ -898,9 +1002,42 @@ class FlagsViewModel @Inject constructor(
                 // the screen — see [recallListToTop].
                 if (!returningFromTopic) _recallListToTop.value = true
             } finally {
-                _isRefreshing.value = false
+                endRefresh()
             }
         }
+    }
+
+    /**
+     * #743 — in-flight guard shared by the two [maybeAutoRefresh] checkpoints. `true` when a refresh
+     * is running (the landing must not start a concurrent fan-out); the landing is then remembered
+     * for replay in [endRefresh] if it targets an uncovered type, and cleared otherwise (latest
+     * landing wins, cf. [deferredLandingType]).
+     */
+    private fun deferLandingIfRefreshing(type: FlagType): Boolean {
+        if (!_isRefreshing.value) return false
+        deferredLandingType = type.takeIf { it !in refreshingCoveredTypes }
+        return true
+    }
+
+    /** Raises the single loading cue ([isRefreshing]) for a refresh covering [coveredTypes]. */
+    private fun beginRefresh(type: FlagType, coveredTypes: Set<FlagType> = setOf(type)) {
+        refreshingType = type
+        refreshingCoveredTypes = coveredTypes
+        _isRefreshing.value = true
+    }
+
+    /**
+     * Clears the loading cue, then replays the landing deferred behind this refresh (#743) — through
+     * [maybeAutoRefresh], so it still meets the pref/auth gates and its own throttle window — provided
+     * that tab is still the selected one; a tab left meanwhile lands again on its own when re-selected.
+     */
+    private fun endRefresh() {
+        refreshingType = null
+        refreshingCoveredTypes = emptySet()
+        _isRefreshing.value = false
+        val deferred = deferredLandingType ?: return
+        deferredLandingType = null
+        if (deferred == _selectedTab.value.flagType) maybeAutoRefresh()
     }
 
     /**
@@ -1062,6 +1199,8 @@ class FlagsViewModel @Inject constructor(
         groupByCategory: Boolean,
         hideReadCategories: Boolean,
         keepFullyReadSections: Boolean,
+        markerStyle: MarkerStyle,
+        subcategoryNames: Map<SubcategoryKey, String>,
     ): FlagsListUiState = when (flagsResult) {
         FlagsResult.Loading -> FlagsListUiState.Loading
         is FlagsResult.Failure -> FlagsListUiState.Failure(flagsResult.cause)
@@ -1072,6 +1211,8 @@ class FlagsViewModel @Inject constructor(
                 groupByCategory = groupByCategory,
                 hideReadCategories = hideReadCategories,
                 keepFullyReadSections = keepFullyReadSections,
+                markerStyle = markerStyle,
+                subcategoryNames = subcategoryNames,
             ),
         )
     }
@@ -1088,9 +1229,12 @@ class FlagsViewModel @Inject constructor(
         groupByCategory: Boolean,
         hideReadCategories: Boolean,
         keepFullyReadSections: Boolean,
+        markerStyle: MarkerStyle,
+        subcategoryNames: Map<SubcategoryKey, String>,
     ): FlagsContent {
-        if (!groupByCategory) return FlagsContent.Flat(flags)
-        val grouped = groupFlagsByCategory(flags, resolveCategoryOrder(categoriesResult))
+        val rows = toFlagRows(flags, markerStyle, subcategoryNames)
+        if (!groupByCategory) return FlagsContent.Flat(rows)
+        val grouped = groupFlagRowsByCategory(rows, resolveCategoryOrder(categoriesResult))
         val sections = if (hideReadCategories) {
             filterCategoriesWithUnread(grouped, keepFullyRead = keepFullyReadSections)
         } else {
@@ -1172,12 +1316,12 @@ class FlagsViewModel @Inject constructor(
 
 /**
  * UI-level tab model for the Drapeaux screen. The three real tabs map to a [FlagType] the
- * repository can fetch ; [Super] is a placeholder for the future « super favoris » feature
- * and intentionally carries no [FlagType] (no `flag_owntopic` is known, no backend exists).
+ * repository can fetch ; [Super] is a local « super favoris » feature and intentionally carries no
+ * [FlagType] (no `flag_owntopic` is known, no HFR backend exists).
  *
  * The ViewModel keeps fetching/filtering on [FlagType] for the three real tabs ; this type
- * only drives which tab is selected so the screen can render a placeholder body for [Super]
- * without polluting the domain enum.
+ * only drives which tab is selected so the screen can render the local Super body without polluting
+ * the domain enum.
  */
 sealed interface FlagTab {
     /** Backing flag type, or `null` for the placeholder [Super] tab. */
@@ -1195,7 +1339,7 @@ sealed interface FlagTab {
         override val flagType: FlagType = FlagType.FAVORITE
     }
 
-    /** Placeholder — future « super favoris ». No fetch, no backend. */
+    /** Local « super favoris ». No flag-bucket fetch, no HFR backend. */
     data object Super : FlagTab {
         override val flagType: FlagType? = null
     }
@@ -1210,13 +1354,18 @@ sealed interface FlagTab {
     }
 }
 
+data class FlagsTabListUiState(
+    val tab: FlagTab,
+    val flagsState: FlagsListUiState?,
+)
+
 /**
  * Single route-facing UI state for the category-grouped Drapeaux list (#179). Replaces a
  * direct `FlagsResult` exposure so a `Loading`/`Failure` can never diverge from a stale set
  * of sections (cf. impl prompt §4.1 correction #2).
  *
  * A `null` value (not a member of this interface) keeps its prior meaning « not applicable »:
- * the Anonymous login intro or the [FlagTab.Super] placeholder.
+ * the Anonymous login intro or the DT body, which owns [DtListUiState].
  */
 sealed interface FlagsListUiState {
     /** Cold fetch in flight, no prior content to keep. */
@@ -1250,14 +1399,19 @@ sealed interface FlagsContent {
      * Flat list in repository order (last reply descending) — the legacy pre-#179 view, kept as
      * an explicit fallback so the user can always read every flag at once without category bands.
      */
-    data class Flat(val flags: List<Flag>) : FlagsContent
+    data class Flat(val rows: List<FlagRowUiModel>) : FlagsContent
 }
 
+private const val LOG_TAG = "FlagsViewModel"
+
 /**
- * #378 — minimum delay between two auto-refreshes ([FlagsViewModel.maybeAutoRefresh]). 15 s:
- * shorter than any realistic topic-read round-trip (the « back from a topic » trigger stays
- * effective) but long enough that bouncing between tabs or popping in and out of a topic does
- * not re-run the per-category REST fan-out every time.
+ * #378 — minimum delay between two auto-refreshes OF THE SAME [FlagType]
+ * ([FlagsViewModel.maybeAutoRefresh]; one window per type since #743). 15 s: shorter than any
+ * realistic topic-read round-trip (the « back from a topic » trigger stays effective) but long
+ * enough that re-landing on a tab — resume, back-and-forth with another tab, popping in and out of
+ * a topic — does not re-run its per-category REST fan-out every time. Bouncing across the three
+ * tabs costs at most one fan-out per tab per window, and never two at once (refreshes stay
+ * sequential, cf. [FlagsViewModel.maybeAutoRefresh]).
  */
 private val AUTO_REFRESH_THROTTLE: Duration = Duration.ofSeconds(15)
 

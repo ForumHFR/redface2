@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.flags
 
+import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
 import org.junit.Assert.assertEquals
@@ -148,8 +149,8 @@ class FlagCategorySectionTest {
     @Test
     fun `filterCategoriesWithUnread keeps unread sections and drops empty plus fully-read ones`() {
         val sections = listOf(
-            FlagCategorySection(1, "A", listOf(flag(topicId = 1, cat = 1, hasUnread = true))),
-            FlagCategorySection(10, "B", listOf(flag(topicId = 2, cat = 10, hasUnread = false))),
+            FlagCategorySection(1, "A", listOf(row(topicId = 1, cat = 1, hasUnread = true))),
+            FlagCategorySection(10, "B", listOf(row(topicId = 2, cat = 10, hasUnread = false))),
             FlagCategorySection(13, "C", emptyList()),
         )
 
@@ -163,7 +164,7 @@ class FlagCategorySectionTest {
         // The cyan « +lus » override: a fully-read section is kept, but a truly empty section is
         // always dropped (nothing to show).
         val sections = listOf(
-            FlagCategorySection(1, "A", listOf(flag(topicId = 1, cat = 1, hasUnread = false))),
+            FlagCategorySection(1, "A", listOf(row(topicId = 1, cat = 1, hasUnread = false))),
             FlagCategorySection(10, "B", emptyList()),
         )
 
@@ -203,4 +204,11 @@ class FlagCategorySectionTest {
         lastReplyAuthor = "",
         lastReplyAt = "",
     )
+
+    private fun row(
+        topicId: Int,
+        cat: Int,
+        hasUnread: Boolean = true,
+    ): FlagRowUiModel = flag(topicId = topicId, cat = cat, hasUnread = hasUnread)
+        .toFlagRowUiModel(MarkerStyle.STRIPE)
 }

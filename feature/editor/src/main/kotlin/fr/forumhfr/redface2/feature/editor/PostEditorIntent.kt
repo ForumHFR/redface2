@@ -110,6 +110,13 @@ sealed interface PostEditorEffect {
     data class SubmitSucceeded(
         val targetPage: Int?,
         val scrollTo: Int? = null,
+        /**
+         * #974 — the `numreponse` of every post the reply cited (appearance order ; inline
+         * `[quotemsg]` tags of the field and armed cards alike), empty for a plain reply or an
+         * edit : the topic engine lands on the highest one when it is on the landing page, at the
+         * bottom otherwise (never on the fresh post when an older one was quoted).
+         */
+        val quotedNumreponses: List<Int> = emptyList(),
     ) : PostEditorEffect
 
     /**

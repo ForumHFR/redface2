@@ -35,7 +35,11 @@ class TopicReplyQuoteMaterializer @Inject constructor(
      * [extraQuoteNumreponses] (selection order preserved). With no extras — or a non-quote
      * context — this is a plain [ReplyRepository.fetchReplyForm].
      */
-    suspend fun fetchFormWithQuotes(context: ReplyContext, extraQuoteNumreponses: List<Int>): ReplyForm {
+    suspend fun fetchFormWithQuotes(
+        context: ReplyContext,
+        extraQuoteNumreponses: List<Int>,
+        truncate: Boolean = false,
+    ): ReplyForm {
         val form = replyRepository.fetchReplyForm(context)
         return when {
             !context.isQuote -> form
@@ -48,10 +52,14 @@ class TopicReplyQuoteMaterializer @Inject constructor(
             // without its quote block was the reported symptom.
             extraQuoteNumreponses.isEmpty() -> {
                 check(form.initialContent.isNotBlank()) { "quote prefill came back blank" }
-                form
+                if (truncate) {
+                    form.copy(initialContent = truncateQuote(form.initialContent.trimEnd()))
+                } else {
+                    form
+                }
             }
 
-            else -> form.copy(initialContent = mergedPrefills(form, context, extraQuoteNumreponses))
+            else -> form.copy(initialContent = mergedPrefills(form, context, extraQuoteNumreponses, truncate))
         }
     }
 
@@ -59,29 +67,34 @@ class TopicReplyQuoteMaterializer @Inject constructor(
         form: ReplyForm,
         context: ReplyContext,
         extraQuoteNumreponses: List<Int>,
+        truncate: Boolean,
     ): String {
         val prefills = buildList {
-            add(form.initialContent)
+            add(checkedPrefill(form.initialContent, truncate))
             extraQuoteNumreponses.forEach { numreponse ->
                 // TOPIC-ONLY contract: extra quotes resolve by numrep alone. Do not copy this
                 // nulling to cat=prive, where ref omission has not been observed.
                 add(
-                    replyRepository
-                        .fetchReplyForm(context.copy(quotedNumreponse = numreponse, quoteRef = null))
-                        .initialContent,
+                    checkedPrefill(
+                        replyRepository
+                            .fetchReplyForm(context.copy(quotedNumreponse = numreponse, quoteRef = null))
+                            .initialContent,
+                        truncate,
+                    ),
                 )
             }
         }
-        return prefills
-            .map { prefill ->
-                prefill.trimEnd().also { trimmed ->
-                    // Codex review — a 200-OK form whose prefill came back BLANK would silently
-                    // drop a quote the user explicitly selected (the exact failure mode the
-                    // sequential design refuses). Fail the whole fetch instead; callers keep
-                    // their retryable error path.
-                    check(trimmed.isNotBlank()) { "multi-quote prefill came back blank" }
-                }
-            }
-            .joinToString(separator = "\n\n", postfix = "\n\n")
+        return prefills.joinToString(separator = "\n\n", postfix = "\n\n")
+    }
+
+    private fun checkedPrefill(prefill: String, truncate: Boolean): String {
+        val trimmed = prefill.trimEnd().also {
+            // Codex review — a 200-OK form whose prefill came back BLANK would silently
+            // drop a quote the user explicitly selected (the exact failure mode the
+            // sequential design refuses). Fail the whole fetch instead; callers keep
+            // their retryable error path.
+            check(it.isNotBlank()) { "multi-quote prefill came back blank" }
+        }
+        return if (truncate) truncateQuote(trimmed) else trimmed
     }
 }

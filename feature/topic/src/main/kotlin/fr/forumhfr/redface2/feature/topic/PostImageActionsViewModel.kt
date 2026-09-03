@@ -13,31 +13,35 @@ import kotlinx.coroutines.launch
 
 /**
  * #831 — the THIN ViewModel behind
- * [fr.forumhfr.redface2.core.ui.post.PostImageMenuSheet]'s « Enregistrer l'image » action.
+ * [fr.forumhfr.redface2.core.ui.post.PostImageMenuSheet]'s host-owned actions.
  * Deliberately its own small `@HiltViewModel` (precedent: [QuickReplyViewModel]) instead of a new
- * member on the `@AssistedInject` TopicViewModel: the save needs exactly one injected seam
- * ([PostImageSaver], `:core:domain`) and one feedback channel, nothing of the topic state.
+ * member on the `@AssistedInject` TopicViewModel: the image menu needs one injected save seam
+ * ([PostImageSaver], `:core:domain`) and one effect channel, nothing of the topic state.
  *
- * The save runs in [viewModelScope], NOT in the sheet's composition: the sheet closes on tap
- * (feedback-through-Toast convention of `:feature:topic`) and the write must survive its
- * dismissal. Effects are one-shot (Channel, same idiom as [QuickReplyViewModel]) and rendered as
- * Toasts by the hosting screen.
+ * Save runs in [viewModelScope], NOT in the sheet's composition: the sheet closes on tap
+ * (feedback-through-Toast convention of `:feature:topic`) and the write must survive dismissal.
+ * Share is host-side Android UI, so it is emitted as a one-shot effect on the same channel.
  */
 @HiltViewModel
 class PostImageActionsViewModel @Inject constructor(
     private val postImageSaver: PostImageSaver,
 ) : ViewModel() {
 
+    /** One-shot image-menu effects rendered by the host. */
+    sealed interface Effect
+
     /** One-shot feedback of a save request — mapped to a Toast string by the host. */
-    enum class SaveImageEffect {
+    enum class SaveImageEffect : Effect {
         SAVED,
         FAILED_FETCH,
         FAILED_STORAGE,
         FAILED_TOO_LARGE,
     }
 
-    private val _effects: Channel<SaveImageEffect> = Channel(capacity = Channel.BUFFERED)
-    val effects: Flow<SaveImageEffect> = _effects.receiveAsFlow()
+    data class ShareImageEffect(val url: String) : Effect
+
+    private val _effects: Channel<Effect> = Channel(capacity = Channel.BUFFERED)
+    val effects: Flow<Effect> = _effects.receiveAsFlow()
 
     /** Saves the image behind [url] into the shared Pictures collection (fire-and-report). */
     fun saveImage(url: String) {
@@ -53,6 +57,13 @@ class PostImageActionsViewModel @Inject constructor(
                 }
             }
             _effects.send(effect)
+        }
+    }
+
+    /** Requests the host to share [url] through Android's chooser. */
+    fun shareImage(url: String) {
+        viewModelScope.launch {
+            _effects.send(ShareImageEffect(url))
         }
     }
 }

@@ -110,8 +110,8 @@ internal fun Modifier.topicPageSwipe(
     // `pointerInput` sits BEFORE `graphicsLayer` on purpose: the gesture must read finger deltas in
     // the untranslated coordinate space. If it were inside the translated layer, each frame's
     // `positionChange()` would be `Δfinger − Δtranslation`, halving the tracking and doubling the
-    // effective commit distance. `graphicsLayer` (draw-only) leaves the hit-test bounds put, so the
-    // finger stays over the page while the page visibly follows.
+    // effective commit distance. Keeping the detector outside the translated layer preserves
+    // layout-space deltas while the inner content visually follows the finger.
     //
     // Keyed on `currentPage` ONLY — never `totalPages`. A commit defers `onOpenPage` by
     // COMMIT_SLIDE_OUT_MILLIS inside this block's `coroutineScope`; if `totalPages` were part of the

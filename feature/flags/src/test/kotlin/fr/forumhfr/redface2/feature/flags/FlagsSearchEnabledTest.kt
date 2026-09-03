@@ -7,9 +7,9 @@ import org.junit.Test
 
 /**
  * Gating of the « rechercher dans les drapeaux » loupe (#603 harmonisation). The loupe is offered on
- * every tab that holds a searchable list — the three flag tabs AND DT — but never when anonymous, and
- * never on Super (a placeholder with no list). Pure, so a future gating change is caught here rather
- * than only on-device. Guards the Codex review reserve (test the gating directly).
+ * every tab that holds a searchable list — the three flag tabs, DT and Super — but never when
+ * anonymous. Pure, so a future gating change is caught here rather than only on-device. Guards the
+ * Codex review reserve (test the gating directly).
  */
 class FlagsSearchEnabledTest {
 
@@ -28,8 +28,8 @@ class FlagsSearchEnabledTest {
     }
 
     @Test
-    fun `the loupe is disabled on the Super placeholder (no list to search)`() {
-        assertFalse(flagsSearchEnabled(authed, FlagTab.Super))
+    fun `the loupe is enabled on the Super tab when authenticated`() {
+        assertTrue(flagsSearchEnabled(authed, FlagTab.Super))
     }
 
     @Test

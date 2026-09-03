@@ -13,6 +13,13 @@ android {
             // merged Android resources at JVM unit-test time. Same convention as :feature:topic
             // and :core:ui (Compose UI tests).
             isIncludeAndroidResources = true
+            all {
+                // #595 — preview captures are diagnostic-only Roborazzi records. The Gradle
+                // Roborazzi plugin is still not applied under AGP 9; `testDebugUnitTest` writes
+                // PNGs directly through `captureRoboImage`, same convention as :core:ui.
+                it.systemProperties["robolectric.pixelCopyRenderMode"] = "hardware"
+                it.systemProperties["roborazzi.test.record"] = "true"
+            }
         }
     }
 }
@@ -47,5 +54,7 @@ dependencies {
     testImplementation(libs.androidx.compose.ui.test.junit4)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 }

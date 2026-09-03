@@ -46,13 +46,16 @@ import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.contentColorFor
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
@@ -85,6 +88,7 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalDensity
@@ -111,6 +115,7 @@ import fr.forumhfr.redface2.core.domain.author.isRf2Creator
 import fr.forumhfr.redface2.core.domain.author.resolveAuthorRolePill
 import fr.forumhfr.redface2.core.domain.ego.deriveEgoCanonicalPseudo
 import fr.forumhfr.redface2.core.domain.ego.isEgoPost
+import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
 import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.Poll
@@ -142,18 +147,43 @@ import fr.forumhfr.redface2.core.ui.post.PostListScaffold
 import fr.forumhfr.redface2.core.ui.post.ReadingPostCard
 import fr.forumhfr.redface2.core.ui.post.ReadingPostCardPresentation
 import fr.forumhfr.redface2.core.ui.post.collectPostMediaUrls
+import fr.forumhfr.redface2.core.ui.post.postHeaderColors
 import fr.forumhfr.redface2.core.ui.post.readingContentColors
 import fr.forumhfr.redface2.core.ui.post.retryFailedPostMedia
+import fr.forumhfr.redface2.core.ui.post.sharePostImageUrl
 import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Locale
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+
+@Suppress("LongParameterList")
+internal fun CoroutineScope.launchPostSubmittedElsewhereSnackbar(
+    effect: TopicEffect.PostSubmittedElsewhere,
+    message: String,
+    actionLabel: String,
+    showSnackbar: suspend (
+        message: String,
+        actionLabel: String,
+        duration: SnackbarDuration
+    ) -> SnackbarResult,
+    departureAnchor: () -> TopicScrollAnchor?,
+    openSubmittedPostPage: (page: Int, scrollTo: Int?, departureAnchor: TopicScrollAnchor?) -> Unit,
+) {
+    launch {
+        val result = showSnackbar(message, actionLabel, SnackbarDuration.Long)
+        if (result == SnackbarResult.ActionPerformed) {
+            openSubmittedPostPage(effect.page, effect.scrollTo, departureAnchor())
+        }
+    }
+}
 
 @Composable
 // LongParameterList : state-hoisted Composable : each callback has a distinct call-site
@@ -336,6 +366,13 @@ fun TopicScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val favoriteAtPostState by viewModel.favoriteAtPostState.collectAsStateWithLifecycle()
     val lazyListState = rememberLazyListState()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val snackbarScope = rememberCoroutineScope()
+    // #1137 — measured height (px) of the « Dernier message lu » separator, written from where the
+    // marker is composed (onSizeChanged, inside the last-read post's item — cf. TopicLoadedContent)
+    // and read by the flag landing below to put the marker's top edge on the landing line (the post
+    // body above it, off-screen). Read from effect lambdas only — it never drives composition.
+    val lastReadMarkerHeightPx = remember { mutableIntStateOf(0) }
     // #518 follow-up — report scroll facts up so `:app` can reveal the hidden system nav bar per the
     // chosen mode. No-op (and clears stale facts) when the feature is inactive.
     ImmersiveNavBarScrollReporter(
@@ -378,11 +415,11 @@ fun TopicScreen(
         viewModel.returnFromJump(alignedDepartureAnchor())
     }
     // #895 étape 4 (PR 2) — consume the pending full-editor submit outcome exactly once per
-    // eventId : hand it to the retained ViewModel (in-place force refresh + landing) and clear
-    // the :app slot. The quick-reply sheet path below calls applySubmitResult directly.
+    // eventId : hand it to the retained ViewModel (in-place force refresh + conditional landing)
+    // and clear the :app slot. The quick-reply sheet path below calls applySubmitResult directly.
     LaunchedEffect(pendingSubmitResult?.eventId) {
         pendingSubmitResult?.let { result ->
-            viewModel.applySubmitResult(result.targetPage, result.scrollTo)
+            viewModel.applySubmitResult(result.targetPage, result.scrollTo, result.quotedNumreponses)
             onSubmitResultConsumed()
         }
     }
@@ -413,6 +450,8 @@ fun TopicScreen(
     // suspending lambda but the surrounding scope is still a Composable). Capturing the message
     // upfront keeps the rule happy and avoids re-resolving on every effect.
     val refreshFailedMsg = stringResource(R.string.topic_post_submit_refresh_failed)
+    val submittedElsewhereMsg = stringResource(R.string.topic_post_submitted_elsewhere)
+    val submittedElsewhereAction = stringResource(R.string.topic_post_submitted_elsewhere_action)
     // #335 — manual pull-to-refresh failure message (resolved upfront, same rationale).
     val refreshManualFailedMsg = stringResource(R.string.topic_refresh_failed)
     // Chantier C (#546) — intra-topic search failure message (resolved upfront, same rationale).
@@ -485,7 +524,22 @@ fun TopicScreen(
                     if (index >= 0) {
                         // +1 because the LazyColumn header card occupies item 0.
                         val target = index + 1
-                        lazyListState.scrollToItem(target)
+                        // #1137 — a flag-tap landing (`effect.lastRead`, set by the ViewModel's entry
+                        // producer only) whose post overflows the viewport puts the TOP of the
+                        // « Dernier message lu » marker on the landing line instead of the top of the
+                        // post : the marker and the first unread post are on screen, the already-read
+                        // post one swipe up. A post that fits keeps the historical top-of-post
+                        // landing, and so does every other ScrollToPost producer (cited jump, search
+                        // hit, deep link, post-submit) — even when its numreponse is the one the
+                        // marker sits on : the reader was sent there to READ that post. The flag is
+                        // read off the EFFECT, not `request` (which keeps forceRefresh/scrollTo
+                        // across in-VM navigations, #953/F4).
+                        val landing = if (effect.lastRead) {
+                            LandingAlignment.LastReadMarker { lastReadMarkerHeightPx.intValue }
+                        } else {
+                            LandingAlignment.TopOfPost
+                        }
+                        lazyListState.landOn(target, landing)
                         // Gate r1/r2 — aligned only AFTER the scroll actually applied (a suspension
                         // or disposal mid-landing must keep persists blocked) ; the #197 re-anchor
                         // below only re-pins the same target, the position keeps describing this page.
@@ -494,7 +548,8 @@ fun TopicScreen(
                         // Coil decodes them, shifting the offset *after* this one-shot scroll and
                         // leaving the target off-screen on a cold image cache. Keep it pinned while
                         // the layout settles (bails on user scroll, bounded by a frame budget).
-                        lazyListState.reanchorWhileMediaSettles(target)
+                        // #1137 — the re-pins re-apply the SAME alignment, re-decided every frame.
+                        lazyListState.reanchorWhileMediaSettles(target, landing)
                     } else {
                         // Gate r2 — not-found : the no-scroll DECISION is the landing application
                         // (the content is this page, at a position the user now owns).
@@ -564,15 +619,28 @@ fun TopicScreen(
                     // Issue #200 — HFR accepted the post but the local force refresh failed.
                     // Surface a Toast so the user knows the submit went through and can
                     // re-trigger the refresh manually (pull-to-refresh / Retry) instead of
-                    // assuming the post was silently lost. Toast picked over Snackbar to keep
-                    // this composable a plain Surface — wrapping the existing TopicContent in
-                    // a Scaffold + SnackbarHost is left for a follow-up if a richer feedback
-                    // surface is needed.
+                    // assuming the post was silently lost.
                     android.widget.Toast.makeText(
                         context,
                         refreshFailedMsg,
                         android.widget.Toast.LENGTH_LONG,
                     ).show()
+                }
+                is TopicEffect.PostSubmittedElsewhere -> {
+                    snackbarScope.launchPostSubmittedElsewhereSnackbar(
+                        effect = effect,
+                        message = String.format(Locale.getDefault(), submittedElsewhereMsg, effect.page),
+                        actionLabel = submittedElsewhereAction,
+                        showSnackbar = { message, actionLabel, duration ->
+                            snackbarHostState.showSnackbar(
+                                message = message,
+                                actionLabel = actionLabel,
+                                duration = duration,
+                            )
+                        },
+                        departureAnchor = alignedDepartureAnchor,
+                        openSubmittedPostPage = viewModel::openSubmittedPostPage,
+                    )
                 }
                 TopicEffect.RefreshFailed -> {
                     // #335 — manual pull-to-refresh could not reach HFR; the page stays on screen
@@ -682,12 +750,15 @@ fun TopicScreen(
     TopicContent(
         state = state,
         listState = lazyListState,
+        snackbarHostState = snackbarHostState,
+        // #1137 — the marker's measured height feeds the flag landing's alignment (cf. above).
+        onLastReadMarkerMeasured = { lastReadMarkerHeightPx.intValue = it },
         onIntent = viewModel::send,
         onBack = onBack,
         onReply = onReply,
         onEscalateToFullEditor = onEscalateToFullEditor,
         // Vague 4 (#604) lot 1 / #895 étape 4 — a reply POSTed from the quick-reply sheet goes
-        // straight to the retained ViewModel (in-place force refresh, #200/#226) : the sheet
+        // straight to the retained ViewModel (in-place force refresh, #200/#226/#1243) : the sheet
         // never entered the back stack and the topic entry no longer gets replaced.
         onQuickReplySubmitted = viewModel::applySubmitResult,
         onEdit = onEdit,
@@ -873,16 +944,31 @@ private fun MoveFavoriteConfirmDialog(
  * perso) keep that nudge small in the common case; a dedicated warmup-before-reanchor is the follow-up
  * if a deep-link to a perso-heavy post drifts in practice (to validate on a cold-cache device).
  *
+ * #1137 note — the pin is no longer always « target at offset 0 » : a flag landing whose post
+ * overflows the viewport puts the top of the « Dernier message lu » marker on the landing line
+ * ([LandingAlignment.LastReadMarker]), and the offset that achieves it depends on the post's CURRENT
+ * height. That height is the very thing
+ * a cold decode changes (the post inflates as its own images land), so the desired offset is
+ * re-decided every frame from the live layout ([landingOffset]) — never frozen at landing time — and
+ * a size change of the target counts as movement for the settle test ([ReanchorFrame.targetSize]) :
+ * the first visible item growing keeps its `index`/`offset` reading while its bottom edge drifts down.
+ *
  * The per-frame decision is delegated to the pure [reanchorStep] so the state machine is unit-tested
  * without a frame clock or a live `LazyListState`.
  */
-private suspend fun LazyListState.reanchorWhileMediaSettles(target: Int) {
+private suspend fun LazyListState.reanchorWhileMediaSettles(target: Int, landing: LandingAlignment) {
     var stableFrames = 0
     var previous: ReanchorFrame? = null
+    // #1137 — the target's last measured size, carried over the frames where it is not laid out
+    // (snapped fully above the viewport while the marker height is still 0) : reading 0 there would
+    // flip the decision back to top-of-post and make the loop oscillate between the two pins.
+    var targetSize = measuredSizeOf(target) ?: 0
     repeat(REANCHOR_MAX_FRAMES) { frame ->
         withFrameNanos { }
         if (isScrollInProgress) return // user took over — never fight a manual scroll
-        val current = ReanchorFrame(firstVisibleItemIndex, firstVisibleItemScrollOffset)
+        measuredSizeOf(target)?.let { targetSize = it }
+        val current = ReanchorFrame(firstVisibleItemIndex, firstVisibleItemScrollOffset, targetSize)
+        val targetOffset = landingOffset(landing, targetSize)
         val stableThreshold = if (frame >= REANCHOR_MIN_FRAMES) {
             REANCHOR_STABLE_FRAMES
         } else {
@@ -892,7 +978,7 @@ private suspend fun LazyListState.reanchorWhileMediaSettles(target: Int) {
             val step = reanchorStep(
                 current = current,
                 previous = previous,
-                target = target,
+                goal = ReanchorGoal(target, targetOffset),
                 stableFrames = stableFrames,
                 stableThreshold = stableThreshold,
             )
@@ -900,12 +986,66 @@ private suspend fun LazyListState.reanchorWhileMediaSettles(target: Int) {
             ReanchorStep.Stop -> return
             is ReanchorStep.Continue -> {
                 stableFrames = step.stableFrames
-                if (step.repin) scrollToItem(target)
+                if (step.repin) scrollToItem(target, targetOffset)
             }
         }
         previous = current
     }
 }
+
+/**
+ * #1137 — how a `ScrollToPost` landing aligns its target, for the one-shot snap ([landOn]) and for
+ * every re-pin of [reanchorWhileMediaSettles] alike (the two must agree, or a re-pin would undo the
+ * landing).
+ */
+internal sealed interface LandingAlignment {
+    /** The target's top edge on the landing line — every landing before #1137, still every non-flag one. */
+    data object TopOfPost : LandingAlignment
+
+    /**
+     * Flag-tap landing (`TopicEffect.ScrollToPost.lastRead`, set by the ViewModel's flag entry
+     * producer only) : when the post overflows the viewport, the TOP of the « Dernier message lu »
+     * separator — rendered at the bottom of the same item — comes to the landing line, so the marker
+     * is the first thing on screen and the first unread post follows it ; the post body itself is
+     * entirely above the line. When the post fits, top-of-post as before. The decision itself is the
+     * pure [lastReadLandingOffset].
+     *
+     * [markerHeightPx] is read per decision, not captured : the marker is measured where it is
+     * composed (`onLastReadMarkerMeasured`), possibly after the first snap ; `0` while unmeasured.
+     */
+    class LastReadMarker(val markerHeightPx: () -> Int) : LandingAlignment
+}
+
+/**
+ * #1137 — one-shot landing of [target] under [landing]. The top-aligned snap always runs first : it
+ * is what composes and measures the target, and the marker alignment cannot be decided before the
+ * item has a height. A second snap then applies the resulting offset when it is non-zero, back to
+ * back with the first (no frame await in between).
+ */
+private suspend fun LazyListState.landOn(target: Int, landing: LandingAlignment) {
+    scrollToItem(target)
+    val offset = landingOffset(landing, targetSize = measuredSizeOf(target) ?: 0)
+    if (offset != 0) scrollToItem(target, offset)
+}
+
+/**
+ * #1137 — the `scrollToItem` offset the target should rest at under [landing], decided against the
+ * CURRENT layout and the target's [targetSize] (its measured main-axis size, cf. [measuredSizeOf]).
+ * `viewportEndOffset` is the span below the landing line (the layout's size minus the top content
+ * padding, which sits above that line and is not available to the item).
+ */
+private fun LazyListState.landingOffset(landing: LandingAlignment, targetSize: Int): Int = when (landing) {
+    LandingAlignment.TopOfPost -> 0
+    is LandingAlignment.LastReadMarker -> lastReadLandingOffset(
+        itemHeight = targetSize,
+        viewportHeight = layoutInfo.viewportEndOffset,
+        markerHeight = landing.markerHeightPx(),
+    )
+}
+
+/** #1137 — the measured main-axis size of item [target] this frame, `null` while it is not laid out. */
+private fun LazyListState.measuredSizeOf(target: Int): Int? =
+    layoutInfo.visibleItemsInfo.firstOrNull { it.index == target }?.size
 
 /**
  * #307 — one-shot restoration of the saved read position + the single central save point.
@@ -984,15 +1124,27 @@ private fun TopicScrollRestorationEffects(
     }
 }
 
-/** The target row's position within the viewport on a given frame. Cf. [reanchorStep]. */
-internal data class ReanchorFrame(val index: Int, val offset: Int)
+/**
+ * The target row's position within the viewport on a given frame — plus, since #1137, the target
+ * item's measured main-axis size ([targetSize]) : the first visible item GROWING (its own images
+ * decoding) leaves [index] and [offset] untouched while its bottom part — the marker a last-read
+ * landing keeps on screen — drifts down, so a size change must count as movement for the settle test.
+ * Cf. [reanchorStep].
+ */
+internal data class ReanchorFrame(val index: Int, val offset: Int, val targetSize: Int = 0)
+
+/**
+ * Item index to pin and target `scrollToItem` offset. `0` is the historical top-of-post pin ;
+ * otherwise #1137 marker alignment is recomputed every frame by the caller.
+ */
+internal data class ReanchorGoal(val index: Int, val offset: Int = 0)
 
 /** Outcome of one [reanchorStep] decision. */
 internal sealed interface ReanchorStep {
     /** The layout has settled (or the frame budget is spent) — stop re-anchoring. */
     data object Stop : ReanchorStep
 
-    /** Keep going: carry [stableFrames] to the next frame and re-pin to the top iff [repin]. */
+    /** Keep going: carry [stableFrames] to the next frame and re-pin to the landing offset iff [repin]. */
     data class Continue(val stableFrames: Int, val repin: Boolean) : ReanchorStep
 }
 
@@ -1000,31 +1152,63 @@ internal sealed interface ReanchorStep {
  * Pure per-frame decision for [reanchorWhileMediaSettles] (#197), extracted so the state machine is
  * unit-testable without a frame clock or a live `LazyListState`.
  *
- * Stop once the target's position has held still ([current] equal to [previous]) for
- * [stableThreshold] consecutive frames. The caller passes `Int.MAX_VALUE` during the initial
- * cold-decode guard window so the helper keeps monitoring even if the first frames are stable.
- * Otherwise carry the updated stable count and ask for a re-pin whenever the target is not currently
- * at the very top ([ReanchorFrame.index] != [target] or a non-zero offset) — a no-op when it already
- * is, harmless when the list cannot scroll it higher.
+ * Stop once the target's reading has held still ([current] equal to [previous] — position AND
+ * measured size, cf. [ReanchorFrame]) for [stableThreshold] consecutive frames. The caller passes
+ * `Int.MAX_VALUE` during the initial cold-decode guard window so the helper keeps monitoring even if
+ * the first frames are stable. Otherwise carry the updated stable count and ask for a re-pin whenever
+ * the target is not currently where the landing wants it ([ReanchorFrame.index] != [ReanchorGoal.index]
+ * or [ReanchorFrame.offset] != [ReanchorGoal.offset]) — a no-op when it already is, harmless when the list
+ * cannot scroll it there.
  *
- * @param current the target row's position this frame
+ * @param current the target row's reading this frame
  * @param previous the same reading from the previous frame, or `null` on the first frame
- * @param target the item index we want pinned to the top
+ * @param goal the item index and `scrollToItem` offset the target should rest at — `0` for the
+ *   historical top-of-post pin ; #1137 — the marker alignment otherwise, recomputed by the caller
+ *   every frame from the target's current size (the same size [current] carries)
  * @param stableFrames consecutive still frames observed so far
  * @param stableThreshold still frames required to consider the layout settled
  */
 internal fun reanchorStep(
     current: ReanchorFrame,
     previous: ReanchorFrame?,
-    target: Int,
+    goal: ReanchorGoal,
     stableFrames: Int,
     stableThreshold: Int,
 ): ReanchorStep {
     val moved = previous == null || current != previous
     val nextStableFrames = if (moved) 0 else stableFrames + 1
     if (nextStableFrames >= stableThreshold) return ReanchorStep.Stop
-    val repin = current.index != target || current.offset != 0
+    val repin = current.index != goal.index || current.offset != goal.offset
     return ReanchorStep.Continue(stableFrames = nextStableFrames, repin = repin)
+}
+
+/**
+ * #1137 — pure alignment decision of a last-read landing ([LandingAlignment.LastReadMarker]),
+ * extracted so it is unit-testable without a `LazyListState` (same stance as [reanchorStep]).
+ *
+ * Returns the `scrollToItem` offset the target item should rest at :
+ *  - `0` — the item fits below the landing line ([itemHeight] <= [viewportHeight]) : top-of-post,
+ *    the historical landing, unchanged ;
+ *  - [itemHeight] − [markerHeight] — the item overflows : the TOP of the marker comes to the landing
+ *    line. Only the item's last [markerHeight] px (the marker) stay on screen, above the first unread
+ *    post ; the post body is entirely above the line. An unmeasured marker (`0`) degrades to the
+ *    whole item scrolled off, i.e. the first unread post at the top.
+ *
+ * Re-evaluated on every re-anchor frame : the post GROWS while its images decode (cold cache), so
+ * both the fit decision and the offset move with it — a decision frozen on the first frame would let
+ * the marker drift down as the post inflates. Defensive on garbage : a non-positive height (nothing
+ * laid out yet) and a marker at least as tall as its item return `0` — never a negative offset,
+ * never a move decided on unmeasured geometry.
+ *
+ * @param itemHeight measured main-axis size of the target item (post card + marker)
+ * @param viewportHeight main-axis span available below the landing line —
+ *   `LazyListLayoutInfo.viewportEndOffset` (the top content padding sits above that line)
+ * @param markerHeight measured height of the « Dernier message lu » separator, `0` while unknown
+ */
+internal fun lastReadLandingOffset(itemHeight: Int, viewportHeight: Int, markerHeight: Int): Int = when {
+    itemHeight <= 0 || viewportHeight <= 0 -> 0
+    itemHeight <= viewportHeight -> 0
+    else -> (itemHeight - markerHeight.coerceAtLeast(0)).coerceAtLeast(0)
 }
 
 /**
@@ -1053,6 +1237,7 @@ private const val REANCHOR_STABLE_FRAMES = 3
 internal fun TopicContent(
     state: TopicUiState,
     listState: LazyListState,
+    snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     onIntent: (TopicIntent) -> Unit,
     onBack: () -> Unit,
     onReply: (subcat: Int, page: Int, quotes: List<QuoteSelection>) -> Unit,
@@ -1096,9 +1281,14 @@ internal fun TopicContent(
     onClosePoll: () -> Unit = {},
     // Vague 4 (#604) lot 1 — HFR accepted a quick-reply POST. Since #895 étape 4 this feeds
     // `TopicViewModel.applySubmitResult` directly (wired at the stateful entry point): the retained
-    // engine force-refreshes and lands the submit — no route refresh (historically `:app` bumped a
-    // submitSignal on the route, the same path as the full editor's onSubmitSucceeded, #200).
-    onQuickReplySubmitted: (targetPage: Int?, scrollTo: Int?) -> Unit = { _, _ -> },
+    // engine force-refreshes and conditionally lands the submit — no route refresh (historically
+    // `:app` bumped a submitSignal on the route, the same path as the full editor's
+    // onSubmitSucceeded, #200).
+    onQuickReplySubmitted: (targetPage: Int?, scrollTo: Int?, quotedNumreponses: List<Int>) -> Unit =
+        { _, _, _ -> },
+    // #1137 — measured height (px) of the « Dernier message lu » separator, reported from where it is
+    // composed so the flag landing can align on it. Threaded down to TopicLoadedContent.
+    onLastReadMarkerMeasured: (heightPx: Int) -> Unit = {},
 ) {
     // #285 — the topic title and #284 — the page counter live in a persistent top app bar so they
     // stay visible while the user scrolls (the in-card title/caption scrolls away). While loading,
@@ -1151,6 +1341,7 @@ internal fun TopicContent(
         } else {
             Modifier
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopicTopBar(
                 state = state,
@@ -1379,6 +1570,7 @@ internal fun TopicContent(
                                 pollManualExpanded = pollManualExpanded,
                                 onPollExpansionChanged = onPollExpansionChanged,
                                 onClosePoll = onClosePoll,
+                                onLastReadMarkerMeasured = onLastReadMarkerMeasured,
                             )
                         }
                         PullToRefreshDefaults.Indicator(
@@ -1448,14 +1640,14 @@ internal fun TopicContent(
                     launch.consumesBasket,
                 )
             },
-            onSubmitted = { targetPage, scrollTo ->
+            onSubmitted = { targetPage, scrollTo, quotedNumreponses ->
                 // #868/#869 — a SUCCESSFUL send of a basket-consuming session (« Citer N » ≤ 2)
                 // finally consumes the selection ; a dismiss/cancel above never does.
                 if (launch.consumesBasket) {
                     onClearMultiQuote()
                 }
                 quickReplyFor = null
-                onQuickReplySubmitted(targetPage, scrollTo)
+                onQuickReplySubmitted(targetPage, scrollTo, quotedNumreponses)
             },
         )
     }
@@ -1936,6 +2128,8 @@ private fun TopicLoadedContent(
     onPollExpansionChanged: (Boolean) -> Unit = {},
     // #1201 — the owner « Clore ce sondage » tap. Threaded down to the poll card.
     onClosePoll: () -> Unit = {},
+    // #1137 — reports the « Dernier message lu » separator's measured height (px) — cf. its mount.
+    onLastReadMarkerMeasured: (heightPx: Int) -> Unit = {},
 ) {
     // Scroll-anchor (#104 follow-up): the post the reader was sent to (quote link, deep link, last-read).
     // Marked by tinting ONLY its identity band with tertiaryContainer (XaTriX: the left-rail attempt was
@@ -1986,11 +2180,14 @@ private fun TopicLoadedContent(
     // #831 — one stable handler instance provided (via TopicPostCard) to the post bodies'
     // LocalPostImageActions; remembered so providing it never invalidates the cards.
     val postImageActions = remember { PostImageActions(onLongPress = { imageMenuTarget = it }) }
-    // #831 — « Enregistrer l'image » seam. A dedicated thin @HiltViewModel (precedent
-    // QuickReplyViewModel) so the save survives the sheet's dismissal; feedback = Toast
-    // (feature-topic convention, no SnackbarHost in TopicScreen).
+    // #831 — image-menu actions. A dedicated thin @HiltViewModel (precedent QuickReplyViewModel)
+    // so the save survives the sheet's dismissal; share is emitted back to this host for the
+    // Android chooser.
     val imageActionsViewModel: PostImageActionsViewModel = hiltViewModel()
     val imageActionsContext = androidx.compose.ui.platform.LocalContext.current
+    val imageShareFailedFeedback = stringResource(
+        fr.forumhfr.redface2.core.ui.R.string.post_image_menu_share_failed,
+    )
     LaunchedEffect(imageActionsViewModel) {
         imageActionsViewModel.effects.collect { effect ->
             val messageRes = when (effect) {
@@ -2002,7 +2199,12 @@ private fun TopicLoadedContent(
                     R.string.topic_image_menu_save_failed_storage
                 PostImageActionsViewModel.SaveImageEffect.FAILED_TOO_LARGE ->
                     R.string.topic_image_menu_save_failed_too_large
+                is PostImageActionsViewModel.ShareImageEffect -> {
+                    sharePostImageUrl(imageActionsContext, effect.url, imageShareFailedFeedback)
+                    null
+                }
             }
+            if (messageRes == null) return@collect
             // The @StringRes overload resolves at show() time — no LocalContext resource query
             // (LocalContextGetResourceValueCall) for a one-shot Toast.
             android.widget.Toast.makeText(
@@ -2145,13 +2347,13 @@ private fun TopicLoadedContent(
             // clickables (links, buttons, avatar) consume their own up events, so taps on them
             // never count toward this detector; drags past slop cancel it, so scrolling and the
             // #282 page swipe are untouched. The pull-to-refresh indicator gives the feedback
-            // (isRefreshing is already shared with the pull gesture); the haptic tick confirms
-            // the trigger under the finger.
-            .topicDoubleTapRefresh {
+            // (isRefreshing is already shared with the pull gesture); the haptic tick confirms the
+            // trigger under the finger. While zoomed, the detector is removed instead of relying on
+            // the callback guard, because `detectTapGestures` consumes taps before callback dispatch.
+            .topicDoubleTapRefresh(enabled = !zoomSuspendsScroll) {
                 // #182 — double-tap refresh is suspended while zoomed (contract ZOOMÉ).
-                // The magnifier already consumes the down on its Initial pass while
-                // zoomed (replied mode), so this guard is DEFENSE IN DEPTH — it keeps
-                // the suspension correct even if the modifier stacking ever changes.
+                // The magnifier now leaves tap and long-press targets transparent while zoomed,
+                // so this explicit guard owns the double-tap refresh suspension.
                 if (!zoomState.zoomed) {
                     haptics.performHapticFeedback(HapticFeedbackType.Confirm)
                     onDoubleTapRefresh()
@@ -2331,6 +2533,7 @@ private fun TopicLoadedContent(
                         onImageLongPress = postImageActions.onLongPress,
                         // #884 — « posts en pleine largeur »: boundary-less card, full bleed.
                         flat = state.fullWidthPosts,
+                        postHeaderEmphasis = state.postHeaderEmphasis,
                         // #983 — who closes this post's bottom edge (derived above).
                         flatBottomEdge = flatBottomEdge,
                         // #874 — Q4 and P1 are independent: an own post carrying an auto-citation
@@ -2343,7 +2546,15 @@ private fun TopicLoadedContent(
                     // #983 — the separator owns its own symmetric vertical rhythm in full-width
                     // (no container adds a gap there), and stays edge to edge like the posts it cuts
                     // through — it is a rule, not an island card.
-                    LastReadMarker(modifier = Modifier.separatorPadding(state.fullWidthPosts))
+                    // #1137 — measured where it is composed, OUTSIDE the separator padding (the
+                    // outer modifier sees the padded size) : the flag landing puts the marker's top
+                    // edge on the landing line, i.e. keeps exactly this many px of the item on
+                    // screen.
+                    LastReadMarker(
+                        modifier = Modifier
+                            .onSizeChanged { onLastReadMarkerMeasured(it.height) }
+                            .separatorPadding(state.fullWidthPosts),
+                    )
                 }
             }
         }
@@ -2464,6 +2675,11 @@ private fun TopicLoadedContent(
             } else {
                 null
             },
+            onQuoteStart = if (shouldShowQuoteAction(topic, state.isAuthenticated)) {
+                { onQuoteRequested(post.toQuoteSelection(topic.page, truncate = true)) }
+            } else {
+                null
+            },
             // #509 — a post reachable through the menu is either not blocked, or blocked-but-revealed;
             // either way `numreponse in hiddenNumreponses` tells whether the author is blacklisted, so
             // the entry flips between Masquer / Ne plus masquer. Hidden for the user's own posts.
@@ -2484,16 +2700,23 @@ private fun TopicLoadedContent(
         PostImageMenuSheet(
             target = target,
             onSave = imageActionsViewModel::saveImage,
+            onShare = imageActionsViewModel::shareImage,
             onDismiss = { imageMenuTarget = null },
         )
     }
 }
 
 /** #382 — the single list-level double-tap detector, exposed for mounted gesture coverage. */
-internal fun Modifier.topicDoubleTapRefresh(onDoubleTapRefresh: () -> Unit): Modifier =
+internal fun Modifier.topicDoubleTapRefresh(
+    enabled: Boolean = true,
+    onDoubleTapRefresh: () -> Unit,
+): Modifier = if (enabled) {
     pointerInput(Unit) {
         detectTapGestures(onDoubleTap = { onDoubleTapRefresh() })
     }
+} else {
+    this
+}
 
 /**
  * #600 → vague 3 (#604) — traversing « Dernier message lu » separator (mockup « Lecture A ») :
@@ -2825,23 +3048,18 @@ internal fun TopicPollCard(
  */
 @Composable
 private fun TopicPollReadOnlyResults(poll: Poll) {
-    poll.options.forEach { option ->
-        Text(
-            // #697 — the FORM shape carries no numbers : render the bare label instead
-            // of a misleading « 0.0% (0 votes) ».
-            text = if (poll.resultsAvailable) {
-                stringResource(
-                    R.string.topic_poll_option,
-                    option.text,
-                    option.percentage,
-                    option.votes,
-                )
-            } else {
-                option.text
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+    if (poll.resultsAvailable) {
+        TopicPollResultBars(calculatePollResultBars(poll))
+    } else {
+        poll.options.forEach { option ->
+            Text(
+                // #697 — the FORM shape carries no numbers : render the bare label instead
+                // of a misleading « 0 % (0 votes) ».
+                text = option.text,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
     val choiceLabel = if (poll.multipleChoice) {
         stringResource(R.string.topic_poll_multiple_choices)
@@ -2859,16 +3077,18 @@ private fun TopicPollReadOnlyResults(poll: Poll) {
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-    poll.blankVotes?.let { blankVotes ->
-        Text(
-            text = pluralStringResource(
-                R.plurals.topic_poll_blank_votes,
-                blankVotes,
-                blankVotes,
-            ),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+    if (!poll.resultsAvailable) {
+        poll.blankVotes?.let { blankVotes ->
+            Text(
+                text = pluralStringResource(
+                    R.plurals.topic_poll_blank_votes,
+                    blankVotes,
+                    blankVotes,
+                ),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -3048,6 +3268,8 @@ internal fun TopicPostCard(
      * Default `false`: the historical card.
      */
     flat: Boolean = false,
+    /** #595 nuit F — optional vivid accent identity band; default keeps historical subtle tint. */
+    postHeaderEmphasis: PostHeaderEmphasis = PostHeaderEmphasis.SUBTLE,
     /**
      * #983 — forwarded to [ReadingPostCard]: whether this flat post draws its own closing hairline, or
      * draws none — because what follows brings its own boundary (separator rule, island border), or
@@ -3156,17 +3378,21 @@ internal fun TopicPostCard(
         // PostIdentityBand (#351) receives both roles explicitly; the enclosing Card clips the strip
         // to its rounded corners. The #104 tint logic stays the topic's decision.
         identity = { moderationOverride ->
-            val bandContainerColor = when {
+            val normalHeaderColors = postHeaderColors(postHeaderEmphasis)
+            val bandColors = when {
                 // #1112 (retour device XaTriX) : un post de modération garde son header rouge même
                 // quand il est la cible d'ancrage — le rouge persistant prime sur la teinte d'ancrage transitoire.
-                moderationOverride != null -> moderationOverride.containerColor
-                highlighted -> MaterialTheme.colorScheme.tertiaryContainer
-                else -> MaterialTheme.colorScheme.secondaryContainer
+                moderationOverride != null -> moderationOverride
+                highlighted -> normalHeaderColors.copy(
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+                else -> normalHeaderColors
             }
-            val bandContentColor = when {
-                moderationOverride != null -> moderationOverride.contentColor
-                highlighted -> contentColorFor(MaterialTheme.colorScheme.tertiaryContainer)
-                else -> contentColorFor(MaterialTheme.colorScheme.secondaryContainer)
+            val supportingContentColorOverride = when {
+                moderationOverride != null -> bandColors.contentColor
+                !highlighted && postHeaderEmphasis == PostHeaderEmphasis.VIVID -> bandColors.contentColor
+                else -> null
             }
             PostIdentityBand(
                 // #874/#1112 — colour is not the sole signal: the active intrinsic marker sits on
@@ -3180,16 +3406,16 @@ internal fun TopicPostCard(
                                 stateDescription = moderationPostStateDescription
                             }
                         }
-                    },
-                containerColor = bandContainerColor,
-                contentColor = bandContentColor,
+                },
+                containerColor = bandColors.containerColor,
+                contentColor = bandColors.contentColor,
             ) {
                 TopicPostIdentityHeader(
                     post = post,
                     authorRole = authorRole,
                     onOpenProfile = onOpenProfile,
                     onOpenMenu = onOpenMenu,
-                    supportingContentColorOverride = moderationOverride?.let { bandContentColor },
+                    supportingContentColorOverride = supportingContentColorOverride,
                     // #287 — the band's header padding (12.dp horizontal, m.cardHeaderVertical vertical)
                     // is reinjected on the header slot's modifier (densities stay feature-owned, #351).
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = m.cardHeaderVertical),
@@ -3989,8 +4215,8 @@ internal fun rememberQuickReplyLaunch(): MutableState<QuickReplyLaunch?> =
 
 /**
  * #953 (F3) — explicit [Saver] for the (non-Parcelable) [QuickReplyLaunch] : the flat list is
- * `[cat, subcat, topicId, page, consumesBasket, then page/numreponse/ref/author/excerpt per quote]` —
- * primitives only, all Bundle-safe. A null launch (sheet closed) is handled by [listSaver]
+ * `[cat, subcat, topicId, page, consumesBasket, then page/numreponse/ref/author/excerpt/truncate
+ * per quote]` — primitives only, all Bundle-safe. A null launch (sheet closed) is handled by [listSaver]
  * itself : the empty list it produces is stored as null, restored as null, and this saver's
  * `restore` only ever sees non-empty lists.
  */
@@ -4011,6 +4237,7 @@ internal val QuickReplyLaunchSaver: Saver<QuickReplyLaunch?, Any> = listSaver<Qu
                     add(quote.locator.ref ?: QUICK_REPLY_SAVER_REF_ABSENT)
                     add(quote.author)
                     add(quote.excerpt)
+                    add(quote.truncate)
                 }
             }
         }
@@ -4028,13 +4255,16 @@ internal val QuickReplyLaunchSaver: Saver<QuickReplyLaunch?, Any> = listSaver<Qu
                 ),
                 initialQuotes = saved
                     .drop(QUICK_REPLY_SAVER_HEADER_SIZE)
-                    .chunked(QUICK_REPLY_SAVER_QUOTE_FIELDS)
+                    .let { quoteFields ->
+                        quoteFields.chunked(quickReplySaverQuoteFields(quoteFields.size))
+                    }
                     .map { fields ->
                         val page = fields[0] as Int
                         val numreponse = fields[1] as Int
                         val ref = fields[2] as Int
                         val author = fields[3] as String
                         val excerpt = fields[4] as String
+                        val truncate = fields.getOrNull(5) as? Boolean ?: false
                         QuoteSelection(
                             locator = QuoteLocator(
                                 page = page,
@@ -4043,6 +4273,7 @@ internal val QuickReplyLaunchSaver: Saver<QuickReplyLaunch?, Any> = listSaver<Qu
                             ),
                             author = author,
                             excerpt = excerpt,
+                            truncate = truncate,
                         )
                     },
                 consumesBasket = saved[4] as Boolean,
@@ -4054,8 +4285,11 @@ internal val QuickReplyLaunchSaver: Saver<QuickReplyLaunch?, Any> = listSaver<Qu
 /** [QuickReplyLaunchSaver] layout: request Ints + consumesBasket before the quote fields. */
 private const val QUICK_REPLY_SAVER_HEADER_SIZE = 5
 
-/** [QuickReplyLaunchSaver] layout : page, numreponse, ref, author, excerpt per armed quote. */
-private const val QUICK_REPLY_SAVER_QUOTE_FIELDS = 5
+/** [QuickReplyLaunchSaver] layout : page, numreponse, ref, author, excerpt, truncate per quote. */
+private const val QUICK_REPLY_SAVER_QUOTE_FIELDS = 6
+
+/** Pre-#327 saved launches did not carry the truncate flag. */
+private const val QUICK_REPLY_SAVER_QUOTE_FIELDS_LEGACY = 5
 
 /** Bundle-safe encoding of a nullable quote ref; real HFR refs are non-negative. */
 private const val QUICK_REPLY_SAVER_REF_ABSENT = -1
@@ -4094,11 +4328,19 @@ internal const val MULTI_QUOTE_FULL_EDITOR_THRESHOLD = 3
 // #604/#1074 — typed locator + quote-card snapshot, built AT SELECTION TIME where the full Post and
 // its page are in scope (the cards never re-parse a post; the exact [quotemsg] is fetched at
 // materialisation). The app-level basket completes identity with QuoteScope.
-internal fun Post.toQuoteSelection(page: Int): QuoteSelection = QuoteSelection(
+internal fun Post.toQuoteSelection(page: Int, truncate: Boolean = false): QuoteSelection = QuoteSelection(
     locator = QuoteLocator(page = page, numreponse = numreponse, ref = quoteRef),
     author = author,
     excerpt = postContentExcerpt(content),
+    truncate = truncate,
 )
+
+private fun quickReplySaverQuoteFields(size: Int): Int =
+    if (size % QUICK_REPLY_SAVER_QUOTE_FIELDS == 0) {
+        QUICK_REPLY_SAVER_QUOTE_FIELDS
+    } else {
+        QUICK_REPLY_SAVER_QUOTE_FIELDS_LEGACY
+    }
 
 internal fun shouldEnableReply(topic: Topic, isAuthenticated: Boolean): Boolean =
     topic.canReply && isAuthenticated

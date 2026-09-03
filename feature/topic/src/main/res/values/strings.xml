@@ -72,6 +72,7 @@
     <string name="topic_post_menu_text_copied">Texte copié</string>
     <string name="topic_post_menu_copy_link">Copier le lien de ce post</string>
     <string name="topic_post_menu_link_copied">Lien copié</string>
+    <string name="topic_post_menu_quote_start">Citer le début</string>
     <string name="topic_post_menu_report_soon">Alerter (à venir)</string>
     <!-- #792 — entrée « Envoyer un MP » du menu contextuel de post (composeur MP pré-rempli). -->
     <string name="topic_post_menu_send_private_message">Envoyer un MP</string>
@@ -108,10 +109,16 @@
     <string name="topic_citing_posts_error">Impossible de charger les citations</string>
     <string name="topic_citing_posts_no_text">Message sans extrait textuel</string>
     <string name="topic_citing_posts_open">Aller au message de %1$s</string>
-    <string name="topic_poll_option">%1$s — %2$.1f%% (%3$d votes)</string>
     <!-- #697 — forme « formulaire » (pas encore voté / lecture anonyme) : options sans résultats,
          et remplacement du résumé total-votes par cette mention factuelle. -->
     <string name="topic_poll_no_results">Résultats disponibles après vote • %1$s</string>
+    <string name="topic_poll_blank_label">Vote blanc</string>
+    <plurals name="topic_poll_result_votes">
+        <item quantity="one">%1$d vote</item>
+        <item quantity="other">%1$d votes</item>
+    </plurals>
+    <string name="topic_poll_result_percentage">%1$s&#160;%%</string>
+    <string name="topic_poll_result_content_description">%1$s, %2$s, %3$s</string>
     <string name="topic_poll_summary">%1$d votes au total • %2$s</string>
     <string name="topic_poll_multiple_choices">multi-choix</string>
     <string name="topic_poll_single_choice">choix unique</string>
@@ -161,6 +168,8 @@
     <string name="topic_post_edit">Modifier</string>
     <string name="topic_edit_first_post">Modifier le premier message</string>
     <string name="topic_post_submit_refresh_failed">Message envoyé, mais le rafraîchissement de la page a échoué. Tirez pour réessayer.</string>
+    <string name="topic_post_submitted_elsewhere">Message publié en page %1$d</string>
+    <string name="topic_post_submitted_elsewhere_action">Y aller</string>
     <string name="topic_refresh_failed">Le rafraîchissement a échoué. Réessayez.</string>
     <string name="topic_open_profile_action">Voir le profil</string>
 

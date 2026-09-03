@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.feature.messages
 
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
+import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
 import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
 
@@ -24,6 +25,8 @@ data class PrivateMessageThreadUiState(
     val fullWidthPosts: Boolean = false,
     /** #1050 — shared topic/MP signature preference; inert when HFR supplied no signature. */
     val showSignatures: Boolean = false,
+    /** Vivid/subtle identity-band colour preference, render-only like [showSignatures]. */
+    val postHeaderEmphasis: PostHeaderEmphasis = PostHeaderEmphasis.SUBTLE,
     /** #1050 — shared #874 EgoQuote preference, independent from [egoPostEnabled]; render-only. */
     val egoQuoteEnabled: Boolean = true,
     /** #1050 — shared #874 EgoPost preference, independent from [egoQuoteEnabled]; render-only. */
@@ -179,4 +182,7 @@ sealed interface PrivateMessageThreadEffect {
 
     /** The image exceeded the saver's bounded download size. */
     data object ImageSaveFailedTooLarge : PrivateMessageThreadEffect
+
+    /** #831 — share the direct post-image URL through Android's chooser. */
+    data class ShareImage(val url: String) : PrivateMessageThreadEffect
 }
