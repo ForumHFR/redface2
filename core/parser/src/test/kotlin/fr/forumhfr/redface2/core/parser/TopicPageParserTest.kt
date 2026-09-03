@@ -107,6 +107,7 @@ class TopicPageParserTest {
             assertEquals(176, poll.totalVotes)
             assertEquals("1. Non, c'est dégueu!", poll.options.first().text)
             assertEquals(34, poll.options.first().votes)
+            assertEquals(20.1f, poll.options[1].percentage, 0.0001f)
         }
     }
 

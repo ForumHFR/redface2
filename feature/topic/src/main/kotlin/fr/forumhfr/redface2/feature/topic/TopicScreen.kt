@@ -157,10 +157,33 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Locale
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+
+@Suppress("LongParameterList")
+internal fun CoroutineScope.launchPostSubmittedElsewhereSnackbar(
+    effect: TopicEffect.PostSubmittedElsewhere,
+    message: String,
+    actionLabel: String,
+    showSnackbar: suspend (
+        message: String,
+        actionLabel: String,
+        duration: SnackbarDuration
+    ) -> SnackbarResult,
+    departureAnchor: () -> TopicScrollAnchor?,
+    openSubmittedPostPage: (page: Int, scrollTo: Int?, departureAnchor: TopicScrollAnchor?) -> Unit,
+) {
+    launch {
+        val result = showSnackbar(message, actionLabel, SnackbarDuration.Long)
+        if (result == SnackbarResult.ActionPerformed) {
+            openSubmittedPostPage(effect.page, effect.scrollTo, departureAnchor())
+        }
+    }
+}
 
 @Composable
 // LongParameterList : state-hoisted Composable : each callback has a distinct call-site
@@ -344,6 +367,7 @@ fun TopicScreen(
     val favoriteAtPostState by viewModel.favoriteAtPostState.collectAsStateWithLifecycle()
     val lazyListState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
+    val snackbarScope = rememberCoroutineScope()
     // #1137 — measured height (px) of the « Dernier message lu » separator, written from where the
     // marker is composed (onSizeChanged, inside the last-read post's item — cf. TopicLoadedContent)
     // and read by the flag landing below to put the marker's top edge on the landing line (the post
@@ -603,18 +627,20 @@ fun TopicScreen(
                     ).show()
                 }
                 is TopicEffect.PostSubmittedElsewhere -> {
-                    val result = snackbarHostState.showSnackbar(
+                    snackbarScope.launchPostSubmittedElsewhereSnackbar(
+                        effect = effect,
                         message = String.format(Locale.getDefault(), submittedElsewhereMsg, effect.page),
                         actionLabel = submittedElsewhereAction,
-                        duration = SnackbarDuration.Long,
+                        showSnackbar = { message, actionLabel, duration ->
+                            snackbarHostState.showSnackbar(
+                                message = message,
+                                actionLabel = actionLabel,
+                                duration = duration,
+                            )
+                        },
+                        departureAnchor = alignedDepartureAnchor,
+                        openSubmittedPostPage = viewModel::openSubmittedPostPage,
                     )
-                    if (result == SnackbarResult.ActionPerformed) {
-                        viewModel.openSubmittedPostPage(
-                            page = effect.page,
-                            scrollTo = effect.scrollTo,
-                            departureAnchor = alignedDepartureAnchor(),
-                        )
-                    }
                 }
                 TopicEffect.RefreshFailed -> {
                     // #335 — manual pull-to-refresh could not reach HFR; the page stays on screen

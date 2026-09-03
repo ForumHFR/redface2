@@ -109,7 +109,7 @@ class TopicPollVoteCardTest {
 
         compose.onNodeWithText("10 votes au total • choix unique").assertIsDisplayed()
         compose.onNodeWithText("Vote blanc").assertIsDisplayed()
-        compose.onNodeWithContentDescription("Kotlin, 6 votes, 60\u00A0%").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Kotlin, 6 votes, 75\u00A0%").assertIsDisplayed()
         compose.onNodeWithContentDescription("Vote blanc, 2 votes, 20\u00A0%").assertIsDisplayed()
     }
 
@@ -283,8 +283,17 @@ class TopicPollVoteCardTest {
                     poll = Poll(
                         question = "Quel langage préférez-vous ?",
                         options = listOf(
-                            PollOption("Kotlin", votes = optionVotes[0], percentage = 80f),
-                            PollOption("Java", votes = optionVotes[1], percentage = 20f),
+                            // HFR percentages are computed over expressed (non-blank) votes.
+                            PollOption(
+                                "Kotlin",
+                                votes = optionVotes[0],
+                                percentage = optionVotes[0] * 100f / optionVotes.sum(),
+                            ),
+                            PollOption(
+                                "Java",
+                                votes = optionVotes[1],
+                                percentage = optionVotes[1] * 100f / optionVotes.sum(),
+                            ),
                         ),
                         multipleChoice = false,
                         totalVotes = optionVotes.sum() + (blankVotes ?: 0),
