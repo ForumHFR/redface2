@@ -69,6 +69,41 @@ class DefaultForumRepositoryTest {
     }
 
     @Test
+    fun `observeCachedCategories emits null on cold cache without fetching`() = runTest {
+        val apiClient = mockk<HfrApiClient>(relaxed = true)
+        val repo = repository(apiClient)
+
+        repo.observeCachedCategories().test {
+            assertNull(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify(exactly = 0) { apiClient.getCategories(any()) }
+    }
+
+    @Test
+    fun `observeCachedCategories emits a warmed cache without fetching again`() = runTest {
+        val apiClient = mockk<HfrApiClient> {
+            coEvery { getCategories(any()) } returns fixture("rest_categories.json")
+        }
+        val repo = repository(apiClient)
+
+        repo.observeCategories().test {
+            awaitItem() // Loading
+            awaitItem() // Success
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repo.observeCachedCategories().test {
+            val cached = awaitItem() as ForumResult.Success
+            assertEquals(19, cached.value.size)
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify(exactly = 1) { apiClient.getCategories(any()) }
+    }
+
+    @Test
     fun `concurrent cold observers coalesce into a single categories fetch`() = runTest {
         // Two collectors subscribe before either fetch completes (the gate keeps the first
         // getCategories suspended). Without the single-flight mutex both would see a cold

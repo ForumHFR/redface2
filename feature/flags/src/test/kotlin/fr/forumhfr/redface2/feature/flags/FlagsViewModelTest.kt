@@ -74,6 +74,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.onSubscription
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -310,17 +311,42 @@ class FlagsViewModelTest {
     }
 
     @Test
-    fun `refresh on the Super tab is a no-op`() = runTest {
+    fun `refresh on the Super tab refreshes backing lists in order and ignores reentrant pulls`() = runTest {
         val flags = FakeFlagRepository()
+        flags.refreshGate = CompletableDeferred()
         val forum = FakeForumRepository(catIds = listOf(1))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val vm = viewModel(auth, flags, forum)
+        advanceUntilIdle()
+        // The initial (Cyan) tab legitimately subscribes once; Super must not add a subscription.
+        val categoriesSubscriptionsBeforeSuper = forum.observeCategoriesSubscriptions
 
         vm.selectTab(FlagTab.Super)
         advanceUntilIdle()
-        vm.refresh()
-        assertTrue("Super refresh must be a no-op", flags.refreshCalls.isEmpty())
-        assertEquals(false, vm.isRefreshing.value)
+        assertEquals(
+            "opening Super must not observe the categories catalogue",
+            categoriesSubscriptionsBeforeSuper,
+            forum.observeCategoriesSubscriptions,
+        )
+        assertEquals("opening Super must not refresh the categories catalogue", 0, forum.refreshCategoriesCalls)
+        vm.isRefreshing.test {
+            assertFalse(awaitItem())
+
+            vm.refresh()
+            assertTrue(awaitItem())
+            vm.refresh()
+
+            expectNoEvents()
+            assertEquals(listOf(FlagType.CYAN), flags.refreshCalls)
+
+            flags.refreshGate!!.complete(Unit)
+            assertFalse(awaitItem())
+            assertEquals(listOf(FlagType.CYAN, FlagType.RED, FlagType.FAVORITE), flags.refreshCalls)
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(categoriesSubscriptionsBeforeSuper, forum.observeCategoriesSubscriptions)
+        assertEquals(0, forum.refreshCategoriesCalls)
     }
 
     @Test
@@ -2508,6 +2534,8 @@ class FlagsViewModelTest {
             auth,
             flags,
             forum,
+            // Flat content: these tests inspect rows, not the default category sections.
+            prefs = FakeUserPreferencesRepository(groupByCategory = false),
             superFavorite = FakeSuperFavoriteRepository(favorites),
         )
 
@@ -2534,6 +2562,8 @@ class FlagsViewModelTest {
             auth,
             flags,
             forum,
+            // Flat content: these tests inspect rows, not the default category sections.
+            prefs = FakeUserPreferencesRepository(groupByCategory = false),
             superFavorite = FakeSuperFavoriteRepository(setOf(legacyDuplicate, favorite)),
         )
 
@@ -2825,6 +2855,7 @@ class FlagsViewModelTest {
     private class FakeFlagRepository : FlagRepository {
         private val perType: Map<FlagType, MutableSharedFlow<FlagsResult>> = FlagType.entries
             .associateWith { MutableSharedFlow(replay = 1, extraBufferCapacity = 4) }
+        private val cacheUpdates = MutableSharedFlow<FlagType>(extraBufferCapacity = 8)
         var refreshCalls: List<FlagType> = emptyList()
             private set
         var clearSessionCacheCallCount: Int = 0
@@ -2851,6 +2882,9 @@ class FlagsViewModelTest {
         override fun observe(type: FlagType): Flow<FlagsResult> =
             perType.getValue(type).asSharedFlow()
 
+        override fun observeCacheUpdates(types: Set<FlagType>): Flow<FlagType> =
+            cacheUpdates.asSharedFlow().filter { it in types }
+
         /**
          * Optional gate to suspend a [refresh] round-trip so a test can assert the intermediate
          * `isRefreshing` state before the call resolves. Null = the refresh returns immediately (the
@@ -2861,6 +2895,7 @@ class FlagsViewModelTest {
         override suspend fun refresh(type: FlagType) {
             refreshCalls = refreshCalls + type
             refreshGate?.await()
+            cacheUpdates.emit(type)
         }
 
         override fun clearSessionCache() {

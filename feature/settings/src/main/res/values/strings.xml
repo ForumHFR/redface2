@@ -258,6 +258,7 @@
     <string name="settings_flags_hide_read_categories_title">Masquer les catégories sans non-lu</string>
     <string name="settings_flags_hide_read_categories_description">Cache les catégories sans message non lu. Sans effet en vue à plat.</string>
     <string name="settings_flags_hide_read_categories_persist_failed">Impossible de mémoriser le filtre des catégories. Réessayez.</string>
+    <string name="settings_flags_global_layout_disabled_by_per_tab_override">L\'affichage se règle par onglet depuis l\'écran Drapeaux, dans la feuille de configuration rapide.</string>
 
     <!-- #309 — Réglages d'affichage différents par type de drapeau (onglet). Quand activé, les deux
          réglages ci-dessus servent de valeurs par défaut et chaque onglet (Mes sujets / Lu / Favoris)
