@@ -16,6 +16,29 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.54.1` — `internal` (dev) — 2026-09-05
+
+Correctifs issus de la relecture ciblée du lot produit en gpt-5.5 (0.51 → 0.53.6, bêta) : douze défauts confirmés par deux relecteurs indépendants, onze corrigés. Produit par Sol (Codex gpt-5.6, xhigh) sous gate Fable, builds Opus ; PR [#1269](https://github.com/ForumHFR/redface2/pull/1269) (topic, citations, navigation) et [#1270](https://github.com/ForumHFR/redface2/pull/1270) (drapeaux, couleurs).
+
+### Corrigé
+
+- **Citations tronquées** — la troncature ne coupe plus au milieu d'une URL, d'un smiley (`[:x]` ou `:x:`) ni d'une balise `[url]` ouverte, et ne sépare plus un emoji en deux ; une citation déjà tronquée n'est plus retronquée à tort.
+- **Citation rapide en double** — cartes de citation désactivées, une rotation de l'écran ne rajoute plus un second `[quotemsg]` au brouillon.
+- **Atterrissage sur un message perdu** — un pull-to-refresh, un vote, une suppression ou une clôture de sondage survenant avant la page fraîche n'annule plus le défilement vers le message visé.
+- **Réancrage des images** — le réancrage d'une page ne continue plus sur la page suivante quand on change de page pendant le chargement des images.
+- **Pile de navigation** — rouvrir un écran déjà présent deux fois dans la pile dépile jusqu'à l'occurrence la plus récente au lieu de détruire l'écran courant.
+- **Super favoris** — un super favori dont le sujet a disparu du cache ne propose plus « Retirer le drapeau » et n'envoie plus de suppression de drapeau au serveur (ADR-017 : une épingle est locale).
+- **Super favoris par compte** — les épingles sont désormais rangées par compte HFR (migration automatique des épingles existantes vers le compte connecté) ; changer de compte ne montre plus celles de l'autre.
+- **Rafraîchissement des drapeaux** — tirer sur un onglet pendant qu'un autre se rafraîchit ne lance plus deux rafraîchissements concurrents et l'indicateur reste affiché jusqu'au bout ; un tirage sur Super pendant un rafraîchissement n'est plus perdu.
+- **Couleurs** — quitter l'écran pendant l'enregistrement d'une couleur ne remet plus l'ancienne valeur en mémoire pendant que la nouvelle est écrite sur disque.
+- **Libellés de sous-catégorie** — un échec de chargement n'empêche plus de réessayer à l'émission suivante.
+
+### Note
+
+Reste différé du même audit : le miroir de thème de démarrage peut être écrit avant la confirmation du commit (un flash de couleur possible au redémarrage après un crash au mauvais instant). Détail de l'audit : `redface2-work/reports/AUDIT-perimetre-gpt55-0103sept.md` (hors dépôt).
+
+---
+
 ## `0.54.0` — `internal` (dev) — 2026-09-04
 
 Premier lot du chantier « vieilles issues » (session hfr2-27) : quatre chantiers anciens livrés d'un coup. Produit par Sol (Codex gpt-5.6, xhigh) sous gate Fable, builds Opus (local + socadisc) ; PR #1265, #1266, #1267, #1268.

@@ -1,6 +1,6 @@
-Redface 2 v0.54.0 — dev.
+Redface 2 v0.54.1 — dev.
 
-- Viewer d'image plein écran : tap sur une image, pincement/double-tap, actions partager, copier, navigateur, enregistrer.
-- Icône de l'application au choix (Classique, Sombre, Rose, Rouge RF1).
-- Ton du message : affiché dans les posts, sélectionnable dans l'éditeur.
-- Coins des images : arrondis, légers ou carrés.
+- Citations : la troncature ne coupe plus les URL, smileys et emojis ; plus de citation rapide en double après rotation.
+- Sujets : le défilement vers un message n'est plus perdu après un rafraîchissement ; réancrage des images borné à la page.
+- Super favoris : plus de suppression serveur depuis une épingle orpheline ; épingles rangées par compte.
+- Drapeaux : rafraîchissements sérialisés entre onglets ; couleurs : enregistrement fiable en quittant l'écran.
