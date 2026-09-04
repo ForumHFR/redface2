@@ -240,6 +240,11 @@ Cas particulier : toute contribution qui ajoute ou modifie une fonction de la **
 - workflow GitHub Actions sur push `main` et PR
 - exécution dans le même env Docker de référence, épinglé par digest
 - pipeline actuelle (CI) : `detektAll`, `lintDebug` + `:app:lintProdDebug`, `test` + `testDebugUnitTest` (inclut les checks Konsist), `:app:assembleProdDebug` — le `:app:assembleDebug` **non flavoré ne résout plus** (variantes `dev`/`prod`, [#233](https://github.com/ForumHFR/redface2/issues/233))
+- Sur les PR qui ne touchent que la documentation (`*.md`, `docs/`, `drafts/`, notes Play, templates d'issue ou licence), la matrice Gradle `verify` est ignorée ; `repo-guards` reste toujours bloquant.
+- **Exception : certaines docs restent du « code ».** `docs/specs/**`, `docs/guides/contributing.md`, `AGENTS.md`, `CHANGELOG.md` et `README.md` sont **ré-inclus** dans le filtre `code` (règles placées après les négations : chez `dorny/paths-filter`, la **dernière** règle qui matche gagne). Raison : `DocsConsistencyTest` (`:app`, garde B de parité de lecture entre autres) **lit ces fichiers à l'exécution** ; les traiter comme doc-only désarmerait la garde précisément sur les PR qui les modifient.
+- **Résidu assumé.** La garde Nav3 de `DocsConsistencyTest` (`docs do not reference obsolete Navigation 3 APIs as current guidance` — grep des 4 identifiants Nav3 obsolètes listés dans `forbiddenApis` du test ; ils ne sont pas recopiés ici, la garde balayant aussi cette page) balaie **tous** les `docs/**/*.md`. Une PR qui ne touche que des docs hors ré-inclusion (ex. `docs/adr/**`, `docs/notes/**`) skippe `verify` et ne fait donc **pas** tourner cette garde ; l'écart est rattrapé au premier push sur `dev`/`main`, qui exécute toujours `verify`.
+- Le check agrégé accepte ce `verify` ignoré uniquement quand le filtre `changes` confirme `code=false` ; tout autre fichier déclenche la matrice complète.
+- Les push sur `main`/`dev` exécutent toujours `verify` pour alimenter les caches. Un bump de version touche `app/build.gradle.kts` et n'est donc volontairement pas traité comme doc-only.
 - **Dependabot** configuré pour `gradle` et `github-actions`
 
 **Couverture (hybride différenciée) :**

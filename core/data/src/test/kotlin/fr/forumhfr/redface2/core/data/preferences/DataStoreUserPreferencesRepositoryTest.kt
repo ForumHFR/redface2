@@ -23,6 +23,7 @@ import fr.forumhfr.redface2.core.domain.preferences.NavBarLabelsBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
+import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
@@ -1567,6 +1568,35 @@ class DataStoreUserPreferencesRepositoryTest {
 
         repository.observePostImageMaxWidth().test {
             assertEquals(PostImageMaxWidth.DEFAULT, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observePostImageCorners defaults to ROUNDED on an empty store`() = runTest(dispatcher) {
+        repository.observePostImageCorners().test {
+            assertEquals(PostImageCorners.DEFAULT, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setPostImageCorners persists and round-trips every shape`() = runTest(dispatcher) {
+        PostImageCorners.entries.forEach { corners ->
+            repository.setPostImageCorners(corners)
+            repository.observePostImageCorners().test {
+                assertEquals(corners, awaitItem())
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+    }
+
+    @Test
+    fun `corrupt post_image_corners value falls back to ROUNDED instead of crashing`() = runTest(dispatcher) {
+        dataStore.edit { prefs -> prefs[stringPreferencesKey("post_image_corners")] = "CIRCLE" }
+
+        repository.observePostImageCorners().test {
+            assertEquals(PostImageCorners.DEFAULT, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
     }

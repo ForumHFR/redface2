@@ -16,6 +16,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.LightSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
+import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
@@ -260,6 +261,12 @@ class SettingsViewModel @Inject constructor(
             isLocked = { it.isUpdatingPostImageMaxWidth },
             apply = { state, value -> state.copy(postImageMaxWidth = value) },
         )
+        // #985 — coins des images de contenu (enum), même forme de collecte que leur largeur.
+        observePreference(
+            flow = userPreferencesRepository.observePostImageCorners(),
+            isLocked = { it.isUpdatingPostImageCorners },
+            apply = { state, value -> state.copy(postImageCorners = value) },
+        )
         // #989 — délimiteur du picker de smileys (enum), même forme de collecte.
         observePreference(
             flow = userPreferencesRepository.observeSmileyPickerDecoration(),
@@ -412,6 +419,7 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.AppLauncherIconChanged -> updateAppLauncherIcon(intent.icon)
             is SettingsIntent.MediaDisplayProfileChanged -> updateMediaDisplayProfile(intent.profile)
             is SettingsIntent.PostImageMaxWidthChanged -> updatePostImageMaxWidth(intent.width)
+            is SettingsIntent.PostImageCornersChanged -> updatePostImageCorners(intent.corners)
             is SettingsIntent.SmileyPickerDecorationChanged ->
                 updateSmileyPickerDecoration(intent.decoration)
             is SettingsIntent.SetUploadProvider -> updateUploadProvider(intent.provider)
@@ -953,6 +961,36 @@ class SettingsViewModel @Inject constructor(
                             postImageMaxWidth = previous,
                             isUpdatingPostImageMaxWidth = false,
                             postImageMaxWidthError = true,
+                        )
+                    }
+                }
+        }
+    }
+
+    /** #985 — content-image corners use the same optimistic update and rollback as image width. */
+    private fun updatePostImageCorners(desired: PostImageCorners) {
+        val previous = _state.value.postImageCorners
+        _state.update {
+            it.copy(
+                postImageCorners = desired,
+                isUpdatingPostImageCorners = true,
+                postImageCornersError = false,
+                postImageCornersTouchedLocally = true,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { userPreferencesRepository.setPostImageCorners(desired) }
+                .onSuccess {
+                    _state.update {
+                        it.copy(postImageCorners = desired, isUpdatingPostImageCorners = false)
+                    }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            postImageCorners = previous,
+                            isUpdatingPostImageCorners = false,
+                            postImageCornersError = true,
                         )
                     }
                 }

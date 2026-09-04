@@ -10,6 +10,7 @@ import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
+import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
@@ -1105,6 +1106,30 @@ class SettingsViewModelTest {
             assertFalse(state.isUpdatingPostImageMaxWidth)
             assertTrue(state.postImageMaxWidthError)
         }
+
+    @Test
+    fun `init hydrates the post image corners from storage`() = runTest {
+        repository.emitPostImageCorners(PostImageCorners.SOFT)
+
+        val viewModel = newViewModel()
+
+        assertEquals(PostImageCorners.SOFT, viewModel.state.value.postImageCorners)
+    }
+
+    @Test
+    fun `PostImageCornersChanged persists the new shape and clears the updating flag`() = runTest {
+        val viewModel = newViewModel()
+        assertEquals(PostImageCorners.DEFAULT, viewModel.state.value.postImageCorners)
+
+        viewModel.submit(SettingsIntent.PostImageCornersChanged(PostImageCorners.SQUARE))
+
+        val state = viewModel.state.value
+        assertEquals(PostImageCorners.SQUARE, state.postImageCorners)
+        assertFalse(state.isUpdatingPostImageCorners)
+        assertFalse(state.postImageCornersError)
+        assertEquals(1, repository.postImageCornersSetCalls)
+        assertEquals(PostImageCorners.SQUARE, repository.lastPostImageCornersSet)
+    }
 
     @Test
     fun `FontScaleChanged persists the new preset and clears the updating flag`() = runTest {
@@ -2581,6 +2606,24 @@ class SettingsViewModelTest {
 
         fun emitPostImageMaxWidth(value: PostImageMaxWidth) {
             postImageMaxWidth.value = value
+        }
+
+        private val postImageCorners = MutableStateFlow(PostImageCorners.DEFAULT)
+        var postImageCornersSetCalls: Int = 0
+            private set
+        var lastPostImageCornersSet: PostImageCorners? = null
+            private set
+
+        override fun observePostImageCorners(): Flow<PostImageCorners> = postImageCorners
+
+        override suspend fun setPostImageCorners(corners: PostImageCorners) {
+            postImageCornersSetCalls += 1
+            lastPostImageCornersSet = corners
+            postImageCorners.value = corners
+        }
+
+        fun emitPostImageCorners(value: PostImageCorners) {
+            postImageCorners.value = value
         }
 
         // Build 89 follow-up — topic top-bar auto-hide. Same optimistic-flip seam as amoled.

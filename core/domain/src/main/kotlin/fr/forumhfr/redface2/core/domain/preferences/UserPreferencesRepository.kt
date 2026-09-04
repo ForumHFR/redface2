@@ -519,6 +519,15 @@ interface UserPreferencesRepository {
     suspend fun setPostImageMaxWidth(width: PostImageMaxWidth)
 
     /**
+     * Content-image corner preset (#985): [PostImageCorners.ROUNDED] (default) preserves the
+     * historical 8 dp radius; SOFT and SQUARE let the user reduce or remove it.
+     */
+    fun observePostImageCorners(): Flow<PostImageCorners>
+
+    /** Persists [observePostImageCorners]. Default [PostImageCorners.ROUNDED] until the first call. */
+    suspend fun setPostImageCorners(corners: PostImageCorners)
+
+    /**
      * Smiley picker cell delimiter (#989): [SmileyPickerDecoration.NONE] (default) keeps the
      * current undelimited picker; [SmileyPickerDecoration.OUTLINE] and
      * [SmileyPickerDecoration.SEPARATORS] add visual cell boundaries without changing thumbnail size
