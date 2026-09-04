@@ -152,8 +152,10 @@ import fr.forumhfr.redface2.core.ui.post.postHeaderColors
 import fr.forumhfr.redface2.core.ui.post.readingContentColors
 import fr.forumhfr.redface2.core.ui.post.retryFailedPostMedia
 import fr.forumhfr.redface2.core.ui.post.sharePostImageUrl
+import fr.forumhfr.redface2.core.ui.post.viewerRequestFor
 import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
+import fr.forumhfr.redface2.core.ui.viewer.ImageViewerRequest
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -265,6 +267,8 @@ fun TopicScreen(
      * (cf. `docs/specs/architecture.md` § Frontière feature:topic ↔ feature:profile).
      */
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
+    /** #182 — opens the typed fullscreen image route owned by `:app`. */
+    onOpenImageViewer: (ImageViewerRequest) -> Unit = {},
     /**
      * #792 — « Envoyer un MP » from a post's contextual menu : `:app` opens the NEW-conversation
      * MP composer with [author] prefilled as recipient (`PrivateMessageComposeRoute.prefilledRecipient`
@@ -776,6 +780,7 @@ fun TopicScreen(
             viewModel.goToPost(page, numreponse, alignedDepartureAnchor())
         },
         onOpenProfile = onOpenProfile,
+        onOpenImageViewer = onOpenImageViewer,
         onSendPrivateMessage = onSendPrivateMessage,
         onDeleteRequest = { numreponse -> deleteCandidate = numreponse },
         favoriteAtPostState = favoriteAtPostState,
@@ -1257,6 +1262,7 @@ internal fun TopicContent(
     // #699 — quote-header tap, threaded down to the post cards (cf. TopicScreen KDoc).
     onGoToPost: (page: Int, numreponse: Int) -> Unit = { _, _ -> },
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
+    onOpenImageViewer: (ImageViewerRequest) -> Unit = {},
     // #792 — « Envoyer un MP » entry of the post menu, forwarded up to `:app` (MP composer).
     onSendPrivateMessage: (author: String) -> Unit = {},
     // #292 — a per-post « Supprimer » tap; the screen owns the confirmation dialog, so this only
@@ -1545,6 +1551,7 @@ internal fun TopicContent(
                                 onOpenPage = onOpenPage,
                                 onGoToPost = onGoToPost,
                                 onOpenProfile = onOpenProfile,
+                                onOpenImageViewer = onOpenImageViewer,
                                 onSendPrivateMessage = onSendPrivateMessage,
                                 onDeleteRequest = onDeleteRequest,
                                 favoriteAtPostState = favoriteAtPostState,
@@ -2098,6 +2105,7 @@ private fun TopicLoadedContent(
     // #699 — quote-header tap, forwarded into each TopicPostCard's PostRenderer.
     onGoToPost: (page: Int, numreponse: Int) -> Unit = { _, _ -> },
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
+    onOpenImageViewer: (ImageViewerRequest) -> Unit = {},
     // #792 — « Envoyer un MP » entry of the post menu (gated at the mount below).
     onSendPrivateMessage: (author: String) -> Unit = {},
     onDeleteRequest: (numreponse: Int) -> Unit = {},
@@ -2180,7 +2188,14 @@ private fun TopicLoadedContent(
     var imageMenuTarget by remember { mutableStateOf<PostImageTarget?>(null) }
     // #831 — one stable handler instance provided (via TopicPostCard) to the post bodies'
     // LocalPostImageActions; remembered so providing it never invalidates the cards.
-    val postImageActions = remember { PostImageActions(onLongPress = { imageMenuTarget = it }) }
+    val postImageActions = remember(onOpenImageViewer) {
+        PostImageActions(
+            onLongPress = { imageMenuTarget = it },
+            onOpenViewer = { target ->
+                viewerRequestFor(target, diskCache = true)?.let(onOpenImageViewer)
+            },
+        )
+    }
     // #831 — image-menu actions. A dedicated thin @HiltViewModel (precedent QuickReplyViewModel)
     // so the save survives the sheet's dismissal; share is emitted back to this host for the
     // Android chooser.
@@ -2532,6 +2547,7 @@ private fun TopicLoadedContent(
                         onToggleMultiQuote = multiQuoteToggle,
                         // #831 — long-press on a post image opens the image contextual menu.
                         onImageLongPress = postImageActions.onLongPress,
+                        onOpenImageViewer = postImageActions.onOpenViewer,
                         // #884 — « posts en pleine largeur »: boundary-less card, full bleed.
                         flat = state.fullWidthPosts,
                         postHeaderEmphasis = state.postHeaderEmphasis,
@@ -2702,6 +2718,13 @@ private fun TopicLoadedContent(
             target = target,
             onSave = imageActionsViewModel::saveImage,
             onShare = imageActionsViewModel::shareImage,
+            onOpenViewer = { imageTarget ->
+                imageMenuTarget = null
+                viewerRequestFor(
+                    target = imageTarget.copy(linkUrl = null),
+                    diskCache = true,
+                )?.let(onOpenImageViewer)
+            },
             onDismiss = { imageMenuTarget = null },
         )
     }
@@ -3340,6 +3363,8 @@ internal fun TopicPostCard(
      * outside that capability and keep their historical inert images. Null leaves every image inert.
      */
     onImageLongPress: ((PostImageTarget) -> Unit)? = null,
+    /** #182 — viewer navigation for BODY block images; signatures remain outside the provider. */
+    onOpenImageViewer: ((PostImageTarget) -> Unit)? = null,
 ) {
     // #287 — structural spacing from the active density preset (Comfort = the historical rhythm).
     val m = LocalDisplayMetrics.current
@@ -3372,6 +3397,7 @@ internal fun TopicPostCard(
         ),
         onGoToCitedPost = onGoToCitedPost,
         onImageLongPress = onImageLongPress,
+        onOpenImageViewer = onOpenImageViewer,
         // Identity band — the avatar/pseudo/date header gets its own tinted strip across the full card
         // width (forum idiom, dogfooding v109): secondaryContainer over the neutral card. #104 follow-up
         // (XaTriX): the scroll-anchor post tints ONLY this band with tertiaryContainer (the left rail was

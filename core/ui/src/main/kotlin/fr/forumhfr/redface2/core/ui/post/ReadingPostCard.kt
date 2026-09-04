@@ -34,8 +34,9 @@ import fr.forumhfr.redface2.core.ui.theme.egoHighlightColors
  * [badges] and [footer] are optional feature slots; their absence adds no placeholder node. The
  * body owns the card's bottom padding exactly when [footer] is absent.
  *
- * [onGoToCitedPost] and [onImageLongPress] are capabilities by presence. A null callback keeps the
- * corresponding renderer affordance inert. Selection is deliberately always enabled: changing
+ * [onGoToCitedPost] and [onImageLongPress] are capabilities by presence. [onOpenImageViewer]
+ * completes the active image host with its fullscreen navigation seam. A null long-press callback
+ * keeps the corresponding renderer affordance inert. Selection is deliberately always enabled: changing
  * `PostRenderer.selectable` at runtime would insert or remove its `SelectionContainer`, recreate
  * the body subtree and discard nested `rememberSaveable` state (#946).
  *
@@ -54,6 +55,7 @@ fun ReadingPostCard(
     mediaDiskCachePolicy: PostMediaDiskCachePolicy = PostMediaDiskCachePolicy.ENABLED,
     onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
     onImageLongPress: ((PostImageTarget) -> Unit)? = null,
+    onOpenImageViewer: ((PostImageTarget) -> Unit)? = null,
     badges: (@Composable () -> Unit)? = null,
     footer: (@Composable () -> Unit)? = null,
 ) {
@@ -113,8 +115,13 @@ fun ReadingPostCard(
                             ),
                         verticalArrangement = Arrangement.spacedBy(m.postSpacing),
                     ) {
-                        val imageActions = remember(onImageLongPress) {
-                            onImageLongPress?.let { PostImageActions(onLongPress = it) }
+                        val imageActions = remember(onImageLongPress, onOpenImageViewer) {
+                            onImageLongPress?.let {
+                                PostImageActions(
+                                    onLongPress = it,
+                                    onOpenViewer = onOpenImageViewer ?: {},
+                                )
+                            }
                         }
                         CompositionLocalProvider(
                             LocalPostImageActions provides imageActions,

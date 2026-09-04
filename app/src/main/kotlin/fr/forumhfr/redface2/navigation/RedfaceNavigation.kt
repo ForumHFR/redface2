@@ -16,6 +16,8 @@ import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
@@ -113,7 +115,10 @@ import fr.forumhfr.redface2.core.ui.account.RedfaceAccountMenu
 import fr.forumhfr.redface2.core.ui.browser.LocalAlwaysAskLinkApp
 import fr.forumhfr.redface2.core.ui.browser.openUrlInExternalBrowser
 import fr.forumhfr.redface2.core.ui.debug.DebugBoundsOverlay
+import fr.forumhfr.redface2.core.ui.post.sharePostImageUrl
 import fr.forumhfr.redface2.core.ui.theme.ReadingDisplaySettings
+import fr.forumhfr.redface2.core.ui.viewer.ImageViewerRequest
+import fr.forumhfr.redface2.core.ui.viewer.ImageViewerScreen
 import fr.forumhfr.redface2.feature.auth.LoginScreen
 import fr.forumhfr.redface2.feature.editor.PostEditorMode
 import fr.forumhfr.redface2.feature.editor.PostEditorRequest
@@ -147,9 +152,11 @@ import fr.forumhfr.redface2.feature.settings.SettingsBlacklistScreen
 import fr.forumhfr.redface2.feature.settings.SettingsProxyScreen
 import fr.forumhfr.redface2.feature.settings.SettingsScreen
 import fr.forumhfr.redface2.feature.topic.TopicRequest
+import fr.forumhfr.redface2.feature.topic.PostImageActionsViewModel
 import fr.forumhfr.redface2.feature.topic.TopicScreen
 import fr.forumhfr.redface2.feature.topic.TopicScrollAnchor
 import fr.forumhfr.redface2.feature.topic.TopicSubmitResult
+import fr.forumhfr.redface2.feature.topic.R as TopicR
 import java.time.Instant
 import kotlinx.serialization.Serializable
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -179,6 +186,20 @@ data class SearchUserPostsRoute(val pseudo: String) : RedfaceNavKey
 
 @Serializable
 data object MessagesRoute : RedfaceNavKey
+
+/** Restorable, self-contained fullscreen image viewer destination (#182). */
+@Serializable
+data class ImageViewerRoute(
+    val sourceUrl: String,
+    val previewUrl: String,
+    val externalUrl: String,
+    val description: String? = null,
+    val diskCache: Boolean = true,
+) : RedfaceNavKey {
+    init {
+        require(sourceUrl.isNotBlank()) { "Image viewer source URL must not be blank" }
+    }
+}
 
 @Serializable
 data class PrivateMessageThreadRoute(
@@ -238,7 +259,7 @@ data class PrivateMessageComposeRoute(
  */
 private fun NavKey?.hidesNavigationSuite(): Boolean =
     this is PostEditorRoute || this is TopicFormRoute || this is PrivateMessageReplyRoute ||
-        this is PrivateMessageComposeRoute
+        this is PrivateMessageComposeRoute || this is ImageViewerRoute
 
 /**
  * #494 — type de barre de navigation à passer au [NavigationSuiteScaffoldLayout]. Sur téléphone l'adaptatif
@@ -2157,6 +2178,33 @@ internal fun Map<TopicTitleKey, String>.withTitle(key: TopicTitleKey, title: Str
     }
 }
 
+/** Renders the existing topic image-action effects for the app-owned viewer entry. */
+@Composable
+private fun ImageViewerSaveEffectHost(viewModel: PostImageActionsViewModel) {
+    val context = LocalContext.current
+    val shareFailedFeedback = stringResource(CoreUiR.string.post_image_menu_share_failed)
+    LaunchedEffect(viewModel) {
+        viewModel.effects.collect { effect ->
+            val messageRes = when (effect) {
+                PostImageActionsViewModel.SaveImageEffect.SAVED -> TopicR.string.topic_image_menu_saved
+                PostImageActionsViewModel.SaveImageEffect.FAILED_FETCH ->
+                    TopicR.string.topic_image_menu_save_failed_fetch
+                PostImageActionsViewModel.SaveImageEffect.FAILED_STORAGE ->
+                    TopicR.string.topic_image_menu_save_failed_storage
+                PostImageActionsViewModel.SaveImageEffect.FAILED_TOO_LARGE ->
+                    TopicR.string.topic_image_menu_save_failed_too_large
+                is PostImageActionsViewModel.ShareImageEffect -> {
+                    sharePostImageUrl(context, effect.url, shareFailedFeedback)
+                    null
+                }
+            }
+            if (messageRes != null) {
+                Toast.makeText(context, messageRes, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+}
+
 @Composable
 @Suppress("CyclomaticComplexMethod", "LongParameterList") // One entry per top-level route + per-screen
 // navigation callbacks ; splitting the host would just push the same `when` shape one level deeper
@@ -2196,6 +2244,19 @@ private fun RedfaceNavHost(
     immersiveNavBarNavState: ImmersiveNavBarNavState,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
 ) {
+    val openImageViewer: (ImageViewerRequest) -> Unit = remember(backStack) {
+        { request: ImageViewerRequest ->
+            backStack.add(
+                ImageViewerRoute(
+                    sourceUrl = request.sourceUrl,
+                    previewUrl = request.previewUrl,
+                    externalUrl = request.externalUrl,
+                    description = request.description,
+                    diskCache = request.diskCache,
+                ),
+            )
+        }
+    }
     NavDisplay(
         backStack = backStack,
         onBack = {
@@ -2213,13 +2274,44 @@ private fun RedfaceNavHost(
         // le backStack → ça passe par transitionSpec : on le détecte par le changement de racine de pile
         // (chaque onglet a une racine distincte) pour ne pas hériter du slide de drill-down.
         transitionSpec = { navForwardTransform(initialState, targetState) },
-        popTransitionSpec = { navSharedAxisXBack() },
-        predictivePopTransitionSpec = { navSharedAxisXBack() },
+        popTransitionSpec = {
+            if (initialState.isImageViewerTransitionTo(targetState)) {
+                navImageViewerTransform()
+            } else {
+                navSharedAxisXBack()
+            }
+        },
+        predictivePopTransitionSpec = {
+            if (initialState.isImageViewerTransitionTo(targetState)) {
+                navImageViewerTransform()
+            } else {
+                navSharedAxisXBack()
+            }
+        },
         entryDecorators = listOf(
             rememberSaveableStateHolderNavEntryDecorator(),
             rememberViewModelStoreNavEntryDecorator(),
         ),
         entryProvider = entryProvider {
+            entry<ImageViewerRoute> { route ->
+                val imageActionsViewModel: PostImageActionsViewModel = hiltViewModel()
+                ImageViewerSaveEffectHost(imageActionsViewModel)
+                ImageViewerScreen(
+                    request = ImageViewerRequest(
+                        sourceUrl = route.sourceUrl,
+                        previewUrl = route.previewUrl,
+                        externalUrl = route.externalUrl,
+                        description = route.description,
+                        diskCache = route.diskCache,
+                    ),
+                    onClose = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
+                    onSave = imageActionsViewModel::saveImage,
+                )
+            }
             entry<FlagsListRoute> {
                 FlagsRoute(
                     // #676 v2 — [page] is chosen by the caller: row tap + sheet « Ouvrir » resume at
@@ -2498,6 +2590,7 @@ private fun RedfaceNavHost(
                     // #1042 — same app-level profile sheet as the topic (#208): tapping a message's
                     // avatar/pseudo opens ProfilePreviewSheet as an overlay on the current tab.
                     onOpenProfile = onOpenProfile,
+                    onOpenImageViewer = openImageViewer,
                     topBarActions = accountMenu,
                 )
             }
@@ -2785,6 +2878,7 @@ private fun RedfaceNavHost(
                         ?.result,
                     onSubmitResultConsumed = topicSubmitNavState.onConsumed,
                     onOpenProfile = onOpenProfile,
+                    onOpenImageViewer = openImageViewer,
                     // #792 — « Envoyer un MP » from a post's menu : the NEW-conversation composer
                     // opens with the post's author prefilled (the route arg was designed for this).
                     onSendPrivateMessage = { author ->
@@ -3261,6 +3355,7 @@ private const val DRILL_FADE_OUT_MS = 90
 private const val TAB_FADE_IN_MS = 140
 private const val TAB_FADE_OUT_MS = 80
 private const val SLIDE_DIVISOR = 4
+internal const val IMAGE_VIEWER_TRANSITION_MS = 200
 
 /** Shared-axis X, sens AVANT : l'entrant glisse depuis la droite, le sortant part vers la gauche. */
 private fun navSharedAxisXForward(): ContentTransform =
@@ -3279,6 +3374,20 @@ private fun navSharedAxisXBack(): ContentTransform =
 /** Fade-through court entre onglets (contenus sans relation spatiale → pas de slide). */
 private fun navTabFadeThrough(): ContentTransform =
     fadeIn(tween(TAB_FADE_IN_MS, delayMillis = 30)) togetherWith fadeOut(tween(TAB_FADE_OUT_MS))
+
+/** Short fullscreen reveal/dismiss, deliberately separate from Nav3's historical long fade. */
+private fun navImageViewerTransform(): ContentTransform =
+    (fadeIn(tween(IMAGE_VIEWER_TRANSITION_MS)) +
+        scaleIn(initialScale = 0.96f, animationSpec = tween(IMAGE_VIEWER_TRANSITION_MS))) togetherWith
+        (fadeOut(tween(IMAGE_VIEWER_TRANSITION_MS)) +
+            scaleOut(targetScale = 1.02f, animationSpec = tween(IMAGE_VIEWER_TRANSITION_MS)))
+
+/** Pure seam pinned by [NavTransitionTest]: entering or leaving the viewer uses its short reveal. */
+internal fun isImageViewerTransition(from: Any?, to: Any?): Boolean =
+    from is ImageViewerRoute || to is ImageViewerRoute
+
+private fun Scene<NavKey>.isImageViewerTransitionTo(to: Scene<NavKey>): Boolean =
+    isImageViewerTransition(entries.lastOrNull()?.contentKey, to.entries.lastOrNull()?.contentKey)
 
 /**
  * Pure : une navigation AVANT est un drill-down (push) — par opposition à un changement d'onglet ou un
@@ -3311,6 +3420,7 @@ private fun Scene<NavKey>.isForwardDrillDownTo(to: Scene<NavKey>): Boolean =
  * mérite la même transition que tout autre remplacement.
  */
 private fun navForwardTransform(from: Scene<NavKey>, to: Scene<NavKey>): ContentTransform = when {
+    from.isImageViewerTransitionTo(to) -> navImageViewerTransform()
     from.isForwardDrillDownTo(to) -> navSharedAxisXForward()
     else -> navTabFadeThrough()
 }

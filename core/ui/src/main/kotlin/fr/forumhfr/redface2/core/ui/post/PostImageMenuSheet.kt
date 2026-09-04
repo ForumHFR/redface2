@@ -51,19 +51,22 @@ import kotlinx.coroutines.launch
  *   on Android 13+, Toast below);
  * - « Ouvrir dans le navigateur » — `ACTION_VIEW` on the image URL (the DIRECT image, not the
  *   `[url=…]` link, which the block tap already covers);
- * - « Afficher en taille réelle (à venir) » — DISABLED placeholder (#288 « menu vitrine »
- *   pattern). The affordance remains visible until the fullscreen viewer (#182) enables it.
+ * - « Afficher en plein écran » — opens the fullscreen viewer (#182). The sheet deliberately
+ *   targets the rendered image itself, including for linked inline images: the viewer policy for
+ *   a direct block tap is separate from this explicit menu action.
  *
  * The hero shows the image thumbnail + the host and full URL so the user can tell WHICH image the
  * menu targets when a post carries several. [mediaDiskCachePolicy] follows the source surface:
  * public topics reuse Coil's disk cache, while MP thumbnails remain memory-only (#1096).
  */
 @OptIn(ExperimentalMaterial3Api::class)
+@Suppress("LongParameterList") // One callback per menu action; grouping them would only move the list.
 @Composable
 fun PostImageMenuSheet(
     target: PostImageTarget,
     onSave: (url: String) -> Unit,
     onShare: (url: String) -> Unit,
+    onOpenViewer: (PostImageTarget) -> Unit,
     onDismiss: () -> Unit,
     mediaDiskCachePolicy: PostMediaDiskCachePolicy = PostMediaDiskCachePolicy.ENABLED,
 ) {
@@ -137,14 +140,14 @@ fun PostImageMenuSheet(
 
             Spacer(Modifier.height(8.dp))
 
-            // #182 — fullscreen viewer placeholder, greyed « menu vitrine » (#288 pattern):
-            // the affordance is visible, the « (à venir) » suffix explains why it is disabled.
             OutlinedButton(
-                onClick = {},
-                enabled = false,
+                onClick = {
+                    onOpenViewer(target)
+                    hideThenDismiss(coroutineScope, sheetState, onDismiss)
+                },
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text(stringResource(R.string.post_image_menu_full_size_soon))
+                Text(stringResource(R.string.post_image_menu_full_screen))
             }
 
             Spacer(Modifier.height(8.dp))
@@ -207,7 +210,7 @@ private fun PostImageMenuHero(
  * Clipboard write + feedback for the image URL. Android 13+ (T) shows the system « copié » overlay
  * on its own; older API levels get a Toast.
  */
-private fun copyImageUrlToClipboard(context: Context, url: String, feedback: String) {
+internal fun copyImageUrlToClipboard(context: Context, url: String, feedback: String) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     clipboard.setPrimaryClip(ClipData.newPlainText("redface2 image url", url))
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
@@ -216,7 +219,7 @@ private fun copyImageUrlToClipboard(context: Context, url: String, feedback: Str
 }
 
 /** Opens the direct image URL in an external browser, surfacing a Toast when none exists. */
-private fun openImageUrlInBrowser(
+internal fun openImageUrlInBrowser(
     context: Context,
     url: String,
     failureFeedback: String,
