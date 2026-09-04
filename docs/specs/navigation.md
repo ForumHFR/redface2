@@ -314,6 +314,13 @@ Implémentation via **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026).
 @Serializable data object ForumRoute : RedfaceNavKey
 @Serializable data object SearchRoute : RedfaceNavKey
 @Serializable data object MessagesRoute : RedfaceNavKey
+@Serializable data class ImageViewerRoute(
+    val sourceUrl: String,                  // source plein format, non vide
+    val previewUrl: String,                 // image déjà rendue, placeholder mémoire Coil
+    val externalUrl: String,                // destination explicite du navigateur
+    val description: String? = null,
+    val diskCache: Boolean = true,          // false pour les médias issus d'un MP
+) : RedfaceNavKey
 @Serializable data class PrivateMessageThreadRoute(
     val threadId: Int,                     // id `post` HFR de la conversation `cat=prive`
     val page: Int = 1,
@@ -420,6 +427,20 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                     onLoaded = { onPrivateMessageThreadLoaded(route.threadId) },
                     onBack = { backStack.removeAt(backStack.lastIndex) },
                     topBarActions = accountMenu,
+                )
+            }
+            entry<ImageViewerRoute> { route ->
+                val imageActionsViewModel: PostImageActionsViewModel = hiltViewModel()
+                ImageViewerScreen(
+                    request = ImageViewerRequest(
+                        sourceUrl = route.sourceUrl,
+                        previewUrl = route.previewUrl,
+                        externalUrl = route.externalUrl,
+                        description = route.description,
+                        diskCache = route.diskCache,
+                    ),
+                    onClose = { backStack.removeAt(backStack.lastIndex) },
+                    onSave = imageActionsViewModel::saveImage,
                 )
             }
             entry<CategoryRoute> { route ->
@@ -610,6 +631,11 @@ Le `TopicScreen` reçoit le `scrollTo` (numreponse cible) via la `TopicRoute` et
 ### Predictive back
 
 Nav 3 intègre `PredictiveBackHandler` via `NavDisplay` — aucun code custom requis pour les écrans standards. Seuls les écrans à interaction custom (ex : éditeur avec draft) ajoutent leur propre handler ; Phase 2B-A livre `PostEditorScreen` sans cette confirmation (pas encore de draft persistant) — l'exemple ci-dessous reste le pattern cible quand la persistance arrivera :
+
+Le viewer d'image est un écran standard empilé au-dessus du topic ou du MP : le back système et le
+predictive back sont donc fournis par `NavDisplay`, comme le bouton fermer qui dépile la même entrée.
+Sa transition dédiée est un fade + scale de 200 ms à l'aller comme au retour ; elle remplace le
+shared-axis pour cette seule destination et ne met jamais en jeu un swipe-dismiss.
 
 ```kotlin
 @Composable

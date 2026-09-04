@@ -114,8 +114,10 @@ import fr.forumhfr.redface2.core.ui.post.ReadingPostCardPresentation
 import fr.forumhfr.redface2.core.ui.post.postHeaderColors
 import fr.forumhfr.redface2.core.ui.post.readingContentColors
 import fr.forumhfr.redface2.core.ui.post.sharePostImageUrl
+import fr.forumhfr.redface2.core.ui.post.viewerRequestFor
 import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
+import fr.forumhfr.redface2.core.ui.viewer.ImageViewerRequest
 import fr.forumhfr.redface2.core.ui.zoom.PinchZoomState
 import fr.forumhfr.redface2.core.ui.zoom.pinchZoom
 import fr.forumhfr.redface2.core.ui.zoom.pinchZoomTransform
@@ -163,6 +165,8 @@ fun PrivateMessageThreadScreen(
     // topic's onOpenProfile: the host owns the navigation (the app-level profile sheet), the screen
     // only supplies the identity of the tapped author. Default no-op mirrors the topic screen.
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
+    /** #182 — opens the fullscreen viewer while preserving the MP no-disk-cache policy. */
+    onOpenImageViewer: (ImageViewerRequest) -> Unit = {},
     topBarActions: @Composable (() -> Unit)? = null,
 ) {
     val viewModel = hiltViewModel<PrivateMessageThreadViewModel, PrivateMessageThreadViewModel.Factory>(
@@ -273,6 +277,7 @@ fun PrivateMessageThreadScreen(
                 onManageRecipients(request.threadId, state.page)
             },
             onOpenProfile = onOpenProfile,
+            onOpenImageViewer = onOpenImageViewer,
             onSetAuthorBlocked = viewModel::setAuthorBlocked,
             onSaveImage = viewModel::saveImage,
             onShareImage = viewModel::shareImage,
@@ -502,6 +507,7 @@ internal data class PrivateMessageThreadCallbacks(
     // #1042 — defaulted (unlike its siblings) so the pre-#1042 characterization mounts compile
     // unchanged; a host that does not navigate keeps the tap a no-op, like the topic screen default.
     val onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
+    val onOpenImageViewer: (ImageViewerRequest) -> Unit = {},
     // #1051 — block/unblock is repository-owned; the live blacklist collector re-renders locally.
     val onSetAuthorBlocked: (author: String, blocked: Boolean) -> Unit = { _, _ -> },
     // #831/#1051 — the ViewModel-owned save survives dismissal of the local image sheet.
@@ -541,11 +547,14 @@ internal fun PrivateMessageThreadContent(
     var imageMenuTarget by remember { mutableStateOf<PostImageTarget?>(null) }
     // One stable handler instance is threaded through MessageCard to LocalPostImageActions;
     // remembered so providing it never invalidates the cards. Opening either menu closes the other.
-    val postImageActions = remember {
+    val postImageActions = remember(callbacks.onOpenImageViewer) {
         PostImageActions(
             onLongPress = {
                 messageMenuTarget = null
                 imageMenuTarget = it
+            },
+            onOpenViewer = { target ->
+                viewerRequestFor(target, diskCache = false)?.let(callbacks.onOpenImageViewer)
             },
         )
     }
@@ -708,6 +717,7 @@ internal fun PrivateMessageThreadContent(
                         multiQuoteSelections = multiQuoteSelections,
                         onOpenMessageMenu = openMessageMenu,
                         onImageLongPress = postImageActions.onLongPress,
+                        onOpenImageViewer = postImageActions.onOpenViewer,
                     ),
                 )
             }
@@ -749,6 +759,7 @@ internal fun PrivateMessageThreadContent(
         target = imageMenuTarget,
         onSave = callbacks.onSaveImage,
         onShare = callbacks.onShareImage,
+        onOpenViewer = callbacks.onOpenImageViewer,
         onClear = { imageMenuTarget = null },
     )
 }
@@ -769,6 +780,7 @@ private data class PrivateMessageReaderPresentation(
     val multiQuoteSelections: List<QuoteSelection>,
     val onOpenMessageMenu: (message: Post, contentRevealed: Boolean) -> Unit,
     val onImageLongPress: (PostImageTarget) -> Unit,
+    val onOpenImageViewer: (PostImageTarget) -> Unit,
 )
 
 /** Ephemeral menu target; explicit reveal prevents a hidden body from escaping through copy. */
@@ -1008,6 +1020,7 @@ private fun PrivateMessageThreadReader(
                 onOpenProfile = callbacks.onOpenProfile,
                 onOpenMessageMenu = presentation.onOpenMessageMenu,
                 onImageLongPress = presentation.onImageLongPress,
+                onOpenImageViewer = presentation.onOpenImageViewer,
                 scrollSession = ThreadScrollSession(
                     listState = session.listState,
                     zoomState = zoomState,
@@ -1179,6 +1192,7 @@ private fun ThreadImageMenuHost(
     target: PostImageTarget?,
     onSave: (String) -> Unit,
     onShare: (String) -> Unit,
+    onOpenViewer: (ImageViewerRequest) -> Unit,
     onClear: () -> Unit,
 ) {
     // Unlike TopicLoadedContent, this host must explicitly forget the private target when its content
@@ -1194,6 +1208,13 @@ private fun ThreadImageMenuHost(
                 target = imageTarget,
                 onSave = onSave,
                 onShare = onShare,
+                onOpenViewer = { menuTarget ->
+                    onClear()
+                    viewerRequestFor(
+                        target = menuTarget.copy(linkUrl = null),
+                        diskCache = false,
+                    )?.let(onOpenViewer)
+                },
                 onDismiss = onClear,
                 // The thumbnail is a second request for the same private PostContent URL and
                 // lives outside ReadingPostCard's provider, so carry the policy explicitly.
@@ -1628,6 +1649,7 @@ private fun ThreadMessages(
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit,
     onOpenMessageMenu: (message: Post, contentRevealed: Boolean) -> Unit,
     onImageLongPress: (PostImageTarget) -> Unit,
+    onOpenImageViewer: (PostImageTarget) -> Unit,
     scrollSession: ThreadScrollSession,
 ) {
     // #509/#1050 — reveal is deliberately page-local and non-saveable. In-place pagination keeps
@@ -1764,6 +1786,7 @@ private fun ThreadMessages(
                         )
                     },
                     onImageLongPress = onImageLongPress,
+                    onOpenImageViewer = onOpenImageViewer,
                     onGoToCitedPost = onGoToCitedPost,
                     quoteAffordances = quoteAffordances,
                 )
@@ -1889,6 +1912,7 @@ internal fun MessageCard(
     onOpenProfile: (() -> Unit)? = null,
     onOpenMenu: (() -> Unit)? = null,
     onImageLongPress: ((PostImageTarget) -> Unit)? = null,
+    onOpenImageViewer: ((PostImageTarget) -> Unit)? = null,
     onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
     quoteAffordances: MessageQuoteAffordances? = null,
 ) {
@@ -1926,6 +1950,7 @@ internal fun MessageCard(
         mediaDiskCachePolicy = PostMediaDiskCachePolicy.DISABLED,
         onGoToCitedPost = onGoToCitedPost,
         onImageLongPress = onImageLongPress,
+        onOpenImageViewer = onOpenImageViewer,
         identity = { moderationOverride ->
             // An MP has no anchor/category tint, but still carries the same full-width identity band
             // as a normal topic post. Its configurable neutral/vivid colour is independent from

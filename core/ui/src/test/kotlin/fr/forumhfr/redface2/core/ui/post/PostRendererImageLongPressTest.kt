@@ -60,6 +60,7 @@ class PostRendererImageLongPressTest {
     private val smallUrl = "https://rehost.diberie.com/Picture/Get/f/small.png"
     private val ccUrl = "https://example.org/emojis-micro/1f600.png?hfr-cc-image=true"
     private val fullLinkUrl = "https://example.org/full"
+    private val fullImageUrl = "https://cdn.example.org/original/full.PNG?download=1"
 
     @OptIn(coil3.annotation.DelicateCoilApi::class)
     @Before
@@ -112,6 +113,93 @@ class PostRendererImageLongPressTest {
             ),
         ),
     )
+
+    private fun linkedBlockImageContent(linkUrl: String) = PostContent(
+        blocks = listOf(
+            PostBlock.Paragraph(
+                inlines = listOf(
+                    PostInline.Link(
+                        url = linkUrl,
+                        children = listOf(PostInline.InlineImage(url = blockUrl, description = "promue")),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    @Test
+    fun `tap on an unlinked block image opens the viewer`() {
+        var opened: PostImageTarget? = null
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(
+                    LocalPostImageActions provides PostImageActions(
+                        onLongPress = {},
+                        onOpenViewer = { opened = it },
+                    ),
+                ) {
+                    PostRenderer(
+                        content = PostContent(
+                            blocks = listOf(PostBlock.Image(blockUrl, description = "diagramme")),
+                        ),
+                        selectable = true,
+                    )
+                }
+            }
+        }
+
+        composeTestRule.onNodeWithContentDescription("diagramme").performTouchInput { click() }
+
+        assertEquals(PostImageTarget(blockUrl, "diagramme", null), opened)
+    }
+
+    @Test
+    fun `tap on a linked image-like block opens the viewer instead of the browser`() {
+        var opened: PostImageTarget? = null
+        val uriHandler = RecordingUriHandler()
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(
+                    LocalPostImageActions provides PostImageActions(
+                        onLongPress = {},
+                        onOpenViewer = { opened = it },
+                    ),
+                    LocalUriHandler provides uriHandler,
+                ) {
+                    PostRenderer(content = linkedBlockImageContent(fullImageUrl), selectable = true)
+                }
+            }
+        }
+
+        composeTestRule.onNodeWithContentDescription("promue").performTouchInput { click() }
+
+        assertEquals(PostImageTarget(blockUrl, "promue", fullImageUrl), opened)
+        assertNull(uriHandler.opened)
+    }
+
+    @Test
+    fun `tap on a linked non-image block keeps opening the browser`() {
+        var opened: PostImageTarget? = null
+        val uriHandler = RecordingUriHandler()
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(
+                    LocalPostImageActions provides PostImageActions(
+                        onLongPress = {},
+                        onOpenViewer = { opened = it },
+                    ),
+                    LocalUriHandler provides uriHandler,
+                ) {
+                    PostRenderer(content = linkedBlockImageContent(fullLinkUrl), selectable = true)
+                }
+            }
+        }
+
+        composeTestRule.onNodeWithContentDescription("promue").performTouchInput { click() }
+
+        assertNull(opened)
+        assertEquals(fullLinkUrl, uriHandler.opened)
+    }
 
     @Test
     fun `long press on an inline image reaches the provided handler with the image URL`() {

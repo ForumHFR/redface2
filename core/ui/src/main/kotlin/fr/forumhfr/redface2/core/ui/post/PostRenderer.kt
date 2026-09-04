@@ -1187,10 +1187,11 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
             val (coldWidth, coldHeight) = coldBlockSlotDp(maxWidth.value, capBlocDp, postImageMaxWidth)
             Modifier.size(coldWidth.dp, coldHeight.dp)
         }
-        // #831/#958 (Lot 2, §5) — contextual image menu on long-press + linked-image tap, BOTH gated
-        // by the host capability below. A linked image (#257) gains its tap-through (opens linkUrl)
-        // AND the long-press menu through ONE combinedClickable; an unlinked eligible image gets a
-        // long-press-ONLY handler. When the surface provides no actions (editor preview, signatures
+        // #831/#958/#182 — contextual image menu on long-press + block-image tap, BOTH gated by the
+        // host capability below. An unlinked eligible block opens the viewer; a linked block opens
+        // it when its target is image-like, otherwise it keeps the historical browser tap. Tap and
+        // long-press share ONE combinedClickable. When the surface provides no actions (editor
+        // preview, signatures
         // and any host omitting the callback: default null) the image is TOTALLY inert — even when
         // linked — the Lot 2 §5 target. data:/blob:/empty URLs are never menu-eligible.
         // #958 Lot 2 (§5) — the HOST capability (LocalPostImageActions != null) gates ALL image
@@ -1198,22 +1199,35 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
         // TOTALLY inert — no tap (even linked), no long-press. Its image composable still exposes
         // the content Role.Image from its non-null contentDescription on both active and inert
         // hosts; only OnClick / OnLongClick discriminate the host's interactive capability.
-        // Two independent gates (Sol reserve): the TAP-to-open-link depends on `linkUrl != null`
-        // (NOT on the image URL's menu-eligibility) ; the long-press MENU depends on the image URL
-        // being eligible. Role.Image + onClickLabel « Ouvrir l'image » ([AMENDEMENT-Lot2-2] : Role.Link
+        // The viewer truth table lives in viewerRequestFor; inline taps intentionally do not use it.
+        // Role.Image + onClickLabel « Ouvrir l'image » ([AMENDEMENT-Lot2-2] : Role.Link
         // does not exist in Compose 1.11.x ; the onClickLabel announces the link-open to TalkBack).
         val host = LocalPostImageActions.current
-        val tapOpensLink = host != null && linkUrl != null
+        val target = PostImageTarget(url = url, description = description, linkUrl = linkUrl)
+        val viewerEligible = host != null && viewerRequestFor(
+            target = target,
+            diskCache = mediaDiskCachePolicy == PostMediaDiskCachePolicy.ENABLED,
+        ) != null
+        val tapOpensLink = host != null && linkUrl != null && !viewerEligible
         val menuEligible = host != null && isEligiblePostImageUrl(url)
         val optionsLabel = stringResource(R.string.post_image_options_action)
         val interactionModifier = when {
+            viewerEligible && menuEligible ->
+                Modifier.combinedClickable(
+                    role = Role.Image,
+                    onClickLabel = openLabel,
+                    onLongClickLabel = optionsLabel,
+                    onLongClick = { host.onLongPress(target) },
+                    onClick = { host.onOpenViewer(target) },
+                )
+
             tapOpensLink && menuEligible ->
                 Modifier.combinedClickable(
                     role = Role.Image,
                     onClickLabel = openLabel,
                     onLongClickLabel = optionsLabel,
                     onLongClick = {
-                        host.onLongPress(PostImageTarget(url = url, description = description, linkUrl = linkUrl))
+                        host.onLongPress(target)
                     },
                 ) {
                     runCatching { uriHandler.openUri(linkUrl) }
@@ -1228,7 +1242,7 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
 
             menuEligible -> Modifier.postImageLongPress(
                 actions = host,
-                target = PostImageTarget(url = url, description = description, linkUrl = null),
+                target = target,
                 haptics = LocalHapticFeedback.current,
                 optionsLabel = optionsLabel,
             )

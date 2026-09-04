@@ -6,7 +6,6 @@ import android.content.Context
 import android.content.Intent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.test.ExperimentalTestApi
-import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -34,7 +33,7 @@ import org.robolectric.annotation.GraphicsMode
  * #831/#1040 — pins the entries of the shared image contextual menu: « Enregistrer » routes
  * to the save callback, « Partager » routes to the share callback, « Copier l'URL » writes the
  * clipboard, « Ouvrir dans le navigateur » fires an ACTION_VIEW on the DIRECT image URL, and
- * « Afficher en taille réelle » stays a DISABLED placeholder until the fullscreen viewer (#182).
+ * « Afficher en plein écran » forwards the exact target to the fullscreen viewer (#182).
  *
  * The target URL uses the reserved `.invalid` TLD so the hero thumbnail's Coil request fails
  * fast without touching the network — the sheet never blocks on the bitmap by design.
@@ -57,6 +56,7 @@ class PostImageMenuSheetTest {
     private fun mount(
         onSave: (String) -> Unit = {},
         onShare: (String) -> Unit = {},
+        onOpenViewer: (PostImageTarget) -> Unit = {},
         onDismiss: () -> Unit = {},
         mediaDiskCachePolicy: PostMediaDiskCachePolicy = PostMediaDiskCachePolicy.ENABLED,
     ) {
@@ -66,6 +66,7 @@ class PostImageMenuSheetTest {
                     target = target,
                     onSave = onSave,
                     onShare = onShare,
+                    onOpenViewer = onOpenViewer,
                     onDismiss = onDismiss,
                     mediaDiskCachePolicy = mediaDiskCachePolicy,
                 )
@@ -134,6 +135,7 @@ class PostImageMenuSheetTest {
                     target = target,
                     onSave = {},
                     onShare = { url -> sharePostImageUrl(context, url, "échec") },
+                    onOpenViewer = {},
                     onDismiss = {},
                 )
             }
@@ -176,10 +178,12 @@ class PostImageMenuSheetTest {
     }
 
     @Test
-    fun `the full-size entry is a disabled placeholder`() {
-        mount()
+    fun `the full-screen entry opens the viewer with the target`() {
+        var opened: PostImageTarget? = null
+        mount(onOpenViewer = { opened = it })
 
-        composeTestRule.onNodeWithText("Afficher en taille réelle (à venir)")
-            .assertIsNotEnabled()
+        composeTestRule.onNodeWithText("Afficher en plein écran").performClick()
+
+        assertEquals(target, opened)
     }
 }

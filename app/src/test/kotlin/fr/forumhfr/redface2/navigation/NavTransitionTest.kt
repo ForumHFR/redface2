@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.navigation
 
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -55,5 +56,19 @@ class NavTransitionTest {
     @Test
     fun `both stacks empty is not a drill-down`() {
         assertFalse(isForwardDrillDown(sourceStack = emptyList(), targetParentStack = emptyList()))
+    }
+
+    @Test
+    fun `viewer transitions are selected both entering and leaving`() {
+        val viewer = ImageViewerRoute(
+            sourceUrl = "https://images.example.org/full.jpg",
+            previewUrl = "https://images.example.org/thumb.jpg",
+            externalUrl = "https://images.example.org/full.jpg",
+        )
+
+        assertTrue(isImageViewerTransition(TopicRoute(cat = 23, post = 42), viewer))
+        assertTrue(isImageViewerTransition(viewer, TopicRoute(cat = 23, post = 42)))
+        assertFalse(isImageViewerTransition(ForumRoute, TopicRoute(cat = 23, post = 42)))
+        assertEquals(200, IMAGE_VIEWER_TRANSITION_MS)
     }
 }
