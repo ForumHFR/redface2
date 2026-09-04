@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="post_mood_icon_description">Ton du message</string>
     <!-- #1040 lot 6 — primitive de sélection de page partagée, sans politique de feature. -->
     <string name="pager_previous">Précédent</string>
     <string name="pager_next">Suivant</string>

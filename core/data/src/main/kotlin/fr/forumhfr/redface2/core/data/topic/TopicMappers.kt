@@ -104,6 +104,7 @@ internal object TopicMappers {
         citedCount = citedCount,
         signature = signature,
         isModerationPost = isModerationPost,
+        msgIcon = msgIcon,
     )
 
     private fun PostEntity.toDomain(): Post = Post(
@@ -122,6 +123,7 @@ internal object TopicMappers {
         citedCount = citedCount,
         signature = signature,
         isModerationPost = isModerationPost,
+        msgIcon = msgIcon,
     )
 
     /**

@@ -47,6 +47,8 @@ data class TopicFormState(
     val signatureEnabled: Boolean = false,
     val smileyDisabled: Boolean = false,
     val emailNotificationEnabled: Boolean = false,
+    /** Selected HFR `MsgIcon` radio value. The topic form exposes the current 1..16 choices. */
+    val msgIcon: Int = DEFAULT_MSG_ICON,
     val isLoadingForm: Boolean = false,
     val isSubmitting: Boolean = false,
     val submitError: SubmitError? = null,
@@ -186,6 +188,7 @@ sealed interface TopicFormIntent {
     data class ToggleSignature(val enabled: Boolean) : TopicFormIntent
     data class ToggleSmileyDisabled(val disabled: Boolean) : TopicFormIntent
     data class ToggleEmailNotification(val enabled: Boolean) : TopicFormIntent
+    data class MsgIconSelected(val n: Int) : TopicFormIntent
     /**
      * The user tapped a smiley in the picker : insert the token at the caret. #441 — open /
      * dismiss / query-change are no longer intents (the sheet talks directly to the shared

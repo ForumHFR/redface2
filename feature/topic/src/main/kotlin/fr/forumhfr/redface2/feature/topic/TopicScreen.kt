@@ -144,6 +144,7 @@ import fr.forumhfr.redface2.core.ui.post.PostImageActions
 import fr.forumhfr.redface2.core.ui.post.PostImageMenuSheet
 import fr.forumhfr.redface2.core.ui.post.PostImageTarget
 import fr.forumhfr.redface2.core.ui.post.PostListScaffold
+import fr.forumhfr.redface2.core.ui.post.PostMoodIcon
 import fr.forumhfr.redface2.core.ui.post.ReadingPostCard
 import fr.forumhfr.redface2.core.ui.post.ReadingPostCardPresentation
 import fr.forumhfr.redface2.core.ui.post.collectPostMediaUrls
@@ -3549,21 +3550,29 @@ private fun TopicPostIdentityHeader(
                 authorRole?.let { AuthorRolePill(role = it) }
             }
         },
-        // #483 — the compact « · édité » marker (beta feedback Azgor). The exact edit time stays in the
-        // « … » menu (PostMenuSheet « Édité le … »). Rendered INLINE to the right of the date (dateTrailing
-        // slot), same labelMedium / onSurfaceVariant style — identical to the pre-shell single-row layout.
-        dateTrailing = if (post.editedAt != null) {
+        // #340/#483 — one existing dateTrailing slot owns both optional markers. The mood comes
+        // first, then « · édité », so the visual order remains date → icon → edited without adding
+        // another slot to the shared identity primitive.
+        dateTrailing = if (post.msgIcon != null || post.editedAt != null) {
             {
-                val editedLabel = stringResource(R.string.topic_post_edited_inline)
-                Text(
-                    // « · » is a decorative separator — TalkBack reads the contentDescription
-                    // (« édité »), so the dot is never vocalised.
-                    text = "· $editedLabel",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = supportingContentColorOverride
-                        ?: MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.semantics { contentDescription = editedLabel },
-                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    post.msgIcon?.let { msgIcon -> PostMoodIcon(n = msgIcon) }
+                    if (post.editedAt != null) {
+                        val editedLabel = stringResource(R.string.topic_post_edited_inline)
+                        Text(
+                            // « · » is a decorative separator — TalkBack reads the contentDescription
+                            // (« édité »), so the dot is never vocalised.
+                            text = "· $editedLabel",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = supportingContentColorOverride
+                                ?: MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.semantics { contentDescription = editedLabel },
+                        )
+                    }
+                }
             }
         } else {
             null

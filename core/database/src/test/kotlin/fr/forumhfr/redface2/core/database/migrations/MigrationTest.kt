@@ -36,7 +36,8 @@ import org.robolectric.annotation.Config
  * `MIGRATION_13_14` (#330 added `Post.signature` in v14), `MIGRATION_14_15` (#863 added
  * `Post.citedCount` in v15), `MIGRATION_15_16` (#638 added flag position metadata in v16),
  * `MIGRATION_16_17` (#1040/#1097 added the dormant private-message content tables in v17), and
- * `MIGRATION_17_18` (#1112 persisted the moderation marker in both Post-backed caches).
+ * `MIGRATION_17_18` (#1112 persisted the moderation marker in both Post-backed caches), and
+ * `MIGRATION_18_19` (#340 persisted the nullable message tone for topic posts).
  * Without these tests a typo (missing column, wrong index name, wrong default)
  * would only crash on a real upgrade-in-place install, where the diagnostic loop is
  * days long. The tests take seconds.
@@ -139,6 +140,7 @@ class MigrationTest {
                 MIGRATION_15_16,
                 MIGRATION_16_17,
                 MIGRATION_17_18,
+                MIGRATION_18_19,
             )
             .build()
 
@@ -287,6 +289,7 @@ class MigrationTest {
                 MIGRATION_15_16,
                 MIGRATION_16_17,
                 MIGRATION_17_18,
+                MIGRATION_18_19,
             )
             .build()
 
@@ -395,6 +398,7 @@ class MigrationTest {
                 MIGRATION_15_16,
                 MIGRATION_16_17,
                 MIGRATION_17_18,
+                MIGRATION_18_19,
             )
             .build()
 
@@ -475,6 +479,7 @@ class MigrationTest {
                 MIGRATION_15_16,
                 MIGRATION_16_17,
                 MIGRATION_17_18,
+                MIGRATION_18_19,
             )
             .build()
 
@@ -551,6 +556,7 @@ class MigrationTest {
                 MIGRATION_15_16,
                 MIGRATION_16_17,
                 MIGRATION_17_18,
+                MIGRATION_18_19,
             )
             .build()
 
@@ -618,6 +624,7 @@ class MigrationTest {
                 MIGRATION_15_16,
                 MIGRATION_16_17,
                 MIGRATION_17_18,
+                MIGRATION_18_19,
             )
             .build()
 
@@ -699,6 +706,7 @@ class MigrationTest {
                 MIGRATION_15_16,
                 MIGRATION_16_17,
                 MIGRATION_17_18,
+                MIGRATION_18_19,
             )
             .build()
 
@@ -767,6 +775,7 @@ class MigrationTest {
                 MIGRATION_15_16,
                 MIGRATION_16_17,
                 MIGRATION_17_18,
+                MIGRATION_18_19,
             )
             .build()
 
@@ -825,6 +834,7 @@ class MigrationTest {
                 MIGRATION_15_16,
                 MIGRATION_16_17,
                 MIGRATION_17_18,
+                MIGRATION_18_19,
             )
             .build()
 
@@ -887,6 +897,7 @@ class MigrationTest {
                 MIGRATION_15_16,
                 MIGRATION_16_17,
                 MIGRATION_17_18,
+                MIGRATION_18_19,
             )
             .build()
 
@@ -954,6 +965,7 @@ class MigrationTest {
                 MIGRATION_15_16,
                 MIGRATION_16_17,
                 MIGRATION_17_18,
+                MIGRATION_18_19,
             )
             .build()
 
@@ -1021,6 +1033,7 @@ class MigrationTest {
                 MIGRATION_15_16,
                 MIGRATION_16_17,
                 MIGRATION_17_18,
+                MIGRATION_18_19,
             )
             .build()
 
@@ -1098,6 +1111,7 @@ class MigrationTest {
                 MIGRATION_15_16,
                 MIGRATION_16_17,
                 MIGRATION_17_18,
+                MIGRATION_18_19,
             )
             .build()
 
@@ -1172,6 +1186,7 @@ class MigrationTest {
                 MIGRATION_15_16,
                 MIGRATION_16_17,
                 MIGRATION_17_18,
+                MIGRATION_18_19,
             )
             .build()
 
@@ -1241,6 +1256,7 @@ class MigrationTest {
                 MIGRATION_15_16,
                 MIGRATION_16_17,
                 MIGRATION_17_18,
+                MIGRATION_18_19,
             )
             .build()
 
@@ -1367,6 +1383,7 @@ class MigrationTest {
                 MIGRATION_15_16,
                 MIGRATION_16_17,
                 MIGRATION_17_18,
+                MIGRATION_18_19,
             )
             .build()
 
@@ -1467,6 +1484,40 @@ class MigrationTest {
             ).use { cursor ->
                 assertTrue("the pre-v18 private message must survive", cursor.moveToFirst())
                 assertEquals(0, cursor.getInt(0))
+            }
+        }
+    }
+
+    /** v18 → v19 (#340) — topic posts gain a nullable message tone; MP storage is unchanged. */
+    @Test
+    fun migrate_18_to_19_adds_nullable_msgIcon() {
+        val dbName = "migration_18_19_test"
+
+        helper.createDatabase(dbName, 18).use { v18 ->
+            v18.execSQL(
+                """
+                INSERT INTO posts (
+                    cat, numreponse, post, author, date, content, isEditable, isOwnPost,
+                    quotedAuthors, fetchedAt, authMode, isModerationPost
+                ) VALUES (
+                    13, 2800250, 21512, 'Auteur', 0, '{"blocks":[]}', 0, 0,
+                    '[]', 0, 'ANONYMOUS', 0
+                )
+                """.trimIndent(),
+            )
+        }
+
+        helper.runMigrationsAndValidate(dbName, 19, true, MIGRATION_18_19).use { v19 ->
+            assertTrue("posts must expose the new column", "msgIcon" in v19.columnNames("posts"))
+            assertTrue(
+                "mp_messages must stay unchanged",
+                "msgIcon" !in v19.columnNames("mp_messages"),
+            )
+            v19.query(
+                "SELECT msgIcon FROM posts WHERE numreponse = 2800250",
+            ).use { cursor ->
+                assertTrue("the pre-v19 topic post must survive", cursor.moveToFirst())
+                assertTrue("the new column must backfill to NULL", cursor.isNull(0))
             }
         }
     }

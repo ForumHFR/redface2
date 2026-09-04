@@ -57,7 +57,7 @@ import kotlinx.coroutines.launch
  *
  * 1. On init, fetch the topic form via [TopicFormRepository] using the
  *    mode-specific request shape.
- * 2. Hydrate `subject`, `draft`, the three per-post options, and the parsed
+ * 2. Hydrate `subject`, `draft`, the per-post options/message tone, and the parsed
  *    subcategory selection ONCE — subsequent silent refetches (e.g. after
  *    `InvalidHashCheck`) must never overwrite user edits.
  * 3. On [TopicFormIntent.SubmitClicked], POST via the matching repository method
@@ -307,6 +307,10 @@ class TopicFormViewModel @AssistedInject constructor(
                 _state.update { it.copy(smileyDisabled = intent.disabled) }
             is TopicFormIntent.ToggleEmailNotification ->
                 _state.update { it.copy(emailNotificationEnabled = intent.enabled) }
+            is TopicFormIntent.MsgIconSelected ->
+                intent.n.takeIf { it in EDITOR_MSG_ICONS }?.let { selected ->
+                    _state.update { it.copy(msgIcon = selected) }
+                }
             is TopicFormIntent.SmileySelected -> onSmileySelected(intent.token)
             is TopicFormIntent.ImageUrlInserted -> onImageUrlInserted(intent.url)
             is TopicFormIntent.ImagesPicked -> onImagesPicked(intent.uris)
@@ -702,7 +706,7 @@ class TopicFormViewModel @AssistedInject constructor(
             val outcome = runCatching {
                 topicFormRepository.submitEditFirstPost(
                     context = context,
-                    form = form,
+                    form = form.copy(msgIcon = snapshot.msgIcon.toString()),
                     subject = snapshot.subject.text,
                     bbcodeContent = snapshot.draft.text,
                     selectedSubcat = selectedSubcat,
@@ -754,7 +758,7 @@ class TopicFormViewModel @AssistedInject constructor(
             val outcome = runCatching {
                 topicFormRepository.submitNewTopic(
                     context = context,
-                    form = form,
+                    form = form.copy(msgIcon = snapshot.msgIcon.toString()),
                     subject = snapshot.subject.text,
                     bbcodeContent = snapshot.draft.text,
                     selectedSubcat = selectedSubcat,
@@ -919,6 +923,17 @@ class TopicFormViewModel @AssistedInject constructor(
     private fun TopicFormState.shouldHydrateDraftFrom(form: TopicForm): Boolean =
         !draftHydratedFromServer && draft.text.isBlank() && form.initialContent.isNotBlank()
 
+    /**
+     * Server value takes over only when [hydrate] is true, caret parked at the end. Extracted from
+     * `withFormHydration` to keep that function under the detekt CyclomaticComplexMethod threshold.
+     */
+    private fun TextFieldValue.hydratedWith(serverText: String, hydrate: Boolean): TextFieldValue =
+        if (hydrate) {
+            TextFieldValue(text = serverText, selection = TextRange(serverText.length))
+        } else {
+            this
+        }
+
     private fun TopicFormState.withFormHydration(
         form: TopicForm,
         nextPreview: PostContent,
@@ -928,22 +943,8 @@ class TopicFormViewModel @AssistedInject constructor(
         // the other one without clobbering the user's edit.
         val hydrateSubject = shouldHydrateSubjectFrom(form)
         val hydrateDraft = shouldHydrateDraftFrom(form)
-        val nextSubject = if (hydrateSubject) {
-            TextFieldValue(
-                text = form.subject,
-                selection = TextRange(form.subject.length),
-            )
-        } else {
-            subject
-        }
-        val nextDraft = if (hydrateDraft) {
-            TextFieldValue(
-                text = form.initialContent,
-                selection = TextRange(form.initialContent.length),
-            )
-        } else {
-            draft
-        }
+        val nextSubject = subject.hydratedWith(form.subject, hydrateSubject)
+        val nextDraft = draft.hydratedWith(form.initialContent, hydrateDraft)
         val hydrateOptions = !optionsHydratedFromForm
         return copy(
             isLoadingForm = false,
@@ -972,6 +973,7 @@ class TopicFormViewModel @AssistedInject constructor(
             } else {
                 emailNotificationEnabled
             },
+            msgIcon = if (hydrateOptions) form.msgIcon.toEditorMsgIcon() else msgIcon,
             optionsHydratedFromForm = true,
             // Propagate the parsed anonymous flag so `canSubmit` can refuse
             // the POST locally (the wire would refuse too, but we don't want

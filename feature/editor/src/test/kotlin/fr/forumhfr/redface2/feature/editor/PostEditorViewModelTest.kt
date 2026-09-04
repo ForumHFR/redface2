@@ -552,6 +552,50 @@ class PostEditorViewModelTest {
     }
 
     @Test
+    fun `message tone is hydrated from the first form`() = runTest {
+        // A non-default tone (6) so the assertion cannot pass on the DEFAULT_MSG_ICON fallback.
+        replyRepository.formResult = Result.success(authenticatedForm().copy(msgIcon = "6"))
+
+        val viewModel = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(6, viewModel.state.value.msgIcon)
+        assertTrue(viewModel.state.value.optionsHydratedFromForm)
+    }
+
+    @Test
+    fun `selected message tone reaches the submitted reply form`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm().copy(msgIcon = "1"))
+        replyRepository.submitResult = ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+        val viewModel = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.MsgIconSelected(6))
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("hi")))
+        assertEquals(6, viewModel.state.value.msgIcon)
+        viewModel.submit(PostEditorIntent.SubmitClicked)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("6", replyRepository.lastSubmittedForm?.msgIcon)
+    }
+
+    @Test
+    fun `silent refetch does not overwrite a user-selected message tone`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm().copy(msgIcon = "1"))
+        replyRepository.submitResult = ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
+        val viewModel = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.MsgIconSelected(6))
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("hi")))
+        viewModel.submit(PostEditorIntent.SubmitClicked)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("refetch happened", 2, replyRepository.formFetches)
+        assertEquals(6, viewModel.state.value.msgIcon)
+    }
+
+    @Test
     fun `silent refetch must not overwrite user-toggled options`() = runTest {
         // First load : HFR ships everything false. User flips signature on.
         // InvalidHashCheck triggers a silent refetch with the same defaults.
@@ -2161,6 +2205,8 @@ class PostEditorViewModelTest {
             private set
         var lastSubmittedBbcode: String? = null
             private set
+        var lastSubmittedForm: ReplyForm? = null
+            private set
 
         // #291 — per-numrep responses for the multi-quote pipeline; falls back to [formResult]
         // when the quoted numreponse has no dedicated entry (single-quote / plain-reply tests).
@@ -2189,6 +2235,7 @@ class PostEditorViewModelTest {
             submitCalls += 1
             lastSubmittedContext = context
             lastSubmittedBbcode = bbcodeContent
+            lastSubmittedForm = form
             lastSubmittedOptions = options
             submitGate?.await()
             submitException?.let { throw it }

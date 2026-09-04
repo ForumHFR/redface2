@@ -60,11 +60,11 @@ data class ReplyForm(
     /**
      * `MsgIcon` HFR radio value (the « ton du message » row). HFR renders ~16
      * icons ; the one with `checked="checked"` is the server-side default for
-     * the user. We forward this value verbatim on POST without exposing it to
-     * the UI for Phase 2C — Edit / Phase 2D may add a picker if there is real
-     * user demand. `null` keeps HFR's own server-side default (the field is
-     * simply not transmitted) ; in practice every authenticated form ships a
-     * checked icon (typically `1`).
+     * the user. Full reply/edit editors hydrate their 1..16 picker from this
+     * value, then submit the user's final choice through a copied [ReplyForm].
+     * `null` leaves the typed override unset for callers without that picker ;
+     * their generic [hiddenFields] passthrough may still echo HFR's checked
+     * server default. In practice every authenticated form ships one (typically `1`).
      */
     val msgIcon: String? = null,
     /**
