@@ -4744,6 +4744,40 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `a landing pending on a provisional page is dispatched by a manual refresh`() = runTest {
+        val target = 777
+        val emissions = MutableSharedFlow<TopicPageEmission>(replay = 1)
+        assertTrue(
+            emissions.tryEmit(
+                TopicPageEmission(
+                    fakeTopic(page = 2, totalPages = 2, posts = listOf(fakePost(100))),
+                    provisional = true,
+                ),
+            ),
+        )
+        val repository = FakeStreamingEmissionTopicRepository(
+            source = emissions,
+            refreshTopicsToReturn = listOf(
+                fakeTopic(page = 2, totalPages = 2, posts = listOf(fakePost(100), fakePost(target))),
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2, scrollTo = target),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+        advanceUntilIdle()
+        assertTrue(assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).provisional)
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.Refresh)
+            assertEquals(TopicEffect.ScrollToPost(target), awaitItem())
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `a second Refresh while one is in flight is collapsed to a single network call (#335)`() = runTest {
         val loaded = fakeTopic(page = 2, totalPages = 5, title = "loaded")
         val refreshed = fakeTopic(page = 2, totalPages = 5, title = "refreshed")

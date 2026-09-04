@@ -14,6 +14,7 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.lifecycle.SavedStateHandle
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
@@ -24,6 +25,14 @@ import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.setMain
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -162,18 +171,65 @@ class QuickReplyRestorationTest {
         assertEquals(launch, observed)
     }
 
-    private fun restorationViewModel(repository: ReplyRepository): QuickReplyViewModel =
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `recreation after inline quote does not re-materialize the quote`() = runTest {
+        Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
+        try {
+            val repository = CountingQuoteRepository()
+            val draftStore = InMemoryDraftStore()
+            val savedStateHandle = SavedStateHandle()
+            val quote = QuoteSelection(
+                locator = QuoteLocator(page = 3, numreponse = 101, ref = 7),
+                author = "alice",
+                excerpt = "extrait",
+            )
+            var viewModel = restorationViewModel(
+                repository = repository,
+                draftStore = draftStore,
+                savedStateHandle = savedStateHandle,
+                quoteCardsEnabled = false,
+            )
+
+            viewModel.onSheetOpened(currentPage = REQUEST.page, initialQuotes = listOf(quote))
+            advanceTimeBy(AUTOSAVE_DEBOUNCE_PLUS_MS)
+            advanceUntilIdle()
+
+            viewModel = restorationViewModel(
+                repository = repository,
+                draftStore = draftStore,
+                savedStateHandle = savedStateHandle,
+                quoteCardsEnabled = false,
+            )
+            viewModel.onSheetOpened(currentPage = REQUEST.page, initialQuotes = listOf(quote))
+            advanceUntilIdle()
+
+            assertEquals(1, Regex("""\[quotemsg=""").findAll(viewModel.state.value.text.text).count())
+            assertEquals("the quote form is fetched once across recreation", 1, repository.quoteFetchCount)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    private fun restorationViewModel(
+        repository: ReplyRepository,
+        draftStore: EditorDraftStore = InMemoryDraftStore(),
+        savedStateHandle: SavedStateHandle = SavedStateHandle(),
+        quoteCardsEnabled: Boolean = true,
+    ): QuickReplyViewModel =
         QuickReplyViewModel(
             request = REQUEST,
+            savedStateHandle = savedStateHandle,
             replyRepository = repository,
             quoteMaterializer = TopicReplyQuoteMaterializer(repository),
-            draftStore = InMemoryDraftStore(),
-            userPreferencesRepository = FakeUserPreferencesRepository(),
+            draftStore = draftStore,
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = quoteCardsEnabled),
         )
 
     private companion object {
         const val OPEN_TAG = "quick_reply_restoration_open"
         const val SHEET_TAG = "quick_reply_restoration_sheet"
+        const val AUTOSAVE_DEBOUNCE_PLUS_MS = 751L
         val REQUEST = QuickReplyRequest(cat = 23, subcat = 401, topicId = 35421, page = 3)
     }
 }
@@ -202,6 +258,30 @@ private class GatedSubmitRepository : ReplyRepository {
         submitGate.await()
         return ReplySubmitResult.Success(refreshUrl = null, targetPage = TARGET_PAGE, numreponse = SCROLL_TO)
     }
+}
+
+private class CountingQuoteRepository : ReplyRepository {
+    var quoteFetchCount: Int = 0
+        private set
+
+    override suspend fun fetchReplyForm(context: ReplyContext): ReplyForm {
+        val quoted = context.quotedNumreponse
+        if (quoted != null) quoteFetchCount++
+        return ReplyForm(
+            hashCheck = "hash",
+            sujet = "sujet",
+            hiddenFields = emptyMap(),
+            isAnonymous = false,
+            initialContent = quoted?.let { "[quotemsg=$it]corps[/quotemsg]" }.orEmpty(),
+        )
+    }
+
+    override suspend fun submitReply(
+        context: ReplyContext,
+        form: ReplyForm,
+        bbcodeContent: String,
+        options: ReplyFormOptions,
+    ): ReplySubmitResult = error("submitReply not used by restoration test")
 }
 
 private class InMemoryDraftStore : EditorDraftStore {

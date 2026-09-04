@@ -785,9 +785,9 @@ internal fun inAppRouteBackStackAfterOpen(
     backStack: List<NavKey>,
     route: NavKey,
 ): List<NavKey> {
-    val existingIndex = backStack.indexOf(route)
+    if (backStack.lastOrNull() == route) return backStack
+    val existingIndex = backStack.lastIndexOf(route)
     return when {
-        existingIndex >= 0 && existingIndex == backStack.lastIndex -> backStack
         existingIndex >= 0 -> backStack.take(existingIndex + 1)
         else -> backStack + route
     }

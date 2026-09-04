@@ -8,7 +8,7 @@ package fr.forumhfr.redface2.core.domain.write
 fun truncateQuote(bbcode: String, limit: Int = DEFAULT_TRUNCATED_QUOTE_LIMIT): String {
     val quote = singleOuterQuote(bbcode)
     val truncated = quote
-        ?.takeUnless { it.isAlreadyTruncated() }
+        ?.takeUnless { it.isAlreadyTruncated(limit.coerceAtLeast(0)) }
         ?.let { truncatedQuoteContent(it.content, limit.coerceAtLeast(0)) }
 
     return if (quote != null && truncated != null) {
@@ -95,10 +95,13 @@ private fun initialScanState(limit: Int): ScanState =
 
 private fun nextScanState(content: String, state: ScanState, limit: Int): ScanState {
     val tag = bbcodeTagAt(content, state.index)
+    val atom = nonSplittableAtomAt(content, state.index)
     return if (tag != null) {
         scanBbcodeTag(state, tag)
+    } else if (atom != null) {
+        scanNonSplittableAtom(state, atom, limit)
     } else {
-        scanVisibleCharacter(state, content[state.index], limit)
+        scanVisibleCodePoint(state, content, limit)
     }
 }
 
@@ -108,15 +111,28 @@ private fun scanBbcodeTag(state: ScanState, tag: MatchResult): ScanState =
         openTags = state.openTags.after(tag),
     )
 
-private fun scanVisibleCharacter(state: ScanState, char: Char, limit: Int): ScanState {
-    val nextVisible = state.visible + 1
-    val boundary = Boundary(rawIndex = state.index + 1, openTags = state.openTags)
+private fun scanNonSplittableAtom(state: ScanState, atom: MatchResult, limit: Int): ScanState {
+    val boundary = Boundary(rawIndex = state.index, openTags = state.openTags)
+    val nextVisible = state.visible + atom.value.codePointCount(0, atom.value.length)
     return state.copy(
-        index = state.index + 1,
+        index = atom.range.last + 1,
         visible = nextVisible,
         cuts = state.cuts + boundary,
-        wordBoundaries = state.wordBoundaries.plusIfWordBoundary(char, boundary),
-        hardCut = boundary.takeIf { nextVisible == limit } ?: state.hardCut,
+        hardCut = boundary.takeIf { nextVisible >= limit } ?: state.hardCut,
+    )
+}
+
+private fun scanVisibleCodePoint(state: ScanState, content: String, limit: Int): ScanState {
+    val codePoint = content.codePointAt(state.index)
+    val rawLength = Character.charCount(codePoint)
+    val nextVisible = state.visible + 1
+    val boundary = Boundary(rawIndex = state.index + rawLength, openTags = state.openTags)
+    return state.copy(
+        index = state.index + rawLength,
+        visible = nextVisible,
+        cuts = state.cuts + boundary,
+        wordBoundaries = state.wordBoundaries.plusIfWordBoundary(codePoint, boundary),
+        hardCut = boundary.takeIf { nextVisible >= limit } ?: state.hardCut,
     )
 }
 
@@ -130,8 +146,8 @@ private fun List<String>.close(name: String): List<String> {
     return if (last == lastIndex) dropLast(1) else this
 }
 
-private fun List<Boundary>.plusIfWordBoundary(char: Char, boundary: Boundary): List<Boundary> =
-    if (isWordOrLineBoundary(char)) this + boundary else this
+private fun List<Boundary>.plusIfWordBoundary(codePoint: Int, boundary: Boundary): List<Boundary> =
+    if (isWordOrLineBoundary(codePoint)) this + boundary else this
 
 private fun chooseCutBoundary(scan: TruncationScan): Boundary {
     val preferred = scan.preferredBoundary()
@@ -165,8 +181,9 @@ private fun visibleLength(content: String): Int {
         if (tag != null) {
             index = tag.range.last + 1
         } else {
+            val codePoint = content.codePointAt(index)
             length += 1
-            index += 1
+            index += Character.charCount(codePoint)
         }
     }
     return length
@@ -175,11 +192,16 @@ private fun visibleLength(content: String): Int {
 private fun bbcodeTagAt(content: String, index: Int): MatchResult? =
     BBCODE_TAG.find(content, index)?.takeIf { it.range.first == index }
 
+private fun nonSplittableAtomAt(content: String, index: Int): MatchResult? =
+    NON_SPLITTABLE_ATOMS.firstNotNullOfOrNull { regex ->
+        regex.find(content, index)?.takeIf { it.range.first == index }
+    }
+
 private fun MatchResult.isClosingTag(): Boolean =
     groupValues[1] == "/"
 
-private fun isWordOrLineBoundary(char: Char): Boolean =
-    char.isWhitespace() || char in WORD_BOUNDARY_PUNCTUATION
+private fun isWordOrLineBoundary(codePoint: Int): Boolean =
+    Character.isWhitespace(codePoint) || codePoint in WORD_BOUNDARY_PUNCTUATION
 
 private data class QuoteShell(
     val leading: String,
@@ -189,8 +211,9 @@ private data class QuoteShell(
     val trailing: String,
 )
 
-private fun QuoteShell.isAlreadyTruncated(): Boolean =
-    content.trimEnd().endsWith(TRUNCATION_MARKER)
+private fun QuoteShell.isAlreadyTruncated(limit: Int): Boolean =
+    content.trimEnd().endsWith(TRUNCATION_MARKER) &&
+        visibleLength(content) <= limit + TRUNCATION_MARKER.length
 
 private fun QuoteShell.renderContent(content: String): String =
     leading + openTag + content + closeTag + trailing
@@ -234,6 +257,26 @@ private val QUOTEMSG_CLOSE_TAG = Regex("""\[/quotemsg]""", RegexOption.IGNORE_CA
 
 private val BBCODE_TAG = Regex("""\[(/?)([#a-z][#a-z0-9]*)(?:=[^\]]*)?]""", RegexOption.IGNORE_CASE)
 
-private val EXCLUDED_IF_OPEN_TAGS = setOf("img", "quotemsg")
+private val PERSONAL_SMILEY_ATOM = Regex("""\[:[^\]]+]""")
 
-private val WORD_BOUNDARY_PUNCTUATION = setOf('.', ',', ';', ':', '!', '?', ')', ']', '}', '»')
+// Requires at least one letter or underscore so digit-only pairs (e.g. the `:30:` inside
+// a clock time like `12:30:00`) are not mistaken for a builtin smiley code.
+private val BUILTIN_SMILEY_ATOM = Regex(""":[a-z0-9_]*[a-z_][a-z0-9_]*:""", RegexOption.IGNORE_CASE)
+
+// A raw `[` starts a BBCode tag in quote content and must remain available to [BBCODE_TAG].
+private val URL_ATOM = Regex("""https?://[^\s\[]+""", RegexOption.IGNORE_CASE)
+
+private val NON_SPLITTABLE_ATOMS = listOf(PERSONAL_SMILEY_ATOM, BUILTIN_SMILEY_ATOM, URL_ATOM)
+
+private val EXCLUDED_IF_OPEN_TAGS = setOf("img", "quotemsg", "url")
+
+private val WORD_BOUNDARY_PUNCTUATION = setOf(
+    ','.code,
+    ';'.code,
+    '!'.code,
+    '?'.code,
+    ')'.code,
+    ']'.code,
+    '}'.code,
+    '»'.code,
+)

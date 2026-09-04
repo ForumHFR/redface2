@@ -70,4 +70,76 @@ class QuoteTruncationTest {
 
         assertEquals(once, truncateQuote(once, limit = 14))
     }
+
+    @Test
+    fun `truncation never splits a URL`() {
+        val bbcode = "[quotemsg=1]voir https://example.com/page ensuite[/quotemsg]"
+
+        assertEquals(
+            "[quotemsg=1]voir [...][/quotemsg]",
+            truncateQuote(bbcode, limit = 12),
+        )
+    }
+
+    @Test
+    fun `keeps a perso smiley atomic`() {
+        val bbcode = "[quotemsg=1]bravo [:lol] la suite[/quotemsg]"
+
+        assertEquals(
+            "[quotemsg=1]bravo [...][/quotemsg]",
+            truncateQuote(bbcode, limit = 8),
+        )
+    }
+
+    @Test
+    fun `keeps a builtin smiley atomic`() {
+        val bbcode = "[quotemsg=1]bravo :bounce: la suite[/quotemsg]"
+
+        assertEquals(
+            "[quotemsg=1]bravo [...][/quotemsg]",
+            truncateQuote(bbcode, limit = 8),
+        )
+    }
+
+    @Test
+    fun `does not treat a clock-format colon pair as a smiley`() {
+        // `:30:` inside `12:30:00` must not be swallowed as a builtin smiley atom, which would
+        // push the cut back before the digits.
+        val bbcode = "[quotemsg=1]12:30:00 ce soir[/quotemsg]"
+
+        assertEquals(
+            "[quotemsg=1]12:30 [...][/quotemsg]",
+            truncateQuote(bbcode, limit = 5),
+        )
+    }
+
+    @Test
+    fun `drops a url tag opened at the cut`() {
+        val bbcode = "[quotemsg=1]avant [url]https://x.org/a/b[/url] après[/quotemsg]"
+
+        assertEquals(
+            "[quotemsg=1]avant [...][/quotemsg]",
+            truncateQuote(bbcode, limit = 12),
+        )
+    }
+
+    @Test
+    fun `never splits a surrogate pair`() {
+        val bbcode = "[quotemsg=1]abc😀def[/quotemsg]"
+
+        assertEquals(
+            "[quotemsg=1]abc😀 [...][/quotemsg]",
+            truncateQuote(bbcode, limit = 4),
+        )
+    }
+
+    @Test
+    fun `a long quote ending with the marker is still truncated`() {
+        val bbcode = "[quotemsg=1]un deux trois quatre [...][/quotemsg]"
+
+        assertEquals(
+            "[quotemsg=1]un deux [...][/quotemsg]",
+            truncateQuote(bbcode, limit = 8),
+        )
+    }
 }
