@@ -1187,6 +1187,7 @@ private fun ThreadMessageMenuHost(
  * current frame. Extracted to keep [PrivateMessageThreadContent] under detekt's complexity threshold.
  */
 @Composable
+@Suppress("LongParameterList") // One callback per menu action; grouping them would only move the list.
 private fun ThreadImageMenuHost(
     mode: PrivateMessageThreadUiState.Mode,
     target: PostImageTarget?,

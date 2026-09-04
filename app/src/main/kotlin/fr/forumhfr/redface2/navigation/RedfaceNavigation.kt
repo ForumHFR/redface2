@@ -2241,7 +2241,7 @@ private fun RedfaceNavHost(
     immersiveNavBarNavState: ImmersiveNavBarNavState,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
 ) {
-    val openImageViewer = remember(backStack) {
+    val openImageViewer: (ImageViewerRequest) -> Unit = remember(backStack) {
         { request: ImageViewerRequest ->
             backStack.add(
                 ImageViewerRoute(

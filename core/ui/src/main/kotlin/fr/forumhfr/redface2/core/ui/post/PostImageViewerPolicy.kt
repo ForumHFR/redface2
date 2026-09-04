@@ -16,6 +16,7 @@ private val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "gif", "webp", "avif"
  * Returns true when [url] is safe to treat as a direct image target for the fullscreen viewer.
  * Query parameters and fragments never participate in the extension check.
  */
+@Suppress("ReturnCount") // Parse guard + host allowlist shortcut, each a cheap early return.
 fun isImageLikeUrl(url: String): Boolean {
     val uri = runCatching { URI(url.trim()) }.getOrNull() ?: return false
     val host = uri.host?.lowercase()
@@ -32,6 +33,7 @@ fun isImageLikeUrl(url: String): Boolean {
  * target is image-like; an unlinked image uses its rendered URL for all three roles. Inline images
  * call this with `target.copy(linkUrl = null)` from their contextual sheet.
  */
+@Suppress("ReturnCount") // Eligibility guard + non-image link rejection, both terminal cases.
 fun viewerRequestFor(target: PostImageTarget, diskCache: Boolean): ImageViewerRequest? {
     if (!isEligiblePostImageUrl(target.url)) return null
     val linkUrl = target.linkUrl

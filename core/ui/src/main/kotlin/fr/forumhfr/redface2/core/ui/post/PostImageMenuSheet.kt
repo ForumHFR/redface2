@@ -60,6 +60,7 @@ import kotlinx.coroutines.launch
  * public topics reuse Coil's disk cache, while MP thumbnails remain memory-only (#1096).
  */
 @OptIn(ExperimentalMaterial3Api::class)
+@Suppress("LongParameterList") // One callback per menu action; grouping them would only move the list.
 @Composable
 fun PostImageMenuSheet(
     target: PostImageTarget,

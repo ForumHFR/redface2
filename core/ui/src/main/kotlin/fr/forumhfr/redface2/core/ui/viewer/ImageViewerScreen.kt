@@ -23,6 +23,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -104,18 +105,20 @@ fun ImageViewerScreen(
         )
 
         ImageViewerActionBar(
-            onClose = onClose,
-            onShare = { sharePostImageUrl(context, request.sourceUrl, shareFailedFeedback) },
-            onCopy = { copyImageUrlToClipboard(context, request.sourceUrl, copiedFeedback) },
-            onOpenBrowser = {
-                openImageUrlInBrowser(
-                    context = context,
-                    url = request.externalUrl,
-                    failureFeedback = browserFailedFeedback,
-                    alwaysAsk = alwaysAskLinkApp,
-                )
-            },
-            onSave = { onSave(request.sourceUrl) },
+            actions = ImageViewerActions(
+                onClose = onClose,
+                onShare = { sharePostImageUrl(context, request.sourceUrl, shareFailedFeedback) },
+                onCopy = { copyImageUrlToClipboard(context, request.sourceUrl, copiedFeedback) },
+                onOpenBrowser = {
+                    openImageUrlInBrowser(
+                        context = context,
+                        url = request.externalUrl,
+                        failureFeedback = browserFailedFeedback,
+                        alwaysAsk = alwaysAskLinkApp,
+                    )
+                },
+                onSave = { onSave(request.sourceUrl) },
+            ),
             modifier = Modifier.align(Alignment.BottomCenter),
         )
     }
@@ -166,13 +169,19 @@ private fun ImageViewerLoadOverlay(
     }
 }
 
+/** Groups the viewer action-bar callbacks so the composable keeps a short parameter list. */
+@Immutable
+private class ImageViewerActions(
+    val onClose: () -> Unit,
+    val onShare: () -> Unit,
+    val onCopy: () -> Unit,
+    val onOpenBrowser: () -> Unit,
+    val onSave: () -> Unit,
+)
+
 @Composable
 private fun ImageViewerActionBar(
-    onClose: () -> Unit,
-    onShare: () -> Unit,
-    onCopy: () -> Unit,
-    onOpenBrowser: () -> Unit,
-    onSave: () -> Unit,
+    actions: ImageViewerActions,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -185,11 +194,19 @@ private fun ImageViewerActionBar(
             .padding(vertical = 4.dp)
             .testTag(IMAGE_VIEWER_ACTIONS_TAG),
     ) {
-        ImageViewerAction(R.drawable.ic_close, R.string.image_viewer_close, onClose)
-        ImageViewerAction(R.drawable.ic_ms_share, R.string.post_image_menu_share, onShare)
-        ImageViewerAction(R.drawable.ic_ms_content_copy, R.string.post_image_menu_copy_url, onCopy)
-        ImageViewerAction(R.drawable.ic_ms_open_in_new, R.string.browser_open_action, onOpenBrowser)
-        ImageViewerAction(R.drawable.ic_ms_download, R.string.post_image_menu_save, onSave)
+        ImageViewerAction(R.drawable.ic_close, R.string.image_viewer_close, actions.onClose)
+        ImageViewerAction(R.drawable.ic_ms_share, R.string.post_image_menu_share, actions.onShare)
+        ImageViewerAction(
+            R.drawable.ic_ms_content_copy,
+            R.string.post_image_menu_copy_url,
+            actions.onCopy,
+        )
+        ImageViewerAction(
+            R.drawable.ic_ms_open_in_new,
+            R.string.browser_open_action,
+            actions.onOpenBrowser,
+        )
+        ImageViewerAction(R.drawable.ic_ms_download, R.string.post_image_menu_save, actions.onSave)
     }
 }
 
