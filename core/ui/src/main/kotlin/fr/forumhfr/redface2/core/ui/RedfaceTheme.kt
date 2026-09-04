@@ -23,6 +23,7 @@ import fr.forumhfr.redface2.core.ui.theme.DisplayMetrics
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 import fr.forumhfr.redface2.core.ui.theme.LocalFoldLongQuotes
 import fr.forumhfr.redface2.core.ui.theme.LocalMediaDisplayProfile
+import fr.forumhfr.redface2.core.ui.theme.LocalPostImageCorners
 import fr.forumhfr.redface2.core.ui.theme.LocalPostImageMaxWidth
 import fr.forumhfr.redface2.core.ui.theme.LocalSmileyPickerDecoration
 import fr.forumhfr.redface2.core.ui.theme.LocalShowScrollbar
@@ -77,6 +78,8 @@ fun RedfaceTheme(
         LocalMediaDisplayProfile provides reading.mediaDisplayProfile,
         // #991 — expose the maximum fImage width to all post content-image paths.
         LocalPostImageMaxWidth provides reading.postImageMaxWidth,
+        // #985 — expose the selected corner shape to all post content-image paths.
+        LocalPostImageCorners provides reading.postImageCorners,
         // #989 — expose the picker's cell delimiter (read via LocalSmileyPickerDecoration.current in
         // SmileyPickerGrid) so switching the setting re-decorates the grid.
         LocalSmileyPickerDecoration provides reading.smileyPickerDecoration,

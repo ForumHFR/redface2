@@ -8,6 +8,7 @@ import fr.forumhfr.redface2.core.database.dao.TopicDao
 import fr.forumhfr.redface2.core.database.entities.FetchMode
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
@@ -790,6 +791,11 @@ class TopicRepositoryImplTest {
             MutableStateFlow(PostImageMaxWidth.DEFAULT)
 
         override suspend fun setPostImageMaxWidth(width: PostImageMaxWidth) = Unit
+
+        override fun observePostImageCorners(): Flow<PostImageCorners> =
+            MutableStateFlow(PostImageCorners.DEFAULT)
+
+        override suspend fun setPostImageCorners(corners: PostImageCorners) = Unit
 
         override fun observeSmileyPickerDecoration(): Flow<SmileyPickerDecoration> =
             MutableStateFlow(SmileyPickerDecoration.NONE)

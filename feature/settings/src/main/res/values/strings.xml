@@ -362,6 +362,13 @@
     <string name="settings_display_post_image_max_width_99">99&#160;%</string>
     <string name="settings_display_post_image_max_width_100">100&#160;%</string>
     <string name="settings_img_width_persist_failed">Impossible de mémoriser la largeur des images. Réessayez.</string>
+    <!-- #985 — rayon des coins des images de contenu ; 8 dp conserve le rendu historique. -->
+    <string name="settings_display_post_image_corners_title">Coins des images</string>
+    <string name="settings_display_post_image_corners_intro">Choisissez le rayon des images affichées dans les messages.</string>
+    <string name="settings_display_post_image_corners_rounded">Arrondis (8 dp, défaut)</string>
+    <string name="settings_display_post_image_corners_soft">Légers (4 dp)</string>
+    <string name="settings_display_post_image_corners_square">Carrés (0 dp)</string>
+    <string name="settings_display_post_image_corners_persist_failed">Impossible de mémoriser les coins des images. Réessayez.</string>
     <!-- #989 — délimiteur des cellules du picker de smileys. « Aucun » par défaut : le délimiteur
          aide à repérer chaque vignette sur un corpus très hétérogène, il ne change PAS la taille des
          smileys (le preset qui agrandissait les petits a été rejeté, cf. #1022). -->

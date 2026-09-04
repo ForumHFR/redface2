@@ -25,6 +25,7 @@ import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.domain.preferences.NavBarLabelsBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
+import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
@@ -804,6 +805,21 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observePostImageCorners(): Flow<PostImageCorners> =
+        dataStore.data
+            // Default ROUNDED (#985): preserves the historical 8 dp content-image radius.
+            .map(::readPostImageCorners)
+            .distinctUntilChanged()
+            .catch { emit(PostImageCorners.DEFAULT) }
+
+    override suspend fun setPostImageCorners(corners: PostImageCorners) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_POST_IMAGE_CORNERS] = corners.name
+            }
+        }
+    }
+
     override fun observeSmileyPickerDecoration(): Flow<SmileyPickerDecoration> =
         dataStore.data
             // Default NONE (#989): delimiters are opt-in selection aids, not thumbnail resizing.
@@ -1014,6 +1030,12 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         prefs[KEY_POST_IMAGE_MAX_WIDTH]
             ?.let { stored -> runCatching { PostImageMaxWidth.valueOf(stored) }.getOrNull() }
             ?: PostImageMaxWidth.DEFAULT
+
+    /** Unknown / corrupt #985 values fall back to the historical rounded corners. */
+    private fun readPostImageCorners(prefs: Preferences): PostImageCorners =
+        prefs[KEY_POST_IMAGE_CORNERS]
+            ?.let { stored -> runCatching { PostImageCorners.valueOf(stored) }.getOrNull() }
+            ?: PostImageCorners.DEFAULT
 
     /**
      * Reads [KEY_SMILEY_PICKER_DECORATION] defensively (#989): an unknown / corrupt stored value
@@ -1371,6 +1393,8 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val KEY_MEDIA_DISPLAY_PROFILE = stringPreferencesKey("media_display_profile")
         // #991 — post content image max width (PostImageMaxWidth.name, defensively parsed).
         val KEY_POST_IMAGE_MAX_WIDTH = stringPreferencesKey("post_image_max_width")
+        // #985 — post content image corners (PostImageCorners.name, defensively parsed).
+        val KEY_POST_IMAGE_CORNERS = stringPreferencesKey("post_image_corners")
         // #989 — smiley picker cell delimiter (SmileyPickerDecoration.name, defensively parsed).
         val KEY_SMILEY_PICKER_DECORATION = stringPreferencesKey("smiley_picker_decoration")
 

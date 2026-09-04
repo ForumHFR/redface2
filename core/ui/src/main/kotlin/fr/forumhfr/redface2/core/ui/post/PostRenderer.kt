@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -110,6 +109,7 @@ import fr.forumhfr.redface2.core.ui.theme.LocalEgoQuotePseudo
 import fr.forumhfr.redface2.core.ui.theme.LocalFoldLongQuotes
 import fr.forumhfr.redface2.core.ui.theme.LocalIgnoreInlineColors
 import fr.forumhfr.redface2.core.ui.theme.LocalMediaDisplayProfile
+import fr.forumhfr.redface2.core.ui.theme.LocalPostImageCorners
 import fr.forumhfr.redface2.core.ui.theme.LocalPostImageMaxWidth
 import fr.forumhfr.redface2.core.ui.theme.egoHighlightColors
 import fr.forumhfr.redface2.core.model.PostBlock
@@ -1149,6 +1149,7 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
     // slot is deterministic (no dimensions, no MIME — no factor).
     val mediaDisplayProfile = LocalMediaDisplayProfile.current
     val postImageMaxWidth = LocalPostImageMaxWidth.current
+    val imageCornerShape = cornerShapeFor(LocalPostImageCorners.current)
     val gifCeiling = if (metadata?.mimeType == GIF_MIME_TYPE) mediaDisplayProfile.factor else 1f
     // #876 (§8 [AMENDEMENT-v1.5-4]) — `mApercu`: an eligible LINKED PREVIEW (a thumbnail wrapped
     // in a link to a DISTINCT resource of the SAME host, native axis ≤ 400 px — the pure guard
@@ -1246,7 +1247,7 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
             // cannot enumerate them. testTag is invisible to TalkBack.
             .testTag(BLOCK_IMAGE_TEST_TAG)
             .then(gifGate.modifier)
-            .clip(RoundedCornerShape(8.dp))
+            .clip(imageCornerShape)
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             .then(interactionModifier)
         // #959 (§7) — measured: decode at the explicit calculator size, KEYED into the remember so
@@ -1286,7 +1287,7 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
                 Box(
                     modifier = sizeModifier
                         .testTag(BLOCK_IMAGE_TEST_TAG)
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(imageCornerShape)
                         .background(
                             LocalModerationHighlightColors.current?.subSurfaceContainer
                                 ?: MaterialTheme.colorScheme.surfaceContainerHighest,

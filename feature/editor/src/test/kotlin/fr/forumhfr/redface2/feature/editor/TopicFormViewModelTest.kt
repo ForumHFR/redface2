@@ -12,6 +12,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
@@ -1642,6 +1643,11 @@ class TopicFormViewModelTest {
             MutableStateFlow(PostImageMaxWidth.DEFAULT)
 
         override suspend fun setPostImageMaxWidth(width: PostImageMaxWidth) = Unit
+
+        override fun observePostImageCorners(): Flow<PostImageCorners> =
+            MutableStateFlow(PostImageCorners.DEFAULT)
+
+        override suspend fun setPostImageCorners(corners: PostImageCorners) = Unit
 
         // #989 — délimiteur du picker : non exercé ici, présent pour satisfaire l'interface.
         override fun observeSmileyPickerDecoration(): Flow<SmileyPickerDecoration> =

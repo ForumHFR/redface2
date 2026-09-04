@@ -8,6 +8,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.LightSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
+import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.ThemeAccent
@@ -271,6 +272,11 @@ data class SettingsState(
     val isUpdatingPostImageMaxWidth: Boolean = false,
     val postImageMaxWidthError: Boolean = false,
     val postImageMaxWidthTouchedLocally: Boolean = false,
+    // #985 — coins des images de contenu (ROUNDED 8 dp par défaut).
+    val postImageCorners: PostImageCorners = PostImageCorners.DEFAULT,
+    val isUpdatingPostImageCorners: Boolean = false,
+    val postImageCornersError: Boolean = false,
+    val postImageCornersTouchedLocally: Boolean = false,
     // #989 — délimiteur des cellules du picker de smileys (NONE par défaut).
     val smileyPickerDecoration: SmileyPickerDecoration = SmileyPickerDecoration.NONE,
     val isUpdatingSmileyPickerDecoration: Boolean = false,
@@ -446,6 +452,9 @@ data class SettingsState(
 
     val canChangePostImageMaxWidth: Boolean
         get() = !isUpdatingPostImageMaxWidth
+
+    val canChangePostImageCorners: Boolean
+        get() = !isUpdatingPostImageCorners
 
     val canChangeSmileyPickerDecoration: Boolean
         get() = !isUpdatingSmileyPickerDecoration
@@ -628,6 +637,9 @@ sealed interface SettingsIntent {
 
     // #991 — maximum fImage width for content images, applied optimistically like the GIF profile.
     data class PostImageMaxWidthChanged(val width: PostImageMaxWidth) : SettingsIntent
+
+    /** #985 — l'utilisateur choisit le rayon des coins des images de contenu. */
+    data class PostImageCornersChanged(val corners: PostImageCorners) : SettingsIntent
 
     /** #989 — l'utilisateur choisit le délimiteur des cellules du picker de smileys. */
     data class SmileyPickerDecorationChanged(val decoration: SmileyPickerDecoration) : SettingsIntent
