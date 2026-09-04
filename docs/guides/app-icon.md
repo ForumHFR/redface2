@@ -47,6 +47,37 @@ app/src/main/res/
     android:roundIcon="@mipmap/ic_launcher_round" ... />
 ```
 
+## Icônes alternatives
+
+Réglages → Affichage → Icône de l'application permet de choisir quatre variantes. Elles réutilisent
+toutes le même foreground drapeau et ne changent que le fond de l'adaptive icon :
+
+| Choix | Alias du manifest | Fond |
+|-------|-------------------|------|
+| Classique | `.LauncherClassic` | `#FFFFFF` |
+| Sombre | `.LauncherDark` | `#121212` |
+| Rose | `.LauncherRose` | `#A62C2C` (graine du preset Rose) |
+| Rouge | `.LauncherRed` | `#F44336` (graine du preset Rouge RF1) |
+
+Chaque alias cible `.MainActivity` et porte son propre filtre `MAIN` / `LAUNCHER`. `MainActivity`
+conserve séparément tous les filtres `VIEW` des deep links HFR. Android mémorise l'état des
+composants : l'application active d'abord l'alias choisi, puis désactive les trois autres avec
+`DONT_KILL_APP`, afin de ne jamais laisser le lanceur sans entrée active.
+
+Les trois variantes non classiques n'ont volontairement aucun PNG legacy : avec `minSdk 29`, toutes
+les cibles prennent en charge les adaptive icons API 26. Les PNG existants restent uniquement le
+fallback historique de l'icône classique.
+
+Pour ajouter une variante :
+
+1. ajouter son fond `drawable/ic_launcher_background_<variante>.xml` ;
+2. ajouter les deux adaptive icons `mipmap-anydpi-v26/ic_launcher_<variante>.xml` et
+   `ic_launcher_<variante>_round.xml`, avec le foreground `@mipmap/ic_launcher_foreground` ;
+3. déclarer un `activity-alias` désactivé par défaut dans le manifest ;
+4. étendre `AppLauncherIcon`, le mapping `launcherAliasFor` et le choix dans Réglages ;
+5. vérifier que les tests garantissent toujours exactement un alias actif et l'ordre
+   activation-puis-désactivation.
+
 ## Dimensions (108dp canvas adaptive + 48dp legacy)
 
 | Densité | Adaptive foreground | Legacy icon |

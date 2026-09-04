@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- #326 - launcher background. Keep in sync with AccentPreset.ROSE (seedRgb 0xA62C2C), mirrored by LauncherIconRoseBackground (core/ui theme/Color.kt). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#A62C2C" />
+</shape>

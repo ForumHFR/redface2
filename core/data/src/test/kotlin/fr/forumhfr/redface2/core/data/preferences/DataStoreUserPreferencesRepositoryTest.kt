@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
+import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
 import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
@@ -1469,6 +1470,32 @@ class DataStoreUserPreferencesRepositoryTest {
 
         repository.observeDisplayDensity().test {
             assertEquals(DisplayDensity.COMFORT, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `launcher icon defaults to CLASSIC and round-trips every value`() = runTest(dispatcher) {
+        repository.observeAppLauncherIcon().test {
+            assertEquals(AppLauncherIcon.CLASSIC, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        AppLauncherIcon.entries.forEach { icon ->
+            repository.setAppLauncherIcon(icon)
+            repository.observeAppLauncherIcon().test {
+                assertEquals(icon, awaitItem())
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+    }
+
+    @Test
+    fun `corrupt app_launcher_icon value falls back to CLASSIC instead of crashing`() = runTest(dispatcher) {
+        dataStore.edit { prefs -> prefs[stringPreferencesKey("app_launcher_icon")] = "BLUE" }
+
+        repository.observeAppLauncherIcon().test {
+            assertEquals(AppLauncherIcon.CLASSIC, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
     }

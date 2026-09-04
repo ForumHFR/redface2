@@ -489,6 +489,15 @@ interface UserPreferencesRepository {
     suspend fun setDisplayDensity(density: DisplayDensity)
 
     /**
+     * Launcher icon shown by Android (#326). [AppLauncherIcon.CLASSIC] is the default. The Android
+     * component switch is deliberately owned by the Settings UI after this preference persists.
+     */
+    fun observeAppLauncherIcon(): Flow<AppLauncherIcon>
+
+    /** Persists [observeAppLauncherIcon]. Default [AppLauncherIcon.CLASSIC] until the first call. */
+    suspend fun setAppLauncherIcon(icon: AppLauncherIcon)
+
+    /**
      * Block-GIF display profile (#973, contrat images §8 [AMENDEMENT-v1.5-2]):
      * [MediaDisplayProfile.M] (default, ×1,5) — the enlargement factor applied to eligible block
      * GIFs by the post renderer (wired in wave 2). Observed by the renderer hosts and mirrored in

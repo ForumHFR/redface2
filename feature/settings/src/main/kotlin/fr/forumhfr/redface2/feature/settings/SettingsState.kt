@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.settings
 
 import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
+import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
 import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
@@ -260,6 +261,12 @@ data class SettingsState(
     val isUpdatingFontScale: Boolean = false,
     val fontScaleError: Boolean = false,
     val fontScaleTouchedLocally: Boolean = false,
+    // #326 — launcher activity-alias selection. PackageManager is updated by the composable only
+    // after this optimistic DataStore write settles successfully.
+    val appLauncherIcon: AppLauncherIcon = AppLauncherIcon.CLASSIC,
+    val isUpdatingAppLauncherIcon: Boolean = false,
+    val appLauncherIconError: Boolean = false,
+    val appLauncherIconTouchedLocally: Boolean = false,
     // #973 — block-GIF display profile ([AMENDEMENT-v1.5-2]). Same optimistic-flip machinery as
     // the reading display presets. Default matches the DataStore default (M ×1,5, choix XaTriX).
     val mediaDisplayProfile: MediaDisplayProfile = MediaDisplayProfile.M,
@@ -439,6 +446,9 @@ data class SettingsState(
 
     val canChangeFontScale: Boolean
         get() = !isUpdatingFontScale
+
+    val canChangeAppLauncherIcon: Boolean
+        get() = !isUpdatingAppLauncherIcon
 
     // #973 — the block-GIF profile selector is gated only by its own write.
     val canChangeMediaDisplayProfile: Boolean
@@ -621,6 +631,9 @@ sealed interface SettingsIntent {
     // optimistically with revert-on-failure, like ThemeModeChanged.
     data class DisplayDensityChanged(val density: DisplayDensity) : SettingsIntent
     data class FontScaleChanged(val scale: FontScalePreference) : SettingsIntent
+
+    /** #326 — persist a launcher alias selection before the UI applies it through PackageManager. */
+    data class AppLauncherIconChanged(val icon: AppLauncherIcon) : SettingsIntent
 
     // #973 — block-GIF display profile. `profile` is the desired selection, applied optimistically
     // with revert-on-failure, like DisplayDensityChanged.
