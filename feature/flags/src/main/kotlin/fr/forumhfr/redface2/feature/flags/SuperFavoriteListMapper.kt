@@ -116,6 +116,7 @@ class SuperFavoriteListMapper @Inject constructor(
         firstPostAuthor = "",
         lastReplyAuthor = "",
         lastReplyAt = "",
+        resolvedFromServer = false,
     )
 
     private fun superFavoriteContent(

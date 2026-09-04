@@ -44,6 +44,7 @@ import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.FlagType
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.async
@@ -349,6 +350,10 @@ class DataStoreUserPreferencesRepository @Inject constructor(
                     themeBootstrapStore.writeThemeColorPreferences(latest)
                 }
             }
+        } catch (cancellation: CancellationException) {
+            // The detached persist keeps committing after its caller disappears. Rolling back here
+            // would make the in-memory source of truth stale while DataStore stores the new bundle.
+            throw cancellation
         } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
             // The cache is the in-session source of truth: an unpersisted bundle must not survive a
             // failed commit (theme vs. settings divergence, bootstrap mirror backfilled with it). The

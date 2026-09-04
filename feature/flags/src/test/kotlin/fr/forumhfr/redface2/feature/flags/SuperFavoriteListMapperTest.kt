@@ -63,6 +63,7 @@ class SuperFavoriteListMapperTest {
 
         val rows = (state.content as FlagsContent.Flat).rows
         assertEquals(listOf("Live exact", "Snapshot only", "Cached legacy", "Sujet #99"), rows.map { it.title })
+        assertEquals(listOf(true, false, true, false), rows.map { it.flag.resolvedFromServer })
         assertEquals(List(rows.size) { MarkerStyle.PASTILLE }, rows.map { it.markerStyle })
         assertEquals("Android", rows[1].subcatName)
         coVerify(exactly = 0) { flagRepository.findFlag(any(), any()) }

@@ -169,6 +169,60 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `cancelling the caller during a theme color write does not roll back the cache`() = runTest {
+        val pausedDispatcher = StandardTestDispatcher(testScheduler)
+        val dataStoreScope = CoroutineScope(pausedDispatcher + Job())
+        val appScope = CoroutineScope(pausedDispatcher + SupervisorJob())
+        val survivalStore = PreferenceDataStoreFactory.create(
+            scope = dataStoreScope,
+            produceFile = { tempFolder.newFile("theme-cancellation.preferences_pb") },
+        )
+        val survivalRepository = DataStoreUserPreferencesRepository(
+            dataStore = survivalStore,
+            themeBootstrapStore = themeBootstrapStore,
+            startScreenBootstrapStore = startScreenBootstrapStore,
+            navBarLabelsBootstrapStore = navBarLabelsBootstrapStore,
+            ioDispatcher = pausedDispatcher,
+            externalScope = appScope,
+        )
+        val desired = ThemeColorPreferences(
+            accent = ThemeAccent.Preset(AccentPreset.BLUE),
+            darkSurfaceTone = DarkSurfaceTone.AMOLED,
+        )
+        val callerScope = CoroutineScope(UnconfinedTestDispatcher(testScheduler) + Job())
+
+        // Seed a non-null stale value so the pre-fix rollback is directly observable from the cache
+        // and cannot be masked by a subsequent disk read after the detached write completes.
+        assertEquals(ThemeColorPreferences(), survivalRepository.observeThemeColorPreferences().first())
+        callerScope.launch { survivalRepository.setThemeColorPreferences(desired) }
+        assertEquals(desired, survivalRepository.observeThemeColorPreferences().first())
+        callerScope.cancel()
+
+        assertEquals(
+            "caller cancellation must not roll the optimistic cache back while the detached write continues",
+            desired,
+            survivalRepository.observeThemeColorPreferences().first(),
+        )
+        advanceUntilIdle()
+        val freshRepository = DataStoreUserPreferencesRepository(
+            dataStore = survivalStore,
+            themeBootstrapStore = themeBootstrapStore,
+            startScreenBootstrapStore = startScreenBootstrapStore,
+            navBarLabelsBootstrapStore = navBarLabelsBootstrapStore,
+            ioDispatcher = pausedDispatcher,
+            externalScope = appScope,
+        )
+        assertEquals(
+            "the detached write must also reach DataStore",
+            desired,
+            freshRepository.observeThemeColorPreferences().first(),
+        )
+
+        appScope.cancel()
+        dataStoreScope.cancel()
+    }
+
+    @Test
     fun `empty store observes disabled proxy`() = runTest(dispatcher) {
         repository.observeProxyConfig().test {
             val config = awaitItem()

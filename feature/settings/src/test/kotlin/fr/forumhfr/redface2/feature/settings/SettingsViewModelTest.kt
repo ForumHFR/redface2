@@ -33,6 +33,7 @@ import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.FlagType
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -934,6 +935,19 @@ class SettingsViewModelTest {
         )
         assertFalse(viewModel.state.value.isUpdatingThemeColors)
         assertTrue(viewModel.state.value.themeColorsError)
+    }
+
+    @Test
+    fun `theme colour cancellation is propagated without optimistic rollback`() = runTest {
+        repository.cancelOnThemeColorPreferencesSet = true
+        val viewModel = newViewModel()
+        val desired = ThemeColorPreferences(darkSurfaceTone = DarkSurfaceTone.AMOLED)
+
+        viewModel.submit(SettingsIntent.DarkSurfaceToneChanged(DarkSurfaceTone.AMOLED))
+
+        assertEquals(desired, viewModel.state.value.themeColorPreferences)
+        assertTrue(viewModel.state.value.isUpdatingThemeColors)
+        assertFalse(viewModel.state.value.themeColorsError)
     }
 
     @Test
@@ -2481,6 +2495,7 @@ class SettingsViewModelTest {
         var lastThemeColorPreferencesSet: ThemeColorPreferences? = null
             private set
         var failOnThemeColorPreferencesSet: Boolean = false
+        var cancelOnThemeColorPreferencesSet: Boolean = false
 
         override fun observeThemeMode(): Flow<ThemeMode> = themeMode
 
@@ -2495,6 +2510,7 @@ class SettingsViewModelTest {
 
         override suspend fun setThemeColorPreferences(preferences: ThemeColorPreferences) {
             themeColorPreferencesSetCalls += 1
+            if (cancelOnThemeColorPreferencesSet) throw CancellationException("caller left")
             check(!failOnThemeColorPreferencesSet) { "boom" }
             lastThemeColorPreferencesSet = preferences
             themeColorPreferences.value = preferences

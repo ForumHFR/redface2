@@ -77,8 +77,38 @@ class FlagActionsSheetTest {
         compose.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 FlagActionsSheet(
-                    flag = flag().copy(cat = 0),
+                    flag = flag().copy(cat = 0, resolvedFromServer = false),
                     categoryName = "Catégorie 0",
+                    isSuperFavorite = true,
+                    actions = FlagSheetActions(
+                        onOpen = {},
+                        onReply = {},
+                        onToggleSuperFavorite = { toggleSuperFavoriteCalls += 1 },
+                        onRemove = { removeFlagCalls += 1 },
+                        onDismiss = {},
+                    ),
+                )
+            }
+        }
+
+        compose.onNodeWithText("Retirer des super favoris").performClick()
+        compose.onNodeWithText("Retirer le drapeau").assertDoesNotExist()
+
+        compose.runOnIdle {
+            assertEquals(1, toggleSuperFavoriteCalls)
+            assertEquals(0, removeFlagCalls)
+        }
+    }
+
+    @Test
+    fun `a fallback super favorite with a known cat never offers the server removal`() {
+        var toggleSuperFavoriteCalls = 0
+        var removeFlagCalls = 0
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                FlagActionsSheet(
+                    flag = flag().copy(resolvedFromServer = false),
+                    categoryName = "Discussions",
                     isSuperFavorite = true,
                     actions = FlagSheetActions(
                         onOpen = {},
