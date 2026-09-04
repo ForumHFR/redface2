@@ -854,6 +854,7 @@ class TopicViewModel @AssistedInject constructor(
                         search = current.search.capturingAnchor(topic),
                     )
                 }
+                dispatchPendingLanding(topic)
                 pollVoteMutationGeneration = null
                 recordSnapshot(topic)
             } catch (cancellation: CancellationException) {
@@ -1012,6 +1013,7 @@ class TopicViewModel @AssistedInject constructor(
                         search = it.search.capturingAnchor(topic),
                     )
                 }
+                dispatchPendingLanding(topic)
                 recordSnapshot(topic)
                 // Re-arm the page+1 warmup, like `loadCurrentPage` (l. ~219). Unlike the post-submit
                 // `performSubmitRefresh` (which deliberately skips it), a manual mid-page pull is
@@ -1936,6 +1938,7 @@ class TopicViewModel @AssistedInject constructor(
                         availablePages = (1..topic.totalPages).toList(),
                     )
                 }
+                dispatchPendingLanding(topic)
                 recordSnapshot(topic)
             } catch (cancellation: CancellationException) {
                 throw cancellation
@@ -2179,6 +2182,7 @@ class TopicViewModel @AssistedInject constructor(
                         search = it.search.capturingAnchor(topic),
                     )
                 }
+                dispatchPendingLanding(topic)
                 recordSnapshot(topic)
             } catch (cancellation: CancellationException) {
                 throw cancellation

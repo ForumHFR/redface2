@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.feature.topic
 
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.assisted.Assisted
@@ -123,6 +124,7 @@ sealed interface QuickReplyEffect {
 @HiltViewModel(assistedFactory = QuickReplyViewModel.Factory::class)
 class QuickReplyViewModel @AssistedInject constructor(
     @Assisted private val request: QuickReplyRequest,
+    private val savedStateHandle: SavedStateHandle,
     private val replyRepository: ReplyRepository,
     private val quoteMaterializer: TopicReplyQuoteMaterializer,
     private val draftStore: EditorDraftStore,
@@ -257,7 +259,16 @@ class QuickReplyViewModel @AssistedInject constructor(
                 // Through onQuoteAdded : keeps the dedup + #808 cap semantics of a manual add.
                 initialQuotes.forEach(::onQuoteAdded)
             } else {
-                materializeInlineQuotes(initialQuotes.distinctBy { it.numreponse })
+                val quotes = initialQuotes.distinctBy { it.numreponse }
+                // Process-restored delivery identity: a recreated sheet reloads the autosaved
+                // inline BBCode without fetching and appending the same quote set a second time.
+                val deliveryKey = quotes
+                    .map { it.numreponse }
+                    .sorted()
+                    .joinToString(separator = ",")
+                if (savedStateHandle.get<String>(KEY_DELIVERED_QUOTES) != deliveryKey) {
+                    materializeInlineQuotes(quotes, deliveryKey)
+                }
             }
         }
     }
@@ -271,7 +282,7 @@ class QuickReplyViewModel @AssistedInject constructor(
      * exactly what the pre-cards flow rode at submit.
      */
     @Suppress("TooGenericExceptionCaught") // mapped to a typed error below; cancellation rethrown.
-    private fun materializeInlineQuotes(quotes: List<QuoteSelection>) {
+    private fun materializeInlineQuotes(quotes: List<QuoteSelection>, deliveryKey: String) {
         materializeJob?.cancel()
         val baseContext = replyContext()
         materializeJob = viewModelScope.launch {
@@ -300,6 +311,7 @@ class QuickReplyViewModel @AssistedInject constructor(
                         isPreparingQuotes = false,
                     )
                 }
+                savedStateHandle[KEY_DELIVERED_QUOTES] = deliveryKey
                 scheduleAutosave()
             } catch (cancelled: CancellationException) {
                 _state.update { it.copy(isPreparingQuotes = false) }
@@ -547,6 +559,7 @@ class QuickReplyViewModel @AssistedInject constructor(
                     null
                 }
                 draftStore.delete(owner, draftKey)
+                savedStateHandle.remove<String>(KEY_DELIVERED_QUOTES)
                 _state.update { QuickReplyUiState() }
                 _effects.send(
                     QuickReplyEffect.SubmitSucceeded(
@@ -591,5 +604,8 @@ class QuickReplyViewModel @AssistedInject constructor(
     private companion object {
         /** Same debounce as the other #405 consumers. */
         const val AUTOSAVE_DEBOUNCE_MS = 750L
+
+        /** Stable, process-restored identity of the inline quote set already delivered to the draft. */
+        const val KEY_DELIVERED_QUOTES = "quickReply.deliveredQuotes"
     }
 }

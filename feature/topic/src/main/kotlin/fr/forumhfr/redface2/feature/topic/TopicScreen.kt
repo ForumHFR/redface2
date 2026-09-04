@@ -161,6 +161,7 @@ import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Locale
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
@@ -520,45 +521,58 @@ fun TopicScreen(
     // straight from `viewModel.state` and waiting for `Loaded` makes the invariant
     // impossible to break.
     LaunchedEffect(Unit) {
+        var scrollLandingJob: Job? = null
         viewModel.effects.collect { effect ->
+            if (effect.isScrollEffect()) scrollLandingJob?.cancel()
             when (effect) {
                 is TopicEffect.ScrollToPost -> {
-                    val landedState = viewModel.state.first { it.mode is TopicUiState.Mode.Loaded }
-                    val loadedMode = landedState.mode as TopicUiState.Mode.Loaded
-                    val index = loadedMode.topic.posts.indexOfFirst { it.numreponse == effect.numreponse }
-                    if (index >= 0) {
-                        // +1 because the LazyColumn header card occupies item 0.
-                        val target = index + 1
-                        // #1137 — a flag-tap landing (`effect.lastRead`, set by the ViewModel's entry
-                        // producer only) whose post overflows the viewport puts the TOP of the
-                        // « Dernier message lu » marker on the landing line instead of the top of the
-                        // post : the marker and the first unread post are on screen, the already-read
-                        // post one swipe up. A post that fits keeps the historical top-of-post
-                        // landing, and so does every other ScrollToPost producer (cited jump, search
-                        // hit, deep link, post-submit) — even when its numreponse is the one the
-                        // marker sits on : the reader was sent there to READ that post. The flag is
-                        // read off the EFFECT, not `request` (which keeps forceRefresh/scrollTo
-                        // across in-VM navigations, #953/F4).
-                        val landing = if (effect.lastRead) {
-                            LandingAlignment.LastReadMarker { lastReadMarkerHeightPx.intValue }
-                        } else {
-                            LandingAlignment.TopOfPost
+                    val page = viewModel.state.value.request.page
+                    scrollLandingJob = launch {
+                        val landedState = viewModel.state.first {
+                            it.request.page != page || it.mode is TopicUiState.Mode.Loaded
                         }
-                        lazyListState.landOn(target, landing)
-                        // Gate r1/r2 — aligned only AFTER the scroll actually applied (a suspension
-                        // or disposal mid-landing must keep persists blocked) ; the #197 re-anchor
-                        // below only re-pins the same target, the position keeps describing this page.
-                        alignment.onLandingApplied(landedState.request.page)
-                        // #197 — block images above the target grow from 160dp to up to 480dp once
-                        // Coil decodes them, shifting the offset *after* this one-shot scroll and
-                        // leaving the target off-screen on a cold image cache. Keep it pinned while
-                        // the layout settles (bails on user scroll, bounded by a frame budget).
-                        // #1137 — the re-pins re-apply the SAME alignment, re-decided every frame.
-                        lazyListState.reanchorWhileMediaSettles(target, landing)
-                    } else {
-                        // Gate r2 — not-found : the no-scroll DECISION is the landing application
-                        // (the content is this page, at a position the user now owns).
-                        alignment.onLandingApplied(landedState.request.page)
+                        if (landedState.request.page != page) return@launch
+                        val loadedMode = landedState.mode as TopicUiState.Mode.Loaded
+                        val index = loadedMode.topic.posts.indexOfFirst { it.numreponse == effect.numreponse }
+                        if (index >= 0) {
+                            // +1 because the LazyColumn header card occupies item 0.
+                            val target = index + 1
+                            // #1137 — a flag-tap landing (`effect.lastRead`, set by the ViewModel's
+                            // entry producer only) whose post overflows the viewport puts the TOP of
+                            // the « Dernier message lu » marker on the landing line instead of the
+                            // top of the post : the marker and the first unread post are on screen,
+                            // the already-read post one swipe up. A post that fits keeps the
+                            // historical top-of-post landing, and so does every other ScrollToPost
+                            // producer (cited jump, search hit, deep link, post-submit) — even when
+                            // its numreponse is the one the marker sits on : the reader was sent
+                            // there to READ that post. The flag is read off the EFFECT, not `request`
+                            // (which keeps forceRefresh/scrollTo across in-VM navigations, #953/F4).
+                            val landing = if (effect.lastRead) {
+                                LandingAlignment.LastReadMarker { lastReadMarkerHeightPx.intValue }
+                            } else {
+                                LandingAlignment.TopOfPost
+                            }
+                            lazyListState.landOn(target, landing)
+                            if (viewModel.state.value.request.page != page) return@launch
+                            // Gate r1/r2 — aligned only AFTER the scroll actually applied (a
+                            // suspension or disposal mid-landing must keep persists blocked) ; the
+                            // #197 re-anchor below only re-pins the same target, the position keeps
+                            // describing this page.
+                            alignment.onLandingApplied(page)
+                            // #197 — block images above the target grow from 160dp to up to 480dp
+                            // once Coil decodes them, shifting the offset *after* this one-shot
+                            // scroll and leaving the target off-screen on a cold image cache. Keep
+                            // it pinned while the layout settles (bails on user scroll, page
+                            // replacement, or a newer scroll effect; bounded by a frame budget).
+                            // #1137 — the re-pins re-apply the SAME alignment, re-decided every frame.
+                            lazyListState.reanchorWhileMediaSettles(target, landing) {
+                                viewModel.state.value.request.page == page
+                            }
+                        } else {
+                            // Gate r2 — not-found : the no-scroll DECISION is the landing application
+                            // (the content is this page, at a position the user now owns).
+                            alignment.onLandingApplied(page)
+                        }
                     }
                 }
                 TopicEffect.ScrollToTopOfResults -> {
@@ -962,7 +976,11 @@ private fun MoveFavoriteConfirmDialog(
  * The per-frame decision is delegated to the pure [reanchorStep] so the state machine is unit-tested
  * without a frame clock or a live `LazyListState`.
  */
-private suspend fun LazyListState.reanchorWhileMediaSettles(target: Int, landing: LandingAlignment) {
+private suspend fun LazyListState.reanchorWhileMediaSettles(
+    target: Int,
+    landing: LandingAlignment,
+    ownerStillValid: () -> Boolean,
+) {
     var stableFrames = 0
     var previous: ReanchorFrame? = null
     // #1137 — the target's last measured size, carried over the frames where it is not laid out
@@ -987,6 +1005,7 @@ private suspend fun LazyListState.reanchorWhileMediaSettles(target: Int, landing
                 goal = ReanchorGoal(target, targetOffset),
                 stableFrames = stableFrames,
                 stableThreshold = stableThreshold,
+                ownerStillValid = ownerStillValid(),
             )
         ) {
             ReanchorStep.Stop -> return
@@ -1173,20 +1192,38 @@ internal sealed interface ReanchorStep {
  *   every frame from the target's current size (the same size [current] carries)
  * @param stableFrames consecutive still frames observed so far
  * @param stableThreshold still frames required to consider the layout settled
+ * @param ownerStillValid whether the page that started the re-anchor still owns the shared list
  */
+// 7 parameters: this is a pure, exhaustively unit-tested decision function whose inputs are the
+// re-anchor frame readings; bundling them into a holder would only move the same fields around.
+@Suppress("LongParameterList")
 internal fun reanchorStep(
     current: ReanchorFrame,
     previous: ReanchorFrame?,
     goal: ReanchorGoal,
     stableFrames: Int,
     stableThreshold: Int,
+    ownerStillValid: Boolean = true,
 ): ReanchorStep {
+    if (!ownerStillValid) return ReanchorStep.Stop
     val moved = previous == null || current != previous
     val nextStableFrames = if (moved) 0 else stableFrames + 1
-    if (nextStableFrames >= stableThreshold) return ReanchorStep.Stop
-    val repin = current.index != goal.index || current.offset != goal.offset
-    return ReanchorStep.Continue(stableFrames = nextStableFrames, repin = repin)
+    return if (nextStableFrames >= stableThreshold) {
+        ReanchorStep.Stop
+    } else {
+        ReanchorStep.Continue(
+            stableFrames = nextStableFrames,
+            repin = current.index != goal.index || current.offset != goal.offset,
+        )
+    }
 }
+
+private fun TopicEffect.isScrollEffect(): Boolean =
+    this is TopicEffect.ScrollToPost ||
+        this == TopicEffect.ScrollToTopOfResults ||
+        this is TopicEffect.ScrollToEndOfPage ||
+        this is TopicEffect.ScrollToAnchor ||
+        this is TopicEffect.ScrollToTop
 
 /**
  * #1137 — pure alignment decision of a last-read landing ([LandingAlignment.LastReadMarker]),
