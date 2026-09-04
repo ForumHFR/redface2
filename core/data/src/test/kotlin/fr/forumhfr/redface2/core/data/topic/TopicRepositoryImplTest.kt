@@ -6,6 +6,7 @@ import app.cash.turbine.test
 import fr.forumhfr.redface2.core.database.RedfaceDatabase
 import fr.forumhfr.redface2.core.database.dao.TopicDao
 import fr.forumhfr.redface2.core.database.entities.FetchMode
+import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
@@ -779,6 +780,11 @@ class TopicRepositoryImplTest {
         override fun observeFontScale(): Flow<FontScalePreference> = MutableStateFlow(FontScalePreference.M)
 
         override suspend fun setFontScale(scale: FontScalePreference) = Unit
+
+        override fun observeAppLauncherIcon(): Flow<AppLauncherIcon> =
+            MutableStateFlow(AppLauncherIcon.CLASSIC)
+
+        override suspend fun setAppLauncherIcon(icon: AppLauncherIcon) = Unit
 
         // #973 — the block-GIF display profile is irrelevant to TopicRepository; stubbed at the M default.
         override fun observeMediaDisplayProfile(): Flow<MediaDisplayProfile> =

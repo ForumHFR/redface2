@@ -8,6 +8,7 @@ import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageContentCache
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageContentCacheException
 import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
+import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
 import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
@@ -242,6 +243,11 @@ class SettingsViewModel @Inject constructor(
             isLocked = { it.isUpdatingFontScale },
             apply = { state, value -> state.copy(fontScale = value) },
         )
+        observePreference(
+            flow = userPreferencesRepository.observeAppLauncherIcon(),
+            isLocked = { it.isUpdatingAppLauncherIcon },
+            apply = { state, value -> state.copy(appLauncherIcon = value) },
+        )
         // #973 — block-GIF display profile (enum), same collection shape as the display presets.
         observePreference(
             flow = userPreferencesRepository.observeMediaDisplayProfile(),
@@ -403,6 +409,7 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.FlagsAutoRefreshChanged -> updateFlagsAutoRefresh(intent.enabled)
             is SettingsIntent.DisplayDensityChanged -> updateDisplayDensity(intent.density)
             is SettingsIntent.FontScaleChanged -> updateFontScale(intent.scale)
+            is SettingsIntent.AppLauncherIconChanged -> updateAppLauncherIcon(intent.icon)
             is SettingsIntent.MediaDisplayProfileChanged -> updateMediaDisplayProfile(intent.profile)
             is SettingsIntent.PostImageMaxWidthChanged -> updatePostImageMaxWidth(intent.width)
             is SettingsIntent.SmileyPickerDecorationChanged ->
@@ -857,6 +864,36 @@ class SettingsViewModel @Inject constructor(
                             fontScale = previous,
                             isUpdatingFontScale = false,
                             fontScaleError = true,
+                        )
+                    }
+                }
+        }
+    }
+
+    // #326 — the UI applies the PackageManager alias only after this write succeeds.
+    private fun updateAppLauncherIcon(desired: AppLauncherIcon) {
+        val previous = _state.value.appLauncherIcon
+        _state.update {
+            it.copy(
+                appLauncherIcon = desired,
+                isUpdatingAppLauncherIcon = true,
+                appLauncherIconError = false,
+                appLauncherIconTouchedLocally = true,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { userPreferencesRepository.setAppLauncherIcon(desired) }
+                .onSuccess {
+                    _state.update {
+                        it.copy(appLauncherIcon = desired, isUpdatingAppLauncherIcon = false)
+                    }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            appLauncherIcon = previous,
+                            isUpdatingAppLauncherIcon = false,
+                            appLauncherIconError = true,
                         )
                     }
                 }

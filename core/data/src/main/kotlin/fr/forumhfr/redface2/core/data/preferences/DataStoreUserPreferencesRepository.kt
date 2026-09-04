@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import fr.forumhfr.redface2.core.domain.coroutines.ApplicationScope
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
+import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
 import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
 import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
 import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
@@ -773,6 +774,22 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeAppLauncherIcon(): Flow<AppLauncherIcon> =
+        dataStore.data
+            // Component state persists independently in PackageManager; DataStore mirrors the
+            // selected option for Settings and degrades safely if a future value is unknown.
+            .map(::readAppLauncherIcon)
+            .distinctUntilChanged()
+            .catch { emit(AppLauncherIcon.CLASSIC) }
+
+    override suspend fun setAppLauncherIcon(icon: AppLauncherIcon) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_APP_LAUNCHER_ICON] = icon.name
+            }
+        }
+    }
+
     override fun observeMediaDisplayProfile(): Flow<MediaDisplayProfile> =
         dataStore.data
             // Default M ×1,5 (#973, [AMENDEMENT-v1.5-2] — chosen by XaTriX). Like the display
@@ -994,6 +1011,12 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         prefs[KEY_DISPLAY_DENSITY]
             ?.let { stored -> runCatching { DisplayDensity.valueOf(stored) }.getOrNull() }
             ?: DisplayDensity.COMFORT
+
+    /** Reads [KEY_APP_LAUNCHER_ICON] defensively; unknown / corrupt value → [AppLauncherIcon.CLASSIC]. */
+    private fun readAppLauncherIcon(prefs: Preferences): AppLauncherIcon =
+        prefs[KEY_APP_LAUNCHER_ICON]
+            ?.let { stored -> runCatching { AppLauncherIcon.valueOf(stored) }.getOrNull() }
+            ?: AppLauncherIcon.CLASSIC
 
     /**
      * Reads [KEY_MEDIA_DISPLAY_PROFILE] defensively (#973): an unknown / corrupt stored value
@@ -1367,6 +1390,8 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         // (FontScalePreference.name), both defensively parsed. No bootstrap mirror (cf. observers).
         val KEY_DISPLAY_DENSITY = stringPreferencesKey("display_density")
         val KEY_FONT_SCALE = stringPreferencesKey("font_scale")
+        // #326 — selected manifest activity-alias (AppLauncherIcon.name), defensively parsed.
+        val KEY_APP_LAUNCHER_ICON = stringPreferencesKey("app_launcher_icon")
         // #973 — block-GIF display profile (MediaDisplayProfile.name, defensively parsed).
         val KEY_MEDIA_DISPLAY_PROFILE = stringPreferencesKey("media_display_profile")
         // #991 — post content image max width (PostImageMaxWidth.name, defensively parsed).

@@ -479,6 +479,13 @@ internal fun buildSettingsCatalogue(
                 ),
                 onClick = onOpenDisplay,
             ),
+            navRow(
+                id = "display_launcher_icon",
+                title = stringResource(R.string.settings_display_launcher_icon_title),
+                description = stringResource(R.string.settings_display_launcher_icon_help),
+                keywords = listOf("icône", "lanceur", "launcher", "logo", "application"),
+                onClick = onOpenDisplay,
+            ),
             futureRow(
                 id = "future_classic_theme",
                 title = stringResource(R.string.settings_future_classic_theme),

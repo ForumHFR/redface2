@@ -1,6 +1,8 @@
 package fr.forumhfr.redface2.core.ui.settings
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ListItem
@@ -11,6 +13,7 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
@@ -97,15 +100,20 @@ fun RedfaceSettingsListItem(
 
 /**
  * One option of a [RedfaceSettingsChoiceGroup]: the backing [value] (an enum, typically) and its
- * localized [label].
+ * localized [label]. [previewContent] optionally renders a compact visual preview above that label.
  */
-data class RedfaceSettingsChoice<T>(val value: T, val label: String)
+data class RedfaceSettingsChoice<T>(
+    val value: T,
+    val label: String,
+    val previewContent: (@Composable () -> Unit)? = null,
+)
 
 /**
- * A text-only single-choice segmented selector, replicating the pattern used across the settings
- * cards (theme, density, font scale, upload provider). [selected] is compared by equality against
- * each [RedfaceSettingsChoice.value]; [onSelected] is called with the picked value. [enabled] gates
- * every button at once (e.g. while a DataStore write is in flight).
+ * A single-choice segmented selector, replicating the pattern used across the settings cards
+ * (theme, density, font scale, upload provider). Choices are text-only by default and can opt into a
+ * compact preview. [selected] is compared by equality against each [RedfaceSettingsChoice.value];
+ * [onSelected] is called with the picked value. [enabled] gates every button at once (e.g. while a
+ * DataStore write is in flight).
  */
 @Composable
 fun <T> RedfaceSettingsChoiceGroup(
@@ -123,7 +131,18 @@ fun <T> RedfaceSettingsChoiceGroup(
                 onClick = { onSelected(option.value) },
                 shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
             ) {
-                Text(option.label)
+                val previewContent = option.previewContent
+                if (previewContent == null) {
+                    Text(option.label)
+                } else {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        previewContent()
+                        Text(option.label)
+                    }
+                }
             }
         }
     }

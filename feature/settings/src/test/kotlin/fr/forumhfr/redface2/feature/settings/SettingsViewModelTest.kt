@@ -5,6 +5,7 @@ import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageContentCache
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageContentCacheException
 import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
+import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
 import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
@@ -974,6 +975,33 @@ class SettingsViewModelTest {
             assertFalse(state.isUpdatingDisplayDensity)
             assertTrue(state.displayDensityError)
         }
+
+    @Test
+    fun `AppLauncherIconChanged persists the new icon and exposes the settled state`() = runTest {
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.AppLauncherIconChanged(AppLauncherIcon.ROSE))
+
+        val state = viewModel.state.value
+        assertEquals(AppLauncherIcon.ROSE, state.appLauncherIcon)
+        assertFalse(state.isUpdatingAppLauncherIcon)
+        assertFalse(state.appLauncherIconError)
+        assertEquals(1, repository.appLauncherIconSetCalls)
+        assertEquals(AppLauncherIcon.ROSE, repository.lastAppLauncherIconSet)
+    }
+
+    @Test
+    fun `AppLauncherIconChanged reverts and does not expose success when persistence fails`() = runTest {
+        repository.failOnAppLauncherIconSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.AppLauncherIconChanged(AppLauncherIcon.DARK))
+
+        val state = viewModel.state.value
+        assertEquals(AppLauncherIcon.CLASSIC, state.appLauncherIcon)
+        assertFalse(state.isUpdatingAppLauncherIcon)
+        assertTrue(state.appLauncherIconError)
+    }
 
     @Test
     fun `init hydrates the media display profile from storage`() = runTest {
@@ -2486,6 +2514,22 @@ class SettingsViewModelTest {
 
         fun emitFontScale(value: FontScalePreference) {
             fontScale.value = value
+        }
+
+        private val appLauncherIcon = MutableStateFlow(AppLauncherIcon.CLASSIC)
+        var appLauncherIconSetCalls: Int = 0
+            private set
+        var lastAppLauncherIconSet: AppLauncherIcon? = null
+            private set
+        var failOnAppLauncherIconSet: Boolean = false
+
+        override fun observeAppLauncherIcon(): Flow<AppLauncherIcon> = appLauncherIcon
+
+        override suspend fun setAppLauncherIcon(icon: AppLauncherIcon) {
+            appLauncherIconSetCalls += 1
+            check(!failOnAppLauncherIconSet) { "boom" }
+            lastAppLauncherIconSet = icon
+            appLauncherIcon.value = icon
         }
 
         // #973 — block-GIF display profile. Same optimistic-flip seam as the display density.
