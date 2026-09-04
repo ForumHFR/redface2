@@ -1,7 +1,6 @@
-Redface 2 v0.53.6 — beta.
+Redface 2 v0.54.0 — dev.
 
-Batch 0.51 → 0.53:
-- Colors: accent (8 presets or hex), background tone, Light/System/Dark, header Subtle/Vivid, RF1-style grey background.
-- Flags: Super tab (super favourites), subcategory, jump-free swipe, coloured +N badge, accent-insensitive search.
-- Topics: no more teleport when posting, return to quoted post, poll result bars, 15-line quick reply, interactive zoom, image width.
-- HFR links: consistent back and destination.
+- Fullscreen image viewer: tap an image, pinch/double-tap, share, copy, browser, save actions.
+- Choose the app icon (Classic, Dark, Rose, RF1 Red).
+- Message tone: shown on posts, selectable in the editor.
+- Image corners: rounded, soft or square.

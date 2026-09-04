@@ -16,6 +16,27 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.54.0` — `internal` (dev) — 2026-09-04
+
+Premier lot du chantier « vieilles issues » (session hfr2-27) : quatre chantiers anciens livrés d'un coup. Produit par Sol (Codex gpt-5.6, xhigh) sous gate Fable, builds Opus (local + socadisc) ; PR #1265, #1266, #1267, #1268.
+
+### Ajouté
+
+- **Viewer d'image plein écran** ([#182](https://github.com/ForumHFR/redface2/issues/182) volet C) — un tap sur une image de post ouvre un viewer noir plein écran : pincement, déplacement, double-tap 2×, fermeture par bouton, Retour ou geste prédictif, barres système masquées puis restaurées. La miniature déjà affichée sert d'aperçu immédiat, la pleine résolution est rechargée sans le plafond de décodage des posts (Telephoto 0.19). Une image liée vers une autre image ouvre directement la source pleine taille ; un lien vers autre chose continue d'ouvrir le navigateur. Actions : Partager, Copier l'URL, Ouvrir dans le navigateur, Enregistrer. Depuis les messages privés, rien n'est écrit sur disque. Le bouton « Afficher en taille réelle (à venir) » du menu image devient « Afficher en plein écran » (clôt la promesse notée aux entrées #831).
+- **Icône de l'application au choix** ([#326](https://github.com/ForumHFR/redface2/issues/326)) — Réglages → Affichage : Classique, Sombre, Rose, Rouge RF1 (même drapeau, fond différent). Le lanceur peut mettre quelques secondes à se rafraîchir.
+- **Ton du message** ([#340](https://github.com/ForumHFR/redface2/issues/340)) — l'icône de ton choisie par l'auteur (le petit pictogramme HFR à côté du numéro de message) s'affiche sur la ligne de date quand elle n'est pas celle par défaut ; dans l'éditeur (réponse, édition, nouveau sujet), une ligne « Ton du message » repliée permet d'en choisir un parmi les 16 du forum. Le cache local des messages migre (v19) ; les messages déjà en cache affichent le ton au prochain rafraîchissement.
+- **Coins des images** ([#985](https://github.com/ForumHFR/redface2/issues/985)) — Réglages → Affichage : Arrondis (actuel), Légers, Carrés.
+
+### Infra
+
+- **CI** ([#650](https://github.com/ForumHFR/redface2/issues/650)) : une PR qui ne touche que de la documentation ne relance plus les jobs lourds ; les gardes rapides et le test de cohérence des docs restent exécutés.
+
+### Note
+
+Le lot précédent (0.51 → 0.53.6, bêta) avait été produit par Codex gpt-5.5 au lieu de gpt-5.6 : une relecture ciblée des zones à état complexe est en cours (atterrissage post-envoi, onglet Super, moteur de couleurs) ; ses correctifs éventuels suivront en 0.54.x.
+
+---
+
 ## `0.53.6` — `open` (bêta) — 2026-09-03
 
 Promotion bêta du lot développé en dev de `0.51.0` à `0.53.6`, depuis la précédente bêta `0.50.2`. Le détail par version dev figure dans les entrées ci-dessous. Les issues du lot restent ouvertes jusqu'à validation par les retours des testeurs.
