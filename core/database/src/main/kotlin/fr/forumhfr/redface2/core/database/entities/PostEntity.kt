@@ -106,4 +106,9 @@ data class PostEntity(
      * keeps the whole-post moderation highlight. Pre-v18 rows backfill to `false`.
      */
     val isModerationPost: Boolean = false,
+    /**
+     * #340 — nullable HFR message tone, persisted since schema v19. Pre-v19 rows naturally stay
+     * null and recover their value on the next topic refresh.
+     */
+    val msgIcon: Int? = null,
 )

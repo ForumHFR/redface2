@@ -90,8 +90,21 @@ class PostsParser(
             // #1112 — structural marker, scoped to THIS post table. The combined class selector is
             // token-based in Jsoup and deliberately requires both `messCase1` and `messageModo`.
             isModerationPost = postTable.selectFirst(HfrSelectors.POST_MODERATION_CELL) != null,
+            msgIcon = parseMsgIcon(postTable),
         )
     }
+
+    /**
+     * #340 — HFR renders the message tone on the linked post-number icon. Icon 1 is the neutral
+     * default and stays `null` in the domain so ordinary posts do not acquire presentation noise.
+     * The selector deliberately follows the `href="#t…"` link and never relies on `alt=mood`:
+     * advertisement rows also contain that alt text, without a post anchor.
+     */
+    private fun parseMsgIcon(postTable: Element): Int? =
+        postTable.selectFirst(HfrSelectors.POST_MSG_ICON)
+            ?.attr("src")
+            ?.let { src -> MSG_ICON_REGEX.find(src)?.groupValues?.getOrNull(1)?.toIntOrNull() }
+            ?.takeIf { it >= 2 }
 
     /**
      * #362 — last-edit timestamp from the post's `div.edited` trailer, or `null` when the
@@ -206,5 +219,6 @@ class PostsParser(
         val EDIT_PRETTY_REGEX: Regex = Regex("""/editer-\d""")
         // Matches `/hfr/profil-{userId}.htm` — the `\d+` captures the numeric user id.
         val PROFILE_ID_REGEX: Regex = Regex("""/hfr/profil-(\d+)\.htm""")
+        val MSG_ICON_REGEX: Regex = Regex("""icon(\d+)\.gif""")
     }
 }

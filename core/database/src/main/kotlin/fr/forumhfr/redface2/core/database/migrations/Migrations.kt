@@ -506,3 +506,13 @@ val MIGRATION_17_18: Migration = object : Migration(17, 18) {
         )
     }
 }
+
+/**
+ * v18 → v19 (#340) — persists the nullable topic-post message tone. Existing rows keep `NULL`
+ * naturally and are backfilled with the real HFR value on their next topic refresh.
+ */
+val MIGRATION_18_19: Migration = object : Migration(18, 19) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE posts ADD COLUMN msgIcon INTEGER")
+    }
+}

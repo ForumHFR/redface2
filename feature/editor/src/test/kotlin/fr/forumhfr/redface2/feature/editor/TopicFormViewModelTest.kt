@@ -98,6 +98,9 @@ class TopicFormViewModelTest {
 
     @Test
     fun `init hydrates subject draft and per-post options from the parsed form`() = runTest {
+        // A non-default tone (6) so the msgIcon assertion cannot pass on the
+        // DEFAULT_MSG_ICON fallback. Local to this test: the shared fixture stays at "1".
+        topicFormRepository.formResult = topicFormRepository.formResult.copy(msgIcon = "6")
         val viewModel = newViewModel()
         viewModel.state.test {
             val hydrated = awaitHydratedState()
@@ -108,6 +111,7 @@ class TopicFormViewModelTest {
             assertTrue(hydrated.signatureEnabled)
             assertFalse(hydrated.smileyDisabled)
             assertFalse(hydrated.emailNotificationEnabled)
+            assertEquals(6, hydrated.msgIcon)
             assertTrue(hydrated.subjectHydratedFromServer)
             assertTrue(hydrated.draftHydratedFromServer)
             assertTrue(hydrated.optionsHydratedFromForm)
@@ -131,11 +135,13 @@ class TopicFormViewModelTest {
             // User retypes the subject AND the body in their own words.
             viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("User-overridden subject")))
             viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("user override", TextRange(13))))
+            viewModel.submit(TopicFormIntent.MsgIconSelected(6))
             // Submit triggers InvalidHashCheck → silent refetch with the same fake form.
             viewModel.submit(TopicFormIntent.SubmitClicked)
             val finalState = expectMostRecentItem()
             assertEquals("User-overridden subject", finalState.subject.text)
             assertEquals("user override", finalState.draft.text)
+            assertEquals(6, finalState.msgIcon)
             // The user-facing banner stays armed on InvalidHashCheck even though
             // the refetch is silent — without this the user has no way to know
             // their first submit was rejected.
@@ -407,6 +413,7 @@ class TopicFormViewModelTest {
             // User overrides the entry chip to a different sub-category.
             viewModel.submit(TopicFormIntent.SubcatSelected(SAMPLE_OTHER_SUBCAT))
             viewModel.submit(TopicFormIntent.ToggleSignature(enabled = true))
+            viewModel.submit(TopicFormIntent.MsgIconSelected(6))
             viewModel.submit(TopicFormIntent.SubmitClicked)
             cancelAndIgnoreRemainingEvents()
         }
@@ -416,6 +423,7 @@ class TopicFormViewModelTest {
         assertEquals(SAMPLE_OTHER_SUBCAT, topicFormRepository.lastSubmittedSubcat)
         val options = requireNotNull(topicFormRepository.lastSubmittedOptions)
         assertTrue(options.signatureEnabled)
+        assertEquals("6", topicFormRepository.lastSubmittedForm?.msgIcon)
     }
 
     @Test
@@ -1389,6 +1397,8 @@ class TopicFormViewModelTest {
             private set
         var lastSubmittedOptions: ReplyFormOptions? = null
             private set
+        var lastSubmittedForm: TopicForm? = null
+            private set
 
         override suspend fun fetchEditFirstPostForm(context: EditFirstPostContext): TopicForm {
             formFetches += 1
@@ -1411,6 +1421,7 @@ class TopicFormViewModelTest {
             lastSubmittedBbcode = bbcodeContent
             lastSubmittedSubcat = selectedSubcat
             lastSubmittedOptions = options
+            lastSubmittedForm = form
             submitGate?.await()
             return submitResult ?: error("submitResult not set")
         }
@@ -1436,6 +1447,7 @@ class TopicFormViewModelTest {
             lastSubmittedBbcode = bbcodeContent
             lastSubmittedSubcat = selectedSubcat
             lastSubmittedOptions = options
+            lastSubmittedForm = form
             submitGate?.await()
             return newTopicSubmitResult ?: error("newTopicSubmitResult not set")
         }

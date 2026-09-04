@@ -847,6 +847,21 @@ blocs `[quotemsg]`.
 
 ## Autres edge cases documentés
 
+### Ton du message (`MsgIcon`)
+
+Sur une page de sujet, HFR rend le ton dans l'icône du numéro de message :
+`td.messCase1 > div.right > a[href^="#t"] > img`, avec une source
+`/icones/message/iconN.gif`. `N = 1` est le ton par défaut et devient `Post.msgIcon = null` ; les
+autres valeurs sont conservées, y compris les valeurs historiques supérieures à 16 observées en
+lecture (`icon20.gif`). Le formulaire complet expose pour sa part 16 radios `MsgIcon`, de `1` à
+`16`, dont une cochée ; le picker d'écriture reste donc borné à ces 16 choix.
+
+Ne jamais détecter ce champ via `alt="mood"` : les blocs « Publicité » portent aussi une image
+`icon1.gif` avec cet attribut, mais sans ancre de post `a[name^="t"]`. `parsePosts` écarte ces
+blocs avant l'extraction. Contrat capturé le 2026-09-04 dans
+`core/parser/src/test/resources/fixtures/topic_dev_p75_msgicon.html` (28 posts, dont des tons 6,
+10 et 20), avec son sidecar `.source.txt`.
+
 ### Posts édités
 
 Marqueur dans le HTML des posts : un `div.edited` en fin de contenu, ex. `<div class="edited"><a …>Message cité 1 fois</a><br />Message édité par jubjub le 14-03-2016&nbsp;à&nbsp;12:09:00</div>`. Le lien « Message cité N fois » est optionnel et peut exister **sans** ligne « Message édité » (post cité jamais édité) — et inversement. Extrait côté parser (#362) en champ `Post.editedAt: Instant?` via `HfrDateParser.parseEditedAtOrNull` (regex non ancrée, le préfixe citation est toléré ; null si pas de marqueur d'édition). Le `div.edited` reste par ailleurs retiré du contenu rendu (`PostContentParser`).

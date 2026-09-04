@@ -108,4 +108,10 @@ data class Post(
      * cache rows so a cache hit preserves the moderation highlight.
      */
     val isModerationPost: Boolean = false,
+    /**
+     * #340 — numeric HFR message tone read from `icones/message/iconN.gif`. `null` means the
+     * neutral/default tone (`N = 1`), an absent marker, or an unrecognized value. Reading accepts
+     * legacy values above the editor's current 1..16 choices.
+     */
+    val msgIcon: Int? = null,
 )
