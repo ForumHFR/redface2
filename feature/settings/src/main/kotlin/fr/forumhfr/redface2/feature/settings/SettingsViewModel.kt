@@ -782,31 +782,32 @@ class SettingsViewModel @Inject constructor(
             )
         }
         viewModelScope.launch {
-            runCatching { userPreferencesRepository.setThemeColorPreferences(desired) }
-                .onSuccess {
-                    _state.update {
-                        it.copy(
-                            themeColorPreferences = desired,
-                            customAccentHexInput = if (accentChanged) desiredInput else it.customAccentHexInput,
-                            customAccentHexSyncedInput =
-                                if (accentChanged) desiredInput else it.customAccentHexSyncedInput,
-                            isUpdatingThemeColors = false,
-                        )
-                    }
+            try {
+                userPreferencesRepository.setThemeColorPreferences(desired)
+                _state.update {
+                    it.copy(
+                        themeColorPreferences = desired,
+                        customAccentHexInput = if (accentChanged) desiredInput else it.customAccentHexInput,
+                        customAccentHexSyncedInput =
+                            if (accentChanged) desiredInput else it.customAccentHexSyncedInput,
+                        isUpdatingThemeColors = false,
+                    )
                 }
-                .onFailure {
-                    val previousInput = previous.customAccentSyncedInput()
-                    _state.update {
-                        it.copy(
-                            themeColorPreferences = previous,
-                            customAccentHexInput = if (accentChanged) previousInput else it.customAccentHexInput,
-                            customAccentHexSyncedInput =
-                                if (accentChanged) previousInput else it.customAccentHexSyncedInput,
-                            isUpdatingThemeColors = false,
-                            themeColorsError = true,
-                        )
-                    }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (@Suppress("TooGenericExceptionCaught") _: Exception) {
+                val previousInput = previous.customAccentSyncedInput()
+                _state.update {
+                    it.copy(
+                        themeColorPreferences = previous,
+                        customAccentHexInput = if (accentChanged) previousInput else it.customAccentHexInput,
+                        customAccentHexSyncedInput =
+                            if (accentChanged) previousInput else it.customAccentHexSyncedInput,
+                        isUpdatingThemeColors = false,
+                        themeColorsError = true,
+                    )
                 }
+            }
         }
     }
 

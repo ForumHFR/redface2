@@ -5,12 +5,18 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringSetPreferencesKey
+import app.cash.turbine.test
+import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.preferences.SuperFavoriteTopic
+import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
@@ -27,6 +33,7 @@ class DataStoreSuperFavoriteRepositoryTest {
 
     private lateinit var dataStore: DataStore<Preferences>
     private lateinit var repository: DataStoreSuperFavoriteRepository
+    private lateinit var authRepository: FakeAuthRepository
     private val dispatcher = UnconfinedTestDispatcher()
     private val externalScope = CoroutineScope(dispatcher + SupervisorJob())
 
@@ -35,7 +42,12 @@ class DataStoreSuperFavoriteRepositoryTest {
         dataStore = PreferenceDataStoreFactory.create(
             produceFile = { tempFolder.newFile("super.preferences_pb") },
         )
-        repository = DataStoreSuperFavoriteRepository(dataStore = dataStore, externalScope = externalScope)
+        authRepository = FakeAuthRepository(AuthState.Authenticated("Alice"))
+        repository = DataStoreSuperFavoriteRepository(
+            dataStore = dataStore,
+            authRepository = authRepository,
+            externalScope = externalScope,
+        )
     }
 
     @Test
@@ -118,6 +130,60 @@ class DataStoreSuperFavoriteRepositoryTest {
         assertEquals(initial, repository.observeSuperFavoriteTopics().first())
     }
 
+    @Test
+    fun `super favorites are scoped per account`() = runTest(dispatcher) {
+        val aliceTopic = flag(topicId = 42, title = "Alice topic")
+        val bobTopic = flag(topicId = 7, title = "Bob topic")
+
+        repository.setSuperFavorite(aliceTopic, enabled = true)
+        authRepository.authenticate("Bob")
+        assertEquals(emptySet<SuperFavoriteTopic>(), repository.observeSuperFavoriteTopics().first())
+        repository.setSuperFavorite(bobTopic, enabled = true)
+
+        assertEquals(setOf(bobTopic.toStoredTopic()), repository.observeSuperFavoriteTopics().first())
+        authRepository.authenticate("ALICE")
+        assertEquals(setOf(aliceTopic.toStoredTopic()), repository.observeSuperFavoriteTopics().first())
+    }
+
+    @Test
+    fun `legacy global key migrates to the first account that reads it`() = runTest(dispatcher) {
+        val legacyKey = stringSetPreferencesKey("super_favorite_topic_ids")
+        val aliceKey = stringSetPreferencesKey("super_favorite_topic_ids_alice")
+        dataStore.edit { it[legacyKey] = setOf("42") }
+
+        assertEquals(
+            setOf(SuperFavoriteTopic(cat = null, topicId = 42, title = null, subcat = null)),
+            repository.observeSuperFavoriteTopics().first(),
+        )
+        val migrated = dataStore.data.first()
+        assertEquals(setOf("42"), migrated[aliceKey])
+        assertEquals(null, migrated[legacyKey])
+
+        authRepository.authenticate("Bob")
+        assertEquals(emptySet<SuperFavoriteTopic>(), repository.observeSuperFavoriteTopics().first())
+    }
+
+    @Test
+    fun `switching account switches the observed set`() = runTest(dispatcher) {
+        dataStore.edit { prefs ->
+            prefs[stringSetPreferencesKey("super_favorite_topic_ids_alice")] = setOf("1")
+            prefs[stringSetPreferencesKey("super_favorite_topic_ids_bob")] = setOf("2")
+        }
+
+        repository.observeSuperFavoriteTopics().test {
+            assertEquals(
+                setOf(SuperFavoriteTopic(cat = null, topicId = 1, title = null, subcat = null)),
+                awaitItem(),
+            )
+            authRepository.authenticate("Bob")
+            assertEquals(
+                setOf(SuperFavoriteTopic(cat = null, topicId = 2, title = null, subcat = null)),
+                awaitItem(),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
     private fun flag(
         topicId: Int,
         title: String = "Topic $topicId",
@@ -139,4 +205,31 @@ class DataStoreSuperFavoriteRepositoryTest {
         lastReplyAuthor = "last",
         lastReplyAt = "2026-09-03T12:00:00Z",
     )
+
+    private fun Flag.toStoredTopic(): SuperFavoriteTopic = SuperFavoriteTopic(
+        cat = cat,
+        topicId = topicId,
+        title = title,
+        subcat = subcat,
+    )
+
+    private class FakeAuthRepository(initial: AuthState) : AuthRepository {
+        private val state = MutableStateFlow(initial)
+
+        override fun observeAuthState(): Flow<AuthState> = state.asStateFlow()
+
+        override suspend fun login(pseudo: String, password: String): Result<AuthState.Authenticated> {
+            val authenticated = AuthState.Authenticated(pseudo)
+            state.value = authenticated
+            return Result.success(authenticated)
+        }
+
+        override suspend fun logout() {
+            state.value = AuthState.Anonymous
+        }
+
+        fun authenticate(pseudo: String) {
+            state.value = AuthState.Authenticated(pseudo)
+        }
+    }
 }
