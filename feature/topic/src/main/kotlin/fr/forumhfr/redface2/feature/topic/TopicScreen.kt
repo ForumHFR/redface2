@@ -115,6 +115,7 @@ import fr.forumhfr.redface2.core.domain.author.isRf2Creator
 import fr.forumhfr.redface2.core.domain.author.resolveAuthorRolePill
 import fr.forumhfr.redface2.core.domain.ego.deriveEgoCanonicalPseudo
 import fr.forumhfr.redface2.core.domain.ego.isEgoPost
+import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
 import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.Flag
@@ -123,6 +124,7 @@ import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.postContentExcerpt
+import fr.forumhfr.redface2.core.model.write.ModerationAlertOutcome
 import fr.forumhfr.redface2.core.model.write.PollVoteChoice
 import fr.forumhfr.redface2.core.model.write.PollVoteForm
 import fr.forumhfr.redface2.core.model.write.QuoteLocator
@@ -470,6 +472,13 @@ fun TopicScreen(
     val favoriteAddedMsg = stringResource(R.string.topic_post_favorite_added)
     val favoriteFailedMsg = stringResource(R.string.topic_post_favorite_failed)
     val flagNotFoundMsg = stringResource(R.string.topic_remove_flag_not_found)
+    // #293 — moderation-alert feedback messages (resolved upfront, same rationale: the
+    // effect handler is not a composable, and LocalContext.getString is not config-aware).
+    val alertSentMsg = stringResource(R.string.topic_alert_sent)
+    val alertJoinedMsg = stringResource(R.string.topic_alert_joined)
+    val alertErrorMsg = stringResource(R.string.topic_alert_error)
+    val alertServerDownMsg = stringResource(fr.forumhfr.redface2.core.ui.R.string.error_hfr_server_down)
+    val alertNoConnectionMsg = stringResource(fr.forumhfr.redface2.core.ui.R.string.error_no_connection)
     // #1201 — poll closure feedback messages (resolved upfront, same rationale).
     val pollClosedMsg = stringResource(R.string.topic_poll_close_success)
     val pollCloseFailedMsg = stringResource(R.string.topic_poll_close_failure)
@@ -745,6 +754,23 @@ fun TopicScreen(
                         flagNotFoundMsg,
                         android.widget.Toast.LENGTH_SHORT,
                     ).show()
+                }
+                is TopicEffect.ModerationAlertCompleted -> {
+                    // #293 — HFR's own sentence goes to the snackbar verbatim; ours only fill a blank.
+                    val message = when (val outcome = effect.outcome) {
+                        is ModerationAlertOutcome.Sent -> outcome.message.ifBlank { alertSentMsg }
+                        is ModerationAlertOutcome.Joined -> outcome.message.ifBlank { alertJoinedMsg }
+                        is ModerationAlertOutcome.Rejected -> outcome.message.ifBlank { alertErrorMsg }
+                    }
+                    snackbarScope.launch { snackbarHostState.showSnackbar(message) }
+                }
+                is TopicEffect.ModerationAlertFailed -> {
+                    val message = when (effect.kind) {
+                        HfrErrorKind.ServerDown -> alertServerDownMsg
+                        HfrErrorKind.Network -> alertNoConnectionMsg
+                        HfrErrorKind.Other -> alertErrorMsg
+                    }
+                    snackbarScope.launch { snackbarHostState.showSnackbar(message) }
                 }
                 TopicEffect.PollClosed -> {
                     // #1201 — close_sondage.php confirmed ; a page refresh to the closed state runs
@@ -1385,7 +1411,9 @@ internal fun TopicContent(
         } else {
             Modifier
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        snackbarHost = {
+            if (state.moderationAlert == null) SnackbarHost(snackbarHostState)
+        },
         topBar = {
             TopicTopBar(
                 state = state,
@@ -1614,6 +1642,7 @@ internal fun TopicContent(
                                 },
                                 pollManualExpanded = pollManualExpanded,
                                 onPollExpansionChanged = onPollExpansionChanged,
+                                onAlert = { onIntent(TopicIntent.RequestModerationAlert(it)) },
                                 onClosePoll = onClosePoll,
                                 onLastReadMarkerMeasured = onLastReadMarkerMeasured,
                             )
@@ -1695,6 +1724,9 @@ internal fun TopicContent(
                 onQuickReplySubmitted(targetPage, scrollTo, quotedNumreponses)
             },
         )
+    }
+    state.moderationAlert?.let { alert ->
+        ModerationAlertSheet(state = alert, onIntent = onIntent, snackbarHostState = snackbarHostState)
     }
     state.citingPostsSheet?.let { sheet ->
         CitingPostsSheet(
@@ -2174,6 +2206,7 @@ private fun TopicLoadedContent(
     onPollExpansionChanged: (Boolean) -> Unit = {},
     // #1201 — the owner « Clore ce sondage » tap. Threaded down to the poll card.
     onClosePoll: () -> Unit = {},
+    onAlert: (numreponse: Int) -> Unit = {},
     // #1137 — reports the « Dernier message lu » separator's measured height (px) — cf. its mount.
     onLastReadMarkerMeasured: (heightPx: Int) -> Unit = {},
 ) {
@@ -2699,6 +2732,7 @@ private fun TopicLoadedContent(
             ),
             citedCount = post.citedCount ?: 0,
             onDismiss = { menuPost = null },
+            onAlert = onAlert.takeIf { state.isAuthenticated },
             onDelete = menuDeleteAction,
             onEditFirstPost = menuEditFirstPostAction,
             favoriteAction = favoriteActionFor(

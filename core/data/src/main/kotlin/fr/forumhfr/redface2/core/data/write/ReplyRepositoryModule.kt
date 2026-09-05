@@ -7,11 +7,13 @@ import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
 import fr.forumhfr.redface2.core.domain.write.EditPostRepository
+import fr.forumhfr.redface2.core.domain.write.ModerationRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.domain.write.PollVoteRepository
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
 import fr.forumhfr.redface2.core.parser.messages.PrivateMessageReplyLinkParser
+import fr.forumhfr.redface2.core.parser.write.ModerationAlertPageParser
 import fr.forumhfr.redface2.core.parser.write.ReplyFormParser
 import fr.forumhfr.redface2.core.parser.write.ReplySubmitResponseParser
 import fr.forumhfr.redface2.core.parser.write.TopicFormParser
@@ -56,7 +58,15 @@ abstract class ReplyRepositoryModule {
     @Singleton
     abstract fun bindPollVoteRepository(impl: DefaultPollVoteRepository): PollVoteRepository
 
+    @Binds
+    @Singleton
+    abstract fun bindModerationRepository(impl: DefaultModerationRepository): ModerationRepository
+
     companion object {
+        @Provides
+        @Singleton
+        fun provideModerationAlertPageParser(): ModerationAlertPageParser = ModerationAlertPageParser()
+
         @Provides
         @Singleton
         fun provideReplyFormParser(): ReplyFormParser = ReplyFormParser()

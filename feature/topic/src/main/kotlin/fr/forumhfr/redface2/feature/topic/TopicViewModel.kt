@@ -24,10 +24,12 @@ import fr.forumhfr.redface2.core.domain.topic.TopicRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicSearchRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostResult
+import fr.forumhfr.redface2.core.domain.write.ModerationRepository
 import fr.forumhfr.redface2.core.domain.write.PollVoteRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.Post
+import fr.forumhfr.redface2.core.model.write.ModerationAlertOutcome
 import fr.forumhfr.redface2.core.model.write.FlagAddContext
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.model.TopicSearchForm
@@ -94,6 +96,7 @@ class TopicViewModel @AssistedInject constructor(
     private val authRepository: AuthRepository,
     private val userPreferencesRepository: UserPreferencesRepository,
     private val deletePostRepository: DeletePostRepository,
+    private val moderationRepository: ModerationRepository,
     private val pollVoteRepository: PollVoteRepository,
     private val blacklistRepository: BlacklistRepository,
     private val authorRoleRepository: AuthorRoleRepository,
@@ -129,6 +132,9 @@ class TopicViewModel @AssistedInject constructor(
 
     private var loadJob: Job? = null
     private var prefetchJob: Job? = null
+    private var moderationLoadJob: Job? = null
+    private var moderationSubmitJob: Job? = null
+    private var moderationGeneration: Int = 0
     private var prefetchedPage: Int? = null
 
     /** Chantier C (#546) — at most one intra-topic search POST in flight at a time. */
@@ -385,6 +391,7 @@ class TopicViewModel @AssistedInject constructor(
                     }
                 }
                 if (!_state.value.connectedPseudo.equals(connectedPseudo, ignoreCase = true)) {
+                    dismissModerationAlert()
                     favoriteAuthGeneration++
                     favoriteResolveJob?.cancel()
                     // #1144 — this still drops the UI half of an in-flight add (state + effect are
@@ -501,6 +508,11 @@ class TopicViewModel @AssistedInject constructor(
             is TopicIntent.OnCitingPostClick -> openCitingPost(intent.post)
             TopicIntent.OnDismissCitingSheet -> dismissCitingPosts()
             is TopicIntent.DeletePost -> deletePost(intent.numreponse)
+            is TopicIntent.RequestModerationAlert -> requestModerationAlert(intent.numreponse)
+            is TopicIntent.UpdateModerationReason -> updateModerationReason(intent.reason)
+            TopicIntent.SubmitModerationAlert -> submitModerationAlert()
+            TopicIntent.JoinModerationAlert -> joinModerationAlert()
+            TopicIntent.DismissModerationAlert -> dismissModerationAlert()
             TopicIntent.Refresh -> refresh()
             is TopicIntent.UpdatePollSelection -> updatePollSelection(intent.choice, intent.selected)
             TopicIntent.SubmitPollVote -> submitPollVote(PollVoteSubmissionType.NORMAL)
@@ -523,6 +535,101 @@ class TopicViewModel @AssistedInject constructor(
             TopicIntent.NextResult -> nextResult()
             TopicIntent.PrevResult -> prevResult()
         }
+    }
+
+    private fun requestModerationAlert(numreponse: Int) {
+        val snapshot = _state.value
+        val topic = (snapshot.mode as? TopicUiState.Mode.Loaded)?.topic ?: return
+        if (!snapshot.isAuthenticated || moderationSubmitJob?.isActive == true ||
+            topic.posts.none { it.numreponse == numreponse }
+        ) return
+        dismissModerationAlert()
+        val generation = moderationGeneration
+        _state.update { it.copy(moderationAlert = ModerationAlertUi.Loading) }
+        moderationLoadJob = viewModelScope.launch {
+            try {
+                val alert = moderationRepository.loadAlert(topic.cat, topic.post, numreponse, topic.page)
+                if (generation == moderationGeneration) {
+                    _state.update { it.copy(moderationAlert = alert.toModerationAlertUi()) }
+                }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+                if (generation == moderationGeneration) {
+                    _state.update { it.copy(moderationAlert = null) }
+                    _effects.trySend(TopicEffect.ModerationAlertFailed(classifyHfrError(error)))
+                }
+            }
+        }
+    }
+
+    private fun updateModerationReason(reason: String) {
+        _state.update { state ->
+            val form = state.moderationAlert as? ModerationAlertUi.Form
+            if (form != null && !form.submitting) {
+                state.copy(moderationAlert = form.copy(reasonDraft = reason))
+            } else {
+                state
+            }
+        }
+    }
+
+    private fun submitModerationAlert() {
+        val form = _state.value.moderationAlert as? ModerationAlertUi.Form ?: return
+        if (form.reasonDraft.isBlank() || form.submitting) return
+        runModerationSubmission(form.copy(submitting = true), form) {
+            moderationRepository.sendAlert(form.form, form.reasonDraft)
+        }
+    }
+
+    private fun joinModerationAlert() {
+        val prompt = _state.value.moderationAlert as? ModerationAlertUi.JoinPrompt ?: return
+        if (prompt.submitting) return
+        runModerationSubmission(prompt.copy(submitting = true), prompt) {
+            moderationRepository.joinAlert(prompt.prompt)
+        }
+    }
+
+    private fun runModerationSubmission(
+        busy: ModerationAlertUi,
+        idle: ModerationAlertUi,
+        submit: suspend () -> ModerationAlertOutcome,
+    ) {
+        if (!_state.value.isAuthenticated || moderationSubmitJob?.isActive == true) return
+        val generation = moderationGeneration
+        _state.update { it.copy(moderationAlert = busy) }
+        moderationSubmitJob = viewModelScope.launch {
+            try {
+                // Like the other confirmed writes, the POST survives leaving the screen. Only its
+                // UI continuation is discarded on dismissal/account switch; no automatic replay.
+                val outcome = externalScope.awaitDetached { submit() }
+                if (generation == moderationGeneration) completeModerationAlert(outcome)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+                if (generation == moderationGeneration) {
+                    _state.update { it.copy(moderationAlert = idle) }
+                    _effects.trySend(TopicEffect.ModerationAlertFailed(classifyHfrError(error)))
+                }
+            }
+        }
+    }
+
+    private fun completeModerationAlert(outcome: ModerationAlertOutcome) {
+        if (outcome is ModerationAlertOutcome.Rejected) {
+            _state.update { it.copy(moderationAlert = ModerationAlertUi.Result(outcome)) }
+        } else {
+            _state.update { it.copy(moderationAlert = null) }
+            _effects.trySend(TopicEffect.ModerationAlertCompleted(outcome))
+        }
+    }
+
+    private fun dismissModerationAlert() {
+        moderationGeneration++
+        moderationLoadJob?.cancel()
+        moderationLoadJob = null
+        // Keep the submission lock until the already-confirmed mutation finishes.
+        _state.update { it.copy(moderationAlert = null) }
     }
 
     /**
