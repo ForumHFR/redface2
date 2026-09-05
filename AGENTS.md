@@ -31,8 +31,8 @@ Voir SKILLS.md à la racine pour l'index humain des skills.
 # Variantes dev/prod (#233) : le :app:assembleDebug non flavoré ne résout plus.
 ./scripts/docker-dev.sh ./gradlew :app:assembleProdDebug
 
-# Reproduire la CI avant de pousser (skill /validate) : tests JVM de tous les modules, detekt, lint
-./scripts/docker-dev.sh ./gradlew --continue testDebugUnitTest :app:testProdDebugUnitTest detektAll lintDebug
+# Reproduire la CI avant de pousser (skill /validate) : tests JVM de tous les modules (dont modules JVM purs via `test`), detekt, lint (dont `:app` flavorisé)
+./scripts/docker-dev.sh ./gradlew --continue test testDebugUnitTest :app:testProdDebugUnitTest detektAll lintDebug :app:lintProdDebug
 
 # Preview Jekyll (necessite Ruby + Bundler)
 cd docs && bundle install && bundle exec jekyll serve
