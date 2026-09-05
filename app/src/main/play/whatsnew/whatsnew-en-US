@@ -1,3 +1,5 @@
-Redface 2 v0.54.5 — dev.
+Redface 2 v0.54.6 — dev.
 
-- Report a post to the moderators: new post menu entry (reason, join an existing report, pending / handled status), HFR wording shown as is.
+- My sanctions: the account's sanction history under Settings → Account.
+- A moderation-alert link opens the post and the alert sheet.
+- Viewer: a linked thumbnail on a text line opens the full image fullscreen.

@@ -16,6 +16,21 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.54.6` — `internal` (dev) — 2026-09-06
+
+Trois livraisons demandées par XaTriX, code Astra (Codex gpt-6-astra, xhigh) sous gate Fable, builds socadisc ; PR [#1280](https://github.com/ForumHFR/redface2/pull/1280), [#1281](https://github.com/ForumHFR/redface2/pull/1281) et [#1282](https://github.com/ForumHFR/redface2/pull/1282).
+
+### Ajouté
+
+- **Mes sanctions** ([#294](https://github.com/ForumHFR/redface2/issues/294)) — Réglages → Compte → Compte HFR : l'historique des sanctions du compte (type, catégorie, dates, modérateur, raison, badge « En cours » si non levée). Première brique de la vue Compte HFR. Désactivé avec « Connexion requise » hors session.
+- **Lien d'alerte modération** ([#293](https://github.com/ForumHFR/redface2/issues/293)) — un lien `user/modo.php?…numreponse=…` (intent ou lien tapé dans un post) ouvre le sujet sur le message visé et la feuille d'alerte ; hors session, atterrissage sur le message avec invitation à se connecter.
+
+### Corrigé
+
+- **Visionneuse** ([#1279](https://github.com/ForumHFR/redface2/issues/1279)) — une miniature liée à une image en pleine taille, posée sur la même ligne qu'un texte, ouvre désormais la visionneuse plein écran sur la grande image au lieu du navigateur (contrat images v1.5). Signalé par XaTriX.
+
+---
+
 ## `0.54.5` — `internal` (dev) — 2026-09-05
 
 Alerter un post à la modération ([#293](https://github.com/ForumHFR/redface2/issues/293), demandé par XaTriX). Code Astra (Codex gpt-6-astra, xhigh) sous gate Fable, build socadisc ; PR [#1277](https://github.com/ForumHFR/redface2/pull/1277).
