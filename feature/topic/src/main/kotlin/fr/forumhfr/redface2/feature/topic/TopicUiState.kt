@@ -7,6 +7,7 @@ import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
+import fr.forumhfr.redface2.core.model.write.ModerationAlertOutcome
 import fr.forumhfr.redface2.core.model.write.PollVoteChoice
 import fr.forumhfr.redface2.core.model.write.PollVoteForm
 
@@ -14,6 +15,7 @@ data class TopicUiState(
     val request: TopicRequest,
     val mode: Mode,
     val availablePages: List<Int>,
+    val moderationAlert: ModerationAlertUi? = null,
     /**
      * #220 — whether the current HFR session is authenticated. Drives the write
      * affordances (Répondre / Citer / Modifier / Modifier-FP) so they are not offered
@@ -365,6 +367,12 @@ enum class TopicSearchStatus {
 }
 
 sealed interface TopicIntent {
+    data class RequestModerationAlert(val numreponse: Int) : TopicIntent
+    data class UpdateModerationReason(val reason: String) : TopicIntent
+    data object SubmitModerationAlert : TopicIntent
+    data object JoinModerationAlert : TopicIntent
+    data object DismissModerationAlert : TopicIntent
+
     data object Retry : TopicIntent
 
     /** #783 — opens the native HFR reverse-citation sheet for a server-counted post. */
@@ -485,6 +493,9 @@ enum class DeleteFailureReason {
  * the user scrolled away, replaying a scroll on rotation would steal focus).
  */
 sealed interface TopicEffect {
+    data class ModerationAlertCompleted(val outcome: ModerationAlertOutcome) : TopicEffect
+    data class ModerationAlertFailed(val kind: HfrErrorKind) : TopicEffect
+
     /**
      * Ask the screen to scroll to a specific `numreponse` once the topic page is
      * rendered. The ViewModel only emits this when the post is present in the loaded

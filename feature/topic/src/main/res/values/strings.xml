@@ -73,7 +73,9 @@
     <string name="topic_post_menu_copy_link">Copier le lien de ce post</string>
     <string name="topic_post_menu_link_copied">Lien copié</string>
     <string name="topic_post_menu_quote_start">Citer le début</string>
-    <string name="topic_post_menu_report_soon">Alerter (à venir)</string>
+    <string name="topic_post_menu_report">Alerter</string>
+    <!-- #293 — supporting text under the disabled « Alerter » button when no HFR session. -->
+    <string name="topic_post_menu_report_signed_out">Connexion requise</string>
     <!-- #792 — entrée « Envoyer un MP » du menu contextuel de post (composeur MP pré-rempli). -->
     <string name="topic_post_menu_send_private_message">Envoyer un MP</string>
     <!-- #509 — entrée du menu post : masquer / réafficher tous les posts de l'auteur (blacklist). -->
@@ -235,4 +237,20 @@
     <string name="quick_reply_error_session_expired">Votre session HFR a expiré. Reconnectez-vous.</string>
     <string name="quick_reply_error_quote_fetch">Impossible de récupérer la citation. Réessayez depuis « Citer ».</string>
     <string name="quick_reply_preparing_quote">Insertion de la citation…</string>
+
+    <!-- #293 — explicit moderation alert -->
+    <string name="topic_alert_title">Prévenir les modérateurs</string>
+    <string name="topic_alert_warning">Ce message part directement chez les modérateurs. Il sert uniquement à leur demander de venir sur le sujet en cas de problème.</string>
+    <string name="topic_alert_reason">Raison</string>
+    <string name="topic_alert_send">Envoyer</string>
+    <string name="topic_alert_join_prompt">Une demande de modération est déjà en cours sur ce message. Voulez-vous vous y joindre ?</string>
+    <string name="topic_alert_join">Me joindre</string>
+    <string name="topic_alert_cancel">Annuler</string>
+    <string name="topic_alert_close">Fermer</string>
+    <string name="topic_alert_loading">Signalement en cours de chargement ou d’envoi</string>
+    <string name="topic_alert_treated_at">Traitée le %1$s</string>
+    <string name="topic_alert_unknown">HFR ne permet pas de confirmer ce signalement. Fermez cette fenêtre et consultez à nouveau son état.</string>
+    <string name="topic_alert_sent">Signalement envoyé aux modérateurs</string>
+    <string name="topic_alert_joined">Vous êtes joint à la demande de modération</string>
+    <string name="topic_alert_error">Impossible de contacter la modération. Vérifiez votre connexion et votre session HFR.</string>
 </resources>

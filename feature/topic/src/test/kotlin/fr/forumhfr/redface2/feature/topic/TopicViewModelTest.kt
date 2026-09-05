@@ -46,6 +46,9 @@ import fr.forumhfr.redface2.core.model.search.SearchResultPage
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
+import fr.forumhfr.redface2.core.domain.write.ModerationRepository
+import fr.forumhfr.redface2.core.model.write.ModerationAlertState
+import fr.forumhfr.redface2.core.model.write.ModerationAlertOutcome
 import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostResult
 import fr.forumhfr.redface2.core.domain.write.PollVoteRepository
@@ -92,6 +95,7 @@ import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withContext
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -4564,6 +4568,228 @@ class TopicViewModelTest {
         assertEquals(1, topicRepository.refreshCalls.size)
     }
 
+    @Test
+    fun `moderation load moves from loading to form with the displayed post context`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val repository = FakeModerationRepository().apply { loadGate = gate }
+        val viewModel = moderationViewModel(repository)
+        viewModel.send(TopicIntent.RequestModerationAlert(42))
+        assertEquals(ModerationAlertUi.Loading, viewModel.state.value.moderationAlert)
+        gate.complete(Unit)
+        runCurrent()
+        assertEquals(
+            ModerationAlertUi.Form(repository.alert as ModerationAlertState.Form),
+            viewModel.state.value.moderationAlert,
+        )
+        assertEquals(listOf(listOf(SAMPLE_CAT, SAMPLE_POST, 42, 2)), repository.loads)
+    }
+
+    @Test
+    fun `moderation submit sends draft once then closes and emits sent`() = runTest {
+        val repository = FakeModerationRepository()
+        val viewModel = moderationViewModel(repository)
+        viewModel.send(TopicIntent.RequestModerationAlert(42))
+        viewModel.send(TopicIntent.UpdateModerationReason("Insultes"))
+        viewModel.send(TopicIntent.SubmitModerationAlert)
+        assertEquals(listOf(repository.alert to "Insultes"), repository.sends)
+        assertNull(viewModel.state.value.moderationAlert)
+        viewModel.effects.test {
+            assertEquals(
+                TopicEffect.ModerationAlertCompleted(
+                    ModerationAlertOutcome.Sent(FakeModerationRepository.SENT_MESSAGE),
+                ),
+                awaitItem(),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `moderation join prompt confirms joins and closes`() = runTest {
+        val prompt = ModerationAlertState.JoinPrompt("modo.php?cat=13", "join-token", null)
+        val repository = FakeModerationRepository().apply {
+            alert = prompt
+            outcome = ModerationAlertOutcome.Joined(FakeModerationRepository.JOINED_MESSAGE)
+        }
+        val viewModel = moderationViewModel(repository)
+        viewModel.send(TopicIntent.RequestModerationAlert(42))
+        assertEquals(ModerationAlertUi.JoinPrompt(prompt), viewModel.state.value.moderationAlert)
+        viewModel.send(TopicIntent.JoinModerationAlert)
+        assertEquals(listOf(prompt), repository.joins)
+        assertTrue(repository.sends.isEmpty())
+        assertNull(viewModel.state.value.moderationAlert)
+        viewModel.effects.test {
+            assertEquals(
+                TopicEffect.ModerationAlertCompleted(
+                    ModerationAlertOutcome.Joined(FakeModerationRepository.JOINED_MESSAGE),
+                ),
+                awaitItem(),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `moderation pending treated and unknown pages only expose information`() = runTest {
+        val cases = listOf(
+            // #293 — the UI carries HFR's own sentence verbatim, no string-resource mapping.
+            ModerationAlertState.PendingMine(PENDING_MINE) to ModerationAlertUi.Info(PENDING_MINE),
+            ModerationAlertState.PendingJoined(PENDING_JOINED) to ModerationAlertUi.Info(PENDING_JOINED),
+            ModerationAlertState.TreatedMine(TREATED_MINE, "2026-09-05 17:27:28") to
+                ModerationAlertUi.Info(TREATED_MINE, "2026-09-05 17:27:28"),
+            ModerationAlertState.TreatedJoined(TREATED_JOINED, "2026-09-05 17:27:28") to
+                ModerationAlertUi.Info(TREATED_JOINED, "2026-09-05 17:27:28"),
+            ModerationAlertState.Unknown("unrelated page text") to ModerationAlertUi.Info("unrelated page text"),
+        )
+        for ((alert, expected) in cases) {
+            val repository = FakeModerationRepository().apply { this.alert = alert }
+            val viewModel = moderationViewModel(repository)
+            viewModel.send(TopicIntent.RequestModerationAlert(42))
+            assertEquals(expected, viewModel.state.value.moderationAlert)
+            viewModel.send(TopicIntent.SubmitModerationAlert)
+            viewModel.send(TopicIntent.JoinModerationAlert)
+            assertTrue(repository.sends.isEmpty() && repository.joins.isEmpty())
+        }
+    }
+
+    @Test
+    fun `moderation network load error closes and emits topic feedback`() = runTest {
+        val repository = FakeModerationRepository().apply { loadError = IOException("offline") }
+        val viewModel = moderationViewModel(repository)
+        viewModel.send(TopicIntent.RequestModerationAlert(42))
+        assertNull(viewModel.state.value.moderationAlert)
+        viewModel.effects.test {
+            assertEquals(TopicEffect.ModerationAlertFailed(HfrErrorKind.Network), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `moderation submit network error preserves the draft and clears busy state`() = runTest {
+        val repository = FakeModerationRepository().apply { submitError = IOException("offline") }
+        val viewModel = moderationViewModel(repository)
+        viewModel.send(TopicIntent.RequestModerationAlert(42))
+        viewModel.send(TopicIntent.UpdateModerationReason("Insultes"))
+        viewModel.send(TopicIntent.SubmitModerationAlert)
+        assertEquals(
+            ModerationAlertUi.Form(repository.alert as ModerationAlertState.Form, "Insultes"),
+            viewModel.state.value.moderationAlert,
+        )
+        viewModel.effects.test {
+            assertEquals(TopicEffect.ModerationAlertFailed(HfrErrorKind.Network), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `moderation blank reason cannot submit`() = runTest {
+        val repository = FakeModerationRepository()
+        val viewModel = moderationViewModel(repository)
+        viewModel.send(TopicIntent.RequestModerationAlert(42))
+        viewModel.send(TopicIntent.SubmitModerationAlert)
+        viewModel.send(TopicIntent.UpdateModerationReason(" \n\t"))
+        viewModel.send(TopicIntent.SubmitModerationAlert)
+        assertTrue(repository.sends.isEmpty())
+    }
+
+    @Test
+    fun `moderation dismissal cancels loading without reopening the sheet`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val repository = FakeModerationRepository().apply { loadGate = gate }
+        val viewModel = moderationViewModel(repository)
+        viewModel.send(TopicIntent.RequestModerationAlert(42))
+        viewModel.send(TopicIntent.DismissModerationAlert)
+        gate.complete(Unit)
+        runCurrent()
+        assertTrue(repository.loadCancelled)
+        assertNull(viewModel.state.value.moderationAlert)
+        viewModel.effects.test { expectNoEvents() }
+    }
+
+    @Test
+    fun `moderation double submit and reopening during a dismissed POST cannot duplicate it`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val repository = FakeModerationRepository().apply { submitGate = gate }
+        val viewModel = moderationViewModel(repository)
+        viewModel.send(TopicIntent.RequestModerationAlert(42))
+        viewModel.send(TopicIntent.UpdateModerationReason("Insultes"))
+        viewModel.send(TopicIntent.SubmitModerationAlert)
+        viewModel.send(TopicIntent.SubmitModerationAlert)
+        assertTrue((viewModel.state.value.moderationAlert as ModerationAlertUi.Form).submitting)
+        viewModel.send(TopicIntent.DismissModerationAlert)
+        viewModel.send(TopicIntent.RequestModerationAlert(42))
+        assertEquals(1, repository.loads.size)
+        assertEquals(1, repository.sends.size)
+        gate.complete(Unit)
+        runCurrent()
+        assertNull(viewModel.state.value.moderationAlert)
+        viewModel.effects.test { expectNoEvents() }
+    }
+
+    @Test
+    fun `moderation form is discarded on account switch`() = runTest {
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"))
+        val repository = FakeModerationRepository()
+        val viewModel = moderationViewModel(repository, auth)
+        viewModel.send(TopicIntent.RequestModerationAlert(42))
+        viewModel.send(TopicIntent.UpdateModerationReason("Insultes"))
+        auth.emit(AuthState.Authenticated("other"))
+        runCurrent()
+        viewModel.send(TopicIntent.SubmitModerationAlert)
+        assertNull(viewModel.state.value.moderationAlert)
+        assertTrue(repository.sends.isEmpty())
+    }
+
+    @Test
+    fun `moderation rejects anonymous and absent post intents but allows locked topics`() = runTest {
+        val repository = FakeModerationRepository()
+        val anonymous = moderationViewModel(repository, FakeAuthRepository(AuthState.Anonymous))
+        anonymous.send(TopicIntent.RequestModerationAlert(42))
+        val connected = moderationViewModel(repository)
+        connected.send(TopicIntent.RequestModerationAlert(43))
+        assertTrue(repository.loads.isEmpty())
+        connected.send(TopicIntent.RequestModerationAlert(42))
+        assertEquals(1, repository.loads.size)
+    }
+
+    @Test
+    fun `moderation rejection becomes a terminal result without a success effect`() = runTest {
+        val repository = FakeModerationRepository().apply { outcome = ModerationAlertOutcome.Rejected("Refus") }
+        val viewModel = moderationViewModel(repository)
+        viewModel.send(TopicIntent.RequestModerationAlert(42))
+        viewModel.send(TopicIntent.UpdateModerationReason("Insultes"))
+        viewModel.send(TopicIntent.SubmitModerationAlert)
+        assertEquals(ModerationAlertUi.Result(repository.outcome), viewModel.state.value.moderationAlert)
+        viewModel.effects.test { expectNoEvents() }
+    }
+
+    @Test
+    fun `confirmed moderation POST survives destroying the viewmodel`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val repository = FakeModerationRepository().apply { submitGate = gate }
+        val viewModel = moderationViewModel(repository)
+        viewModel.send(TopicIntent.RequestModerationAlert(42))
+        viewModel.send(TopicIntent.UpdateModerationReason("Insultes"))
+        viewModel.send(TopicIntent.SubmitModerationAlert)
+        destroyViewModel(viewModel)
+        gate.complete(Unit)
+        runCurrent()
+        assertEquals(1, repository.submissionsCompleted)
+        viewModel.effects.test { expectNoEvents() }
+    }
+
+    private fun moderationViewModel(
+        repository: ModerationRepository,
+        auth: AuthRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+    ): TopicViewModel = topicViewModel(
+        request = topicRequest(page = 2),
+        topicRepository = FakeTopicRepository(
+            flowsToReturn = listOf(flowOf(fakeTopic(2, 2, posts = listOf(fakePost(42))).copy(canReply = false))),
+        ),
+        authRepository = auth,
+        moderationRepository = repository,
+    )
+
     private fun loadedPollVote(viewModel: TopicViewModel): PollVoteUiState =
         requireNotNull((viewModel.state.value.mode as TopicUiState.Mode.Loaded).pollVote)
 
@@ -4574,6 +4800,7 @@ class TopicViewModelTest {
         authRepository: AuthRepository,
         userPreferencesRepository: UserPreferencesRepository = FakeUserPreferencesRepository(),
         deletePostRepository: DeletePostRepository = FakeDeletePostRepository(),
+        moderationRepository: ModerationRepository = FakeModerationRepository(),
         pollVoteRepository: PollVoteRepository = FakePollVoteRepository(),
         blacklistRepository: BlacklistRepository = FakeBlacklistRepository(),
         authorRoleRepository: AuthorRoleRepository = FakeAuthorRoleRepository(),
@@ -4594,6 +4821,7 @@ class TopicViewModelTest {
         authRepository = authRepository,
         userPreferencesRepository = userPreferencesRepository,
         deletePostRepository = deletePostRepository,
+        moderationRepository = moderationRepository,
         pollVoteRepository = pollVoteRepository,
         blacklistRepository = blacklistRepository,
         authorRoleRepository = authorRoleRepository,
@@ -5556,6 +5784,16 @@ class TopicViewModelTest {
         private const val SAMPLE_POST = 84_540
         private const val SAMPLE_SUBCAT = 432
         private const val CANCEL_TIMEOUT_MS = 2_000L
+
+        // #293 — HFR's own sentences, as the parser hands them over.
+        private const val PENDING_MINE =
+            "Votre demande de modération sur ce message n'est pas encore traitée"
+        private const val PENDING_JOINED =
+            "La demande de modération sur ce message à laquelle vous vous êtes joint n'est pas encore traitée"
+        private const val TREATED_MINE =
+            "Votre demande de modération sur ce message a été traitée le 2026-09-05 17:27:28"
+        private const val TREATED_JOINED =
+            "Une demande de modération sur ce message a été traitée le 2026-09-05 17:27:28"
     }
 }
 

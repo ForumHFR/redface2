@@ -33,6 +33,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import fr.forumhfr.redface2.core.model.Post
@@ -57,9 +58,8 @@ import fr.forumhfr.redface2.core.ui.R as CoreUiR
  * - stacked full-width actions, profile-sheet style: a filled « Copier le lien de ce
  *   post » (primary), « Copier le texte » (disabled when an image-only post projects to
  *   blank), an outlined « Ouvrir dans le navigateur » (debug-friendly: the canonical
- *   permalink opens in the default browser), and a DISABLED « Alerter »
- *   placeholder — the report flow is not implemented yet, the greyed button shows the
- *   roadmap like the Settings « menu vitrine » (#288).
+ *   permalink opens in the default browser), and « Alerter » for an authenticated
+ *   moderation request (#293).
  *
  * Clipboard feedback follows the Diagnostics pattern: Android 13+ shows the system
  * overlay natively, older devices get a Toast. Both real actions play the sheet's hide
@@ -78,6 +78,8 @@ internal fun PostMenuSheet(
     permalink: String,
     citedCount: Int,
     onDismiss: () -> Unit,
+    /** Null disables moderation for an anonymous session. */
+    onAlert: ((numreponse: Int) -> Unit)? = null,
     /**
      * #418 — « Supprimer ce message », moved here from the post card's action row (beta
      * feedback by nicko : a destructive one-tap button under every own post invites
@@ -349,16 +351,15 @@ internal fun PostMenuSheet(
 
             Spacer(Modifier.height(8.dp))
 
-            // Report flow not implemented yet — greyed « menu vitrine » placeholder (#288
-            // pattern): the affordance is visible, the « (à venir) » suffix explains why it
-            // is disabled.
-            OutlinedButton(
-                onClick = {},
-                enabled = false,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(stringResource(R.string.topic_post_menu_report_soon))
-            }
+            ModerationAlertEntry(
+                onClick = {
+                    hideThenDismiss(coroutineScope, sheetState) {
+                        onDismiss()
+                        onAlert?.invoke(post.numreponse)
+                    }
+                },
+                enabled = onAlert != null,
+            )
 
             if (onDelete != null) {
                 Spacer(Modifier.height(8.dp))
@@ -471,6 +472,26 @@ private fun copyPermalinkToClipboard(context: Context, permalink: String, feedba
     clipboard.setPrimaryClip(ClipData.newPlainText("redface2 post link", permalink))
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
         Toast.makeText(context, feedback, Toast.LENGTH_SHORT).show()
+    }
+}
+
+/**
+ * #293 — « Alerter » plus its sign-in hint. Extracted from [PostMenuSheet] so the sheet stays
+ * under detekt's cyclomatic-complexity threshold; a disabled button alone never says why.
+ */
+@Composable
+private fun ModerationAlertEntry(onClick: () -> Unit, enabled: Boolean) {
+    OutlinedButton(onClick = onClick, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
+        Text(stringResource(R.string.topic_post_menu_report))
+    }
+    if (!enabled) {
+        Text(
+            stringResource(R.string.topic_post_menu_report_signed_out),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            textAlign = TextAlign.Center,
+        )
     }
 }
 

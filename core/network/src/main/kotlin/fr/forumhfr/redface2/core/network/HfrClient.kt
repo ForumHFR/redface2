@@ -393,6 +393,61 @@ class HfrClient @Inject constructor(
         return mutation.newCall(request).executeAuthenticatedHtml()
     }
 
+    /** #293 — user-initiated authenticated read; construct the URL without parsing cryptlinks. */
+    suspend fun fetchModerationAlertPage(cat: Int, topicId: Int, numreponse: Int, page: Int): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegments("user/modo.php")
+            .addQueryParameter("config", "hfr.inc")
+            .addQueryParameter("cat", cat.toString())
+            .addQueryParameter("post", topicId.toString())
+            .addQueryParameter("numreponse", numreponse.toString())
+            .addQueryParameter("page", page.toString())
+            .addQueryParameter("ref", "1")
+            .build()
+        return authenticated.newCall(Request.Builder().url(url).get().build()).executeAuthenticatedHtml()
+    }
+
+    suspend fun submitModerationAlert(
+        action: String,
+        hashCheck: String,
+        refererPage: String?,
+        reason: String,
+    ): String {
+        val body = moderationAlertBody(hashCheck, refererPage)
+            .add("raison", reason)
+            .add("Submit", "Valider votre message")
+            .build()
+        return postModerationAlert(action, body)
+    }
+
+    suspend fun joinModerationAlert(action: String, hashCheck: String, refererPage: String?): String {
+        val body = moderationAlertBody(hashCheck, refererPage)
+            .add("cfmodoalert", "1")
+            .add("Submit", "Confirmer")
+            .build()
+        return postModerationAlert(action, body)
+    }
+
+    private fun moderationAlertBody(hashCheck: String, refererPage: String?): FormBody.Builder {
+        if (hashCheck.isBlank()) throw IOException("Missing moderation form token")
+        return FormBody.Builder(Charsets.UTF_8)
+            .add("hash_check", hashCheck)
+            .apply { refererPage?.let { add("referer_page", it) } }
+    }
+
+    /** Resolve against /user/, retaining every query field supplied by HFR's form. */
+    private suspend fun postModerationAlert(action: String, body: FormBody): String {
+        val url = baseUrl.resolve("user/")?.resolve(action)
+            ?: throw IOException("Invalid moderation form action")
+        val sameOrigin = url.scheme == baseUrl.scheme && url.host == baseUrl.host && url.port == baseUrl.port
+        val isModerationAction = url.encodedPath == "/user/modo.php" &&
+            url.username.isEmpty() && url.password.isEmpty() && url.fragment == null
+        if (!sameOrigin || !isModerationAction) throw IOException("Invalid moderation form action")
+        val request = Request.Builder().url(url).post(body).build()
+        // Authenticated cookie jar, retryOnConnectionFailure(false): never replay a moderation POST.
+        return mutation.newCall(request).executeAuthenticatedHtml()
+    }
+
     /**
      * Phase 2D (#147) — GET the HFR edit form for a post the user owns. The URL
      * shape is the same as the reply form, but with a `numreponse={N}` parameter
