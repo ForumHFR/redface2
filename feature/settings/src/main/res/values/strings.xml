@@ -292,13 +292,14 @@
     <string name="settings_theme_system">Système</string>
     <string name="settings_theme_dark">Sombre</string>
     <string name="settings_theme_persist_failed">Impossible de mémoriser le thème. Réessayez.</string>
-    <!-- #326 — sélection de l'activity-alias du lanceur ; les aperçus réutilisent les fonds fixes. -->
+    <!-- #326 — galerie des icônes adaptatives et application explicite avec redémarrage. -->
     <string name="settings_display_launcher_icon_title">Icône de l\'application</string>
-    <string name="settings_display_launcher_icon_help">Le lanceur peut mettre quelques secondes à afficher la nouvelle icône.</string>
+    <string name="settings_display_launcher_icon_help">L\'application redémarre pour changer d\'icône. Le lanceur peut mettre quelques secondes à se rafraîchir.</string>
     <string name="settings_display_launcher_icon_classic">Classique</string>
-    <string name="settings_display_launcher_icon_dark">Sombre</string>
-    <string name="settings_display_launcher_icon_rose">Rose</string>
-    <string name="settings_display_launcher_icon_red">Rouge</string>
+    <string name="settings_display_launcher_icon_rf1">Redface 1</string>
+    <string name="settings_display_launcher_icon_current">Actuelle</string>
+    <string name="settings_display_launcher_icon_apply">Appliquer</string>
+    <string name="settings_display_launcher_icon_personal_help">Une image personnelle ne peut pas remplacer l\'icône dans la liste des applications ; certains lanceurs (Nova, Lawnchair…) proposent cette personnalisation.</string>
     <string name="settings_display_launcher_icon_persist_failed">Impossible de mémoriser l\'icône. Réessayez.</string>
     <string name="settings_colors_post_header_title">En-tête des messages</string>
     <string name="settings_colors_post_header_subtle">Discret</string>

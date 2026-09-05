@@ -30,13 +30,17 @@ import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 // Flat MVI dispatcher: one small, near-identical optimistic-flip handler per user preference.
 // The size comes from breadth (many independent settings live here cohesively), not from deep
@@ -49,10 +53,13 @@ class SettingsViewModel @Inject constructor(
     private val topicCacheMaintenance: TopicCacheMaintenance,
     private val imageCacheMaintenance: ImageCacheMaintenance,
     private val privateMessageContentCache: PrivateMessageContentCache,
+    private val launcherIconController: AppLauncherIconController,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SettingsState())
     val state: StateFlow<SettingsState> = _state.asStateFlow()
+    private val _effects = Channel<SettingsEffect>(Channel.BUFFERED)
+    val effects: Flow<SettingsEffect> = _effects.receiveAsFlow()
 
     init {
         // #788 — continuous hydration: every persisted preference is COLLECTED for the VM's
@@ -247,7 +254,15 @@ class SettingsViewModel @Inject constructor(
         observePreference(
             flow = userPreferencesRepository.observeAppLauncherIcon(),
             isLocked = { it.isUpdatingAppLauncherIcon },
-            apply = { state, value -> state.copy(appLauncherIcon = value) },
+            apply = { state, value ->
+                val current = value.takeIf { it.selectable } ?: AppLauncherIcon.CLASSIC
+                val pending = if (state.pendingAppLauncherIcon == state.appLauncherIcon) {
+                    current
+                } else {
+                    state.pendingAppLauncherIcon
+                }
+                state.copy(appLauncherIcon = current, pendingAppLauncherIcon = pending)
+            },
         )
         // #973 — block-GIF display profile (enum), same collection shape as the display presets.
         observePreference(
@@ -416,7 +431,16 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.FlagsAutoRefreshChanged -> updateFlagsAutoRefresh(intent.enabled)
             is SettingsIntent.DisplayDensityChanged -> updateDisplayDensity(intent.density)
             is SettingsIntent.FontScaleChanged -> updateFontScale(intent.scale)
-            is SettingsIntent.AppLauncherIconChanged -> updateAppLauncherIcon(intent.icon)
+            is SettingsIntent.AppLauncherIconChanged -> selectAppLauncherIcon(intent.icon)
+            SettingsIntent.ApplyAppLauncherIcon -> applyPendingAppLauncherIcon()
+            SettingsIntent.AppLauncherIconRestartFailed ->
+                _state.update {
+                    it.copy(
+                        appLauncherIcon = AppLauncherIcon.CLASSIC,
+                        isUpdatingAppLauncherIcon = false,
+                        appLauncherIconError = true,
+                    )
+                }
             is SettingsIntent.MediaDisplayProfileChanged -> updateMediaDisplayProfile(intent.profile)
             is SettingsIntent.PostImageMaxWidthChanged -> updatePostImageMaxWidth(intent.width)
             is SettingsIntent.PostImageCornersChanged -> updatePostImageCorners(intent.corners)
@@ -879,33 +903,36 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    // #326 — the UI applies the PackageManager alias only after this write succeeds.
-    private fun updateAppLauncherIcon(desired: AppLauncherIcon) {
-        val previous = _state.value.appLauncherIcon
-        _state.update {
-            it.copy(
-                appLauncherIcon = desired,
-                isUpdatingAppLauncherIcon = true,
-                appLauncherIconError = false,
-                appLauncherIconTouchedLocally = true,
-            )
+    private fun selectAppLauncherIcon(icon: AppLauncherIcon) {
+        if (icon.selectable && _state.value.canChangeAppLauncherIcon) {
+            _state.update { it.copy(pendingAppLauncherIcon = icon, appLauncherIconError = false) }
         }
+    }
+
+    private fun applyPendingAppLauncherIcon() {
+        val snapshot = _state.value
+        if (!snapshot.canChangeAppLauncherIcon || snapshot.pendingAppLauncherIcon == snapshot.appLauncherIcon) return
+        val desired = snapshot.pendingAppLauncherIcon
+        _state.update { it.copy(isUpdatingAppLauncherIcon = true, appLauncherIconError = false) }
         viewModelScope.launch {
-            runCatching { userPreferencesRepository.setAppLauncherIcon(desired) }
-                .onSuccess {
-                    _state.update {
-                        it.copy(appLauncherIcon = desired, isUpdatingAppLauncherIcon = false)
-                    }
-                }
-                .onFailure {
-                    _state.update {
-                        it.copy(
-                            appLauncherIcon = previous,
-                            isUpdatingAppLauncherIcon = false,
-                            appLauncherIconError = true,
-                        )
-                    }
-                }
+            // Once Apply starts, leaving this destination cannot split commit, switch and restart.
+            withContext(NonCancellable) {
+                commitAppLauncherIcon(desired)
+            }
+        }
+    }
+
+    private suspend fun commitAppLauncherIcon(desired: AppLauncherIcon) {
+        try {
+            // Controller waits for DataStore's commit before changing any component state.
+            launcherIconController.apply(desired)
+            _state.update { it.copy(appLauncherIcon = desired, pendingAppLauncherIcon = desired) }
+            _effects.send(SettingsEffect.RestartOnLauncherAlias(desired))
+            // Keep Apply disabled until the host has restarted; duplicate taps cannot enqueue restarts.
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            _state.update { it.copy(isUpdatingAppLauncherIcon = false, appLauncherIconError = true) }
         }
     }
 

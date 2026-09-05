@@ -42,6 +42,7 @@ import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.FlagType
+import java.util.logging.Logger
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
@@ -1033,10 +1034,16 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             ?.let { stored -> runCatching { DisplayDensity.valueOf(stored) }.getOrNull() }
             ?: DisplayDensity.COMFORT
 
-    /** Reads [KEY_APP_LAUNCHER_ICON] defensively; unknown / corrupt value → [AppLauncherIcon.CLASSIC]. */
+    /** Reads retired and unknown values as Classic without changing storage during collection. */
     private fun readAppLauncherIcon(prefs: Preferences): AppLauncherIcon =
         prefs[KEY_APP_LAUNCHER_ICON]
             ?.let { stored -> runCatching { AppLauncherIcon.valueOf(stored) }.getOrNull() }
+            ?.also { icon ->
+                if (!icon.selectable) {
+                    Logger.getLogger("AppLauncherIcon").fine("Retired launcher icon ${icon.name}: using CLASSIC")
+                }
+            }
+            ?.takeIf { it.selectable }
             ?: AppLauncherIcon.CLASSIC
 
     /**

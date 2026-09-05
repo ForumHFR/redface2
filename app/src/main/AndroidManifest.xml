@@ -62,6 +62,15 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".LauncherIconRestartActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleInstance"
+            android:process=":launcherIconRestart"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <activity-alias
             android:name=".LauncherClassic"
             android:enabled="true"
@@ -76,6 +85,21 @@
             </intent-filter>
         </activity-alias>
 
+        <activity-alias
+            android:name=".LauncherRf1"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_rf1"
+            android:label="${appLabel}"
+            android:roundIcon="@mipmap/ic_launcher_rf1_round"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <!-- Retained so a 0.54.0 installation can repair an enabled historical alias on startup. -->
         <activity-alias
             android:name=".LauncherDark"
             android:enabled="false"

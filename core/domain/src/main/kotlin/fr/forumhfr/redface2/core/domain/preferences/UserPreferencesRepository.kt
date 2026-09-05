@@ -490,7 +490,7 @@ interface UserPreferencesRepository {
 
     /**
      * Launcher icon shown by Android (#326). [AppLauncherIcon.CLASSIC] is the default. The Android
-     * component switch is deliberately owned by the Settings UI after this preference persists.
+     * component switch is owned by the Android launcher controller after this preference persists.
      */
     fun observeAppLauncherIcon(): Flow<AppLauncherIcon>
 
