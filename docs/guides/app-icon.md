@@ -55,7 +55,7 @@ Les aperçus chargent leurs ressources adaptatives : le masque est celui du syst
 | Choix | Alias du manifeste | Composition |
 |-------|--------------------|-------------|
 | Classique | `.LauncherClassic` | Drapeau RF2 existant, fond `#FFFFFF`, inchangé |
-| Redface 1 | `.LauncherRf1` | Visage RF1 transparent, fond `#EB3523` à deux bandes diagonales `#CA2315` |
+| Redface 1 | `.LauncherRf1` | Foreground et fond adaptatifs d’origine de Redface 1 (PNG aux cinq densités) |
 
 La sélection reste provisoire jusqu’au bouton **Appliquer**. Le redémarrage suit le schéma
 ProcessPhoenix en quatre temps :

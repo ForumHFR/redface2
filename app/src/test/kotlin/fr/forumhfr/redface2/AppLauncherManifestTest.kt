@@ -64,12 +64,13 @@ class AppLauncherManifestTest {
         listOf("ic_launcher_rf1", "ic_launcher_rf1_round").forEach { name ->
             val icon = xml("app/src/main/res/mipmap-anydpi-v26/$name.xml")
             assertEquals("adaptive-icon", icon.tagName)
-            assertEquals("@drawable/ic_launcher_rf1_background", icon.child("background").android("drawable"))
+            assertEquals("@mipmap/ic_launcher_rf1_background", icon.child("background").android("drawable"))
             assertEquals("@mipmap/ic_launcher_rf1_foreground", icon.child("foreground").android("drawable"))
             assertEquals("@mipmap/ic_launcher_rf1_foreground", icon.child("monochrome").android("drawable"))
         }
         listOf("mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi").forEach { density ->
             assertTrue(root.resolve("app/src/main/res/mipmap-$density/ic_launcher_rf1_foreground.png").exists())
+            assertTrue(root.resolve("app/src/main/res/mipmap-$density/ic_launcher_rf1_background.png").exists())
         }
     }
 
