@@ -1,4 +1,3 @@
-Redface 2 v0.54.3 — dev.
+Redface 2 v0.54.4 — dev.
 
-- Zoom: long press then drag extends the text selection instead of scrolling.
-- Redface 1 icon: the original background.
+- Startup color: the theme mirror is written only after a confirmed save (no flash after a crash).

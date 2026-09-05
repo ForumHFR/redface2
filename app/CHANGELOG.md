@@ -16,6 +16,16 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.54.4` — `internal` (dev) — 2026-09-05
+
+Clôture de la relecture ciblée du périmètre codé en gpt-5.5 : dernier défaut corrigé, 13 sur 13. Code Astra (Codex gpt-6-astra, xhigh) sous gate Fable, build socadisc ; PR [#1276](https://github.com/ForumHFR/redface2/pull/1276). Documentation : la séquence de validation locale d'AGENTS.md, README et du guide de contribution inclut désormais `test` et `:app:lintProdDebug` ([#1275](https://github.com/ForumHFR/redface2/pull/1275)).
+
+### Corrigé
+
+- **Couleur au démarrage** — le miroir qui peint la première frame était écrit avant la confirmation de l'enregistrement ; un crash à cet instant pouvait afficher au redémarrage une couleur jamais enregistrée. Le miroir n'est plus alimenté qu'après hydratation ou commit confirmé, en écriture durable.
+
+---
+
 ## `0.54.3` — `internal` (dev) — 2026-09-05
 
 Correctif du dernier lot de la relecture 5.5 et vrai fond de l'icône Redface 1. Code Astra (Codex gpt-6-astra, xhigh) sous gate Fable, builds socadisc ; PR [#1272](https://github.com/ForumHFR/redface2/pull/1272) et [#1273](https://github.com/ForumHFR/redface2/pull/1273).

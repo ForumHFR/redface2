@@ -1,4 +1,3 @@
-Redface 2 v0.54.3 — dev.
+Redface 2 v0.54.4 — dev.
 
-- Zoom : appui long puis glisser étend bien la sélection de texte au lieu de faire défiler.
-- Icône Redface 1 : vrai fond d'origine.
+- Couleur au démarrage : le miroir de thème n'est écrit qu'après enregistrement confirmé (plus de flash après un crash).
