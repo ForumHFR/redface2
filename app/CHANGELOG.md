@@ -16,6 +16,21 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.54.3` — `internal` (dev) — 2026-09-05
+
+Correctif du dernier lot de la relecture 5.5 et vrai fond de l'icône Redface 1. Code Astra (Codex gpt-6-astra, xhigh) sous gate Fable, builds socadisc ; PR [#1272](https://github.com/ForumHFR/redface2/pull/1272) et [#1273](https://github.com/ForumHFR/redface2/pull/1273).
+
+### Corrigé
+
+- **Sélection de texte en zoom** — en zoom, appuyer longuement sur du texte puis glisser étendait le défilement au lieu de la sélection : le pan à un doigt est désormais arbitré après les enfants et laisse le glisser à la sélection ; le pincement à deux doigts garde sa priorité. Seul défaut majeur relevé par la relecture du reste du périmètre 5.5 (réglages, bootstrap du thème, forum, MP, éditeur, zoom, recherche, liens).
+- **Icône Redface 1** ([#326](https://github.com/ForumHFR/redface2/issues/326)) — le fond redessiné en 0.54.2 ne ressemblait pas à l'original ; l'icône utilise maintenant le vrai fond du dépôt ForumHFR/Redface (Apache 2.0, chevrons montants reliés).
+
+### Note
+
+Trois dessins d'icône supplémentaires (monogramme, bulles, puce) ont été proposés et refusés à la validation visuelle ; le catalogue reste Classique et Redface 1. La relecture ciblée du périmètre codé en gpt-5.5 est terminée : 12 des 13 défauts confirmés sont corrigés (0.54.1 et 0.54.3), reste le mineur du miroir de thème de démarrage.
+
+---
+
 ## `0.54.2` — `internal` (dev) — 2026-09-05
 
 Reprise de [#326](https://github.com/ForumHFR/redface2/issues/326) après retour de XaTriX : le réglage de la 0.54.0 (quatre fonds du même drapeau) ne répondait pas à la demande d'icônes alternatives complètes. Cadrage Codex gpt-6-astra, code Astra sous gate Fable, build et preuve visuelle Opus ; PR [#1271](https://github.com/ForumHFR/redface2/pull/1271).

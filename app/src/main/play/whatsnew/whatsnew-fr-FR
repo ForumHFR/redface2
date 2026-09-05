@@ -1,4 +1,4 @@
-Redface 2 v0.54.2 — dev.
+Redface 2 v0.54.3 — dev.
 
-- Icône de l'application : vraie galerie avec aperçus, Classique ou Redface 1 (l'icône d'origine). Appliquer redémarre l'application sur la nouvelle icône.
-- Les variantes de fond Sombre/Rose/Rouge sont retirées.
+- Zoom : appui long puis glisser étend bien la sélection de texte au lieu de faire défiler.
+- Icône Redface 1 : vrai fond d'origine.

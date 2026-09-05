@@ -1,4 +1,4 @@
-Redface 2 v0.54.2 — dev.
+Redface 2 v0.54.3 — dev.
 
-- App icon: a real gallery with previews, Classic or Redface 1 (the original icon). Apply restarts the app on the new icon.
-- The Dark/Rose/Red background variants are gone.
+- Zoom: long press then drag extends the text selection instead of scrolling.
+- Redface 1 icon: the original background.
