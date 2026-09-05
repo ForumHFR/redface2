@@ -98,35 +98,12 @@ internal fun parseHfrDeepLink(uri: Uri): ParsedDeepLink? = when (uri.path) {
         )
     }
 
-    "/user/modo.php" -> parseModerationAlertDeepLink(uri)
-
     "/forum1f.php" -> ParsedDeepLink(
         destination = TopLevelDestination.Flags,
         route = FlagsListRoute,
     )
 
     else -> null
-}
-
-private fun parseModerationAlertDeepLink(uri: Uri): ParsedDeepLink? {
-    val cat = uri.getQueryParameter("cat")?.toIntOrNull()?.takeIf { it > 0 }
-    val post = uri.getQueryParameter("post")?.toIntOrNull()?.takeIf { it > 0 }
-    val numreponse = uri.getQueryParameter("numreponse")?.toIntOrNull()?.takeIf { it > 0 }
-    if (cat == null || post == null || numreponse == null) return null
-    val page = uri.getQueryParameter("page")?.toIntOrNull()?.coerceAtLeast(1) ?: 1
-    // #293 — only the post context travels into the app. Fetch a fresh moderation form;
-    // config, ref and any hash_check from the incoming link never become submission data.
-    return ParsedDeepLink(
-        destination = TopLevelDestination.Flags,
-        route = TopicRoute(
-            cat = cat,
-            post = post,
-            page = page,
-            scrollTo = numreponse,
-            resolveScrollToPage = page == 1,
-            moderationAlertFor = numreponse,
-        ),
-    )
 }
 
 private val WEB_SCHEMES = setOf("http", "https")

@@ -1200,7 +1200,7 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
         // TOTALLY inert — no tap (even linked), no long-press. Its image composable still exposes
         // the content Role.Image from its non-null contentDescription on both active and inert
         // hosts; only OnClick / OnLongClick discriminate the host's interactive capability.
-        // The viewer truth table lives in viewerRequestFor; inline taps intentionally do not use it.
+        // #1279 (v1.5) — viewerRequestFor also governs linked inline taps; §2 rendering stays unchanged.
         // Role.Image + onClickLabel « Ouvrir l'image » ([AMENDEMENT-Lot2-2] : Role.Link
         // does not exist in Compose 1.11.x ; the onClickLabel announces the link-open to TalkBack).
         val host = LocalPostImageActions.current
@@ -2153,48 +2153,61 @@ internal fun imageInlineContent(
         // nor the remember keys of ParagraphBlock. The HOST capability (LocalPostImageActions
         // != null) gates ALL interaction of a content image: on a null host (including editor
         // preview and signature) the image is TOTALLY inert — no tap even when [linkUrl] is set, no
-        // long-press. Its image composable still exposes the content Role.Image from its non-null
+        // long-press. On an ACTIVE host a linked image is never inert: when its own URL is not
+        // menu-eligible (data:, blob:, cc-image) the tap still opens the link, without a menu.
+        // Its image composable still exposes the content Role.Image from its non-null
         // contentDescription on both active and inert hosts; only OnClick / OnLongClick
-        // discriminate the host's capability. Two independent gates (Sol reserve): the TAP-to-
-        // open-link depends on `linkUrl != null` (threaded from the LinkAnnotation split), the
-        // long-press MENU on the image URL's eligibility; both live in ONE combinedClickable, so
-        // tap and long-press are mutually exclusive by construction. Role.Image + onClickLabel
-        // « Ouvrir l'image » ([AMENDEMENT-Lot2-2] : Role.Link does not exist in Compose 1.11.x).
+        // discriminate the host's capability. #1279 (v1.5) aligns linked inline taps with the
+        // block viewer policy: image-like links open the viewer, other links open the browser.
+        // Unlinked inline images keep only their long-press menu; cc-images and non-http(s)
+        // payloads gain no image actions. Tap and long-press share ONE combinedClickable and
+        // remain mutually exclusive. Role.Image + onClickLabel « Ouvrir l'image » is unchanged.
         // The pre-#958 "long-press only, never install an onClick" Codex reserve is superseded by
         // [AMENDEMENT-Lot2-1]: the device spike proved a tap reaches a clickable child even under
-        // an active selection, so a linked image now opens its link and clears the selection
+        // an active selection, so a linked image opens its target and clears the selection
         // exactly like a text link. Selection drags STARTED on the surrounding text still travel
         // across the image unaffected.
         val host = LocalPostImageActions.current
-        val tapOpensLink = host != null && linkUrl != null
-        val menuEligible = host != null && isEligiblePostImageUrl(image.url)
+        val target = PostImageTarget(url = image.url, description = image.description, linkUrl = linkUrl)
+        val viewerEligible = host != null && linkUrl != null && viewerRequestFor(
+            target = target,
+            diskCache = mediaDiskCachePolicy == PostMediaDiskCachePolicy.ENABLED,
+        ) != null
+        val menuEligible = host != null && !isCcImageUrl(image.url) && isEligiblePostImageUrl(image.url)
+        val tapOpensLink = host != null && linkUrl != null && !viewerEligible
         val uriHandler = LocalUriHandler.current
         val openLabel = stringResource(R.string.post_image_open_link)
         val optionsLabel = stringResource(R.string.post_image_options_action)
         val interactionModifier = when {
+            viewerEligible && menuEligible -> Modifier.combinedClickable(
+                role = Role.Image,
+                onClickLabel = openLabel,
+                onLongClickLabel = optionsLabel,
+                onLongClick = { host.onLongPress(target) },
+                onClick = { host.onOpenViewer(target) },
+            )
+
             tapOpensLink && menuEligible -> Modifier.combinedClickable(
                 role = Role.Image,
                 onClickLabel = openLabel,
                 onLongClickLabel = optionsLabel,
-                onLongClick = {
-                    host.onLongPress(
-                        PostImageTarget(url = image.url, description = image.description, linkUrl = linkUrl),
-                    )
-                },
+                onLongClick = { host.onLongPress(target) },
             ) {
                 runCatching { uriHandler.openUri(linkUrl) }
             }
 
             tapOpensLink ->
-                // Linked image whose own URL is not menu-eligible (e.g. data:) : the tap still
-                // opens the link, no long-press menu.
+                // Linked inline image whose own URL is not menu-eligible (e.g. data:) : the tap
+                // still opens the link, no long-press menu — exactly the block behaviour.
+                // (cc-images never reach here: the split leaves them under the LinkAnnotation
+                // with a null linkUrl.)
                 Modifier.clickable(role = Role.Image, onClickLabel = openLabel) {
                     runCatching { uriHandler.openUri(linkUrl) }
                 }
 
             menuEligible -> Modifier.postImageLongPress(
                 actions = host,
-                target = PostImageTarget(url = image.url, description = image.description, linkUrl = null),
+                target = target,
                 haptics = LocalHapticFeedback.current,
                 optionsLabel = optionsLabel,
             )

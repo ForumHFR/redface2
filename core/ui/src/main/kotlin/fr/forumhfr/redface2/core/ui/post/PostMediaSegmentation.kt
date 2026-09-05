@@ -7,6 +7,8 @@ import fr.forumhfr.redface2.core.model.PostInline
  * and [ParagraphSegment.MediaRun] (block gallery), per the frozen images contract v1.4 §2 :
  * the inline/block decision is taken on the AST STRUCTURE alone — measured dimensions never
  * participate (they only size, §3, later lots).
+ * v1.5 — #1279: a linked inline image opens the viewer when its target is image-like. Only the
+ * tap action is aligned with block images; these §2 inline/block partition rules stay unchanged.
  *
  * Wired into `ParagraphBlock` since #957 (Lot 1B) : the renderer maps [InlineSegment] to the
  * historical prose path and [MediaRun] to spaced `BlockImage` columns (§4). Types are DERIVED,
