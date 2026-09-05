@@ -1,3 +1,5 @@
-Redface 2 v0.54.5 — dev.
+Redface 2 v0.54.6 — dev.
 
-- Alerter un post à la modération : nouvelle entrée du menu de post (motif, se joindre à une alerte existante, suivi en attente / traitée), texte HFR affiché tel quel.
+- Mes sanctions : l'historique des sanctions du compte dans Réglages → Compte.
+- Un lien d'alerte modération ouvre le message et la feuille d'alerte.
+- Visionneuse : une miniature liée sur une ligne de texte ouvre la grande image en plein écran.
