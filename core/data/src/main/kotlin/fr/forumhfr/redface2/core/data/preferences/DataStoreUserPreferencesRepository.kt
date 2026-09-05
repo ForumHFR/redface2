@@ -324,14 +324,22 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         themeColorPreferencesCache
             .onStart {
                 if (themeColorPreferencesCache.value == null) {
-                    val fromDisk = runCatching { readThemeColorPreferences(dataStore.data.first()) }
-                        .getOrDefault(ThemeColorPreferences())
-                    themeColorPreferencesCache.compareAndSet(null, fromDisk)
+                    // The mirror commits synchronously on IO. Share the setter's lock so a late
+                    // hydration cannot overwrite a newer confirmed bundle (or backfill twice).
+                    withContext(ioDispatcher) {
+                        themeColorPreferencesWriteMutex.withLock {
+                            if (themeColorPreferencesCache.value == null) {
+                                val fromDisk = runCatching { readThemeColorPreferences(dataStore.data.first()) }
+                                    .onSuccess(::backfillThemeColorBootstrap)
+                                    .getOrDefault(ThemeColorPreferences())
+                                themeColorPreferencesCache.compareAndSet(null, fromDisk)
+                            }
+                        }
+                    }
                 }
             }
             .filterNotNull()
             .distinctUntilChanged()
-            .onEach(::backfillThemeColorBootstrap)
             .catch { emit(ThemeColorPreferences()) }
 
     override suspend fun setThemeColorPreferences(preferences: ThemeColorPreferences) {
@@ -348,7 +356,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
                         prefs[KEY_DYNAMIC_COLOR_ENABLED] = latest.dynamicColorEnabled
                         prefs[KEY_POST_HEADER_EMPHASIS] = latest.postHeaderEmphasis.name
                     }
-                    themeBootstrapStore.writeThemeColorPreferences(latest)
+                    backfillThemeColorBootstrap(latest)
                 }
             }
         } catch (cancellation: CancellationException) {
@@ -357,8 +365,8 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             throw cancellation
         } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
             // The cache is the in-session source of truth: an unpersisted bundle must not survive a
-            // failed commit (theme vs. settings divergence, bootstrap mirror backfilled with it). The
-            // CAS keeps a newer bundle written meanwhile (Opus review of #1250 H3).
+            // failed commit (theme vs. settings divergence). The CAS keeps a newer bundle written
+            // meanwhile (Opus review of #1250 H3).
             themeColorPreferencesCache.compareAndSet(preferences, stale)
             throw error
         }
