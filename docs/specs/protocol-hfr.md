@@ -128,6 +128,26 @@ annule le GET en cours ; un POST déjà confirmé poursuit son exécution, comme
 réponses POST. Le repository laisse remonter les exceptions réseau/session ; le topic
 les présente via sa snackbar, sans confondre un échec de transport avec une confirmation HFR.
 
+#### Lien entrant modo.php
+
+Les liens HTTP et HTTPS vers `/user/modo.php` passent par le même résolveur pour un
+intent Android `VIEW` et un tap dans un post. Ils exigent `cat`, `post` et `numreponse`
+entiers strictement positifs ; sinon, l’URL reste ouverte dans le navigateur.
+`page` est optionnel (défaut 1, valeur minimale 1). Une page égale à 1 déclenche la
+résolution de la page réelle du post selon la règle #750, avant le chargement d’entrée.
+`config`, `ref`, `hash_check` et le fragment sont ignorés : seul le contexte du post
+est transmis, via `TopicRoute.moderationAlertFor` puis `TopicRequest.moderationAlertFor`.
+
+Au premier `Loaded` de la génération d’entrée, le topic consomme le déclencheur : si
+le post est présent, il s’y positionne et ouvre la même feuille que le menu « Alerter ».
+Le GET utilise le contexte de la page affichée et récupère un formulaire frais ; aucun
+POST n’est automatique. Si le post est absent, aucune feuille ne s’ouvre, même si une
+émission ultérieure contient le post. L’état initial de session est attendu avant
+l’ouverture ; une session anonyme conserve l’atterrissage et reçoit la snackbar
+« Connectez-vous pour alerter la modération ». La rotation conserve le ViewModel ;
+un refresh ou une navigation interne ne rejoue pas le déclencheur. Une navigation
+qui remplace l’entrée pendant le chargement ou l’attente de session l’annule.
+
 ### Historique des sanctions — `/modo/historique.php` (#294)
 
 Contrat capturé le **06/09/2026** : les fixtures réelles `sanctions_history_empty.html`

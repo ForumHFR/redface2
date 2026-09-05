@@ -4569,6 +4569,251 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `a moderationAlertFor request opens the alert once the entry page is loaded`() = runTest {
+        val pages = MutableSharedFlow<Topic>()
+        val gate = CompletableDeferred<Unit>()
+        val repository = FakeModerationRepository().apply { loadGate = gate }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2, scrollTo = 42, moderationAlertFor = 42),
+            topicRepository = FakeStreamingTopicRepository(pages),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            moderationRepository = repository,
+        )
+        assertNull(viewModel.state.value.moderationAlert)
+        assertTrue(repository.loads.isEmpty())
+
+        pages.emit(fakeTopic(2, 2, posts = listOf(fakePost(42))))
+        runCurrent()
+        assertEquals(ModerationAlertUi.Loading, viewModel.state.value.moderationAlert)
+        assertEquals(listOf(listOf(SAMPLE_CAT, SAMPLE_POST, 42, 2)), repository.loads)
+        gate.complete(Unit)
+        runCurrent()
+
+        assertEquals(
+            ModerationAlertUi.Form(repository.alert as ModerationAlertState.Form),
+            viewModel.state.value.moderationAlert,
+        )
+        viewModel.effects.test {
+            assertEquals(TopicEffect.ScrollToPost(42), awaitItem())
+            expectNoEvents()
+        }
+        assertTrue(repository.sends.isEmpty())
+        assertTrue(repository.joins.isEmpty())
+    }
+
+    @Test
+    fun `moderationAlertFor is consumed after the first entry load`() = runTest {
+        val entry = fakeTopic(2, 3, posts = listOf(fakePost(42)))
+        val pages = FakeTopicRepository(
+            flowsToReturn = listOf(flowOf(entry), flowOf(entry.copy(page = 3)), flowOf(entry)),
+            refreshTopicsToReturn = listOf(entry),
+        )
+        val repository = FakeModerationRepository()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2, scrollTo = 42, moderationAlertFor = 42),
+            topicRepository = pages,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            moderationRepository = repository,
+        )
+        assertTrue(viewModel.state.value.moderationAlert is ModerationAlertUi.Form)
+        viewModel.send(TopicIntent.DismissModerationAlert)
+
+        viewModel.send(TopicIntent.Refresh)
+        runCurrent()
+        assertNull(viewModel.state.value.moderationAlert)
+        viewModel.switchToPage(3)
+        runCurrent()
+        assertNull(viewModel.state.value.moderationAlert)
+        viewModel.switchToPage(2)
+        runCurrent()
+
+        assertEquals(listOf(2, 3, 2), pages.calls.map { it.third })
+        assertEquals(listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)), pages.refreshCalls)
+        assertNull(viewModel.state.value.moderationAlert)
+        assertEquals(1, repository.loads.size)
+    }
+
+    @Test
+    fun `moderationAlertFor with anonymous session lands on the post and emits the sign-in snackbar`() = runTest {
+        val auth = FakeAuthRepository(AuthState.Anonymous)
+        val repository = FakeModerationRepository()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2, scrollTo = 42, moderationAlertFor = 42),
+            topicRepository = FakeTopicRepository(listOf(flowOf(fakeTopic(2, 2, posts = listOf(fakePost(42)))))),
+            authRepository = auth,
+            moderationRepository = repository,
+        )
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.ScrollToPost(42), awaitItem())
+            assertEquals(TopicEffect.ModerationAlertSignInRequired, awaitItem())
+            auth.emit(AuthState.Authenticated("xaat"))
+            runCurrent()
+            expectNoEvents()
+        }
+        assertNull(viewModel.state.value.moderationAlert)
+        assertTrue(repository.loads.isEmpty())
+    }
+
+    @Test
+    fun `moderationAlertFor whose post is absent from the page opens nothing`() = runTest {
+        val pages = MutableSharedFlow<Topic>(replay = 1).apply {
+            tryEmit(fakeTopic(2, 2, posts = listOf(fakePost(43))))
+        }
+        val repository = FakeModerationRepository()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2, scrollTo = 42, moderationAlertFor = 42),
+            topicRepository = FakeStreamingTopicRepository(pages),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            moderationRepository = repository,
+        )
+        viewModel.effects.test { expectNoEvents() }
+        assertNull(viewModel.state.value.moderationAlert)
+
+        // A later emission may satisfy the scroll, but cannot retry the consumed alert trigger.
+        pages.emit(fakeTopic(2, 2, posts = listOf(fakePost(42))))
+        runCurrent()
+        viewModel.effects.test {
+            assertEquals(TopicEffect.ScrollToPost(42), awaitItem())
+            expectNoEvents()
+        }
+        assertNull(viewModel.state.value.moderationAlert)
+        assertTrue(repository.loads.isEmpty())
+    }
+
+    @Test
+    fun `moderationAlertFor loads the form with the resolved entry page`() = runTest {
+        val repository = FakeModerationRepository()
+        val search = FakeSearchRepository(pageToResolve = 76)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1, scrollTo = 42, resolveScrollToPage = true, moderationAlertFor = 42),
+            topicRepository = FakeTopicRepository(listOf(flowOf(fakeTopic(76, 76, posts = listOf(fakePost(42)))))),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            moderationRepository = repository,
+            searchRepository = search,
+        )
+
+        assertEquals(listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 42)), search.resolveCalls)
+        assertEquals(76, viewModel.state.value.request.page)
+        assertEquals(listOf(listOf(SAMPLE_CAT, SAMPLE_POST, 42, 76)), repository.loads)
+        assertTrue(viewModel.state.value.moderationAlert is ModerationAlertUi.Form)
+    }
+
+    @Test
+    fun `moderationAlertFor is superseded by a page switch before the entry loads`() = runTest {
+        val entryGate = CompletableDeferred<Unit>()
+        val entry = fakeTopic(2, 3, posts = listOf(fakePost(42)))
+        val repository = FakeModerationRepository()
+        val pages = FakeTopicRepository(
+            listOf(
+                flow {
+                    entryGate.await()
+                    emit(entry)
+                },
+                flowOf(entry.copy(page = 3)),
+                flowOf(entry),
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2, scrollTo = 42, moderationAlertFor = 42),
+            topicRepository = pages,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            moderationRepository = repository,
+        )
+
+        viewModel.switchToPage(3)
+        entryGate.complete(Unit)
+        runCurrent()
+        assertEquals(3, viewModel.state.value.request.page)
+        viewModel.switchToPage(2)
+        runCurrent()
+
+        assertNull(viewModel.state.value.moderationAlert)
+        assertTrue(repository.loads.isEmpty())
+    }
+
+    @Test
+    fun `moderationAlertFor on a cached page waits for the initial session`() = runTest {
+        val authGate = CompletableDeferred<Unit>()
+        val auth = object : AuthRepository by FakeAuthRepository(AuthState.Anonymous) {
+            override fun observeAuthState(): Flow<AuthState> = flow {
+                authGate.await()
+                emit(AuthState.Authenticated("xaat"))
+            }
+        }
+        val repository = FakeModerationRepository()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2, scrollTo = 42, moderationAlertFor = 42),
+            topicRepository = FakeTopicRepository(listOf(flowOf(fakeTopic(2, 2, posts = listOf(fakePost(42)))))),
+            authRepository = auth,
+            moderationRepository = repository,
+        )
+        assertNull(viewModel.state.value.moderationAlert)
+        assertTrue(repository.loads.isEmpty())
+        viewModel.effects.test {
+            assertEquals(TopicEffect.ScrollToPost(42), awaitItem())
+            expectNoEvents()
+            authGate.complete(Unit)
+            runCurrent()
+            expectNoEvents()
+        }
+
+        assertTrue(viewModel.state.value.moderationAlert is ModerationAlertUi.Form)
+        assertEquals(1, repository.loads.size)
+    }
+
+    @Test
+    fun `moderationAlertFor waiting for auth cannot open on a newer page owner`() = runTest {
+        val authGate = CompletableDeferred<Unit>()
+        val auth = object : AuthRepository by FakeAuthRepository(AuthState.Anonymous) {
+            override fun observeAuthState(): Flow<AuthState> = flow {
+                authGate.await()
+                emit(AuthState.Authenticated("xaat"))
+            }
+        }
+        val entry = fakeTopic(2, 3, posts = listOf(fakePost(42)))
+        val repository = FakeModerationRepository()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2, scrollTo = 42, moderationAlertFor = 42),
+            topicRepository = FakeTopicRepository(listOf(flowOf(entry), flowOf(entry.copy(page = 3)))),
+            authRepository = auth,
+            moderationRepository = repository,
+        )
+
+        viewModel.switchToPage(3)
+        authGate.complete(Unit)
+        runCurrent()
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.ScrollToPost(42), awaitItem())
+            assertEquals(TopicEffect.ScrollToTop(3), awaitItem())
+            expectNoEvents()
+        }
+        assertNull(viewModel.state.value.moderationAlert)
+        assertTrue(repository.loads.isEmpty())
+    }
+
+    @Test
+    fun `moderationAlertFor supplies the entry target when scrollTo is absent`() = runTest {
+        val repository = FakeModerationRepository()
+        val search = FakeSearchRepository(pageToResolve = 2)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1, resolveScrollToPage = true, moderationAlertFor = 42),
+            topicRepository = FakeTopicRepository(listOf(flowOf(fakeTopic(2, 2, posts = listOf(fakePost(42)))))),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            moderationRepository = repository,
+            searchRepository = search,
+        )
+
+        assertEquals(listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 42)), search.resolveCalls)
+        assertTrue(viewModel.state.value.moderationAlert is ModerationAlertUi.Form)
+        viewModel.effects.test {
+            assertEquals(TopicEffect.ScrollToPost(42), awaitItem())
+            expectNoEvents()
+        }
+    }
+
+    @Test
     fun `moderation load moves from loading to form with the displayed post context`() = runTest {
         val gate = CompletableDeferred<Unit>()
         val repository = FakeModerationRepository().apply { loadGate = gate }
@@ -4852,12 +5097,14 @@ class TopicViewModelTest {
         page: Int,
         scrollTo: Int? = null,
         resolveScrollToPage: Boolean = false,
+        moderationAlertFor: Int? = null,
     ): TopicRequest = TopicRequest(
         cat = SAMPLE_CAT,
         post = SAMPLE_POST,
         page = page,
         scrollTo = scrollTo,
         resolveScrollToPage = resolveScrollToPage,
+        moderationAlertFor = moderationAlertFor,
     )
 
     // ──────────────────────────────────────────────────────────────────────

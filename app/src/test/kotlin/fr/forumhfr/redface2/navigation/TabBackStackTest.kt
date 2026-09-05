@@ -180,6 +180,25 @@ class TabBackStackTest {
     }
 
     @Test
+    fun `in-app moderation link has a distinct entry and reopening the exact key is a no-op`() {
+        val topic = TopicRoute(cat = 23, post = 35421, page = 76, scrollTo = 2_800_456)
+        val alert = topic.copy(moderationAlertFor = 2_800_456)
+        val result = inAppRouteBackStackAfterOpen(
+            currentDestination = TopLevelDestination.Forum,
+            parsed = ParsedDeepLink(TopLevelDestination.Flags, alert),
+            backStackFor = { listOf(ForumRoute, topic) },
+        )
+
+        assertEquals(TopLevelDestination.Forum, result.destination)
+        assertEquals(listOf(ForumRoute, topic, alert), result.backStack)
+        assertEquals(result.backStack, inAppRouteBackStackAfterOpen(result.backStack, alert))
+        assertEquals(
+            listOf(ForumRoute, topic),
+            inAppRouteBackStackAfterOpen(result.backStack, topic),
+        )
+    }
+
+    @Test
     fun `in-app HFR route already lower in the stack pops back to it`() {
         val topicA = TopicRoute(cat = 23, post = 100, page = 4)
         val topicB = TopicRoute(cat = 23, post = 200, page = 7)

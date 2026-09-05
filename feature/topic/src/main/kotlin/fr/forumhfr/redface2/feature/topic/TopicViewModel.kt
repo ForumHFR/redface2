@@ -42,6 +42,7 @@ import fr.forumhfr.redface2.core.model.write.PollVoteForm
 import fr.forumhfr.redface2.core.model.write.PollVoteResult
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -135,6 +136,9 @@ class TopicViewModel @AssistedInject constructor(
     private var moderationLoadJob: Job? = null
     private var moderationSubmitJob: Job? = null
     private var moderationGeneration: Int = 0
+    private var pendingModerationAlertFor: Int? = request.moderationAlertFor
+    // A cached page may arrive before the cold auth flow reads the persisted session.
+    private val initialAuthObserved = CompletableDeferred<Unit>()
     private var prefetchedPage: Int? = null
 
     /** Chantier C (#546) — at most one intra-topic search POST in flight at a time. */
@@ -340,7 +344,7 @@ class TopicViewModel @AssistedInject constructor(
         }
         // Sol points 4-5 — ENTRY intentions are consumable one-shots : an already-consumed
         // scrollTo never replays after process death ; an interrupted one resumes.
-        val initialScrollTo = request.scrollTo
+        val initialScrollTo = (request.scrollTo ?: pendingModerationAlertFor)
             ?.takeIf { savedStateHandle.get<Boolean>(KEY_SCROLL_TO_CONSUMED) != true }
         val untrustedPageTarget = request.resolveScrollToPage && initialScrollTo != null &&
             canonicalPage == null
@@ -424,6 +428,7 @@ class TopicViewModel @AssistedInject constructor(
                         connectedPseudo = connectedPseudo,
                     )
                 }
+                initialAuthObserved.complete(Unit)
             }
             .launchIn(viewModelScope)
         // Build 89 follow-up — mirror the top-bar auto-hide preference into state so the screen
@@ -558,6 +563,26 @@ class TopicViewModel @AssistedInject constructor(
                 if (generation == moderationGeneration) {
                     _state.update { it.copy(moderationAlert = null) }
                     _effects.trySend(TopicEffect.ModerationAlertFailed(classifyHfrError(error)))
+                }
+            }
+        }
+    }
+
+    /** #293 — consume on the entry owner's first Loaded, including an absent target. */
+    private fun dispatchPendingModerationAlert(topic: Topic, armed: ArmedLanding) {
+        if (!armed.initialScrollTo || topic.page != armed.page) return
+        val numreponse = pendingModerationAlertFor ?: return
+        pendingModerationAlertFor = null
+        if (topic.posts.any { it.numreponse == numreponse }) {
+            viewModelScope.launch {
+                initialAuthObserved.await()
+                // Auth may suspend past a page switch: never open an entry sheet on its successor.
+                if (armed.generation == ownerGeneration && armed.page == request.page) {
+                    if (_state.value.isAuthenticated) {
+                        requestModerationAlert(numreponse)
+                    } else {
+                        _effects.trySend(TopicEffect.ModerationAlertSignInRequired)
+                    }
                 }
             }
         }
@@ -1182,7 +1207,9 @@ class TopicViewModel @AssistedInject constructor(
         entryLanding: PendingLanding?,
         entryLandingIsScrollTo: Boolean,
     ) {
-        val scrollTo = requireNotNull(request.scrollTo) { "resolveScrollToPageThenLoad requires scrollTo" }
+        val scrollTo = requireNotNull(request.scrollTo ?: pendingModerationAlertFor) {
+            "resolveScrollToPageThenLoad requires an entry post target"
+        }
         _state.update { it.copy(mode = TopicUiState.Mode.Loading) }
         // Gate Sol PR1 r2 (bloquant 1) — a switch / submit arriving DURING the probe owns the
         // page : the late resolution must neither adopt its page nor restart the load.
@@ -1275,6 +1302,8 @@ class TopicViewModel @AssistedInject constructor(
      * scrollTo (any newer navigation supersedes the entry intention, Sol point 5).
      */
     private fun armLanding(landing: PendingLanding?, initialScrollTo: Boolean = false) {
+        // Any internal navigation supersedes the entry alert, even before its page has loaded.
+        if (!initialScrollTo) pendingModerationAlertFor = null
         val previous = pendingLanding
         if (previous?.initialScrollTo == true) {
             savedStateHandle[KEY_SCROLL_TO_CONSUMED] = true
@@ -1521,6 +1550,7 @@ class TopicViewModel @AssistedInject constructor(
         val armed = pendingLanding
             ?.takeIf { it.generation == ownerGeneration && it.page == request.page }
             ?: return
+        dispatchPendingModerationAlert(topic, armed)
         val effect = when (val landing = armed.landing) {
             // A Post target absent from the page stays pending : the next emission of the same
             // owner may contain it (historical scrollTo retry) — hence the nullable effect.
