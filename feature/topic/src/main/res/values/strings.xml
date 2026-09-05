@@ -240,6 +240,7 @@
 
     <!-- #293 — explicit moderation alert -->
     <string name="topic_alert_title">Prévenir les modérateurs</string>
+    <string name="topic_alert_sign_in_required">Connectez-vous pour alerter la modération</string>
     <string name="topic_alert_warning">Ce message part directement chez les modérateurs. Il sert uniquement à leur demander de venir sur le sujet en cas de problème.</string>
     <string name="topic_alert_reason">Raison</string>
     <string name="topic_alert_send">Envoyer</string>
