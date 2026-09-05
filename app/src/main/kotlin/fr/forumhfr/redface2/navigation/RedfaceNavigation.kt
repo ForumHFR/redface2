@@ -356,6 +356,8 @@ data class TopicRoute(
      * defaulted so older serialised back stacks deserialise without the field.
      */
     val resolveScrollToPage: Boolean = false,
+    /** #293 — open this post's moderation alert on entry; default preserves older saved stacks. */
+    val moderationAlertFor: Int? = null,
 ) : RedfaceNavKey
 
 @Serializable
@@ -782,7 +784,9 @@ internal fun tabBackTarget(
  * #1251 — HFR links tapped from rendered app content reuse the target tab's existing stack. Re-opening
  * the exact top [NavKey] is a no-op. Targeting an older key returns to it by dropping the entries above
  * it, matching Back semantics and keeping a single nav3 owner for that key. A same-topic link with a
- * different page or anchor is a distinct [TopicRoute] key, so it is pushed instead of collapsed.
+ * different page, anchor or moderationAlertFor is a distinct [TopicRoute] key, so it is pushed
+ * instead of collapsed. An alert link therefore gets its own entry even beside the same post's
+ * ordinary reading route; re-opening that exact alert key still follows the rules above.
  */
 internal fun inAppRouteBackStackAfterOpen(
     backStack: List<NavKey>,
@@ -2876,6 +2880,7 @@ private fun RedfaceNavHost(
                         forceRefresh = route.forceRefresh,
                         titleHint = topicTitleNavState.titles[TopicTitleKey(route.cat, route.post)],
                         resolveScrollToPage = route.resolveScrollToPage,
+                        moderationAlertFor = route.moderationAlertFor,
                     ),
                     onTitleLoaded = { title ->
                         topicTitleNavState.onTitleLoaded(route.cat, route.post, title)

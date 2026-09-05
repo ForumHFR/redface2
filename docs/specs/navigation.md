@@ -283,6 +283,7 @@ Les URLs HFR doivent ouvrir directement le bon écran dans l'app.
 | `forum.hardware.fr/forum2.php?cat=X&post=Y&page=Z#tN` | Topic Y page Z, avec scroll vers le post N | Phase 1 |
 | `forum.hardware.fr/hfr/<Cat>/…/<slug>-sujet_Y_Z.htm#tN` | Topic Y page Z, catégorie résolue depuis le slug, avec scroll vers N | Phase 4 (#1032 PR2) |
 | `forum.hardware.fr/forum1f.php` | Drapeaux | Phase 1 |
+| `forum.hardware.fr/user/modo.php?cat=X&post=Y&numreponse=N&page=Z` | Topic Y, scroll vers N et ouverture de la feuille d’alerte modération | #293 |
 | `forum.hardware.fr/forum1.php?config=hfr.inc&cat=prive&page=Z` | Navigateur (inbox MP non routée dans l'app) | Fallback navigateur |
 | `forum.hardware.fr/forum2.php?config=hfr.inc&cat=prive&post=Y&page=Z` | Navigateur (conversation MP non routée dans l'app) | Fallback navigateur |
 | Autre chemin `/hfr/…` (profil, `liste_sujet`, slug de catégorie inconnu…) | Navigateur | Fallback navigateur |
@@ -292,9 +293,17 @@ Les URLs HFR doivent ouvrir directement le bon écran dans l'app.
 > `resolveHfrDeepLink` les ouvre donc explicitement dans le navigateur au lieu d'échouer en silence.
 
 Le manifest garde deux filtres distincts, sans `autoVerify` : les chemins legacy exacts
-(`/forum1.php`, `/forum2.php`, `/forum1f.php`) et le préfixe volontairement large `/hfr/`.
+(`/forum1.php`, `/forum2.php`, `/forum1f.php`, `/user/modo.php`) et le préfixe volontairement large `/hfr/`.
 La sur-capture du second filtre est intentionnelle : `resolveHfrDeepLink` valide l'action, le
 schéma et le host, route les topics reconnus, puis délègue toute URL HFR non routable au navigateur.
+
+Le contrat du lien d’alerte est décrit dans
+[`protocol-hfr.md` § « Lien entrant modo.php »]({{ site.baseurl }}/specs/protocol-hfr#lien-entrant-modophp).
+Un lien externe cible l’onglet Drapeaux ; un tap dans un post conserve l’onglet courant,
+comme les autres liens vers un topic. `moderationAlertFor` participe à l’égalité de
+`TopicRoute` : une entrée d’alerte est distincte d’une entrée de lecture du même post.
+Retaper la route d’alerte exacte déjà au sommet reste sans effet ; si elle est plus bas,
+la pile revient à cette entrée existante.
 
 Comme `hardware.fr` est un domaine tiers, Redface 2 ne peut pas être *vérifié* comme handler et
 l'utilisateur doit l'activer manuellement. Pour rendre cet opt-in découvrable (#1032 PR3), la ligne
@@ -342,6 +351,7 @@ Implémentation via **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026).
     val post: Int,
     val page: Int = 1,
     val scrollTo: Int? = null,            // numreponse cible pour #t{numreponse}
+    val moderationAlertFor: Int? = null,  // #293 — ouverture de l’alerte, une seule fois à l’entrée
     val submitSignal: Long? = null,       // Phase 2 (#200) — bumpé à System.currentTimeMillis() par le
                                           // navigation host quand l'éditeur pop après un submit réussi.
                                           // Invalide la route key, force la rebuild du ViewModel, et fait

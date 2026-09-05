@@ -33,6 +33,10 @@
                     android:host="forum.hardware.fr"
                     android:path="/forum1f.php" />
                 <data
+                    android:scheme="https"
+                    android:host="forum.hardware.fr"
+                    android:path="/user/modo.php" />
+                <data
                     android:scheme="http"
                     android:host="forum.hardware.fr"
                     android:path="/forum1.php" />
@@ -44,6 +48,10 @@
                     android:scheme="http"
                     android:host="forum.hardware.fr"
                     android:path="/forum1f.php" />
+                <data
+                    android:scheme="http"
+                    android:host="forum.hardware.fr"
+                    android:path="/user/modo.php" />
             </intent-filter>
 
             <intent-filter>

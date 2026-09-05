@@ -477,6 +477,7 @@ fun TopicScreen(
     val alertSentMsg = stringResource(R.string.topic_alert_sent)
     val alertJoinedMsg = stringResource(R.string.topic_alert_joined)
     val alertErrorMsg = stringResource(R.string.topic_alert_error)
+    val alertSignInRequiredMsg = stringResource(R.string.topic_alert_sign_in_required)
     val alertServerDownMsg = stringResource(fr.forumhfr.redface2.core.ui.R.string.error_hfr_server_down)
     val alertNoConnectionMsg = stringResource(fr.forumhfr.redface2.core.ui.R.string.error_no_connection)
     // #1201 — poll closure feedback messages (resolved upfront, same rationale).
@@ -754,6 +755,9 @@ fun TopicScreen(
                         flagNotFoundMsg,
                         android.widget.Toast.LENGTH_SHORT,
                     ).show()
+                }
+                TopicEffect.ModerationAlertSignInRequired -> {
+                    snackbarScope.launch { snackbarHostState.showSnackbar(alertSignInRequiredMsg) }
                 }
                 is TopicEffect.ModerationAlertCompleted -> {
                     // #293 — HFR's own sentence goes to the snackbar verbatim; ours only fill a blank.
