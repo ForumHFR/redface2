@@ -1,3 +1,3 @@
-Redface 2 v0.54.4 — dev.
+Redface 2 v0.54.5 — dev.
 
-- Startup color: the theme mirror is written only after a confirmed save (no flash after a crash).
+- Report a post to the moderators: new post menu entry (reason, join an existing report, pending / handled status), HFR wording shown as is.

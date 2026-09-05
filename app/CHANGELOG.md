@@ -16,6 +16,16 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.54.5` — `internal` (dev) — 2026-09-05
+
+Alerter un post à la modération ([#293](https://github.com/ForumHFR/redface2/issues/293), demandé par XaTriX). Code Astra (Codex gpt-6-astra, xhigh) sous gate Fable, build socadisc ; PR [#1277](https://github.com/ForumHFR/redface2/pull/1277).
+
+### Ajouté
+
+- **Alerter un post** — nouvelle entrée du menu de post. La feuille suit la page `modo.php` de HFR : motif de l'alerte, proposition de se joindre à une alerte déjà déposée par un autre membre, alerte en attente ou déjà traitée (avec la date). Le texte de HFR est affiché tel quel, la réponse d'envoi aussi. Hors connexion, l'entrée est désactivée avec la mention « Connexion requise ». Recette live à faire : l'agent n'a envoyé aucune alerte réelle.
+
+---
+
 ## `0.54.4` — `internal` (dev) — 2026-09-05
 
 Clôture de la relecture ciblée du périmètre codé en gpt-5.5 : dernier défaut corrigé, 13 sur 13. Code Astra (Codex gpt-6-astra, xhigh) sous gate Fable, build socadisc ; PR [#1276](https://github.com/ForumHFR/redface2/pull/1276). Documentation : la séquence de validation locale d'AGENTS.md, README et du guide de contribution inclut désormais `test` et `:app:lintProdDebug` ([#1275](https://github.com/ForumHFR/redface2/pull/1275)).
