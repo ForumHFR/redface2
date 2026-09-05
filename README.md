@@ -64,3 +64,5 @@ Redface v1 tourne sur une stack de 2015 : Java, Retrofit 1.9, RxJava 1, ButterKn
 ## Licence
 
 `GPL-3.0-only` : garder le client communautaire et éviter les forks applicatifs fermés ([ADR-010](https://forumhfr.github.io/redface2/adr/010-licence-client-android)).
+
+Crédits des assets tiers : [mentions et licences](app/THIRD_PARTY_NOTICES.md).

@@ -445,6 +445,9 @@ data object SettingsDisplayRoute : RedfaceNavKey
 data object SettingsColorsRoute : RedfaceNavKey
 
 @Serializable
+data object SettingsAppIconRoute : RedfaceNavKey
+
+@Serializable
 data object SettingsImagesRoute : RedfaceNavKey
 
 @Serializable
@@ -2646,6 +2649,7 @@ private fun RedfaceNavHost(
                     onOpenProxy = { backStack.add(SettingsProxyRoute) },
                     onOpenMaintenance = { backStack.add(SettingsMaintenanceRoute) },
                     onOpenDisplay = { backStack.add(SettingsDisplayRoute) },
+                    onOpenAppIcon = { backStack.add(SettingsAppIconRoute) },
                     onOpenImages = { backStack.add(SettingsImagesRoute) },
                     onOpenAccountAbout = { backStack.add(SettingsAccountAboutRoute) },
                     onOpenBlacklist = { backStack.add(SettingsBlacklistRoute) },
@@ -2665,6 +2669,7 @@ private fun RedfaceNavHost(
                     onOpenProxy = { backStack.add(SettingsProxyRoute) },
                     onOpenMaintenance = { backStack.add(SettingsMaintenanceRoute) },
                     onOpenDisplay = { backStack.add(SettingsDisplayRoute) },
+                    onOpenAppIcon = { backStack.add(SettingsAppIconRoute) },
                     onOpenImages = { backStack.add(SettingsImagesRoute) },
                     onOpenAccountAbout = { backStack.add(SettingsAccountAboutRoute) },
                     onOpenBlacklist = { backStack.add(SettingsBlacklistRoute) },
@@ -2713,6 +2718,15 @@ private fun RedfaceNavHost(
                         }
                     },
                     onOpenColors = { backStack.add(SettingsColorsRoute) },
+                    onOpenAppIcon = { backStack.add(SettingsAppIconRoute) },
+                    topBarActions = accountMenu,
+                )
+            }
+            entry<SettingsAppIconRoute> {
+                SettingsAppIconEntry(
+                    onBack = {
+                        if (backStack.size > 1) backStack.removeAt(backStack.lastIndex)
+                    },
                     topBarActions = accountMenu,
                 )
             }
@@ -3231,6 +3245,7 @@ private fun applyDeepLinkResolution(
     switchTab: (TopLevelDestination) -> Unit,
     backStacks: Map<TopLevelDestination, NavBackStack<NavKey>>,
 ) {
+    if (restoreAppIconRoute(intent, switchTab, backStacks)) return
     when (val resolution = resolveHfrDeepLink(intent)) {
         is HfrDeepLinkResolution.Route -> {
             val parsed = resolution.parsed
@@ -3322,7 +3337,7 @@ private class HfrInAppUriHandler(
  * #286 — walk the Context chain to the host [Activity] (or null), so the system-bar SideEffect never
  * crashes on a non-Activity / ContextWrapper context. Tail-recursive over [ContextWrapper.baseContext].
  */
-private tailrec fun Context.findActivity(): Activity? = when (this) {
+internal tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this
     is ContextWrapper -> baseContext.findActivity()
     else -> null

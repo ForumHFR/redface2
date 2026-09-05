@@ -1,9 +1,6 @@
 package fr.forumhfr.redface2.feature.settings
 
-import androidx.compose.ui.test.assertCountEquals
-import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
-import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -19,58 +16,34 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-/** #326 — Compose contract for the launcher-icon choice group in Settings > Affichage. */
+/** #326 — Affichage now opens the gallery and shows the currently persisted icon name. */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class SettingsDisplayLauncherIconTest {
-
     @get:Rule
     val composeTestRule = createComposeRule()
+    private var galleryOpens = 0
 
-    private val received = mutableListOf<SettingsIntent>()
-
-    private fun mount(state: SettingsState = SettingsState()) {
+    private fun mount(icon: AppLauncherIcon) {
         val viewModel = mockk<SettingsViewModel> {
-            every { this@mockk.state } returns MutableStateFlow(state)
-            every { submit(any()) } answers { received += firstArg<SettingsIntent>() }
+            every { state } returns MutableStateFlow(SettingsState(appLauncherIcon = icon))
         }
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                SettingsDisplayScreen(onBack = {}, viewModel = viewModel)
+                SettingsDisplayScreen(onBack = {}, onOpenAppIcon = { galleryOpens++ }, viewModel = viewModel)
             }
         }
-        composeTestRule.waitForIdle()
     }
 
     @Test
-    fun `the four icons and launcher refresh help are shown`() {
-        mount()
+    fun `launcher row shows current icon and navigates to the gallery`() {
+        mount(AppLauncherIcon.RF1)
 
-        composeTestRule.onNodeWithText("Classique").performScrollTo().assertExists()
-        composeTestRule.onAllNodesWithText("Sombre").assertCountEquals(2)
-        composeTestRule.onNodeWithText("Rose").assertExists()
-        composeTestRule.onNodeWithText("Rouge").assertExists()
-        composeTestRule
-            .onNodeWithText("Le lanceur peut mettre quelques secondes à afficher la nouvelle icône.")
-            .assertExists()
-    }
+        composeTestRule.onNodeWithText("Redface 1").performScrollTo().assertExists()
+        composeTestRule.onNodeWithText("Icône de l'application").performClick()
 
-    @Test
-    fun `tapping an icon dispatches AppLauncherIconChanged`() {
-        mount()
-
-        composeTestRule.onNodeWithText("Rose").performScrollTo().performClick()
-
-        assertEquals(
-            listOf<SettingsIntent>(SettingsIntent.AppLauncherIconChanged(AppLauncherIcon.ROSE)),
-            received,
-        )
-    }
-
-    @Test
-    fun `the choices are disabled while persistence is in flight`() {
-        mount(SettingsState(isUpdatingAppLauncherIcon = true))
-
-        composeTestRule.onNodeWithText("Classique").performScrollTo().assertIsNotEnabled()
+        assertEquals(1, galleryOpens)
+        composeTestRule.onNodeWithText("Rose").assertDoesNotExist()
+        composeTestRule.onNodeWithText("Rouge").assertDoesNotExist()
     }
 }

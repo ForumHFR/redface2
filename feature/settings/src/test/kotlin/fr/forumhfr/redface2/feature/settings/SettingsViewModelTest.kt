@@ -33,6 +33,11 @@ import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.FlagType
+import androidx.lifecycle.viewModelScope
+import app.cash.turbine.test
+import io.mockk.coEvery
+import io.mockk.coVerify
+import io.mockk.mockk
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -44,6 +49,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.yield
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -60,6 +66,14 @@ class SettingsViewModelTest {
     private val topicCacheMaintenance = FakeTopicCacheMaintenance()
     private val imageCacheMaintenance = FakeImageCacheMaintenance()
     private val privateMessageContentCache = FakePrivateMessageContentCache()
+    private val appliedLauncherIcons = mutableListOf<AppLauncherIcon>()
+    private val launcherIconController = mockk<AppLauncherIconController>().also { controller ->
+        coEvery { controller.apply(any()) } coAnswers {
+            val icon = firstArg<AppLauncherIcon>()
+            repository.setAppLauncherIcon(icon)
+            appliedLauncherIcons += icon
+        }
+    }
 
     @Before
     fun setUp() {
@@ -992,30 +1006,104 @@ class SettingsViewModelTest {
         }
 
     @Test
-    fun `AppLauncherIconChanged persists the new icon and exposes the settled state`() = runTest {
+    fun `launcher selection is provisional and has no persistence or component side effects`() = runTest {
         val viewModel = newViewModel()
+        viewModel.effects.test {
+            viewModel.submit(SettingsIntent.AppLauncherIconChanged(AppLauncherIcon.RF1))
 
-        viewModel.submit(SettingsIntent.AppLauncherIconChanged(AppLauncherIcon.ROSE))
-
-        val state = viewModel.state.value
-        assertEquals(AppLauncherIcon.ROSE, state.appLauncherIcon)
-        assertFalse(state.isUpdatingAppLauncherIcon)
-        assertFalse(state.appLauncherIconError)
-        assertEquals(1, repository.appLauncherIconSetCalls)
-        assertEquals(AppLauncherIcon.ROSE, repository.lastAppLauncherIconSet)
+            assertEquals(AppLauncherIcon.CLASSIC, viewModel.state.value.appLauncherIcon)
+            assertEquals(AppLauncherIcon.RF1, viewModel.state.value.pendingAppLauncherIcon)
+            assertEquals(0, repository.appLauncherIconSetCalls)
+            coVerify(exactly = 0) { launcherIconController.apply(any()) }
+            expectNoEvents()
+        }
     }
 
     @Test
-    fun `AppLauncherIconChanged reverts and does not expose success when persistence fails`() = runTest {
+    fun `Apply waits for persistence and component application before requesting restart`() = runTest {
+        val commit = CompletableDeferred<Unit>()
+        repository.appLauncherIconCommitGate = commit
+        val viewModel = newViewModel()
+        viewModel.effects.test {
+            viewModel.submit(SettingsIntent.AppLauncherIconChanged(AppLauncherIcon.RF1))
+            viewModel.submit(SettingsIntent.ApplyAppLauncherIcon)
+
+            assertTrue(viewModel.state.value.isUpdatingAppLauncherIcon)
+            assertEquals(AppLauncherIcon.CLASSIC, viewModel.state.value.appLauncherIcon)
+            assertTrue(appliedLauncherIcons.isEmpty())
+            expectNoEvents()
+            viewModel.submit(SettingsIntent.ApplyAppLauncherIcon)
+            commit.complete(Unit)
+
+            assertEquals(SettingsEffect.RestartOnLauncherAlias(AppLauncherIcon.RF1), awaitItem())
+            assertEquals(listOf(AppLauncherIcon.RF1), appliedLauncherIcons)
+            assertEquals(AppLauncherIcon.RF1, repository.lastAppLauncherIconSet)
+            assertEquals(AppLauncherIcon.RF1, viewModel.state.value.appLauncherIcon)
+            assertFalse(viewModel.state.value.canChangeAppLauncherIcon)
+            assertEquals(1, repository.appLauncherIconSetCalls)
+            expectNoEvents()
+        }
+    }
+
+    @Test
+    fun `leaving the gallery during commit still applies and emits the restart`() = runTest {
+        val commit = CompletableDeferred<Unit>()
+        repository.appLauncherIconCommitGate = commit
+        val viewModel = newViewModel()
+        viewModel.effects.test {
+            viewModel.submit(SettingsIntent.AppLauncherIconChanged(AppLauncherIcon.RF1))
+            viewModel.submit(SettingsIntent.ApplyAppLauncherIcon)
+            viewModel.viewModelScope.cancel()
+            commit.complete(Unit)
+
+            assertEquals(SettingsEffect.RestartOnLauncherAlias(AppLauncherIcon.RF1), awaitItem())
+            assertEquals(listOf(AppLauncherIcon.RF1), appliedLauncherIcons)
+            assertEquals(AppLauncherIcon.RF1, repository.lastAppLauncherIconSet)
+        }
+    }
+
+    @Test
+    fun `failed launcher persistence shows the snackbar error without applying or restarting`() = runTest {
         repository.failOnAppLauncherIconSet = true
         val viewModel = newViewModel()
+        viewModel.effects.test {
+            viewModel.submit(SettingsIntent.AppLauncherIconChanged(AppLauncherIcon.RF1))
+            viewModel.submit(SettingsIntent.ApplyAppLauncherIcon)
 
-        viewModel.submit(SettingsIntent.AppLauncherIconChanged(AppLauncherIcon.DARK))
+            assertEquals(AppLauncherIcon.CLASSIC, viewModel.state.value.appLauncherIcon)
+            assertEquals(AppLauncherIcon.RF1, viewModel.state.value.pendingAppLauncherIcon)
+            assertTrue(viewModel.state.value.appLauncherIconError)
+            assertFalse(viewModel.state.value.isUpdatingAppLauncherIcon)
+            assertTrue(appliedLauncherIcons.isEmpty())
+            expectNoEvents()
+        }
+    }
 
-        val state = viewModel.state.value
-        assertEquals(AppLauncherIcon.CLASSIC, state.appLauncherIcon)
-        assertFalse(state.isUpdatingAppLauncherIcon)
-        assertTrue(state.appLauncherIconError)
+    @Test
+    @Suppress("DEPRECATION") // Exercise data retained from dev 0.54.0.
+    fun `retired ROSE hydrates Classic and cannot be selected`() = runTest {
+        repository.emitAppLauncherIcon(AppLauncherIcon.ROSE)
+        val viewModel = newViewModel()
+
+        assertEquals(AppLauncherIcon.CLASSIC, viewModel.state.value.appLauncherIcon)
+        assertEquals(AppLauncherIcon.CLASSIC, viewModel.state.value.pendingAppLauncherIcon)
+        viewModel.submit(SettingsIntent.AppLauncherIconChanged(AppLauncherIcon.ROSE))
+        viewModel.submit(SettingsIntent.ApplyAppLauncherIcon)
+        coVerify(exactly = 0) { launcherIconController.apply(any()) }
+        assertEquals(0, repository.appLauncherIconSetCalls)
+    }
+
+    @Test
+    fun `live preferences hydrate current icon without discarding a provisional choice`() = runTest {
+        val viewModel = newViewModel()
+        repository.emitAppLauncherIcon(AppLauncherIcon.RF1)
+        assertEquals(AppLauncherIcon.RF1, viewModel.state.value.pendingAppLauncherIcon)
+
+        repository.emitAppLauncherIcon(AppLauncherIcon.CLASSIC)
+        viewModel.submit(SettingsIntent.AppLauncherIconChanged(AppLauncherIcon.RF1))
+        repository.emitAppLauncherIcon(AppLauncherIcon.valueOf("ROSE"))
+        assertEquals(AppLauncherIcon.CLASSIC, viewModel.state.value.appLauncherIcon)
+        assertEquals(AppLauncherIcon.RF1, viewModel.state.value.pendingAppLauncherIcon)
     }
 
     @Test
@@ -2333,6 +2421,7 @@ class SettingsViewModelTest {
             topicCacheMaintenance,
             imageCacheMaintenance,
             privateMessageContentCache,
+            launcherIconController,
         )
 
     private class FakePrivateMessageContentCache : PrivateMessageContentCache {
@@ -2563,11 +2652,15 @@ class SettingsViewModelTest {
         var lastAppLauncherIconSet: AppLauncherIcon? = null
             private set
         var failOnAppLauncherIconSet: Boolean = false
+        var appLauncherIconCommitGate: CompletableDeferred<Unit>? = null
+
+        fun emitAppLauncherIcon(icon: AppLauncherIcon) { appLauncherIcon.value = icon }
 
         override fun observeAppLauncherIcon(): Flow<AppLauncherIcon> = appLauncherIcon
 
         override suspend fun setAppLauncherIcon(icon: AppLauncherIcon) {
             appLauncherIconSetCalls += 1
+            appLauncherIconCommitGate?.await()
             check(!failOnAppLauncherIconSet) { "boom" }
             lastAppLauncherIconSet = icon
             appLauncherIcon.value = icon

@@ -262,12 +262,11 @@ data class SettingsState(
     val isUpdatingFontScale: Boolean = false,
     val fontScaleError: Boolean = false,
     val fontScaleTouchedLocally: Boolean = false,
-    // #326 — launcher activity-alias selection. PackageManager is updated by the composable only
-    // after this optimistic DataStore write settles successfully.
+    // #326 — gallery selection stays provisional until the explicit Apply action completes.
     val appLauncherIcon: AppLauncherIcon = AppLauncherIcon.CLASSIC,
+    val pendingAppLauncherIcon: AppLauncherIcon = AppLauncherIcon.CLASSIC,
     val isUpdatingAppLauncherIcon: Boolean = false,
     val appLauncherIconError: Boolean = false,
-    val appLauncherIconTouchedLocally: Boolean = false,
     // #973 — block-GIF display profile ([AMENDEMENT-v1.5-2]). Same optimistic-flip machinery as
     // the reading display presets. Default matches the DataStore default (M ×1,5, choix XaTriX).
     val mediaDisplayProfile: MediaDisplayProfile = MediaDisplayProfile.M,
@@ -641,8 +640,10 @@ sealed interface SettingsIntent {
     data class DisplayDensityChanged(val density: DisplayDensity) : SettingsIntent
     data class FontScaleChanged(val scale: FontScalePreference) : SettingsIntent
 
-    /** #326 — persist a launcher alias selection before the UI applies it through PackageManager. */
+    /** #326 — select provisionally; Apply commits, switches the alias, then requests a restart. */
     data class AppLauncherIconChanged(val icon: AppLauncherIcon) : SettingsIntent
+    data object ApplyAppLauncherIcon : SettingsIntent
+    data object AppLauncherIconRestartFailed : SettingsIntent
 
     // #973 — block-GIF display profile. `profile` is the desired selection, applied optimistically
     // with revert-on-failure, like DisplayDensityChanged.
@@ -666,4 +667,8 @@ sealed interface SettingsIntent {
 
     /** #459 PR-images follow-up — choose how the editor wraps an inserted image. */
     data class SetEditorImageInsert(val mode: EditorImageInsert) : SettingsIntent
+}
+
+sealed interface SettingsEffect {
+    data class RestartOnLauncherAlias(val icon: AppLauncherIcon) : SettingsEffect
 }

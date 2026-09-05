@@ -1530,18 +1530,29 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
-    fun `launcher icon defaults to CLASSIC and round-trips every value`() = runTest(dispatcher) {
+    fun `launcher icon defaults to CLASSIC and round-trips selectable values`() = runTest(dispatcher) {
         repository.observeAppLauncherIcon().test {
             assertEquals(AppLauncherIcon.CLASSIC, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
 
-        AppLauncherIcon.entries.forEach { icon ->
+        AppLauncherIcon.selectable.forEach { icon ->
             repository.setAppLauncherIcon(icon)
             repository.observeAppLauncherIcon().test {
                 assertEquals(icon, awaitItem())
                 cancelAndIgnoreRemainingEvents()
             }
+        }
+    }
+
+    @Test
+    fun `retired launcher backgrounds read as CLASSIC without rewriting storage`() = runTest(dispatcher) {
+        val key = stringPreferencesKey("app_launcher_icon")
+        listOf("DARK", "ROSE", "RED").forEach { retired ->
+            dataStore.edit { it[key] = retired }
+
+            assertEquals(AppLauncherIcon.CLASSIC, repository.observeAppLauncherIcon().first())
+            assertEquals(retired, dataStore.data.first()[key])
         }
     }
 

@@ -1,15 +1,11 @@
 package fr.forumhfr.redface2.feature.settings
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
@@ -17,21 +13,13 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
@@ -43,10 +31,6 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsChoice
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsChoiceGroup
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsListItem
-import fr.forumhfr.redface2.core.ui.theme.LauncherIconClassicBackground
-import fr.forumhfr.redface2.core.ui.theme.LauncherIconDarkBackground
-import fr.forumhfr.redface2.core.ui.theme.LauncherIconRedBackground
-import fr.forumhfr.redface2.core.ui.theme.LauncherIconRoseBackground
 
 /**
  * #494 — « Affichage » sub-page. Extracts the theme mode (#286), the colours sub-page (#595), and
@@ -54,23 +38,17 @@ import fr.forumhfr.redface2.core.ui.theme.LauncherIconRoseBackground
  * [RedfaceSettingsChoiceGroup]. Binds its own [SettingsViewModel] instance (DataStore source of truth
  * — same trade-off as `SettingsProxyScreen`).
  */
+@Suppress("LongParameterList") // One lambda per navigation target plus the usual Composable seams.
 @Composable
 fun SettingsDisplayScreen(
     onBack: () -> Unit,
     onOpenColors: () -> Unit = {},
+    onOpenAppIcon: () -> Unit = {},
     modifier: Modifier = Modifier,
     topBarActions: @Composable (() -> Unit)? = null,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    var pendingLauncherIcon by remember { mutableStateOf<AppLauncherIcon?>(null) }
-    ApplyLauncherIconAfterPersistence(
-        pending = pendingLauncherIcon,
-        persisted = state.appLauncherIcon,
-        isUpdating = state.isUpdatingAppLauncherIcon,
-        hasError = state.appLauncherIconError,
-        onConsumed = { pendingLauncherIcon = null },
-    )
     val themeOptions = listOf(
         RedfaceSettingsChoice(ThemeMode.LIGHT, stringResource(R.string.settings_theme_light)),
         RedfaceSettingsChoice(ThemeMode.SYSTEM, stringResource(R.string.settings_theme_system)),
@@ -145,14 +123,11 @@ fun SettingsDisplayScreen(
                 trailingContent = { ChevronTrailing() },
             )
 
-            AppLauncherIconSetting(
-                selected = state.appLauncherIcon,
-                enabled = state.canChangeAppLauncherIcon,
-                error = state.appLauncherIconError,
-                onSelected = { icon ->
-                    pendingLauncherIcon = icon
-                    viewModel.submit(SettingsIntent.AppLauncherIconChanged(icon))
-                },
+            RedfaceSettingsListItem(
+                title = stringResource(R.string.settings_display_launcher_icon_title),
+                description = stringResource(launcherIconNameRes(state.appLauncherIcon)),
+                onClick = onOpenAppIcon,
+                trailingContent = { ChevronTrailing() },
             )
 
             // Reading presets (#287).
@@ -275,89 +250,6 @@ fun SettingsDisplayScreen(
             )
         }
     }
-}
-
-/** Keeps PackageManager work out of the ViewModel and only runs it after the DataStore write settles. */
-@Composable
-private fun ApplyLauncherIconAfterPersistence(
-    pending: AppLauncherIcon?,
-    persisted: AppLauncherIcon,
-    isUpdating: Boolean,
-    hasError: Boolean,
-    onConsumed: () -> Unit,
-) {
-    val context = LocalContext.current
-    LaunchedEffect(pending, persisted, isUpdating, hasError) {
-        val desired = pending ?: return@LaunchedEffect
-        // Stay pending while the write is in flight, and also while it has settled on a value that
-        // is not yet the desired one: only an error or the matching persisted value releases it.
-        if (isUpdating) return@LaunchedEffect
-        if (!hasError && persisted != desired) return@LaunchedEffect
-        if (!hasError) {
-            // A PackageManager refusal must not take the settings screen down with it.
-            runCatching { applyLauncherIcon(context, desired) }
-        }
-        onConsumed()
-    }
-}
-
-/** #326 — four activity-alias choices, with a stable colour-only preview for each background. */
-@Composable
-private fun AppLauncherIconSetting(
-    selected: AppLauncherIcon,
-    enabled: Boolean,
-    error: Boolean,
-    onSelected: (AppLauncherIcon) -> Unit,
-) {
-    val options = listOf(
-        RedfaceSettingsChoice(
-            AppLauncherIcon.CLASSIC,
-            stringResource(R.string.settings_display_launcher_icon_classic),
-        ) { LauncherIconPreview(LauncherIconClassicBackground) },
-        RedfaceSettingsChoice(
-            AppLauncherIcon.DARK,
-            stringResource(R.string.settings_display_launcher_icon_dark),
-        ) { LauncherIconPreview(LauncherIconDarkBackground) },
-        RedfaceSettingsChoice(
-            AppLauncherIcon.ROSE,
-            stringResource(R.string.settings_display_launcher_icon_rose),
-        ) { LauncherIconPreview(LauncherIconRoseBackground) },
-        RedfaceSettingsChoice(
-            AppLauncherIcon.RED,
-            stringResource(R.string.settings_display_launcher_icon_red),
-        ) { LauncherIconPreview(LauncherIconRedBackground) },
-    )
-    Text(
-        text = stringResource(R.string.settings_display_launcher_icon_title),
-        style = MaterialTheme.typography.titleMedium,
-        color = MaterialTheme.colorScheme.onSurface,
-    )
-    Text(
-        text = stringResource(R.string.settings_display_launcher_icon_help),
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    RedfaceSettingsChoiceGroup(
-        options = options,
-        selected = selected,
-        onSelected = onSelected,
-        enabled = enabled,
-    )
-    if (error) {
-        PreferencePersistError(R.string.settings_display_launcher_icon_persist_failed)
-    }
-}
-
-@Composable
-private fun LauncherIconPreview(background: Color) {
-    val shape = MaterialTheme.shapes.medium
-    Box(
-        modifier = Modifier
-            .size(40.dp)
-            .clip(shape)
-            .background(background)
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape),
-    ) {}
 }
 
 /**
