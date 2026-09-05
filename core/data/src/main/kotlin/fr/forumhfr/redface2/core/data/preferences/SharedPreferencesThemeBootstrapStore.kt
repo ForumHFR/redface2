@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.data.preferences
 
+import android.annotation.SuppressLint
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
 import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
@@ -50,6 +51,7 @@ class SharedPreferencesThemeBootstrapStore @Inject constructor(
             ?: PostHeaderEmphasis.SUBTLE,
     )
 
+    // Per-key helpers stay non-blocking: observeThemeMode can backfill on the main thread.
     override fun writeThemeMode(mode: ThemeMode) {
         prefs.edit().putString(KEY_THEME_MODE, mode.name).apply()
     }
@@ -76,6 +78,9 @@ class SharedPreferencesThemeBootstrapStore @Inject constructor(
         prefs.edit().putString(KEY_POST_HEADER_EMPHASIS, emphasis.name).apply()
     }
 
+    // Both callers (disk hydration and successful persist) run on IO in the repository. Wait for
+    // the mirror's disk write so a process exit after this call keeps the confirmed first-frame theme.
+    @SuppressLint("ApplySharedPref")
     override fun writeThemeColorPreferences(preferences: ThemeColorPreferences) {
         prefs.edit().apply {
             putThemeAccent(preferences.accent)
@@ -83,7 +88,7 @@ class SharedPreferencesThemeBootstrapStore @Inject constructor(
             putBoolean(KEY_AMOLED_ENABLED, preferences.darkSurfaceTone == DarkSurfaceTone.AMOLED)
             putBoolean(KEY_DYNAMIC_COLOR_ENABLED, preferences.dynamicColorEnabled)
             putString(KEY_POST_HEADER_EMPHASIS, preferences.postHeaderEmphasis.name)
-        }.apply()
+        }.commit()
     }
 
     private fun readThemeAccent(): ThemeAccent {

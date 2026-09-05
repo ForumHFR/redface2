@@ -39,12 +39,16 @@ import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.FlagType
+import java.io.IOException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -72,6 +76,7 @@ class DataStoreUserPreferencesRepositoryTest {
     /** In-memory [ThemeBootstrapStore] — the SharedPreferences impl has its own Robolectric test. */
     private val themeBootstrapStore = object : ThemeBootstrapStore {
         var stored = ThemeBootstrap()
+        val colorWrites = mutableListOf<ThemeColorPreferences>()
         override fun read(): ThemeBootstrap = stored
         override fun writeThemeMode(mode: ThemeMode) {
             stored = stored.copy(themeMode = mode)
@@ -90,6 +95,10 @@ class DataStoreUserPreferencesRepositoryTest {
         }
         override fun writePostHeaderEmphasis(emphasis: PostHeaderEmphasis) {
             stored = stored.copy(postHeaderEmphasis = emphasis)
+        }
+        override fun writeThemeColorPreferences(preferences: ThemeColorPreferences) {
+            colorWrites += preferences
+            super.writeThemeColorPreferences(preferences)
         }
     }
 
@@ -114,6 +123,7 @@ class DataStoreUserPreferencesRepositoryTest {
     @Before
     fun setUp() {
         themeBootstrapStore.stored = ThemeBootstrap()
+        themeBootstrapStore.colorWrites.clear()
         startScreenBootstrapStore.stored = StartScreenPreference()
         navBarLabelsBootstrapStore.stored = true
         dataStore = PreferenceDataStoreFactory.create(
@@ -196,6 +206,7 @@ class DataStoreUserPreferencesRepositoryTest {
         assertEquals(ThemeColorPreferences(), survivalRepository.observeThemeColorPreferences().first())
         callerScope.launch { survivalRepository.setThemeColorPreferences(desired) }
         assertEquals(desired, survivalRepository.observeThemeColorPreferences().first())
+        assertEquals(ThemeColorPreferences(), themeBootstrapStore.read().colorPreferences)
         callerScope.cancel()
 
         assertEquals(
@@ -204,6 +215,7 @@ class DataStoreUserPreferencesRepositoryTest {
             survivalRepository.observeThemeColorPreferences().first(),
         )
         advanceUntilIdle()
+        assertEquals(desired, themeBootstrapStore.read().colorPreferences)
         val freshRepository = DataStoreUserPreferencesRepository(
             dataStore = survivalStore,
             themeBootstrapStore = themeBootstrapStore,
@@ -919,6 +931,111 @@ class DataStoreUserPreferencesRepositoryTest {
             PostHeaderEmphasis.VIVID.name,
             dataStore.data.first()[stringPreferencesKey("post_header_emphasis")],
         )
+    }
+
+    @Test
+    fun `bootstrap mirror is written only after the DataStore commit succeeds`() = runTest(dispatcher) {
+        val gatedStore = GatedCommitDataStore(dataStore)
+        val repo = repositoryWith(gatedStore)
+        val desired = ThemeColorPreferences(
+            accent = ThemeAccent.Custom(rgb = 0x123456),
+            lightSurfaceTone = LightSurfaceTone.WHITE,
+            darkSurfaceTone = DarkSurfaceTone.AMOLED,
+            dynamicColorEnabled = true,
+            postHeaderEmphasis = PostHeaderEmphasis.VIVID,
+        )
+
+        repo.observeThemeColorPreferences().test {
+            assertEquals(ThemeColorPreferences(), awaitItem())
+            val write = launch { repo.setThemeColorPreferences(desired) }
+            gatedStore.commitStarted.await()
+
+            assertEquals(desired, awaitItem())
+            assertEquals(ThemeColorPreferences(), themeBootstrapStore.read().colorPreferences)
+            assertTrue(themeBootstrapStore.colorWrites.isEmpty())
+            assertFalse(write.isCompleted)
+
+            gatedStore.finishCommit.complete(Unit)
+            write.join()
+
+            assertEquals(desired, themeBootstrapStore.read().colorPreferences)
+            assertEquals(listOf(desired), themeBootstrapStore.colorWrites)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a failed commit leaves the bootstrap mirror on the last confirmed value`() = runTest(dispatcher) {
+        val confirmed = ThemeColorPreferences(accent = ThemeAccent.Preset(AccentPreset.BLUE))
+        repository.setThemeColorPreferences(confirmed)
+        val gatedStore = GatedCommitDataStore(dataStore)
+        val repo = repositoryWith(gatedStore)
+        val desired = confirmed.copy(darkSurfaceTone = DarkSurfaceTone.AMOLED)
+        val failure = IOException("Disk full")
+
+        repo.observeThemeColorPreferences().test {
+            assertEquals(confirmed, awaitItem())
+            val write = async { runCatching { repo.setThemeColorPreferences(desired) } }
+            gatedStore.commitStarted.await()
+
+            assertEquals(desired, awaitItem())
+            assertEquals(confirmed, themeBootstrapStore.read().colorPreferences)
+            assertEquals(listOf(confirmed), themeBootstrapStore.colorWrites)
+
+            gatedStore.finishCommit.completeExceptionally(failure)
+            // Coroutine stacktrace recovery hands back a copy, so compare type and message.
+            val thrown = write.await().exceptionOrNull()
+            assertTrue(thrown is IOException)
+            assertEquals(failure.message, thrown?.message)
+
+            assertEquals(confirmed, awaitItem())
+            assertEquals(confirmed, themeBootstrapStore.read().colorPreferences)
+            assertEquals(listOf(confirmed), themeBootstrapStore.colorWrites)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `hydration backfills the mirror once`() = runTest(dispatcher) {
+        val confirmed = ThemeColorPreferences(
+            accent = ThemeAccent.Custom(rgb = 0x123456),
+            lightSurfaceTone = LightSurfaceTone.WHITE,
+            darkSurfaceTone = DarkSurfaceTone.AMOLED,
+            dynamicColorEnabled = true,
+            postHeaderEmphasis = PostHeaderEmphasis.VIVID,
+        )
+        dataStore.edit { prefs ->
+            prefs[stringPreferencesKey("accent_color")] = "CUSTOM"
+            prefs[intPreferencesKey("accent_custom_rgb")] = 0x123456
+            prefs[stringPreferencesKey("light_surface_tone")] = LightSurfaceTone.WHITE.name
+            prefs[booleanPreferencesKey("amoled_enabled")] = true
+            prefs[booleanPreferencesKey("dynamic_color_enabled")] = true
+            prefs[stringPreferencesKey("post_header_emphasis")] = PostHeaderEmphasis.VIVID.name
+        }
+        assertTrue(themeBootstrapStore.colorWrites.isEmpty())
+
+        assertEquals(confirmed, repository.observeThemeColorPreferences().first())
+        assertEquals(confirmed, themeBootstrapStore.read().colorPreferences)
+        assertEquals(listOf(confirmed), themeBootstrapStore.colorWrites)
+
+        repository.setThemeMode(ThemeMode.DARK)
+        assertEquals(confirmed, repository.observeThemeColorPreferences().first())
+        assertEquals(listOf(confirmed), themeBootstrapStore.colorWrites)
+        assertEquals(ThemeMode.DARK, themeBootstrapStore.read().themeMode)
+    }
+
+    @Test
+    fun `failed hydration does not backfill the mirror with fallback defaults`() = runTest(dispatcher) {
+        val confirmed = ThemeBootstrap(accent = ThemeAccent.Preset(AccentPreset.BLUE))
+        themeBootstrapStore.stored = confirmed
+        val failingStore = object : DataStore<Preferences> by dataStore {
+            override val data = flow<Preferences> { throw IOException("Disk unavailable") }
+        }
+
+        assertEquals(ThemeColorPreferences(), repositoryWith(failingStore).observeThemeColorPreferences().first())
+
+        assertEquals(confirmed, themeBootstrapStore.read())
+        assertTrue(themeBootstrapStore.colorWrites.isEmpty())
     }
 
     @Test
@@ -1866,5 +1983,31 @@ class DataStoreUserPreferencesRepositoryTest {
         callers.cancel()
         appScope.cancel()
         dataStoreScope.cancel()
+    }
+
+    private fun repositoryWith(store: DataStore<Preferences>): DataStoreUserPreferencesRepository =
+        DataStoreUserPreferencesRepository(
+            dataStore = store,
+            themeBootstrapStore = themeBootstrapStore,
+            startScreenBootstrapStore = startScreenBootstrapStore,
+            navBarLabelsBootstrapStore = navBarLabelsBootstrapStore,
+            ioDispatcher = dispatcher,
+            externalScope = externalScope,
+        )
+
+    /** Suspends after the edit transform, before DataStore can commit it to disk. */
+    private class GatedCommitDataStore(
+        private val delegate: DataStore<Preferences>,
+    ) : DataStore<Preferences> by delegate {
+        val commitStarted = CompletableDeferred<Unit>()
+        val finishCommit = CompletableDeferred<Unit>()
+
+        override suspend fun updateData(transform: suspend (Preferences) -> Preferences): Preferences =
+            delegate.updateData { current ->
+                val updated = transform(current)
+                commitStarted.complete(Unit)
+                finishCommit.await()
+                updated
+            }
     }
 }
