@@ -26,7 +26,6 @@ import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Rule
@@ -39,10 +38,10 @@ import org.robolectric.annotation.GraphicsMode
 /**
  * #831/#958 — pins the interaction contract of post images on BOTH render paths (inline `[img]`
  * inside the selectable Text, and block image). Since #958 (Lot 2, §5) the LinkAnnotation SPLIT
- * gives a linked INLINE content image its own interaction node: tap opens the enclosing link,
- * long-press opens the contextual menu (mutually exclusive), both gated by the host capability
- * ([LocalPostImageActions] != null) — on the three null hosts (MP / editor preview / signatures)
- * a content image is TOTALLY inert. cc-images (#256) keep the link overlay behaviour and gain no
+ * gives a linked INLINE content image its own interaction node. Since #1279, tap opens the viewer
+ * for an image-like link and the browser otherwise; long-press opens the contextual menu (mutually
+ * exclusive), both gated by the host capability ([LocalPostImageActions] != null) — on null hosts
+ * (editor preview / signatures) a content image is TOTALLY inert. cc-images (#256) keep the link overlay and gain no
  * tap surface of their own. The fine finger-level interplay with selection drags is covered on
  * device (banc S10e, cas 11.1).
  */
@@ -61,6 +60,9 @@ class PostRendererImageLongPressTest {
     private val ccUrl = "https://example.org/emojis-micro/1f600.png?hfr-cc-image=true"
     private val fullLinkUrl = "https://example.org/full"
     private val fullImageUrl = "https://cdn.example.org/original/full.PNG?download=1"
+    private val thumbnailUrl = "https://rehost.diberie.com/Picture/Get/t/1"
+    private val originalUrl = "https://rehost.diberie.com/Picture/Get/f/1"
+    private val dataUrl = "data:image/png;base64,AAAA"
 
     @OptIn(coil3.annotation.DelicateCoilApi::class)
     @Before
@@ -75,6 +77,8 @@ class PostRendererImageLongPressTest {
             .intercept(blockUrl, ColorImage(0xFF1565C0.toInt(), width = 400, height = 300))
             .intercept(smallUrl, ColorImage(0xFF8E24AA.toInt(), width = 80, height = 60))
             .intercept(ccUrl, ColorImage(0xFFF9A825.toInt(), width = 16, height = 16))
+            .intercept(thumbnailUrl, ColorImage(0xFF2E7D32.toInt(), width = 400, height = 300))
+            .intercept(dataUrl, ColorImage(0xFF2E7D32.toInt(), width = 400, height = 300))
             .build()
         SingletonImageLoader.setUnsafe(ImageLoader.Builder(context).components { add(engine) }.build())
     }
@@ -88,13 +92,13 @@ class PostRendererImageLongPressTest {
         }
     }
 
-    private fun linkedInlineImageContent(url: String = inlineUrl) = PostContent(
+    private fun linkedInlineImageContent(url: String = inlineUrl, linkUrl: String = fullLinkUrl) = PostContent(
         blocks = listOf(
             PostBlock.Paragraph(
                 inlines = listOf(
                     PostInline.Text("regarde "),
                     PostInline.Link(
-                        url = fullLinkUrl,
+                        url = linkUrl,
                         children = listOf(PostInline.InlineImage(url = url, description = "photo")),
                     ),
                 ),
@@ -334,17 +338,22 @@ class PostRendererImageLongPressTest {
     }
 
     @Test
-    fun `tap on a linked inline image opens the link through the image node`() {
-        // §5/I2.4 — the tap belongs to the image node itself (Role.Image + OnClick), not to the
-        // text link machinery: the placeholder left the LinkAnnotation, the image opens its link.
+    fun `tap on a linked image-like inline image opens the viewer instead of the browser`() {
+        var opened: PostImageTarget? = null
         val uriHandler = RecordingUriHandler()
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 CompositionLocalProvider(
-                    LocalPostImageActions provides PostImageActions(onLongPress = {}),
+                    LocalPostImageActions provides PostImageActions(
+                        onLongPress = {},
+                        onOpenViewer = { opened = it },
+                    ),
                     LocalUriHandler provides uriHandler,
                 ) {
-                    PostRenderer(content = linkedInlineImageContent(), selectable = false)
+                    PostRenderer(
+                        content = linkedInlineImageContent(thumbnailUrl, linkUrl = originalUrl),
+                        selectable = true,
+                    )
                 }
             }
         }
@@ -354,20 +363,89 @@ class PostRendererImageLongPressTest {
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Image))
             .performTouchInput { click() }
 
-        assertEquals(fullLinkUrl, uriHandler.opened)
+        assertEquals(PostImageTarget(thumbnailUrl, "photo", originalUrl), opened)
+        val request = opened?.let { viewerRequestFor(it, diskCache = true) }
+        assertEquals(originalUrl, request?.sourceUrl)
+        assertEquals(thumbnailUrl, request?.previewUrl)
+        assertNull(uriHandler.opened)
     }
 
     @Test
-    fun `long-press on a linked inline image never opens the link - tap and menu mutually exclusive`() {
-        var received: PostImageTarget? = null
+    fun `tap on a linked inline image with an image extension opens the viewer`() {
+        var opened: PostImageTarget? = null
+        val linkUrl = "https://example.com/photo.jpg"
         val uriHandler = RecordingUriHandler()
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 CompositionLocalProvider(
-                    LocalPostImageActions provides PostImageActions(onLongPress = { received = it }),
+                    LocalPostImageActions provides PostImageActions(
+                        onLongPress = {},
+                        onOpenViewer = { opened = it },
+                    ),
                     LocalUriHandler provides uriHandler,
                 ) {
-                    PostRenderer(content = linkedInlineImageContent(), selectable = false)
+                    PostRenderer(content = linkedInlineImageContent(linkUrl = linkUrl), selectable = true)
+                }
+            }
+        }
+
+        composeTestRule.onNodeWithContentDescription("photo").performTouchInput { click() }
+
+        assertEquals(PostImageTarget(inlineUrl, "photo", linkUrl), opened)
+        val request = opened?.let { viewerRequestFor(it, diskCache = true) }
+        assertEquals(linkUrl, request?.sourceUrl)
+        assertEquals(inlineUrl, request?.previewUrl)
+        assertNull(uriHandler.opened)
+    }
+
+    @Test
+    fun `tap on a linked non-image inline image keeps opening the browser`() {
+        // #1279 narrows the historical browser expectation to non-image links; the tap still
+        // belongs to the image node itself (Role.Image + OnClick), outside the LinkAnnotation.
+        var opened: PostImageTarget? = null
+        val linkUrl = "https://example.com/page"
+        val uriHandler = RecordingUriHandler()
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(
+                    LocalPostImageActions provides PostImageActions(
+                        onLongPress = {},
+                        onOpenViewer = { opened = it },
+                    ),
+                    LocalUriHandler provides uriHandler,
+                ) {
+                    PostRenderer(content = linkedInlineImageContent(linkUrl = linkUrl), selectable = false)
+                }
+            }
+        }
+
+        composeTestRule.onNodeWithContentDescription("photo")
+            .assert(SemanticsMatcher.keyIsDefined(SemanticsActions.OnClick))
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Image))
+            .performTouchInput { click() }
+
+        assertEquals(linkUrl, uriHandler.opened)
+        assertNull(opened)
+    }
+
+    @Test
+    fun `long press on a linked inline image still reaches the handler`() {
+        var received: PostImageTarget? = null
+        var opened: PostImageTarget? = null
+        val uriHandler = RecordingUriHandler()
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(
+                    LocalPostImageActions provides PostImageActions(
+                        onLongPress = { received = it },
+                        onOpenViewer = { opened = it },
+                    ),
+                    LocalUriHandler provides uriHandler,
+                ) {
+                    PostRenderer(
+                        content = linkedInlineImageContent(thumbnailUrl, linkUrl = originalUrl),
+                        selectable = true,
+                    )
                 }
             }
         }
@@ -375,21 +453,28 @@ class PostRendererImageLongPressTest {
         composeTestRule.onNodeWithContentDescription("photo")
             .performTouchInput { longClick() }
 
-        assertNotNull("the long-press must reach the menu handler", received)
+        assertEquals(PostImageTarget(thumbnailUrl, "photo", originalUrl), received)
+        assertNull("the long-press must NOT open the viewer", opened)
         assertNull("the long-press must NOT open the link", uriHandler.opened)
     }
 
     @Test
-    fun `on a null host a linked inline image is totally inert`() {
-        // #958 Lot 2 (§5 matrice I5.4) — on the three null hosts (MP, editor preview, signature)
-        // a linked content image loses even its historical link-overlay tap: the placeholder left
+    fun `linked inline image stays inert without a host`() {
+        // #958/#1279 — on null hosts (editor preview, signature), even an image-like linked
+        // content image loses its historical link-overlay tap: the placeholder left
         // the LinkAnnotation and no interaction node replaces it. Text links stay live (their own
         // ranges are untouched — pinned structurally in PostRendererLinkSplitTest).
         val uriHandler = RecordingUriHandler()
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                CompositionLocalProvider(LocalUriHandler provides uriHandler) {
-                    PostRenderer(content = linkedInlineImageContent(), selectable = false)
+                CompositionLocalProvider(
+                    LocalPostImageActions provides null,
+                    LocalUriHandler provides uriHandler,
+                ) {
+                    PostRenderer(
+                        content = linkedInlineImageContent(thumbnailUrl, linkUrl = originalUrl),
+                        selectable = false,
+                    )
                 }
             }
         }
@@ -403,15 +488,97 @@ class PostRendererImageLongPressTest {
     }
 
     @Test
-    fun `a linked cc-image keeps the link overlay tap and gains no tap surface of its own`() {
-        // #256/#958 — cc-images STAY under the LinkAnnotation: the tap keeps going through the
-        // text link machinery (works on every host), and the split gives them no OnClick of
-        // their own.
+    fun `linked inline data image still opens its link without a long-press menu`() {
+        var opened: PostImageTarget? = null
+        var received: PostImageTarget? = null
         val uriHandler = RecordingUriHandler()
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 CompositionLocalProvider(
-                    LocalPostImageActions provides PostImageActions(onLongPress = {}),
+                    LocalPostImageActions provides PostImageActions(
+                        onLongPress = { received = it },
+                        onOpenViewer = { opened = it },
+                    ),
+                    LocalUriHandler provides uriHandler,
+                ) {
+                    PostRenderer(
+                        content = linkedInlineImageContent(dataUrl, linkUrl = originalUrl),
+                        selectable = false,
+                    )
+                }
+            }
+        }
+
+        // #1279 — the thumbnail's own URL is not menu-eligible (data:) so the viewer and the
+        // contextual menu are both out, but the image keeps the historical browser tap of its
+        // link, exactly like the block path.
+        composeTestRule.onNodeWithContentDescription("photo")
+            .assert(SemanticsMatcher.keyNotDefined(SemanticsActions.OnLongClick))
+            .performTouchInput { click() }
+
+        assertNull(opened)
+        assertNull(received)
+        assertEquals(originalUrl, uriHandler.opened)
+    }
+
+    @Test
+    fun `linked block data image opens its link without a long-press menu`() {
+        var opened: PostImageTarget? = null
+        var received: PostImageTarget? = null
+        val uriHandler = RecordingUriHandler()
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(
+                    LocalPostImageActions provides PostImageActions(
+                        onLongPress = { received = it },
+                        onOpenViewer = { opened = it },
+                    ),
+                    LocalUriHandler provides uriHandler,
+                ) {
+                    PostRenderer(
+                        content = PostContent(
+                            blocks = listOf(
+                                PostBlock.Paragraph(
+                                    inlines = listOf(
+                                        PostInline.Link(
+                                            url = originalUrl,
+                                            children = listOf(
+                                                PostInline.InlineImage(url = dataUrl, description = "promue"),
+                                            ),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ),
+                        selectable = true,
+                    )
+                }
+            }
+        }
+
+        composeTestRule.onNodeWithContentDescription("promue")
+            .assert(SemanticsMatcher.keyNotDefined(SemanticsActions.OnLongClick))
+            .performTouchInput { click() }
+
+        assertNull(opened)
+        assertNull(received)
+        assertEquals(originalUrl, uriHandler.opened)
+    }
+
+    @Test
+    fun `a linked cc-image keeps the link overlay tap and gains no tap surface of its own`() {
+        // #256/#958 — cc-images STAY under the LinkAnnotation: the tap keeps going through the
+        // text link machinery (works on every host), and the split gives them no OnClick of
+        // their own.
+        var opened: PostImageTarget? = null
+        val uriHandler = RecordingUriHandler()
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(
+                    LocalPostImageActions provides PostImageActions(
+                        onLongPress = {},
+                        onOpenViewer = { opened = it },
+                    ),
                     LocalUriHandler provides uriHandler,
                 ) {
                     PostRenderer(
@@ -421,7 +588,7 @@ class PostRendererImageLongPressTest {
                                     inlines = listOf(
                                         PostInline.Text("regarde "),
                                         PostInline.Link(
-                                            url = fullLinkUrl,
+                                            url = fullImageUrl,
                                             children = listOf(
                                                 PostInline.InlineImage(url = ccUrl, description = "emoji"),
                                             ),
@@ -438,9 +605,11 @@ class PostRendererImageLongPressTest {
 
         composeTestRule.onNodeWithContentDescription("emoji")
             .assert(SemanticsMatcher.keyNotDefined(SemanticsActions.OnClick))
+            .assert(SemanticsMatcher.keyNotDefined(SemanticsActions.OnLongClick))
             .performTouchInput { click() }
 
-        assertEquals(fullLinkUrl, uriHandler.opened)
+        assertEquals(fullImageUrl, uriHandler.opened)
+        assertNull(opened)
     }
 
     @Test

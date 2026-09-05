@@ -495,7 +495,6 @@ enum class DeleteFailureReason {
 sealed interface TopicEffect {
     data class ModerationAlertCompleted(val outcome: ModerationAlertOutcome) : TopicEffect
     data class ModerationAlertFailed(val kind: HfrErrorKind) : TopicEffect
-    data object ModerationAlertSignInRequired : TopicEffect
 
     /**
      * Ask the screen to scroll to a specific `numreponse` once the topic page is

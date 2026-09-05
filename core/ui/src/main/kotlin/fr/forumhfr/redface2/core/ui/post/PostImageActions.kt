@@ -17,9 +17,9 @@ data class PostImageTarget(
 )
 
 /**
- * #831/#182 — actions a hosting surface offers on post images. The renderer invokes
- * [onOpenViewer] only for block images accepted by the pure viewer policy; inline taps stay
- * unchanged and reach the viewer exclusively through the contextual sheet.
+ * #831/#182/#1279 — actions a hosting surface offers on post images. The renderer invokes
+ * [onOpenViewer] for block images and linked inline images accepted by [viewerRequestFor].
+ * Unlinked inline images reach the viewer exclusively through the contextual sheet.
  */
 class PostImageActions(
     val onLongPress: (PostImageTarget) -> Unit,

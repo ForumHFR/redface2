@@ -50,10 +50,10 @@ import kotlinx.coroutines.launch
  * - « Copier l'URL de l'image » — clipboard write, Diagnostics feedback pattern (system overlay
  *   on Android 13+, Toast below);
  * - « Ouvrir dans le navigateur » — `ACTION_VIEW` on the image URL (the DIRECT image, not the
- *   `[url=…]` link, which the block tap already covers);
+ *   `[url=…]` link, which the linked image tap already covers);
  * - « Afficher en plein écran » — opens the fullscreen viewer (#182). The sheet deliberately
  *   targets the rendered image itself, including for linked inline images: the viewer policy for
- *   a direct block tap is separate from this explicit menu action.
+ *   a direct block or linked inline tap is separate from this explicit menu action.
  *
  * The hero shows the image thumbnail + the host and full URL so the user can tell WHICH image the
  * menu targets when a post carries several. [mediaDiskCachePolicy] follows the source surface:

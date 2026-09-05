@@ -29,9 +29,11 @@ fun isImageLikeUrl(url: String): Boolean {
 }
 
 /**
- * Applies the #182 block-image truth table. A linked image opens the viewer only when its wrapping
- * target is image-like; an unlinked image uses its rendered URL for all three roles. Inline images
- * call this with `target.copy(linkUrl = null)` from their contextual sheet.
+ * Applies the #182 image truth table, shared by linked inline taps since v1.5 (#1279), without
+ * changing inline/block rendering (§2). A linked image opens the viewer only when its wrapping
+ * target is image-like; an unlinked image uses its rendered URL for all three roles. The renderer
+ * keeps unlinked inline images long-press-only. The contextual sheet calls this with
+ * `target.copy(linkUrl = null)` to open the rendered image, independently of its wrapping link.
  */
 @Suppress("ReturnCount") // Eligibility guard + non-image link rejection, both terminal cases.
 fun viewerRequestFor(target: PostImageTarget, diskCache: Boolean): ImageViewerRequest? {
