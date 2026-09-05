@@ -407,6 +407,15 @@ class HfrClient @Inject constructor(
         return authenticated.newCall(Request.Builder().url(url).get().build()).executeAuthenticatedHtml()
     }
 
+    /** #294 — user-initiated authenticated read of the active account's sanctions. */
+    suspend fun fetchSanctionsHistoryPage(): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegments("modo/historique.php")
+            .addQueryParameter("config", "hfr.inc")
+            .build()
+        return authenticated.newCall(Request.Builder().url(url).get().build()).executeAuthenticatedHtml()
+    }
+
     suspend fun submitModerationAlert(
         action: String,
         hashCheck: String,

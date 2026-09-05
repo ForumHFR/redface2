@@ -1,9 +1,13 @@
 package fr.forumhfr.redface2.feature.settings
 
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -40,10 +44,22 @@ internal fun SettingsSubPageTopBar(
     title: String,
     onBack: () -> Unit,
     topBarActions: @Composable (() -> Unit)? = null,
+    subtitle: String? = null,
 ) {
     val backLabel = stringResource(R.string.settings_back)
     TopAppBar(
-        title = { Text(title) },
+        title = {
+            Column {
+                Text(title)
+                if (!subtitle.isNullOrBlank()) {
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        },
         navigationIcon = {
             IconButton(
                 onClick = onBack,
@@ -56,6 +72,22 @@ internal fun SettingsSubPageTopBar(
             }
         },
         actions = { topBarActions?.invoke() },
+    )
+}
+
+/** Settings sub-page shell with an optional account subtitle. */
+@Composable
+internal fun RedfaceSettingsScaffold(
+    title: String,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+    subtitle: String? = null,
+    content: @Composable (PaddingValues) -> Unit,
+) {
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        topBar = { SettingsSubPageTopBar(title = title, onBack = onBack, subtitle = subtitle) },
+        content = content,
     )
 }
 

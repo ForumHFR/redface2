@@ -58,6 +58,7 @@ La documentation HTML est issue de la rétro-ingénierie du code de [Redface v1]
 | Annuaire staff (responsables) | GET | `/message-smi-mp-aj.php?config=hfr.inc&user_id=0&responsable=1` | non |
 | Paramètres utilisateur | GET | `/editprofil.php?config=hfr.inc&page={1..7}` | **oui** |
 | Modération (alerte) | GET/POST | `/user/modo.php?config=hfr.inc&cat={cat}&post={topicId}&numreponse={numreponse}&page={page}&ref=1` (voir ci-dessous) | **oui** |
+| Historique des sanctions (#294) | GET | `/modo/historique.php?config=hfr.inc` | **oui** |
 | Recherche (form) | GET | `/search.php?config=hfr.inc` | non |
 | Recherche (résultats) | GET | `/forum1.php?recherches=1&config=hfr.inc&search={query}&cat={catEncoded}&...` | non |
 
@@ -126,6 +127,50 @@ annule le GET en cours ; un POST déjà confirmé poursuit son exécution, comme
 `ModerationAlertPageParser` renvoie `Sent`, `Joined` ou `Rejected(message)` pour les
 réponses POST. Le repository laisse remonter les exceptions réseau/session ; le topic
 les présente via sa snackbar, sans confondre un échec de transport avec une confirmation HFR.
+
+### Historique des sanctions — `/modo/historique.php` (#294)
+
+Contrat capturé le **06/09/2026** : les fixtures réelles `sanctions_history_empty.html`
+(XaTelitte, aucune sanction) et `sanctions_history_one.html` (XaTriX, une sanction levée),
+avec leurs sidecars `.source.txt`, vivent dans `core/parser/src/test/resources/fixtures/`.
+
+L’ouverture de « Mes sanctions » depuis Réglages → Compte déclenche un **GET authentifié volontaire** :
+
+```text
+https://forum.hardware.fr/modo/historique.php?config=hfr.inc
+```
+
+En anonyme, HFR répond **HTTP 200 avec un corps vide**. Le parser renvoie
+`SanctionsHistory.SignInRequired` quand le tableau attendu est absent, jamais un historique vide.
+Le ViewModel observe la session et ne lance aucune requête en anonyme ; il annule la lecture et
+efface les données au changement de compte. Aucun cache persistant ni préchargement.
+
+Le pseudo vient de `h1#md_arbo_tree_3 b`. Sélectionner la `table.main` contenant un
+`tr.cBackHeader` avec un `th` « Nom du posteur » : la première `table.main.fastsearchMain`
+est la recherche rapide, pas l’historique. Le tableau des sanctions est le deuxième dans les captures.
+Chaque `tr.profil` contient sept `td`, indépendamment de l’alternance de la classe `cBackTab2` :
+
+| Colonne HFR | Champ `Sanction` | Traitement |
+|---|---|---|
+| Nom du posteur | `pseudo` | Texte |
+| Sanction | `kind` | Texte, par exemple « Teletubbies » |
+| Modéré par | `moderator` | Texte |
+| Catégorie Interdite | `category` | Texte |
+| Date de la sanction | `issuedAt` | Date brute normalisée |
+| Sanction levée le | `liftedAt` | Date brute normalisée ; vide/blanc → `null` (« En cours ») |
+| Raison de la sanction | `reason` | Texte brut, éventuellement vide |
+
+Les dates restent des `String` au format `dd-MM-yyyy à HH:mm`, en heure de Paris :
+`13-06-2026&nbsp;à&nbsp;22:13` devient « 13-06-2026 à 22:13 », sans conversion de fuseau.
+Une ligne avec moins de sept cellules est ignorée. L’en-tête seul est un historique chargé vide,
+avec le pseudo du `h1` (`SanctionsHistory.Loaded`).
+
+La sanction capturée est « Teletubbies », par TotalRecall, catégorie « Intelligence Artificielle »,
+du 13-06-2026 à 22:13 au 18-06-2026 à 22:13, raison « Promo de juin : pour deux TALC, un TT offert. ».
+**Une sanction en cours et une raison vide n’ont pas été observées dans ces fixtures** : ces cas
+sont traités défensivement et couverts par des variantes DOM en mémoire des captures réelles.
+Les erreurs de transport/parsing restent des échecs `Result`, classés pour l’affichage avec « Réessayer » ;
+une session expirée détectée par le client rejoint « Connexion requise ».
 
 ### Retirer un drapeau — `delflag.php` (#99, Phase 2 finish)
 

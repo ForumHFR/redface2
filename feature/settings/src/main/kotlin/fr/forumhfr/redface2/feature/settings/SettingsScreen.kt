@@ -78,6 +78,8 @@ fun SettingsScreen(
     onOpenBlacklist: () -> Unit,
     onOpenCategory: (String) -> Unit,
     onOpenAppIcon: () -> Unit = {},
+    onOpenSanctions: () -> Unit = {},
+    isAuthenticated: Boolean = false,
     modifier: Modifier = Modifier,
     topBarActions: @Composable (() -> Unit)? = null,
     viewModel: SettingsViewModel = hiltViewModel(),
@@ -96,6 +98,8 @@ fun SettingsScreen(
         onOpenAppIcon = onOpenAppIcon,
         onOpenImages = onOpenImages,
         onOpenAccountAbout = onOpenAccountAbout,
+        onOpenSanctions = onOpenSanctions,
+        isAuthenticated = isAuthenticated,
         onOpenBlacklist = onOpenBlacklist,
         onOpenCategory = onOpenCategory,
         modifier = modifier,
@@ -122,6 +126,8 @@ internal fun SettingsRoot(
     onOpenBlacklist: () -> Unit,
     onOpenCategory: (String) -> Unit,
     onOpenAppIcon: () -> Unit = {},
+    onOpenSanctions: () -> Unit = {},
+    isAuthenticated: Boolean = false,
     modifier: Modifier = Modifier,
     topBarActions: @Composable (() -> Unit)? = null,
 ) {
@@ -168,6 +174,8 @@ internal fun SettingsRoot(
         onOpenAppIcon = onOpenAppIcon,
         onOpenImages = onOpenImages,
         onOpenAccountAbout = onOpenAccountAbout,
+        onOpenSanctions = onOpenSanctions,
+        isAuthenticated = isAuthenticated,
         onOpenBlacklist = onOpenBlacklist,
         hfrLinkStatus = rememberHfrLinkHandlingStatus(),
         onOpenHfrLinkSettings = { openAppDefaultLinkSettings(context) },
@@ -311,6 +319,8 @@ internal fun buildSettingsCatalogue(
     onOpenAccountAbout: () -> Unit,
     onOpenBlacklist: () -> Unit,
     onOpenAppIcon: () -> Unit = {},
+    onOpenSanctions: () -> Unit = {},
+    isAuthenticated: Boolean = false,
     hfrLinkStatus: HfrLinkHandlingStatus = HfrLinkHandlingStatus.UNKNOWN,
     onOpenHfrLinkSettings: () -> Unit = {},
 ): List<SettingsCatalogueSection> = listOf(
@@ -948,6 +958,7 @@ internal fun buildSettingsCatalogue(
                 ),
                 onClick = onOpenAccountAbout,
             ),
+            sanctionsRow(isAuthenticated = isAuthenticated, onClick = onOpenSanctions),
             futureRow(
                 id = "future_hfr_profile_settings",
                 title = stringResource(R.string.settings_future_hfr_profile_settings),
@@ -1062,6 +1073,18 @@ internal fun buildSettingsCatalogue(
             ),
         ),
     ),
+)
+
+@Composable
+private fun sanctionsRow(isAuthenticated: Boolean, onClick: () -> Unit): SettingsCatalogueRow = SettingsCatalogueRow(
+    searchable = SettingsSearchableItem(
+        id = "sanctions",
+        title = stringResource(R.string.sanctions_title),
+        description = stringResource(sanctionsDescriptionRes(isAuthenticated)),
+        keywords = listOf("historique", "sanction", "TT", "ban", "modération", "compte HFR"),
+        enabled = isAuthenticated,
+    ),
+    render = { SanctionsSettingsItem(isAuthenticated = isAuthenticated, onClick = onClick) },
 )
 
 /** A navigation row (chevron trailing) — opaque to search via [keywords]. */
