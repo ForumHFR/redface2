@@ -7,20 +7,20 @@ nav_order: 5
 # Icône de l'application
 {: .fs-8 }
 
-Procédure de génération et structure de l'icône de lancement Android.
+Catalogue et structure des icônes de lancement Android.
 {: .fs-5 .fw-300 }
 
-## Statut actuel — placeholder
+## Icône Classique — drapeau historique
 
-L'icône actuelle est un **placeholder pour builds internes**, dérivée du
+L'icône Classique, activée par défaut, est le **placeholder historique**, dérivé du
 drapeau historique HFR (`flag1.gif`, 14 × 11, pixel art teal/rose avec
-bordure noire). Elle sera remplacée par une identité visuelle propre à
-Redface 2 avant toute publication publique.
+bordure noire). La galerie propose aussi Redface 1 et trois dessins originaux ;
+ces derniers restent à valider visuellement par XaTriX avant leur diffusion en bêta.
 
 La source vit en dehors du repo (`~/Téléchargements/flag1.gif` sur la
 machine de dev). Les ressources générées sont dans `app/src/main/res/`.
 
-## Structure (adaptive icon + legacy fallback)
+## Structure de Classique (adaptive icon + legacy fallback)
 
 minSdk 29 ⇒ toutes les cibles supportent les adaptive icons (API 26+). On
 fournit quand même les PNG legacy pour les launchers qui n'utilisent pas encore
@@ -29,9 +29,10 @@ la structure adaptive.
 ```
 app/src/main/res/
 ├── drawable/
-│   └── ic_launcher_background.xml         # solid color #FFFFFF (contraste avec la bordure noire du drapeau)
+│   ├── ic_launcher_background.xml         # solid color #FFFFFF (contraste avec la bordure noire du drapeau)
+│   └── ic_launcher_monochrome.xml         # silhouette vectorielle en aplat du drapeau
 ├── mipmap-anydpi-v26/
-│   ├── ic_launcher.xml                    # <adaptive-icon> fg+bg
+│   ├── ic_launcher.xml                    # <adaptive-icon> fg+bg+monochrome
 │   └── ic_launcher_round.xml              # idem, pour le slot roundIcon
 ├── mipmap-{mdpi,hdpi,xhdpi,xxhdpi,xxxhdpi}/
 │   ├── ic_launcher.png                    # fallback legacy carré (avec bg intégré)
@@ -49,13 +50,35 @@ app/src/main/res/
 
 ## Icônes alternatives
 
-Réglages → Affichage → Icône de l’application ouvre une galerie de deux icônes complètes.
+Réglages → Affichage → Icône de l’application ouvre une galerie de cinq icônes complètes,
+dans une grille défilante à deux colonnes. Le bouton Appliquer reste sous la grille.
 Les aperçus chargent leurs ressources adaptatives : le masque est celui du système Android.
 
 | Choix | Alias du manifeste | Composition |
 |-------|--------------------|-------------|
-| Classique | `.LauncherClassic` | Drapeau RF2 existant, fond `#FFFFFF`, inchangé |
+| Classique | `.LauncherClassic` | Drapeau RF2 existant, fond `#FFFFFF` ; silhouette vectorielle pour le monochrome |
 | Redface 1 | `.LauncherRf1` | Foreground et fond adaptatifs d’origine de Redface 1 (PNG aux cinq densités) |
+| Monogramme RF | `.LauncherMonogram` | Lettres RF géométriques blanches, fond rouge `#D32F2F` |
+| Discussion | `.LauncherBubbles` | Deux bulles rouges `#D32F2F`, pleine et contour, fond blanc cassé `#FAFAFA` |
+| Puce | `.LauncherChip` | Puce rouge `#E53935`, douze broches et carré central blancs, fond anthracite `#263238` |
+
+Les trois créations sont des `VectorDrawable` de 108 × 108 dp, sans police ni dégradé.
+Pour chaque nom `monogram`, `bubbles` ou `chip`, `drawable/ic_launcher_<nom>_{background,foreground,monochrome}.xml`
+fournit les trois couches ; `mipmap-anydpi-v26/ic_launcher_<nom>.xml` et sa variante `_round.xml`
+référencent les mêmes couches, avec `<monochrome>` pour les icônes thématiques Android 13+.
+
+- **Monogramme RF** : deux lettres en chemins, hautes de 40 dp, traits principaux de 9 dp ;
+  le R garde une contreforme transparente. Le monochrome conserve uniquement les lettres.
+- **Discussion** : bulle pleine en bas à gauche et bulle à contour de 6 dp en haut à droite,
+  avec coins arrondis et queues triangulaires. Un espace transparent les sépare aussi en monochrome.
+- **Puce** : corps carré de 44 dp à coins arrondis, trois broches de 4 × 10 dp par côté,
+  carré central de 12 dp. En monochrome, ce carré devient une découpe transparente dans la puce.
+
+Le rouge `#D32F2F` reprend la valeur de `FlagPalette.Red`
+(`core/ui/src/main/kotlin/fr/forumhfr/redface2/core/ui/theme/FlagPalette.kt`), couleur fixe des drapeaux ;
+il ne dépend pas de l’accent actif de l’application. Les dessins sont centrés sur (54, 54) :
+le monogramme tient dans le cercle sûr de 66 dp ; les bulles et broches restent dans celui de 72 dp.
+Les nouveaux dessins ne reprennent aucun logo existant. Aucun PNG legacy supplémentaire n’est nécessaire avec `minSdk 29`.
 
 La sélection reste provisoire jusqu’au bouton **Appliquer**. Le redémarrage suit le schéma
 ProcessPhoenix en quatre temps :
@@ -87,13 +110,14 @@ Chaque alias cible `.MainActivity` et porte son propre filtre `MAIN` / `LAUNCHER
 conserve les filtres `VIEW` des deep links HFR. Les alias `.LauncherDark`, `.LauncherRose` et
 `.LauncherRed` et leurs ressources restent déclarés pour les installations dev 0.54.0, mais ne sont
 plus proposés. Leurs valeurs persistées se lisent comme `CLASSIC`, sans écriture à la lecture.
-Au démarrage de `MainActivity`, le contrôleur vérifie les états effectifs des cinq composants sur
+Au démarrage de `MainActivity`, le contrôleur vérifie les états effectifs des huit composants sur
 le dispatcher IO : un ancien alias actif ou l’absence d’alias actif entraîne un retour à Classique
 et sa persistance ; les autres écarts suivent la préférence sélectionnable. Ce contrôle partage
 un verrou avec Appliquer et devient sans effet une fois les états cohérents.
 
-RF1 fournit une couche `<monochrome>` à partir de son foreground. Classique conserve ses XML
-existants, sans couche monochrome dédiée. Aucun PNG legacy RF1 n’est nécessaire avec `minSdk 29`.
+RF1 fournit une couche `<monochrome>` à partir de son foreground. Classique dispose d’une couche
+monochrome vectorielle tracée depuis les pixels opaques du foreground mdpi existant ; ses ressources
+couleur sont conservées. Aucun PNG legacy RF1 n’est nécessaire avec `minSdk 29`.
 Origine, licence Apache 2.0 et adaptation : [mentions des assets tiers](https://github.com/ForumHFR/redface2/blob/dev/app/THIRD_PARTY_NOTICES.md).
 
 Pour ajouter une icône :

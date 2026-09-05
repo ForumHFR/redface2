@@ -1557,6 +1557,21 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `original launcher drawings persist their stable names and read them back`() = runTest(dispatcher) {
+        val key = stringPreferencesKey("app_launcher_icon")
+        listOf(
+            AppLauncherIcon.MONOGRAM to "MONOGRAM",
+            AppLauncherIcon.BUBBLES to "BUBBLES",
+            AppLauncherIcon.CHIP to "CHIP",
+        ).forEach { (icon, storedName) ->
+            repository.setAppLauncherIcon(icon)
+
+            assertEquals(storedName, dataStore.data.first()[key])
+            assertEquals(icon, repository.observeAppLauncherIcon().first())
+        }
+    }
+
+    @Test
     fun `corrupt app_launcher_icon value falls back to CLASSIC instead of crashing`() = runTest(dispatcher) {
         dataStore.edit { prefs -> prefs[stringPreferencesKey("app_launcher_icon")] = "BLUE" }
 

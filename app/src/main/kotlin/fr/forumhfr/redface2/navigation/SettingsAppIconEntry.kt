@@ -67,6 +67,9 @@ internal fun SettingsAppIconEntry(
 
 internal fun appLauncherIconResource(icon: AppLauncherIcon): Int = when (icon) {
     AppLauncherIcon.RF1 -> R.mipmap.ic_launcher_rf1
+    AppLauncherIcon.MONOGRAM -> R.mipmap.ic_launcher_monogram
+    AppLauncherIcon.BUBBLES -> R.mipmap.ic_launcher_bubbles
+    AppLauncherIcon.CHIP -> R.mipmap.ic_launcher_chip
     else -> R.mipmap.ic_launcher
 }
 

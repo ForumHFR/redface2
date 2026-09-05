@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Flat silhouette traced from the existing mdpi foreground's opaque pixel runs. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M31,34H40V38H31Z M49,34H59V38H49Z M31,38H77V43H31Z M36,43H72V47H36Z M36,47H68V52H36Z M40,52H63V56H40Z M40,56H54V61H40Z M45,61H49V70H45Z M49,70H54V79H49Z" />
+</vector>

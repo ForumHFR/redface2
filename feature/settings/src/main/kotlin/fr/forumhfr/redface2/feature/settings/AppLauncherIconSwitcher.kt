@@ -10,12 +10,15 @@ import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
 fun launcherAliasFor(icon: AppLauncherIcon): String = when (icon) {
     AppLauncherIcon.CLASSIC -> LAUNCHER_CLASSIC_ALIAS
     AppLauncherIcon.RF1 -> LAUNCHER_RF1_ALIAS
+    AppLauncherIcon.MONOGRAM -> LAUNCHER_MONOGRAM_ALIAS
+    AppLauncherIcon.BUBBLES -> LAUNCHER_BUBBLES_ALIAS
+    AppLauncherIcon.CHIP -> LAUNCHER_CHIP_ALIAS
     AppLauncherIcon.DARK -> LAUNCHER_DARK_ALIAS
     AppLauncherIcon.ROSE -> LAUNCHER_ROSE_ALIAS
     AppLauncherIcon.RED -> LAUNCHER_RED_ALIAS
 }
 
-/** True when [className] is one of the five manifest launcher aliases (untrusted-input guard). */
+/** True when [className] is a declared manifest launcher alias (untrusted-input guard). */
 fun isKnownLauncherAlias(className: String): Boolean =
     AppLauncherIcon.entries.any { launcherAliasFor(it) == className }
 
@@ -90,6 +93,9 @@ internal fun reconcileLauncherIcon(context: Context, persisted: AppLauncherIcon)
 private const val MANIFEST_PACKAGE = "fr.forumhfr.redface2"
 internal const val LAUNCHER_CLASSIC_ALIAS = "$MANIFEST_PACKAGE.LauncherClassic"
 internal const val LAUNCHER_RF1_ALIAS = "$MANIFEST_PACKAGE.LauncherRf1"
+internal const val LAUNCHER_MONOGRAM_ALIAS = "$MANIFEST_PACKAGE.LauncherMonogram"
+internal const val LAUNCHER_BUBBLES_ALIAS = "$MANIFEST_PACKAGE.LauncherBubbles"
+internal const val LAUNCHER_CHIP_ALIAS = "$MANIFEST_PACKAGE.LauncherChip"
 internal const val LAUNCHER_DARK_ALIAS = "$MANIFEST_PACKAGE.LauncherDark"
 internal const val LAUNCHER_ROSE_ALIAS = "$MANIFEST_PACKAGE.LauncherRose"
 internal const val LAUNCHER_RED_ALIAS = "$MANIFEST_PACKAGE.LauncherRed"

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Three 4x10dp pins per side; all tips stay inside the 72dp circle. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M42,22H46V32H42Z M52,22H56V32H52Z M62,22H66V32H62Z M42,76H46V86H42Z M52,76H56V86H52Z M62,76H66V86H62Z M22,42H32V46H22Z M22,52H32V56H22Z M22,62H32V66H22Z M76,42H86V46H76Z M76,52H86V56H76Z M76,62H86V66H76Z" />
+    <path
+        android:fillColor="#E53935"
+        android:pathData="M40,32H68Q76,32 76,40V68Q76,76 68,76H40Q32,76 32,68V40Q32,32 40,32Z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M48,48H60V60H48Z" />
+</vector>

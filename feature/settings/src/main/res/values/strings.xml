@@ -297,6 +297,9 @@
     <string name="settings_display_launcher_icon_help">L\'application redémarre pour changer d\'icône. Le lanceur peut mettre quelques secondes à se rafraîchir.</string>
     <string name="settings_display_launcher_icon_classic">Classique</string>
     <string name="settings_display_launcher_icon_rf1">Redface 1</string>
+    <string name="settings_display_launcher_icon_monogram">Monogramme RF</string>
+    <string name="settings_display_launcher_icon_bubbles">Discussion</string>
+    <string name="settings_display_launcher_icon_chip">Puce</string>
     <string name="settings_display_launcher_icon_current">Actuelle</string>
     <string name="settings_display_launcher_icon_apply">Appliquer</string>
     <string name="settings_display_launcher_icon_personal_help">Une image personnelle ne peut pas remplacer l\'icône dans la liste des applications ; certains lanceurs (Nova, Lawnchair…) proposent cette personnalisation.</string>

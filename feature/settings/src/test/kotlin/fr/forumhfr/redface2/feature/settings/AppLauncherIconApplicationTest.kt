@@ -36,32 +36,33 @@ class AppLauncherIconApplicationTest {
 
     @Test
     fun `selected alias is enabled before all others are disabled without killing the app`() {
-        val context = RecordingContext(application, SUFFIXED_APPLICATION_ID)
+        AppLauncherIcon.entries.forEach { selected ->
+            val context = RecordingContext(application, SUFFIXED_APPLICATION_ID)
 
-        applyLauncherIcon(context, AppLauncherIcon.RF1)
+            applyLauncherIcon(context, selected)
 
-        assertEquals(AppLauncherIcon.entries.size, context.calls.size)
-        val enableCall = context.calls.first()
-        assertEquals(SUFFIXED_APPLICATION_ID, enableCall.component.packageName)
-        assertEquals(LAUNCHER_RF1_ALIAS, enableCall.component.className)
-        assertEquals(PackageManager.COMPONENT_ENABLED_STATE_ENABLED, enableCall.newState)
+            assertEquals(8, context.calls.size)
+            val enableCall = context.calls.first()
+            assertEquals(SUFFIXED_APPLICATION_ID, enableCall.component.packageName)
+            assertEquals(launcherAliasFor(selected), enableCall.component.className)
+            assertEquals(PackageManager.COMPONENT_ENABLED_STATE_ENABLED, enableCall.newState)
 
-        val disableCalls = context.calls.drop(1)
-        assertEquals(
-            setOf(LAUNCHER_CLASSIC_ALIAS, LAUNCHER_DARK_ALIAS, LAUNCHER_ROSE_ALIAS, LAUNCHER_RED_ALIAS),
-            disableCalls.map { it.component.className }.toSet(),
-        )
-        assertTrue(disableCalls.all { it.newState == PackageManager.COMPONENT_ENABLED_STATE_DISABLED })
-        assertTrue(context.calls.all { it.flags == PackageManager.DONT_KILL_APP })
+            val disableCalls = context.calls.drop(1)
+            assertEquals(
+                AppLauncherIcon.entries.filter { it != selected }.map(::launcherAliasFor).toSet(),
+                disableCalls.map { it.component.className }.toSet(),
+            )
+            assertEquals(listOf(selected), context.activeIcons())
+            assertTrue(disableCalls.all { it.newState == PackageManager.COMPONENT_ENABLED_STATE_DISABLED })
+            assertTrue(context.calls.all { it.flags == PackageManager.DONT_KILL_APP })
+        }
     }
 
     @Test
     fun `coherent default and explicitly enabled aliases are no-ops`() = runTest {
-        val contexts = listOf(
-            RecordingContext(application, SUFFIXED_APPLICATION_ID),
-            contextWithActive(AppLauncherIcon.RF1),
-        )
-        contexts.zip(AppLauncherIcon.selectable).forEach { (context, icon) ->
+        val contexts = listOf(RecordingContext(application, SUFFIXED_APPLICATION_ID) to AppLauncherIcon.CLASSIC) +
+            AppLauncherIcon.selectable.map { contextWithActive(it) to it }
+        contexts.forEach { (context, icon) ->
             val preferences = preferences(icon)
             val controller = AppLauncherIconController(context, preferences, StandardTestDispatcher(testScheduler))
 
@@ -82,7 +83,7 @@ class AppLauncherIconApplicationTest {
         controller.reconcile()
 
         assertEquals(listOf(AppLauncherIcon.RF1), context.activeIcons())
-        assertEquals(5, context.calls.size)
+        assertEquals(8, context.calls.size)
         coVerify(exactly = 0) { preferences.setAppLauncherIcon(any()) }
     }
 
@@ -141,15 +142,26 @@ class AppLauncherIconApplicationTest {
 
     @Test
     fun `multiple selectable aliases are reduced to the preference without re-enabling it`() = runTest {
-        val context = contextWithActive(AppLauncherIcon.CLASSIC, AppLauncherIcon.RF1)
-        val preferences = preferences(AppLauncherIcon.RF1)
-        val controller = AppLauncherIconController(context, preferences, StandardTestDispatcher(testScheduler))
+        AppLauncherIcon.selectable.forEach { selected ->
+            val context = contextWithActive(
+                AppLauncherIcon.CLASSIC,
+                AppLauncherIcon.RF1,
+                AppLauncherIcon.MONOGRAM,
+                AppLauncherIcon.BUBBLES,
+                AppLauncherIcon.CHIP,
+            )
+            val preferences = preferences(selected)
+            val controller = AppLauncherIconController(context, preferences, StandardTestDispatcher(testScheduler))
 
-        controller.reconcile()
+            controller.reconcile()
+            controller.reconcile()
 
-        assertEquals(listOf(AppLauncherIcon.RF1), context.activeIcons())
-        assertTrue(context.calls.none { it.component.className == LAUNCHER_RF1_ALIAS })
-        assertTrue(context.calls.all { it.newState == PackageManager.COMPONENT_ENABLED_STATE_DISABLED })
+            assertEquals(listOf(selected), context.activeIcons())
+            assertEquals(7, context.calls.size)
+            assertTrue(context.calls.none { it.component.className == launcherAliasFor(selected) })
+            assertTrue(context.calls.all { it.newState == PackageManager.COMPONENT_ENABLED_STATE_DISABLED })
+            coVerify(exactly = 0) { preferences.setAppLauncherIcon(any()) }
+        }
     }
 
     @Test
@@ -176,7 +188,7 @@ class AppLauncherIconApplicationTest {
 
         assertEquals(AppLauncherIcon.RF1, persisted.value)
         assertEquals(listOf(AppLauncherIcon.RF1), context.activeIcons())
-        assertEquals(5, context.calls.size)
+        assertEquals(8, context.calls.size)
     }
 
     @Test

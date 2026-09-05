@@ -9,6 +9,9 @@ package fr.forumhfr.redface2.core.domain.preferences
 enum class AppLauncherIcon(val selectable: Boolean) {
     CLASSIC(true),
     RF1(true),
+    MONOGRAM(true),
+    BUBBLES(true),
+    CHIP(true),
     @Deprecated("Retained only for the 0.54.0 launcher migration")
     DARK(false),
     @Deprecated("Retained only for the 0.54.0 launcher migration")

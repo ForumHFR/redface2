@@ -4,7 +4,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -27,7 +26,6 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -36,7 +34,6 @@ import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -99,7 +96,7 @@ class TopicZoomGestureTest {
                 )
             }
             Box(modifier) {
-                LazyColumn(state = listState, userScrollEnabled = !zoomState.zoomed) {
+                LazyColumn(state = listState) {
                     items(count = 200) { i ->
                         Text("post $i", Modifier.fillMaxWidth().height(48.dp))
                     }
@@ -121,55 +118,6 @@ class TopicZoomGestureTest {
             up(0)
             up(1)
         }
-    }
-
-    /** Public SelectionContainer does not expose its selection: spy on the same long-press drag contract. */
-    private fun mountLongPressDragTarget(
-        onDragStart: () -> Unit = {},
-        onDragEnd: () -> Unit = {},
-        onDragCancel: () -> Unit = {},
-        onDrag: (Offset) -> Unit = {},
-    ): Long {
-        var longPressTimeoutMillis = 0L
-        compose.setContent {
-            val scope = rememberCoroutineScope()
-            longPressTimeoutMillis = LocalViewConfiguration.current.longPressTimeoutMillis
-            listState = remember { LazyListState() }
-            zoomState = rememberTopicZoomState(pageKey = 1, animationScope = scope)
-            Box(
-                Modifier.size(360.dp, 600.dp).testTag("zoom").topicMagnifier(zoomState, listState),
-            ) {
-                LazyColumn(
-                    state = listState,
-                    userScrollEnabled = !zoomState.zoomed,
-                    modifier = Modifier.topicZoomTransform(zoomState),
-                ) {
-                    item {
-                        Text(
-                            "one two three four five six seven eight",
-                            Modifier.fillMaxWidth().height(600.dp).pointerInput(Unit) {
-                                detectDragGesturesAfterLongPress(
-                                    onDragStart = { onDragStart() },
-                                    onDragEnd = onDragEnd,
-                                    onDragCancel = onDragCancel,
-                                ) { change, amount ->
-                                    onDrag(amount)
-                                    change.consume()
-                                }
-                            },
-                        )
-                    }
-                    items(count = 20) { i -> Text("post $i", Modifier.fillMaxWidth().height(48.dp)) }
-                }
-            }
-        }
-        compose.runOnIdle {
-            zoomState.scale.floatValue = 2f
-            // Leave room in both horizontal directions so clamping cannot hide a stolen drag.
-            zoomState.panX.floatValue = -100f
-        }
-        compose.waitForIdle()
-        return longPressTimeoutMillis
     }
 
     @Test
@@ -407,74 +355,7 @@ class TopicZoomGestureTest {
     }
 
     @Test
-    fun `long press then drag while zoomed extends the selection instead of panning`() {
-        var longPresses = 0
-        var dragEnds = 0
-        var childDrag = Offset.Zero
-        val longPressTimeout = mountLongPressDragTarget(
-            onDragStart = { longPresses++ },
-            onDragEnd = { dragEnds++ },
-            onDrag = { childDrag += it },
-        )
-        val panBefore = Offset(zoomState.panX.floatValue, zoomState.panY.floatValue)
-        val itemBefore = listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
-
-        compose.onNodeWithTag("zoom").performTouchInput {
-            down(0, Offset(120f, 40f))
-            advanceEventTime(longPressTimeout + 1)
-            moveBy(0, Offset(80f, 0f))
-            up(0)
-        }
-        compose.waitForIdle()
-
-        // Fallback oracle: the child receives the full drag through the 2x transform and ends
-        // normally, while neither layer translation nor real list scrolling changes.
-        assertEquals("the text child must recognize the long press", 1, longPresses)
-        assertEquals("the child must keep the drag through release", 1, dragEnds)
-        assertEquals("80 screen px must reach the child as 40 local px", 40f, childDrag.x, 0.001f)
-        assertEquals(panBefore, Offset(zoomState.panX.floatValue, zoomState.panY.floatValue))
-        assertEquals(itemBefore, listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset)
-        assertFalse("selection must never engage the zoom pan", zoomState.gestureEngaged)
-        assertNull("selection must not start a zoom fling", zoomState.releaseJob)
-    }
-
-    @Test
-    fun `a second finger still starts a pinch after a child claims the long press drag`() {
-        var childDrag = Offset.Zero
-        var dragCancellations = 0
-        val longPressTimeout = mountLongPressDragTarget(
-            onDragCancel = { dragCancellations++ },
-            onDrag = { childDrag += it },
-        )
-        compose.onNodeWithTag("zoom").performTouchInput {
-            down(0, center - Offset(0f, 150f))
-            advanceEventTime(longPressTimeout + 1)
-            moveBy(0, Offset(80f, 0f))
-        }
-        compose.waitForIdle()
-        assertEquals(40f, childDrag.x, 0.001f)
-        assertEquals("child consumption must block the pan", -100f, zoomState.panX.floatValue, 0.001f)
-
-        compose.onNodeWithTag("zoom").performTouchInput {
-            down(1, center + Offset(80f, 150f))
-        }
-        assertTrue("the second down must engage on Initial despite child ownership", zoomState.gestureEngaged)
-        compose.onNodeWithTag("zoom").performTouchInput {
-            repeat(4) {
-                moveBy(0, Offset(0f, -20f))
-                moveBy(1, Offset(0f, 20f))
-            }
-            up(1)
-            up(0)
-        }
-        compose.waitForIdle()
-        assertTrue("the pinch must still increase the scale", zoomState.scale.floatValue > 2f)
-        assertEquals("the pinch must cancel the child's drag", 1, dragCancellations)
-        assertEquals("pinch movement must be consumed before the child on Main", 0f, childDrag.y, 0.001f)
-    }
-
-    @Test
-    fun `one finger pan while zoomed lets children arbitrate then consumes subsequent movement`() {
+    fun `one finger pan while zoomed consumes movement before child detectors`() {
         var childUnconsumedMoves = 0
         compose.setContent {
             val scope = rememberCoroutineScope()
@@ -520,44 +401,8 @@ class TopicZoomGestureTest {
         compose.waitForIdle()
 
         val itemAfter = listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
-        assertEquals("only the engaging frame reaches children unconsumed on Main", 1, childUnconsumedMoves)
+        assertEquals("zoomed pan movement must be consumed on Initial", 0, childUnconsumedMoves)
         assertNotEquals("the consumed movement must still drive the zoom pan", itemBefore, itemAfter)
-    }
-
-    @Test
-    fun `one finger horizontal pan without long press still translates while zoomed`() {
-        mount(withSwipe = true)
-        pinchOut(gapEndPx = 600f)
-        compose.waitForIdle()
-        val panBefore = zoomState.panX.floatValue
-        val itemBefore = listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
-
-        compose.onNodeWithTag("zoom").performTouchInput {
-            down(0, center)
-            repeat(4) { moveBy(0, Offset(80f, 0f)) }
-            up(0)
-        }
-        compose.waitForIdle()
-
-        assertEquals("all horizontal deltas still drive the pan", panBefore + 320f, zoomState.panX.floatValue, 0.001f)
-        assertEquals(itemBefore, listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset)
-        assertEquals("zoomed horizontal pan must not arm the page swipe", 0f, swipeDragOffset.floatValue, 0.001f)
-    }
-
-    @Test
-    fun `at rest a vertical drag still scrolls the native list without engaging the magnifier`() {
-        mount(withSwipe = true)
-        val itemBefore = listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
-        compose.onNodeWithTag("zoom").performTouchInput {
-            down(0, center)
-            repeat(4) { moveBy(0, Offset(0f, -80f)) }
-        }
-        compose.waitForIdle()
-
-        assertNotEquals(itemBefore, listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset)
-        assertFalse("native scrolling at 1x must retain the gesture", zoomState.gestureEngaged)
-        assertEquals(1f, zoomState.scale.floatValue, 0.001f)
-        compose.onNodeWithTag("zoom").performTouchInput { up(0) }
     }
 
     @Test

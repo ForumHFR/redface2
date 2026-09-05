@@ -198,5 +198,8 @@ private fun AppIconCard(icon: AppLauncherIcon, state: SettingsState, resource: I
 @StringRes
 internal fun launcherIconNameRes(icon: AppLauncherIcon): Int = when (icon) {
     AppLauncherIcon.RF1 -> R.string.settings_display_launcher_icon_rf1
+    AppLauncherIcon.MONOGRAM -> R.string.settings_display_launcher_icon_monogram
+    AppLauncherIcon.BUBBLES -> R.string.settings_display_launcher_icon_bubbles
+    AppLauncherIcon.CHIP -> R.string.settings_display_launcher_icon_chip
     else -> R.string.settings_display_launcher_icon_classic
 }

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Geometric RF, 40dp high, with a transparent counter in the R. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M30,34H41C49,34 54,39 54,46C54,51 51,55 47,57L56,74H45L39,59V74H30Z M39,43V50H41C44,50 45,49 45,46C45,44 44,43 41,43Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M60,34H78V43H69V50H77V59H69V74H60Z" />
+</vector>
