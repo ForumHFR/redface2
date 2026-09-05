@@ -142,6 +142,7 @@ import fr.forumhfr.redface2.feature.profile.ProfileRoute
 import fr.forumhfr.redface2.feature.profile.ProfileViewModel
 import fr.forumhfr.redface2.feature.search.SearchScreen
 import fr.forumhfr.redface2.feature.settings.MyImagesScreen
+import fr.forumhfr.redface2.feature.settings.SanctionsScreen
 import fr.forumhfr.redface2.feature.settings.SettingsAccountAboutScreen
 import fr.forumhfr.redface2.feature.settings.SettingsColorsScreen
 import fr.forumhfr.redface2.feature.settings.SettingsCategoryDetailScreen
@@ -419,6 +420,10 @@ data object SettingsRoute : RedfaceNavKey
  */
 @Serializable
 data object MyImagesRoute : RedfaceNavKey
+
+/** #294 — authenticated history of the active HFR account, loaded on demand. */
+@Serializable
+data object SanctionsRoute : RedfaceNavKey
 
 /**
  * #6 — read-only MPStorage inspector (debug). Reached from the Settings screen, only when the DT
@@ -1391,6 +1396,7 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                             // parent BackHandler above handles it in the current nav3 where it does not).
                             onRootBack = onRootTabBack,
                             accountMenu = accountMenu,
+                            isAuthenticated = authState is AuthState.Authenticated,
                             flagsQuickConfigRequest = flagsQuickConfigRequest,
                             // #603 bug fix — reset the counter once FlagsRoute handled it, so a re-mount
                             // (return from a category/topic) does not replay the sheet open (Codex review).
@@ -2219,6 +2225,7 @@ private fun RedfaceNavHost(
     // fires instead; this keeps the behaviour correct if a future nav3 invokes onBack at the root.
     onRootBack: () -> Unit,
     accountMenu: @Composable () -> Unit,
+    isAuthenticated: Boolean,
     // #603 PR6 — increments on each Drapeaux-tab re-tap; FlagsRoute opens its quick-config sheet on change.
     flagsQuickConfigRequest: Int,
     // #603 bug fix — FlagsRoute calls this once it has handled a request, resetting the counter to 0 so a
@@ -2652,6 +2659,8 @@ private fun RedfaceNavHost(
                     onOpenAppIcon = { backStack.add(SettingsAppIconRoute) },
                     onOpenImages = { backStack.add(SettingsImagesRoute) },
                     onOpenAccountAbout = { backStack.add(SettingsAccountAboutRoute) },
+                    onOpenSanctions = { backStack.add(SanctionsRoute) },
+                    isAuthenticated = isAuthenticated,
                     onOpenBlacklist = { backStack.add(SettingsBlacklistRoute) },
                     // #494 v2 — catégories sans sous-page dédiée → détail générique.
                     onOpenCategory = { categoryId -> backStack.add(SettingsCategoryRoute(categoryId)) },
@@ -2672,6 +2681,8 @@ private fun RedfaceNavHost(
                     onOpenAppIcon = { backStack.add(SettingsAppIconRoute) },
                     onOpenImages = { backStack.add(SettingsImagesRoute) },
                     onOpenAccountAbout = { backStack.add(SettingsAccountAboutRoute) },
+                    onOpenSanctions = { backStack.add(SanctionsRoute) },
+                    isAuthenticated = isAuthenticated,
                     onOpenBlacklist = { backStack.add(SettingsBlacklistRoute) },
                     topBarActions = accountMenu,
                 )
@@ -2762,7 +2773,18 @@ private fun RedfaceNavHost(
                     versionCode = BuildConfig.VERSION_CODE,
                     onOpenDiagnostics = { backStack.add(DiagnosticsRoute) },
                     onReportContent = onReportContent,
+                    onOpenSanctions = { backStack.add(SanctionsRoute) },
+                    isAuthenticated = isAuthenticated,
                     topBarActions = accountMenu,
+                )
+            }
+            entry<SanctionsRoute> {
+                SanctionsScreen(
+                    onBack = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
                 )
             }
             entry<MyImagesRoute> {
