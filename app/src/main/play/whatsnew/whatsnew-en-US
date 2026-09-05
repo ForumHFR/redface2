@@ -1,6 +1,4 @@
-Redface 2 v0.54.1 — dev.
+Redface 2 v0.54.2 — dev.
 
-- Quotes: truncation no longer splits URLs, smileys or emojis; no more duplicated quick quote after rotation.
-- Topics: scroll-to-post survives a refresh; image reanchoring stays on its page.
-- Super favorites: no server removal from an orphaned pin; pins are stored per account.
-- Flags: refreshes are serialized across tabs; colors: reliable save when leaving the screen.
+- App icon: a real gallery with previews, Classic or Redface 1 (the original icon). Apply restarts the app on the new icon.
+- The Dark/Rose/Red background variants are gone.

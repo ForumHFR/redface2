@@ -16,6 +16,20 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.54.2` — `internal` (dev) — 2026-09-05
+
+Reprise de [#326](https://github.com/ForumHFR/redface2/issues/326) après retour de XaTriX : le réglage de la 0.54.0 (quatre fonds du même drapeau) ne répondait pas à la demande d'icônes alternatives complètes. Cadrage Codex gpt-6-astra, code Astra sous gate Fable, build et preuve visuelle Opus ; PR [#1271](https://github.com/ForumHFR/redface2/pull/1271).
+
+### Modifié
+
+- **Icône de l'application** — Réglages → Affichage → Icône de l'application devient une sous-page avec aperçus réels : **Classique** (drapeau RF2) et **Redface 1** (l'icône originale de Redface 1, reprise du dépôt ForumHFR/Redface sous licence Apache 2.0, fond rouge à chevrons redessiné). Sélection provisoire, badge « Actuelle », bouton **Appliquer** ; l'application redémarre d'elle-même sur la nouvelle icône et rouvre la galerie. Les variantes Sombre, Rose et Rouge sont retirées ; une installation dev 0.54.0 qui en utilisait une est ramenée automatiquement sur Classique au démarrage. Une image personnelle ne peut pas remplacer l'icône dans la liste des applications (limite Android) ; la page le dit et renvoie aux lanceurs qui le permettent.
+
+### Note
+
+Prochaines étapes du chantier : essais sur lanceurs réels (One UI, tiers, icônes thématiques Android 13+), puis dessins supplémentaires. Mentions de licence : `app/THIRD_PARTY_NOTICES.md`.
+
+---
+
 ## `0.54.1` — `internal` (dev) — 2026-09-05
 
 Correctifs issus de la relecture ciblée du lot produit en gpt-5.5 (0.51 → 0.53.6, bêta) : douze défauts confirmés par deux relecteurs indépendants, onze corrigés. Produit par Sol (Codex gpt-5.6, xhigh) sous gate Fable, builds Opus ; PR [#1269](https://github.com/ForumHFR/redface2/pull/1269) (topic, citations, navigation) et [#1270](https://github.com/ForumHFR/redface2/pull/1270) (drapeaux, couleurs).

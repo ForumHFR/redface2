@@ -1,6 +1,4 @@
-Redface 2 v0.54.1 — dev.
+Redface 2 v0.54.2 — dev.
 
-- Citations : la troncature ne coupe plus les URL, smileys et emojis ; plus de citation rapide en double après rotation.
-- Sujets : le défilement vers un message n'est plus perdu après un rafraîchissement ; réancrage des images borné à la page.
-- Super favoris : plus de suppression serveur depuis une épingle orpheline ; épingles rangées par compte.
-- Drapeaux : rafraîchissements sérialisés entre onglets ; couleurs : enregistrement fiable en quittant l'écran.
+- Icône de l'application : vraie galerie avec aperçus, Classique ou Redface 1 (l'icône d'origine). Appliquer redémarre l'application sur la nouvelle icône.
+- Les variantes de fond Sombre/Rose/Rouge sont retirées.
