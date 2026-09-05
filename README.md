@@ -39,8 +39,8 @@ Site : **[forumhfr.github.io/redface2](https://forumhfr.github.io/redface2)** (p
 # Build debug prod dans l'image Docker épinglée (SDK, JDK et caches reproductibles)
 ./scripts/docker-dev.sh ./gradlew :app:assembleProdDebug
 
-# Reproduire la CI avant de pousser : tests JVM, detekt, lint
-./scripts/docker-dev.sh ./gradlew --continue testDebugUnitTest :app:testProdDebugUnitTest detektAll lintDebug
+# Reproduire la CI avant de pousser : tests JVM (dont modules JVM purs), detekt, lint (dont `:app` flavorisé)
+./scripts/docker-dev.sh ./gradlew --continue test testDebugUnitTest :app:testProdDebugUnitTest detektAll lintDebug :app:lintProdDebug
 ```
 
 - 18 modules Gradle : `:app`, huit `:core:*` (model, domain, data, network, parser, database, ui, extension), neuf `:feature:*` (auth, flags, forum, topic, editor, messages, search, settings, profile). Structure détaillée dans le [guide de contribution](https://forumhfr.github.io/redface2/guides/contributing).

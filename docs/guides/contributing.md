@@ -50,8 +50,8 @@ Exemples :
 # Build debug dans le container de référence
 ./scripts/docker-dev.sh
 
-# Lancer une commande Gradle arbitraire dans le même env
-./scripts/docker-dev.sh ./gradlew lintDebug testDebugUnitTest
+# Reproduire la séquence de validation CI dans le même env (cf. skill /validate)
+./scripts/docker-dev.sh ./gradlew --continue test testDebugUnitTest :app:testProdDebugUnitTest detektAll lintDebug :app:lintProdDebug
 ```
 
 Le script monte le repo dans `/workspace`, persiste les caches Gradle / Android dans `.gradle-user/` et exécute le container avec l'UID/GID de l'utilisateur hôte pour éviter les fichiers root-owned sur Linux. En rootless Podman, `--userns keep-id` est ajouté automatiquement pour garder le mapping d'identité.
