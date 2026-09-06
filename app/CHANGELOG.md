@@ -16,6 +16,16 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.54.7` — `internal` (dev) — 2026-09-06
+
+Correctif de release. La 0.54.6 annonçait le lien d'alerte modération mais ne le contenait pas : le squash de la PR [#1281](https://github.com/ForumHFR/redface2/pull/1281) avait annulé par erreur les fichiers de [#1280](https://github.com/ForumHFR/redface2/pull/1280). Signalé par XaTriX. PR [#1284](https://github.com/ForumHFR/redface2/pull/1284).
+
+### Corrigé
+
+- **Lien d'alerte modération** ([#293](https://github.com/ForumHFR/redface2/issues/293)) — réapplication à l'identique : un lien `user/modo.php?…numreponse=…` (intent ou lien tapé dans un post) ouvre le sujet sur le message visé et la feuille d'alerte ; hors session, atterrissage sur le message avec invitation à se connecter.
+
+---
+
 ## `0.54.6` — `internal` (dev) — 2026-09-06
 
 Trois livraisons demandées par XaTriX, code Astra (Codex gpt-6-astra, xhigh) sous gate Fable, builds socadisc ; PR [#1280](https://github.com/ForumHFR/redface2/pull/1280), [#1281](https://github.com/ForumHFR/redface2/pull/1281) et [#1282](https://github.com/ForumHFR/redface2/pull/1282).

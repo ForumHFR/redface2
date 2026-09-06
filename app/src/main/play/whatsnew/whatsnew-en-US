@@ -1,5 +1,3 @@
-Redface 2 v0.54.6 — dev.
+Redface 2 v0.54.7 — dev.
 
-- My sanctions: the account's sanction history under Settings → Account.
-- A moderation-alert link opens the post and the alert sheet.
-- Viewer: a linked thumbnail on a text line opens the full image fullscreen.
+- Fix: the moderation-alert link (announced in 0.54.6) now really opens the post and the alert sheet.
