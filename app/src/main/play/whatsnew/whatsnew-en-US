@@ -1,3 +1,3 @@
-Redface 2 v0.54.9 — dev.
+Redface 2 v0.54.10 — dev.
 
-- The moderation-alert sheet opened from a link no longer jumps while loading.
+- Moderation-alert sheets: shown only once loaded (thin progress bar before), no motion; layout refined.
