@@ -130,13 +130,35 @@ les présente via sa snackbar, sans confondre un échec de transport avec une co
 
 #### Lien entrant modo.php
 
-Les liens HTTP et HTTPS vers `/user/modo.php` passent par le même résolveur pour un
-intent Android `VIEW` et un tap dans un post. Ils exigent `cat`, `post` et `numreponse`
-entiers strictement positifs ; sinon, l’URL reste ouverte dans le navigateur.
-`page` est optionnel (défaut 1, valeur minimale 1). Une page égale à 1 déclenche la
-résolution de la page réelle du post selon la règle #750, avant le chargement d’entrée.
-`config`, `ref`, `hash_check` et le fragment sont ignorés : seul le contexte du post
-est transmis, via `TopicRoute.moderationAlertFor` puis `TopicRequest.moderationAlertFor`.
+Les liens HTTP et HTTPS vers `/user/modo.php` partagent la validation d’URL pour un
+intent Android `VIEW` et un tap in-app. Ils exigent `cat`, `post` et `numreponse` entiers
+strictement positifs ; sinon, l’URL reste ouverte dans le navigateur. `page` est optionnel
+(défaut 1, valeur minimale 1). `config`, `ref`, `hash_check` et le fragment sont ignorés :
+seul le contexte du post est transmis, jamais un token issu du lien.
+
+**Tap in-app — option B (#1287)** : `HfrInAppUriHandler` intercepte la route d’alerte
+et ouvre une feuille d’info racine. Après lecture de l’état de session, le seul appel
+est `ModerationRepository.loadAlert(cat, post, numreponse, page)` : **GET modo.php seul,
+aucun chargement de page de sujet ni résolution de page du post**. Le drapeau HFR reste
+intact ; le chargement authentifié du sujet qui le déplace (#1243) n’est pas déclenché
+pour consulter l’info. Les états `PendingMine`, `PendingJoined`, `TreatedMine`,
+`TreatedJoined` et `Unknown` affichent le texte HFR (repli générique si vide), ainsi que
+`treatedAt` si présent. Les fixtures modo.php et le modèle parsé ne fournissent ni
+auteur ni extrait du **post** : aucun aperçu n’est inventé ou chargé depuis le sujet.
+
+Sans session, la feuille affiche « Connectez-vous pour consulter cette alerte » sans
+GET modo.php. Une erreur propose « Réessayer ». « Voir le message » reste disponible
+dans ces deux cas et dans l’info : cette action explicite navigue vers le post sans
+`moderationAlertFor`. `Form` et `JoinPrompt` ferment au contraire la feuille et naviguent
+avec ce déclencheur, pour afficher le post avant de proposer un signalement. Dans ces
+navigations seulement, une page égale à 1 est résolue selon #750 avant le chargement du
+sujet ; une page supérieure à 1 est conservée. Fermer annule le GET et ignore ses retours
+tardifs ; changer de compte invalide le résultat et consulte l’état du nouveau compte.
+
+**Intent externe — comportement #293 conservé** : la route navigue d’abord vers le topic
+avec `TopicRoute.moderationAlertFor`, transmis à `TopicRequest.moderationAlertFor`.
+La page réelle est résolue selon #750 si `page == 1`. Le flux d’entrée ci-dessous vaut
+aussi pour le repli in-app `Form`/`JoinPrompt`.
 
 Au premier `Loaded` de la génération d’entrée, le topic consomme le déclencheur : si
 le post est présent, il s’y positionne et ouvre la même feuille que le menu « Alerter ».

@@ -110,6 +110,7 @@ références sont des symboles, pas des numéros de ligne.
 
 | Fonction | Réf. | MP/DT ? | Détail |
 |---|---|---|---|
+| Lien vers une alerte modération | #1287, `HfrInAppUriHandler` + `ModerationAlertLinkSheet` | **oui, livré** | Un lien modo.php vers un post public ouvre la même info racine depuis Topic et MP/DT, sans quitter la page courante. Le contrat de consultation et les cas qui naviguent vers le post sont définis dans [Navigation — Deep Linking]({{ site.baseurl }}/specs/navigation#deep-linking). |
 | Taille de police | #287, `RedfaceTheme` | **oui, livré** | Typo scalée par le préréglage, fournie par le thème — effective partout. |
 | Pliage des longues citations | #332, `LocalFoldLongQuotes` | **oui, livré** | Fourni par `RedfaceTheme`, lu dans `PostRenderer.QuoteBlock` — effectif en MP. |
 | Ascenseur intra-page | #300/#351c, `PostListScaffold` + `LazyListScrollbar` | **oui, livré** | Arrive par le scaffold partagé, qui lit `LocalShowScrollbar` lui-même. Une recherche de symbole côté MP le rate — l'écart se mesure par lecture, pas au grep. |

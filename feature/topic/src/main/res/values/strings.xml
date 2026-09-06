@@ -254,4 +254,9 @@
     <string name="topic_alert_sent">Signalement envoyé aux modérateurs</string>
     <string name="topic_alert_joined">Vous êtes joint à la demande de modération</string>
     <string name="topic_alert_error">Impossible de contacter la modération. Vérifiez votre connexion et votre session HFR.</string>
+    <string name="topic_alert_link_title">Alerte modération</string>
+    <string name="topic_alert_link_sign_in_required">Connectez-vous pour consulter cette alerte</string>
+    <string name="topic_alert_link_view_post">Voir le message</string>
+    <string name="topic_alert_link_topic_page">%1$s, page %2$d</string>
+    <string name="topic_alert_link_post_fallback">Message n° %1$d du sujet %2$d, page %3$d</string>
 </resources>
