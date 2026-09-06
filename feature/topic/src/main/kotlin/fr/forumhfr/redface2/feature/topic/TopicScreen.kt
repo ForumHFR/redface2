@@ -1700,6 +1700,14 @@ internal fun TopicContent(
                 }
             }
         }
+        // Scaffold stacks its body children: this thin overlay does not move the Surface or the posts.
+        ModerationAlertLoadingBar(
+            visible = state.moderationAlert is ModerationAlertUi.Loading,
+            modifier = Modifier.padding(innerPadding),
+        )
+    }
+    BackHandler(enabled = state.moderationAlert is ModerationAlertUi.Loading) {
+        onIntent(TopicIntent.DismissModerationAlert)
     }
     quickReplyFor?.let { launch ->
         QuickReplySheet(
@@ -1729,7 +1737,7 @@ internal fun TopicContent(
             },
         )
     }
-    state.moderationAlert?.let { alert ->
+    state.moderationAlert?.takeUnless { it is ModerationAlertUi.Loading }?.let { alert ->
         ModerationAlertSheet(state = alert, onIntent = onIntent, snackbarHostState = snackbarHostState)
     }
     state.citingPostsSheet?.let { sheet ->

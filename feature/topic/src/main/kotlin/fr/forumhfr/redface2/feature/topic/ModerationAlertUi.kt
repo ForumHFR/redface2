@@ -3,8 +3,9 @@ package fr.forumhfr.redface2.feature.topic
 import fr.forumhfr.redface2.core.model.write.ModerationAlertOutcome
 import fr.forumhfr.redface2.core.model.write.ModerationAlertState
 
-/** Transient sheet state; form tokens and the draft never enter saved state or the topic cache. */
+/** Transient alert state; form tokens and the draft never enter saved state or the topic cache. */
 sealed interface ModerationAlertUi {
+    /** Initial read shown as an overlay bar; no modal is composed until its result is known. */
     data object Loading : ModerationAlertUi
     data class Form(
         val form: ModerationAlertState.Form,

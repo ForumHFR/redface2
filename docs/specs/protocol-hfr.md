@@ -84,6 +84,10 @@ Construire cette URL depuis le post affiché, sans parser son lien de modératio
 être cryptlinké. `numreponse` est unique **par catégorie**. Le GET d’entrée utilise `ref=1` ;
 les actions des formulaires capturés portent `ref=18`, conservé tel quel pour le POST.
 Le flux reste disponible sur un sujet verrouillé et nécessite une session connectée.
+La feuille n’apparaît qu’une fois l’état connu ; une barre de progression fine superposée
+en haut du topic signale le chargement initial. Retour annule le GET et ses retours tardifs
+sont ignorés. Pendant l’envoi, la feuille reste ouverte ; le champ raison ne prend le focus
+qu’une fois la feuille complètement déployée, sans délai arbitraire.
 
 Le GET renvoie l’un des **six états** suivants, propres au post et au compte :
 
@@ -137,7 +141,9 @@ strictement positifs ; sinon, l’URL reste ouverte dans le navigateur. `page` e
 seul le contexte du post est transmis, jamais un token issu du lien.
 
 **Tap in-app — option B (#1287)** : `HfrInAppUriHandler` intercepte la route d’alerte
-et ouvre une feuille d’info racine. Après lecture de l’état de session, le seul appel
+et prépare une feuille d’info racine. La feuille n’apparaît qu’une fois l’état connu ;
+une barre de progression fine superposée en haut de l’écran signale le chargement.
+Après lecture de l’état de session, le seul appel
 est `ModerationRepository.loadAlert(cat, post, numreponse, page)` : **GET modo.php seul,
 aucun chargement de page de sujet ni résolution de page du post**. Le drapeau HFR reste
 intact ; le chargement authentifié du sujet qui le déplace (#1243) n’est pas déclenché
@@ -149,11 +155,14 @@ auteur ni extrait du **post** : aucun aperçu n’est inventé ou chargé depuis
 Sans session, la feuille affiche « Connectez-vous pour consulter cette alerte » sans
 GET modo.php. Une erreur propose « Réessayer ». « Voir le message » reste disponible
 dans ces deux cas et dans l’info : cette action explicite navigue vers le post sans
-`moderationAlertFor`. `Form` et `JoinPrompt` ferment au contraire la feuille et naviguent
-avec ce déclencheur, pour afficher le post avant de proposer un signalement. Dans ces
-navigations seulement, une page égale à 1 est résolue selon #750 avant le chargement du
+`moderationAlertFor`. `Form` et `JoinPrompt` naviguent directement avec ce déclencheur,
+en fermant toute feuille d’info déjà ouverte, pour afficher le post avant de proposer un signalement.
+Dans ces navigations seulement, une page égale à 1 est résolue selon #750 avant le chargement du
 sujet ; une page supérieure à 1 est conservée. Fermer annule le GET et ignore ses retours
 tardifs ; changer de compte invalide le résultat et consulte l’état du nouveau compte.
+Retour annule aussi la lecture initiale sans quitter l’écran. « Réessayer » et un changement
+de compte sur une feuille ouverte conservent celle-ci, avec l’ancien message immédiatement
+effacé pendant le rechargement. Aucun chargement n’est relancé à la rotation.
 
 **Intent externe — comportement #293 conservé** : la route navigue d’abord vers le topic
 avec `TopicRoute.moderationAlertFor`, transmis à `TopicRequest.moderationAlertFor`.

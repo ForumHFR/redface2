@@ -4943,10 +4943,32 @@ class TopicViewModelTest {
         val repository = FakeModerationRepository().apply { loadGate = gate }
         val viewModel = moderationViewModel(repository)
         viewModel.send(TopicIntent.RequestModerationAlert(42))
+        assertEquals(ModerationAlertUi.Loading, viewModel.state.value.moderationAlert)
+        assertEquals(1, repository.loads.size)
         viewModel.send(TopicIntent.DismissModerationAlert)
+        assertNull(viewModel.state.value.moderationAlert)
         gate.complete(Unit)
         runCurrent()
         assertTrue(repository.loadCancelled)
+        assertNull(viewModel.state.value.moderationAlert)
+        viewModel.effects.test { expectNoEvents() }
+    }
+
+    @Test
+    fun `late noncancellable moderation GET cannot reopen a dismissed initial load`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val repository = FakeModerationRepository().apply { loadGate = gate }
+        val noncancellable = object : ModerationRepository by repository {
+            override suspend fun loadAlert(cat: Int, topicId: Int, numreponse: Int, page: Int): ModerationAlertState =
+                withContext(NonCancellable) { repository.loadAlert(cat, topicId, numreponse, page) }
+        }
+        val viewModel = moderationViewModel(noncancellable)
+        viewModel.send(TopicIntent.RequestModerationAlert(42))
+        assertEquals(ModerationAlertUi.Loading, viewModel.state.value.moderationAlert)
+        assertEquals(1, repository.loads.size)
+        viewModel.send(TopicIntent.DismissModerationAlert)
+        gate.complete(Unit)
+        runCurrent()
         assertNull(viewModel.state.value.moderationAlert)
         viewModel.effects.test { expectNoEvents() }
     }

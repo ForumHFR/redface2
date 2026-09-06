@@ -249,6 +249,7 @@
     <string name="topic_alert_cancel">Annuler</string>
     <string name="topic_alert_close">Fermer</string>
     <string name="topic_alert_loading">Signalement en cours de chargement ou d’envoi</string>
+    <string name="topic_alert_initial_loading">Chargement de l\'alerte</string>
     <string name="topic_alert_treated_at">Traitée le %1$s</string>
     <string name="topic_alert_unknown">HFR ne permet pas de confirmer ce signalement. Fermez cette fenêtre et consultez à nouveau son état.</string>
     <string name="topic_alert_sent">Signalement envoyé aux modérateurs</string>

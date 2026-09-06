@@ -1,6 +1,9 @@
 package fr.forumhfr.redface2.feature.topic
 
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -10,6 +13,7 @@ import androidx.compose.ui.test.performClick
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -27,7 +31,7 @@ class ModerationAlertLinkSheetTest {
     private val target = ModerationAlertLinkTarget(cat = 23, post = 35421, numreponse = 2_800_456, page = 76)
 
     @Test
-    fun `info shows HFR text treatment date and the known topic beside view post`() {
+    fun `info shows HFR text treatment date and the known topic above view post`() {
         val intents = mutableListOf<ModerationAlertLinkIntent>()
         mount(
             ModerationAlertLinkState.Info(target, "Texte HFR verbatim", "2026-09-05 17:27:28"),
@@ -37,8 +41,11 @@ class ModerationAlertLinkSheetTest {
         compose.onNodeWithText("Alerte modération").assertExists()
         compose.onNodeWithText("Texte HFR verbatim").assertExists()
         compose.onNodeWithText("Traitée le 2026-09-05 17:27:28").assertExists()
-        compose.onNodeWithText("Redface 2, page 76", useUnmergedTree = true).assertExists()
-        compose.onNodeWithText("Voir le message", substring = true).performClick()
+        val subtitle = compose.onNodeWithText("Redface 2, page 76").assertHasNoClickAction().fetchSemanticsNode()
+        val button = compose.onNodeWithText("Voir le message").assertIsDisplayed().fetchSemanticsNode()
+        assertTrue(subtitle.boundsInRoot.bottom < button.boundsInRoot.top)
+        assertEquals(listOf("Voir le message"), button.config[SemanticsProperties.Text].map { it.text })
+        compose.onNodeWithText("Voir le message").performClick()
         compose.onNodeWithText("Fermer").performClick()
         assertEquals(listOf(ModerationAlertLinkIntent.ViewPost, ModerationAlertLinkIntent.Dismiss), intents)
         compose.onNodeWithText("Envoyer").assertDoesNotExist()
@@ -83,21 +90,48 @@ class ModerationAlertLinkSheetTest {
     }
 
     @Test
-    fun `loading is accessible and can be closed`() {
+    fun `reload in an open sheet is accessible and can be closed`() {
         val intents = mutableListOf<ModerationAlertLinkIntent>()
-        mount(ModerationAlertLinkState.Loading(target), onIntent = intents::add)
+        mount(ModerationAlertLinkState.Loading(target, keepSheetOpen = true), onIntent = intents::add)
         compose.onNodeWithContentDescription("Signalement en cours de chargement ou d’envoi").assertExists()
         compose.onNodeWithText("Fermer").performClick()
         assertEquals(listOf(ModerationAlertLinkIntent.Dismiss), intents)
     }
 
     @Test
-    fun `loading state keeps the view-post button visible`() {
+    fun `reload in an open sheet keeps the view-post button visible`() {
         val intents = mutableListOf<ModerationAlertLinkIntent>()
-        mount(ModerationAlertLinkState.Loading(target), onIntent = intents::add)
+        mount(ModerationAlertLinkState.Loading(target, keepSheetOpen = true), onIntent = intents::add)
         compose.onNodeWithText("Voir le message", substring = true).assertIsDisplayed().assertIsEnabled().performClick()
         compose.onNodeWithText("Fermer").assertIsDisplayed()
         assertEquals(listOf(ModerationAlertLinkIntent.ViewPost), intents)
+    }
+
+    @Test
+    fun `initial loading does not compose a sheet or its actions`() {
+        mount(ModerationAlertLinkState.Loading(target))
+        compose.onNodeWithText("Alerte modération").assertDoesNotExist()
+        compose.onNodeWithText("Voir le message").assertDoesNotExist()
+        compose.onNodeWithText("Fermer").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Signalement en cours de chargement ou d’envoi").assertDoesNotExist()
+    }
+
+    @Test
+    fun `account reload immediately removes the previous message and date`() {
+        val state = mutableStateOf<ModerationAlertLinkState>(
+            ModerationAlertLinkState.Info(target, "Ancien compte", "2026-09-05 17:27:28"),
+        )
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                ModerationAlertLinkSheet(state.value, {}, "Redface 2")
+            }
+        }
+        compose.onNodeWithText("Ancien compte").assertIsDisplayed()
+        compose.runOnIdle { state.value = ModerationAlertLinkState.Loading(target, keepSheetOpen = true) }
+        compose.onNodeWithText("Ancien compte").assertDoesNotExist()
+        compose.onNodeWithText("Traitée le 2026-09-05 17:27:28").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Signalement en cours de chargement ou d’envoi").assertExists()
+        compose.onNodeWithText("Fermer").assertIsDisplayed()
     }
 
     @Test

@@ -304,17 +304,24 @@ est réinitialisé vers le topic, le post est affiché et sa feuille d’alerte 
 
 Un **tap in-app** ouvre « Alerte modération » au-dessus de la navigation, quel que soit
 l’onglet ou l’écran courant (y compris les MP), sans modifier la pile ni charger le sujet.
+La feuille n’apparaît qu’une fois l’état connu ; une barre de progression fine, superposée
+en haut de l’écran, signale le chargement. Retour annule cette lecture sans dépiler la navigation.
 `ModerationAlertLinkViewModel`, détenu par l’Activity, conserve le chargement et l’info à la
 rotation ; fermer annule la lecture, et un changement de compte invalide l’info précédente.
-La feuille affiche le texte HFR et sa date éventuelle. « Voir le message » indique le titre
-connu dans `topicTitleCache` et la page, ou les identifiants du message/sujet et la page.
-Il ouvre `TopicRoute(cat, post, page, scrollTo = numreponse, resolveScrollToPage = page == 1)`
+« Réessayer » et le changement de compte conservent une feuille déjà ouverte en effaçant
+immédiatement l’ancien message pendant la nouvelle lecture. Un second tap sur la même cible
+en cours de chargement est ignoré ; une autre cible annule et remplace la lecture précédente.
+La feuille affiche le texte HFR et sa date éventuelle en texte secondaire. Au-dessus du bouton
+« Voir le message », un sous-titre indique le titre connu dans `topicTitleCache` et la page,
+ou les identifiants du message/sujet et la page. Le titre est figé à l’ouverture.
+Le bouton ouvre `TopicRoute(cat, post, page, scrollTo = numreponse, resolveScrollToPage = page == 1)`
 par le chemin in-app habituel, **sans `moderationAlertFor`** : aucune feuille à l’arrivée.
 Sans session, la feuille invite à se connecter pour consulter l’alerte, sans GET ;
 « Voir le message » reste disponible, comme en cas d’erreur, où « Réessayer » est ajouté.
 
-Les états `Form` et `JoinPrompt` ferment l’info et naviguent vers le post **avec
+Les états `Form` et `JoinPrompt` naviguent directement vers le post **avec
 `moderationAlertFor`**, pour le montrer avant toute confirmation de signalement.
+Toute feuille d’info déjà ouverte est alors fermée.
 Ces navigations conservent l’onglet courant et les règles usuelles de réutilisation des
 entrées : `moderationAlertFor` distingue une entrée d’alerte d’une entrée de lecture.
 Retaper un lien modo.php ouvre à nouveau l’info, même si une route d’alerte existe déjà.

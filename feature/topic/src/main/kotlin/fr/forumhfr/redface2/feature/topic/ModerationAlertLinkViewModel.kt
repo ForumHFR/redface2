@@ -20,7 +20,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
-/** #1287 — reads modo.php alone, preserving the current topic page and its HFR flag. */
+/** #1287 — reads modo.php before showing the sheet, preserving the current topic page and its HFR flag. */
 @HiltViewModel
 class ModerationAlertLinkViewModel @Inject constructor(
     private val moderationRepository: ModerationRepository,
@@ -34,7 +34,7 @@ class ModerationAlertLinkViewModel @Inject constructor(
         when (intent) {
             is ModerationAlertLinkIntent.Open -> open(intent.target)
             ModerationAlertLinkIntent.Retry -> (_state.value as? ModerationAlertLinkState.Error)?.let {
-                open(it.target)
+                open(it.target, keepSheetOpen = true)
             }
             ModerationAlertLinkIntent.Dismiss -> {
                 cancelLoad()
@@ -47,13 +47,22 @@ class ModerationAlertLinkViewModel @Inject constructor(
         }
     }
 
-    private fun open(target: ModerationAlertLinkTarget) {
+    private fun open(target: ModerationAlertLinkTarget, keepSheetOpen: Boolean = false) {
+        val current = _state.value
+        // The job also observes account changes after loading; its activity is not a double-tap guard.
+        if (current is ModerationAlertLinkState.Loading && current.target == target) return
         cancelLoad()
-        _state.value = ModerationAlertLinkState.Loading(target)
+        _state.value = ModerationAlertLinkState.Loading(target, keepSheetOpen)
         loadJob = viewModelScope.launch {
             // Keep observing while the sheet is open: an account change invalidates the previous result.
             authRepository.observeAuthState().distinctUntilChanged().collectLatest { auth ->
-                _state.value = ModerationAlertLinkState.Loading(target)
+                val keepOpen = when (val previous = _state.value) {
+                    is ModerationAlertLinkState.Loading -> previous.keepSheetOpen
+                    is ModerationAlertLinkState.Info, is ModerationAlertLinkState.SignInRequired,
+                    is ModerationAlertLinkState.Error -> true
+                    else -> false
+                }
+                _state.value = ModerationAlertLinkState.Loading(target, keepOpen)
                 val result = if (auth is AuthState.Authenticated) {
                     loadAlert(target)
                 } else {
