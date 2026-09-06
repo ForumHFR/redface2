@@ -152,6 +152,9 @@ import fr.forumhfr.redface2.feature.settings.SettingsMaintenanceScreen
 import fr.forumhfr.redface2.feature.settings.SettingsBlacklistScreen
 import fr.forumhfr.redface2.feature.settings.SettingsProxyScreen
 import fr.forumhfr.redface2.feature.settings.SettingsScreen
+import fr.forumhfr.redface2.feature.topic.ModerationAlertLinkIntent
+import fr.forumhfr.redface2.feature.topic.ModerationAlertLinkTarget
+import fr.forumhfr.redface2.feature.topic.ModerationAlertLinkViewModel
 import fr.forumhfr.redface2.feature.topic.TopicRequest
 import fr.forumhfr.redface2.feature.topic.PostImageActionsViewModel
 import fr.forumhfr.redface2.feature.topic.TopicScreen
@@ -790,8 +793,8 @@ internal fun tabBackTarget(
  * the exact top [NavKey] is a no-op. Targeting an older key returns to it by dropping the entries above
  * it, matching Back semantics and keeping a single nav3 owner for that key. A same-topic link with a
  * different page, anchor or moderationAlertFor is a distinct [TopicRoute] key, so it is pushed
- * instead of collapsed. An alert link therefore gets its own entry even beside the same post's
- * ordinary reading route; re-opening that exact alert key still follows the rules above.
+ * instead of collapsed. Since #1287, a modo.php tap opens root information first; only Form/JoinPrompt
+ * navigate with moderationAlertFor. The explicit ViewPost action navigates without that trigger.
  */
 internal fun inAppRouteBackStackAfterOpen(
     backStack: List<NavKey>,
@@ -1043,6 +1046,8 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
         // the user where they were, and a Settings change only applies on the next launch.
         val startScreenViewModel: StartScreenViewModel = hiltViewModel()
         val startScreen = startScreenViewModel.startScreen
+        // #1287 — Activity owner, outside NavDisplay: retain the info sheet across rotation on every tab.
+        val moderationAlertLinkViewModel: ModerationAlertLinkViewModel = hiltViewModel()
 
         val flagsBackStack = rememberNavBackStack(FlagsListRoute)
         val forumStartCat = startScreen.forumCatId
@@ -1325,6 +1330,9 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                 onSwitch = { switchTab(destination) },
             )
         }
+        val openInAppRoute: (ParsedDeepLink) -> Unit = remember(currentDestination, backStacks, switchTab) {
+            { parsed -> openRouteInApp(currentDestination, parsed, backStacks, switchTab) }
+        }
         // #666 follow-up — NavigationSuiteScaffoldLayout (not the higher-level NavigationSuiteScaffold) so
         // the navigationSuite slot can swap a shorter icon-only bar in when labels are off (Option A). The
         // content slot below is unchanged (#529 content-inset handling stays put).
@@ -1363,17 +1371,17 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                     val alwaysAskLinkApp = LocalAlwaysAskLinkApp.current
                     val inAppUriHandler = remember(
                         context,
-                        currentDestination,
-                        backStacks,
-                        switchTab,
+                        openInAppRoute,
+                        moderationAlertLinkViewModel,
                         platformUriHandler,
                         alwaysAskLinkApp,
                     ) {
                         HfrInAppUriHandler(
                             context = context,
-                            currentDestination = currentDestination,
-                            backStacks = backStacks,
-                            switchTab = switchTab,
+                            openRouteInApp = openInAppRoute,
+                            openModerationAlert = { target ->
+                                moderationAlertLinkViewModel.onIntent(ModerationAlertLinkIntent.Open(target))
+                            },
                             platformUriHandler = platformUriHandler,
                             alwaysAskExternalApp = alwaysAskLinkApp,
                         )
@@ -1633,6 +1641,8 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                 )
             }
         }
+
+        ModerationAlertLinkHost(moderationAlertLinkViewModel, topicTitleCache, openInAppRoute)
 
         // #445 — debug bounds overlay, emitted LAST so it paints on top of every sibling (the nav
         // scaffold + the profile sheet). The root content is Box-stacked by z-order = emission order,
@@ -3313,18 +3323,18 @@ private fun popToRoot(backStack: NavBackStack<NavKey>) {
     }
 }
 
-private class HfrInAppUriHandler(
+/** In-app modo.php links open root information; Android VIEW intents keep their topic-entry flow. */
+internal class HfrInAppUriHandler(
     private val context: Context,
-    private val currentDestination: TopLevelDestination,
-    private val backStacks: Map<TopLevelDestination, NavBackStack<NavKey>>,
-    private val switchTab: (TopLevelDestination) -> Unit,
+    private val openRouteInApp: (ParsedDeepLink) -> Unit,
+    private val openModerationAlert: (ModerationAlertLinkTarget) -> Unit,
     private val platformUriHandler: UriHandler,
     private val alwaysAskExternalApp: Boolean,
 ) : UriHandler {
     override fun openUri(uri: String) {
         val parsedUri = uri.toUri()
         when (val resolution = resolveHfrUri(parsedUri)) {
-            is HfrDeepLinkResolution.Route -> openRouteInApp(resolution.parsed)
+            is HfrDeepLinkResolution.Route -> openResolvedRoute(resolution.parsed)
             // HFR host but no in-app route: the exclude-Redface launcher avoids the self-deep-link loop.
             is HfrDeepLinkResolution.BrowserFallback -> openExternally(resolution.uri, uri)
             // Non-HFR link: plain platform resolution, so App Links still hand off to native apps
@@ -3333,23 +3343,13 @@ private class HfrInAppUriHandler(
         }
     }
 
-    private fun openRouteInApp(parsed: ParsedDeepLink) {
-        val result = inAppRouteBackStackAfterOpen(
-            currentDestination = currentDestination,
-            parsed = parsed,
-            backStackFor = { destination -> backStacks.getValue(destination) },
-        )
-        switchTab(result.destination)
-        applyInAppBackStackUpdate(backStacks.getValue(result.destination), result.backStack)
-    }
-
-    private fun applyInAppBackStackUpdate(backStack: NavBackStack<NavKey>, updated: List<NavKey>) {
-        if (updated == backStack) return
-        while (backStack.size > updated.size) {
-            backStack.removeAt(backStack.lastIndex)
-        }
-        for (index in backStack.size until updated.size) {
-            backStack.add(updated[index])
+    private fun openResolvedRoute(parsed: ParsedDeepLink) {
+        val topic = parsed.route as? TopicRoute
+        val alertPost = topic?.moderationAlertFor
+        if (topic != null && alertPost != null) {
+            openModerationAlert(ModerationAlertLinkTarget(topic.cat, topic.post, alertPost, topic.page))
+        } else {
+            openRouteInApp(parsed)
         }
     }
 
@@ -3357,6 +3357,31 @@ private class HfrInAppUriHandler(
         if (!openUrlInExternalBrowser(context, uri, alwaysAskExternalApp)) {
             platformUriHandler.openUri(original)
         }
+    }
+}
+
+internal fun openRouteInApp(
+    currentDestination: TopLevelDestination,
+    parsed: ParsedDeepLink,
+    backStacks: Map<TopLevelDestination, NavBackStack<NavKey>>,
+    switchTab: (TopLevelDestination) -> Unit,
+) {
+    val result = inAppRouteBackStackAfterOpen(
+        currentDestination = currentDestination,
+        parsed = parsed,
+        backStackFor = { destination -> backStacks.getValue(destination) },
+    )
+    switchTab(result.destination)
+    applyInAppBackStackUpdate(backStacks.getValue(result.destination), result.backStack)
+}
+
+private fun applyInAppBackStackUpdate(backStack: NavBackStack<NavKey>, updated: List<NavKey>) {
+    if (updated == backStack) return
+    while (backStack.size > updated.size) {
+        backStack.removeAt(backStack.lastIndex)
+    }
+    for (index in backStack.size until updated.size) {
+        backStack.add(updated[index])
     }
 }
 

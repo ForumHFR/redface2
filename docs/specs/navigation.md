@@ -283,7 +283,7 @@ Les URLs HFR doivent ouvrir directement le bon écran dans l'app.
 | `forum.hardware.fr/forum2.php?cat=X&post=Y&page=Z#tN` | Topic Y page Z, avec scroll vers le post N | Phase 1 |
 | `forum.hardware.fr/hfr/<Cat>/…/<slug>-sujet_Y_Z.htm#tN` | Topic Y page Z, catégorie résolue depuis le slug, avec scroll vers N | Phase 4 (#1032 PR2) |
 | `forum.hardware.fr/forum1f.php` | Drapeaux | Phase 1 |
-| `forum.hardware.fr/user/modo.php?cat=X&post=Y&numreponse=N&page=Z` | Topic Y, scroll vers N et ouverture de la feuille d’alerte modération | #293 |
+| `forum.hardware.fr/user/modo.php?cat=X&post=Y&numreponse=N&page=Z` | Intent externe : Topic Y et feuille d’alerte ; tap in-app : feuille d’info sur place | #293, #1287 |
 | `forum.hardware.fr/forum1.php?config=hfr.inc&cat=prive&page=Z` | Navigateur (inbox MP non routée dans l'app) | Fallback navigateur |
 | `forum.hardware.fr/forum2.php?config=hfr.inc&cat=prive&post=Y&page=Z` | Navigateur (conversation MP non routée dans l'app) | Fallback navigateur |
 | Autre chemin `/hfr/…` (profil, `liste_sujet`, slug de catégorie inconnu…) | Navigateur | Fallback navigateur |
@@ -299,11 +299,25 @@ schéma et le host, route les topics reconnus, puis délègue toute URL HFR non 
 
 Le contrat du lien d’alerte est décrit dans
 [`protocol-hfr.md` § « Lien entrant modo.php »]({{ site.baseurl }}/specs/protocol-hfr#lien-entrant-modophp).
-Un lien externe cible l’onglet Drapeaux ; un tap dans un post conserve l’onglet courant,
-comme les autres liens vers un topic. `moderationAlertFor` participe à l’égalité de
-`TopicRoute` : une entrée d’alerte est distincte d’une entrée de lecture du même post.
-Retaper la route d’alerte exacte déjà au sommet reste sans effet ; si elle est plus bas,
-la pile revient à cette entrée existante.
+Un **intent Android `VIEW` externe** conserve le comportement #293 : l’onglet Drapeaux
+est réinitialisé vers le topic, le post est affiché et sa feuille d’alerte est ouverte.
+
+Un **tap in-app** ouvre « Alerte modération » au-dessus de la navigation, quel que soit
+l’onglet ou l’écran courant (y compris les MP), sans modifier la pile ni charger le sujet.
+`ModerationAlertLinkViewModel`, détenu par l’Activity, conserve le chargement et l’info à la
+rotation ; fermer annule la lecture, et un changement de compte invalide l’info précédente.
+La feuille affiche le texte HFR et sa date éventuelle. « Voir le message » indique le titre
+connu dans `topicTitleCache` et la page, ou les identifiants du message/sujet et la page.
+Il ouvre `TopicRoute(cat, post, page, scrollTo = numreponse, resolveScrollToPage = page == 1)`
+par le chemin in-app habituel, **sans `moderationAlertFor`** : aucune feuille à l’arrivée.
+Sans session, la feuille invite à se connecter pour consulter l’alerte, sans GET ;
+« Voir le message » reste disponible, comme en cas d’erreur, où « Réessayer » est ajouté.
+
+Les états `Form` et `JoinPrompt` ferment l’info et naviguent vers le post **avec
+`moderationAlertFor`**, pour le montrer avant toute confirmation de signalement.
+Ces navigations conservent l’onglet courant et les règles usuelles de réutilisation des
+entrées : `moderationAlertFor` distingue une entrée d’alerte d’une entrée de lecture.
+Retaper un lien modo.php ouvre à nouveau l’info, même si une route d’alerte existe déjà.
 
 Comme `hardware.fr` est un domaine tiers, Redface 2 ne peut pas être *vérifié* comme handler et
 l'utilisateur doit l'activer manuellement. Pour rendre cet opt-in découvrable (#1032 PR3), la ligne
