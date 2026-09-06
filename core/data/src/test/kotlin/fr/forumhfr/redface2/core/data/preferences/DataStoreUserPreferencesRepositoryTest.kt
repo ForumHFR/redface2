@@ -1985,6 +1985,146 @@ class DataStoreUserPreferencesRepositoryTest {
         dataStoreScope.cancel()
     }
 
+    @Test
+    fun `category layout defaults to expanded and round-trips four independent combinations`() = runTest(dispatcher) {
+        assertFalse(repository.observeForumCategoryMenusCollapsed().first())
+        assertFalse(repository.observeForumCategoryStickyTopicsCollapsed().first())
+        repository.setForumCategoryFlagFilter(CategoryFlagFilter.FAVORITES)
+        for (menus in listOf(false, true)) {
+            for (sticky in listOf(false, true)) {
+                repository.setForumCategoryMenusCollapsed(menus)
+                repository.setForumCategoryStickyTopicsCollapsed(sticky)
+                val fresh = repositoryWith(dataStore)
+                assertEquals(menus, fresh.observeForumCategoryMenusCollapsed().first())
+                assertEquals(sticky, fresh.observeForumCategoryStickyTopicsCollapsed().first())
+                assertEquals(CategoryFlagFilter.FAVORITES, fresh.observeForumCategoryFlagFilter().first())
+            }
+        }
+    }
+
+    @Test
+    fun `category layout reads literal stored keys and a failed read defaults to expanded`() = runTest(dispatcher) {
+        dataStore.edit {
+            it[booleanPreferencesKey("forum_category_menus_collapsed")] = true
+            it[booleanPreferencesKey("forum_category_sticky_topics_collapsed")] = false
+        }
+        assertTrue(repository.observeForumCategoryMenusCollapsed().first())
+        assertFalse(repository.observeForumCategoryStickyTopicsCollapsed().first())
+        val unreadable = object : DataStore<Preferences> by dataStore {
+            override val data = flow<Preferences> { throw IOException("read failure") }
+        }
+        val fresh = repositoryWith(unreadable)
+        assertFalse(fresh.observeForumCategoryMenusCollapsed().first())
+        assertFalse(fresh.observeForumCategoryStickyTopicsCollapsed().first())
+    }
+
+    @Test
+    fun `category choices are visible before commit and survive caller cancellation`() = runTest(dispatcher) {
+        val gated = GatedCommitDataStore(dataStore)
+        val repo = repositoryWith(gated)
+        val menus = backgroundScope.launch(dispatcher) { repo.setForumCategoryMenusCollapsed(true) }
+        gated.commitStarted.await()
+        val sticky = backgroundScope.launch(dispatcher) { repo.setForumCategoryStickyTopicsCollapsed(true) }
+        assertTrue(repo.observeForumCategoryMenusCollapsed().first())
+        assertTrue(repo.observeForumCategoryStickyTopicsCollapsed().first())
+        assertFalse(dataStore.data.first()[booleanPreferencesKey("forum_category_menus_collapsed")] ?: false)
+        assertFalse(menus.isCompleted)
+        assertFalse(sticky.isCompleted)
+        menus.cancel()
+        sticky.cancel()
+        gated.finishCommit.complete(Unit)
+        // Wait for the application-owned queued writes, not the already cancelled callers.
+        dataStore.data.first {
+            it[booleanPreferencesKey("forum_category_menus_collapsed")] == true &&
+                it[booleanPreferencesKey("forum_category_sticky_topics_collapsed")] == true
+        }
+        val fresh = repositoryWith(dataStore)
+        assertTrue(fresh.observeForumCategoryMenusCollapsed().first())
+        assertTrue(fresh.observeForumCategoryStickyTopicsCollapsed().first())
+    }
+
+    @Test
+    fun `rapid independent layout writes converge on the last choice after a blocked commit`() = runTest(dispatcher) {
+        val gated = GatedCommitDataStore(dataStore)
+        val repo = repositoryWith(gated)
+        val callerDispatcher = StandardTestDispatcher(testScheduler)
+        val first = backgroundScope.launch(callerDispatcher) { repo.setForumCategoryMenusCollapsed(true) }
+        runCurrent()
+        gated.commitStarted.await()
+        val second = backgroundScope.launch(callerDispatcher) { repo.setForumCategoryStickyTopicsCollapsed(true) }
+        val third = backgroundScope.launch(callerDispatcher) { repo.setForumCategoryMenusCollapsed(false) }
+        val fourth = backgroundScope.launch(callerDispatcher) { repo.setForumCategoryStickyTopicsCollapsed(false) }
+        val last = backgroundScope.launch(callerDispatcher) { repo.setForumCategoryStickyTopicsCollapsed(true) }
+        // Starting a nested Unconfined launch does not guarantee it ran before a synchronous cache
+        // read. Drain the callers explicitly while the first disk commit remains blocked.
+        runCurrent()
+        val writes = listOf(first, second, third, fourth, last)
+        assertTrue(writes.none { it.isCompleted })
+        assertFalse(gated.finishCommit.isCompleted)
+        assertFalse(repo.observeForumCategoryMenusCollapsed().first())
+        assertTrue(repo.observeForumCategoryStickyTopicsCollapsed().first())
+        gated.finishCommit.complete(Unit)
+        writes.forEach { it.join() }
+        val fresh = repositoryWith(dataStore)
+        assertFalse(fresh.observeForumCategoryMenusCollapsed().first())
+        assertTrue(fresh.observeForumCategoryStickyTopicsCollapsed().first())
+    }
+
+    @Test
+    fun `delayed layout hydration cannot overwrite a choice made during the disk read`() = runTest(dispatcher) {
+        val readsStarted = kotlinx.coroutines.channels.Channel<Unit>(capacity = 2)
+        val finishRead = CompletableDeferred<Unit>()
+        val delayed = object : DataStore<Preferences> by dataStore {
+            override val data = flow {
+                val old = dataStore.data.first()
+                readsStarted.send(Unit)
+                finishRead.await()
+                emit(old)
+            }
+        }
+        val repo = repositoryWith(delayed)
+        val menus = backgroundScope.async(dispatcher) { repo.observeForumCategoryMenusCollapsed().first() }
+        val sticky = backgroundScope.async(dispatcher) { repo.observeForumCategoryStickyTopicsCollapsed().first() }
+        repeat(2) { readsStarted.receive() }
+        assertFalse(menus.isCompleted)
+        assertFalse(sticky.isCompleted)
+        repo.setForumCategoryMenusCollapsed(true)
+        repo.setForumCategoryStickyTopicsCollapsed(true)
+        finishRead.complete(Unit)
+        assertTrue(menus.await())
+        assertTrue(sticky.await())
+        assertTrue(repo.observeForumCategoryMenusCollapsed().first())
+        assertTrue(repo.observeForumCategoryStickyTopicsCollapsed().first())
+    }
+
+    @Test
+    fun `cancelled layout hydration leaves both caches unseeded for the next category`() = runTest(dispatcher) {
+        dataStore.edit {
+            it[booleanPreferencesKey("forum_category_menus_collapsed")] = true
+            it[booleanPreferencesKey("forum_category_sticky_topics_collapsed")] = true
+        }
+        val started = kotlinx.coroutines.channels.Channel<Unit>(capacity = 2)
+        val finish = CompletableDeferred<Unit>()
+        val delayed = object : DataStore<Preferences> by dataStore {
+            override val data = flow {
+                started.send(Unit)
+                finish.await()
+                emit(dataStore.data.first())
+            }
+        }
+        val repo = repositoryWith(delayed)
+        val menus = backgroundScope.launch(dispatcher) { repo.observeForumCategoryMenusCollapsed().first() }
+        val sticky = backgroundScope.launch(dispatcher) { repo.observeForumCategoryStickyTopicsCollapsed().first() }
+        repeat(2) { started.receive() }
+        menus.cancel()
+        sticky.cancel()
+        menus.join()
+        sticky.join()
+        finish.complete(Unit)
+        assertTrue(repo.observeForumCategoryMenusCollapsed().first())
+        assertTrue(repo.observeForumCategoryStickyTopicsCollapsed().first())
+    }
+
     private fun repositoryWith(store: DataStore<Preferences>): DataStoreUserPreferencesRepository =
         DataStoreUserPreferencesRepository(
             dataStore = store,

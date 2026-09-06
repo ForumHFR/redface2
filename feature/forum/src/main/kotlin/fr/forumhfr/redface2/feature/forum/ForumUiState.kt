@@ -72,6 +72,11 @@ data class CategoryUiState(
      * NOT derived from the query being non-blank.
      */
     val searchActive: Boolean = false,
+    /** Global installation layout preferences (#1303), independent of authentication and search. */
+    val menusCollapsed: Boolean = false,
+    val stickyTopicsCollapsed: Boolean = false,
+    /** No expandable commands or list until BOTH stored layout preferences have emitted. */
+    val layoutPreferencesReady: Boolean = false,
     /** Filtered view over `topics.page.topics` per [searchQuery]. */
     val filteredTopics: List<TopicSummary>,
     /**

@@ -3245,6 +3245,19 @@ class SettingsViewModelTest {
         // interface satisfied (SettingsViewModel never reads or writes it).
         private val forumCategoryFlagFilter = MutableStateFlow(CategoryFlagFilter.ALL)
 
+        private val menusCollapsed = MutableStateFlow(false)
+        private val stickyCollapsed = MutableStateFlow(false)
+
+        override fun observeForumCategoryMenusCollapsed(): Flow<Boolean> = menusCollapsed
+        override suspend fun setForumCategoryMenusCollapsed(collapsed: Boolean) {
+            menusCollapsed.value = collapsed
+        }
+
+        override fun observeForumCategoryStickyTopicsCollapsed(): Flow<Boolean> = stickyCollapsed
+        override suspend fun setForumCategoryStickyTopicsCollapsed(collapsed: Boolean) {
+            stickyCollapsed.value = collapsed
+        }
+
         override fun observeForumCategoryFlagFilter(): Flow<CategoryFlagFilter> = forumCategoryFlagFilter
 
         override suspend fun setForumCategoryFlagFilter(filter: CategoryFlagFilter) {

@@ -103,6 +103,9 @@ class DataStoreUserPreferencesRepository @Inject constructor(
     // DataStore commit — closing the cross-category read/write race (a plain `dataStore.data` read
     // could otherwise return the pre-write disk value).
     private val forumCategoryFlagFilterCache = MutableStateFlow<CategoryFlagFilter?>(null)
+    private val forumCategoryMenusCollapsedCache = MutableStateFlow<Boolean?>(null)
+    private val forumCategoryStickyTopicsCollapsedCache = MutableStateFlow<Boolean?>(null)
+    private val forumCategoryLayoutWriteMutex = Mutex()
 
     // Same cache-first contract for the grouped theme-colour bundle (#1250 H3). Each UI action
     // persists five DataStore keys; the cache is the in-session source of truth while queued disk
@@ -1010,6 +1013,51 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeForumCategoryMenusCollapsed(): Flow<Boolean> =
+        observeCategoryLayout(forumCategoryMenusCollapsedCache, KEY_FORUM_CATEGORY_MENUS_COLLAPSED)
+
+    override suspend fun setForumCategoryMenusCollapsed(collapsed: Boolean) {
+        setCategoryLayout(forumCategoryMenusCollapsedCache, KEY_FORUM_CATEGORY_MENUS_COLLAPSED, collapsed)
+    }
+
+    override fun observeForumCategoryStickyTopicsCollapsed(): Flow<Boolean> =
+        observeCategoryLayout(forumCategoryStickyTopicsCollapsedCache, KEY_FORUM_CATEGORY_STICKY_TOPICS_COLLAPSED)
+
+    override suspend fun setForumCategoryStickyTopicsCollapsed(collapsed: Boolean) {
+        setCategoryLayout(
+            forumCategoryStickyTopicsCollapsedCache,
+            KEY_FORUM_CATEGORY_STICKY_TOPICS_COLLAPSED,
+            collapsed,
+        )
+    }
+
+    /** #1303 — hydrate once, without overwriting a choice made while the disk read was pending. */
+    private fun observeCategoryLayout(cache: MutableStateFlow<Boolean?>, key: Preferences.Key<Boolean>): Flow<Boolean> =
+        cache.onStart {
+            if (cache.value == null) {
+                val fromDisk = runCatching { dataStore.data.first()[key] ?: false }.getOrElse { failure ->
+                    // Leaving a category during hydration must not seed the shared cache with false.
+                    if (failure is CancellationException) throw failure
+                    false
+                }
+                cache.compareAndSet(null, fromDisk)
+            }
+        }.filterNotNull().distinctUntilChanged()
+
+    /** Shared cache first; queued application-scope commits always write the latest value of THIS key. */
+    private suspend fun setCategoryLayout(
+        cache: MutableStateFlow<Boolean?>,
+        key: Preferences.Key<Boolean>,
+        collapsed: Boolean,
+    ) {
+        cache.value = collapsed
+        persist {
+            forumCategoryLayoutWriteMutex.withLock {
+                dataStore.edit { prefs -> prefs[key] = cache.value ?: collapsed }
+            }
+        }
+    }
+
     /**
      * Reads [KEY_UPLOAD_PROVIDER] defensively: an unknown / corrupt stored value (older build with a
      * renamed enum, manual edit) falls back to [UploadProviderId.DIBERIE] instead of crashing on
@@ -1450,6 +1498,8 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val KEY_IMMERSIVE_NAV_BAR_REVEAL = stringPreferencesKey("immersive_nav_bar_reveal")
 
         // #1132 — last « Mes drapeaux » Forum filter (CategoryFlagFilter.name, defensively parsed).
+        val KEY_FORUM_CATEGORY_MENUS_COLLAPSED = booleanPreferencesKey("forum_category_menus_collapsed")
+        val KEY_FORUM_CATEGORY_STICKY_TOPICS_COLLAPSED = booleanPreferencesKey("forum_category_sticky_topics_collapsed")
         val KEY_FORUM_CATEGORY_FLAG_FILTER = stringPreferencesKey("forum_category_flag_filter")
     }
 }

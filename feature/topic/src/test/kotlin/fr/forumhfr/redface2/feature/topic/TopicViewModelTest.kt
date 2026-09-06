@@ -6674,6 +6674,19 @@ internal class FakeUserPreferencesRepository(
     override suspend fun setAlwaysAskLinkApp(enabled: Boolean) = Unit
 
     // #1132 — Forum flag-filter preference is irrelevant to the topic surfaces; default ALL stub.
+    private val menusCollapsed = MutableStateFlow(false)
+    private val stickyCollapsed = MutableStateFlow(false)
+
+    override fun observeForumCategoryMenusCollapsed(): Flow<Boolean> = menusCollapsed
+    override suspend fun setForumCategoryMenusCollapsed(collapsed: Boolean) {
+        menusCollapsed.value = collapsed
+    }
+
+    override fun observeForumCategoryStickyTopicsCollapsed(): Flow<Boolean> = stickyCollapsed
+    override suspend fun setForumCategoryStickyTopicsCollapsed(collapsed: Boolean) {
+        stickyCollapsed.value = collapsed
+    }
+
     override fun observeForumCategoryFlagFilter(): Flow<CategoryFlagFilter> =
         MutableStateFlow(CategoryFlagFilter.ALL)
 
