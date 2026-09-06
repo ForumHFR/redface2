@@ -16,6 +16,18 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.54.11` — `internal` (dev) — 2026-09-06
+
+Raccords de l'écran « Mes sanctions » avec le reste des Réglages ([#294](https://github.com/ForumHFR/redface2/issues/294)), après une revue de cohérence UI demandée par XaTriX. Code Astra sous gate Fable, build socadisc ; PR [#1294](https://github.com/ForumHFR/redface2/pull/1294).
+
+### Modifié
+
+- **Réglages → Compte** — « Mes sanctions » passe en tête de la section Compte HFR ; le réglage à venir (avatars, signatures, messages par page) et sa note sont regroupés dans une sous-section « Réglages du profil HFR », la note ne parle plus d'editprofil.php.
+- **Menu compte** — présent dans la barre supérieure de « Mes sanctions » et de « Mes images », comme sur les autres sous-pages.
+- **Mes sanctions** — messages d'erreur réseau/serveur identiques au reste de l'app ; titres de sanction annoncés comme en-têtes par les lecteurs d'écran, cartes regroupées, chargement nommé ; états « Connexion requise » et vide alignés sur Mes images.
+
+---
+
 ## `0.54.10` — `internal` (dev) — 2026-09-06
 
 Feuilles d'alerte modération : affichage seulement une fois chargées ([#1287](https://github.com/ForumHFR/redface2/issues/1287), retour XaTriX sur la 0.54.9). Diagnostic et conception Astra (avis lecture seule), implémentation Astra sous gate Fable, build socadisc ; PR [#1292](https://github.com/ForumHFR/redface2/pull/1292).
