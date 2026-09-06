@@ -5,15 +5,15 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -21,22 +21,32 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.model.profile.Sanction
+import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 
 @Composable
 fun SanctionsScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    topBarActions: @Composable (() -> Unit)? = null,
     viewModel: SanctionsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    SanctionsContent(state = state, onIntent = viewModel::submit, onBack = onBack, modifier = modifier)
+    SanctionsContent(
+        state = state,
+        onIntent = viewModel::submit,
+        onBack = onBack,
+        modifier = modifier,
+        topBarActions = topBarActions,
+    )
 }
 
 @Composable
@@ -45,6 +55,7 @@ internal fun SanctionsContent(
     onIntent: (SanctionsIntent) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    topBarActions: @Composable (() -> Unit)? = null,
 ) {
     val pseudo = when (state) {
         is SanctionsUiState.Empty -> state.pseudo
@@ -56,12 +67,14 @@ internal fun SanctionsContent(
         subtitle = pseudo,
         onBack = onBack,
         modifier = modifier,
+        topBarActions = topBarActions,
     ) { innerPadding ->
         Box(modifier = Modifier.fillMaxSize().padding(innerPadding), contentAlignment = Alignment.Center) {
             when (state) {
-                SanctionsUiState.Loading -> CircularProgressIndicator()
-                SanctionsUiState.SignInRequired -> Text(stringResource(R.string.sanctions_sign_in_required))
-                is SanctionsUiState.Empty -> SanctionsEmptyContent()
+                SanctionsUiState.Loading -> SanctionsProgress()
+                SanctionsUiState.SignInRequired ->
+                    SanctionsMessageContent(stringResource(R.string.sanctions_sign_in_required))
+                is SanctionsUiState.Empty -> SanctionsMessageContent(stringResource(R.string.sanctions_empty))
                 is SanctionsUiState.Loaded -> SanctionsList(state.sanctions)
                 is SanctionsUiState.Error -> SanctionsErrorContent(state.kind, onIntent)
             }
@@ -70,29 +83,29 @@ internal fun SanctionsContent(
 }
 
 @Composable
-private fun SanctionsEmptyContent() {
+private fun SanctionsProgress() {
+    val label = stringResource(R.string.sanctions_loading)
+    CircularProgressIndicator(modifier = Modifier.semantics { contentDescription = label })
+}
+
+@Composable
+private fun SanctionsMessageContent(text: String) {
     Column(
         modifier = Modifier.padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Icon(
-            painter = painterResource(fr.forumhfr.redface2.core.ui.R.drawable.ic_ms_article),
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(48.dp),
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Text(stringResource(R.string.sanctions_empty), style = MaterialTheme.typography.bodyLarge)
     }
 }
 
 @Composable
 private fun SanctionsErrorContent(kind: HfrErrorKind, onIntent: (SanctionsIntent) -> Unit) {
-    val message = when (kind) {
-        HfrErrorKind.Network -> R.string.sanctions_error_network
-        HfrErrorKind.ServerDown -> R.string.sanctions_error_server
-        HfrErrorKind.Other -> R.string.sanctions_error
-    }
+    val message = kind.sharedLabelResOrNull() ?: R.string.sanctions_error
     Column(
         modifier = Modifier.padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -119,10 +132,14 @@ private fun SanctionsList(sanctions: List<Sanction>) {
 
 @Composable
 private fun SanctionCard(sanction: Sanction) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(sanction.kind, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                Text(
+                    text = sanction.kind,
+                    modifier = Modifier.weight(1f).semantics { heading() },
+                    style = MaterialTheme.typography.titleMedium,
+                )
                 SanctionStatus(ongoing = sanction.liftedAt == null)
             }
             Text(

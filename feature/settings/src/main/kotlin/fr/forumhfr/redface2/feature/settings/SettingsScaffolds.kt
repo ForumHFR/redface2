@@ -75,18 +75,27 @@ internal fun SettingsSubPageTopBar(
     )
 }
 
-/** Settings sub-page shell with an optional account subtitle. */
+/** Settings sub-page shell with an optional account subtitle and account menu. */
+@Suppress("LongParameterList") // Shell API: title + back + modifier + subtitle + account slot + content.
 @Composable
 internal fun RedfaceSettingsScaffold(
     title: String,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     subtitle: String? = null,
+    topBarActions: @Composable (() -> Unit)? = null,
     content: @Composable (PaddingValues) -> Unit,
 ) {
     Scaffold(
         modifier = modifier.fillMaxSize(),
-        topBar = { SettingsSubPageTopBar(title = title, onBack = onBack, subtitle = subtitle) },
+        topBar = {
+            SettingsSubPageTopBar(
+                title = title,
+                onBack = onBack,
+                subtitle = subtitle,
+                topBarActions = topBarActions,
+            )
+        },
         content = content,
     )
 }

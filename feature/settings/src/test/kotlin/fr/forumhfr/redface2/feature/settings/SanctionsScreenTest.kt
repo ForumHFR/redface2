@@ -1,6 +1,14 @@
 package fr.forumhfr.redface2.feature.settings
 
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -13,7 +21,9 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import fr.forumhfr.redface2.core.ui.R as CoreUiR
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w360dp-h900dp-xxhdpi")
@@ -61,12 +71,59 @@ class SanctionsScreenTest {
     }
 
     @Test
+    fun `sanction kind is a heading and its card groups all details`() {
+        mount(SanctionsUiState.Loaded("XaTriX", listOf(sanction())))
+        val heading = SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading)
+        compose.onNodeWithText("Teletubbies", useUnmergedTree = true).assert(heading)
+        compose.onAllNodes(heading, useUnmergedTree = true).assertCountEquals(1)
+        compose.onNodeWithText("Teletubbies")
+            .assert(hasText("Catégorie : Intelligence Artificielle"))
+            .assert(hasText("Levée"))
+            .assert(hasText("Du 13-06-2026 à 22:13 au 18-06-2026 à 22:13"))
+            .assert(hasText("Par TotalRecall"))
+            .assert(hasText("Promo de juin : pour deux TALC, un TT offert."))
+    }
+
+    @Test
+    fun `loading indicator names the operation`() {
+        mount(SanctionsUiState.Loading)
+        compose.onNodeWithContentDescription("Chargement des sanctions")
+            .assertIsDisplayed()
+            .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.ProgressBarRangeInfo))
+    }
+
+    @Test
     fun `error displays retry and dispatches the retry intent`() {
         val intents = mutableListOf<SanctionsIntent>()
         mount(SanctionsUiState.Error(HfrErrorKind.Network), onIntent = intents::add)
-        compose.onNodeWithText("Pas de connexion").assertIsDisplayed()
+        val label = RuntimeEnvironment.getApplication().getString(CoreUiR.string.error_no_connection)
+        compose.onNodeWithText(label).assertIsDisplayed()
         compose.onNodeWithText("Réessayer").performClick()
         assertEquals(listOf(SanctionsIntent.Retry), intents)
+    }
+
+    @Test
+    fun `server error uses the shared label`() {
+        mount(SanctionsUiState.Error(HfrErrorKind.ServerDown))
+        val label = RuntimeEnvironment.getApplication().getString(CoreUiR.string.error_hfr_server_down)
+        compose.onNodeWithText(label).assertIsDisplayed()
+    }
+
+    @Test
+    fun `other error keeps the sanctions fallback`() {
+        mount(SanctionsUiState.Error(HfrErrorKind.Other))
+        compose.onNodeWithText("Impossible de charger vos sanctions.").assertIsDisplayed()
+    }
+
+    @Test
+    fun `account menu action is rendered through the settings scaffold`() {
+        var opens = 0
+        mount(
+            SanctionsUiState.Empty("XaTelitte"),
+            topBarActions = { TextButton(onClick = { opens++ }) { Text("Compte") } },
+        )
+        compose.onNodeWithText("Compte").assertIsDisplayed().performClick()
+        assertEquals(1, opens)
     }
 
     @Test
@@ -81,10 +138,16 @@ class SanctionsScreenTest {
         state: SanctionsUiState,
         onIntent: (SanctionsIntent) -> Unit = {},
         onBack: () -> Unit = {},
+        topBarActions: @Composable (() -> Unit)? = null,
     ) {
         compose.setContent {
             RedfaceTheme(darkTheme = false, dynamicColor = false) {
-                SanctionsContent(state = state, onIntent = onIntent, onBack = onBack)
+                SanctionsContent(
+                    state = state,
+                    onIntent = onIntent,
+                    onBack = onBack,
+                    topBarActions = topBarActions,
+                )
             }
         }
     }
