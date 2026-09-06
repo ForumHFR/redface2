@@ -14,6 +14,8 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SheetState
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -32,30 +34,34 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.model.write.ModerationAlertOutcome
 
-/** #293 — explicit confirmation for an authenticated moderation alert or join. */
+/** #293 — opens after the initial read; submission stays visible and reason focus waits for expansion. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ModerationAlertSheet(
     state: ModerationAlertUi,
     onIntent: (TopicIntent) -> Unit,
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
+    sheetState: SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
 ) {
+    if (state is ModerationAlertUi.Loading) return
     ModalBottomSheet(
         onDismissRequest = { onIntent(TopicIntent.DismissModerationAlert) },
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetState = sheetState,
     ) {
         Column(modifier = Modifier.imePadding()) {
-            ModerationAlertContent(state, onIntent, Modifier.weight(1f, fill = false))
+            ModerationAlertContent(state, onIntent, sheetState.currentValue, Modifier.weight(1f, fill = false))
             // The topic's existing host state stays above the modal and outside the scrolling body.
             SnackbarHost(hostState = snackbarHostState, modifier = Modifier.padding(horizontal = 16.dp))
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ModerationAlertContent(
     state: ModerationAlertUi,
     onIntent: (TopicIntent) -> Unit,
+    sheetValue: SheetValue,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -68,16 +74,24 @@ private fun ModerationAlertContent(
             modifier = Modifier.semantics { heading() },
         )
         when (state) {
-            ModerationAlertUi.Loading -> ModerationAlertProgress()
-            is ModerationAlertUi.Form -> ModerationAlertForm(state, onIntent)
+            ModerationAlertUi.Loading -> Unit
+            is ModerationAlertUi.Form -> ModerationAlertForm(state, onIntent, sheetValue)
             is ModerationAlertUi.JoinPrompt -> ModerationAlertJoin(state, onIntent)
             is ModerationAlertUi.Info -> {
-                // #293 — HFR's own sentence, verbatim; the generic string is only a blank fallback.
-                Text(
-                    state.message.ifBlank { stringResource(R.string.topic_alert_unknown) },
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                state.treatedAt?.let { Text(stringResource(R.string.topic_alert_treated_at, it)) }
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // #293 — HFR's own sentence, verbatim; the generic string is only a blank fallback.
+                    Text(
+                        state.message.ifBlank { stringResource(R.string.topic_alert_unknown) },
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    state.treatedAt?.let {
+                        Text(
+                            stringResource(R.string.topic_alert_treated_at, it),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
             is ModerationAlertUi.Result -> Text(moderationAlertResultMessage(state.outcome))
         }
@@ -90,8 +104,13 @@ private fun ModerationAlertContent(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ModerationAlertForm(state: ModerationAlertUi.Form, onIntent: (TopicIntent) -> Unit) {
+private fun ModerationAlertForm(
+    state: ModerationAlertUi.Form,
+    onIntent: (TopicIntent) -> Unit,
+    sheetValue: SheetValue,
+) {
     val focusRequester = remember { FocusRequester() }
     Text(stringResource(R.string.topic_alert_warning), style = MaterialTheme.typography.bodyMedium)
     OutlinedTextField(
@@ -110,7 +129,9 @@ private fun ModerationAlertForm(state: ModerationAlertUi.Form, onIntent: (TopicI
     ) {
         Text(stringResource(R.string.topic_alert_send))
     }
-    LaunchedEffect(Unit) { if (!state.submitting) focusRequester.requestFocus() }
+    LaunchedEffect(sheetValue) {
+        if (sheetValue == SheetValue.Expanded && !state.submitting) focusRequester.requestFocus()
+    }
 }
 
 @Composable

@@ -23,6 +23,7 @@ import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withContext
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -120,8 +121,12 @@ class ModerationAlertLinkViewModelTest {
         assertEquals(ModerationAlertLinkState.Error(target, HfrErrorKind.Network), viewModel.state.value)
         moderation.loadError = null
         moderation.alert = ModerationAlertState.PendingMine(HFR_MESSAGE)
+        moderation.loadGate = CompletableDeferred()
         viewModel.onIntent(ModerationAlertLinkIntent.Retry)
-        assertEquals(ModerationAlertLinkState.Loading(target), viewModel.state.value)
+        assertEquals(ModerationAlertLinkState.Loading(target, keepSheetOpen = true), viewModel.state.value)
+        runCurrent()
+        assertEquals(ModerationAlertLinkState.Loading(target, keepSheetOpen = true), viewModel.state.value)
+        moderation.loadGate?.complete(Unit)
         advanceUntilIdle()
         assertEquals(ModerationAlertLinkState.Info(target, HFR_MESSAGE), viewModel.state.value)
         assertEquals(List(2) { listOf(23, 35421, 2_800_456, 76) }, moderation.loads)
@@ -156,10 +161,88 @@ class ModerationAlertLinkViewModelTest {
         val viewModel = viewModel()
         viewModel.onIntent(ModerationAlertLinkIntent.Open(target))
         runCurrent()
+        assertEquals(ModerationAlertLinkState.Loading(target), viewModel.state.value)
+        assertEquals(listOf(listOf(23, 35421, 2_800_456, 76)), moderation.loads)
         viewModel.onIntent(ModerationAlertLinkIntent.Dismiss)
         advanceUntilIdle()
         assertEquals(ModerationAlertLinkState.Idle, viewModel.state.value)
         assertTrue(moderation.loadCancelled)
+        moderation.loadGate?.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(ModerationAlertLinkState.Idle, viewModel.state.value)
+    }
+
+    @Test
+    fun `double tap on the same loading target is ignored before and after the GET starts`() = runTest {
+        moderation.loadGate = CompletableDeferred()
+        moderation.alert = ModerationAlertState.PendingMine(HFR_MESSAGE)
+        val viewModel = viewModel()
+        viewModel.onIntent(ModerationAlertLinkIntent.Open(target))
+        viewModel.onIntent(ModerationAlertLinkIntent.Open(target))
+        runCurrent()
+        viewModel.onIntent(ModerationAlertLinkIntent.Open(target))
+        runCurrent()
+        assertEquals(ModerationAlertLinkState.Loading(target), viewModel.state.value)
+        assertEquals(1, moderation.loads.size)
+        assertFalse(moderation.loadCancelled)
+        moderation.loadGate?.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(ModerationAlertLinkState.Info(target, HFR_MESSAGE), viewModel.state.value)
+    }
+
+    @Test
+    fun `another target cancels the previous GET and starts a fresh initial load`() = runTest {
+        val firstGate = CompletableDeferred<Unit>()
+        moderation.loadGate = firstGate
+        val viewModel = viewModel()
+        viewModel.onIntent(ModerationAlertLinkIntent.Open(target))
+        runCurrent()
+        moderation.loadGate = CompletableDeferred()
+        val nextTarget = target.copy(numreponse = target.numreponse + 1)
+        viewModel.onIntent(ModerationAlertLinkIntent.Open(nextTarget))
+        assertEquals(ModerationAlertLinkState.Loading(nextTarget), viewModel.state.value)
+        runCurrent()
+        assertTrue(moderation.loadCancelled)
+        assertEquals(listOf(target.numreponse, nextTarget.numreponse), moderation.loads.map { it[2] })
+        firstGate.complete(Unit)
+        runCurrent()
+        assertEquals(ModerationAlertLinkState.Loading(nextTarget), viewModel.state.value)
+        moderation.alert = ModerationAlertState.PendingMine(HFR_MESSAGE)
+        moderation.loadGate?.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(ModerationAlertLinkState.Info(nextTarget, HFR_MESSAGE), viewModel.state.value)
+    }
+
+    @Test
+    fun `opening the same target again after info reloads despite the active account observer`() = runTest {
+        moderation.alert = ModerationAlertState.PendingMine(HFR_MESSAGE)
+        val viewModel = viewModel()
+        viewModel.onIntent(ModerationAlertLinkIntent.Open(target))
+        advanceUntilIdle()
+        moderation.loadGate = CompletableDeferred()
+        viewModel.onIntent(ModerationAlertLinkIntent.Open(target))
+        runCurrent()
+        assertEquals(ModerationAlertLinkState.Loading(target), viewModel.state.value)
+        assertEquals(2, moderation.loads.size)
+    }
+
+    @Test
+    fun `resubscribing to retained state does not restart a loading GET`() = runTest {
+        moderation.loadGate = CompletableDeferred()
+        moderation.alert = ModerationAlertState.PendingMine(HFR_MESSAGE)
+        val viewModel = viewModel()
+        viewModel.onIntent(ModerationAlertLinkIntent.Open(target))
+        runCurrent()
+        repeat(2) {
+            viewModel.state.test {
+                assertEquals(ModerationAlertLinkState.Loading(target), awaitItem())
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+        assertEquals(1, moderation.loads.size)
+        moderation.loadGate?.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(ModerationAlertLinkState.Info(target, HFR_MESSAGE), viewModel.state.value)
     }
 
     @Test
@@ -228,10 +311,48 @@ class ModerationAlertLinkViewModelTest {
         assertEquals(ModerationAlertLinkState.SignInRequired(target), viewModel.state.value)
         assertEquals(1, moderation.loads.size)
         moderation.alert = ModerationAlertState.Unknown("Autre compte")
+        moderation.loadGate = CompletableDeferred()
         auth.emit(AuthState.Authenticated("another-user"))
+        runCurrent()
+        assertEquals(ModerationAlertLinkState.Loading(target, keepSheetOpen = true), viewModel.state.value)
+        moderation.loadGate?.complete(Unit)
         advanceUntilIdle()
         assertEquals(ModerationAlertLinkState.Info(target, "Autre compte"), viewModel.state.value)
         assertEquals(2, moderation.loads.size)
+    }
+
+    @Test
+    fun `account switch clears open information while keeping its sheet open`() = runTest {
+        moderation.alert = ModerationAlertState.PendingMine(HFR_MESSAGE)
+        val viewModel = viewModel()
+        viewModel.onIntent(ModerationAlertLinkIntent.Open(target))
+        advanceUntilIdle()
+        moderation.loadGate = CompletableDeferred()
+        moderation.alert = ModerationAlertState.Unknown("Autre compte")
+        auth.emit(AuthState.Authenticated("another-user"))
+        runCurrent()
+        assertEquals(ModerationAlertLinkState.Loading(target, keepSheetOpen = true), viewModel.state.value)
+        assertEquals(2, moderation.loads.size)
+        viewModel.onIntent(ModerationAlertLinkIntent.Open(target))
+        runCurrent()
+        assertEquals(2, moderation.loads.size)
+        assertFalse(moderation.loadCancelled)
+        moderation.loadGate?.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(ModerationAlertLinkState.Info(target, "Autre compte"), viewModel.state.value)
+    }
+
+    @Test
+    fun `account switch during the initial read keeps the sheet hidden`() = runTest {
+        moderation.loadGate = CompletableDeferred()
+        val viewModel = viewModel()
+        viewModel.onIntent(ModerationAlertLinkIntent.Open(target))
+        runCurrent()
+        auth.emit(AuthState.Authenticated("another-user"))
+        runCurrent()
+        assertEquals(ModerationAlertLinkState.Loading(target), viewModel.state.value)
+        assertEquals(2, moderation.loads.size)
+        assertTrue(moderation.loadCancelled)
     }
 
     @Test

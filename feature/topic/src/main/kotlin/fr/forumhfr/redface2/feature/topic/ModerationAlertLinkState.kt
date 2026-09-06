@@ -5,7 +5,9 @@ import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 /** Only the post context from the link; numreponse is unique per category. */
 data class ModerationAlertLinkTarget(val cat: Int, val post: Int, val numreponse: Int, val page: Int)
 
-/** Root sheet state retained by the Activity's ViewModel, without persisting account-specific messages. */
+/**
+ * Activity-retained alert state: the initial read precedes the sheet, without saving account-specific messages.
+ */
 sealed interface ModerationAlertLinkState {
     val target: ModerationAlertLinkTarget?
 
@@ -13,7 +15,11 @@ sealed interface ModerationAlertLinkState {
         override val target: ModerationAlertLinkTarget? = null
     }
 
-    data class Loading(override val target: ModerationAlertLinkTarget) : ModerationAlertLinkState
+    /** Only a retry or an account change in an already open sheet keeps the modal visible. */
+    data class Loading(
+        override val target: ModerationAlertLinkTarget,
+        val keepSheetOpen: Boolean = false,
+    ) : ModerationAlertLinkState
     data class Info(
         override val target: ModerationAlertLinkTarget,
         val message: String,

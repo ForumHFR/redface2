@@ -27,7 +27,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 
-/** Read-only information above any destination; only ViewPost or a missing alert initiates navigation. */
+/** Shown once the initial read resolves; retries clear the old body while keeping the sheet open. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ModerationAlertLinkSheet(
@@ -36,6 +36,7 @@ fun ModerationAlertLinkSheet(
     topicTitle: String?,
 ) {
     if (state is ModerationAlertLinkState.Idle || state is ModerationAlertLinkState.NavigateToPost) return
+    if (state is ModerationAlertLinkState.Loading && !state.keepSheetOpen) return
     ModalBottomSheet(
         onDismissRequest = { onIntent(ModerationAlertLinkIntent.Dismiss) },
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -50,10 +51,7 @@ fun ModerationAlertLinkSheet(
                 modifier = Modifier.semantics { heading() },
             )
             Box(
-                // The floor covers the 40 dp spinner and a one-line message, so swapping one for the
-                // other leaves the sheet height untouched; animateContentSize smooths the growth
-                // towards a longer alert text. Compose's size animation honours the system animator
-                // duration scale, including zero.
+                // Keep room for the spinner during retry/account reload; animate the new message's size.
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).animateContentSize(),
                 contentAlignment = if (state is ModerationAlertLinkState.Loading) {
                     Alignment.Center
@@ -65,13 +63,7 @@ fun ModerationAlertLinkSheet(
                     ModerationAlertLinkBody(state, onIntent)
                 }
             }
-            state.target?.let { ModerationAlertLinkViewPost(it, topicTitle, onIntent) }
-            TextButton(
-                onClick = { onIntent(ModerationAlertLinkIntent.Dismiss) },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(stringResource(R.string.topic_alert_close))
-            }
+            state.target?.let { ModerationAlertLinkActions(it, topicTitle, onIntent) }
         }
     }
 }
@@ -87,11 +79,19 @@ private fun ModerationAlertLinkBody(
             CircularProgressIndicator(modifier = Modifier.semantics { contentDescription = label })
         }
         is ModerationAlertLinkState.Info -> {
-            Text(
-                state.message.ifBlank { stringResource(R.string.topic_alert_unknown) },
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            state.treatedAt?.let { Text(stringResource(R.string.topic_alert_treated_at, it)) }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    state.message.ifBlank { stringResource(R.string.topic_alert_unknown) },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                state.treatedAt?.let {
+                    Text(
+                        stringResource(R.string.topic_alert_treated_at, it),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
         is ModerationAlertLinkState.SignInRequired -> Text(stringResource(R.string.topic_alert_link_sign_in_required))
         is ModerationAlertLinkState.Error -> {
@@ -105,23 +105,33 @@ private fun ModerationAlertLinkBody(
 }
 
 @Composable
-private fun ModerationAlertLinkViewPost(
+private fun ModerationAlertLinkActions(
     target: ModerationAlertLinkTarget,
     topicTitle: String?,
     onIntent: (ModerationAlertLinkIntent) -> Unit,
 ) {
-    Button(
-        onClick = { onIntent(ModerationAlertLinkIntent.ViewPost) },
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        val subtitle = if (topicTitle.isNullOrBlank()) {
+            stringResource(R.string.topic_alert_link_post_fallback, target.numreponse, target.post, target.page)
+        } else {
+            stringResource(R.string.topic_alert_link_topic_page, topicTitle, target.page)
+        }
+        Text(
+            subtitle,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Button(
+            onClick = { onIntent(ModerationAlertLinkIntent.ViewPost) },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
             Text(stringResource(R.string.topic_alert_link_view_post))
-            val subtitle = if (topicTitle.isNullOrBlank()) {
-                stringResource(R.string.topic_alert_link_post_fallback, target.numreponse, target.post, target.page)
-            } else {
-                stringResource(R.string.topic_alert_link_topic_page, topicTitle, target.page)
-            }
-            Text(subtitle, style = MaterialTheme.typography.bodySmall)
+        }
+        TextButton(
+            onClick = { onIntent(ModerationAlertLinkIntent.Dismiss) },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(stringResource(R.string.topic_alert_close))
         }
     }
 }

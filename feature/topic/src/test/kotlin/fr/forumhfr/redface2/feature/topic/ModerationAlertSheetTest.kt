@@ -1,9 +1,13 @@
 package fr.forumhfr.redface2.feature.topic
 
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.remember
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.SheetState
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsFocused
@@ -27,7 +31,7 @@ import org.robolectric.annotation.GraphicsMode
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w360dp-h1000dp-xxhdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-@OptIn(ExperimentalTestApi::class)
+@OptIn(ExperimentalTestApi::class, ExperimentalMaterial3Api::class)
 class ModerationAlertSheetTest {
     @get:Rule
     val compose = createComposeRule()
@@ -101,12 +105,37 @@ class ModerationAlertSheetTest {
     }
 
     @Test
-    fun `loading is accessible and cancellable`() {
-        val intents = mutableListOf<TopicIntent>()
-        mount(ModerationAlertUi.Loading, intents::add)
-        compose.onNodeWithContentDescription("Signalement en cours de chargement ou d’envoi").assertExists()
-        compose.onNodeWithText("Annuler").performClick()
-        assertEquals(listOf(TopicIntent.DismissModerationAlert), intents)
+    fun `initial loading does not compose the sheet or request reason focus`() {
+        mount(ModerationAlertUi.Loading)
+        compose.onNodeWithText("Prévenir les modérateurs").assertDoesNotExist()
+        compose.onNodeWithText("Raison").assertDoesNotExist()
+        compose.onNodeWithText("Annuler").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Signalement en cours de chargement ou d’envoi").assertDoesNotExist()
+    }
+
+    @Test
+    fun `reason receives focus once the sheet is expanded`() {
+        compose.mainClock.autoAdvance = false
+        lateinit var sheetState: SheetState
+        compose.setContent {
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                ModerationAlertSheet(
+                    state = ModerationAlertUi.Form(ModerationAlertState.Form("modo.php", "token", null)),
+                    onIntent = {},
+                    sheetState = sheetState,
+                )
+            }
+        }
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
+        compose.runOnIdle { assertEquals(SheetValue.Hidden, sheetState.currentValue) }
+        // The reason field's focus before expansion is not observable here: the modal's dialog window
+        // focuses its first focusable child as soon as it is composed, with or without our request.
+        compose.mainClock.autoAdvance = true
+        compose.waitForIdle()
+        compose.runOnIdle { assertEquals(SheetValue.Expanded, sheetState.currentValue) }
+        compose.onNodeWithText("Raison").assertIsFocused()
     }
 
     @Test
@@ -117,6 +146,8 @@ class ModerationAlertSheetTest {
             ),
         )
         compose.onNodeWithText("Raison").assertIsNotEnabled()
+        compose.onNodeWithContentDescription("Signalement en cours de chargement ou d’envoi").assertExists()
+        compose.onNodeWithText("Fermer").assertIsEnabled()
         compose.onNodeWithText("Envoyer").assertIsNotEnabled()
     }
 

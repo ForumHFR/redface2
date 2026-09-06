@@ -542,6 +542,7 @@ class TopicViewModel @AssistedInject constructor(
         }
     }
 
+    /** Loads behind the topic's progress bar; dismiss cancels this read before any sheet is opened. */
     private fun requestModerationAlert(numreponse: Int) {
         val snapshot = _state.value
         val topic = (snapshot.mode as? TopicUiState.Mode.Loaded)?.topic ?: return
