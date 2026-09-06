@@ -16,6 +16,17 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.54.10` — `internal` (dev) — 2026-09-06
+
+Feuilles d'alerte modération : affichage seulement une fois chargées ([#1287](https://github.com/ForumHFR/redface2/issues/1287), retour XaTriX sur la 0.54.9). Diagnostic et conception Astra (avis lecture seule), implémentation Astra sous gate Fable, build socadisc ; PR [#1292](https://github.com/ForumHFR/redface2/pull/1292).
+
+### Modifié
+
+- **Feuilles « Alerte modération »** (lien et menu « Alerter ») — elles n'apparaissent plus pendant le chargement : une fine barre de progression en haut de l'écran signale la lecture, puis la feuille s'ouvre directement à sa hauteur finale, sans mouvement. Retour annule la lecture. Réessayer et un changement de compte gardent la feuille ouverte. Le champ « raison » ne prend le focus qu'une fois la feuille développée, le clavier ne la déplace plus.
+- **Mise en page** — date « traitée le » en texte secondaire, sous-titre « sujet, page N » au-dessus d'un bouton « Voir le message » épuré, « Fermer » en bouton texte.
+
+---
+
 ## `0.54.9` — `internal` (dev) — 2026-09-06
 
 Correctif de la feuille d'alerte modération ouverte depuis un lien ([#1287](https://github.com/ForumHFR/redface2/issues/1287)), signalé par XaTriX sur la 0.54.8. Code Astra sous gate Fable, build socadisc, mesure vidéo sur émulateur ; PR [#1290](https://github.com/ForumHFR/redface2/pull/1290).

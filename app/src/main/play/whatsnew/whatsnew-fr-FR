@@ -1,3 +1,3 @@
-Redface 2 v0.54.9 — dev.
+Redface 2 v0.54.10 — dev.
 
-- La feuille d'alerte modération ouverte depuis un lien ne saute plus au chargement.
+- Feuilles d'alerte modération : affichées seulement une fois chargées (fine barre de progression avant), sans mouvement ; mise en page revue.
