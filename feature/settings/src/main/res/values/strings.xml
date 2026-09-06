@@ -43,7 +43,7 @@
     <string name="settings_section_notifications">Notifications</string>
     <string name="settings_section_accessibility">Accessibilité</string>
     <string name="settings_section_extensions">Extensions et filtrage</string>
-    <string name="settings_hfr_account_note">Ces réglages proviennent de votre profil HFR (editprofil.php) et arriveront plus tard.</string>
+    <string name="settings_hfr_account_note">Ces réglages viennent de votre profil HFR et arriveront plus tard.</string>
 
     <!-- #494 — refonte du menu : barre supérieure avec recherche activable, sous-pages, état vide. -->
     <string name="settings_back">Retour</string>
@@ -123,6 +123,7 @@
 
     <!-- #294 — historique des sanctions du compte HFR. -->
     <string name="sanctions_title">Mes sanctions</string>
+    <string name="sanctions_loading">Chargement des sanctions</string>
     <string name="settings_sanctions_description">Historique des sanctions de votre compte HFR</string>
     <string name="sanctions_sign_in_required">Connexion requise</string>
     <string name="sanctions_empty">Aucune sanction sur ce compte.</string>
@@ -133,8 +134,6 @@
     <string name="sanctions_since">Depuis %1$s</string>
     <string name="sanctions_moderator">Par %1$s</string>
     <string name="sanctions_error">Impossible de charger vos sanctions.</string>
-    <string name="sanctions_error_network">Pas de connexion</string>
-    <string name="sanctions_error_server">HFR est en panne (erreur serveur)</string>
     <string name="sanctions_retry">Réessayer</string>
 
     <!-- #494 — catalogue exhaustif des options à venir (toggles désactivés mais cherchables).

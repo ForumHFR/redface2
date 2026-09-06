@@ -2799,6 +2799,7 @@ private fun RedfaceNavHost(
                             backStack.removeAt(backStack.lastIndex)
                         }
                     },
+                    topBarActions = accountMenu,
                 )
             }
             entry<MyImagesRoute> {
@@ -2808,6 +2809,7 @@ private fun RedfaceNavHost(
                             backStack.removeAt(backStack.lastIndex)
                         }
                     },
+                    topBarActions = accountMenu,
                 )
             }
             entry<MpStorageInspectorRoute> {

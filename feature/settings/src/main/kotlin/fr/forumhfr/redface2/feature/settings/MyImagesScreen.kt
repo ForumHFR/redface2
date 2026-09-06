@@ -59,6 +59,7 @@ import java.util.Locale
 fun MyImagesScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    topBarActions: @Composable (() -> Unit)? = null,
     viewModel: MyImagesViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -67,6 +68,7 @@ fun MyImagesScreen(
         onIntent = viewModel::submit,
         onBack = onBack,
         modifier = modifier,
+        topBarActions = topBarActions,
     )
 }
 
@@ -77,6 +79,7 @@ internal fun MyImagesContent(
     onIntent: (MyImagesIntent) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    topBarActions: @Composable (() -> Unit)? = null,
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     DeletionMessageEffect(
@@ -89,6 +92,7 @@ internal fun MyImagesContent(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.my_images_title)) },
+                actions = { topBarActions?.invoke() },
                 navigationIcon = {
                     // detekt ForbiddenImport blocks `androidx.compose.material.*` (incl.
                     // material-icons), so the back glyph uses the local `ic_arrow_back` vector
