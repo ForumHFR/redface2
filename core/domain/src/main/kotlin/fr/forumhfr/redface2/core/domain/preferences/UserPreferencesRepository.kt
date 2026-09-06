@@ -617,4 +617,25 @@ interface UserPreferencesRepository {
      * not a user choice).
      */
     suspend fun setForumCategoryFlagFilter(filter: CategoryFlagFilter)
+
+    /**
+     * #1303 — global category-menu layout for this installation, including anonymous sessions.
+     * Default false (expanded). The first emission waits for hydration: callers must not flash
+     * expanded commands beforehand. Shared cache reads see an explicit choice before its disk commit.
+     */
+    fun observeForumCategoryMenusCollapsed(): Flow<Boolean>
+
+    /** Cache-first, last-choice-wins persistence in the application scope; independent of search. */
+    suspend fun setForumCategoryMenusCollapsed(collapsed: Boolean)
+
+    /**
+     * Global sticky-topic layout (#1303), default false. Same hydration/cache contract as
+     * [observeForumCategoryMenusCollapsed]. Search temporarily shows matches; flag buckets stay flat.
+     * Neither exception writes this preference. The two layout keys are independent.
+     */
+    fun observeForumCategoryStickyTopicsCollapsed(): Flow<Boolean>
+
+    /** Persists the explicit sticky-group choice even if the category ViewModel is cancelled. */
+    suspend fun setForumCategoryStickyTopicsCollapsed(collapsed: Boolean)
+
 }

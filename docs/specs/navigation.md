@@ -203,6 +203,38 @@ Catégories
 
 Chaque catégorie affiche le nombre de topics et l'activité récente.
 
+Dans une catégorie, deux commandes de densité indépendantes sont disponibles (#1303) :
+
+- **Menus** : le chevron de la ligne de titre replie ensemble les sous-catégories, leur
+  séparateur, le filtre drapeaux (session connectée) et la pilule de recherche fermée. Le titre
+  reste sur une ligne avec ellipse ; son nom complet reste accessible. Une loupe de 48 dp
+  apparaît quand les menus sont repliés et ouvre uniquement le champ de recherche.
+- **Rappel des filtres** : menus repliés, une ligne cliquable « Sous-cat · Filtre » rappelle les
+  choix actifs et redéplie les menus. Les valeurs « Toutes / Tous » sont omises ; une
+  sous-catégorie dont le nom est indisponible conserve un rappel par identifiant.
+- **Recherche** : le champ actif reste hors du panneau repliable et conserve son focus et sa
+  requête lors du repli. Changer de sous-catégorie conserve la recherche et revient à la page 1.
+  Ouvrir ou fermer la recherche ne modifie aucune préférence de disposition. Fermer vide la
+  requête et quitte le mode en une seule transition.
+- **Épinglés** : un en-tête unique, avant le groupe dans la liste défilante, remplace le
+  séparateur « Autres sujets ». Il affiche « Épinglés (N) » ou « N épinglés masqués » ; toute la
+  ligne (48 dp minimum) commande le repli. Le compte et la partition portent uniquement sur
+  les résultats filtrés de la page chargée. Sans épinglé, aucun en-tête ; avec uniquement des
+  épinglés masqués, l'en-tête et la pagination restent affichés, sans faux état vide.
+- **Exceptions** : recherche ouverte, même vide, les épinglés correspondants restent visibles
+  avec un en-tête informatif sans commande ; fermer réapplique la préférence. Avec un filtre
+  drapeaux actif, la liste reste plate dans son ordre source, sans en-tête ni masquage, même
+  si elle contient des épinglés.
+
+Les préférences globales `forum_category_menus_collapsed` et
+`forum_category_sticky_topics_collapsed` s'appliquent à toutes les catégories de cette
+installation, connecté comme anonyme ; leur défaut est `false` (déplié). Avant leur première
+lecture, seuls le titre et le chargement s'affichent, commandes désactivées, pour éviter un
+flash déplié. Replier ne recharge pas les sujets et ne change ni page, ni sous-catégorie, ni
+recherche. La liste conserve son ancre par clé ; si l'ancre était un épinglé retiré, elle revient
+à l'en-tête. Le FAB reste développé seulement à l'index zéro **et** à l'offset zéro, avec sa
+réserve basse de 88 dp ; les insets système restent appliqués une seule fois.
+
 ### Création de topic
 
 Formulaire complet :

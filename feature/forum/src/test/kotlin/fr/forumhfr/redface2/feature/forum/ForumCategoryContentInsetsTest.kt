@@ -64,7 +64,7 @@ import org.robolectric.annotation.GraphicsMode
  * Output: `feature/forum/build/outputs/roborazzi/forum_category_system_bars_*.png` (gitignored).
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34], qualifiers = "w360dp-h780dp-xxhdpi")
+@Config(sdk = [34], qualifiers = "fr-rFR-w360dp-h780dp-xxhdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @OptIn(ExperimentalTestApi::class)
 class ForumCategoryContentInsetsTest {
@@ -116,15 +116,21 @@ class ForumCategoryContentInsetsTest {
     @Test
     fun recordDark() = record(darkTheme = true, suffix = "dark")
 
-    private fun record(darkTheme: Boolean, suffix: String) {
-        mount(darkTheme = darkTheme, simulateBars = true)
+    @Test
+    fun recordCollapsedLight() = record(darkTheme = false, suffix = "collapsed_light", collapsed = true)
+
+    @Test
+    fun recordCollapsedDark() = record(darkTheme = true, suffix = "collapsed_dark", collapsed = true)
+
+    private fun record(darkTheme: Boolean, suffix: String, collapsed: Boolean = false) {
+        mount(darkTheme = darkTheme, simulateBars = true, collapsed = collapsed)
         applySystemBars(statusTop = STATUS_BAR, navBottom = NAV_BAR)
         compose.onRoot().captureRoboImage(
             filePath = "build/outputs/roborazzi/forum_category_system_bars_$suffix.png",
         )
     }
 
-    private fun mount(darkTheme: Boolean = false, simulateBars: Boolean = false) {
+    private fun mount(darkTheme: Boolean = false, simulateBars: Boolean = false, collapsed: Boolean = false) {
         compose.setContent {
             val view = LocalView.current
             val currentDensity = LocalDensity.current
@@ -135,7 +141,7 @@ class ForumCategoryContentInsetsTest {
             RedfaceTheme(darkTheme = darkTheme, amoledTheme = false, dynamicColor = false) {
                 Box(modifier = Modifier.fillMaxSize()) {
                     ForumCategoryContent(
-                        state = contentState(),
+                        state = contentState().copy(menusCollapsed = collapsed, stickyTopicsCollapsed = collapsed),
                         highlightTitle = null,
                         onOpenTopic = {},
                         onCreateTopic = { _, _ -> },
@@ -217,6 +223,7 @@ class ForumCategoryContentInsetsTest {
             isRefreshing = false,
             // Authenticated shape: FAB rendered (Scaffold slot) and #1131 clearance reserved.
             canCreateTopic = true,
+            layoutPreferencesReady = true,
         )
     }
 
