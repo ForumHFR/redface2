@@ -16,6 +16,20 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.54.12` — `internal` (dev) — 2026-09-06
+
+Deux retours de XaTriX : la visionneuse d'images et la place perdue en haut de la vue catégorie. Code Astra sous gate Fable, preuves émulateur socadisc ; PRs [#1304](https://github.com/ForumHFR/redface2/pull/1304) et [#1305](https://github.com/ForumHFR/redface2/pull/1305) ([#1303](https://github.com/ForumHFR/redface2/issues/1303)).
+
+### Ajouté
+
+- **Forum → catégorie** — deux commandes de repli : un chevron sur la ligne du nom de catégorie replie sous-catégories, filtre drapeaux et recherche (une loupe reste disponible, un rappel « Sous-cat · Filtre » réapparaît si quelque chose est actif) ; un en-tête « Épinglés (N) » / « N épinglés masqués » replie les sujets épinglés. Les deux états sont mémorisés. L'en-tête remplace le séparateur « Autres sujets ».
+
+### Corrigé
+
+- **Visionneuse d'images** — la barre translucide du bas réservait l'encoche haute de l'écran après masquage des barres système, d'où une hauteur doublée (104 dp au lieu de 56) ; elle ne réserve plus que le bas et les côtés. La croix de fermeture passe tout à droite dans un cercle translucide, séparée des quatre autres actions.
+
+---
+
 ## `0.54.11` — `internal` (dev) — 2026-09-06
 
 Raccords de l'écran « Mes sanctions » avec le reste des Réglages ([#294](https://github.com/ForumHFR/redface2/issues/294)), après une revue de cohérence UI demandée par XaTriX. Code Astra sous gate Fable, build socadisc ; PR [#1294](https://github.com/ForumHFR/redface2/pull/1294).
