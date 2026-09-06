@@ -1,3 +1,3 @@
-Redface 2 v0.54.8 — dev.
+Redface 2 v0.54.9 — dev.
 
-- Moderation-alert link tapped in a post: info sheet in place, without leaving the page or moving the read flag, with "View post".
+- The moderation-alert sheet opened from a link no longer jumps while loading.

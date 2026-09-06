@@ -16,6 +16,16 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.54.9` — `internal` (dev) — 2026-09-06
+
+Correctif de la feuille d'alerte modération ouverte depuis un lien ([#1287](https://github.com/ForumHFR/redface2/issues/1287)), signalé par XaTriX sur la 0.54.8. Code Astra sous gate Fable, build socadisc, mesure vidéo sur émulateur ; PR [#1290](https://github.com/ForumHFR/redface2/pull/1290).
+
+### Corrigé
+
+- **Feuille « Alerte modération »** — elle sautait quand le texte de HFR remplaçait l'indicateur de chargement (changement de hauteur brutal). La zone de contenu a désormais une hauteur minimale et une transition animée : une fois posée, la feuille ne bouge plus.
+
+---
+
 ## `0.54.8` — `internal` (dev) — 2026-09-06
 
 Lien d'alerte modération, option B choisie par XaTriX sur le fil DEV ([#1287](https://github.com/ForumHFR/redface2/issues/1287)). Code Astra (Codex gpt-6-astra, xhigh) sous gate Fable, build socadisc ; PR [#1288](https://github.com/ForumHFR/redface2/pull/1288).
