@@ -1,8 +1,11 @@
 package fr.forumhfr.redface2.feature.topic
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -15,6 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -45,7 +49,22 @@ fun ModerationAlertLinkSheet(
                 style = MaterialTheme.typography.titleLarge,
                 modifier = Modifier.semantics { heading() },
             )
-            ModerationAlertLinkBody(state, onIntent)
+            Box(
+                // The floor covers the 40 dp spinner and a one-line message, so swapping one for the
+                // other leaves the sheet height untouched; animateContentSize smooths the growth
+                // towards a longer alert text. Compose's size animation honours the system animator
+                // duration scale, including zero.
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).animateContentSize(),
+                contentAlignment = if (state is ModerationAlertLinkState.Loading) {
+                    Alignment.Center
+                } else {
+                    Alignment.TopStart
+                },
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    ModerationAlertLinkBody(state, onIntent)
+                }
+            }
             state.target?.let { ModerationAlertLinkViewPost(it, topicTitle, onIntent) }
             TextButton(
                 onClick = { onIntent(ModerationAlertLinkIntent.Dismiss) },

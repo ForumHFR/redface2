@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.topic
 
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -88,6 +89,15 @@ class ModerationAlertLinkSheetTest {
         compose.onNodeWithContentDescription("Signalement en cours de chargement ou d’envoi").assertExists()
         compose.onNodeWithText("Fermer").performClick()
         assertEquals(listOf(ModerationAlertLinkIntent.Dismiss), intents)
+    }
+
+    @Test
+    fun `loading state keeps the view-post button visible`() {
+        val intents = mutableListOf<ModerationAlertLinkIntent>()
+        mount(ModerationAlertLinkState.Loading(target), onIntent = intents::add)
+        compose.onNodeWithText("Voir le message", substring = true).assertIsDisplayed().assertIsEnabled().performClick()
+        compose.onNodeWithText("Fermer").assertIsDisplayed()
+        assertEquals(listOf(ModerationAlertLinkIntent.ViewPost), intents)
     }
 
     @Test
