@@ -12,10 +12,19 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -184,17 +193,20 @@ private fun ImageViewerActionBar(
     actions: ImageViewerActions,
     modifier: Modifier = Modifier,
 ) {
+    // safeDrawing also includes the TOP cutout, which can remain after hiding system bars.
+    // A bottom bar only needs bottom/side protection, including side navigation in landscape.
+    // navigationBars respects visibility; never reserve navigationBarsIgnoringVisibility here.
+    val actionInsets = WindowInsets.navigationBars.union(WindowInsets.displayCutout)
+        .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
     Row(
-        horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier
             .fillMaxWidth()
-            .background(Color.Black.copy(alpha = 0.64f))
-            .safeDrawingPadding()
-            .padding(vertical = 4.dp)
-            .testTag(IMAGE_VIEWER_ACTIONS_TAG),
+            .testTag(IMAGE_VIEWER_ACTIONS_TAG)
+            .background(Color.Black.copy(alpha = ACTION_BAR_ALPHA))
+            .windowInsetsPadding(actionInsets)
+            .padding(horizontal = 4.dp, vertical = 4.dp),
     ) {
-        ImageViewerAction(R.drawable.ic_close, R.string.image_viewer_close, actions.onClose)
         ImageViewerAction(R.drawable.ic_ms_share, R.string.post_image_menu_share, actions.onShare)
         ImageViewerAction(
             R.drawable.ic_ms_content_copy,
@@ -207,6 +219,19 @@ private fun ImageViewerActionBar(
             actions.onOpenBrowser,
         )
         ImageViewerAction(R.drawable.ic_ms_download, R.string.post_image_menu_save, actions.onSave)
+        Spacer(Modifier.weight(1f))
+        IconButton(
+            onClick = actions.onClose,
+            modifier = Modifier
+                .size(ACTION_TOUCH_TARGET)
+                .background(Color.White.copy(alpha = CLOSE_CONTAINER_ALPHA), CircleShape),
+        ) {
+            RedfaceVectorIcon(
+                resId = R.drawable.ic_close,
+                contentDescription = stringResource(R.string.image_viewer_close),
+                tint = Color.White,
+            )
+        }
     }
 }
 
@@ -216,7 +241,7 @@ private fun ImageViewerAction(
     @StringRes labelRes: Int,
     onClick: () -> Unit,
 ) {
-    IconButton(onClick = onClick) {
+    IconButton(onClick = onClick, modifier = Modifier.size(ACTION_TOUCH_TARGET)) {
         RedfaceVectorIcon(
             resId = iconRes,
             contentDescription = stringResource(labelRes),
@@ -355,3 +380,6 @@ internal const val IMAGE_VIEWER_PROGRESS_TAG = "image-viewer-progress"
 internal const val IMAGE_VIEWER_ERROR_TAG = "image-viewer-error"
 internal const val IMAGE_VIEWER_ACTIONS_TAG = "image-viewer-actions"
 private const val DOUBLE_TAP_ZOOM = 2f
+private const val ACTION_BAR_ALPHA = 0.64f
+private const val CLOSE_CONTAINER_ALPHA = 0.2f
+private val ACTION_TOUCH_TARGET = 48.dp
