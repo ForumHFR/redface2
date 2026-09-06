@@ -1,5 +1,3 @@
-Redface 2 v0.54.6 — dev.
+Redface 2 v0.54.7 — dev.
 
-- Mes sanctions : l'historique des sanctions du compte dans Réglages → Compte.
-- Un lien d'alerte modération ouvre le message et la feuille d'alerte.
-- Visionneuse : une miniature liée sur une ligne de texte ouvre la grande image en plein écran.
+- Correctif : le lien d'alerte modération (annoncé en 0.54.6) ouvre bien le message et la feuille d'alerte.
