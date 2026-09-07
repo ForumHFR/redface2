@@ -354,6 +354,8 @@ fun TopicScreen(
      * [pollManualExpanded], keeping the poll collapsed / expanded across page navigation.
      */
     onPollExpansionChanged: (Boolean) -> Unit = {},
+    /** #1296 — live route check, including disposal; a configuration recreation keeps the visit. */
+    isCurrentRoute: () -> Boolean = { true },
     /**
      * #518 follow-up — `true` when `:app` wants this screen to report its scroll facts for the
      * immersive nav-bar reveal (immersive on AND a scroll-driven mode selected). When `false` the
@@ -372,6 +374,17 @@ fun TopicScreen(
         creationCallback = { factory -> factory.create(request) },
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val routeCurrent = isCurrentRoute()
+    LaunchedEffect(viewModel, routeCurrent) {
+        // The outgoing entry can stay composed throughout a navigation animation.
+        if (!routeCurrent) viewModel.onTopicRouteLeft()
+    }
+    val currentRouteCheck = rememberUpdatedState(isCurrentRoute)
+    DisposableEffect(viewModel) {
+        onDispose {
+            if (!currentRouteCheck.value()) viewModel.onTopicRouteLeft()
+        }
+    }
     val favoriteAtPostState by viewModel.favoriteAtPostState.collectAsStateWithLifecycle()
     val lazyListState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -2491,6 +2504,7 @@ private fun TopicLoadedContent(
                         expandUnansweredPolls = state.expandUnansweredPolls,
                         pollVoteForm = topic.pollVoteForm,
                         pollClosed = poll.closed,
+                        justVoted = (state.mode as? TopicUiState.Mode.Loaded)?.pollJustVoted == true,
                     ),
                     onExpansionChanged = onPollExpansionChanged,
                     // #1206 — HFR's native close link is rendered for the owner of an open poll on
@@ -3021,6 +3035,7 @@ internal data class TopicPollVoteUi(
  * reliable yet). A non-blank transient token is the same submit-capability gate used by the vote
  * controls; [pollClosed] additionally prevents an expired/closed poll from auto-expanding. The
  * nullable manual choice is checked first so an explicit collapse remains sticky across pages.
+ * #1296 — [justVoted] keeps results visible for this page visit under the unanswered-poll opt-in.
  */
 internal fun resolvePollRevealed(
     manualExpanded: Boolean?,
@@ -3028,10 +3043,11 @@ internal fun resolvePollRevealed(
     expandUnansweredPolls: Boolean,
     pollVoteForm: PollVoteForm?,
     pollClosed: Boolean,
+    justVoted: Boolean,
 ): Boolean {
     val canVote = pollVoteForm?.hashCheck?.isNotBlank() == true && !pollClosed
     return manualExpanded
-        ?: (pollsExpandedDefault || (expandUnansweredPolls && canVote))
+        ?: (pollsExpandedDefault || (expandUnansweredPolls && (canVote || justVoted)))
 }
 
 @Suppress("LongParameterList") // fully-controlled card: poll + vote slice + expansion + owner close.

@@ -34,6 +34,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -2268,6 +2269,8 @@ private fun RedfaceNavHost(
     immersiveNavBarNavState: ImmersiveNavBarNavState,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
 ) {
+    // #1296 — an outgoing entry must see the active tab's stack, even during its disposal.
+    val currentBackStack = rememberUpdatedState(backStack)
     val openImageViewer: (ImageViewerRequest) -> Unit = remember(backStack) {
         { request: ImageViewerRequest ->
             backStack.add(
@@ -2906,6 +2909,7 @@ private fun RedfaceNavHost(
                         .anchors[TopicScrollKey(route.cat, route.post, route.page)],
                 )
                 TopicScreen(
+                    isCurrentRoute = { currentBackStack.value.lastOrNull() == route },
                     request = TopicRequest(
                         cat = route.cat,
                         post = route.post,

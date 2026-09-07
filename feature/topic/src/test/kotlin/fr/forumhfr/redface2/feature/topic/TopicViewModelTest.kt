@@ -4280,7 +4280,7 @@ class TopicViewModelTest {
 
     @Test
     fun `Accepted refreshes once to results and never reposts`() = runTest {
-        val form = fakePollVoteForm()
+        val form = fakePollVoteForm().let { it.copy(choices = it.choices.take(2)) }
         val pollRepository = FakePollVoteRepository(PollVoteResult.Accepted)
         val topicRepository = FakeTopicRepository(
             flowsToReturn = listOf(
@@ -4293,6 +4293,7 @@ class TopicViewModelTest {
             topicRepository = topicRepository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
             pollVoteRepository = pollRepository,
+            userPreferencesRepository = FakeUserPreferencesRepository(topicUnansweredPollsExpanded = true),
         )
         viewModel.send(TopicIntent.UpdatePollSelection(form.choices[0], selected = true))
 
@@ -4304,11 +4305,14 @@ class TopicViewModelTest {
         val loaded = viewModel.state.value.mode as TopicUiState.Mode.Loaded
         assertEquals(null, loaded.pollVote)
         assertTrue(loaded.topic.poll?.resultsAvailable == true)
+        assertTrue(loaded.pollJustVoted)
+        assertTrue(pollRevealed(viewModel))
+        assertFalse(pollRevealed(viewModel, manualExpanded = false))
     }
 
     @Test
     fun `AlreadyVoted refreshes once to results and never reposts`() = runTest {
-        val form = fakePollVoteForm()
+        val form = fakePollVoteForm().let { it.copy(choices = it.choices.take(2)) }
         val pollRepository = FakePollVoteRepository(PollVoteResult.AlreadyVoted)
         val topicRepository = FakeTopicRepository(
             flowsToReturn = listOf(
@@ -4321,6 +4325,7 @@ class TopicViewModelTest {
             topicRepository = topicRepository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
             pollVoteRepository = pollRepository,
+            userPreferencesRepository = FakeUserPreferencesRepository(topicUnansweredPollsExpanded = true),
         )
         viewModel.send(TopicIntent.UpdatePollSelection(form.choices[0], selected = true))
 
@@ -4330,6 +4335,279 @@ class TopicViewModelTest {
         assertEquals(1, pollRepository.calls.size)
         assertEquals(1, topicRepository.refreshCalls.size)
         assertEquals(null, (viewModel.state.value.mode as TopicUiState.Mode.Loaded).pollVote)
+        assertTrue((viewModel.state.value.mode as TopicUiState.Mode.Loaded).pollJustVoted)
+        assertTrue(pollRevealed(viewModel))
+        assertFalse(pollRevealed(viewModel, manualExpanded = false))
+    }
+
+    @Test
+    fun `voted poll collapses on page change and stays collapsed on snapshot revisit`() = runTest {
+        val results = fakeTopic(1, 2, poll = fakePollResults())
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flowOf(votingTopic()),
+                flowOf(results.copy(page = 2)),
+                flow { kotlinx.coroutines.awaitCancellation() },
+            ),
+            refreshTopicsToReturn = listOf(results),
+        )
+        val viewModel = pollVisitViewModel(repository)
+        viewModel.send(TopicIntent.SubmitBlankPollVote)
+        advanceUntilIdle()
+        assertTrue(pollRevealed(viewModel))
+
+        viewModel.switchToPage(2)
+        advanceUntilIdle()
+        assertFalse((viewModel.state.value.mode as TopicUiState.Mode.Loaded).pollJustVoted)
+        assertFalse(pollRevealed(viewModel))
+        viewModel.switchToPage(1)
+        runCurrent()
+        assertEquals(1, (viewModel.state.value.mode as TopicUiState.Mode.Loaded).topic.page)
+        assertFalse(pollRevealed(viewModel))
+    }
+
+    @Test
+    fun `leaving during page grace cannot restore just voted on a quick return`() = runTest {
+        val results = fakeTopic(1, 2, poll = fakePollResults())
+        val viewModel = pollVisitViewModel(
+            FakeTopicRepository(
+                flowsToReturn = listOf(
+                    flowOf(votingTopic()),
+                    flow { kotlinx.coroutines.awaitCancellation() },
+                    flowOf(results),
+                ),
+                refreshTopicsToReturn = listOf(results),
+            ),
+        )
+        viewModel.send(TopicIntent.SubmitBlankPollVote)
+        advanceUntilIdle()
+        assertTrue(pollRevealed(viewModel))
+
+        viewModel.switchToPage(2)
+        runCurrent()
+        val held = viewModel.state.value.mode as TopicUiState.Mode.Loaded
+        assertEquals(1, held.topic.page)
+        assertFalse(held.pollJustVoted)
+        viewModel.switchToPage(1)
+        advanceUntilIdle()
+        assertFalse(pollRevealed(viewModel))
+    }
+
+    @Test
+    fun `explicit refresh clears just voted before GET even when GET fails`() = runTest {
+        for (fails in listOf(false, true)) {
+            val results = fakeTopic(1, 2, poll = fakePollResults())
+            val repository = FakeTopicRepository(
+                flowsToReturn = listOf(flowOf(votingTopic())),
+                refreshTopicsToReturn = listOf(results, results),
+            )
+            val viewModel = pollVisitViewModel(repository)
+            viewModel.send(TopicIntent.SubmitBlankPollVote)
+            advanceUntilIdle()
+            assertTrue(pollRevealed(viewModel))
+            val refreshGate = CompletableDeferred<Unit>()
+            repository.refreshHook = { _, _, _ ->
+                refreshGate.await()
+                if (fails) throw IOException("manual refresh offline")
+            }
+
+            viewModel.send(TopicIntent.Refresh)
+            runCurrent()
+            assertTrue(viewModel.state.value.isRefreshing)
+            assertFalse((viewModel.state.value.mode as TopicUiState.Mode.Loaded).pollJustVoted)
+            assertFalse(pollRevealed(viewModel))
+            refreshGate.complete(Unit)
+            advanceUntilIdle()
+            assertFalse(pollRevealed(viewModel))
+            assertEquals(2, repository.refreshCalls.size)
+        }
+    }
+
+    @Test
+    fun `explicit refresh during a vote clears the visit without duplicating the results GET`() = runTest {
+        for (phase in listOf(PollVotePhase.Submitting, PollVotePhase.Refreshing)) {
+            val submitGate = CompletableDeferred<Unit>()
+            val refreshGate = CompletableDeferred<Unit>()
+            val pollRepository = FakePollVoteRepository(PollVoteResult.Accepted).apply { gate = submitGate }
+            val repository = FakeTopicRepository(
+                listOf(flowOf(votingTopic())),
+                refreshTopicsToReturn = listOf(fakeTopic(1, 2, poll = fakePollResults())),
+            ).apply { refreshHook = { _, _, _ -> refreshGate.await() } }
+            val viewModel = pollVisitViewModel(repository, pollRepository = pollRepository)
+            viewModel.send(TopicIntent.SubmitBlankPollVote)
+            if (phase == PollVotePhase.Refreshing) submitGate.complete(Unit)
+            runCurrent()
+            assertEquals(phase, loadedPollVote(viewModel).phase)
+
+            viewModel.send(TopicIntent.Refresh)
+            runCurrent()
+
+            assertFalse((viewModel.state.value.mode as TopicUiState.Mode.Loaded).pollJustVoted)
+            assertEquals("explicit refresh must not interrupt the vote", phase, loadedPollVote(viewModel).phase)
+            submitGate.complete(Unit)
+            runCurrent()
+            assertEquals(PollVotePhase.Refreshing, loadedPollVote(viewModel).phase)
+            assertFalse(pollRevealed(viewModel))
+            refreshGate.complete(Unit)
+            advanceUntilIdle()
+            assertFalse(pollRevealed(viewModel))
+            assertEquals(1, pollRepository.completedBlankCalls.size)
+            assertEquals(1, repository.refreshCalls.size)
+        }
+    }
+
+    @Test
+    fun `numbered results preserve option labels that themselves start with a number`() = runTest {
+        val initial = votingTopic()
+        val form = requireNotNull(initial.pollVoteForm).let { original ->
+            original.copy(choices = original.choices.map { it.copy(label = "1. ${it.label}") })
+        }
+        val results = fakePollResults().copy(
+            options = listOf(
+                PollOption("1. 1. Kotlin", votes = 8, percentage = 80f),
+                PollOption("2. 1. Java", votes = 2, percentage = 20f),
+            ),
+        )
+        val viewModel = pollVisitViewModel(
+            FakeTopicRepository(
+                listOf(flowOf(initial.copy(poll = fakeVotingPoll(form), pollVoteForm = form))),
+                refreshTopicsToReturn = listOf(initial.copy(poll = results, pollVoteForm = null)),
+            ),
+        )
+
+        viewModel.send(TopicIntent.SubmitBlankPollVote)
+        advanceUntilIdle()
+
+        assertTrue((viewModel.state.value.mode as TopicUiState.Mode.Loaded).pollJustVoted)
+        assertTrue(pollRevealed(viewModel))
+    }
+
+    @Test
+    fun `replacement or disappearance of the poll clears just voted on the same page`() = runTest {
+        val results = fakePollResults()
+        val replacements = listOf(
+            results.copy(question = "Un autre sondage ?"),
+            results.copy(options = results.options.map { it.copy(text = "${it.text} changed") }),
+            null,
+        )
+        for (poll in replacements) {
+            val viewModel = pollVisitViewModel(
+                FakeTopicRepository(
+                    listOf(flowOf(votingTopic())),
+                    refreshTopicsToReturn = listOf(fakeTopic(1, 2, poll = poll)),
+                ),
+            )
+
+            viewModel.send(TopicIntent.SubmitBlankPollVote)
+            advanceUntilIdle()
+
+            assertFalse((viewModel.state.value.mode as TopicUiState.Mode.Loaded).pollJustVoted)
+            assertFalse(pollRevealed(viewModel))
+        }
+    }
+
+    @Test
+    fun `account change clears just voted results`() = runTest {
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"))
+        val viewModel = pollVisitViewModel(
+            FakeTopicRepository(
+                listOf(flowOf(votingTopic())),
+                refreshTopicsToReturn = listOf(fakeTopic(1, 2, poll = fakePollResults())),
+            ),
+            authRepository = auth,
+        )
+        viewModel.send(TopicIntent.SubmitBlankPollVote)
+        advanceUntilIdle()
+        assertTrue(pollRevealed(viewModel))
+
+        auth.emit(AuthState.Authenticated("bob"))
+        advanceUntilIdle()
+
+        assertFalse((viewModel.state.value.mode as TopicUiState.Mode.Loaded).pollJustVoted)
+        assertFalse(pollRevealed(viewModel))
+    }
+
+    @Test
+    fun `leaving a retained topic route clears just voted and a new route starts collapsed`() = runTest {
+        val results = fakeTopic(1, 2, poll = fakePollResults())
+        val viewModel = pollVisitViewModel(
+            FakeTopicRepository(listOf(flowOf(votingTopic())), refreshTopicsToReturn = listOf(results)),
+        )
+        viewModel.send(TopicIntent.SubmitBlankPollVote)
+        advanceUntilIdle()
+        assertTrue(pollRevealed(viewModel))
+
+        viewModel.onTopicRouteLeft()
+        assertFalse((viewModel.state.value.mode as TopicUiState.Mode.Loaded).pollJustVoted)
+        assertFalse(pollRevealed(viewModel))
+        val reopened = pollVisitViewModel(FakeTopicRepository(listOf(flowOf(results))))
+        assertFalse(pollRevealed(reopened))
+    }
+
+    @Test
+    fun `acceptance after leaving a retained route cannot restore just voted`() = runTest {
+        val submitGate = CompletableDeferred<Unit>()
+        val pollRepository = FakePollVoteRepository(PollVoteResult.Accepted).apply { gate = submitGate }
+        val viewModel = pollVisitViewModel(
+            FakeTopicRepository(
+                listOf(flowOf(votingTopic())),
+                refreshTopicsToReturn = listOf(fakeTopic(1, 2, poll = fakePollResults())),
+            ),
+            pollRepository = pollRepository,
+        )
+        viewModel.send(TopicIntent.SubmitBlankPollVote)
+        runCurrent()
+        viewModel.onTopicRouteLeft()
+        submitGate.complete(Unit)
+        advanceUntilIdle()
+
+        assertEquals(1, pollRepository.completedBlankCalls.size)
+        assertFalse((viewModel.state.value.mode as TopicUiState.Mode.Loaded).pollJustVoted)
+        assertFalse(pollRevealed(viewModel))
+    }
+
+    @Test
+    fun `accepted vote stays revealed during its refresh but leaving still wins over the late GET`() = runTest {
+        val refreshGate = CompletableDeferred<Unit>()
+        val repository = FakeTopicRepository(
+            listOf(flowOf(votingTopic())),
+            refreshTopicsToReturn = listOf(fakeTopic(1, 2, poll = fakePollResults())),
+        ).apply {
+            refreshHook = { _, _, _ -> refreshGate.await() }
+        }
+        val viewModel = pollVisitViewModel(repository)
+        viewModel.send(TopicIntent.SubmitBlankPollVote)
+        runCurrent()
+
+        assertEquals(PollVotePhase.Refreshing, loadedPollVote(viewModel).phase)
+        assertTrue(loadedPollVote(viewModel).form.hashCheck.isBlank())
+        assertTrue((viewModel.state.value.mode as TopicUiState.Mode.Loaded).pollJustVoted)
+        assertTrue(pollRevealed(viewModel))
+        viewModel.onTopicRouteLeft()
+        refreshGate.complete(Unit)
+        advanceUntilIdle()
+
+        assertFalse((viewModel.state.value.mode as TopicUiState.Mode.Loaded).pollJustVoted)
+        assertFalse(pollRevealed(viewModel))
+    }
+
+    @Test
+    fun `local refilter keeps just voted results on the same page`() = runTest {
+        val blacklist = FakeBlacklistRepository()
+        val viewModel = pollVisitViewModel(
+            FakeTopicRepository(
+                listOf(flowOf(votingTopic())),
+                refreshTopicsToReturn = listOf(fakeTopic(1, 2, poll = fakePollResults())),
+            ),
+            blacklistRepository = blacklist,
+        )
+        viewModel.send(TopicIntent.SubmitBlankPollVote)
+        advanceUntilIdle()
+        blacklist.block("troll")
+        advanceUntilIdle()
+
+        assertTrue((viewModel.state.value.mode as TopicUiState.Mode.Loaded).pollJustVoted)
+        assertTrue(pollRevealed(viewModel))
     }
 
     @Test
@@ -4562,6 +4840,7 @@ class TopicViewModelTest {
         val pollVote = loadedPollVote(viewModel)
         assertEquals(PollVotePhase.Idle, pollVote.phase)
         assertEquals(PollVoteUiError.RefreshFailedAfterAccepted, pollVote.error)
+        assertTrue((viewModel.state.value.mode as TopicUiState.Mode.Loaded).pollJustVoted)
         assertEquals(setOf(form.choices[0]), pollVote.selectedChoices)
         assertTrue("the consumed form can never repost", pollVote.form.hashCheck.isBlank())
         assertEquals(1, pollRepository.calls.size)
@@ -5056,6 +5335,38 @@ class TopicViewModelTest {
         authRepository = auth,
         moderationRepository = repository,
     )
+
+    private fun votingTopic(): Topic {
+        val form = fakePollVoteForm().let { it.copy(choices = it.choices.take(2)) }
+        return fakeTopic(1, 2, poll = fakeVotingPoll(form), pollVoteForm = form)
+    }
+
+    private fun pollVisitViewModel(
+        repository: TopicRepository,
+        pollRepository: PollVoteRepository = FakePollVoteRepository(PollVoteResult.Accepted),
+        blacklistRepository: BlacklistRepository = FakeBlacklistRepository(),
+        authRepository: AuthRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+    ): TopicViewModel = topicViewModel(
+        request = topicRequest(page = 1),
+        topicRepository = repository,
+        authRepository = authRepository,
+        pollVoteRepository = pollRepository,
+        blacklistRepository = blacklistRepository,
+        userPreferencesRepository = FakeUserPreferencesRepository(topicUnansweredPollsExpanded = true),
+    )
+
+    private fun pollRevealed(viewModel: TopicViewModel, manualExpanded: Boolean? = null): Boolean {
+        val state = viewModel.state.value
+        val loaded = state.mode as TopicUiState.Mode.Loaded
+        return resolvePollRevealed(
+            manualExpanded = manualExpanded,
+            pollsExpandedDefault = state.pollsExpandedDefault,
+            expandUnansweredPolls = state.expandUnansweredPolls,
+            pollVoteForm = loaded.topic.pollVoteForm,
+            pollClosed = loaded.topic.poll?.closed == true,
+            justVoted = loaded.pollJustVoted,
+        )
+    }
 
     private fun loadedPollVote(viewModel: TopicViewModel): PollVoteUiState =
         requireNotNull((viewModel.state.value.mode as TopicUiState.Mode.Loaded).pollVote)
@@ -5996,9 +6307,10 @@ class TopicViewModelTest {
 
     private fun fakePollResults(): Poll = Poll(
         question = "Quel langage préférez-vous ?",
+        // HFR's RESULTS labels keep their ordinal; FORM labels do not (TopicPageParserTest).
         options = listOf(
-            PollOption("Kotlin", votes = 8, percentage = 80f),
-            PollOption("Java", votes = 2, percentage = 20f),
+            PollOption("1. Kotlin", votes = 8, percentage = 80f),
+            PollOption("2. Java", votes = 2, percentage = 20f),
         ),
         multipleChoice = false,
         totalVotes = 10,

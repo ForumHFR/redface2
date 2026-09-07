@@ -29,6 +29,7 @@ import fr.forumhfr.redface2.core.domain.write.PollVoteRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.Post
+import fr.forumhfr.redface2.core.model.Poll
 import fr.forumhfr.redface2.core.model.write.ModerationAlertOutcome
 import fr.forumhfr.redface2.core.model.write.FlagAddContext
 import fr.forumhfr.redface2.core.model.Topic
@@ -146,6 +147,9 @@ class TopicViewModel @AssistedInject constructor(
 
     /** #779 — anti double-submit lock; the detached POST itself may outlive this job/VM. */
     private var pollVoteJob: Job? = null
+
+    /** #1296 — fences a late accepted vote after a page/route departure or explicit refresh. */
+    private var pollVisitGeneration = 0
 
     /**
      * Generation owning the visible Submitting/Refreshing phase. A page takeover advances
@@ -415,6 +419,7 @@ class TopicViewModel @AssistedInject constructor(
                                     pollVoteForm = null,
                                 ),
                                 pollVote = null,
+                                pollJustVoted = false,
                             )
                         } ?: it.mode
                     } else {
@@ -858,6 +863,7 @@ class TopicViewModel @AssistedInject constructor(
                 submissionType = submissionType,
                 generation = ownerGeneration,
                 account = account,
+                visitGeneration = pollVisitGeneration,
             )
         } else {
             null
@@ -940,6 +946,7 @@ class TopicViewModel @AssistedInject constructor(
             current.copy(
                 mode = loaded.copy(
                     topic = loaded.topic.copy(pollVoteForm = consumedForm),
+                    pollJustVoted = snapshot.visitGeneration == pollVisitGeneration,
                     pollVote = pollVote.copy(
                         form = consumedForm,
                         phase = PollVotePhase.Refreshing,
@@ -1020,6 +1027,7 @@ class TopicViewModel @AssistedInject constructor(
         val submissionType: PollVoteSubmissionType,
         val generation: Int,
         val account: String,
+        val visitGeneration: Int,
     )
 
     private enum class PollVoteSubmissionType { NORMAL, BLANK }
@@ -1120,8 +1128,11 @@ class TopicViewModel @AssistedInject constructor(
         // #910 — during a cold-switch grace the DISPLAYED page is the departed one while the
         // canonical page is already the target : a pull here would refresh a page the user is
         // leaving (and fight the in-flight switch load). The switch resolves within the grace.
+        if (displayed.topic.page != request.page) return
+        // #1296 — even when the vote owns the pending GET, the explicit refresh ends this visit's
+        // expansion. Keep the single-flight guard below: neither cancel the vote nor issue GET 2.
+        clearPollVisit()
         if (
-            displayed.topic.page != request.page ||
             _state.value.isRefreshing ||
             displayed.pollVote?.phase?.let { it != PollVotePhase.Idle } == true
         ) {
@@ -1483,7 +1494,41 @@ class TopicViewModel @AssistedInject constructor(
             // collect above forwards the repository's provenance.
             provisional = provisional,
             pollVote = resyncPollVote(previousLoaded?.pollVote, topic.pollVoteForm),
+            pollJustVoted = previousLoaded?.pollJustVoted == true &&
+                isSamePollPage(previousLoaded.topic, topic),
         )
+
+    /** #1296 — results change counters, not the identity of the page's single HFR poll. */
+    private fun isSamePollPage(previous: Topic, current: Topic): Boolean {
+        val previousPoll = previous.poll ?: return false
+        val currentPoll = current.poll ?: return false
+        val samePage = previous.cat == current.cat && previous.post == current.post && previous.page == current.page
+        val samePoll = previousPoll.question == currentPoll.question &&
+            previousPoll.optionLabels() == currentPoll.optionLabels()
+        return samePage && samePoll
+    }
+
+    /**
+     * HFR numbers RESULTS labels ("1. Kotlin"), but FORM labels are unnumbered ("Kotlin").
+     * Strip only the result ordinal, preserving a number that belongs to the user's label.
+     * See the real topic_poll_results_blank.html fixture and TopicPageParserTest.
+     */
+    private fun Poll.optionLabels(): List<String> = options.mapIndexed { index, option ->
+        if (resultsAvailable) option.text.removePrefix("${index + 1}.").trimStart() else option.text
+    }
+
+    /** #1296 — a retained nav-entry VM starts a fresh visit when its route is left. */
+    fun onTopicRouteLeft() {
+        clearPollVisit()
+    }
+
+    private fun clearPollVisit() {
+        pollVisitGeneration++
+        _state.update { current ->
+            val loaded = current.mode as? TopicUiState.Mode.Loaded ?: return@update current
+            current.copy(mode = loaded.copy(pollJustVoted = false))
+        }
+    }
 
     /**
      * #779 — single reducer for the transient poll form on every Topic emission. Selection survives
@@ -1941,6 +1986,9 @@ class TopicViewModel @AssistedInject constructor(
      * [KEY_CURRENT_PAGE], and the persisted anchor keys (they described the DEPARTED page).
      */
     private fun updateCanonicalPage(target: Int) {
+        if (target != request.page) {
+            clearPollVisit()
+        }
         request = request.copy(page = target)
         savedStateHandle[KEY_CURRENT_PAGE] = target
         // Gate Sol PR1 r2 (réserve) — the persisted anchor must describe the NEW current page :
