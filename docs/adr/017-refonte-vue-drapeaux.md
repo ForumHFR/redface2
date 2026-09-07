@@ -77,14 +77,21 @@ Les alternatives « badge cité » (dépend de `quotedMe`, non confirmé) et « 
 La transformation `List<Flag>` → modèle d'affichage est **calculée hors composition** (ViewModel /
 mappeur), via des **fonctions pures unit-testées** :
 
-- `pagesToRead = max(totalPages - lastReadPage, 0)` ;
+- `pagesToRead = max(max(totalPages, 1) - pageToOpen(), 0)` (#1025) ;
 - regroupement / tri / en-têtes de catégorie (réutilise et étend `groupFlagsByCategory`) ;
 - résolution du marqueur (couleur + état lu/non-lu) ;
 - filtres existants (`unreadOnly`, `hideReadCategories`).
 
-`hasUnread` reste la **source de vérité** de l'état lu/non-lu ; `pagesToRead` n'est qu'un compteur de
-pages restantes d'affichage — il peut valoir `0` alors que `hasUnread` est vrai (non-lus sur la
-dernière page lue). Ne jamais déduire « tout lu » de `pagesToRead == 0`.
+Le badge `+N` compte les pages restantes **après la page ouverte par le tap**, sans compter celle-ci
+([#1025](https://github.com/ForumHFR/redface2/issues/1025), décision de XaTriX pour la parité avec les
+userscripts web). Arrêt en bas de page 59/60 → ouverture de 60, aucun badge ; arrêt en milieu de
+59/60 → ouverture de 59, `+1`. Le calcul délègue à `Flag.pageToOpen()` (`:core:model`), qui gère
+l'avance en fin de page et les bornes en cas de cache périmé.
+
+`hasUnread` reste la **source de vérité** de l'état lu/non-lu ; `pagesToRead` n'est qu'un compteur
+d'affichage — il peut valoir `0` alors que `hasUnread` est vrai (tous les non-lus restants sont sur
+la page ouverte). La pastille reste conditionnée par `hasUnread && pagesToRead > 0` : ne jamais
+déduire « tout lu » de `pagesToRead == 0`.
 
 - **Note (#814, 2026-09-02)** : `lagTone(pagesToRead)` (1-2 → `LOW`, 3-9 → `MEDIUM`, ≥ 10 → `HIGH`,
   fonction pure `:core:model`) pilote la couleur de la pastille « pages à lire », désormais
