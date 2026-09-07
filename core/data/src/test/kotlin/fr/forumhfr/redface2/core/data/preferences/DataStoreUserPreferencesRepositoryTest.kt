@@ -2022,12 +2022,18 @@ class DataStoreUserPreferencesRepositoryTest {
     fun `category choices are visible before commit and survive caller cancellation`() = runTest(dispatcher) {
         val gated = GatedCommitDataStore(dataStore)
         val repo = repositoryWith(gated)
-        val menus = backgroundScope.launch(dispatcher) { repo.setForumCategoryMenusCollapsed(true) }
+        val callerDispatcher = StandardTestDispatcher(testScheduler)
+        val menus = backgroundScope.launch(callerDispatcher) { repo.setForumCategoryMenusCollapsed(true) }
+        runCurrent()
         gated.commitStarted.await()
-        val sticky = backgroundScope.launch(dispatcher) { repo.setForumCategoryStickyTopicsCollapsed(true) }
+        val sticky = backgroundScope.launch(callerDispatcher) { repo.setForumCategoryStickyTopicsCollapsed(true) }
+        // Drain the callers before reading the cache; the gate keeps the disk commit blocked.
+        runCurrent()
+        assertFalse(gated.finishCommit.isCompleted)
         assertTrue(repo.observeForumCategoryMenusCollapsed().first())
         assertTrue(repo.observeForumCategoryStickyTopicsCollapsed().first())
         assertFalse(dataStore.data.first()[booleanPreferencesKey("forum_category_menus_collapsed")] ?: false)
+        assertFalse(dataStore.data.first()[booleanPreferencesKey("forum_category_sticky_topics_collapsed")] ?: false)
         assertFalse(menus.isCompleted)
         assertFalse(sticky.isCompleted)
         menus.cancel()
