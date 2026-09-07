@@ -189,6 +189,8 @@ data class TopicUiState(
              * never persisted or copied into SavedStateHandle.
              */
             val pollVote: PollVoteUiState? = null,
+            /** #1296 — keep results expanded for this page visit; never persisted or snapshotted. */
+            val pollJustVoted: Boolean = false,
         ) : Mode
 
         data class Error(

@@ -168,6 +168,7 @@ L'écran central de l'app. Affiche les posts d'un topic avec pagination.
 > défaut, cartes en option). La navigation par pages ci-dessous (#282/#307) reste exacte.
 
 **Navigation dans le topic :**
+- **Sondage après vote (#1296)** — avec « déplier les sondages non votés », un vote accepté (y compris « déjà voté ») maintient le sondage déplié sur la page courante jusqu'au changement de page, à la sortie de la route du sujet ou au rechargement explicite, sans minuterie ; le choix manuel de repli/dépli garde la priorité.
 - Scroll vertical pour lire les posts
 - Boutons page précédente / suivante
 - **Swipe horizontal gauche/droite pour changer de page (#282)** — geste « drag-follow » (la page suit le doigt, résistance amortie aux bords, retour haptique à l'armement et au commit, edge-glow discret). Implémenté par `Modifier.topicPageSwipe` (`feature/topic/.../TopicSwipe.kt`, helpers purs testés) ; il appelle le **même** callback `onOpenPage(targetPage)` que les boutons de pager. Depuis #895 étape 4 (12/07/2026), `onOpenPage` alimente `TopicViewModel.switchToPage()` : la pagination est **in-ViewModel**, la `TopicRoute` est figée à l'entrée et un changement de page ne traverse plus la navigation (à la livraison de #282 la navigation était route-driven — remplacement de la `TopicRoute` compensé par un `transitionSpec` Topic→Topic instantané, retiré à l'étape 5 de #895). Le geste est gaté tant que l'entrée nav n'est pas `RESUMED` (protège les transitions d'**entrée** dans le topic) et ne déclenche jamais d'action destructive.
