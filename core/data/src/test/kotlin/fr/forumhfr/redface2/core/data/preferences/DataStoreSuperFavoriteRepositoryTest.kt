@@ -26,6 +26,10 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
+private val LEGACY_KEY = stringSetPreferencesKey("super_favorite_topic_ids")
+private val ALICE_KEY = stringSetPreferencesKey("super_favorite_topic_ids_alice")
+private val ANONYMOUS_KEY = stringSetPreferencesKey("super_favorite_topic_ids_anonymous")
+
 @OptIn(ExperimentalCoroutinesApi::class)
 class DataStoreSuperFavoriteRepositoryTest {
 
@@ -146,21 +150,75 @@ class DataStoreSuperFavoriteRepositoryTest {
     }
 
     @Test
-    fun `legacy global key migrates to the first account that reads it`() = runTest(dispatcher) {
-        val legacyKey = stringSetPreferencesKey("super_favorite_topic_ids")
-        val aliceKey = stringSetPreferencesKey("super_favorite_topic_ids_alice")
-        dataStore.edit { it[legacyKey] = setOf("42") }
+    fun `legacy global key migrates to the first authenticated account that reads it`() = runTest(dispatcher) {
+        dataStore.edit { it[LEGACY_KEY] = setOf("42") }
 
-        assertEquals(
-            setOf(SuperFavoriteTopic(cat = null, topicId = 42, title = null, subcat = null)),
-            repository.observeSuperFavoriteTopics().first(),
-        )
+        assertEquals(setOf(orphan(42)), repository.observeSuperFavoriteTopics().first())
         val migrated = dataStore.data.first()
-        assertEquals(setOf("42"), migrated[aliceKey])
-        assertEquals(null, migrated[legacyKey])
+        assertEquals(setOf("42"), migrated[ALICE_KEY])
+        assertEquals(null, migrated[LEGACY_KEY])
 
         authRepository.authenticate("Bob")
         assertEquals(emptySet<SuperFavoriteTopic>(), repository.observeSuperFavoriteTopics().first())
+    }
+
+    // #1319 — the anonymous pseudo-account must never claim the legacy key: an expired HFR session
+    // used to be enough to move it out of reach of the account that actually owns the pins.
+    @Test
+    fun `an anonymous observer reads the legacy global key without migrating it`() = runTest(dispatcher) {
+        dataStore.edit { it[LEGACY_KEY] = setOf("42") }
+        authRepository.logout()
+
+        assertEquals(setOf(orphan(42)), repository.observeSuperFavoriteTopics().first())
+        val afterAnonymousRead = dataStore.data.first()
+        assertEquals(setOf("42"), afterAnonymousRead[LEGACY_KEY])
+        assertEquals(null, afterAnonymousRead[ANONYMOUS_KEY])
+
+        authRepository.authenticate("Alice")
+        assertEquals(setOf(orphan(42)), repository.observeSuperFavoriteTopics().first())
+        val afterLogin = dataStore.data.first()
+        assertEquals(setOf("42"), afterLogin[ALICE_KEY])
+        assertEquals(null, afterLogin[LEGACY_KEY])
+    }
+
+    @Test
+    fun `toggling while logged out writes to the anonymous key and leaves the legacy key alone`() =
+        runTest(dispatcher) {
+            dataStore.edit { it[LEGACY_KEY] = setOf("42") }
+            authRepository.logout()
+
+            repository.setSuperFavorite(flag(topicId = 7, title = "Anon"), enabled = true)
+
+            assertEquals(
+                setOf(orphan(42), SuperFavoriteTopic(cat = 23, topicId = 7, title = "Anon", subcat = null)),
+                repository.observeSuperFavoriteTopics().first(),
+            )
+            val prefs = dataStore.data.first()
+            assertEquals(setOf("42"), prefs[LEGACY_KEY])
+            assertEquals(2, prefs[ANONYMOUS_KEY]?.size)
+        }
+
+    @Test
+    fun `an authenticated account adopts the anonymous set left behind by the 1319 regression`() =
+        runTest(dispatcher) {
+            dataStore.edit { it[ANONYMOUS_KEY] = setOf("42") }
+
+            assertEquals(setOf(orphan(42)), repository.observeSuperFavoriteTopics().first())
+            val rescued = dataStore.data.first()
+            assertEquals(setOf("42"), rescued[ALICE_KEY])
+            assertEquals(null, rescued[ANONYMOUS_KEY])
+        }
+
+    @Test
+    fun `the anonymous rescue does not steal pins once another account owns a set`() = runTest(dispatcher) {
+        dataStore.edit { prefs ->
+            prefs[ALICE_KEY] = setOf("1")
+            prefs[ANONYMOUS_KEY] = setOf("2")
+        }
+        authRepository.authenticate("Bob")
+
+        assertEquals(emptySet<SuperFavoriteTopic>(), repository.observeSuperFavoriteTopics().first())
+        assertEquals(setOf("2"), dataStore.data.first()[ANONYMOUS_KEY])
     }
 
     @Test
@@ -183,6 +241,9 @@ class DataStoreSuperFavoriteRepositoryTest {
             cancelAndIgnoreRemainingEvents()
         }
     }
+
+    private fun orphan(topicId: Int): SuperFavoriteTopic =
+        SuperFavoriteTopic(cat = null, topicId = topicId, title = null, subcat = null)
 
     private fun flag(
         topicId: Int,

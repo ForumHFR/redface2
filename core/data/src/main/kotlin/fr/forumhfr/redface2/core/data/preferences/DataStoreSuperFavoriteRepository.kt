@@ -37,6 +37,9 @@ import kotlinx.coroutines.sync.withLock
  * `Set<String>` (the only set type DataStore Preferences offers), with a versioned
  * `(cat, topicId, subcat, title)` encoding. The former topic-id-only values are still decoded as
  * orphan snapshots so no user pin is lost.
+ *
+ * The pre-#1270 global key is never claimed by the anonymous pseudo-account (#1319): it waits for
+ * the first *authenticated* account, while logged-out observers only read it as a fallback.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @Singleton
@@ -53,12 +56,11 @@ class DataStoreSuperFavoriteRepository @Inject constructor(
             .map(::accountId)
             .distinctUntilChanged()
             .flatMapLatest { accountId ->
-                val accountKey = superFavoriteKey(accountId)
                 flow {
-                    migrateLegacyKeyIfNeeded(accountKey)
+                    adoptPendingEntriesIfNeeded(accountId)
                     emitAll(
                         dataStore.data.map { prefs ->
-                            prefs[accountKey].orEmpty().mapNotNull(::decodeEntry).toSet()
+                            prefs.superFavoriteEntries(accountId).mapNotNull(::decodeEntry).toSet()
                         },
                     )
                 }
@@ -95,26 +97,29 @@ class DataStoreSuperFavoriteRepository @Inject constructor(
     private suspend fun updateSuperFavorites(
         transform: (Set<SuperFavoriteTopic>) -> Set<SuperFavoriteTopic>,
     ) {
-        val accountKey = superFavoriteKey(accountId(authRepository.observeAuthState().first()))
+        val accountId = accountId(authRepository.observeAuthState().first())
         // Parented to the process-lifetime scope (cf. DataStoreUserPreferencesRepository.persist) so a
         // long-press sheet dismissed mid-write still commits the toggle. The mutex makes toggle a
         // read-current-then-write operation even when two callers hit DataStore before its flow emits.
         externalScope.async {
             writeMutex.withLock {
                 dataStore.edit { prefs ->
-                    prefs.migrateLegacyKeyIfNeeded(accountKey)
-                    val current = prefs[accountKey].orEmpty()
+                    prefs.adoptPendingEntriesIfNeeded(accountId)
+                    val current = prefs.superFavoriteEntries(accountId)
                         .mapNotNull(::decodeEntry)
                         .toSet()
-                    prefs[accountKey] = transform(current).mapTo(mutableSetOf(), ::encodeEntry)
+                    prefs[superFavoriteKey(accountId)] =
+                        transform(current).mapTo(mutableSetOf(), ::encodeEntry)
                 }
             }
         }.await()
     }
 
-    private suspend fun migrateLegacyKeyIfNeeded(accountKey: Preferences.Key<Set<String>>) {
+    /** No-op for the anonymous account, so a logged-out read never opens a write transaction. */
+    private suspend fun adoptPendingEntriesIfNeeded(accountId: String) {
+        if (accountId == ANONYMOUS_ACCOUNT_ID) return
         writeMutex.withLock {
-            dataStore.edit { prefs -> prefs.migrateLegacyKeyIfNeeded(accountKey) }
+            dataStore.edit { prefs -> prefs.adoptPendingEntriesIfNeeded(accountId) }
         }
     }
 }
@@ -126,6 +131,8 @@ private const val NULL_SUBCAT = "_"
 private const val ANONYMOUS_ACCOUNT_ID = "anonymous"
 private const val SUPER_FAVORITE_KEY_PREFIX = "super_favorite_topic_ids_"
 private val LEGACY_SUPER_FAVORITE_KEY = stringSetPreferencesKey("super_favorite_topic_ids")
+private val ANONYMOUS_SUPER_FAVORITE_KEY =
+    stringSetPreferencesKey("$SUPER_FAVORITE_KEY_PREFIX$ANONYMOUS_ACCOUNT_ID")
 private val TITLE_ENCODER: Base64.Encoder = Base64.getUrlEncoder().withoutPadding()
 private val TITLE_DECODER: Base64.Decoder = Base64.getUrlDecoder()
 
@@ -135,13 +142,55 @@ private fun accountId(state: AuthState): String =
 private fun superFavoriteKey(accountId: String): Preferences.Key<Set<String>> =
     stringSetPreferencesKey("$SUPER_FAVORITE_KEY_PREFIX$accountId")
 
-private fun MutablePreferences.migrateLegacyKeyIfNeeded(accountKey: Preferences.Key<Set<String>>) {
-    val legacy = this[LEGACY_SUPER_FAVORITE_KEY] ?: return
-    if (this[accountKey] == null) {
-        this[accountKey] = legacy
-        remove(LEGACY_SUPER_FAVORITE_KEY)
+/**
+ * Entries an account observes: its own key, or — for the anonymous pseudo-account only — the
+ * pre-#1270 global key as a **read-only** fallback (#1319), so a user opening the app logged out
+ * after the upgrade still sees the pins that are waiting for their real account.
+ */
+private fun Preferences.superFavoriteEntries(accountId: String): Set<String> {
+    val own = this[superFavoriteKey(accountId)]
+    val legacyFallback = if (accountId == ANONYMOUS_ACCOUNT_ID) {
+        this[LEGACY_SUPER_FAVORITE_KEY]
+    } else {
+        null
+    }
+    return own ?: legacyFallback.orEmpty()
+}
+
+/**
+ * Moves the entries a fresh authenticated account should own into its key. The anonymous
+ * pseudo-account is deliberately excluded: before #1319 it could claim (and thus hide) the legacy
+ * global key of a user whose HFR session had simply expired.
+ */
+private fun MutablePreferences.adoptPendingEntriesIfNeeded(accountId: String) {
+    if (accountId == ANONYMOUS_ACCOUNT_ID || this[superFavoriteKey(accountId)] != null) return
+    val sourceKey = pendingSuperFavoriteSourceKey()
+    if (sourceKey != null) {
+        this[superFavoriteKey(accountId)] = this[sourceKey].orEmpty()
+        remove(sourceKey)
     }
 }
+
+private fun Preferences.pendingSuperFavoriteSourceKey(): Preferences.Key<Set<String>>? = when {
+    this[LEGACY_SUPER_FAVORITE_KEY] != null -> LEGACY_SUPER_FAVORITE_KEY
+    canRescueAnonymousEntries() -> ANONYMOUS_SUPER_FAVORITE_KEY
+    else -> null
+}
+
+/**
+ * One-shot rescue for the installs already hit by #1319 on the dev channel: there, opening the app
+ * logged out moved the legacy global key to `..._anonymous` and deleted it, so the account key of
+ * the pins' real owner stays empty forever. Adopting the anonymous set is only safe while no other
+ * account has claimed a set yet — otherwise a second account signing in would steal pins that the
+ * first one legitimately made while logged out.
+ */
+private fun Preferences.canRescueAnonymousEntries(): Boolean =
+    !this[ANONYMOUS_SUPER_FAVORITE_KEY].isNullOrEmpty() && !hasAccountScopedEntries()
+
+private fun Preferences.hasAccountScopedEntries(): Boolean =
+    asMap().keys.any { key ->
+        key.name.startsWith(SUPER_FAVORITE_KEY_PREFIX) && key.name != ANONYMOUS_SUPER_FAVORITE_KEY.name
+    }
 
 private fun Flag.toSuperFavoriteTopic(): SuperFavoriteTopic = SuperFavoriteTopic(
     cat = cat,
