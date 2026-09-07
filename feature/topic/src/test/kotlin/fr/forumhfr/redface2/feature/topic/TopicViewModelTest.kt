@@ -5359,12 +5359,14 @@ class TopicViewModelTest {
         val state = viewModel.state.value
         val loaded = state.mode as TopicUiState.Mode.Loaded
         return resolvePollRevealed(
-            manualExpanded = manualExpanded,
-            pollsExpandedDefault = state.pollsExpandedDefault,
-            expandUnansweredPolls = state.expandUnansweredPolls,
-            pollVoteForm = loaded.topic.pollVoteForm,
-            pollClosed = loaded.topic.poll?.closed == true,
-            justVoted = loaded.pollJustVoted,
+            PollRevealInputs(
+                manualExpanded = manualExpanded,
+                pollsExpandedDefault = state.pollsExpandedDefault,
+                expandUnansweredPolls = state.expandUnansweredPolls,
+                pollVoteForm = loaded.topic.pollVoteForm,
+                pollClosed = loaded.topic.poll?.closed == true,
+                justVoted = loaded.pollJustVoted,
+            ),
         )
     }
 

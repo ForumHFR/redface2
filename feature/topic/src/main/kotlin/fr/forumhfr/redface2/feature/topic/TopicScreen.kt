@@ -2499,12 +2499,14 @@ private fun TopicLoadedContent(
                         )
                     },
                     revealed = resolvePollRevealed(
-                        manualExpanded = pollManualExpanded,
-                        pollsExpandedDefault = state.pollsExpandedDefault,
-                        expandUnansweredPolls = state.expandUnansweredPolls,
-                        pollVoteForm = topic.pollVoteForm,
-                        pollClosed = poll.closed,
-                        justVoted = (state.mode as? TopicUiState.Mode.Loaded)?.pollJustVoted == true,
+                        PollRevealInputs(
+                            manualExpanded = pollManualExpanded,
+                            pollsExpandedDefault = state.pollsExpandedDefault,
+                            expandUnansweredPolls = state.expandUnansweredPolls,
+                            pollVoteForm = topic.pollVoteForm,
+                            pollClosed = poll.closed,
+                            justVoted = (state.mode as? TopicUiState.Mode.Loaded)?.pollJustVoted == true,
+                        ),
                     ),
                     onExpansionChanged = onPollExpansionChanged,
                     // #1206 — HFR's native close link is rendered for the owner of an open poll on
@@ -3037,17 +3039,18 @@ internal data class TopicPollVoteUi(
  * nullable manual choice is checked first so an explicit collapse remains sticky across pages.
  * #1296 — [justVoted] keeps results visible for this page visit under the unanswered-poll opt-in.
  */
-internal fun resolvePollRevealed(
-    manualExpanded: Boolean?,
-    pollsExpandedDefault: Boolean,
-    expandUnansweredPolls: Boolean,
-    pollVoteForm: PollVoteForm?,
-    pollClosed: Boolean,
-    justVoted: Boolean,
-): Boolean {
+internal data class PollRevealInputs(
+    val manualExpanded: Boolean?,
+    val pollsExpandedDefault: Boolean,
+    val expandUnansweredPolls: Boolean,
+    val pollVoteForm: PollVoteForm?,
+    val pollClosed: Boolean,
+    val justVoted: Boolean,
+)
+
+internal fun resolvePollRevealed(inputs: PollRevealInputs): Boolean = with(inputs) {
     val canVote = pollVoteForm?.hashCheck?.isNotBlank() == true && !pollClosed
-    return manualExpanded
-        ?: (pollsExpandedDefault || (expandUnansweredPolls && (canVote || justVoted)))
+    manualExpanded ?: (pollsExpandedDefault || (expandUnansweredPolls && (canVote || justVoted)))
 }
 
 @Suppress("LongParameterList") // fully-controlled card: poll + vote slice + expansion + owner close.

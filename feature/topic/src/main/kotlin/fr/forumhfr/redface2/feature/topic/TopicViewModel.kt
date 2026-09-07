@@ -1124,11 +1124,11 @@ class TopicViewModel @AssistedInject constructor(
      * authenticated (same justification as `performSubmitRefresh`).
      */
     private fun refresh() {
-        val displayed = _state.value.mode as? TopicUiState.Mode.Loaded ?: return
         // #910 — during a cold-switch grace the DISPLAYED page is the departed one while the
         // canonical page is already the target : a pull here would refresh a page the user is
         // leaving (and fight the in-flight switch load). The switch resolves within the grace.
-        if (displayed.topic.page != request.page) return
+        val displayed = (_state.value.mode as? TopicUiState.Mode.Loaded)
+            ?.takeIf { it.topic.page == request.page } ?: return
         // #1296 — even when the vote owns the pending GET, the explicit refresh ends this visit's
         // expansion. Keep the single-flight guard below: neither cancel the vote nor issue GET 2.
         clearPollVisit()
@@ -1500,12 +1500,16 @@ class TopicViewModel @AssistedInject constructor(
 
     /** #1296 — results change counters, not the identity of the page's single HFR poll. */
     private fun isSamePollPage(previous: Topic, current: Topic): Boolean {
-        val previousPoll = previous.poll ?: return false
-        val currentPoll = current.poll ?: return false
-        val samePage = previous.cat == current.cat && previous.post == current.post && previous.page == current.page
-        val samePoll = previousPoll.question == currentPoll.question &&
-            previousPoll.optionLabels() == currentPoll.optionLabels()
-        return samePage && samePoll
+        val previousPoll = previous.poll
+        val currentPoll = current.poll
+        return if (previousPoll == null || currentPoll == null) {
+            false
+        } else {
+            val samePage = previous.cat == current.cat && previous.post == current.post && previous.page == current.page
+            val samePoll = previousPoll.question == currentPoll.question &&
+                previousPoll.optionLabels() == currentPoll.optionLabels()
+            samePage && samePoll
+        }
     }
 
     /**
