@@ -16,6 +16,20 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.54.13` — `internal` (dev) — 2026-09-07
+
+Suite de la visionneuse (XaTriX) et retour d'antiseptiqueIncolore sur le fond blanc. Code Astra sous gate Fable, preuves émulateur socadisc ; PRs [#1310](https://github.com/ForumHFR/redface2/pull/1310) ([#1308](https://github.com/ForumHFR/redface2/issues/1308)) et [#1311](https://github.com/ForumHFR/redface2/pull/1311) ([#1297](https://github.com/ForumHFR/redface2/issues/1297)).
+
+### Ajouté
+
+- **Visionneuse d'images** — un tap simple sur l'image masque la barre d'actions du bas (mode plein écran), le tap suivant la ramène ; double tap, pincement et défilement inchangés. La barre est visible par défaut à chaque image. Action TalkBack « Afficher / Masquer les actions ». Connu : un balayage vertical que l'image ne peut pas consommer est traité comme un tap ([#1309](https://github.com/ForumHFR/redface2/issues/1309)).
+
+### Modifié
+
+- **Thème, fond clair « Blanc »** — les cartes de post et les cadres de citation reçoivent un liseré de 1 dp pour se détacher du blanc pur ; les bordures de sélection et de modération gardent la priorité. Autres tons et thème sombre inchangés.
+
+---
+
 ## `0.54.12` — `internal` (dev) — 2026-09-06
 
 Deux retours de XaTriX : la visionneuse d'images et la place perdue en haut de la vue catégorie. Code Astra sous gate Fable, preuves émulateur socadisc ; PRs [#1304](https://github.com/ForumHFR/redface2/pull/1304) et [#1305](https://github.com/ForumHFR/redface2/pull/1305) ([#1303](https://github.com/ForumHFR/redface2/issues/1303)).
