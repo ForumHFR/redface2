@@ -19,6 +19,8 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -995,6 +997,179 @@ class CategoryViewModelTest {
         assertEquals(listOf(CategoryFlagFilter.PARTICIPATED), prefs.setCalls)
     }
 
+    @Test
+    fun `layout defaults are expanded and all four choices restore in another anonymous category`() = runTest {
+        val prefs = FakePreferences()
+        val first = categoryVm(FakeForumRepository(), prefs = prefs)
+        first.uiState.test {
+            val initial = awaitContent { it.layoutPreferencesReady }
+            assertFalse(initial.menusCollapsed)
+            assertFalse(initial.stickyTopicsCollapsed)
+            cancelAndIgnoreRemainingEvents()
+        }
+        for (menus in listOf(false, true)) {
+            for (sticky in listOf(false, true)) {
+                first.setMenusCollapsed(menus)
+                first.setStickyTopicsCollapsed(sticky)
+                val next = categoryVm(
+                    FakeForumRepository(),
+                    request = CategoryRequest(cat = 13, initialSubcat = null),
+                    prefs = prefs,
+                )
+                next.uiState.test {
+                    val restored = awaitContent { it.layoutPreferencesReady }
+                    assertEquals(menus, restored.menusCollapsed)
+                    assertEquals(sticky, restored.stickyTopicsCollapsed)
+                    assertFalse(restored.canCreateTopic)
+                    cancelAndIgnoreRemainingEvents()
+                }
+                clearVm(next)
+            }
+        }
+        clearVm(first)
+    }
+
+    @Test
+    fun `layout remains unready until both delayed preferences arrive without expanded flash`() = runTest {
+        val menusGate = CompletableDeferred<Unit>()
+        val stickyGate = CompletableDeferred<Unit>()
+        val prefs = FakePreferences(
+            initialMenus = true, initialSticky = true, menusGate = menusGate, stickyGate = stickyGate,
+        )
+        val vm = categoryVm(FakeForumRepository(), prefs = prefs)
+        vm.uiState.test {
+            assertFalse(awaitItem().layoutPreferencesReady)
+            vm.setMenusCollapsed(false)
+            vm.setStickyTopicsCollapsed(false)
+            assertTrue(prefs.menuWrites.isEmpty())
+            assertTrue(prefs.stickyWrites.isEmpty())
+            menusGate.complete(Unit)
+            val partial = awaitContent { it.menusCollapsed }
+            assertFalse(partial.layoutPreferencesReady)
+            stickyGate.complete(Unit)
+            val ready = awaitContent { it.layoutPreferencesReady }
+            assertTrue(ready.menusCollapsed)
+            assertTrue(ready.stickyTopicsCollapsed)
+            cancelAndIgnoreRemainingEvents()
+        }
+        clearVm(vm)
+    }
+
+    @Test
+    fun `rapid layout taps skip unchanged values and search never writes preferences`() = runTest {
+        val prefs = FakePreferences()
+        val vm = categoryVm(FakeForumRepository(), prefs = prefs)
+        vm.uiState.test {
+            awaitContent { it.layoutPreferencesReady }
+            vm.setMenusCollapsed(false)
+            vm.setStickyTopicsCollapsed(false)
+            for (collapsed in listOf(true, true, false, true)) vm.setMenusCollapsed(collapsed)
+            for (collapsed in listOf(true, true, false)) vm.setStickyTopicsCollapsed(collapsed)
+            vm.openSearch()
+            vm.updateSearchQuery("Android")
+            vm.closeSearch()
+            val closed = awaitContent { it.menusCollapsed && !it.searchActive && it.searchQuery.isEmpty() }
+            assertFalse(closed.stickyTopicsCollapsed)
+            assertEquals(listOf(true, false, true), prefs.menuWrites)
+            assertEquals(listOf(true, false), prefs.stickyWrites)
+            assertTrue(prefs.setCalls.isEmpty())
+            cancelAndIgnoreRemainingEvents()
+        }
+        clearVm(vm)
+    }
+
+    @Test
+    fun `layout changes preserve page subcategory query and all fetch counts`() = runTest {
+        val repo = FakeForumRepository()
+        val vm = categoryVm(
+            repo,
+            request = CategoryRequest(cat = 23, initialSubcat = 550, initialPage = 2),
+        )
+        vm.uiState.test {
+            awaitContent { it.layoutPreferencesReady }
+            repo.emitTopicList(23, 550, 2, ForumResult.Success(EMPTY_PAGE.copy(page = 2)))
+            vm.openSearch()
+            vm.updateSearchQuery("Android")
+            awaitContent { it.searchQuery == "Android" && it.topics is TopicsUiState.Content }
+            val observed = repo.observeTopicListCalls.toList()
+            val prefetched = repo.prefetchTopicListCalls.toList()
+            vm.setMenusCollapsed(true)
+            vm.setStickyTopicsCollapsed(true)
+            val collapsed = awaitContent { it.menusCollapsed && it.stickyTopicsCollapsed }
+            assertEquals(2, collapsed.page)
+            assertEquals(550, collapsed.selectedSubcat)
+            assertEquals("Android", collapsed.searchQuery)
+            assertTrue(collapsed.searchActive)
+            assertEquals(observed, repo.observeTopicListCalls)
+            assertEquals(prefetched, repo.prefetchTopicListCalls)
+            assertTrue(repo.refreshTopicListCalls.isEmpty())
+            assertTrue(repo.refreshSubcategoriesCalls.isEmpty())
+            assertTrue(repo.getFlagFilteredTopicsCalls.isEmpty())
+            cancelAndIgnoreRemainingEvents()
+        }
+        clearVm(vm)
+    }
+
+    @Test
+    fun `layout setter reaches shared cache before immediate ViewModel cancellation`() = runTest {
+        Dispatchers.setMain(kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
+        val prefs = FakePreferences()
+        val vm = categoryVm(FakeForumRepository(), prefs = prefs)
+        vm.uiState.test {
+            awaitContent { it.layoutPreferencesReady }
+            vm.setMenusCollapsed(true)
+            vm.setStickyTopicsCollapsed(true)
+            // No scheduler turn between the actions and route removal.
+            clearVm(vm)
+            assertEquals(listOf(true), prefs.menuWrites)
+            assertEquals(listOf(true), prefs.stickyWrites)
+            cancelAndIgnoreRemainingEvents()
+        }
+        val next = categoryVm(FakeForumRepository(), prefs = prefs)
+        next.uiState.test {
+            val ready = awaitContent { it.layoutPreferencesReady }
+            assertTrue(ready.menusCollapsed)
+            assertTrue(ready.stickyTopicsCollapsed)
+            cancelAndIgnoreRemainingEvents()
+        }
+        clearVm(next)
+    }
+
+    @Test
+    fun `failed layout writes keep the session choice without an uncaught exception`() = runTest {
+        val prefs = FakePreferences().apply { layoutWriteFailure = java.io.IOException("Disk full") }
+        val vm = categoryVm(FakeForumRepository(), prefs = prefs)
+        vm.uiState.test {
+            awaitContent { it.layoutPreferencesReady }
+            vm.setMenusCollapsed(true)
+            vm.setStickyTopicsCollapsed(true)
+            val chosen = awaitContent { it.menusCollapsed && it.stickyTopicsCollapsed }
+            assertTrue(chosen.layoutPreferencesReady)
+            cancelAndIgnoreRemainingEvents()
+        }
+        val next = categoryVm(FakeForumRepository(), prefs = prefs)
+        next.uiState.test {
+            val restored = awaitContent { it.layoutPreferencesReady }
+            assertTrue(restored.menusCollapsed)
+            assertTrue(restored.stickyTopicsCollapsed)
+            cancelAndIgnoreRemainingEvents()
+        }
+        clearVm(vm)
+        clearVm(next)
+    }
+
+    private fun clearVm(vm: CategoryViewModel) {
+        val store = androidx.lifecycle.ViewModelStore()
+        androidx.lifecycle.ViewModelProvider(
+            store,
+            object : androidx.lifecycle.ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T = vm as T
+            },
+        ).get(CategoryViewModel::class.java)
+        store.clear()
+    }
+
     private fun categoryVm(
         repo: FakeForumRepository,
         auth: AuthRepository = FakeAuthRepository(),
@@ -1119,12 +1294,16 @@ class CategoryViewModelTest {
             refreshSubcategoriesCalls = refreshSubcategoriesCalls + cat
         }
 
+        val observeTopicListCalls = mutableListOf<Triple<Int, Int?, Int>>()
+
         override fun observeTopicList(
             cat: Int,
             subcat: Int?,
             page: Int,
-        ): Flow<ForumResult<TopicListPage>> =
-            topicListFlow(cat, subcat, page).asSharedFlow()
+        ): Flow<ForumResult<TopicListPage>> {
+            observeTopicListCalls += Triple(cat, subcat, page)
+            return topicListFlow(cat, subcat, page).asSharedFlow()
+        }
 
         override suspend fun refreshTopicList(cat: Int, subcat: Int?, page: Int) {
             refreshTopicListCalls = refreshTopicListCalls + Triple(cat, subcat, page)
@@ -1209,15 +1388,46 @@ class CategoryViewModelTest {
     /**
      * #1132 — records / stores the persisted Forum flag-filter so a test can assert the write AND a
      * SECOND ViewModel can restore it. Everything else on [UserPreferencesRepository] is delegated to
-     * a relaxed mock: the ViewModel only touches the two forum-filter methods, so this avoids a
+     * a relaxed mock: the ViewModel only touches the Forum preferences, so this avoids a
      * hand-written stub of the ~85 other preference accessors.
      */
     private class FakePreferences(
         initial: CategoryFlagFilter = CategoryFlagFilter.ALL,
+        initialMenus: Boolean = false,
+        initialSticky: Boolean = false,
+        val menusGate: CompletableDeferred<Unit>? = null,
+        val stickyGate: CompletableDeferred<Unit>? = null,
     ) : UserPreferencesRepository by mockk(relaxed = true) {
         private val stored = MutableStateFlow(initial)
         var setCalls: List<CategoryFlagFilter> = emptyList()
             private set
+
+        private val menusCollapsed = MutableStateFlow(initialMenus)
+        private val stickyCollapsed = MutableStateFlow(initialSticky)
+
+        var layoutWriteFailure: java.io.IOException? = null
+        val menuWrites = mutableListOf<Boolean>()
+        val stickyWrites = mutableListOf<Boolean>()
+
+        override fun observeForumCategoryMenusCollapsed(): Flow<Boolean> = flow {
+            menusGate?.await()
+            emitAll(menusCollapsed)
+        }
+        override suspend fun setForumCategoryMenusCollapsed(collapsed: Boolean) {
+            menuWrites += collapsed
+            menusCollapsed.value = collapsed
+            layoutWriteFailure?.let { throw it }
+        }
+
+        override fun observeForumCategoryStickyTopicsCollapsed(): Flow<Boolean> = flow {
+            stickyGate?.await()
+            emitAll(stickyCollapsed)
+        }
+        override suspend fun setForumCategoryStickyTopicsCollapsed(collapsed: Boolean) {
+            stickyWrites += collapsed
+            stickyCollapsed.value = collapsed
+            layoutWriteFailure?.let { throw it }
+        }
 
         override fun observeForumCategoryFlagFilter(): Flow<CategoryFlagFilter> = stored
 

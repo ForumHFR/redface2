@@ -5,10 +5,12 @@ import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageContentCache
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageContentCacheException
 import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
+import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
 import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
+import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
@@ -31,6 +33,12 @@ import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.FlagType
+import androidx.lifecycle.viewModelScope
+import app.cash.turbine.test
+import io.mockk.coEvery
+import io.mockk.coVerify
+import io.mockk.mockk
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -41,6 +49,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.yield
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -57,6 +66,14 @@ class SettingsViewModelTest {
     private val topicCacheMaintenance = FakeTopicCacheMaintenance()
     private val imageCacheMaintenance = FakeImageCacheMaintenance()
     private val privateMessageContentCache = FakePrivateMessageContentCache()
+    private val appliedLauncherIcons = mutableListOf<AppLauncherIcon>()
+    private val launcherIconController = mockk<AppLauncherIconController>().also { controller ->
+        coEvery { controller.apply(any()) } coAnswers {
+            val icon = firstArg<AppLauncherIcon>()
+            repository.setAppLauncherIcon(icon)
+            appliedLauncherIcons += icon
+        }
+    }
 
     @Before
     fun setUp() {
@@ -935,6 +952,19 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `theme colour cancellation is propagated without optimistic rollback`() = runTest {
+        repository.cancelOnThemeColorPreferencesSet = true
+        val viewModel = newViewModel()
+        val desired = ThemeColorPreferences(darkSurfaceTone = DarkSurfaceTone.AMOLED)
+
+        viewModel.submit(SettingsIntent.DarkSurfaceToneChanged(DarkSurfaceTone.AMOLED))
+
+        assertEquals(desired, viewModel.state.value.themeColorPreferences)
+        assertTrue(viewModel.state.value.isUpdatingThemeColors)
+        assertFalse(viewModel.state.value.themeColorsError)
+    }
+
+    @Test
     fun `init hydrates reading display presets from storage`() = runTest {
         repository.emitDisplayDensity(DisplayDensity.COMPACT)
         repository.emitFontScale(FontScalePreference.L)
@@ -974,6 +1004,107 @@ class SettingsViewModelTest {
             assertFalse(state.isUpdatingDisplayDensity)
             assertTrue(state.displayDensityError)
         }
+
+    @Test
+    fun `launcher selection is provisional and has no persistence or component side effects`() = runTest {
+        val viewModel = newViewModel()
+        viewModel.effects.test {
+            viewModel.submit(SettingsIntent.AppLauncherIconChanged(AppLauncherIcon.RF1))
+
+            assertEquals(AppLauncherIcon.CLASSIC, viewModel.state.value.appLauncherIcon)
+            assertEquals(AppLauncherIcon.RF1, viewModel.state.value.pendingAppLauncherIcon)
+            assertEquals(0, repository.appLauncherIconSetCalls)
+            coVerify(exactly = 0) { launcherIconController.apply(any()) }
+            expectNoEvents()
+        }
+    }
+
+    @Test
+    fun `Apply waits for persistence and component application before requesting restart`() = runTest {
+        val commit = CompletableDeferred<Unit>()
+        repository.appLauncherIconCommitGate = commit
+        val viewModel = newViewModel()
+        viewModel.effects.test {
+            viewModel.submit(SettingsIntent.AppLauncherIconChanged(AppLauncherIcon.RF1))
+            viewModel.submit(SettingsIntent.ApplyAppLauncherIcon)
+
+            assertTrue(viewModel.state.value.isUpdatingAppLauncherIcon)
+            assertEquals(AppLauncherIcon.CLASSIC, viewModel.state.value.appLauncherIcon)
+            assertTrue(appliedLauncherIcons.isEmpty())
+            expectNoEvents()
+            viewModel.submit(SettingsIntent.ApplyAppLauncherIcon)
+            commit.complete(Unit)
+
+            assertEquals(SettingsEffect.RestartOnLauncherAlias(AppLauncherIcon.RF1), awaitItem())
+            assertEquals(listOf(AppLauncherIcon.RF1), appliedLauncherIcons)
+            assertEquals(AppLauncherIcon.RF1, repository.lastAppLauncherIconSet)
+            assertEquals(AppLauncherIcon.RF1, viewModel.state.value.appLauncherIcon)
+            assertFalse(viewModel.state.value.canChangeAppLauncherIcon)
+            assertEquals(1, repository.appLauncherIconSetCalls)
+            expectNoEvents()
+        }
+    }
+
+    @Test
+    fun `leaving the gallery during commit still applies and emits the restart`() = runTest {
+        val commit = CompletableDeferred<Unit>()
+        repository.appLauncherIconCommitGate = commit
+        val viewModel = newViewModel()
+        viewModel.effects.test {
+            viewModel.submit(SettingsIntent.AppLauncherIconChanged(AppLauncherIcon.RF1))
+            viewModel.submit(SettingsIntent.ApplyAppLauncherIcon)
+            viewModel.viewModelScope.cancel()
+            commit.complete(Unit)
+
+            assertEquals(SettingsEffect.RestartOnLauncherAlias(AppLauncherIcon.RF1), awaitItem())
+            assertEquals(listOf(AppLauncherIcon.RF1), appliedLauncherIcons)
+            assertEquals(AppLauncherIcon.RF1, repository.lastAppLauncherIconSet)
+        }
+    }
+
+    @Test
+    fun `failed launcher persistence shows the snackbar error without applying or restarting`() = runTest {
+        repository.failOnAppLauncherIconSet = true
+        val viewModel = newViewModel()
+        viewModel.effects.test {
+            viewModel.submit(SettingsIntent.AppLauncherIconChanged(AppLauncherIcon.RF1))
+            viewModel.submit(SettingsIntent.ApplyAppLauncherIcon)
+
+            assertEquals(AppLauncherIcon.CLASSIC, viewModel.state.value.appLauncherIcon)
+            assertEquals(AppLauncherIcon.RF1, viewModel.state.value.pendingAppLauncherIcon)
+            assertTrue(viewModel.state.value.appLauncherIconError)
+            assertFalse(viewModel.state.value.isUpdatingAppLauncherIcon)
+            assertTrue(appliedLauncherIcons.isEmpty())
+            expectNoEvents()
+        }
+    }
+
+    @Test
+    @Suppress("DEPRECATION") // Exercise data retained from dev 0.54.0.
+    fun `retired ROSE hydrates Classic and cannot be selected`() = runTest {
+        repository.emitAppLauncherIcon(AppLauncherIcon.ROSE)
+        val viewModel = newViewModel()
+
+        assertEquals(AppLauncherIcon.CLASSIC, viewModel.state.value.appLauncherIcon)
+        assertEquals(AppLauncherIcon.CLASSIC, viewModel.state.value.pendingAppLauncherIcon)
+        viewModel.submit(SettingsIntent.AppLauncherIconChanged(AppLauncherIcon.ROSE))
+        viewModel.submit(SettingsIntent.ApplyAppLauncherIcon)
+        coVerify(exactly = 0) { launcherIconController.apply(any()) }
+        assertEquals(0, repository.appLauncherIconSetCalls)
+    }
+
+    @Test
+    fun `live preferences hydrate current icon without discarding a provisional choice`() = runTest {
+        val viewModel = newViewModel()
+        repository.emitAppLauncherIcon(AppLauncherIcon.RF1)
+        assertEquals(AppLauncherIcon.RF1, viewModel.state.value.pendingAppLauncherIcon)
+
+        repository.emitAppLauncherIcon(AppLauncherIcon.CLASSIC)
+        viewModel.submit(SettingsIntent.AppLauncherIconChanged(AppLauncherIcon.RF1))
+        repository.emitAppLauncherIcon(AppLauncherIcon.valueOf("ROSE"))
+        assertEquals(AppLauncherIcon.CLASSIC, viewModel.state.value.appLauncherIcon)
+        assertEquals(AppLauncherIcon.RF1, viewModel.state.value.pendingAppLauncherIcon)
+    }
 
     @Test
     fun `init hydrates the media display profile from storage`() = runTest {
@@ -1077,6 +1208,30 @@ class SettingsViewModelTest {
             assertFalse(state.isUpdatingPostImageMaxWidth)
             assertTrue(state.postImageMaxWidthError)
         }
+
+    @Test
+    fun `init hydrates the post image corners from storage`() = runTest {
+        repository.emitPostImageCorners(PostImageCorners.SOFT)
+
+        val viewModel = newViewModel()
+
+        assertEquals(PostImageCorners.SOFT, viewModel.state.value.postImageCorners)
+    }
+
+    @Test
+    fun `PostImageCornersChanged persists the new shape and clears the updating flag`() = runTest {
+        val viewModel = newViewModel()
+        assertEquals(PostImageCorners.DEFAULT, viewModel.state.value.postImageCorners)
+
+        viewModel.submit(SettingsIntent.PostImageCornersChanged(PostImageCorners.SQUARE))
+
+        val state = viewModel.state.value
+        assertEquals(PostImageCorners.SQUARE, state.postImageCorners)
+        assertFalse(state.isUpdatingPostImageCorners)
+        assertFalse(state.postImageCornersError)
+        assertEquals(1, repository.postImageCornersSetCalls)
+        assertEquals(PostImageCorners.SQUARE, repository.lastPostImageCornersSet)
+    }
 
     @Test
     fun `FontScaleChanged persists the new preset and clears the updating flag`() = runTest {
@@ -2266,6 +2421,7 @@ class SettingsViewModelTest {
             topicCacheMaintenance,
             imageCacheMaintenance,
             privateMessageContentCache,
+            launcherIconController,
         )
 
     private class FakePrivateMessageContentCache : PrivateMessageContentCache {
@@ -2428,6 +2584,7 @@ class SettingsViewModelTest {
         var lastThemeColorPreferencesSet: ThemeColorPreferences? = null
             private set
         var failOnThemeColorPreferencesSet: Boolean = false
+        var cancelOnThemeColorPreferencesSet: Boolean = false
 
         override fun observeThemeMode(): Flow<ThemeMode> = themeMode
 
@@ -2442,6 +2599,7 @@ class SettingsViewModelTest {
 
         override suspend fun setThemeColorPreferences(preferences: ThemeColorPreferences) {
             themeColorPreferencesSetCalls += 1
+            if (cancelOnThemeColorPreferencesSet) throw CancellationException("caller left")
             check(!failOnThemeColorPreferencesSet) { "boom" }
             lastThemeColorPreferencesSet = preferences
             themeColorPreferences.value = preferences
@@ -2486,6 +2644,26 @@ class SettingsViewModelTest {
 
         fun emitFontScale(value: FontScalePreference) {
             fontScale.value = value
+        }
+
+        private val appLauncherIcon = MutableStateFlow(AppLauncherIcon.CLASSIC)
+        var appLauncherIconSetCalls: Int = 0
+            private set
+        var lastAppLauncherIconSet: AppLauncherIcon? = null
+            private set
+        var failOnAppLauncherIconSet: Boolean = false
+        var appLauncherIconCommitGate: CompletableDeferred<Unit>? = null
+
+        fun emitAppLauncherIcon(icon: AppLauncherIcon) { appLauncherIcon.value = icon }
+
+        override fun observeAppLauncherIcon(): Flow<AppLauncherIcon> = appLauncherIcon
+
+        override suspend fun setAppLauncherIcon(icon: AppLauncherIcon) {
+            appLauncherIconSetCalls += 1
+            appLauncherIconCommitGate?.await()
+            check(!failOnAppLauncherIconSet) { "boom" }
+            lastAppLauncherIconSet = icon
+            appLauncherIcon.value = icon
         }
 
         // #973 — block-GIF display profile. Same optimistic-flip seam as the display density.
@@ -2537,6 +2715,24 @@ class SettingsViewModelTest {
 
         fun emitPostImageMaxWidth(value: PostImageMaxWidth) {
             postImageMaxWidth.value = value
+        }
+
+        private val postImageCorners = MutableStateFlow(PostImageCorners.DEFAULT)
+        var postImageCornersSetCalls: Int = 0
+            private set
+        var lastPostImageCornersSet: PostImageCorners? = null
+            private set
+
+        override fun observePostImageCorners(): Flow<PostImageCorners> = postImageCorners
+
+        override suspend fun setPostImageCorners(corners: PostImageCorners) {
+            postImageCornersSetCalls += 1
+            lastPostImageCornersSet = corners
+            postImageCorners.value = corners
+        }
+
+        fun emitPostImageCorners(value: PostImageCorners) {
+            postImageCorners.value = value
         }
 
         // Build 89 follow-up — topic top-bar auto-hide. Same optimistic-flip seam as amoled.
@@ -3048,6 +3244,19 @@ class SettingsViewModelTest {
         // #1132 — Forum flag-filter preference has no Settings UI; a plain in-memory seam keeps the
         // interface satisfied (SettingsViewModel never reads or writes it).
         private val forumCategoryFlagFilter = MutableStateFlow(CategoryFlagFilter.ALL)
+
+        private val menusCollapsed = MutableStateFlow(false)
+        private val stickyCollapsed = MutableStateFlow(false)
+
+        override fun observeForumCategoryMenusCollapsed(): Flow<Boolean> = menusCollapsed
+        override suspend fun setForumCategoryMenusCollapsed(collapsed: Boolean) {
+            menusCollapsed.value = collapsed
+        }
+
+        override fun observeForumCategoryStickyTopicsCollapsed(): Flow<Boolean> = stickyCollapsed
+        override suspend fun setForumCategoryStickyTopicsCollapsed(collapsed: Boolean) {
+            stickyCollapsed.value = collapsed
+        }
 
         override fun observeForumCategoryFlagFilter(): Flow<CategoryFlagFilter> = forumCategoryFlagFilter
 

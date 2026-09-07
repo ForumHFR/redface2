@@ -65,11 +65,13 @@ data class PostEditorState(
      */
     val smileyDisabled: Boolean = false,
     val emailNotificationEnabled: Boolean = false,
+    /** Selected HFR `MsgIcon` radio value. The editor exposes only the current 1..16 choices. */
+    val msgIcon: Int = DEFAULT_MSG_ICON,
     /**
      * Mirror of [draftHydratedFromForm] for the options. We do not want a
      * second form fetch (`InvalidHashCheck` refetch) to silently reset the
-     * three toggles the user may have flipped between the first load and the
-     * submit attempt.
+     * three toggles or message tone the user may have changed between the
+     * first load and the submit attempt.
      */
     val optionsHydratedFromForm: Boolean = false,
     // #441 — the smiley picker state no longer lives here : visibility + wiki search moved

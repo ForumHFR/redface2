@@ -13,8 +13,10 @@ import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
+import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
@@ -44,6 +46,9 @@ import fr.forumhfr.redface2.core.model.search.SearchResultPage
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
+import fr.forumhfr.redface2.core.domain.write.ModerationRepository
+import fr.forumhfr.redface2.core.model.write.ModerationAlertState
+import fr.forumhfr.redface2.core.model.write.ModerationAlertOutcome
 import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostResult
 import fr.forumhfr.redface2.core.domain.write.PollVoteRepository
@@ -90,6 +95,7 @@ import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withContext
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -4274,7 +4280,7 @@ class TopicViewModelTest {
 
     @Test
     fun `Accepted refreshes once to results and never reposts`() = runTest {
-        val form = fakePollVoteForm()
+        val form = fakePollVoteForm().let { it.copy(choices = it.choices.take(2)) }
         val pollRepository = FakePollVoteRepository(PollVoteResult.Accepted)
         val topicRepository = FakeTopicRepository(
             flowsToReturn = listOf(
@@ -4287,6 +4293,7 @@ class TopicViewModelTest {
             topicRepository = topicRepository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
             pollVoteRepository = pollRepository,
+            userPreferencesRepository = FakeUserPreferencesRepository(topicUnansweredPollsExpanded = true),
         )
         viewModel.send(TopicIntent.UpdatePollSelection(form.choices[0], selected = true))
 
@@ -4298,11 +4305,14 @@ class TopicViewModelTest {
         val loaded = viewModel.state.value.mode as TopicUiState.Mode.Loaded
         assertEquals(null, loaded.pollVote)
         assertTrue(loaded.topic.poll?.resultsAvailable == true)
+        assertTrue(loaded.pollJustVoted)
+        assertTrue(pollRevealed(viewModel))
+        assertFalse(pollRevealed(viewModel, manualExpanded = false))
     }
 
     @Test
     fun `AlreadyVoted refreshes once to results and never reposts`() = runTest {
-        val form = fakePollVoteForm()
+        val form = fakePollVoteForm().let { it.copy(choices = it.choices.take(2)) }
         val pollRepository = FakePollVoteRepository(PollVoteResult.AlreadyVoted)
         val topicRepository = FakeTopicRepository(
             flowsToReturn = listOf(
@@ -4315,6 +4325,7 @@ class TopicViewModelTest {
             topicRepository = topicRepository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
             pollVoteRepository = pollRepository,
+            userPreferencesRepository = FakeUserPreferencesRepository(topicUnansweredPollsExpanded = true),
         )
         viewModel.send(TopicIntent.UpdatePollSelection(form.choices[0], selected = true))
 
@@ -4324,6 +4335,279 @@ class TopicViewModelTest {
         assertEquals(1, pollRepository.calls.size)
         assertEquals(1, topicRepository.refreshCalls.size)
         assertEquals(null, (viewModel.state.value.mode as TopicUiState.Mode.Loaded).pollVote)
+        assertTrue((viewModel.state.value.mode as TopicUiState.Mode.Loaded).pollJustVoted)
+        assertTrue(pollRevealed(viewModel))
+        assertFalse(pollRevealed(viewModel, manualExpanded = false))
+    }
+
+    @Test
+    fun `voted poll collapses on page change and stays collapsed on snapshot revisit`() = runTest {
+        val results = fakeTopic(1, 2, poll = fakePollResults())
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flowOf(votingTopic()),
+                flowOf(results.copy(page = 2)),
+                flow { kotlinx.coroutines.awaitCancellation() },
+            ),
+            refreshTopicsToReturn = listOf(results),
+        )
+        val viewModel = pollVisitViewModel(repository)
+        viewModel.send(TopicIntent.SubmitBlankPollVote)
+        advanceUntilIdle()
+        assertTrue(pollRevealed(viewModel))
+
+        viewModel.switchToPage(2)
+        advanceUntilIdle()
+        assertFalse((viewModel.state.value.mode as TopicUiState.Mode.Loaded).pollJustVoted)
+        assertFalse(pollRevealed(viewModel))
+        viewModel.switchToPage(1)
+        runCurrent()
+        assertEquals(1, (viewModel.state.value.mode as TopicUiState.Mode.Loaded).topic.page)
+        assertFalse(pollRevealed(viewModel))
+    }
+
+    @Test
+    fun `leaving during page grace cannot restore just voted on a quick return`() = runTest {
+        val results = fakeTopic(1, 2, poll = fakePollResults())
+        val viewModel = pollVisitViewModel(
+            FakeTopicRepository(
+                flowsToReturn = listOf(
+                    flowOf(votingTopic()),
+                    flow { kotlinx.coroutines.awaitCancellation() },
+                    flowOf(results),
+                ),
+                refreshTopicsToReturn = listOf(results),
+            ),
+        )
+        viewModel.send(TopicIntent.SubmitBlankPollVote)
+        advanceUntilIdle()
+        assertTrue(pollRevealed(viewModel))
+
+        viewModel.switchToPage(2)
+        runCurrent()
+        val held = viewModel.state.value.mode as TopicUiState.Mode.Loaded
+        assertEquals(1, held.topic.page)
+        assertFalse(held.pollJustVoted)
+        viewModel.switchToPage(1)
+        advanceUntilIdle()
+        assertFalse(pollRevealed(viewModel))
+    }
+
+    @Test
+    fun `explicit refresh clears just voted before GET even when GET fails`() = runTest {
+        for (fails in listOf(false, true)) {
+            val results = fakeTopic(1, 2, poll = fakePollResults())
+            val repository = FakeTopicRepository(
+                flowsToReturn = listOf(flowOf(votingTopic())),
+                refreshTopicsToReturn = listOf(results, results),
+            )
+            val viewModel = pollVisitViewModel(repository)
+            viewModel.send(TopicIntent.SubmitBlankPollVote)
+            advanceUntilIdle()
+            assertTrue(pollRevealed(viewModel))
+            val refreshGate = CompletableDeferred<Unit>()
+            repository.refreshHook = { _, _, _ ->
+                refreshGate.await()
+                if (fails) throw IOException("manual refresh offline")
+            }
+
+            viewModel.send(TopicIntent.Refresh)
+            runCurrent()
+            assertTrue(viewModel.state.value.isRefreshing)
+            assertFalse((viewModel.state.value.mode as TopicUiState.Mode.Loaded).pollJustVoted)
+            assertFalse(pollRevealed(viewModel))
+            refreshGate.complete(Unit)
+            advanceUntilIdle()
+            assertFalse(pollRevealed(viewModel))
+            assertEquals(2, repository.refreshCalls.size)
+        }
+    }
+
+    @Test
+    fun `explicit refresh during a vote clears the visit without duplicating the results GET`() = runTest {
+        for (phase in listOf(PollVotePhase.Submitting, PollVotePhase.Refreshing)) {
+            val submitGate = CompletableDeferred<Unit>()
+            val refreshGate = CompletableDeferred<Unit>()
+            val pollRepository = FakePollVoteRepository(PollVoteResult.Accepted).apply { gate = submitGate }
+            val repository = FakeTopicRepository(
+                listOf(flowOf(votingTopic())),
+                refreshTopicsToReturn = listOf(fakeTopic(1, 2, poll = fakePollResults())),
+            ).apply { refreshHook = { _, _, _ -> refreshGate.await() } }
+            val viewModel = pollVisitViewModel(repository, pollRepository = pollRepository)
+            viewModel.send(TopicIntent.SubmitBlankPollVote)
+            if (phase == PollVotePhase.Refreshing) submitGate.complete(Unit)
+            runCurrent()
+            assertEquals(phase, loadedPollVote(viewModel).phase)
+
+            viewModel.send(TopicIntent.Refresh)
+            runCurrent()
+
+            assertFalse((viewModel.state.value.mode as TopicUiState.Mode.Loaded).pollJustVoted)
+            assertEquals("explicit refresh must not interrupt the vote", phase, loadedPollVote(viewModel).phase)
+            submitGate.complete(Unit)
+            runCurrent()
+            assertEquals(PollVotePhase.Refreshing, loadedPollVote(viewModel).phase)
+            assertFalse(pollRevealed(viewModel))
+            refreshGate.complete(Unit)
+            advanceUntilIdle()
+            assertFalse(pollRevealed(viewModel))
+            assertEquals(1, pollRepository.completedBlankCalls.size)
+            assertEquals(1, repository.refreshCalls.size)
+        }
+    }
+
+    @Test
+    fun `numbered results preserve option labels that themselves start with a number`() = runTest {
+        val initial = votingTopic()
+        val form = requireNotNull(initial.pollVoteForm).let { original ->
+            original.copy(choices = original.choices.map { it.copy(label = "1. ${it.label}") })
+        }
+        val results = fakePollResults().copy(
+            options = listOf(
+                PollOption("1. 1. Kotlin", votes = 8, percentage = 80f),
+                PollOption("2. 1. Java", votes = 2, percentage = 20f),
+            ),
+        )
+        val viewModel = pollVisitViewModel(
+            FakeTopicRepository(
+                listOf(flowOf(initial.copy(poll = fakeVotingPoll(form), pollVoteForm = form))),
+                refreshTopicsToReturn = listOf(initial.copy(poll = results, pollVoteForm = null)),
+            ),
+        )
+
+        viewModel.send(TopicIntent.SubmitBlankPollVote)
+        advanceUntilIdle()
+
+        assertTrue((viewModel.state.value.mode as TopicUiState.Mode.Loaded).pollJustVoted)
+        assertTrue(pollRevealed(viewModel))
+    }
+
+    @Test
+    fun `replacement or disappearance of the poll clears just voted on the same page`() = runTest {
+        val results = fakePollResults()
+        val replacements = listOf(
+            results.copy(question = "Un autre sondage ?"),
+            results.copy(options = results.options.map { it.copy(text = "${it.text} changed") }),
+            null,
+        )
+        for (poll in replacements) {
+            val viewModel = pollVisitViewModel(
+                FakeTopicRepository(
+                    listOf(flowOf(votingTopic())),
+                    refreshTopicsToReturn = listOf(fakeTopic(1, 2, poll = poll)),
+                ),
+            )
+
+            viewModel.send(TopicIntent.SubmitBlankPollVote)
+            advanceUntilIdle()
+
+            assertFalse((viewModel.state.value.mode as TopicUiState.Mode.Loaded).pollJustVoted)
+            assertFalse(pollRevealed(viewModel))
+        }
+    }
+
+    @Test
+    fun `account change clears just voted results`() = runTest {
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"))
+        val viewModel = pollVisitViewModel(
+            FakeTopicRepository(
+                listOf(flowOf(votingTopic())),
+                refreshTopicsToReturn = listOf(fakeTopic(1, 2, poll = fakePollResults())),
+            ),
+            authRepository = auth,
+        )
+        viewModel.send(TopicIntent.SubmitBlankPollVote)
+        advanceUntilIdle()
+        assertTrue(pollRevealed(viewModel))
+
+        auth.emit(AuthState.Authenticated("bob"))
+        advanceUntilIdle()
+
+        assertFalse((viewModel.state.value.mode as TopicUiState.Mode.Loaded).pollJustVoted)
+        assertFalse(pollRevealed(viewModel))
+    }
+
+    @Test
+    fun `leaving a retained topic route clears just voted and a new route starts collapsed`() = runTest {
+        val results = fakeTopic(1, 2, poll = fakePollResults())
+        val viewModel = pollVisitViewModel(
+            FakeTopicRepository(listOf(flowOf(votingTopic())), refreshTopicsToReturn = listOf(results)),
+        )
+        viewModel.send(TopicIntent.SubmitBlankPollVote)
+        advanceUntilIdle()
+        assertTrue(pollRevealed(viewModel))
+
+        viewModel.onTopicRouteLeft()
+        assertFalse((viewModel.state.value.mode as TopicUiState.Mode.Loaded).pollJustVoted)
+        assertFalse(pollRevealed(viewModel))
+        val reopened = pollVisitViewModel(FakeTopicRepository(listOf(flowOf(results))))
+        assertFalse(pollRevealed(reopened))
+    }
+
+    @Test
+    fun `acceptance after leaving a retained route cannot restore just voted`() = runTest {
+        val submitGate = CompletableDeferred<Unit>()
+        val pollRepository = FakePollVoteRepository(PollVoteResult.Accepted).apply { gate = submitGate }
+        val viewModel = pollVisitViewModel(
+            FakeTopicRepository(
+                listOf(flowOf(votingTopic())),
+                refreshTopicsToReturn = listOf(fakeTopic(1, 2, poll = fakePollResults())),
+            ),
+            pollRepository = pollRepository,
+        )
+        viewModel.send(TopicIntent.SubmitBlankPollVote)
+        runCurrent()
+        viewModel.onTopicRouteLeft()
+        submitGate.complete(Unit)
+        advanceUntilIdle()
+
+        assertEquals(1, pollRepository.completedBlankCalls.size)
+        assertFalse((viewModel.state.value.mode as TopicUiState.Mode.Loaded).pollJustVoted)
+        assertFalse(pollRevealed(viewModel))
+    }
+
+    @Test
+    fun `accepted vote stays revealed during its refresh but leaving still wins over the late GET`() = runTest {
+        val refreshGate = CompletableDeferred<Unit>()
+        val repository = FakeTopicRepository(
+            listOf(flowOf(votingTopic())),
+            refreshTopicsToReturn = listOf(fakeTopic(1, 2, poll = fakePollResults())),
+        ).apply {
+            refreshHook = { _, _, _ -> refreshGate.await() }
+        }
+        val viewModel = pollVisitViewModel(repository)
+        viewModel.send(TopicIntent.SubmitBlankPollVote)
+        runCurrent()
+
+        assertEquals(PollVotePhase.Refreshing, loadedPollVote(viewModel).phase)
+        assertTrue(loadedPollVote(viewModel).form.hashCheck.isBlank())
+        assertTrue((viewModel.state.value.mode as TopicUiState.Mode.Loaded).pollJustVoted)
+        assertTrue(pollRevealed(viewModel))
+        viewModel.onTopicRouteLeft()
+        refreshGate.complete(Unit)
+        advanceUntilIdle()
+
+        assertFalse((viewModel.state.value.mode as TopicUiState.Mode.Loaded).pollJustVoted)
+        assertFalse(pollRevealed(viewModel))
+    }
+
+    @Test
+    fun `local refilter keeps just voted results on the same page`() = runTest {
+        val blacklist = FakeBlacklistRepository()
+        val viewModel = pollVisitViewModel(
+            FakeTopicRepository(
+                listOf(flowOf(votingTopic())),
+                refreshTopicsToReturn = listOf(fakeTopic(1, 2, poll = fakePollResults())),
+            ),
+            blacklistRepository = blacklist,
+        )
+        viewModel.send(TopicIntent.SubmitBlankPollVote)
+        advanceUntilIdle()
+        blacklist.block("troll")
+        advanceUntilIdle()
+
+        assertTrue((viewModel.state.value.mode as TopicUiState.Mode.Loaded).pollJustVoted)
+        assertTrue(pollRevealed(viewModel))
     }
 
     @Test
@@ -4556,10 +4840,534 @@ class TopicViewModelTest {
         val pollVote = loadedPollVote(viewModel)
         assertEquals(PollVotePhase.Idle, pollVote.phase)
         assertEquals(PollVoteUiError.RefreshFailedAfterAccepted, pollVote.error)
+        assertTrue((viewModel.state.value.mode as TopicUiState.Mode.Loaded).pollJustVoted)
         assertEquals(setOf(form.choices[0]), pollVote.selectedChoices)
         assertTrue("the consumed form can never repost", pollVote.form.hashCheck.isBlank())
         assertEquals(1, pollRepository.calls.size)
         assertEquals(1, topicRepository.refreshCalls.size)
+    }
+
+    @Test
+    fun `a moderationAlertFor request opens the alert once the entry page is loaded`() = runTest {
+        val pages = MutableSharedFlow<Topic>()
+        val gate = CompletableDeferred<Unit>()
+        val repository = FakeModerationRepository().apply { loadGate = gate }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2, scrollTo = 42, moderationAlertFor = 42),
+            topicRepository = FakeStreamingTopicRepository(pages),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            moderationRepository = repository,
+        )
+        assertNull(viewModel.state.value.moderationAlert)
+        assertTrue(repository.loads.isEmpty())
+
+        pages.emit(fakeTopic(2, 2, posts = listOf(fakePost(42))))
+        runCurrent()
+        assertEquals(ModerationAlertUi.Loading, viewModel.state.value.moderationAlert)
+        assertEquals(listOf(listOf(SAMPLE_CAT, SAMPLE_POST, 42, 2)), repository.loads)
+        gate.complete(Unit)
+        runCurrent()
+
+        assertEquals(
+            ModerationAlertUi.Form(repository.alert as ModerationAlertState.Form),
+            viewModel.state.value.moderationAlert,
+        )
+        viewModel.effects.test {
+            assertEquals(TopicEffect.ScrollToPost(42), awaitItem())
+            expectNoEvents()
+        }
+        assertTrue(repository.sends.isEmpty())
+        assertTrue(repository.joins.isEmpty())
+    }
+
+    @Test
+    fun `moderationAlertFor is consumed after the first entry load`() = runTest {
+        val entry = fakeTopic(2, 3, posts = listOf(fakePost(42)))
+        val pages = FakeTopicRepository(
+            flowsToReturn = listOf(flowOf(entry), flowOf(entry.copy(page = 3)), flowOf(entry)),
+            refreshTopicsToReturn = listOf(entry),
+        )
+        val repository = FakeModerationRepository()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2, scrollTo = 42, moderationAlertFor = 42),
+            topicRepository = pages,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            moderationRepository = repository,
+        )
+        assertTrue(viewModel.state.value.moderationAlert is ModerationAlertUi.Form)
+        viewModel.send(TopicIntent.DismissModerationAlert)
+
+        viewModel.send(TopicIntent.Refresh)
+        runCurrent()
+        assertNull(viewModel.state.value.moderationAlert)
+        viewModel.switchToPage(3)
+        runCurrent()
+        assertNull(viewModel.state.value.moderationAlert)
+        viewModel.switchToPage(2)
+        runCurrent()
+
+        assertEquals(listOf(2, 3, 2), pages.calls.map { it.third })
+        assertEquals(listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)), pages.refreshCalls)
+        assertNull(viewModel.state.value.moderationAlert)
+        assertEquals(1, repository.loads.size)
+    }
+
+    @Test
+    fun `moderationAlertFor with anonymous session lands on the post and emits the sign-in snackbar`() = runTest {
+        val auth = FakeAuthRepository(AuthState.Anonymous)
+        val repository = FakeModerationRepository()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2, scrollTo = 42, moderationAlertFor = 42),
+            topicRepository = FakeTopicRepository(listOf(flowOf(fakeTopic(2, 2, posts = listOf(fakePost(42)))))),
+            authRepository = auth,
+            moderationRepository = repository,
+        )
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.ScrollToPost(42), awaitItem())
+            assertEquals(TopicEffect.ModerationAlertSignInRequired, awaitItem())
+            auth.emit(AuthState.Authenticated("xaat"))
+            runCurrent()
+            expectNoEvents()
+        }
+        assertNull(viewModel.state.value.moderationAlert)
+        assertTrue(repository.loads.isEmpty())
+    }
+
+    @Test
+    fun `moderationAlertFor whose post is absent from the page opens nothing`() = runTest {
+        val pages = MutableSharedFlow<Topic>(replay = 1).apply {
+            tryEmit(fakeTopic(2, 2, posts = listOf(fakePost(43))))
+        }
+        val repository = FakeModerationRepository()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2, scrollTo = 42, moderationAlertFor = 42),
+            topicRepository = FakeStreamingTopicRepository(pages),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            moderationRepository = repository,
+        )
+        viewModel.effects.test { expectNoEvents() }
+        assertNull(viewModel.state.value.moderationAlert)
+
+        // A later emission may satisfy the scroll, but cannot retry the consumed alert trigger.
+        pages.emit(fakeTopic(2, 2, posts = listOf(fakePost(42))))
+        runCurrent()
+        viewModel.effects.test {
+            assertEquals(TopicEffect.ScrollToPost(42), awaitItem())
+            expectNoEvents()
+        }
+        assertNull(viewModel.state.value.moderationAlert)
+        assertTrue(repository.loads.isEmpty())
+    }
+
+    @Test
+    fun `moderationAlertFor loads the form with the resolved entry page`() = runTest {
+        val repository = FakeModerationRepository()
+        val search = FakeSearchRepository(pageToResolve = 76)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1, scrollTo = 42, resolveScrollToPage = true, moderationAlertFor = 42),
+            topicRepository = FakeTopicRepository(listOf(flowOf(fakeTopic(76, 76, posts = listOf(fakePost(42)))))),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            moderationRepository = repository,
+            searchRepository = search,
+        )
+
+        assertEquals(listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 42)), search.resolveCalls)
+        assertEquals(76, viewModel.state.value.request.page)
+        assertEquals(listOf(listOf(SAMPLE_CAT, SAMPLE_POST, 42, 76)), repository.loads)
+        assertTrue(viewModel.state.value.moderationAlert is ModerationAlertUi.Form)
+    }
+
+    @Test
+    fun `moderationAlertFor is superseded by a page switch before the entry loads`() = runTest {
+        val entryGate = CompletableDeferred<Unit>()
+        val entry = fakeTopic(2, 3, posts = listOf(fakePost(42)))
+        val repository = FakeModerationRepository()
+        val pages = FakeTopicRepository(
+            listOf(
+                flow {
+                    entryGate.await()
+                    emit(entry)
+                },
+                flowOf(entry.copy(page = 3)),
+                flowOf(entry),
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2, scrollTo = 42, moderationAlertFor = 42),
+            topicRepository = pages,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            moderationRepository = repository,
+        )
+
+        viewModel.switchToPage(3)
+        entryGate.complete(Unit)
+        runCurrent()
+        assertEquals(3, viewModel.state.value.request.page)
+        viewModel.switchToPage(2)
+        runCurrent()
+
+        assertNull(viewModel.state.value.moderationAlert)
+        assertTrue(repository.loads.isEmpty())
+    }
+
+    @Test
+    fun `moderationAlertFor on a cached page waits for the initial session`() = runTest {
+        val authGate = CompletableDeferred<Unit>()
+        val auth = object : AuthRepository by FakeAuthRepository(AuthState.Anonymous) {
+            override fun observeAuthState(): Flow<AuthState> = flow {
+                authGate.await()
+                emit(AuthState.Authenticated("xaat"))
+            }
+        }
+        val repository = FakeModerationRepository()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2, scrollTo = 42, moderationAlertFor = 42),
+            topicRepository = FakeTopicRepository(listOf(flowOf(fakeTopic(2, 2, posts = listOf(fakePost(42)))))),
+            authRepository = auth,
+            moderationRepository = repository,
+        )
+        assertNull(viewModel.state.value.moderationAlert)
+        assertTrue(repository.loads.isEmpty())
+        viewModel.effects.test {
+            assertEquals(TopicEffect.ScrollToPost(42), awaitItem())
+            expectNoEvents()
+            authGate.complete(Unit)
+            runCurrent()
+            expectNoEvents()
+        }
+
+        assertTrue(viewModel.state.value.moderationAlert is ModerationAlertUi.Form)
+        assertEquals(1, repository.loads.size)
+    }
+
+    @Test
+    fun `moderationAlertFor waiting for auth cannot open on a newer page owner`() = runTest {
+        val authGate = CompletableDeferred<Unit>()
+        val auth = object : AuthRepository by FakeAuthRepository(AuthState.Anonymous) {
+            override fun observeAuthState(): Flow<AuthState> = flow {
+                authGate.await()
+                emit(AuthState.Authenticated("xaat"))
+            }
+        }
+        val entry = fakeTopic(2, 3, posts = listOf(fakePost(42)))
+        val repository = FakeModerationRepository()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2, scrollTo = 42, moderationAlertFor = 42),
+            topicRepository = FakeTopicRepository(listOf(flowOf(entry), flowOf(entry.copy(page = 3)))),
+            authRepository = auth,
+            moderationRepository = repository,
+        )
+
+        viewModel.switchToPage(3)
+        authGate.complete(Unit)
+        runCurrent()
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.ScrollToPost(42), awaitItem())
+            assertEquals(TopicEffect.ScrollToTop(3), awaitItem())
+            expectNoEvents()
+        }
+        assertNull(viewModel.state.value.moderationAlert)
+        assertTrue(repository.loads.isEmpty())
+    }
+
+    @Test
+    fun `moderationAlertFor supplies the entry target when scrollTo is absent`() = runTest {
+        val repository = FakeModerationRepository()
+        val search = FakeSearchRepository(pageToResolve = 2)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1, resolveScrollToPage = true, moderationAlertFor = 42),
+            topicRepository = FakeTopicRepository(listOf(flowOf(fakeTopic(2, 2, posts = listOf(fakePost(42)))))),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            moderationRepository = repository,
+            searchRepository = search,
+        )
+
+        assertEquals(listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 42)), search.resolveCalls)
+        assertTrue(viewModel.state.value.moderationAlert is ModerationAlertUi.Form)
+        viewModel.effects.test {
+            assertEquals(TopicEffect.ScrollToPost(42), awaitItem())
+            expectNoEvents()
+        }
+    }
+
+    @Test
+    fun `moderation load moves from loading to form with the displayed post context`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val repository = FakeModerationRepository().apply { loadGate = gate }
+        val viewModel = moderationViewModel(repository)
+        viewModel.send(TopicIntent.RequestModerationAlert(42))
+        assertEquals(ModerationAlertUi.Loading, viewModel.state.value.moderationAlert)
+        gate.complete(Unit)
+        runCurrent()
+        assertEquals(
+            ModerationAlertUi.Form(repository.alert as ModerationAlertState.Form),
+            viewModel.state.value.moderationAlert,
+        )
+        assertEquals(listOf(listOf(SAMPLE_CAT, SAMPLE_POST, 42, 2)), repository.loads)
+    }
+
+    @Test
+    fun `moderation submit sends draft once then closes and emits sent`() = runTest {
+        val repository = FakeModerationRepository()
+        val viewModel = moderationViewModel(repository)
+        viewModel.send(TopicIntent.RequestModerationAlert(42))
+        viewModel.send(TopicIntent.UpdateModerationReason("Insultes"))
+        viewModel.send(TopicIntent.SubmitModerationAlert)
+        assertEquals(listOf(repository.alert to "Insultes"), repository.sends)
+        assertNull(viewModel.state.value.moderationAlert)
+        viewModel.effects.test {
+            assertEquals(
+                TopicEffect.ModerationAlertCompleted(
+                    ModerationAlertOutcome.Sent(FakeModerationRepository.SENT_MESSAGE),
+                ),
+                awaitItem(),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `moderation join prompt confirms joins and closes`() = runTest {
+        val prompt = ModerationAlertState.JoinPrompt("modo.php?cat=13", "join-token", null)
+        val repository = FakeModerationRepository().apply {
+            alert = prompt
+            outcome = ModerationAlertOutcome.Joined(FakeModerationRepository.JOINED_MESSAGE)
+        }
+        val viewModel = moderationViewModel(repository)
+        viewModel.send(TopicIntent.RequestModerationAlert(42))
+        assertEquals(ModerationAlertUi.JoinPrompt(prompt), viewModel.state.value.moderationAlert)
+        viewModel.send(TopicIntent.JoinModerationAlert)
+        assertEquals(listOf(prompt), repository.joins)
+        assertTrue(repository.sends.isEmpty())
+        assertNull(viewModel.state.value.moderationAlert)
+        viewModel.effects.test {
+            assertEquals(
+                TopicEffect.ModerationAlertCompleted(
+                    ModerationAlertOutcome.Joined(FakeModerationRepository.JOINED_MESSAGE),
+                ),
+                awaitItem(),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `moderation pending treated and unknown pages only expose information`() = runTest {
+        val cases = listOf(
+            // #293 — the UI carries HFR's own sentence verbatim, no string-resource mapping.
+            ModerationAlertState.PendingMine(PENDING_MINE) to ModerationAlertUi.Info(PENDING_MINE),
+            ModerationAlertState.PendingJoined(PENDING_JOINED) to ModerationAlertUi.Info(PENDING_JOINED),
+            ModerationAlertState.TreatedMine(TREATED_MINE, "2026-09-05 17:27:28") to
+                ModerationAlertUi.Info(TREATED_MINE, "2026-09-05 17:27:28"),
+            ModerationAlertState.TreatedJoined(TREATED_JOINED, "2026-09-05 17:27:28") to
+                ModerationAlertUi.Info(TREATED_JOINED, "2026-09-05 17:27:28"),
+            ModerationAlertState.Unknown("unrelated page text") to ModerationAlertUi.Info("unrelated page text"),
+        )
+        for ((alert, expected) in cases) {
+            val repository = FakeModerationRepository().apply { this.alert = alert }
+            val viewModel = moderationViewModel(repository)
+            viewModel.send(TopicIntent.RequestModerationAlert(42))
+            assertEquals(expected, viewModel.state.value.moderationAlert)
+            viewModel.send(TopicIntent.SubmitModerationAlert)
+            viewModel.send(TopicIntent.JoinModerationAlert)
+            assertTrue(repository.sends.isEmpty() && repository.joins.isEmpty())
+        }
+    }
+
+    @Test
+    fun `moderation network load error closes and emits topic feedback`() = runTest {
+        val repository = FakeModerationRepository().apply { loadError = IOException("offline") }
+        val viewModel = moderationViewModel(repository)
+        viewModel.send(TopicIntent.RequestModerationAlert(42))
+        assertNull(viewModel.state.value.moderationAlert)
+        viewModel.effects.test {
+            assertEquals(TopicEffect.ModerationAlertFailed(HfrErrorKind.Network), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `moderation submit network error preserves the draft and clears busy state`() = runTest {
+        val repository = FakeModerationRepository().apply { submitError = IOException("offline") }
+        val viewModel = moderationViewModel(repository)
+        viewModel.send(TopicIntent.RequestModerationAlert(42))
+        viewModel.send(TopicIntent.UpdateModerationReason("Insultes"))
+        viewModel.send(TopicIntent.SubmitModerationAlert)
+        assertEquals(
+            ModerationAlertUi.Form(repository.alert as ModerationAlertState.Form, "Insultes"),
+            viewModel.state.value.moderationAlert,
+        )
+        viewModel.effects.test {
+            assertEquals(TopicEffect.ModerationAlertFailed(HfrErrorKind.Network), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `moderation blank reason cannot submit`() = runTest {
+        val repository = FakeModerationRepository()
+        val viewModel = moderationViewModel(repository)
+        viewModel.send(TopicIntent.RequestModerationAlert(42))
+        viewModel.send(TopicIntent.SubmitModerationAlert)
+        viewModel.send(TopicIntent.UpdateModerationReason(" \n\t"))
+        viewModel.send(TopicIntent.SubmitModerationAlert)
+        assertTrue(repository.sends.isEmpty())
+    }
+
+    @Test
+    fun `moderation dismissal cancels loading without reopening the sheet`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val repository = FakeModerationRepository().apply { loadGate = gate }
+        val viewModel = moderationViewModel(repository)
+        viewModel.send(TopicIntent.RequestModerationAlert(42))
+        assertEquals(ModerationAlertUi.Loading, viewModel.state.value.moderationAlert)
+        assertEquals(1, repository.loads.size)
+        viewModel.send(TopicIntent.DismissModerationAlert)
+        assertNull(viewModel.state.value.moderationAlert)
+        gate.complete(Unit)
+        runCurrent()
+        assertTrue(repository.loadCancelled)
+        assertNull(viewModel.state.value.moderationAlert)
+        viewModel.effects.test { expectNoEvents() }
+    }
+
+    @Test
+    fun `late noncancellable moderation GET cannot reopen a dismissed initial load`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val repository = FakeModerationRepository().apply { loadGate = gate }
+        val noncancellable = object : ModerationRepository by repository {
+            override suspend fun loadAlert(cat: Int, topicId: Int, numreponse: Int, page: Int): ModerationAlertState =
+                withContext(NonCancellable) { repository.loadAlert(cat, topicId, numreponse, page) }
+        }
+        val viewModel = moderationViewModel(noncancellable)
+        viewModel.send(TopicIntent.RequestModerationAlert(42))
+        assertEquals(ModerationAlertUi.Loading, viewModel.state.value.moderationAlert)
+        assertEquals(1, repository.loads.size)
+        viewModel.send(TopicIntent.DismissModerationAlert)
+        gate.complete(Unit)
+        runCurrent()
+        assertNull(viewModel.state.value.moderationAlert)
+        viewModel.effects.test { expectNoEvents() }
+    }
+
+    @Test
+    fun `moderation double submit and reopening during a dismissed POST cannot duplicate it`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val repository = FakeModerationRepository().apply { submitGate = gate }
+        val viewModel = moderationViewModel(repository)
+        viewModel.send(TopicIntent.RequestModerationAlert(42))
+        viewModel.send(TopicIntent.UpdateModerationReason("Insultes"))
+        viewModel.send(TopicIntent.SubmitModerationAlert)
+        viewModel.send(TopicIntent.SubmitModerationAlert)
+        assertTrue((viewModel.state.value.moderationAlert as ModerationAlertUi.Form).submitting)
+        viewModel.send(TopicIntent.DismissModerationAlert)
+        viewModel.send(TopicIntent.RequestModerationAlert(42))
+        assertEquals(1, repository.loads.size)
+        assertEquals(1, repository.sends.size)
+        gate.complete(Unit)
+        runCurrent()
+        assertNull(viewModel.state.value.moderationAlert)
+        viewModel.effects.test { expectNoEvents() }
+    }
+
+    @Test
+    fun `moderation form is discarded on account switch`() = runTest {
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"))
+        val repository = FakeModerationRepository()
+        val viewModel = moderationViewModel(repository, auth)
+        viewModel.send(TopicIntent.RequestModerationAlert(42))
+        viewModel.send(TopicIntent.UpdateModerationReason("Insultes"))
+        auth.emit(AuthState.Authenticated("other"))
+        runCurrent()
+        viewModel.send(TopicIntent.SubmitModerationAlert)
+        assertNull(viewModel.state.value.moderationAlert)
+        assertTrue(repository.sends.isEmpty())
+    }
+
+    @Test
+    fun `moderation rejects anonymous and absent post intents but allows locked topics`() = runTest {
+        val repository = FakeModerationRepository()
+        val anonymous = moderationViewModel(repository, FakeAuthRepository(AuthState.Anonymous))
+        anonymous.send(TopicIntent.RequestModerationAlert(42))
+        val connected = moderationViewModel(repository)
+        connected.send(TopicIntent.RequestModerationAlert(43))
+        assertTrue(repository.loads.isEmpty())
+        connected.send(TopicIntent.RequestModerationAlert(42))
+        assertEquals(1, repository.loads.size)
+    }
+
+    @Test
+    fun `moderation rejection becomes a terminal result without a success effect`() = runTest {
+        val repository = FakeModerationRepository().apply { outcome = ModerationAlertOutcome.Rejected("Refus") }
+        val viewModel = moderationViewModel(repository)
+        viewModel.send(TopicIntent.RequestModerationAlert(42))
+        viewModel.send(TopicIntent.UpdateModerationReason("Insultes"))
+        viewModel.send(TopicIntent.SubmitModerationAlert)
+        assertEquals(ModerationAlertUi.Result(repository.outcome), viewModel.state.value.moderationAlert)
+        viewModel.effects.test { expectNoEvents() }
+    }
+
+    @Test
+    fun `confirmed moderation POST survives destroying the viewmodel`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val repository = FakeModerationRepository().apply { submitGate = gate }
+        val viewModel = moderationViewModel(repository)
+        viewModel.send(TopicIntent.RequestModerationAlert(42))
+        viewModel.send(TopicIntent.UpdateModerationReason("Insultes"))
+        viewModel.send(TopicIntent.SubmitModerationAlert)
+        destroyViewModel(viewModel)
+        gate.complete(Unit)
+        runCurrent()
+        assertEquals(1, repository.submissionsCompleted)
+        viewModel.effects.test { expectNoEvents() }
+    }
+
+    private fun moderationViewModel(
+        repository: ModerationRepository,
+        auth: AuthRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+    ): TopicViewModel = topicViewModel(
+        request = topicRequest(page = 2),
+        topicRepository = FakeTopicRepository(
+            flowsToReturn = listOf(flowOf(fakeTopic(2, 2, posts = listOf(fakePost(42))).copy(canReply = false))),
+        ),
+        authRepository = auth,
+        moderationRepository = repository,
+    )
+
+    private fun votingTopic(): Topic {
+        val form = fakePollVoteForm().let { it.copy(choices = it.choices.take(2)) }
+        return fakeTopic(1, 2, poll = fakeVotingPoll(form), pollVoteForm = form)
+    }
+
+    private fun pollVisitViewModel(
+        repository: TopicRepository,
+        pollRepository: PollVoteRepository = FakePollVoteRepository(PollVoteResult.Accepted),
+        blacklistRepository: BlacklistRepository = FakeBlacklistRepository(),
+        authRepository: AuthRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+    ): TopicViewModel = topicViewModel(
+        request = topicRequest(page = 1),
+        topicRepository = repository,
+        authRepository = authRepository,
+        pollVoteRepository = pollRepository,
+        blacklistRepository = blacklistRepository,
+        userPreferencesRepository = FakeUserPreferencesRepository(topicUnansweredPollsExpanded = true),
+    )
+
+    private fun pollRevealed(viewModel: TopicViewModel, manualExpanded: Boolean? = null): Boolean {
+        val state = viewModel.state.value
+        val loaded = state.mode as TopicUiState.Mode.Loaded
+        return resolvePollRevealed(
+            PollRevealInputs(
+                manualExpanded = manualExpanded,
+                pollsExpandedDefault = state.pollsExpandedDefault,
+                expandUnansweredPolls = state.expandUnansweredPolls,
+                pollVoteForm = loaded.topic.pollVoteForm,
+                pollClosed = loaded.topic.poll?.closed == true,
+                justVoted = loaded.pollJustVoted,
+            ),
+        )
     }
 
     private fun loadedPollVote(viewModel: TopicViewModel): PollVoteUiState =
@@ -4572,6 +5380,7 @@ class TopicViewModelTest {
         authRepository: AuthRepository,
         userPreferencesRepository: UserPreferencesRepository = FakeUserPreferencesRepository(),
         deletePostRepository: DeletePostRepository = FakeDeletePostRepository(),
+        moderationRepository: ModerationRepository = FakeModerationRepository(),
         pollVoteRepository: PollVoteRepository = FakePollVoteRepository(),
         blacklistRepository: BlacklistRepository = FakeBlacklistRepository(),
         authorRoleRepository: AuthorRoleRepository = FakeAuthorRoleRepository(),
@@ -4592,6 +5401,7 @@ class TopicViewModelTest {
         authRepository = authRepository,
         userPreferencesRepository = userPreferencesRepository,
         deletePostRepository = deletePostRepository,
+        moderationRepository = moderationRepository,
         pollVoteRepository = pollVoteRepository,
         blacklistRepository = blacklistRepository,
         authorRoleRepository = authorRoleRepository,
@@ -4622,12 +5432,14 @@ class TopicViewModelTest {
         page: Int,
         scrollTo: Int? = null,
         resolveScrollToPage: Boolean = false,
+        moderationAlertFor: Int? = null,
     ): TopicRequest = TopicRequest(
         cat = SAMPLE_CAT,
         post = SAMPLE_POST,
         page = page,
         scrollTo = scrollTo,
         resolveScrollToPage = resolveScrollToPage,
+        moderationAlertFor = moderationAlertFor,
     )
 
     // ──────────────────────────────────────────────────────────────────────
@@ -4739,6 +5551,40 @@ class TopicViewModelTest {
         assertFalse(viewModel.state.value.isRefreshing)
         assertEquals("refreshed", (viewModel.state.value.mode as TopicUiState.Mode.Loaded).topic.title)
         assertEquals(1, repository.refreshCalls.size)
+    }
+
+    @Test
+    fun `a landing pending on a provisional page is dispatched by a manual refresh`() = runTest {
+        val target = 777
+        val emissions = MutableSharedFlow<TopicPageEmission>(replay = 1)
+        assertTrue(
+            emissions.tryEmit(
+                TopicPageEmission(
+                    fakeTopic(page = 2, totalPages = 2, posts = listOf(fakePost(100))),
+                    provisional = true,
+                ),
+            ),
+        )
+        val repository = FakeStreamingEmissionTopicRepository(
+            source = emissions,
+            refreshTopicsToReturn = listOf(
+                fakeTopic(page = 2, totalPages = 2, posts = listOf(fakePost(100), fakePost(target))),
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2, scrollTo = target),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+        advanceUntilIdle()
+        assertTrue(assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).provisional)
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.Refresh)
+            assertEquals(TopicEffect.ScrollToPost(target), awaitItem())
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     @Test
@@ -5463,9 +6309,10 @@ class TopicViewModelTest {
 
     private fun fakePollResults(): Poll = Poll(
         question = "Quel langage préférez-vous ?",
+        // HFR's RESULTS labels keep their ordinal; FORM labels do not (TopicPageParserTest).
         options = listOf(
-            PollOption("Kotlin", votes = 8, percentage = 80f),
-            PollOption("Java", votes = 2, percentage = 20f),
+            PollOption("1. Kotlin", votes = 8, percentage = 80f),
+            PollOption("2. Java", votes = 2, percentage = 20f),
         ),
         multipleChoice = false,
         totalVotes = 10,
@@ -5520,6 +6367,16 @@ class TopicViewModelTest {
         private const val SAMPLE_POST = 84_540
         private const val SAMPLE_SUBCAT = 432
         private const val CANCEL_TIMEOUT_MS = 2_000L
+
+        // #293 — HFR's own sentences, as the parser hands them over.
+        private const val PENDING_MINE =
+            "Votre demande de modération sur ce message n'est pas encore traitée"
+        private const val PENDING_JOINED =
+            "La demande de modération sur ce message à laquelle vous vous êtes joint n'est pas encore traitée"
+        private const val TREATED_MINE =
+            "Votre demande de modération sur ce message a été traitée le 2026-09-05 17:27:28"
+        private const val TREATED_JOINED =
+            "Une demande de modération sur ce message a été traitée le 2026-09-05 17:27:28"
     }
 }
 
@@ -6084,6 +6941,11 @@ internal class FakeUserPreferencesRepository(
 
     override suspend fun setFontScale(scale: FontScalePreference) = Unit
 
+    override fun observeAppLauncherIcon(): Flow<AppLauncherIcon> =
+        MutableStateFlow(AppLauncherIcon.CLASSIC)
+
+    override suspend fun setAppLauncherIcon(icon: AppLauncherIcon) = Unit
+
     // #973 — the block-GIF display profile is irrelevant to TopicViewModel; stubbed at the M default.
     override fun observeMediaDisplayProfile(): Flow<MediaDisplayProfile> =
         MutableStateFlow(MediaDisplayProfile.M)
@@ -6094,6 +6956,11 @@ internal class FakeUserPreferencesRepository(
         MutableStateFlow(PostImageMaxWidth.DEFAULT)
 
     override suspend fun setPostImageMaxWidth(width: PostImageMaxWidth) = Unit
+
+    override fun observePostImageCorners(): Flow<PostImageCorners> =
+        MutableStateFlow(PostImageCorners.DEFAULT)
+
+    override suspend fun setPostImageCorners(corners: PostImageCorners) = Unit
 
     // #989 — délimiteur du picker : non exercé ici, présent pour satisfaire l'interface.
     override fun observeSmileyPickerDecoration(): Flow<SmileyPickerDecoration> =
@@ -6121,6 +6988,19 @@ internal class FakeUserPreferencesRepository(
     override suspend fun setAlwaysAskLinkApp(enabled: Boolean) = Unit
 
     // #1132 — Forum flag-filter preference is irrelevant to the topic surfaces; default ALL stub.
+    private val menusCollapsed = MutableStateFlow(false)
+    private val stickyCollapsed = MutableStateFlow(false)
+
+    override fun observeForumCategoryMenusCollapsed(): Flow<Boolean> = menusCollapsed
+    override suspend fun setForumCategoryMenusCollapsed(collapsed: Boolean) {
+        menusCollapsed.value = collapsed
+    }
+
+    override fun observeForumCategoryStickyTopicsCollapsed(): Flow<Boolean> = stickyCollapsed
+    override suspend fun setForumCategoryStickyTopicsCollapsed(collapsed: Boolean) {
+        stickyCollapsed.value = collapsed
+    }
+
     override fun observeForumCategoryFlagFilter(): Flow<CategoryFlagFilter> =
         MutableStateFlow(CategoryFlagFilter.ALL)
 

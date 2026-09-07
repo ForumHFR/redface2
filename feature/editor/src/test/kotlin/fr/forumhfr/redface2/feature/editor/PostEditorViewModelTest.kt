@@ -11,8 +11,10 @@ import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
@@ -548,6 +550,50 @@ class PostEditorViewModelTest {
         assertFalse(settled.smileyDisabled)
         assertTrue(settled.emailNotificationEnabled)
         assertTrue("optionsHydratedFromForm flips after first load", settled.optionsHydratedFromForm)
+    }
+
+    @Test
+    fun `message tone is hydrated from the first form`() = runTest {
+        // A non-default tone (6) so the assertion cannot pass on the DEFAULT_MSG_ICON fallback.
+        replyRepository.formResult = Result.success(authenticatedForm().copy(msgIcon = "6"))
+
+        val viewModel = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(6, viewModel.state.value.msgIcon)
+        assertTrue(viewModel.state.value.optionsHydratedFromForm)
+    }
+
+    @Test
+    fun `selected message tone reaches the submitted reply form`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm().copy(msgIcon = "1"))
+        replyRepository.submitResult = ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+        val viewModel = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.MsgIconSelected(6))
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("hi")))
+        assertEquals(6, viewModel.state.value.msgIcon)
+        viewModel.submit(PostEditorIntent.SubmitClicked)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("6", replyRepository.lastSubmittedForm?.msgIcon)
+    }
+
+    @Test
+    fun `silent refetch does not overwrite a user-selected message tone`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm().copy(msgIcon = "1"))
+        replyRepository.submitResult = ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
+        val viewModel = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.MsgIconSelected(6))
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("hi")))
+        viewModel.submit(PostEditorIntent.SubmitClicked)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("refetch happened", 2, replyRepository.formFetches)
+        assertEquals(6, viewModel.state.value.msgIcon)
     }
 
     @Test
@@ -2160,6 +2206,8 @@ class PostEditorViewModelTest {
             private set
         var lastSubmittedBbcode: String? = null
             private set
+        var lastSubmittedForm: ReplyForm? = null
+            private set
 
         // #291 — per-numrep responses for the multi-quote pipeline; falls back to [formResult]
         // when the quoted numreponse has no dedicated entry (single-quote / plain-reply tests).
@@ -2188,6 +2236,7 @@ class PostEditorViewModelTest {
             submitCalls += 1
             lastSubmittedContext = context
             lastSubmittedBbcode = bbcodeContent
+            lastSubmittedForm = form
             lastSubmittedOptions = options
             submitGate?.await()
             submitException?.let { throw it }
@@ -2456,6 +2505,11 @@ class PostEditorViewModelTest {
 
         override suspend fun setFontScale(scale: FontScalePreference) = Unit
 
+        override fun observeAppLauncherIcon(): Flow<AppLauncherIcon> =
+            MutableStateFlow(AppLauncherIcon.CLASSIC)
+
+        override suspend fun setAppLauncherIcon(icon: AppLauncherIcon) = Unit
+
         // #973 — the block-GIF display profile is irrelevant to the editor; stubbed at the M default.
         override fun observeMediaDisplayProfile(): Flow<MediaDisplayProfile> =
             MutableStateFlow(MediaDisplayProfile.M)
@@ -2466,6 +2520,11 @@ class PostEditorViewModelTest {
             MutableStateFlow(PostImageMaxWidth.DEFAULT)
 
         override suspend fun setPostImageMaxWidth(width: PostImageMaxWidth) = Unit
+
+        override fun observePostImageCorners(): Flow<PostImageCorners> =
+            MutableStateFlow(PostImageCorners.DEFAULT)
+
+        override suspend fun setPostImageCorners(corners: PostImageCorners) = Unit
 
         // #989 — délimiteur du picker : non exercé ici, présent pour satisfaire l'interface.
         override fun observeSmileyPickerDecoration(): Flow<SmileyPickerDecoration> =
@@ -2493,6 +2552,19 @@ class PostEditorViewModelTest {
         override suspend fun setAlwaysAskLinkApp(enabled: Boolean) = Unit
 
         // #1132 — Forum flag-filter preference is irrelevant to the editor; default ALL stub.
+        private val menusCollapsed = MutableStateFlow(false)
+        private val stickyCollapsed = MutableStateFlow(false)
+
+        override fun observeForumCategoryMenusCollapsed(): Flow<Boolean> = menusCollapsed
+        override suspend fun setForumCategoryMenusCollapsed(collapsed: Boolean) {
+            menusCollapsed.value = collapsed
+        }
+
+        override fun observeForumCategoryStickyTopicsCollapsed(): Flow<Boolean> = stickyCollapsed
+        override suspend fun setForumCategoryStickyTopicsCollapsed(collapsed: Boolean) {
+            stickyCollapsed.value = collapsed
+        }
+
         override fun observeForumCategoryFlagFilter(): Flow<CategoryFlagFilter> =
             MutableStateFlow(CategoryFlagFilter.ALL)
 

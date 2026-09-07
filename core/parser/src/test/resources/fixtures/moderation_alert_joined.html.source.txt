@@ -1,0 +1,9 @@
+Fixture : moderation_alert_joined.html
+Origine : page /user/modo.php (alerte à la modération) — Réponse au POST cfmodoalert=1 : « Vous êtes désormais joint à la demande de modération. »
+Capture : live le 2026-09-05, AUTHENTIFIÉ sous XaTelitte (compte de test de l'agent, membre joint), via « Enregistrer la page » du
+          navigateur (chemins d'assets réécrits, neutralisés), sur le topic DEV Redface 2
+          (cat=23, subcat=550, post=35421, page=76, numreponse=2800456 — post de test alerté volontairement,
+          traité par la modération le 2026-09-05 17:27:28). Scénario complet : XaTriX alerte → XaTelitte se joint →
+          modération traite → relecture des deux côtés. Issue #293.
+Sanitation : hash_check remplacé par 32 zéros, referer_page tronqué, blocs de configuration des userscripts
+          Tampermonkey retirés. Aucun cookie, e-mail ni identifiant de session dans la page.

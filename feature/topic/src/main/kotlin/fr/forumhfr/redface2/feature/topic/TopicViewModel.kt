@@ -24,10 +24,13 @@ import fr.forumhfr.redface2.core.domain.topic.TopicRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicSearchRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostResult
+import fr.forumhfr.redface2.core.domain.write.ModerationRepository
 import fr.forumhfr.redface2.core.domain.write.PollVoteRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.Post
+import fr.forumhfr.redface2.core.model.Poll
+import fr.forumhfr.redface2.core.model.write.ModerationAlertOutcome
 import fr.forumhfr.redface2.core.model.write.FlagAddContext
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.model.TopicSearchForm
@@ -40,6 +43,7 @@ import fr.forumhfr.redface2.core.model.write.PollVoteForm
 import fr.forumhfr.redface2.core.model.write.PollVoteResult
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -94,6 +98,7 @@ class TopicViewModel @AssistedInject constructor(
     private val authRepository: AuthRepository,
     private val userPreferencesRepository: UserPreferencesRepository,
     private val deletePostRepository: DeletePostRepository,
+    private val moderationRepository: ModerationRepository,
     private val pollVoteRepository: PollVoteRepository,
     private val blacklistRepository: BlacklistRepository,
     private val authorRoleRepository: AuthorRoleRepository,
@@ -129,6 +134,12 @@ class TopicViewModel @AssistedInject constructor(
 
     private var loadJob: Job? = null
     private var prefetchJob: Job? = null
+    private var moderationLoadJob: Job? = null
+    private var moderationSubmitJob: Job? = null
+    private var moderationGeneration: Int = 0
+    private var pendingModerationAlertFor: Int? = request.moderationAlertFor
+    // A cached page may arrive before the cold auth flow reads the persisted session.
+    private val initialAuthObserved = CompletableDeferred<Unit>()
     private var prefetchedPage: Int? = null
 
     /** Chantier C (#546) — at most one intra-topic search POST in flight at a time. */
@@ -136,6 +147,9 @@ class TopicViewModel @AssistedInject constructor(
 
     /** #779 — anti double-submit lock; the detached POST itself may outlive this job/VM. */
     private var pollVoteJob: Job? = null
+
+    /** #1296 — fences a late accepted vote after a page/route departure or explicit refresh. */
+    private var pollVisitGeneration = 0
 
     /**
      * Generation owning the visible Submitting/Refreshing phase. A page takeover advances
@@ -334,7 +348,7 @@ class TopicViewModel @AssistedInject constructor(
         }
         // Sol points 4-5 — ENTRY intentions are consumable one-shots : an already-consumed
         // scrollTo never replays after process death ; an interrupted one resumes.
-        val initialScrollTo = request.scrollTo
+        val initialScrollTo = (request.scrollTo ?: pendingModerationAlertFor)
             ?.takeIf { savedStateHandle.get<Boolean>(KEY_SCROLL_TO_CONSUMED) != true }
         val untrustedPageTarget = request.resolveScrollToPage && initialScrollTo != null &&
             canonicalPage == null
@@ -385,6 +399,7 @@ class TopicViewModel @AssistedInject constructor(
                     }
                 }
                 if (!_state.value.connectedPseudo.equals(connectedPseudo, ignoreCase = true)) {
+                    dismissModerationAlert()
                     favoriteAuthGeneration++
                     favoriteResolveJob?.cancel()
                     // #1144 — this still drops the UI half of an in-flight add (state + effect are
@@ -404,6 +419,7 @@ class TopicViewModel @AssistedInject constructor(
                                     pollVoteForm = null,
                                 ),
                                 pollVote = null,
+                                pollJustVoted = false,
                             )
                         } ?: it.mode
                     } else {
@@ -417,6 +433,7 @@ class TopicViewModel @AssistedInject constructor(
                         connectedPseudo = connectedPseudo,
                     )
                 }
+                initialAuthObserved.complete(Unit)
             }
             .launchIn(viewModelScope)
         // Build 89 follow-up — mirror the top-bar auto-hide preference into state so the screen
@@ -501,6 +518,11 @@ class TopicViewModel @AssistedInject constructor(
             is TopicIntent.OnCitingPostClick -> openCitingPost(intent.post)
             TopicIntent.OnDismissCitingSheet -> dismissCitingPosts()
             is TopicIntent.DeletePost -> deletePost(intent.numreponse)
+            is TopicIntent.RequestModerationAlert -> requestModerationAlert(intent.numreponse)
+            is TopicIntent.UpdateModerationReason -> updateModerationReason(intent.reason)
+            TopicIntent.SubmitModerationAlert -> submitModerationAlert()
+            TopicIntent.JoinModerationAlert -> joinModerationAlert()
+            TopicIntent.DismissModerationAlert -> dismissModerationAlert()
             TopicIntent.Refresh -> refresh()
             is TopicIntent.UpdatePollSelection -> updatePollSelection(intent.choice, intent.selected)
             TopicIntent.SubmitPollVote -> submitPollVote(PollVoteSubmissionType.NORMAL)
@@ -523,6 +545,122 @@ class TopicViewModel @AssistedInject constructor(
             TopicIntent.NextResult -> nextResult()
             TopicIntent.PrevResult -> prevResult()
         }
+    }
+
+    /** Loads behind the topic's progress bar; dismiss cancels this read before any sheet is opened. */
+    private fun requestModerationAlert(numreponse: Int) {
+        val snapshot = _state.value
+        val topic = (snapshot.mode as? TopicUiState.Mode.Loaded)?.topic ?: return
+        if (!snapshot.isAuthenticated || moderationSubmitJob?.isActive == true ||
+            topic.posts.none { it.numreponse == numreponse }
+        ) return
+        dismissModerationAlert()
+        val generation = moderationGeneration
+        _state.update { it.copy(moderationAlert = ModerationAlertUi.Loading) }
+        moderationLoadJob = viewModelScope.launch {
+            try {
+                val alert = moderationRepository.loadAlert(topic.cat, topic.post, numreponse, topic.page)
+                if (generation == moderationGeneration) {
+                    _state.update { it.copy(moderationAlert = alert.toModerationAlertUi()) }
+                }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+                if (generation == moderationGeneration) {
+                    _state.update { it.copy(moderationAlert = null) }
+                    _effects.trySend(TopicEffect.ModerationAlertFailed(classifyHfrError(error)))
+                }
+            }
+        }
+    }
+
+    /** #293 — consume on the entry owner's first Loaded, including an absent target. */
+    private fun dispatchPendingModerationAlert(topic: Topic, armed: ArmedLanding) {
+        if (!armed.initialScrollTo || topic.page != armed.page) return
+        val numreponse = pendingModerationAlertFor ?: return
+        pendingModerationAlertFor = null
+        if (topic.posts.any { it.numreponse == numreponse }) {
+            viewModelScope.launch {
+                initialAuthObserved.await()
+                // Auth may suspend past a page switch: never open an entry sheet on its successor.
+                if (armed.generation == ownerGeneration && armed.page == request.page) {
+                    if (_state.value.isAuthenticated) {
+                        requestModerationAlert(numreponse)
+                    } else {
+                        _effects.trySend(TopicEffect.ModerationAlertSignInRequired)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun updateModerationReason(reason: String) {
+        _state.update { state ->
+            val form = state.moderationAlert as? ModerationAlertUi.Form
+            if (form != null && !form.submitting) {
+                state.copy(moderationAlert = form.copy(reasonDraft = reason))
+            } else {
+                state
+            }
+        }
+    }
+
+    private fun submitModerationAlert() {
+        val form = _state.value.moderationAlert as? ModerationAlertUi.Form ?: return
+        if (form.reasonDraft.isBlank() || form.submitting) return
+        runModerationSubmission(form.copy(submitting = true), form) {
+            moderationRepository.sendAlert(form.form, form.reasonDraft)
+        }
+    }
+
+    private fun joinModerationAlert() {
+        val prompt = _state.value.moderationAlert as? ModerationAlertUi.JoinPrompt ?: return
+        if (prompt.submitting) return
+        runModerationSubmission(prompt.copy(submitting = true), prompt) {
+            moderationRepository.joinAlert(prompt.prompt)
+        }
+    }
+
+    private fun runModerationSubmission(
+        busy: ModerationAlertUi,
+        idle: ModerationAlertUi,
+        submit: suspend () -> ModerationAlertOutcome,
+    ) {
+        if (!_state.value.isAuthenticated || moderationSubmitJob?.isActive == true) return
+        val generation = moderationGeneration
+        _state.update { it.copy(moderationAlert = busy) }
+        moderationSubmitJob = viewModelScope.launch {
+            try {
+                // Like the other confirmed writes, the POST survives leaving the screen. Only its
+                // UI continuation is discarded on dismissal/account switch; no automatic replay.
+                val outcome = externalScope.awaitDetached { submit() }
+                if (generation == moderationGeneration) completeModerationAlert(outcome)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+                if (generation == moderationGeneration) {
+                    _state.update { it.copy(moderationAlert = idle) }
+                    _effects.trySend(TopicEffect.ModerationAlertFailed(classifyHfrError(error)))
+                }
+            }
+        }
+    }
+
+    private fun completeModerationAlert(outcome: ModerationAlertOutcome) {
+        if (outcome is ModerationAlertOutcome.Rejected) {
+            _state.update { it.copy(moderationAlert = ModerationAlertUi.Result(outcome)) }
+        } else {
+            _state.update { it.copy(moderationAlert = null) }
+            _effects.trySend(TopicEffect.ModerationAlertCompleted(outcome))
+        }
+    }
+
+    private fun dismissModerationAlert() {
+        moderationGeneration++
+        moderationLoadJob?.cancel()
+        moderationLoadJob = null
+        // Keep the submission lock until the already-confirmed mutation finishes.
+        _state.update { it.copy(moderationAlert = null) }
     }
 
     /**
@@ -725,6 +863,7 @@ class TopicViewModel @AssistedInject constructor(
                 submissionType = submissionType,
                 generation = ownerGeneration,
                 account = account,
+                visitGeneration = pollVisitGeneration,
             )
         } else {
             null
@@ -807,6 +946,7 @@ class TopicViewModel @AssistedInject constructor(
             current.copy(
                 mode = loaded.copy(
                     topic = loaded.topic.copy(pollVoteForm = consumedForm),
+                    pollJustVoted = snapshot.visitGeneration == pollVisitGeneration,
                     pollVote = pollVote.copy(
                         form = consumedForm,
                         phase = PollVotePhase.Refreshing,
@@ -854,6 +994,7 @@ class TopicViewModel @AssistedInject constructor(
                         search = current.search.capturingAnchor(topic),
                     )
                 }
+                dispatchPendingLanding(topic)
                 pollVoteMutationGeneration = null
                 recordSnapshot(topic)
             } catch (cancellation: CancellationException) {
@@ -886,6 +1027,7 @@ class TopicViewModel @AssistedInject constructor(
         val submissionType: PollVoteSubmissionType,
         val generation: Int,
         val account: String,
+        val visitGeneration: Int,
     )
 
     private enum class PollVoteSubmissionType { NORMAL, BLANK }
@@ -982,12 +1124,15 @@ class TopicViewModel @AssistedInject constructor(
      * authenticated (same justification as `performSubmitRefresh`).
      */
     private fun refresh() {
-        val displayed = _state.value.mode as? TopicUiState.Mode.Loaded ?: return
         // #910 — during a cold-switch grace the DISPLAYED page is the departed one while the
         // canonical page is already the target : a pull here would refresh a page the user is
         // leaving (and fight the in-flight switch load). The switch resolves within the grace.
+        val displayed = (_state.value.mode as? TopicUiState.Mode.Loaded)
+            ?.takeIf { it.topic.page == request.page } ?: return
+        // #1296 — even when the vote owns the pending GET, the explicit refresh ends this visit's
+        // expansion. Keep the single-flight guard below: neither cancel the vote nor issue GET 2.
+        clearPollVisit()
         if (
-            displayed.topic.page != request.page ||
             _state.value.isRefreshing ||
             displayed.pollVote?.phase?.let { it != PollVotePhase.Idle } == true
         ) {
@@ -1012,6 +1157,7 @@ class TopicViewModel @AssistedInject constructor(
                         search = it.search.capturingAnchor(topic),
                     )
                 }
+                dispatchPendingLanding(topic)
                 recordSnapshot(topic)
                 // Re-arm the page+1 warmup, like `loadCurrentPage` (l. ~219). Unlike the post-submit
                 // `performSubmitRefresh` (which deliberately skips it), a manual mid-page pull is
@@ -1073,7 +1219,9 @@ class TopicViewModel @AssistedInject constructor(
         entryLanding: PendingLanding?,
         entryLandingIsScrollTo: Boolean,
     ) {
-        val scrollTo = requireNotNull(request.scrollTo) { "resolveScrollToPageThenLoad requires scrollTo" }
+        val scrollTo = requireNotNull(request.scrollTo ?: pendingModerationAlertFor) {
+            "resolveScrollToPageThenLoad requires an entry post target"
+        }
         _state.update { it.copy(mode = TopicUiState.Mode.Loading) }
         // Gate Sol PR1 r2 (bloquant 1) — a switch / submit arriving DURING the probe owns the
         // page : the late resolution must neither adopt its page nor restart the load.
@@ -1166,6 +1314,8 @@ class TopicViewModel @AssistedInject constructor(
      * scrollTo (any newer navigation supersedes the entry intention, Sol point 5).
      */
     private fun armLanding(landing: PendingLanding?, initialScrollTo: Boolean = false) {
+        // Any internal navigation supersedes the entry alert, even before its page has loaded.
+        if (!initialScrollTo) pendingModerationAlertFor = null
         val previous = pendingLanding
         if (previous?.initialScrollTo == true) {
             savedStateHandle[KEY_SCROLL_TO_CONSUMED] = true
@@ -1344,7 +1494,45 @@ class TopicViewModel @AssistedInject constructor(
             // collect above forwards the repository's provenance.
             provisional = provisional,
             pollVote = resyncPollVote(previousLoaded?.pollVote, topic.pollVoteForm),
+            pollJustVoted = previousLoaded?.pollJustVoted == true &&
+                isSamePollPage(previousLoaded.topic, topic),
         )
+
+    /** #1296 — results change counters, not the identity of the page's single HFR poll. */
+    private fun isSamePollPage(previous: Topic, current: Topic): Boolean {
+        val previousPoll = previous.poll
+        val currentPoll = current.poll
+        return if (previousPoll == null || currentPoll == null) {
+            false
+        } else {
+            val samePage = previous.cat == current.cat && previous.post == current.post && previous.page == current.page
+            val samePoll = previousPoll.question == currentPoll.question &&
+                previousPoll.optionLabels() == currentPoll.optionLabels()
+            samePage && samePoll
+        }
+    }
+
+    /**
+     * HFR numbers RESULTS labels ("1. Kotlin"), but FORM labels are unnumbered ("Kotlin").
+     * Strip only the result ordinal, preserving a number that belongs to the user's label.
+     * See the real topic_poll_results_blank.html fixture and TopicPageParserTest.
+     */
+    private fun Poll.optionLabels(): List<String> = options.mapIndexed { index, option ->
+        if (resultsAvailable) option.text.removePrefix("${index + 1}.").trimStart() else option.text
+    }
+
+    /** #1296 — a retained nav-entry VM starts a fresh visit when its route is left. */
+    fun onTopicRouteLeft() {
+        clearPollVisit()
+    }
+
+    private fun clearPollVisit() {
+        pollVisitGeneration++
+        _state.update { current ->
+            val loaded = current.mode as? TopicUiState.Mode.Loaded ?: return@update current
+            current.copy(mode = loaded.copy(pollJustVoted = false))
+        }
+    }
 
     /**
      * #779 — single reducer for the transient poll form on every Topic emission. Selection survives
@@ -1412,6 +1600,7 @@ class TopicViewModel @AssistedInject constructor(
         val armed = pendingLanding
             ?.takeIf { it.generation == ownerGeneration && it.page == request.page }
             ?: return
+        dispatchPendingModerationAlert(topic, armed)
         val effect = when (val landing = armed.landing) {
             // A Post target absent from the page stays pending : the next emission of the same
             // owner may contain it (historical scrollTo retry) — hence the nullable effect.
@@ -1801,6 +1990,9 @@ class TopicViewModel @AssistedInject constructor(
      * [KEY_CURRENT_PAGE], and the persisted anchor keys (they described the DEPARTED page).
      */
     private fun updateCanonicalPage(target: Int) {
+        if (target != request.page) {
+            clearPollVisit()
+        }
         request = request.copy(page = target)
         savedStateHandle[KEY_CURRENT_PAGE] = target
         // Gate Sol PR1 r2 (réserve) — the persisted anchor must describe the NEW current page :
@@ -1936,6 +2128,7 @@ class TopicViewModel @AssistedInject constructor(
                         availablePages = (1..topic.totalPages).toList(),
                     )
                 }
+                dispatchPendingLanding(topic)
                 recordSnapshot(topic)
             } catch (cancellation: CancellationException) {
                 throw cancellation
@@ -2179,6 +2372,7 @@ class TopicViewModel @AssistedInject constructor(
                         search = it.search.capturingAnchor(topic),
                     )
                 }
+                dispatchPendingLanding(topic)
                 recordSnapshot(topic)
             } catch (cancellation: CancellationException) {
                 throw cancellation

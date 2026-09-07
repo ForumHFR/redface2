@@ -9,18 +9,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Pure contracts for the category-list layout helpers:
- * - #1131: the 88.dp bottom clearance exists only when the create-topic FAB is rendered;
- * - #1129: sticky/regular partitioning is stable, the boundary requires both sections, and the
- *   partition/separator is scoped to real category listings (never flag-filter buckets).
- *
- * Rendering note (#1129): the only Compose/Robolectric harness in `:feature:forum` is the #1149
- * inset proof (`ForumCategoryContentInsetsTest`, mounting `ForumCategoryContent`). Downstream UI
- * validation must still cover one separator at the sticky/regular boundary, no separator for empty or
- * single-kind results (including after search), no ordinary divider immediately before the
- * separator, the tonal status badge appearing before the title for sticky and/or locked rows, and
- * a FLAT list (no partition, no separator; per-row badge still shown) whenever a flag-filter bucket
- * (Participé/Lus/Favoris) is active.
+ * Pure contracts for #1131 FAB clearance and #1303 page-local sticky partition/header.
+ * Mounted rendering, ordering and collapse assertions live in [ForumCategoryCollapseTest];
+ * [ForumCategoryContentInsetsTest] retains the #1149 inset geometry proof.
  */
 class ForumCategoryLayoutTest {
 
@@ -56,31 +47,41 @@ class ForumCategoryLayoutTest {
     }
 
     @Test
-    fun `shows the sticky boundary only when both sections are non-empty`() {
+    fun `shows a sticky header even when the page contains only sticky topics`() {
         val sticky = topic(topicId = 1, isSticky = true)
         val regular = topic(topicId = 2, isSticky = false)
 
-        assertTrue(TopicSections(sticky = listOf(sticky), regular = listOf(regular)).hasStickyBoundary)
-        assertFalse(TopicSections(sticky = emptyList(), regular = listOf(regular)).hasStickyBoundary)
-        assertFalse(TopicSections(sticky = listOf(sticky), regular = emptyList()).hasStickyBoundary)
-        assertFalse(TopicSections(sticky = emptyList(), regular = emptyList()).hasStickyBoundary)
+        assertTrue(
+            TopicSections(sticky = listOf(sticky), regular = listOf(regular))
+                .shouldShowStickyHeader(filterActive = false),
+        )
+        assertFalse(
+            TopicSections(sticky = emptyList(), regular = listOf(regular))
+                .shouldShowStickyHeader(filterActive = false),
+        )
+        assertTrue(
+            TopicSections(sticky = listOf(sticky), regular = emptyList()).shouldShowStickyHeader(filterActive = false),
+        )
+        assertFalse(
+            TopicSections(sticky = emptyList(), regular = emptyList()).shouldShowStickyHeader(filterActive = false),
+        )
     }
 
     @Test
-    fun `scopes the sticky boundary to category listings and never to flag-filter buckets`() {
+    fun `scopes the sticky header to category listings and never to flag-filter buckets`() {
         val bothSections = TopicSections(
             sticky = listOf(topic(topicId = 1, isSticky = true)),
             regular = listOf(topic(topicId = 2, isSticky = false)),
         )
 
         // Real category listing: the structural boundary is honoured.
-        assertTrue(bothSections.shouldShowStickyBoundary(filterActive = false))
+        assertTrue(bothSections.shouldShowStickyHeader(filterActive = false))
         // Flag-filter bucket (Participé/Lus/Favoris): stay flat even with both sections present.
-        assertFalse(bothSections.shouldShowStickyBoundary(filterActive = true))
+        assertFalse(bothSections.shouldShowStickyHeader(filterActive = true))
         // A structurally-absent boundary is never shown, filter mode or not.
         val onlyRegular = TopicSections(sticky = emptyList(), regular = bothSections.regular)
-        assertFalse(onlyRegular.shouldShowStickyBoundary(filterActive = false))
-        assertFalse(onlyRegular.shouldShowStickyBoundary(filterActive = true))
+        assertFalse(onlyRegular.shouldShowStickyHeader(filterActive = false))
+        assertFalse(onlyRegular.shouldShowStickyHeader(filterActive = true))
     }
 
     private fun topic(

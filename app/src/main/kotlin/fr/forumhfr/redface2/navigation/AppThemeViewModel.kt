@@ -8,6 +8,7 @@ import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.NavBarLabelsBootstrapStore
+import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
@@ -91,6 +92,12 @@ class AppThemeViewModel @Inject constructor(
     val postImageMaxWidth: StateFlow<PostImageMaxWidth> =
         userPreferencesRepository.observePostImageMaxWidth()
             .stateIn(viewModelScope, SharingStarted.Eagerly, PostImageMaxWidth.DEFAULT)
+
+    // #985 — content-image corners, eagerly collected next to their width preference. The
+    // historical 8 dp ROUNDED preset is the seed until DataStore hydrates.
+    val postImageCorners: StateFlow<PostImageCorners> =
+        userPreferencesRepository.observePostImageCorners()
+            .stateIn(viewModelScope, SharingStarted.Eagerly, PostImageCorners.DEFAULT)
 
     // #989 — the smiley picker's cell delimiter, collected at the shell like the reading presets so
     // RedfaceTheme can seed LocalSmileyPickerDecoration. Seed = NONE, the shipped default (an

@@ -38,6 +38,9 @@ sealed interface PostEditorIntent {
     /** Toggle « Activer la notification par email du sujet » (HFR `emaill=1`). */
     data class ToggleEmailNotification(val enabled: Boolean) : PostEditorIntent
 
+    /** Select one of HFR's 16 `MsgIcon` radio values. */
+    data class MsgIconSelected(val n: Int) : PostEditorIntent
+
     /**
      * Phase 2F-B (#11) — the user tapped a smiley in the picker. The ViewModel inserts the
      * token at the current caret position via the formatter helper and closes the sheet.

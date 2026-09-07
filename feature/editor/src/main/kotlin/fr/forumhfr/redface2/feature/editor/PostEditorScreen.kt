@@ -300,7 +300,7 @@ private fun PostEditorContent(
                 onInsert = { url -> onIntent(PostEditorIntent.ImageUrlInserted(url)) },
             )
         }
-        // HFR per-post option toggles, moved behind the bottom bar's « Options » trigger.
+        // HFR per-post controls, moved behind the bottom bar's « Options » trigger.
         // Defaults come from `ReplyForm.options` (the `checked` attribute of each HTML
         // checkbox HFR rendered for this user / topic) ; the repository only adds the
         // matching POST field when the toggle is on — mirroring how a browser submits.
@@ -311,10 +311,12 @@ private fun PostEditorContent(
                     signatureEnabled = state.signatureEnabled,
                     smileyDisabled = state.smileyDisabled,
                     emailNotificationEnabled = state.emailNotificationEnabled,
+                    msgIcon = state.msgIcon,
                     enabled = !state.isSubmitting && !state.isLoadingForm,
                     onSignatureChanged = { onIntent(PostEditorIntent.ToggleSignature(it)) },
                     onSmileyDisabledChanged = { onIntent(PostEditorIntent.ToggleSmileyDisabled(it)) },
                     onEmailNotificationChanged = { onIntent(PostEditorIntent.ToggleEmailNotification(it)) },
+                    onMsgIconSelected = { onIntent(PostEditorIntent.MsgIconSelected(it)) },
                 )
             }
         }
@@ -585,15 +587,17 @@ internal fun EditorSubmitBar(
 }
 
 @Composable
-@Suppress("LongParameterList") // 3 toggles + 3 callbacks + enabled — each call-site distinct.
-private fun PostEditorOptions(
+@Suppress("LongParameterList") // HFR options + callbacks + enabled — each is user-editable.
+internal fun PostEditorOptions(
     signatureEnabled: Boolean,
     smileyDisabled: Boolean,
     emailNotificationEnabled: Boolean,
+    msgIcon: Int,
     enabled: Boolean,
     onSignatureChanged: (Boolean) -> Unit,
     onSmileyDisabledChanged: (Boolean) -> Unit,
     onEmailNotificationChanged: (Boolean) -> Unit,
+    onMsgIconSelected: (Int) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
         Text(
@@ -618,6 +622,11 @@ private fun PostEditorOptions(
             checked = emailNotificationEnabled,
             enabled = enabled,
             onCheckedChange = onEmailNotificationChanged,
+        )
+        MessageIconPicker(
+            selectedIcon = msgIcon,
+            enabled = enabled,
+            onIconSelected = onMsgIconSelected,
         )
     }
 }

@@ -18,8 +18,10 @@ import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
+import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
@@ -278,7 +280,8 @@ class FlagsViewModelTest {
     @Test
     fun `refresh ignores a second pull while the same tab is already refreshing`() = runTest {
         val flags = FakeFlagRepository()
-        flags.refreshGate = CompletableDeferred()
+        val firstGate = CompletableDeferred<Unit>()
+        flags.refreshGate = firstGate
         val forum = FakeForumRepository()
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val vm = viewModel(auth, flags, forum)
@@ -288,7 +291,59 @@ class FlagsViewModelTest {
         vm.refresh()
 
         assertEquals(listOf(FlagType.CYAN), flags.refreshCalls)
-        flags.refreshGate!!.complete(Unit)
+        firstGate.complete(Unit)
+        // A pull on a type already in flight is deduplicated away, not replayed.
+        assertEquals(listOf(FlagType.CYAN), flags.refreshCalls)
+        assertFalse(vm.isRefreshing.value)
+    }
+
+    @Test
+    fun `a manual pull on another tab waits for the running refresh`() = runTest {
+        val flags = FakeFlagRepository()
+        val cyanGate = CompletableDeferred<Unit>()
+        val redGate = CompletableDeferred<Unit>()
+        flags.refreshGate = cyanGate
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = viewModel(auth, flags, FakeForumRepository())
+
+        vm.refresh()
+        vm.selectTab(FlagTab.Red)
+        vm.refresh()
+
+        assertEquals(listOf(FlagType.CYAN), flags.refreshCalls)
+        assertTrue(vm.isRefreshing.value)
+        flags.refreshGate = redGate
+        cyanGate.complete(Unit)
+        assertEquals(listOf(FlagType.CYAN, FlagType.RED), flags.refreshCalls)
+        assertTrue("the shared indicator stays raised while Red is running", vm.isRefreshing.value)
+        redGate.complete(Unit)
+        assertFalse(vm.isRefreshing.value)
+    }
+
+    @Test
+    fun `a super pull during a refresh is replayed`() = runTest {
+        val flags = FakeFlagRepository()
+        val cyanGate = CompletableDeferred<Unit>()
+        val superGate = CompletableDeferred<Unit>()
+        flags.refreshGate = cyanGate
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = viewModel(auth, flags, FakeForumRepository())
+
+        vm.refresh()
+        vm.selectTab(FlagTab.Super)
+        vm.refresh()
+
+        assertEquals(listOf(FlagType.CYAN), flags.refreshCalls)
+        flags.refreshGate = superGate
+        cyanGate.complete(Unit)
+        // CYAN was covered by the running batch: only the uncovered backing types are replayed.
+        assertEquals(listOf(FlagType.CYAN, FlagType.RED), flags.refreshCalls)
+        assertTrue(vm.isRefreshing.value)
+        superGate.complete(Unit)
+        assertEquals(
+            listOf(FlagType.CYAN, FlagType.RED, FlagType.FAVORITE),
+            flags.refreshCalls,
+        )
         assertFalse(vm.isRefreshing.value)
     }
 
@@ -912,6 +967,35 @@ class FlagsViewModelTest {
 
         assertEquals(listOf(flag), flags.removeFlagCalls)
         assertEquals(RemoveFlagEvent.Success(flag.title), vm.removeFlagEvent.value)
+    }
+
+    @Test
+    fun `removing a fallback super favorite only unpins locally`() = runTest {
+        val flags = FakeFlagRepository()
+        val fallback = stubFlag(42, FlagType.FAVORITE).copy(
+            cat = 23,
+            resolvedFromServer = false,
+        )
+        val stored = SuperFavoriteTopic(
+            cat = fallback.cat,
+            topicId = fallback.topicId,
+            title = fallback.title,
+            subcat = fallback.subcat,
+        )
+        val superFavorite = FakeSuperFavoriteRepository(setOf(stored))
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = viewModel(auth, flags, FakeForumRepository(), superFavorite = superFavorite)
+
+        vm.requestRemoveFlag(fallback)
+        advanceUntilIdle()
+
+        assertEquals(
+            "fallback removal must never open the server confirmation",
+            RemoveFlagState.Idle,
+            vm.removeFlagState.value,
+        )
+        assertTrue("fallback removal must never call delflag", flags.removeFlagCalls.isEmpty())
+        assertFalse(superFavorite.currentTopics.any { it.matches(fallback) })
     }
 
     @Test
@@ -2601,7 +2685,7 @@ class FlagsViewModelTest {
     }
 
     @Test
-    fun `flag rows refresh cold subcategory names once and reuse the filled cache (#741)`() = runTest {
+    fun `flag rows re-arm cold subcategory refreshes and reuse the filled cache (#741)`() = runTest {
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository(autoEmit = false)
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
@@ -2618,7 +2702,10 @@ class FlagsViewModelTest {
 
             flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(rowFlag.copy(title = "Topic 1 bis"))))
             awaitItem()
-            assertEquals(listOf(23), forum.refreshSubcategoriesCalls)
+            // The guard is now released in `finally` (the repository reports failures as
+            // ForumResult.Failure instead of throwing), so a still-cold cache is retried on the
+            // next emission instead of being latched off forever.
+            assertEquals(listOf(23, 23), forum.refreshSubcategoriesCalls)
 
             forum.seedCachedSubcategories(23, listOf(SubCategory(id = 550, name = "Android", parentCategoryId = 23)))
             val warmed = awaitItem() as FlagsListUiState.Success
@@ -2666,6 +2753,29 @@ class FlagsViewModelTest {
             assertNull(row.subcatName)
             assertEquals(listOf(23), forum.observeCachedSubcategoriesCalls)
             assertEquals(listOf(23), forum.refreshSubcategoriesCalls)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a failed subcategory fetch can be retried on the next emission`() = runTest {
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(autoEmit = false)
+        forum.refreshSubcategoriesResult = ForumResult.Failure(IllegalStateException("network down"))
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository(groupByCategory = false)
+        val vm = viewModel(auth, flags, forum, prefs)
+        val rowFlag = stubFlag(1, FlagType.CYAN).copy(cat = 23, subcat = 550)
+
+        vm.flagsState.test {
+            awaitItem()
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(rowFlag)))
+            awaitItem()
+            assertEquals(listOf(23), forum.refreshSubcategoriesCalls)
+
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(rowFlag.copy(title = "Topic changed"))))
+            awaitItem()
+            assertEquals(listOf(23, 23), forum.refreshSubcategoriesCalls)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -2974,6 +3084,7 @@ class FlagsViewModelTest {
             private set
         var refreshSubcategoriesCalls: List<Int> = emptyList()
             private set
+        var refreshSubcategoriesResult: ForumResult<List<SubCategory>>? = null
 
         init {
             if (autoEmit) {
@@ -3016,6 +3127,7 @@ class FlagsViewModelTest {
 
         override suspend fun refreshSubcategories(cat: Int) {
             refreshSubcategoriesCalls = refreshSubcategoriesCalls + cat
+            refreshSubcategoriesResult?.let { subcategoryFlow(cat).emit(it) }
         }
 
         override fun observeTopicList(
@@ -3325,6 +3437,11 @@ class FlagsViewModelTest {
 
         override suspend fun setFontScale(scale: FontScalePreference) = Unit
 
+        override fun observeAppLauncherIcon(): Flow<AppLauncherIcon> =
+            MutableStateFlow(AppLauncherIcon.CLASSIC)
+
+        override suspend fun setAppLauncherIcon(icon: AppLauncherIcon) = Unit
+
         // #973 — the block-GIF display profile is irrelevant to FlagsViewModel; stubbed at the M default.
         override fun observeMediaDisplayProfile(): Flow<MediaDisplayProfile> =
             MutableStateFlow(MediaDisplayProfile.M)
@@ -3335,6 +3452,11 @@ class FlagsViewModelTest {
             MutableStateFlow(PostImageMaxWidth.DEFAULT)
 
         override suspend fun setPostImageMaxWidth(width: PostImageMaxWidth) = Unit
+
+        override fun observePostImageCorners(): Flow<PostImageCorners> =
+            MutableStateFlow(PostImageCorners.DEFAULT)
+
+        override suspend fun setPostImageCorners(corners: PostImageCorners) = Unit
 
         // #989 — délimiteur du picker : non exercé ici, présent pour satisfaire l'interface.
         override fun observeSmileyPickerDecoration(): Flow<SmileyPickerDecoration> =
@@ -3362,6 +3484,19 @@ class FlagsViewModelTest {
         override suspend fun setAlwaysAskLinkApp(enabled: Boolean) = Unit
 
         // #1132 — Forum flag-filter preference is irrelevant to FlagsViewModel; default ALL stub.
+        private val menusCollapsed = MutableStateFlow(false)
+        private val stickyCollapsed = MutableStateFlow(false)
+
+        override fun observeForumCategoryMenusCollapsed(): Flow<Boolean> = menusCollapsed
+        override suspend fun setForumCategoryMenusCollapsed(collapsed: Boolean) {
+            menusCollapsed.value = collapsed
+        }
+
+        override fun observeForumCategoryStickyTopicsCollapsed(): Flow<Boolean> = stickyCollapsed
+        override suspend fun setForumCategoryStickyTopicsCollapsed(collapsed: Boolean) {
+            stickyCollapsed.value = collapsed
+        }
+
         override fun observeForumCategoryFlagFilter(): Flow<CategoryFlagFilter> =
             MutableStateFlow(CategoryFlagFilter.ALL)
 

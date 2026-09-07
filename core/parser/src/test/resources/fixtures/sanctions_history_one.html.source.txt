@@ -1,0 +1,10 @@
+Fixture : sanctions_history_one.html
+Origine : page /modo/historique.php?config=hfr.inc (« Historique des sanctions : <pseudo> ») — GET authentifié, compte
+          avec UNE sanction levée : `table.main` > `tr.cBackHeader` (en-têtes : Nom du posteur, Sanction, Modéré par,
+          Catégorie Interdite, Date de la sanction, Sanction levée le, Raison de la sanction) puis une `tr.profil`
+          (7 `td`, dates « jj-mm-aaaa à hh:mm » avec &nbsp;).
+Capture : live le 2026-09-06, AUTHENTIFIÉ sous XaTriX, via « Enregistrer la page » du navigateur (chemins d'assets
+          réécrits en assets/, neutralisés). Sanction réelle (TT « Teletubbies » du 13-06-2026, levée le 18-06-2026),
+          publiée avec l'accord de l'intéressé. Issue #294.
+Sanitation : hash_check remplacé par 32 zéros, panneaux de configuration des userscripts Tampermonkey (ws_front, HFR
+          Image Preview, Video Link Replacer, Bloque liste) retirés. Aucun cookie, e-mail ni identifiant de session.

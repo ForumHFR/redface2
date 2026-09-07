@@ -88,6 +88,12 @@ data class Flag(
      * string at this layer; date parsing is the upstream concern of the data layer.
      */
     val lastReplyAt: String,
+    /**
+     * Whether this row was resolved from an actual server flag bucket. `false` is reserved for
+     * local Super-favorite snapshots that no longer have a matching cached server flag: their
+     * synthetic [type] is display-only and must never be used for a `delflag` mutation.
+     */
+    val resolvedFromServer: Boolean = true,
 )
 
 /**

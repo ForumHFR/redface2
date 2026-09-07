@@ -29,6 +29,7 @@ Chaque choix a été évalué, comparé et verrouillé. Voici le détail.
 | Cache locale | **Room** | DataStore, SQLDelight | Standard Android, intégration Flow, migrations |
 | Stockage cookies HFR | **DataStore non chiffré** + FBE plateforme + `allowBackup="false"` | EncryptedSharedPreferences (**déprécié**), Tink ou clé Keystore custom (overkill, redondant avec FBE puisque le password transite en clair côté HFR) | Décision Option A : re-login manuel à l'expiration session, pas de password stocké. Cf. [ADR-002]({{ site.baseurl }}/adr/002-credentials-option-a). |
 | Images | **Coil 3+** | Glide | Natif Compose, coroutines, plus idiomatique Kotlin |
+| Viewer d'images | **Telephoto 0.19+** (`zoomable-image-coil3`) | zoom maison | Pinch, pan, double-tap et sous-échantillonnage des grands bitmaps derrière `ZoomableRemoteImage` dans `:core:ui`; dépendance instanciée uniquement par l'écran plein format. |
 | Async | **Coroutines + Flow** | RxJava | Standard Kotlin, plus léger, meilleure intégration Compose |
 | Enforcement archi | **Konsist** | ArchUnit | Kotlin-first, voit les sealed/data/internal ; ArchUnit = bytecode-only, perd la finesse Kotlin |
 | Style + deprecations | **Detekt** | ktlint | Plus riche, règles custom possibles |
@@ -296,9 +297,14 @@ Pourquoi pas 31+ :
 
 Pour tenir les objectifs mémoire, en particulier sur les appareils bas de gamme :
 
-- **Coil** : `ImageLoader` custom avec `memoryCache { maxSizePercent(context, 0.15) }` et `diskCache { maxSizeBytes(100L * 1024 * 1024) }` (100 MB disque)
+- **Coil** : `ImageLoader` singleton applicatif avec les budgets mémoire/disque par défaut de Coil ; il ajoute le client HTTP anonyme et les décodeurs GIF/SVG, sans budget custom fictif
 - **LazyColumn** : `key(post.numreponse)` et `contentType` sur chaque item pour optimiser le recyclage Compose
 - **Cache Room** : LRU sur les pages de topic — max 50 pages en cache, éviction par date d'accès
-- **Images dans les posts** : thumbnails dans la liste, pleine résolution uniquement en plein écran
+- **Images dans les posts** : décodage borné à 2048 px dans la liste ; pleine résolution uniquement
+  dans le viewer plein écran, où Telephoto sous-échantillonne les grands bitmaps publics. La
+  miniature déjà rendue sert de placeholder via sa clé de cache mémoire. Telephoto 0.19 transformant
+  en interne une politique disque `DISABLED` en `WRITE_ONLY` pour obtenir ses tuiles, le viewer MP
+  utilise son moteur de gestes autour du painter Coil mémoire-only, sans sous-échantillonnage, afin
+  de conserver l'invariant « aucun média privé sur disque ».
 
 Profiling en debug avec **LeakCanary** et **StrictMode**. Optimisation du cold start avec **Baseline Profiles**.

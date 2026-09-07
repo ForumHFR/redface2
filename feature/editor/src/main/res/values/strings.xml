@@ -27,6 +27,10 @@
     <string name="editor_option_signature">Activer votre signature</string>
     <string name="editor_option_smiley_disabled">Désactiver les smilies</string>
     <string name="editor_option_email_notification">Activer la notification par email du sujet</string>
+    <string name="editor_msg_icon_label">Ton du message</string>
+    <string name="editor_msg_icon_none">Aucun</string>
+    <string name="editor_msg_icon_none_description">Aucun ton</string>
+    <string name="editor_msg_icon_tone_description">Ton %1$d</string>
     <string name="editor_topic_subject_label">Titre du sujet</string>
     <string name="editor_topic_subcat_picker_label">Sous-catégorie</string>
     <string name="editor_topic_subcat_picker_placeholder">Choisir une sous-catégorie</string>

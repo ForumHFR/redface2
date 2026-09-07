@@ -36,4 +36,9 @@ data class TopicRequest(
      * taps and search results already carry a trusted page).
      */
     val resolveScrollToPage: Boolean = false,
+    /**
+     * #293 — entry-only moderation target, opened once after loading the page containing it.
+     * Also supplies the entry scroll target when [scrollTo] is absent.
+     */
+    val moderationAlertFor: Int? = null,
 )

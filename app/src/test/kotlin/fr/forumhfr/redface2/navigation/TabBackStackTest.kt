@@ -140,6 +140,30 @@ class TabBackStackTest {
     }
 
     @Test
+    fun `re-opening the top route with an older duplicate below is a no-op`() {
+        val topicA = TopicRoute(cat = 23, post = 100, page = 4)
+        val topicB = TopicRoute(cat = 23, post = 200, page = 7)
+        val backStack = listOf(FlagsListRoute, topicA, topicB, topicA)
+
+        assertEquals(backStack, inAppRouteBackStackAfterOpen(backStack, topicA))
+    }
+
+    @Test
+    fun `re-opening a route present twice pops to the most recent occurrence`() {
+        val topicA = TopicRoute(cat = 23, post = 100, page = 4)
+        val topicB = TopicRoute(cat = 23, post = 200, page = 7)
+        val topicC = TopicRoute(cat = 23, post = 300, page = 9)
+
+        assertEquals(
+            listOf(FlagsListRoute, topicA, topicB, topicA),
+            inAppRouteBackStackAfterOpen(
+                listOf(FlagsListRoute, topicA, topicB, topicA, topicC),
+                topicA,
+            ),
+        )
+    }
+
+    @Test
     fun `in-app HFR same topic with different page or anchor is pushed as a distinct key`() {
         val topic = TopicRoute(cat = 23, post = 100, page = 4, scrollTo = 123)
         val sameTopicDifferentPage = TopicRoute(cat = 23, post = 100, page = 5, scrollTo = 123)
@@ -152,6 +176,25 @@ class TabBackStackTest {
         assertEquals(
             listOf(FlagsListRoute, topic, sameTopicDifferentAnchor),
             inAppRouteBackStackAfterOpen(listOf(FlagsListRoute, topic), sameTopicDifferentAnchor),
+        )
+    }
+
+    @Test
+    fun `in-app moderation link has a distinct entry and reopening the exact key is a no-op`() {
+        val topic = TopicRoute(cat = 23, post = 35421, page = 76, scrollTo = 2_800_456)
+        val alert = topic.copy(moderationAlertFor = 2_800_456)
+        val result = inAppRouteBackStackAfterOpen(
+            currentDestination = TopLevelDestination.Forum,
+            parsed = ParsedDeepLink(TopLevelDestination.Flags, alert),
+            backStackFor = { listOf(ForumRoute, topic) },
+        )
+
+        assertEquals(TopLevelDestination.Forum, result.destination)
+        assertEquals(listOf(ForumRoute, topic, alert), result.backStack)
+        assertEquals(result.backStack, inAppRouteBackStackAfterOpen(result.backStack, alert))
+        assertEquals(
+            listOf(ForumRoute, topic),
+            inAppRouteBackStackAfterOpen(result.backStack, topic),
         )
     }
 

@@ -47,6 +47,63 @@ app/src/main/res/
     android:roundIcon="@mipmap/ic_launcher_round" ... />
 ```
 
+## Icônes alternatives
+
+Réglages → Affichage → Icône de l’application ouvre une galerie de deux icônes complètes.
+Les aperçus chargent leurs ressources adaptatives : le masque est celui du système Android.
+
+| Choix | Alias du manifeste | Composition |
+|-------|--------------------|-------------|
+| Classique | `.LauncherClassic` | Drapeau RF2 existant, fond `#FFFFFF`, inchangé |
+| Redface 1 | `.LauncherRf1` | Foreground et fond adaptatifs d’origine de Redface 1 (PNG aux cinq densités) |
+
+La sélection reste provisoire jusqu’au bouton **Appliquer**. Le redémarrage suit le schéma
+ProcessPhoenix en quatre temps :
+
+1. L’application attend la persistance DataStore et **active l’alias cible** avec `DONT_KILL_APP`,
+   sans toucher aux autres : l’ancien alias est encore l’`origActivity` de la tâche courante.
+2. Elle termine l’ancienne tâche avec **`finishAffinity()` avant `startActivity()`**, puis démarre
+   `LauncherIconRestartActivity` avec `NEW_TASK | CLEAR_TASK`. Cette activité non exportée a une
+   affinité vide, le mode `singleInstance`, son propre processus `:launcherIconRestart` et reste
+   exclue des applications récentes.
+3. L’activité de relance reçoit **le nom de classe de l’alias cible et la route**, pas un `Intent`
+   parcelable (pattern `UnsafeIntentLaunch`) : elle valide le nom via `isKnownLauncherAlias` puis
+   **reconstruit l’intent localement**. Elle **tue le processus principal**, puis lance l’intent
+   `MAIN` / `LAUNCHER` de l’alias cible avec `NEW_TASK`. La nouvelle tâche a ainsi l’alias cible pour `origActivity`.
+   L’activité de relance se termine et quitte aussi son propre processus.
+4. Au démarrage à froid, la réconciliation de `MainActivity` **désactive les anciens alias** sans
+   re-basculer l’état de la cible déjà active. L’extra interne `settings/app-icon`, porté par
+   l’intent de lancement, restaure Réglages → Affichage → Icône de l’application via
+   `IntentDelivery` dès `onCreate`, sans attendre `onNewIntent`.
+
+Un lancement direct avec `NEW_TASK`, même accompagné de `MULTIPLE_TASK`, ne suffit pas : le mode
+`singleTop` de `MainActivity` peut livrer l’intent à l’activité existante. La tâche conserve alors
+l’ancien alias comme `origActivity` et le système la ferme lorsque cet alias est désactivé.
+Le processus de relance survit à la mort du processus principal pour effectuer un lancement à froid.
+Si le passage à l’activité de relance échoue, l’application rétablit Classique avant de retenter
+la relance. Le lanceur peut rafraîchir son cache avec quelques secondes de retard.
+
+Chaque alias cible `.MainActivity` et porte son propre filtre `MAIN` / `LAUNCHER`. `MainActivity`
+conserve les filtres `VIEW` des deep links HFR. Les alias `.LauncherDark`, `.LauncherRose` et
+`.LauncherRed` et leurs ressources restent déclarés pour les installations dev 0.54.0, mais ne sont
+plus proposés. Leurs valeurs persistées se lisent comme `CLASSIC`, sans écriture à la lecture.
+Au démarrage de `MainActivity`, le contrôleur vérifie les états effectifs des cinq composants sur
+le dispatcher IO : un ancien alias actif ou l’absence d’alias actif entraîne un retour à Classique
+et sa persistance ; les autres écarts suivent la préférence sélectionnable. Ce contrôle partage
+un verrou avec Appliquer et devient sans effet une fois les états cohérents.
+
+RF1 fournit une couche `<monochrome>` à partir de son foreground. Classique conserve ses XML
+existants, sans couche monochrome dédiée. Aucun PNG legacy RF1 n’est nécessaire avec `minSdk 29`.
+Origine, licence Apache 2.0 et adaptation : [mentions des assets tiers](https://github.com/ForumHFR/redface2/blob/dev/app/THIRD_PARTY_NOTICES.md).
+
+Pour ajouter une icône :
+
+1. fournir son foreground et son fond, avec leurs crédits ;
+2. ajouter les adaptive icons normale et ronde, plus la couche monochrome si disponible ;
+3. déclarer un `activity-alias` désactivé par défaut dans le manifeste ;
+4. étendre `AppLauncherIcon`, `launcherAliasFor` et le mapping de ressources côté `:app` ;
+5. vérifier les tests d’exclusivité des alias, de persistance avant application et de restauration.
+
 ## Dimensions (108dp canvas adaptive + 48dp legacy)
 
 | Densité | Adaptive foreground | Legacy icon |

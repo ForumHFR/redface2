@@ -10,8 +10,10 @@ import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
@@ -98,6 +100,9 @@ class TopicFormViewModelTest {
 
     @Test
     fun `init hydrates subject draft and per-post options from the parsed form`() = runTest {
+        // A non-default tone (6) so the msgIcon assertion cannot pass on the
+        // DEFAULT_MSG_ICON fallback. Local to this test: the shared fixture stays at "1".
+        topicFormRepository.formResult = topicFormRepository.formResult.copy(msgIcon = "6")
         val viewModel = newViewModel()
         viewModel.state.test {
             val hydrated = awaitHydratedState()
@@ -108,6 +113,7 @@ class TopicFormViewModelTest {
             assertTrue(hydrated.signatureEnabled)
             assertFalse(hydrated.smileyDisabled)
             assertFalse(hydrated.emailNotificationEnabled)
+            assertEquals(6, hydrated.msgIcon)
             assertTrue(hydrated.subjectHydratedFromServer)
             assertTrue(hydrated.draftHydratedFromServer)
             assertTrue(hydrated.optionsHydratedFromForm)
@@ -131,11 +137,13 @@ class TopicFormViewModelTest {
             // User retypes the subject AND the body in their own words.
             viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("User-overridden subject")))
             viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("user override", TextRange(13))))
+            viewModel.submit(TopicFormIntent.MsgIconSelected(6))
             // Submit triggers InvalidHashCheck → silent refetch with the same fake form.
             viewModel.submit(TopicFormIntent.SubmitClicked)
             val finalState = expectMostRecentItem()
             assertEquals("User-overridden subject", finalState.subject.text)
             assertEquals("user override", finalState.draft.text)
+            assertEquals(6, finalState.msgIcon)
             // The user-facing banner stays armed on InvalidHashCheck even though
             // the refetch is silent — without this the user has no way to know
             // their first submit was rejected.
@@ -407,6 +415,7 @@ class TopicFormViewModelTest {
             // User overrides the entry chip to a different sub-category.
             viewModel.submit(TopicFormIntent.SubcatSelected(SAMPLE_OTHER_SUBCAT))
             viewModel.submit(TopicFormIntent.ToggleSignature(enabled = true))
+            viewModel.submit(TopicFormIntent.MsgIconSelected(6))
             viewModel.submit(TopicFormIntent.SubmitClicked)
             cancelAndIgnoreRemainingEvents()
         }
@@ -416,6 +425,7 @@ class TopicFormViewModelTest {
         assertEquals(SAMPLE_OTHER_SUBCAT, topicFormRepository.lastSubmittedSubcat)
         val options = requireNotNull(topicFormRepository.lastSubmittedOptions)
         assertTrue(options.signatureEnabled)
+        assertEquals("6", topicFormRepository.lastSubmittedForm?.msgIcon)
     }
 
     @Test
@@ -1389,6 +1399,8 @@ class TopicFormViewModelTest {
             private set
         var lastSubmittedOptions: ReplyFormOptions? = null
             private set
+        var lastSubmittedForm: TopicForm? = null
+            private set
 
         override suspend fun fetchEditFirstPostForm(context: EditFirstPostContext): TopicForm {
             formFetches += 1
@@ -1411,6 +1423,7 @@ class TopicFormViewModelTest {
             lastSubmittedBbcode = bbcodeContent
             lastSubmittedSubcat = selectedSubcat
             lastSubmittedOptions = options
+            lastSubmittedForm = form
             submitGate?.await()
             return submitResult ?: error("submitResult not set")
         }
@@ -1436,6 +1449,7 @@ class TopicFormViewModelTest {
             lastSubmittedBbcode = bbcodeContent
             lastSubmittedSubcat = selectedSubcat
             lastSubmittedOptions = options
+            lastSubmittedForm = form
             submitGate?.await()
             return newTopicSubmitResult ?: error("newTopicSubmitResult not set")
         }
@@ -1632,6 +1646,11 @@ class TopicFormViewModelTest {
 
         override suspend fun setFontScale(scale: FontScalePreference) = Unit
 
+        override fun observeAppLauncherIcon(): Flow<AppLauncherIcon> =
+            MutableStateFlow(AppLauncherIcon.CLASSIC)
+
+        override suspend fun setAppLauncherIcon(icon: AppLauncherIcon) = Unit
+
         // #973 — the block-GIF display profile is irrelevant to the topic form; stubbed at the M default.
         override fun observeMediaDisplayProfile(): Flow<MediaDisplayProfile> =
             MutableStateFlow(MediaDisplayProfile.M)
@@ -1642,6 +1661,11 @@ class TopicFormViewModelTest {
             MutableStateFlow(PostImageMaxWidth.DEFAULT)
 
         override suspend fun setPostImageMaxWidth(width: PostImageMaxWidth) = Unit
+
+        override fun observePostImageCorners(): Flow<PostImageCorners> =
+            MutableStateFlow(PostImageCorners.DEFAULT)
+
+        override suspend fun setPostImageCorners(corners: PostImageCorners) = Unit
 
         // #989 — délimiteur du picker : non exercé ici, présent pour satisfaire l'interface.
         override fun observeSmileyPickerDecoration(): Flow<SmileyPickerDecoration> =
@@ -1669,6 +1693,19 @@ class TopicFormViewModelTest {
         override suspend fun setAlwaysAskLinkApp(enabled: Boolean) = Unit
 
         // #1132 — Forum flag-filter preference is irrelevant to the editor; default ALL stub.
+        private val menusCollapsed = MutableStateFlow(false)
+        private val stickyCollapsed = MutableStateFlow(false)
+
+        override fun observeForumCategoryMenusCollapsed(): Flow<Boolean> = menusCollapsed
+        override suspend fun setForumCategoryMenusCollapsed(collapsed: Boolean) {
+            menusCollapsed.value = collapsed
+        }
+
+        override fun observeForumCategoryStickyTopicsCollapsed(): Flow<Boolean> = stickyCollapsed
+        override suspend fun setForumCategoryStickyTopicsCollapsed(collapsed: Boolean) {
+            stickyCollapsed.value = collapsed
+        }
+
         override fun observeForumCategoryFlagFilter(): Flow<CategoryFlagFilter> =
             MutableStateFlow(CategoryFlagFilter.ALL)
 

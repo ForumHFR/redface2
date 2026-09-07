@@ -3,8 +3,20 @@ package fr.forumhfr.redface2.core.ui.theme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
+import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
 
 private val Seed = Color(0xFFA62C2C)
+
+// #326 — fixed adaptive-icon backgrounds. Rose / red are derived from the AccentPreset seeds so the
+// previews cannot drift from the accent palette; they are not derived from the *active* theme
+// because launcher resources and their Settings previews stay stable.
+// The matching launcher backgrounds live in app/src/main/res/drawable/ic_launcher_background_*.xml.
+private fun accentSeedColor(seedRgb: Int) = Color(0xFF000000.toInt() or seedRgb)
+
+val LauncherIconClassicBackground = Color(0xFFFFFFFF)
+val LauncherIconDarkBackground = Color(0xFF121212)
+val LauncherIconRoseBackground = accentSeedColor(AccentPreset.ROSE.seedRgb)
+val LauncherIconRedBackground = accentSeedColor(AccentPreset.ROUGE_REDFACE1.seedRgb)
 
 val RedfaceLightColorScheme = lightColorScheme(
     primary = Color(0xFF8E1D24),

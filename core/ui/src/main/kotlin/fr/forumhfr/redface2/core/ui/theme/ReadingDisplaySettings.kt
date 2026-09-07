@@ -4,6 +4,7 @@ import androidx.compose.runtime.Immutable
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 
@@ -30,6 +31,9 @@ data class ReadingDisplaySettings(
     // #991 — maximum fImage width of content images. Default P95 preserves the historical 0.95 cap
     // and is provided as LocalPostImageMaxWidth.
     val postImageMaxWidth: PostImageMaxWidth = PostImageMaxWidth.DEFAULT,
+    // #985 — shape of content-image corners. ROUNDED preserves the historical 8 dp radius and is
+    // provided as LocalPostImageCorners.
+    val postImageCorners: PostImageCorners = PostImageCorners.DEFAULT,
     // #989 — cell delimiter of the smiley picker. NONE by default (XaTriX): the delimiter is an aid
     // to SELECTION on a very heterogeneous corpus, never a change of thumbnail size — the preset
     // that enlarged small smileys was rejected for making the picker lie about the published size

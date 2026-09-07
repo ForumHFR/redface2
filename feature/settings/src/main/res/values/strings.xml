@@ -43,7 +43,7 @@
     <string name="settings_section_notifications">Notifications</string>
     <string name="settings_section_accessibility">Accessibilité</string>
     <string name="settings_section_extensions">Extensions et filtrage</string>
-    <string name="settings_hfr_account_note">Ces réglages proviennent de votre profil HFR (editprofil.php) et arriveront plus tard.</string>
+    <string name="settings_hfr_account_note">Ces réglages viennent de votre profil HFR et arriveront plus tard.</string>
 
     <!-- #494 — refonte du menu : barre supérieure avec recherche activable, sous-pages, état vide. -->
     <string name="settings_back">Retour</string>
@@ -120,6 +120,21 @@
     <string name="settings_future_data_saver">Mode économie de données</string>
     <!-- Toujours utilisée par SettingsAccountAboutScreen (sous-page Compte). -->
     <string name="settings_future_hfr_profile">Avatars, signatures, messages par page</string>
+
+    <!-- #294 — historique des sanctions du compte HFR. -->
+    <string name="sanctions_title">Mes sanctions</string>
+    <string name="sanctions_loading">Chargement des sanctions</string>
+    <string name="settings_sanctions_description">Historique des sanctions de votre compte HFR</string>
+    <string name="sanctions_sign_in_required">Connexion requise</string>
+    <string name="sanctions_empty">Aucune sanction sur ce compte.</string>
+    <string name="sanctions_ongoing">En cours</string>
+    <string name="sanctions_lifted">Levée</string>
+    <string name="sanctions_category">Catégorie : %1$s</string>
+    <string name="sanctions_period">Du %1$s au %2$s</string>
+    <string name="sanctions_since">Depuis %1$s</string>
+    <string name="sanctions_moderator">Par %1$s</string>
+    <string name="sanctions_error">Impossible de charger vos sanctions.</string>
+    <string name="sanctions_retry">Réessayer</string>
 
     <!-- #494 — catalogue exhaustif des options à venir (toggles désactivés mais cherchables).
          Une string par option du draft drafts/claude-settings-catalogue-v2-options.md. -->
@@ -292,6 +307,15 @@
     <string name="settings_theme_system">Système</string>
     <string name="settings_theme_dark">Sombre</string>
     <string name="settings_theme_persist_failed">Impossible de mémoriser le thème. Réessayez.</string>
+    <!-- #326 — galerie des icônes adaptatives et application explicite avec redémarrage. -->
+    <string name="settings_display_launcher_icon_title">Icône de l\'application</string>
+    <string name="settings_display_launcher_icon_help">L\'application redémarre pour changer d\'icône. Le lanceur peut mettre quelques secondes à se rafraîchir.</string>
+    <string name="settings_display_launcher_icon_classic">Classique</string>
+    <string name="settings_display_launcher_icon_rf1">Redface 1</string>
+    <string name="settings_display_launcher_icon_current">Actuelle</string>
+    <string name="settings_display_launcher_icon_apply">Appliquer</string>
+    <string name="settings_display_launcher_icon_personal_help">Une image personnelle ne peut pas remplacer l\'icône dans la liste des applications ; certains lanceurs (Nova, Lawnchair…) proposent cette personnalisation.</string>
+    <string name="settings_display_launcher_icon_persist_failed">Impossible de mémoriser l\'icône. Réessayez.</string>
     <string name="settings_colors_post_header_title">En-tête des messages</string>
     <string name="settings_colors_post_header_subtle">Discret</string>
     <string name="settings_colors_post_header_vivid">Vif</string>
@@ -362,6 +386,13 @@
     <string name="settings_display_post_image_max_width_99">99&#160;%</string>
     <string name="settings_display_post_image_max_width_100">100&#160;%</string>
     <string name="settings_img_width_persist_failed">Impossible de mémoriser la largeur des images. Réessayez.</string>
+    <!-- #985 — rayon des coins des images de contenu ; 8 dp conserve le rendu historique. -->
+    <string name="settings_display_post_image_corners_title">Coins des images</string>
+    <string name="settings_display_post_image_corners_intro">Choisissez le rayon des images affichées dans les messages.</string>
+    <string name="settings_display_post_image_corners_rounded">Arrondis (8 dp, défaut)</string>
+    <string name="settings_display_post_image_corners_soft">Légers (4 dp)</string>
+    <string name="settings_display_post_image_corners_square">Carrés (0 dp)</string>
+    <string name="settings_display_post_image_corners_persist_failed">Impossible de mémoriser les coins des images. Réessayez.</string>
     <!-- #989 — délimiteur des cellules du picker de smileys. « Aucun » par défaut : le délimiteur
          aide à repérer chaque vignette sur un corpus très hétérogène, il ne change PAS la taille des
          smileys (le preset qui agrandissait les petits a été rejeté, cf. #1022). -->

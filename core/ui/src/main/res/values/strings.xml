@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="post_mood_icon_description">Ton du message</string>
     <!-- #1040 lot 6 — primitive de sélection de page partagée, sans politique de feature. -->
     <string name="pager_previous">Précédent</string>
     <string name="pager_next">Suivant</string>
@@ -58,7 +59,13 @@
     <string name="post_image_menu_share_failed">Aucune application pour partager cette image</string>
     <string name="post_image_menu_copy_url">Copier l\'URL de l\'image</string>
     <string name="post_image_menu_url_copied">URL copiée</string>
-    <string name="post_image_menu_full_size_soon">Afficher en taille réelle (à venir)</string>
+    <string name="post_image_menu_full_screen">Afficher en plein écran</string>
+    <string name="image_viewer_default_description">Image</string>
+    <string name="image_viewer_close">Fermer</string>
+    <string name="image_viewer_show_actions">Afficher les actions</string>
+    <string name="image_viewer_hide_actions">Masquer les actions</string>
+    <string name="image_viewer_loading">Chargement de l\'image</string>
+    <string name="image_viewer_error">Impossible d\'afficher cette image</string>
     <!-- Action navigateur neutre, partagée par le menu image et les menus propres aux features. -->
     <string name="browser_open_action">Ouvrir dans le navigateur</string>
     <string name="browser_no_handler">Aucun navigateur disponible</string>

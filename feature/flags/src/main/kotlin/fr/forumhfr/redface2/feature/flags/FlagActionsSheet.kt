@@ -130,6 +130,7 @@ fun FlagActionsSheet(
                     flag = flag,
                     isSuperFavorite = isSuperFavorite,
                     canOpenTopic = canOpenTopic,
+                    canRemoveServerFlag = flag.resolvedFromServer,
                     actions = actions,
                     onGoToPage = { showPageDialog = true },
                     onCopyLink = { copyTopicLink(context, flagTopicUrl(flag), linkCopied) },
@@ -263,12 +264,13 @@ private fun quickActions(
  * [onGoToPage] opens the in-sheet page-number dialog ([PageInputDialog]); the « Aller à une page » row
  * is omitted for single-page topics (nothing to choose). [actions.onReply] opens the reply editor.
  */
-@Suppress("LongParameterList") // Sheet inputs: flag, two states, actions, three page callbacks.
+@Suppress("LongParameterList") // Sheet inputs: flag, three states, actions, three page callbacks.
 @Composable
 private fun menuActions(
     flag: Flag,
     isSuperFavorite: Boolean,
     canOpenTopic: Boolean,
+    canRemoveServerFlag: Boolean,
     actions: FlagSheetActions,
     onGoToPage: () -> Unit,
     onCopyLink: () -> Unit,
@@ -320,6 +322,8 @@ private fun menuActions(
                     iconTint = variant,
                 ),
             )
+        }
+        if (canRemoveServerFlag) {
             add(
                 SheetActionItem(
                     iconRes = CoreUiR.drawable.ic_ms_delete,

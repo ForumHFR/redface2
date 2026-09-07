@@ -52,6 +52,9 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.materialKolor.utilities)
     implementation(libs.coil.compose)
+    // #182 — fullscreen-only pan/pinch/double-tap viewer. Kept behind
+    // viewer/ZoomableRemoteImage.kt so the rendering engine remains replaceable.
+    implementation(libs.telephoto.zoomable.image.coil3)
     // #959 — EXIF orientation read by the header-only intrinsic probe (ProbeMetadataDecoder).
     implementation(libs.androidx.exifinterface)
     // #959 — Lifecycle.currentStateAsState() gates GIF animation on RESUMED (§3 GIF).

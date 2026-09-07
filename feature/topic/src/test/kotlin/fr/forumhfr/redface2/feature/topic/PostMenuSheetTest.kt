@@ -9,6 +9,7 @@ import android.content.pm.ResolveInfo
 import android.net.Uri
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertHasClickAction
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -92,14 +93,14 @@ class PostMenuSheetTest {
             "Citer le début",
             "Envoyer un MP",
             "Masquer cet utilisateur",
-            "Alerter (à venir)",
+            "Alerter",
             "Supprimer ce message",
             "Édité le 02/01/2025 04:04:05",
             "Cité 2 fois dans le sujet",
         ).forEach { label ->
             compose.onNodeWithText(label).assertExists()
         }
-        compose.onNodeWithText("Alerter (à venir)").assertIsNotEnabled()
+        compose.onNodeWithText("Alerter").assertIsEnabled()
     }
 
     @Test
@@ -137,10 +138,37 @@ class PostMenuSheetTest {
         assertEquals(PERMALINK, started.data.toString())
     }
 
+    @Test
+    fun `alert entry emits the selected post after hiding the menu`() {
+        var reported: Int? = null
+        mount(withAllActions = true, onAlert = { reported = it })
+
+        compose.onNodeWithText("Alerter").assertIsEnabled().performClick()
+        compose.waitUntil(timeoutMillis = 5_000) { reported != null }
+
+        assertEquals(samplePost().numreponse, reported)
+    }
+
+    @Test
+    fun `alert is disabled and explained without an authenticated callback`() {
+        mount()
+        compose.onNodeWithText("Alerter").assertIsNotEnabled()
+        // #293 — a greyed button alone does not say why; the supporting text does.
+        compose.onNodeWithText("Connexion requise").assertExists()
+    }
+
+    @Test
+    fun `alert shows no sign-in hint when authenticated`() {
+        mount(withAllActions = true)
+        compose.onNodeWithText("Alerter").assertIsEnabled()
+        compose.onNodeWithText("Connexion requise").assertDoesNotExist()
+    }
+
     private fun mount(
         post: Post = samplePost(),
         withAllActions: Boolean = false,
         onQuoteStart: () -> Unit = {},
+        onAlert: (Int) -> Unit = {},
     ) {
         compose.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
@@ -149,6 +177,7 @@ class PostMenuSheetTest {
                     permalink = PERMALINK,
                     citedCount = post.citedCount ?: 0,
                     onDismiss = {},
+                    onAlert = if (withAllActions) onAlert else null,
                     onDelete = if (withAllActions) ({}) else null,
                     onEditFirstPost = if (withAllActions) ({}) else null,
                     onOpenProfile = if (withAllActions) ({}) else null,

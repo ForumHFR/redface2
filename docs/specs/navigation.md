@@ -120,6 +120,7 @@ L'écran le plus important de l'app. Affiche les topics suivis par l'utilisateur
 - le miroir dans **Réglages > Drapeaux** (master « Réglages différents par onglet » + les deux toggles globaux qui servent de valeurs par défaut/repli).
 
 **Pastille « pages à lire » (#814)** : en fin de ligne, `+N` est teinté selon le **retard** et non selon la couleur du drapeau — 1-2 pages neutre (`surfaceVariant`), 3-9 accentué (`tertiaryContainer`), ≥ 10 alerte (`error`) ; paliers dans `lagTone` (`:core:model`), couleurs dans `lagToneColors` (`:core:ui`, rôles M3 canoniques, donc suivis en light / dark / AMOLED / accent). Demande de thibw (fil DEV).
+Depuis [#1025](https://github.com/ForumHFR/redface2/issues/1025), `+N` compte les pages restantes **après la page ouverte par le tap**, celle-ci exclue, et `LagTone` suit cette même valeur ; aucun badge si le tap ouvre la dernière page, même s'il reste des messages non lus (règle et exemples dans [ADR-017 § 4]({{ site.baseurl }}/adr/017-refonte-vue-drapeaux)).
 
 **Actions sur un topic :**
 - Tap → ouvrir le topic à la dernière position non lue
@@ -168,6 +169,7 @@ L'écran central de l'app. Affiche les posts d'un topic avec pagination.
 > défaut, cartes en option). La navigation par pages ci-dessous (#282/#307) reste exacte.
 
 **Navigation dans le topic :**
+- **Sondage après vote (#1296)** — avec « déplier les sondages non votés », un vote accepté (y compris « déjà voté ») maintient le sondage déplié sur la page courante jusqu'au changement de page, à la sortie de la route du sujet ou au rechargement explicite, sans minuterie ; le choix manuel de repli/dépli garde la priorité.
 - Scroll vertical pour lire les posts
 - Boutons page précédente / suivante
 - **Swipe horizontal gauche/droite pour changer de page (#282)** — geste « drag-follow » (la page suit le doigt, résistance amortie aux bords, retour haptique à l'armement et au commit, edge-glow discret). Implémenté par `Modifier.topicPageSwipe` (`feature/topic/.../TopicSwipe.kt`, helpers purs testés) ; il appelle le **même** callback `onOpenPage(targetPage)` que les boutons de pager. Depuis #895 étape 4 (12/07/2026), `onOpenPage` alimente `TopicViewModel.switchToPage()` : la pagination est **in-ViewModel**, la `TopicRoute` est figée à l'entrée et un changement de page ne traverse plus la navigation (à la livraison de #282 la navigation était route-driven — remplacement de la `TopicRoute` compensé par un `transitionSpec` Topic→Topic instantané, retiré à l'étape 5 de #895). Le geste est gaté tant que l'entrée nav n'est pas `RESUMED` (protège les transitions d'**entrée** dans le topic) et ne déclenche jamais d'action destructive.
@@ -202,6 +204,38 @@ Catégories
 ```
 
 Chaque catégorie affiche le nombre de topics et l'activité récente.
+
+Dans une catégorie, deux commandes de densité indépendantes sont disponibles (#1303) :
+
+- **Menus** : le chevron de la ligne de titre replie ensemble les sous-catégories, leur
+  séparateur, le filtre drapeaux (session connectée) et la pilule de recherche fermée. Le titre
+  reste sur une ligne avec ellipse ; son nom complet reste accessible. Une loupe de 48 dp
+  apparaît quand les menus sont repliés et ouvre uniquement le champ de recherche.
+- **Rappel des filtres** : menus repliés, une ligne cliquable « Sous-cat · Filtre » rappelle les
+  choix actifs et redéplie les menus. Les valeurs « Toutes / Tous » sont omises ; une
+  sous-catégorie dont le nom est indisponible conserve un rappel par identifiant.
+- **Recherche** : le champ actif reste hors du panneau repliable et conserve son focus et sa
+  requête lors du repli. Changer de sous-catégorie conserve la recherche et revient à la page 1.
+  Ouvrir ou fermer la recherche ne modifie aucune préférence de disposition. Fermer vide la
+  requête et quitte le mode en une seule transition.
+- **Épinglés** : un en-tête unique, avant le groupe dans la liste défilante, remplace le
+  séparateur « Autres sujets ». Il affiche « Épinglés (N) » ou « N épinglés masqués » ; toute la
+  ligne (48 dp minimum) commande le repli. Le compte et la partition portent uniquement sur
+  les résultats filtrés de la page chargée. Sans épinglé, aucun en-tête ; avec uniquement des
+  épinglés masqués, l'en-tête et la pagination restent affichés, sans faux état vide.
+- **Exceptions** : recherche ouverte, même vide, les épinglés correspondants restent visibles
+  avec un en-tête informatif sans commande ; fermer réapplique la préférence. Avec un filtre
+  drapeaux actif, la liste reste plate dans son ordre source, sans en-tête ni masquage, même
+  si elle contient des épinglés.
+
+Les préférences globales `forum_category_menus_collapsed` et
+`forum_category_sticky_topics_collapsed` s'appliquent à toutes les catégories de cette
+installation, connecté comme anonyme ; leur défaut est `false` (déplié). Avant leur première
+lecture, seuls le titre et le chargement s'affichent, commandes désactivées, pour éviter un
+flash déplié. Replier ne recharge pas les sujets et ne change ni page, ni sous-catégorie, ni
+recherche. La liste conserve son ancre par clé ; si l'ancre était un épinglé retiré, elle revient
+à l'en-tête. Le FAB reste développé seulement à l'index zéro **et** à l'offset zéro, avec sa
+réserve basse de 88 dp ; les insets système restent appliqués une seule fois.
 
 ### Création de topic
 
@@ -283,6 +317,7 @@ Les URLs HFR doivent ouvrir directement le bon écran dans l'app.
 | `forum.hardware.fr/forum2.php?cat=X&post=Y&page=Z#tN` | Topic Y page Z, avec scroll vers le post N | Phase 1 |
 | `forum.hardware.fr/hfr/<Cat>/…/<slug>-sujet_Y_Z.htm#tN` | Topic Y page Z, catégorie résolue depuis le slug, avec scroll vers N | Phase 4 (#1032 PR2) |
 | `forum.hardware.fr/forum1f.php` | Drapeaux | Phase 1 |
+| `forum.hardware.fr/user/modo.php?cat=X&post=Y&numreponse=N&page=Z` | Intent externe : Topic Y et feuille d’alerte ; tap in-app : feuille d’info sur place | #293, #1287 |
 | `forum.hardware.fr/forum1.php?config=hfr.inc&cat=prive&page=Z` | Navigateur (inbox MP non routée dans l'app) | Fallback navigateur |
 | `forum.hardware.fr/forum2.php?config=hfr.inc&cat=prive&post=Y&page=Z` | Navigateur (conversation MP non routée dans l'app) | Fallback navigateur |
 | Autre chemin `/hfr/…` (profil, `liste_sujet`, slug de catégorie inconnu…) | Navigateur | Fallback navigateur |
@@ -292,9 +327,38 @@ Les URLs HFR doivent ouvrir directement le bon écran dans l'app.
 > `resolveHfrDeepLink` les ouvre donc explicitement dans le navigateur au lieu d'échouer en silence.
 
 Le manifest garde deux filtres distincts, sans `autoVerify` : les chemins legacy exacts
-(`/forum1.php`, `/forum2.php`, `/forum1f.php`) et le préfixe volontairement large `/hfr/`.
+(`/forum1.php`, `/forum2.php`, `/forum1f.php`, `/user/modo.php`) et le préfixe volontairement large `/hfr/`.
 La sur-capture du second filtre est intentionnelle : `resolveHfrDeepLink` valide l'action, le
 schéma et le host, route les topics reconnus, puis délègue toute URL HFR non routable au navigateur.
+
+Le contrat du lien d’alerte est décrit dans
+[`protocol-hfr.md` § « Lien entrant modo.php »]({{ site.baseurl }}/specs/protocol-hfr#lien-entrant-modophp).
+Un **intent Android `VIEW` externe** conserve le comportement #293 : l’onglet Drapeaux
+est réinitialisé vers le topic, le post est affiché et sa feuille d’alerte est ouverte.
+
+Un **tap in-app** ouvre « Alerte modération » au-dessus de la navigation, quel que soit
+l’onglet ou l’écran courant (y compris les MP), sans modifier la pile ni charger le sujet.
+La feuille n’apparaît qu’une fois l’état connu ; une barre de progression fine, superposée
+en haut de l’écran, signale le chargement. Retour annule cette lecture sans dépiler la navigation.
+`ModerationAlertLinkViewModel`, détenu par l’Activity, conserve le chargement et l’info à la
+rotation ; fermer annule la lecture, et un changement de compte invalide l’info précédente.
+« Réessayer » et le changement de compte conservent une feuille déjà ouverte en effaçant
+immédiatement l’ancien message pendant la nouvelle lecture. Un second tap sur la même cible
+en cours de chargement est ignoré ; une autre cible annule et remplace la lecture précédente.
+La feuille affiche le texte HFR et sa date éventuelle en texte secondaire. Au-dessus du bouton
+« Voir le message », un sous-titre indique le titre connu dans `topicTitleCache` et la page,
+ou les identifiants du message/sujet et la page. Le titre est figé à l’ouverture.
+Le bouton ouvre `TopicRoute(cat, post, page, scrollTo = numreponse, resolveScrollToPage = page == 1)`
+par le chemin in-app habituel, **sans `moderationAlertFor`** : aucune feuille à l’arrivée.
+Sans session, la feuille invite à se connecter pour consulter l’alerte, sans GET ;
+« Voir le message » reste disponible, comme en cas d’erreur, où « Réessayer » est ajouté.
+
+Les états `Form` et `JoinPrompt` naviguent directement vers le post **avec
+`moderationAlertFor`**, pour le montrer avant toute confirmation de signalement.
+Toute feuille d’info déjà ouverte est alors fermée.
+Ces navigations conservent l’onglet courant et les règles usuelles de réutilisation des
+entrées : `moderationAlertFor` distingue une entrée d’alerte d’une entrée de lecture.
+Retaper un lien modo.php ouvre à nouveau l’info, même si une route d’alerte existe déjà.
 
 Comme `hardware.fr` est un domaine tiers, Redface 2 ne peut pas être *vérifié* comme handler et
 l'utilisateur doit l'activer manuellement. Pour rendre cet opt-in découvrable (#1032 PR3), la ligne
@@ -314,6 +378,13 @@ Implémentation via **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026).
 @Serializable data object ForumRoute : RedfaceNavKey
 @Serializable data object SearchRoute : RedfaceNavKey
 @Serializable data object MessagesRoute : RedfaceNavKey
+@Serializable data class ImageViewerRoute(
+    val sourceUrl: String,                  // source plein format, non vide
+    val previewUrl: String,                 // image déjà rendue, placeholder mémoire Coil
+    val externalUrl: String,                // destination explicite du navigateur
+    val description: String? = null,
+    val diskCache: Boolean = true,          // false pour les médias issus d'un MP
+) : RedfaceNavKey
 @Serializable data class PrivateMessageThreadRoute(
     val threadId: Int,                     // id `post` HFR de la conversation `cat=prive`
     val page: Int = 1,
@@ -335,6 +406,7 @@ Implémentation via **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026).
     val post: Int,
     val page: Int = 1,
     val scrollTo: Int? = null,            // numreponse cible pour #t{numreponse}
+    val moderationAlertFor: Int? = null,  // #293 — ouverture de l’alerte, une seule fois à l’entrée
     val submitSignal: Long? = null,       // Phase 2 (#200) — bumpé à System.currentTimeMillis() par le
                                           // navigation host quand l'éditeur pop après un submit réussi.
                                           // Invalide la route key, force la rebuild du ViewModel, et fait
@@ -420,6 +492,20 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                     onLoaded = { onPrivateMessageThreadLoaded(route.threadId) },
                     onBack = { backStack.removeAt(backStack.lastIndex) },
                     topBarActions = accountMenu,
+                )
+            }
+            entry<ImageViewerRoute> { route ->
+                val imageActionsViewModel: PostImageActionsViewModel = hiltViewModel()
+                ImageViewerScreen(
+                    request = ImageViewerRequest(
+                        sourceUrl = route.sourceUrl,
+                        previewUrl = route.previewUrl,
+                        externalUrl = route.externalUrl,
+                        description = route.description,
+                        diskCache = route.diskCache,
+                    ),
+                    onClose = { backStack.removeAt(backStack.lastIndex) },
+                    onSave = imageActionsViewModel::saveImage,
                 )
             }
             entry<CategoryRoute> { route ->
@@ -610,6 +696,11 @@ Le `TopicScreen` reçoit le `scrollTo` (numreponse cible) via la `TopicRoute` et
 ### Predictive back
 
 Nav 3 intègre `PredictiveBackHandler` via `NavDisplay` — aucun code custom requis pour les écrans standards. Seuls les écrans à interaction custom (ex : éditeur avec draft) ajoutent leur propre handler ; Phase 2B-A livre `PostEditorScreen` sans cette confirmation (pas encore de draft persistant) — l'exemple ci-dessous reste le pattern cible quand la persistance arrivera :
+
+Le viewer d'image est un écran standard empilé au-dessus du topic ou du MP : le back système et le
+predictive back sont donc fournis par `NavDisplay`, comme le bouton fermer qui dépile la même entrée.
+Sa transition dédiée est un fade + scale de 200 ms à l'aller comme au retour ; elle remplace le
+shared-axis pour cette seule destination et ne met jamais en jeu un swipe-dismiss.
 
 ```kotlin
 @Composable

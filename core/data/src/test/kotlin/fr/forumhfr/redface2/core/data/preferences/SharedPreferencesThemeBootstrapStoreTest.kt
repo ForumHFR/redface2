@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.data.preferences
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.test.core.app.ApplicationProvider
 import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
 import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
@@ -10,6 +11,11 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeAccent
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrap
 import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
@@ -67,7 +73,7 @@ class SharedPreferencesThemeBootstrapStoreTest {
     }
 
     @Test
-    fun `colour preferences round-trip through the mirror`() {
+    fun `colour preferences round-trip through the mirror`() = runBlocking(Dispatchers.IO) {
         val preferences = ThemeColorPreferences(
             accent = ThemeAccent.Custom(rgb = 0x123456),
             lightSurfaceTone = LightSurfaceTone.WHITE,
@@ -79,6 +85,27 @@ class SharedPreferencesThemeBootstrapStoreTest {
         store.writeThemeColorPreferences(preferences)
 
         assertEquals(preferences, store.read().colorPreferences)
+    }
+
+    @Test
+    fun `colour preferences use commit instead of apply on IO`() = runBlocking(Dispatchers.IO) {
+        // In-memory reads under Robolectric cannot distinguish apply from a durable commit.
+        val editor = mockk<SharedPreferences.Editor>(relaxed = true)
+        val preferences = mockk<SharedPreferences>()
+        val storeContext = mockk<Context>()
+        every { storeContext.getSharedPreferences("theme_bootstrap", Context.MODE_PRIVATE) } returns preferences
+        every { preferences.edit() } returns editor
+        every { editor.putString(any(), any()) } returns editor
+        every { editor.putInt(any(), any()) } returns editor
+        every { editor.putBoolean(any(), any()) } returns editor
+        every { editor.commit() } returns true
+
+        SharedPreferencesThemeBootstrapStore(storeContext).writeThemeColorPreferences(
+            ThemeColorPreferences(accent = ThemeAccent.Custom(rgb = 0x123456)),
+        )
+
+        verify(exactly = 1) { editor.commit() }
+        verify(exactly = 0) { editor.apply() }
     }
 
     @Test

@@ -17,11 +17,13 @@ data class PostImageTarget(
 )
 
 /**
- * #831 — actions a hosting surface offers on post images. PR1 carries the single long-press
- * entry point (the contextual menu); the PR2 viewer adds its own member when it lands.
+ * #831/#182/#1279 — actions a hosting surface offers on post images. The renderer invokes
+ * [onOpenViewer] for block images and linked inline images accepted by [viewerRequestFor].
+ * Unlinked inline images reach the viewer exclusively through the contextual sheet.
  */
 class PostImageActions(
     val onLongPress: (PostImageTarget) -> Unit,
+    val onOpenViewer: (PostImageTarget) -> Unit = {},
 )
 
 /**

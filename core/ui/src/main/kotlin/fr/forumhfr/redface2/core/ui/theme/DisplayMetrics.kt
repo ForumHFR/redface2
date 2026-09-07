@@ -6,6 +6,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 
@@ -103,6 +104,12 @@ val LocalMediaDisplayProfile = staticCompositionLocalOf { MediaDisplayProfile.M 
  * [PostImageMaxWidth.DEFAULT] (0.95), preserving the historical cap for previews / unprovided hosts.
  */
 val LocalPostImageMaxWidth = staticCompositionLocalOf { PostImageMaxWidth.DEFAULT }
+
+/**
+ * #985 — content-image corner preset, seeded from [ReadingDisplaySettings.postImageCorners] by
+ * `RedfaceTheme`. Defaults to the historical 8 dp rounded shape for previews / unprovided hosts.
+ */
+val LocalPostImageCorners = staticCompositionLocalOf { PostImageCorners.DEFAULT }
 
 /**
  * #989 — the smiley picker's cell delimiter, seeded from

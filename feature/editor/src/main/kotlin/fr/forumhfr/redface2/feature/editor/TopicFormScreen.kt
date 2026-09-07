@@ -59,7 +59,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
  * - Subject field (writable).
  * - Subcategory dropdown for both EditFirstPost and New.
  * - BBCode toolbar + draft field + optional preview.
- * - Per-post options (signature / smileys / email) identical to the post-level editor.
+ * - Per-post options (signature / smileys / email / ton) identical to the post-level editor.
  * - Poll : if `state.pollPresent`, a sober note that mutation is not in this version.
  * - Submit button + error banner.
  */
@@ -273,7 +273,7 @@ internal fun TopicFormContent(
             )
         }
     }
-    // HFR per-topic option toggles, moved behind the bottom bar's « Options » trigger
+    // HFR per-topic controls, moved behind the bottom bar's « Options » trigger
     // (shared EditorOptionsSheet with PostEditorScreen).
     if (optionsSheetOpen) {
         EditorOptionsSheet(onDismiss = { optionsSheetOpen = false }) {
@@ -281,10 +281,12 @@ internal fun TopicFormContent(
                 signatureEnabled = state.signatureEnabled,
                 smileyDisabled = state.smileyDisabled,
                 emailNotificationEnabled = state.emailNotificationEnabled,
+                msgIcon = state.msgIcon,
                 enabled = !state.isSubmitting && !state.isLoadingForm,
                 onSignatureChanged = { onIntent(TopicFormIntent.ToggleSignature(it)) },
                 onSmileyDisabledChanged = { onIntent(TopicFormIntent.ToggleSmileyDisabled(it)) },
                 onEmailNotificationChanged = { onIntent(TopicFormIntent.ToggleEmailNotification(it)) },
+                onMsgIconSelected = { onIntent(TopicFormIntent.MsgIconSelected(it)) },
             )
         }
     }
@@ -393,10 +395,12 @@ private fun TopicFormOptionsBlock(
     signatureEnabled: Boolean,
     smileyDisabled: Boolean,
     emailNotificationEnabled: Boolean,
+    msgIcon: Int,
     enabled: Boolean,
     onSignatureChanged: (Boolean) -> Unit,
     onSmileyDisabledChanged: (Boolean) -> Unit,
     onEmailNotificationChanged: (Boolean) -> Unit,
+    onMsgIconSelected: (Int) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
         Text(
@@ -421,6 +425,11 @@ private fun TopicFormOptionsBlock(
             checked = emailNotificationEnabled,
             enabled = enabled,
             onCheckedChange = onEmailNotificationChanged,
+        )
+        MessageIconPicker(
+            selectedIcon = msgIcon,
+            enabled = enabled,
+            onIconSelected = onMsgIconSelected,
         )
     }
 }

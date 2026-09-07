@@ -23,7 +23,9 @@ import fr.forumhfr.redface2.core.ui.theme.DisplayMetrics
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 import fr.forumhfr.redface2.core.ui.theme.LocalFoldLongQuotes
 import fr.forumhfr.redface2.core.ui.theme.LocalMediaDisplayProfile
+import fr.forumhfr.redface2.core.ui.theme.LocalPostImageCorners
 import fr.forumhfr.redface2.core.ui.theme.LocalPostImageMaxWidth
+import fr.forumhfr.redface2.core.ui.theme.LocalReadingTileOutline
 import fr.forumhfr.redface2.core.ui.theme.LocalSmileyPickerDecoration
 import fr.forumhfr.redface2.core.ui.theme.LocalShowScrollbar
 import fr.forumhfr.redface2.core.ui.theme.ReadingDisplaySettings
@@ -32,6 +34,7 @@ import fr.forumhfr.redface2.core.ui.theme.RedfaceShapes
 import fr.forumhfr.redface2.core.ui.theme.RedfaceTypography
 import fr.forumhfr.redface2.core.ui.theme.buildRedfaceColorScheme
 import fr.forumhfr.redface2.core.ui.theme.scaledForReading
+import fr.forumhfr.redface2.core.ui.theme.tileOutlineFor
 import fr.forumhfr.redface2.core.ui.theme.withRedfaceSlateTertiary
 import fr.forumhfr.redface2.core.ui.theme.withRedfaceSurfaceTones
 
@@ -63,8 +66,12 @@ fun RedfaceTheme(
     val colorScheme = remember(context, darkTheme, resolvedColorPreferences) {
         redfaceColorScheme(context, darkTheme, resolvedColorPreferences)
     }
+    val tileOutline = remember(darkTheme, resolvedColorPreferences.lightSurfaceTone, colorScheme.outlineVariant) {
+        tileOutlineFor(resolvedColorPreferences.lightSurfaceTone, darkTheme, colorScheme.outlineVariant)
+    }
 
     CompositionLocalProvider(
+        LocalReadingTileOutline provides tileOutline,
         LocalDisplayMetrics provides DisplayMetrics.of(reading.density),
         // #332 — expose the « fold long quotes » preference to the post renderer (read via
         // LocalFoldLongQuotes.current in QuoteBlock) so flipping the toggle re-renders posts.
@@ -77,6 +84,8 @@ fun RedfaceTheme(
         LocalMediaDisplayProfile provides reading.mediaDisplayProfile,
         // #991 — expose the maximum fImage width to all post content-image paths.
         LocalPostImageMaxWidth provides reading.postImageMaxWidth,
+        // #985 — expose the selected corner shape to all post content-image paths.
+        LocalPostImageCorners provides reading.postImageCorners,
         // #989 — expose the picker's cell delimiter (read via LocalSmileyPickerDecoration.current in
         // SmileyPickerGrid) so switching the setting re-decorates the grid.
         LocalSmileyPickerDecoration provides reading.smileyPickerDecoration,

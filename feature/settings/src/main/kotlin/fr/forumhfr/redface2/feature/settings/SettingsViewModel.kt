@@ -8,6 +8,7 @@ import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageContentCache
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageContentCacheException
 import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
+import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
 import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
@@ -15,6 +16,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.LightSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
+import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
@@ -28,13 +30,17 @@ import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 // Flat MVI dispatcher: one small, near-identical optimistic-flip handler per user preference.
 // The size comes from breadth (many independent settings live here cohesively), not from deep
@@ -47,10 +53,13 @@ class SettingsViewModel @Inject constructor(
     private val topicCacheMaintenance: TopicCacheMaintenance,
     private val imageCacheMaintenance: ImageCacheMaintenance,
     private val privateMessageContentCache: PrivateMessageContentCache,
+    private val launcherIconController: AppLauncherIconController,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SettingsState())
     val state: StateFlow<SettingsState> = _state.asStateFlow()
+    private val _effects = Channel<SettingsEffect>(Channel.BUFFERED)
+    val effects: Flow<SettingsEffect> = _effects.receiveAsFlow()
 
     init {
         // #788 — continuous hydration: every persisted preference is COLLECTED for the VM's
@@ -242,6 +251,19 @@ class SettingsViewModel @Inject constructor(
             isLocked = { it.isUpdatingFontScale },
             apply = { state, value -> state.copy(fontScale = value) },
         )
+        observePreference(
+            flow = userPreferencesRepository.observeAppLauncherIcon(),
+            isLocked = { it.isUpdatingAppLauncherIcon },
+            apply = { state, value ->
+                val current = value.takeIf { it.selectable } ?: AppLauncherIcon.CLASSIC
+                val pending = if (state.pendingAppLauncherIcon == state.appLauncherIcon) {
+                    current
+                } else {
+                    state.pendingAppLauncherIcon
+                }
+                state.copy(appLauncherIcon = current, pendingAppLauncherIcon = pending)
+            },
+        )
         // #973 — block-GIF display profile (enum), same collection shape as the display presets.
         observePreference(
             flow = userPreferencesRepository.observeMediaDisplayProfile(),
@@ -253,6 +275,12 @@ class SettingsViewModel @Inject constructor(
             flow = userPreferencesRepository.observePostImageMaxWidth(),
             isLocked = { it.isUpdatingPostImageMaxWidth },
             apply = { state, value -> state.copy(postImageMaxWidth = value) },
+        )
+        // #985 — coins des images de contenu (enum), même forme de collecte que leur largeur.
+        observePreference(
+            flow = userPreferencesRepository.observePostImageCorners(),
+            isLocked = { it.isUpdatingPostImageCorners },
+            apply = { state, value -> state.copy(postImageCorners = value) },
         )
         // #989 — délimiteur du picker de smileys (enum), même forme de collecte.
         observePreference(
@@ -403,8 +431,19 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.FlagsAutoRefreshChanged -> updateFlagsAutoRefresh(intent.enabled)
             is SettingsIntent.DisplayDensityChanged -> updateDisplayDensity(intent.density)
             is SettingsIntent.FontScaleChanged -> updateFontScale(intent.scale)
+            is SettingsIntent.AppLauncherIconChanged -> selectAppLauncherIcon(intent.icon)
+            SettingsIntent.ApplyAppLauncherIcon -> applyPendingAppLauncherIcon()
+            SettingsIntent.AppLauncherIconRestartFailed ->
+                _state.update {
+                    it.copy(
+                        appLauncherIcon = AppLauncherIcon.CLASSIC,
+                        isUpdatingAppLauncherIcon = false,
+                        appLauncherIconError = true,
+                    )
+                }
             is SettingsIntent.MediaDisplayProfileChanged -> updateMediaDisplayProfile(intent.profile)
             is SettingsIntent.PostImageMaxWidthChanged -> updatePostImageMaxWidth(intent.width)
+            is SettingsIntent.PostImageCornersChanged -> updatePostImageCorners(intent.corners)
             is SettingsIntent.SmileyPickerDecorationChanged ->
                 updateSmileyPickerDecoration(intent.decoration)
             is SettingsIntent.SetUploadProvider -> updateUploadProvider(intent.provider)
@@ -767,31 +806,32 @@ class SettingsViewModel @Inject constructor(
             )
         }
         viewModelScope.launch {
-            runCatching { userPreferencesRepository.setThemeColorPreferences(desired) }
-                .onSuccess {
-                    _state.update {
-                        it.copy(
-                            themeColorPreferences = desired,
-                            customAccentHexInput = if (accentChanged) desiredInput else it.customAccentHexInput,
-                            customAccentHexSyncedInput =
-                                if (accentChanged) desiredInput else it.customAccentHexSyncedInput,
-                            isUpdatingThemeColors = false,
-                        )
-                    }
+            try {
+                userPreferencesRepository.setThemeColorPreferences(desired)
+                _state.update {
+                    it.copy(
+                        themeColorPreferences = desired,
+                        customAccentHexInput = if (accentChanged) desiredInput else it.customAccentHexInput,
+                        customAccentHexSyncedInput =
+                            if (accentChanged) desiredInput else it.customAccentHexSyncedInput,
+                        isUpdatingThemeColors = false,
+                    )
                 }
-                .onFailure {
-                    val previousInput = previous.customAccentSyncedInput()
-                    _state.update {
-                        it.copy(
-                            themeColorPreferences = previous,
-                            customAccentHexInput = if (accentChanged) previousInput else it.customAccentHexInput,
-                            customAccentHexSyncedInput =
-                                if (accentChanged) previousInput else it.customAccentHexSyncedInput,
-                            isUpdatingThemeColors = false,
-                            themeColorsError = true,
-                        )
-                    }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (@Suppress("TooGenericExceptionCaught") _: Exception) {
+                val previousInput = previous.customAccentSyncedInput()
+                _state.update {
+                    it.copy(
+                        themeColorPreferences = previous,
+                        customAccentHexInput = if (accentChanged) previousInput else it.customAccentHexInput,
+                        customAccentHexSyncedInput =
+                            if (accentChanged) previousInput else it.customAccentHexSyncedInput,
+                        isUpdatingThemeColors = false,
+                        themeColorsError = true,
+                    )
                 }
+            }
         }
     }
 
@@ -863,6 +903,39 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    private fun selectAppLauncherIcon(icon: AppLauncherIcon) {
+        if (icon.selectable && _state.value.canChangeAppLauncherIcon) {
+            _state.update { it.copy(pendingAppLauncherIcon = icon, appLauncherIconError = false) }
+        }
+    }
+
+    private fun applyPendingAppLauncherIcon() {
+        val snapshot = _state.value
+        if (!snapshot.canChangeAppLauncherIcon || snapshot.pendingAppLauncherIcon == snapshot.appLauncherIcon) return
+        val desired = snapshot.pendingAppLauncherIcon
+        _state.update { it.copy(isUpdatingAppLauncherIcon = true, appLauncherIconError = false) }
+        viewModelScope.launch {
+            // Once Apply starts, leaving this destination cannot split commit, switch and restart.
+            withContext(NonCancellable) {
+                commitAppLauncherIcon(desired)
+            }
+        }
+    }
+
+    private suspend fun commitAppLauncherIcon(desired: AppLauncherIcon) {
+        try {
+            // Controller waits for DataStore's commit before changing any component state.
+            launcherIconController.apply(desired)
+            _state.update { it.copy(appLauncherIcon = desired, pendingAppLauncherIcon = desired) }
+            _effects.send(SettingsEffect.RestartOnLauncherAlias(desired))
+            // Keep Apply disabled until the host has restarted; duplicate taps cannot enqueue restarts.
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            _state.update { it.copy(isUpdatingAppLauncherIcon = false, appLauncherIconError = true) }
+        }
+    }
+
     // #973 — block-GIF display profile is an enum too; same bespoke optimistic-flip shape as
     // updateDisplayDensity. previous is captured for revert.
     private fun updateMediaDisplayProfile(desired: MediaDisplayProfile) {
@@ -916,6 +989,36 @@ class SettingsViewModel @Inject constructor(
                             postImageMaxWidth = previous,
                             isUpdatingPostImageMaxWidth = false,
                             postImageMaxWidthError = true,
+                        )
+                    }
+                }
+        }
+    }
+
+    /** #985 — content-image corners use the same optimistic update and rollback as image width. */
+    private fun updatePostImageCorners(desired: PostImageCorners) {
+        val previous = _state.value.postImageCorners
+        _state.update {
+            it.copy(
+                postImageCorners = desired,
+                isUpdatingPostImageCorners = true,
+                postImageCornersError = false,
+                postImageCornersTouchedLocally = true,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { userPreferencesRepository.setPostImageCorners(desired) }
+                .onSuccess {
+                    _state.update {
+                        it.copy(postImageCorners = desired, isUpdatingPostImageCorners = false)
+                    }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            postImageCorners = previous,
+                            isUpdatingPostImageCorners = false,
+                            postImageCornersError = true,
                         )
                     }
                 }

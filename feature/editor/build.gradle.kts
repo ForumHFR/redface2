@@ -5,6 +5,13 @@ plugins {
 
 android {
     namespace = "fr.forumhfr.redface2.feature.editor"
+
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+            isReturnDefaultValues = true
+        }
+    }
 }
 
 dependencies {
@@ -27,4 +34,11 @@ dependencies {
     testImplementation(libs.mockk)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.turbine)
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
+    testImplementation(libs.coil.core)
+    testImplementation(libs.coil.test)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 }

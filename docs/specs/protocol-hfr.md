@@ -57,7 +57,8 @@ La documentation HTML est issue de la rétro-ingénierie du code de [Redface v1]
 | Profil public | GET | `/hfr/profil-{user_id}.htm` | non |
 | Annuaire staff (responsables) | GET | `/message-smi-mp-aj.php?config=hfr.inc&user_id=0&responsable=1` | non |
 | Paramètres utilisateur | GET | `/editprofil.php?config=hfr.inc&page={1..7}` | **oui** |
-| Modération (alerte) | GET/POST | `/modo.php?config=hfr.inc&cat={cat}&post={post}&numreponse={numreponse}` | **oui** |
+| Modération (alerte) | GET/POST | `/user/modo.php?config=hfr.inc&cat={cat}&post={topicId}&numreponse={numreponse}&page={page}&ref=1` (voir ci-dessous) | **oui** |
+| Historique des sanctions (#294) | GET | `/modo/historique.php?config=hfr.inc` | **oui** |
 | Recherche (form) | GET | `/search.php?config=hfr.inc` | non |
 | Recherche (résultats) | GET | `/forum1.php?recherches=1&config=hfr.inc&search={query}&cat={catEncoded}&...` | non |
 
@@ -66,6 +67,161 @@ La documentation HTML est issue de la rétro-ingénierie du code de [Redface v1]
 > **Note sur l'URL "Liste des MPs"** : l'endpoint canonique est `forum1.php?config=hfr.inc&cat=prive&...`, **pas** `message.php?config=hfr.inc` (qui ouvre le composer d'un MP isolé). Vérifié dans le legacy v1 (`HFREndpoints.PRIVATE_MESSAGES_URL`, prouvé en prod ~10 ans) et reproduit dans `:core:network HfrClient.getPrivateMessageListPage()` de Phase 1B.1. Toute la chaîne de query params (`subcat=`, `sondage=0`, `owntopic=0`, etc.) est conservée à l'identique du legacy par défensif — HFR pourrait accepter une URL plus courte mais ce n'est pas testé.
 
 > **Note sur `quote_only=1` — liste des posts citants (#783, capturé live 2026-08-30)** : l'endpoint `forum2.php?config=hfr.inc&cat={cat}&post={post}&numreponse={numreponse}&quote_only=1` renvoie une **page topic filtrée** ne contenant que les posts qui **citent** le `numreponse` cible, dans le **DOM `messagetable` standard** (mêmes sélecteurs que la lecture normale — parsé par `HfrParser.parseCitingPosts`). Accessible **anonymement** (aucun cookie requis ; c'est le canal de lecture du badge « cité N fois », un sujet = une source canonique). **Caveat — pas de bijection avec `citedCount`** : la liste renvoyée n'égale pas forcément le compteur serveur affiché (« Message cité N fois »). Le compteur agrège des **occurrences** (un même post peut citer la cible plusieurs fois ; une citation par un post depuis supprimé compte encore), là où la liste expose des **posts distincts** ; HFR **déduplique** côté serveur (observé mais **non contractuel** — d'où la garde `distinctBy { numreponse }` du repo, gate Fable R2). Il n'y a **pas de pagination** de ce filtre : `page=2` **répète** la première page au lieu d'avancer. Le titre de la feuille reste donc le `citedCount` serveur (autorité de comptage) et le corps liste exactement les rows distinctes renvoyées, sans jamais présenter leur nombre comme un second compteur.
+
+### Alerte modération — `modo.php` (#293)
+
+Contrat capturé le **05/09/2026**, avec deux comptes et un cycle complet : envoi, jonction,
+puis traitement par la modération. Les huit fixtures `moderation_alert_*.html` et leurs
+sidecars `.source.txt` vivent dans `core/parser/src/test/resources/fixtures/`.
+
+L’ouverture du menu « Alerter » déclenche un **GET authentifié volontaire** :
+
+```text
+https://forum.hardware.fr/user/modo.php?config=hfr.inc&cat={cat}&post={topicId}&numreponse={numreponse}&page={page}&ref=1
+```
+
+Construire cette URL depuis le post affiché, sans parser son lien de modération, qui peut
+être cryptlinké. `numreponse` est unique **par catégorie**. Le GET d’entrée utilise `ref=1` ;
+les actions des formulaires capturés portent `ref=18`, conservé tel quel pour le POST.
+Le flux reste disponible sur un sujet verrouillé et nécessite une session connectée.
+La feuille n’apparaît qu’une fois l’état connu ; une barre de progression fine superposée
+en haut du topic signale le chargement initial. Retour annule le GET et ses retours tardifs
+sont ignorés. Pendant l’envoi, la feuille reste ouverte ; le champ raison ne prend le focus
+qu’une fois la feuille complètement déployée, sans délai arbitraire.
+
+Le GET renvoie l’un des **six états** suivants, propres au post et au compte :
+
+| État | Signal HFR | Fixture |
+|---|---|---|
+| `Form` | Formulaire POST avec `textarea[name=raison]` | `moderation_alert_form.html` |
+| `JoinPrompt` | Formulaire POST avec `cfmodoalert=1`, sans textarea ; un autre membre a alerté | `moderation_alert_join_confirm.html` |
+| `PendingMine` | Votre demande n’est pas encore traitée | `moderation_alert_pending_mine.html` |
+| `PendingJoined` | La demande à laquelle vous vous êtes joint n’est pas encore traitée | `moderation_alert_pending_joined.html` |
+| `TreatedMine(treatedAt)` | Votre demande a été traitée ; nouveau signalement interdit | `moderation_alert_treated_mine.html` |
+| `TreatedJoined(treatedAt)` | Une demande a été traitée ; nouveau signalement interdit | `moderation_alert_treated_joined.html` |
+
+Les états sans formulaire sont lus dans `div.hop`, en normalisant espaces et entités HTML.
+La date après « traitée le » reste une chaîne HFR (`2026-09-05 17:27:28` dans les deux
+captures), sans supposer son fuseau horaire. Les userscripts de la capture `treated_mine`
+ne doivent pas influencer cette classification. Une page non reconnue produit
+`Unknown(excerpt)` et un message générique dans l’application, sans proposer d’envoi.
+
+Les deux **POST authentifiés**, encodés `application/x-www-form-urlencoded`, utilisent
+l’`action` du formulaire, avec tous ses paramètres de query conservés :
+
+| Action utilisateur | Champs du corps | Confirmation HFR | Fixture |
+|---|---|---|---|
+| Envoyer | `hash_check`, `referer_page` si présent, `raison`, `Submit=Valider votre message` | Un message a été envoyé avec succès aux modérateurs | `moderation_alert_sent.html` |
+| Me joindre | `hash_check`, `referer_page` si présent, `cfmodoalert=1`, `Submit=Confirmer` ; pas de `raison` | Vous êtes désormais joint à la demande de modération | `moderation_alert_joined.html` |
+
+Résoudre une action relative `modo.php?...` contre `https://forum.hardware.fr/user/`.
+Accepter aussi l’action absolue observée, limitée à la même origine et au chemin
+`/user/modo.php`. Le `hash_check` provient **de ce formulaire**, jamais du cache global ;
+les 32 zéros des fixtures sont une sanitation. Ni le token ni le brouillon ne sont persistés.
+
+Le formulaire avertit que le message est adressé directement aux modérateurs, uniquement
+pour leur demander de venir sur le sujet en cas de problème. L’application exige une
+raison contenant au moins un caractère non blanc, sans limite de longueur ajoutée.
+**L’acceptation d’une raison vide par HFR n’a pas été vérifiée.** La jonction exige une
+confirmation explicite. Aucun POST n’est relancé automatiquement ; le client de mutation
+conserve les cookies authentifiés et désactive le rejeu de transport. Fermer la feuille
+annule le GET en cours ; un POST déjà confirmé poursuit son exécution, comme les autres
+écritures du topic. Ses retours tardifs sont ignorés après fermeture ou changement de compte.
+
+`ModerationAlertPageParser` renvoie `Sent`, `Joined` ou `Rejected(message)` pour les
+réponses POST. Le repository laisse remonter les exceptions réseau/session ; le topic
+les présente via sa snackbar, sans confondre un échec de transport avec une confirmation HFR.
+
+#### Lien entrant modo.php
+
+Les liens HTTP et HTTPS vers `/user/modo.php` partagent la validation d’URL pour un
+intent Android `VIEW` et un tap in-app. Ils exigent `cat`, `post` et `numreponse` entiers
+strictement positifs ; sinon, l’URL reste ouverte dans le navigateur. `page` est optionnel
+(défaut 1, valeur minimale 1). `config`, `ref`, `hash_check` et le fragment sont ignorés :
+seul le contexte du post est transmis, jamais un token issu du lien.
+
+**Tap in-app — option B (#1287)** : `HfrInAppUriHandler` intercepte la route d’alerte
+et prépare une feuille d’info racine. La feuille n’apparaît qu’une fois l’état connu ;
+une barre de progression fine superposée en haut de l’écran signale le chargement.
+Après lecture de l’état de session, le seul appel
+est `ModerationRepository.loadAlert(cat, post, numreponse, page)` : **GET modo.php seul,
+aucun chargement de page de sujet ni résolution de page du post**. Le drapeau HFR reste
+intact ; le chargement authentifié du sujet qui le déplace (#1243) n’est pas déclenché
+pour consulter l’info. Les états `PendingMine`, `PendingJoined`, `TreatedMine`,
+`TreatedJoined` et `Unknown` affichent le texte HFR (repli générique si vide), ainsi que
+`treatedAt` si présent. Les fixtures modo.php et le modèle parsé ne fournissent ni
+auteur ni extrait du **post** : aucun aperçu n’est inventé ou chargé depuis le sujet.
+
+Sans session, la feuille affiche « Connectez-vous pour consulter cette alerte » sans
+GET modo.php. Une erreur propose « Réessayer ». « Voir le message » reste disponible
+dans ces deux cas et dans l’info : cette action explicite navigue vers le post sans
+`moderationAlertFor`. `Form` et `JoinPrompt` naviguent directement avec ce déclencheur,
+en fermant toute feuille d’info déjà ouverte, pour afficher le post avant de proposer un signalement.
+Dans ces navigations seulement, une page égale à 1 est résolue selon #750 avant le chargement du
+sujet ; une page supérieure à 1 est conservée. Fermer annule le GET et ignore ses retours
+tardifs ; changer de compte invalide le résultat et consulte l’état du nouveau compte.
+Retour annule aussi la lecture initiale sans quitter l’écran. « Réessayer » et un changement
+de compte sur une feuille ouverte conservent celle-ci, avec l’ancien message immédiatement
+effacé pendant le rechargement. Aucun chargement n’est relancé à la rotation.
+
+**Intent externe — comportement #293 conservé** : la route navigue d’abord vers le topic
+avec `TopicRoute.moderationAlertFor`, transmis à `TopicRequest.moderationAlertFor`.
+La page réelle est résolue selon #750 si `page == 1`. Le flux d’entrée ci-dessous vaut
+aussi pour le repli in-app `Form`/`JoinPrompt`.
+
+Au premier `Loaded` de la génération d’entrée, le topic consomme le déclencheur : si
+le post est présent, il s’y positionne et ouvre la même feuille que le menu « Alerter ».
+Le GET utilise le contexte de la page affichée et récupère un formulaire frais ; aucun
+POST n’est automatique. Si le post est absent, aucune feuille ne s’ouvre, même si une
+émission ultérieure contient le post. L’état initial de session est attendu avant
+l’ouverture ; une session anonyme conserve l’atterrissage et reçoit la snackbar
+« Connectez-vous pour alerter la modération ». La rotation conserve le ViewModel ;
+un refresh ou une navigation interne ne rejoue pas le déclencheur. Une navigation
+qui remplace l’entrée pendant le chargement ou l’attente de session l’annule.
+
+### Historique des sanctions — `/modo/historique.php` (#294)
+
+Contrat capturé le **06/09/2026** : les fixtures réelles `sanctions_history_empty.html`
+(XaTelitte, aucune sanction) et `sanctions_history_one.html` (XaTriX, une sanction levée),
+avec leurs sidecars `.source.txt`, vivent dans `core/parser/src/test/resources/fixtures/`.
+
+L’ouverture de « Mes sanctions » depuis Réglages → Compte déclenche un **GET authentifié volontaire** :
+
+```text
+https://forum.hardware.fr/modo/historique.php?config=hfr.inc
+```
+
+En anonyme, HFR répond **HTTP 200 avec un corps vide**. Le parser renvoie
+`SanctionsHistory.SignInRequired` quand le tableau attendu est absent, jamais un historique vide.
+Le ViewModel observe la session et ne lance aucune requête en anonyme ; il annule la lecture et
+efface les données au changement de compte. Aucun cache persistant ni préchargement.
+
+Le pseudo vient de `h1#md_arbo_tree_3 b`. Sélectionner la `table.main` contenant un
+`tr.cBackHeader` avec un `th` « Nom du posteur » : la première `table.main.fastsearchMain`
+est la recherche rapide, pas l’historique. Le tableau des sanctions est le deuxième dans les captures.
+Chaque `tr.profil` contient sept `td`, indépendamment de l’alternance de la classe `cBackTab2` :
+
+| Colonne HFR | Champ `Sanction` | Traitement |
+|---|---|---|
+| Nom du posteur | `pseudo` | Texte |
+| Sanction | `kind` | Texte, par exemple « Teletubbies » |
+| Modéré par | `moderator` | Texte |
+| Catégorie Interdite | `category` | Texte |
+| Date de la sanction | `issuedAt` | Date brute normalisée |
+| Sanction levée le | `liftedAt` | Date brute normalisée ; vide/blanc → `null` (« En cours ») |
+| Raison de la sanction | `reason` | Texte brut, éventuellement vide |
+
+Les dates restent des `String` au format `dd-MM-yyyy à HH:mm`, en heure de Paris :
+`13-06-2026&nbsp;à&nbsp;22:13` devient « 13-06-2026 à 22:13 », sans conversion de fuseau.
+Une ligne avec moins de sept cellules est ignorée. L’en-tête seul est un historique chargé vide,
+avec le pseudo du `h1` (`SanctionsHistory.Loaded`).
+
+La sanction capturée est « Teletubbies », par TotalRecall, catégorie « Intelligence Artificielle »,
+du 13-06-2026 à 22:13 au 18-06-2026 à 22:13, raison « Promo de juin : pour deux TALC, un TT offert. ».
+**Une sanction en cours et une raison vide n’ont pas été observées dans ces fixtures** : ces cas
+sont traités défensivement et couverts par des variantes DOM en mémoire des captures réelles.
+Les erreurs de transport/parsing restent des échecs `Result`, classés pour l’affichage avec « Réessayer » ;
+une session expirée détectée par le client rejoint « Connexion requise ».
 
 ### Retirer un drapeau — `delflag.php` (#99, Phase 2 finish)
 
@@ -846,6 +1002,21 @@ blocs `[quotemsg]`.
 ---
 
 ## Autres edge cases documentés
+
+### Ton du message (`MsgIcon`)
+
+Sur une page de sujet, HFR rend le ton dans l'icône du numéro de message :
+`td.messCase1 > div.right > a[href^="#t"] > img`, avec une source
+`/icones/message/iconN.gif`. `N = 1` est le ton par défaut et devient `Post.msgIcon = null` ; les
+autres valeurs sont conservées, y compris les valeurs historiques supérieures à 16 observées en
+lecture (`icon20.gif`). Le formulaire complet expose pour sa part 16 radios `MsgIcon`, de `1` à
+`16`, dont une cochée ; le picker d'écriture reste donc borné à ces 16 choix.
+
+Ne jamais détecter ce champ via `alt="mood"` : les blocs « Publicité » portent aussi une image
+`icon1.gif` avec cet attribut, mais sans ancre de post `a[name^="t"]`. `parsePosts` écarte ces
+blocs avant l'extraction. Contrat capturé le 2026-09-04 dans
+`core/parser/src/test/resources/fixtures/topic_dev_p75_msgicon.html` (28 posts, dont des tons 6,
+10 et 20), avec son sidecar `.source.txt`.
 
 ### Posts édités
 

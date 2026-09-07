@@ -12,18 +12,26 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.toArgb
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.lifecycleScope
 import dagger.hilt.android.AndroidEntryPoint
+import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.ui.redfaceBootstrapWindowBackground
+import fr.forumhfr.redface2.feature.settings.AppLauncherIconController
 import fr.forumhfr.redface2.navigation.IntentDelivery
 import fr.forumhfr.redface2.navigation.RedfaceApp
+import fr.forumhfr.redface2.navigation.restartOnLauncherAlias
+import java.util.logging.Logger
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
     @Inject lateinit var themeBootstrapStore: ThemeBootstrapStore
+    @Inject lateinit var launcherIconController: AppLauncherIconController
 
     private var latestIntentDelivery by mutableStateOf<IntentDelivery?>(null)
     private var nextIntentDeliveryId = INITIAL_INTENT_DELIVERY_ID
@@ -41,6 +49,33 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             RedfaceApp(intentDelivery = latestIntentDelivery)
+        }
+        reconcileLauncherIconOnStartup()
+    }
+
+    private fun reconcileLauncherIconOnStartup() {
+        lifecycleScope.launch {
+            try {
+                // The controller reads DataStore and PackageManager on the injected IO dispatcher.
+                launcherIconController.reconcile()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                Logger.getLogger("AppLauncherIcon").warning("Launcher reconciliation failed; retry on next startup")
+            }
+        }
+    }
+
+    internal fun restartLauncherIcon(icon: AppLauncherIcon, onFailure: () -> Unit) {
+        // Once the effect is consumed, the restart belongs to the Activity rather than the gallery.
+        lifecycleScope.launch {
+            try {
+                restartOnLauncherAlias(this@MainActivity, icon, launcherIconController)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                onFailure()
+            }
         }
     }
 

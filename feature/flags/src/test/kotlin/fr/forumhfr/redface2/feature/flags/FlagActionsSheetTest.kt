@@ -77,7 +77,7 @@ class FlagActionsSheetTest {
         compose.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 FlagActionsSheet(
-                    flag = flag().copy(cat = 0),
+                    flag = flag().copy(cat = 0, resolvedFromServer = false),
                     categoryName = "Catégorie 0",
                     isSuperFavorite = true,
                     actions = FlagSheetActions(
@@ -97,6 +97,78 @@ class FlagActionsSheetTest {
         compose.runOnIdle {
             assertEquals(1, toggleSuperFavoriteCalls)
             assertEquals(0, removeFlagCalls)
+        }
+    }
+
+    @Test
+    fun `a fallback super favorite with a known cat never offers the server removal`() {
+        var toggleSuperFavoriteCalls = 0
+        var removeFlagCalls = 0
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                FlagActionsSheet(
+                    flag = flag().copy(resolvedFromServer = false),
+                    categoryName = "Discussions",
+                    isSuperFavorite = true,
+                    actions = FlagSheetActions(
+                        onOpen = {},
+                        onReply = {},
+                        onToggleSuperFavorite = { toggleSuperFavoriteCalls += 1 },
+                        onRemove = { removeFlagCalls += 1 },
+                        onDismiss = {},
+                    ),
+                )
+            }
+        }
+
+        compose.onNodeWithText("Retirer des super favoris").performClick()
+        compose.onNodeWithText("Retirer le drapeau").assertDoesNotExist()
+
+        compose.runOnIdle {
+            assertEquals(1, toggleSuperFavoriteCalls)
+            assertEquals(0, removeFlagCalls)
+        }
+    }
+
+    @Test
+    fun `metadata omits extra pages when the tap opens page 60 of 60`() {
+        showFlag(flag().copy(totalPages = 60, lastReadPage = 59, lastPosition = 2360))
+
+        compose.onNodeWithText("page 59 / 60").assertExists()
+        compose.onNodeWithText("+1 à lire", substring = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun `metadata shows one extra page when the tap stays on page 59 of 60`() {
+        showFlag(flag().copy(totalPages = 60, lastReadPage = 59, lastPosition = 2340))
+
+        compose.onNodeWithText("page 59 / 60 · +1 à lire").assertExists()
+    }
+
+    @Test
+    fun `metadata omits extra pages for a read flag with a positive page counter`() {
+        showFlag(flag().copy(totalPages = 60, lastReadPage = 59, lastPosition = 2360, hasUnread = false))
+
+        compose.onNodeWithText("page 59 / 60").assertExists()
+        compose.onNodeWithText("+1 à lire", substring = true).assertDoesNotExist()
+    }
+
+    private fun showFlag(flag: Flag) {
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                FlagActionsSheet(
+                    flag = flag,
+                    categoryName = "Discussions",
+                    isSuperFavorite = false,
+                    actions = FlagSheetActions(
+                        onOpen = {},
+                        onReply = {},
+                        onToggleSuperFavorite = {},
+                        onRemove = {},
+                        onDismiss = {},
+                    ),
+                )
+            }
         }
     }
 

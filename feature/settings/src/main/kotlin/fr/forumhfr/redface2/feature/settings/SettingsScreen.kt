@@ -77,6 +77,9 @@ fun SettingsScreen(
     onOpenAccountAbout: () -> Unit,
     onOpenBlacklist: () -> Unit,
     onOpenCategory: (String) -> Unit,
+    onOpenAppIcon: () -> Unit = {},
+    onOpenSanctions: () -> Unit = {},
+    isAuthenticated: Boolean = false,
     modifier: Modifier = Modifier,
     topBarActions: @Composable (() -> Unit)? = null,
     viewModel: SettingsViewModel = hiltViewModel(),
@@ -92,8 +95,11 @@ fun SettingsScreen(
         onOpenProxy = onOpenProxy,
         onOpenMaintenance = onOpenMaintenance,
         onOpenDisplay = onOpenDisplay,
+        onOpenAppIcon = onOpenAppIcon,
         onOpenImages = onOpenImages,
         onOpenAccountAbout = onOpenAccountAbout,
+        onOpenSanctions = onOpenSanctions,
+        isAuthenticated = isAuthenticated,
         onOpenBlacklist = onOpenBlacklist,
         onOpenCategory = onOpenCategory,
         modifier = modifier,
@@ -119,6 +125,9 @@ internal fun SettingsRoot(
     onOpenAccountAbout: () -> Unit,
     onOpenBlacklist: () -> Unit,
     onOpenCategory: (String) -> Unit,
+    onOpenAppIcon: () -> Unit = {},
+    onOpenSanctions: () -> Unit = {},
+    isAuthenticated: Boolean = false,
     modifier: Modifier = Modifier,
     topBarActions: @Composable (() -> Unit)? = null,
 ) {
@@ -162,8 +171,11 @@ internal fun SettingsRoot(
         onOpenProxy = onOpenProxy,
         onOpenMaintenance = onOpenMaintenance,
         onOpenDisplay = onOpenDisplay,
+        onOpenAppIcon = onOpenAppIcon,
         onOpenImages = onOpenImages,
         onOpenAccountAbout = onOpenAccountAbout,
+        onOpenSanctions = onOpenSanctions,
+        isAuthenticated = isAuthenticated,
         onOpenBlacklist = onOpenBlacklist,
         hfrLinkStatus = rememberHfrLinkHandlingStatus(),
         onOpenHfrLinkSettings = { openAppDefaultLinkSettings(context) },
@@ -306,6 +318,9 @@ internal fun buildSettingsCatalogue(
     onOpenImages: () -> Unit,
     onOpenAccountAbout: () -> Unit,
     onOpenBlacklist: () -> Unit,
+    onOpenAppIcon: () -> Unit = {},
+    onOpenSanctions: () -> Unit = {},
+    isAuthenticated: Boolean = false,
     hfrLinkStatus: HfrLinkHandlingStatus = HfrLinkHandlingStatus.UNKNOWN,
     onOpenHfrLinkSettings: () -> Unit = {},
 ): List<SettingsCatalogueSection> = listOf(
@@ -446,7 +461,12 @@ internal fun buildSettingsCatalogue(
                     "police",
                     "taille",
                     "image",
+                    "images",
                     "largeur",
+                    "coins",
+                    "arrondis",
+                    "carrés",
+                    "rayon",
                     "90",
                     "95",
                     "99",
@@ -476,8 +496,19 @@ internal fun buildSettingsCatalogue(
                     stringResource(R.string.settings_display_post_image_max_width_95),
                     stringResource(R.string.settings_display_post_image_max_width_99),
                     stringResource(R.string.settings_display_post_image_max_width_100),
+                    stringResource(R.string.settings_display_post_image_corners_title),
+                    stringResource(R.string.settings_display_post_image_corners_rounded),
+                    stringResource(R.string.settings_display_post_image_corners_soft),
+                    stringResource(R.string.settings_display_post_image_corners_square),
                 ),
                 onClick = onOpenDisplay,
+            ),
+            navRow(
+                id = "display_launcher_icon",
+                title = stringResource(R.string.settings_display_launcher_icon_title),
+                description = stringResource(R.string.settings_display_launcher_icon_help),
+                keywords = listOf("icône", "lanceur", "launcher", "logo", "application", "RF1", "Redface 1"),
+                onClick = onOpenAppIcon,
             ),
             futureRow(
                 id = "future_classic_theme",
@@ -927,6 +958,7 @@ internal fun buildSettingsCatalogue(
                 ),
                 onClick = onOpenAccountAbout,
             ),
+            sanctionsRow(isAuthenticated = isAuthenticated, onClick = onOpenSanctions),
             futureRow(
                 id = "future_hfr_profile_settings",
                 title = stringResource(R.string.settings_future_hfr_profile_settings),
@@ -1041,6 +1073,18 @@ internal fun buildSettingsCatalogue(
             ),
         ),
     ),
+)
+
+@Composable
+private fun sanctionsRow(isAuthenticated: Boolean, onClick: () -> Unit): SettingsCatalogueRow = SettingsCatalogueRow(
+    searchable = SettingsSearchableItem(
+        id = "sanctions",
+        title = stringResource(R.string.sanctions_title),
+        description = stringResource(sanctionsDescriptionRes(isAuthenticated)),
+        keywords = listOf("historique", "sanction", "TT", "ban", "modération", "compte HFR"),
+        enabled = isAuthenticated,
+    ),
+    render = { SanctionsSettingsItem(isAuthenticated = isAuthenticated, onClick = onClick) },
 )
 
 /** A navigation row (chevron trailing) — opaque to search via [keywords]. */

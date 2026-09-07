@@ -18,6 +18,10 @@ import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.SubCategory
 import fr.forumhfr.redface2.core.model.TopicListPage
 import fr.forumhfr.redface2.core.model.TopicSummary
+import java.io.IOException
+import java.util.logging.Level
+import java.util.logging.Logger
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
@@ -91,6 +95,13 @@ class CategoryViewModel @AssistedInject constructor(
     // empty field is a valid state.
     private val search: MutableStateFlow<SearchSlice> = MutableStateFlow(SearchSlice(query = "", active = false))
     private val isRefreshing: MutableStateFlow<Boolean> = MutableStateFlow(false)
+
+    // Null until each shared repository cache is hydrated; observed for anonymous sessions too.
+    private val menusCollapsed = MutableStateFlow<Boolean?>(null)
+    private val stickyTopicsCollapsed = MutableStateFlow<Boolean?>(null)
+    private val layoutSearchSlice = combine(search, menusCollapsed, stickyTopicsCollapsed) { search, menus, sticky ->
+        LayoutSearchSlice(search, menus, sticky)
+    }
 
     // #455 — « Mes drapeaux » filter. Pushed state (not flatMapLatest) so refresh() can
     // await the bucket fetch and drive [isRefreshing] correctly, and so a refresh keeps the
@@ -184,15 +195,15 @@ class CategoryViewModel @AssistedInject constructor(
         if (hydrated) FilterSlice(filter, topics) else null
     }.filterNotNull()
 
-    // #1130 — [search] is already a single combined flow (query + active), so it feeds the final
-    // `combine` directly and keeps the same 5 typed sources.
+    // #1303 — search and layout form one slice, preserving the five-source typed combine.
     val uiState: StateFlow<CategoryUiState> = combine(
         coreState,
         filterSlice,
-        search,
+        layoutSearchSlice,
         isRefreshing,
         isAuthenticated,
-    ) { core, filter, searchState, refreshing, authenticated ->
+    ) { core, filter, layoutSearch, refreshing, authenticated ->
+        val searchState = layoutSearch.search
         val filterActive = filter.flagFilter != CategoryFlagFilter.ALL
         CategoryUiState(
             cat = request.cat,
@@ -206,6 +217,9 @@ class CategoryViewModel @AssistedInject constructor(
             topics = core.topics,
             searchQuery = searchState.query,
             searchActive = searchState.active,
+            menusCollapsed = layoutSearch.menusCollapsed ?: false,
+            stickyTopicsCollapsed = layoutSearch.stickyTopicsCollapsed ?: false,
+            layoutPreferencesReady = layoutSearch.menusCollapsed != null && layoutSearch.stickyTopicsCollapsed != null,
             // The text search applies to whichever listing is active (bucket or normal).
             filteredTopics = if (filterActive) {
                 filter.flagFilterTopics.filterTopics(searchState.query)
@@ -238,6 +252,14 @@ class CategoryViewModel @AssistedInject constructor(
     private var prefetchJob: Job? = null
 
     init {
+        userPreferencesRepository.observeForumCategoryMenusCollapsed()
+            .onEach { menusCollapsed.value = it }
+            .launchIn(viewModelScope)
+        userPreferencesRepository.observeForumCategoryStickyTopicsCollapsed()
+            .onEach { stickyTopicsCollapsed.value = it }
+            .launchIn(viewModelScope)
+
+
         // Anonymous prefetch of `page + 1` whenever a Content lands. The trigger is
         // derived **directly from the [TopicListPage] inside `Content`** — not from
         // the separate `selectedSubcat` / `page` `MutableStateFlow`s. The earlier
@@ -353,6 +375,33 @@ class CategoryViewModel @AssistedInject constructor(
     fun selectPage(newPage: Int) {
         if (newPage < 1 || newPage == page.value) return
         page.value = newPage
+    }
+
+    /** #1303 — a layout choice never refetches or changes the page, subcategory or search. */
+    fun setMenusCollapsed(collapsed: Boolean) {
+        if (menusCollapsed.value == null || menusCollapsed.value == collapsed) return
+        menusCollapsed.value = collapsed
+        // Enter the cache-first setter before returning, even if the route is immediately popped.
+        persistLayoutPreference { userPreferencesRepository.setForumCategoryMenusCollapsed(collapsed) }
+    }
+
+    /** Independent of search: closing search reapplies this preference without writing it. */
+    fun setStickyTopicsCollapsed(collapsed: Boolean) {
+        if (stickyTopicsCollapsed.value == null || stickyTopicsCollapsed.value == collapsed) return
+        stickyTopicsCollapsed.value = collapsed
+        persistLayoutPreference { userPreferencesRepository.setForumCategoryStickyTopicsCollapsed(collapsed) }
+    }
+
+    private fun persistLayoutPreference(write: suspend () -> Unit) {
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                write()
+            } catch (failure: IOException) {
+                // The shared cache remains authoritative for this session if the disk is unavailable.
+                // Cancellation is not an IO error: it still propagates, leaving the app-owned commit alive.
+                Logger.getLogger("CategoryViewModel").log(Level.WARNING, "Could not persist category layout", failure)
+            }
+        }
     }
 
     fun updateSearchQuery(query: String) {
@@ -517,6 +566,12 @@ class CategoryViewModel @AssistedInject constructor(
     private data class FilterSlice(
         val flagFilter: CategoryFlagFilter,
         val flagFilterTopics: TopicsUiState,
+    )
+
+    private data class LayoutSearchSlice(
+        val search: SearchSlice,
+        val menusCollapsed: Boolean?,
+        val stickyTopicsCollapsed: Boolean?,
     )
 
     private data class SearchSlice(

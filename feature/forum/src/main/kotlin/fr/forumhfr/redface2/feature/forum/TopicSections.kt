@@ -12,19 +12,12 @@ internal data class TopicSections(
     val regular: List<TopicSummary>,
 )
 
-/** True only when the list needs a visible boundary between sticky and regular topics. */
-internal val TopicSections.hasStickyBoundary: Boolean
-    get() = sticky.isNotEmpty() && regular.isNotEmpty()
-
 /**
- * #1129 — whether to actually draw the sticky/regular boundary (and, upstream, the sticky
- * partition) for the current listing. Scoped to real category listings only: flag-filter buckets
- * (Participé/Lus/Favoris) are recency-sorted cross-category views, so a pinned topic must not be
- * promoted there and no separator is shown. Kept out of the composable so the scoping invariant is
- * unit-testable without a Compose harness.
+ * #1303 — header before the sticky group, even on a sticky-only page. Flag buckets keep their
+ * source order and all sticky topics visible, without a header or a collapse command.
  */
-internal fun TopicSections.shouldShowStickyBoundary(filterActive: Boolean): Boolean =
-    !filterActive && hasStickyBoundary
+internal fun TopicSections.shouldShowStickyHeader(filterActive: Boolean): Boolean =
+    !filterActive && sticky.isNotEmpty()
 
 /** #1129 — partition the filtered topics of the loaded page without assuming server ordering. */
 internal fun List<TopicSummary>.toTopicSections(): TopicSections {

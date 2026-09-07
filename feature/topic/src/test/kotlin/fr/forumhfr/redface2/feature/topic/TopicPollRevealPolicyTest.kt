@@ -10,7 +10,7 @@ import org.junit.Test
 class TopicPollRevealPolicyTest {
 
     @Test
-    fun `the complete reveal matrix preserves manual priority and requires a live open form`() {
+    fun `the complete reveal matrix preserves manual priority and keeps a just voted poll expanded`() {
         val manualChoices = listOf<Boolean?>(null, true, false)
         repeat(manualChoices.size * BOOLEAN_COMBINATIONS) { caseIndex ->
             val manualExpanded = manualChoices[caseIndex / BOOLEAN_COMBINATIONS]
@@ -19,23 +19,27 @@ class TopicPollRevealPolicyTest {
             val expandUnansweredPolls = flags.hasBit(1)
             val hasLiveHash = flags.hasBit(2)
             val pollClosed = flags.hasBit(3)
+            val justVoted = flags.hasBit(4)
             val expected = when (manualExpanded) {
                 null -> pollsExpandedDefault ||
-                    (expandUnansweredPolls && hasLiveHash && !pollClosed)
+                    (expandUnansweredPolls && ((hasLiveHash && !pollClosed) || justVoted))
                 else -> manualExpanded
             }
 
             assertEquals(
                 "manual=$manualExpanded, default=$pollsExpandedDefault, " +
                     "unanswered=$expandUnansweredPolls, liveHash=$hasLiveHash, " +
-                    "closed=$pollClosed",
+                    "closed=$pollClosed, justVoted=$justVoted",
                 expected,
                 resolvePollRevealed(
-                    manualExpanded = manualExpanded,
-                    pollsExpandedDefault = pollsExpandedDefault,
-                    expandUnansweredPolls = expandUnansweredPolls,
-                    pollVoteForm = form(hashCheck = if (hasLiveHash) "live-token" else ""),
-                    pollClosed = pollClosed,
+                    PollRevealInputs(
+                        manualExpanded = manualExpanded,
+                        pollsExpandedDefault = pollsExpandedDefault,
+                        expandUnansweredPolls = expandUnansweredPolls,
+                        pollVoteForm = form(hashCheck = if (hasLiveHash) "live-token" else ""),
+                        pollClosed = pollClosed,
+                        justVoted = justVoted,
+                    ),
                 ),
             )
         }
@@ -45,11 +49,14 @@ class TopicPollRevealPolicyTest {
     fun `collapsed poll with opt-in and a live form is expanded`() {
         assertTrue(
             resolvePollRevealed(
-                manualExpanded = null,
-                pollsExpandedDefault = false,
-                expandUnansweredPolls = true,
-                pollVoteForm = form(hashCheck = "live-token"),
-                pollClosed = false,
+                PollRevealInputs(
+                    manualExpanded = null,
+                    pollsExpandedDefault = false,
+                    expandUnansweredPolls = true,
+                    pollVoteForm = form(hashCheck = "live-token"),
+                    pollClosed = false,
+                    justVoted = false,
+                ),
             ),
         )
     }
@@ -58,11 +65,14 @@ class TopicPollRevealPolicyTest {
     fun `closed poll is not auto-expanded by the unanswered opt-in`() {
         assertFalse(
             resolvePollRevealed(
-                manualExpanded = null,
-                pollsExpandedDefault = false,
-                expandUnansweredPolls = true,
-                pollVoteForm = form(hashCheck = "live-token"),
-                pollClosed = true,
+                PollRevealInputs(
+                    manualExpanded = null,
+                    pollsExpandedDefault = false,
+                    expandUnansweredPolls = true,
+                    pollVoteForm = form(hashCheck = "live-token"),
+                    pollClosed = true,
+                    justVoted = false,
+                ),
             ),
         )
     }
@@ -71,11 +81,14 @@ class TopicPollRevealPolicyTest {
     fun `consumed form with an empty hash is not auto-expanded`() {
         assertFalse(
             resolvePollRevealed(
-                manualExpanded = null,
-                pollsExpandedDefault = false,
-                expandUnansweredPolls = true,
-                pollVoteForm = form(hashCheck = ""),
-                pollClosed = false,
+                PollRevealInputs(
+                    manualExpanded = null,
+                    pollsExpandedDefault = false,
+                    expandUnansweredPolls = true,
+                    pollVoteForm = form(hashCheck = ""),
+                    pollClosed = false,
+                    justVoted = false,
+                ),
             ),
         )
     }
@@ -84,11 +97,62 @@ class TopicPollRevealPolicyTest {
     fun `manual collapse wins over both expansion preferences and a live form`() {
         assertFalse(
             resolvePollRevealed(
-                manualExpanded = false,
-                pollsExpandedDefault = true,
-                expandUnansweredPolls = true,
-                pollVoteForm = form(hashCheck = "live-token"),
-                pollClosed = false,
+                PollRevealInputs(
+                    manualExpanded = false,
+                    pollsExpandedDefault = true,
+                    expandUnansweredPolls = true,
+                    pollVoteForm = form(hashCheck = "live-token"),
+                    pollClosed = false,
+                    justVoted = false,
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `just voted results remain expanded without a vote form`() {
+        assertTrue(
+            resolvePollRevealed(
+                PollRevealInputs(
+                    manualExpanded = null,
+                    pollsExpandedDefault = false,
+                    expandUnansweredPolls = true,
+                    pollVoteForm = null,
+                    pollClosed = false,
+                    justVoted = true,
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `manual collapse still wins immediately after a vote`() {
+        assertFalse(
+            resolvePollRevealed(
+                PollRevealInputs(
+                    manualExpanded = false,
+                    pollsExpandedDefault = false,
+                    expandUnansweredPolls = true,
+                    pollVoteForm = null,
+                    pollClosed = false,
+                    justVoted = true,
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `just voted results stay collapsed when the unanswered opt-in is off`() {
+        assertFalse(
+            resolvePollRevealed(
+                PollRevealInputs(
+                    manualExpanded = null,
+                    pollsExpandedDefault = false,
+                    expandUnansweredPolls = false,
+                    pollVoteForm = null,
+                    pollClosed = false,
+                    justVoted = true,
+                ),
             ),
         )
     }
@@ -104,6 +168,6 @@ class TopicPollRevealPolicyTest {
     private fun Int.hasBit(bit: Int): Boolean = this and (1 shl bit) != 0
 
     private companion object {
-        const val BOOLEAN_COMBINATIONS = 16
+        const val BOOLEAN_COMBINATIONS = 32
     }
 }

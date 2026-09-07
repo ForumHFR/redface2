@@ -1,0 +1,8 @@
+Fixture : sanctions_history_empty.html
+Origine : page /modo/historique.php?config=hfr.inc (« Historique des sanctions : <pseudo> ») — GET authentifié, compte
+          sans aucune sanction : tableau `table.main` avec la seule ligne d'en-tête `tr.cBackHeader` (7 colonnes),
+          aucune `tr.profil`.
+Capture : live le 2026-09-06, AUTHENTIFIÉ sous XaTelitte, via « Enregistrer la page » du navigateur (chemins d'assets
+          réécrits en assets/, neutralisés). Issue #294.
+Sanitation : hash_check (formulaire de recherche rapide) remplacé par 32 zéros. Aucun cookie, e-mail ni identifiant de
+          session dans la page. En anonyme la même URL renvoie un corps vide (aucun tableau, HTTP 200) (vérifié le 2026-09-06).

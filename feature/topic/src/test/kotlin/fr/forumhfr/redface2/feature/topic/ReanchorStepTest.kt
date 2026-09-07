@@ -33,6 +33,20 @@ class ReanchorStepTest {
     }
 
     @Test
+    fun `reanchor stops when the displayed page changes`() {
+        val step = reanchorStep(
+            current = ReanchorFrame(target, 60),
+            previous = ReanchorFrame(target, 0),
+            goal = ReanchorGoal(target),
+            stableFrames = 0,
+            stableThreshold = threshold,
+            ownerStillValid = false,
+        )
+
+        assertEquals(ReanchorStep.Stop, step)
+    }
+
+    @Test
     fun `holding still for the threshold stops`() {
         val frame = ReanchorFrame(target, 0)
         val step = reanchorStep(

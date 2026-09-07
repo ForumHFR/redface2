@@ -19,7 +19,6 @@
     <string name="category_topic_new_highlight">Sujet que vous venez de créer</string>
     <string name="category_badge_sticky">Épinglé</string>
     <string name="category_badge_locked">Fermé</string>
-    <string name="category_regular_topics_separator">Autres sujets</string>
     <string name="category_pager_previous">Précédent</string>
     <string name="category_pager_next">Suivant</string>
     <string name="category_pager_position">page %1$d / %2$d</string>
@@ -42,4 +41,27 @@
     <string name="category_flag_filter_participated">Participé</string>
     <string name="category_flag_filter_read">Lus</string>
     <string name="category_flag_filter_favorites">Favoris</string>
+
+    <!-- #1303 — commandes de repli et états accessibles. -->
+    <string name="category_menus_collapse">Réduire les menus</string>
+    <string name="category_menus_expand">Développer les menus</string>
+    <string name="category_layout_expanded">Dépliés</string>
+    <string name="category_layout_collapsed">Repliés</string>
+    <string name="category_subcategory_fallback">Sous-catégorie %1$d</string>
+    <plurals name="category_sticky_count">
+        <item quantity="one">Épinglé (%1$d)</item>
+        <item quantity="other">Épinglés (%1$d)</item>
+    </plurals>
+    <plurals name="category_sticky_hidden">
+        <item quantity="one">%1$d épinglé masqué</item>
+        <item quantity="other">%1$d épinglés masqués</item>
+    </plurals>
+    <plurals name="category_sticky_expand">
+        <item quantity="one">Afficher %1$d sujet épinglé</item>
+        <item quantity="other">Afficher %1$d sujets épinglés</item>
+    </plurals>
+    <plurals name="category_sticky_collapse">
+        <item quantity="one">Masquer %1$d sujet épinglé</item>
+        <item quantity="other">Masquer %1$d sujets épinglés</item>
+    </plurals>
 </resources>

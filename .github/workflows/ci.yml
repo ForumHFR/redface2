@@ -19,6 +19,39 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      code: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.code }}
+    steps:
+      - name: Detect non-documentation changes
+        id: filter
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.4
+        # A version bump touches app/build.gradle.kts, so it deliberately remains a code PR.
+        with:
+          filters: |
+            code:
+              - '**'
+              - '!**/*.md'
+              - '!docs/**'
+              - '!drafts/**'
+              - '!**/play/whatsnew/**'
+              - '!.github/ISSUE_TEMPLATE/**'
+              - '!LICENSE*'
+              # Ré-inclusions (dorny: la DERNIÈRE règle qui matche gagne). Ces docs sont lues à
+              # l'exécution par `DocsConsistencyTest` (:app) : les exclure du filtre `code`
+              # désarmerait la garde de cohérence sur une PR qui ne touche qu'eux.
+              - 'docs/specs/**'
+              - 'docs/guides/contributing.md'
+              - 'AGENTS.md'
+              - 'CHANGELOG.md'
+              - 'README.md'
+
   # Fan-out by task type (was a single `verify` job running every task in one invocation). Each
   # entry runs on its own runner, so the four task groups parallelise PAST the 4-vCPU cap of a
   # single runner. `setup-gradle` gives each entry its own incremental build cache (seeded on push
@@ -33,6 +66,8 @@ jobs:
   # across variants (incl. the Konsist architecture test).
   verify:
     name: ${{ matrix.task.name }}
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     container:
       image: ghcr.io/cirruslabs/android-sdk:36@sha256:f9b3ea9ed2b5fc9522adae82c7b4622ab7aa54207ef532c8e615a347dca08f31
@@ -115,21 +150,23 @@ jobs:
         run: bash scripts/report-large-files.sh
 
   # Single aggregate check whose name is the one `main`'s branch protection requires
-  # ("Build, lint and test"). Green iff every `verify` matrix entry succeeded, so the fan-out stays
-  # compatible with the existing required-status-check on `main` (dev→main promotion) without having
-  # to re-point branch protection at four separate contexts.
+  # ("Build, lint and test"). Green iff `repo-guards` succeeded and `verify` either succeeded or was
+  # skipped for a docs-only PR, so the fan-out stays compatible with the existing required-status
+  # check on `main` (dev→main promotion) without re-pointing branch protection at separate contexts.
   build-lint-and-test:
     name: Build, lint and test
     if: always()
-    needs: [verify, repo-guards]
+    needs: [changes, verify, repo-guards]
     runs-on: ubuntu-24.04
     steps:
       - name: Require all required jobs to pass
         run: |
+          code='${{ needs.changes.outputs.code }}'
           verify='${{ needs.verify.result }}'
           guards='${{ needs.repo-guards.result }}'
-          echo "verify matrix result: $verify | repo-guards result: $guards"
-          if [ "$verify" != "success" ] || [ "$guards" != "success" ]; then
-            echo "::error::A required job did not succeed (verify=$verify, repo-guards=$guards)."
+          echo "code changes: $code | verify matrix result: $verify | repo-guards result: $guards"
+          if [ "$guards" != "success" ] || \
+             { [ "$verify" != "success" ] && { [ "$code" != "false" ] || [ "$verify" != "skipped" ]; }; }; then
+            echo "::error::A required job did not succeed (code=$code, verify=$verify, repo-guards=$guards)."
             exit 1
           fi

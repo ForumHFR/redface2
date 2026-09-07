@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.topic
 
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
@@ -670,12 +671,14 @@ class QuickReplyViewModelTest {
     private fun quickReplyViewModel(
         replyRepository: ReplyRepository = FakeQuickReplyRepository(),
         draftStore: EditorDraftStore = FakeQuickReplyDraftStore(),
+        savedStateHandle: SavedStateHandle = SavedStateHandle(),
         confirmBeforePosting: Boolean = false,
         // Test default = cards ON so the #604 lot 2-3 card suites keep exercising their mode ;
         // the #805 inline tests opt OUT explicitly (the PRODUCTION default is false = inline).
         quoteCardsEnabled: Boolean = true,
     ): QuickReplyViewModel = QuickReplyViewModel(
         request = QuickReplyRequest(cat = 23, subcat = 401, topicId = 35421, page = 3),
+        savedStateHandle = savedStateHandle,
         replyRepository = replyRepository,
         quoteMaterializer = TopicReplyQuoteMaterializer(replyRepository),
         draftStore = draftStore,

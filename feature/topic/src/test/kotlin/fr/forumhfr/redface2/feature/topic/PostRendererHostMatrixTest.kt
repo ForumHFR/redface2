@@ -8,6 +8,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performTouchInput
@@ -22,6 +23,8 @@ import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.post.PostImageTarget
+import fr.forumhfr.redface2.core.ui.post.viewerRequestFor
+import fr.forumhfr.redface2.core.ui.viewer.ImageViewerRequest
 import java.time.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Before
@@ -53,6 +56,7 @@ class PostRendererHostMatrixTest {
     private val bodyImageUrl = "https://rehost.diberie.com/Picture/Get/f/body.png"
     private val signatureImageUrl = "https://rehost.diberie.com/Picture/Get/f/signature.png"
     private val fullLinkUrl = "https://example.org/full"
+    private val fullImageUrl = "https://cdn.example.org/original/photo.webp"
 
     @OptIn(coil3.annotation.DelicateCoilApi::class)
     @Before
@@ -75,11 +79,13 @@ class PostRendererHostMatrixTest {
         ),
     )
 
-    private fun postWithSignature(): Post = Post(
+    private fun postWithSignature(
+        content: PostContent = PostContent(blocks = listOf(linkedImageParagraph(bodyImageUrl, "corps"))),
+    ): Post = Post(
         numreponse = 16244,
         author = "XaTriX",
         date = Instant.EPOCH,
-        content = PostContent(blocks = listOf(linkedImageParagraph(bodyImageUrl, "corps"))),
+        content = content,
         avatarUrl = null,
         isEditable = false,
         isOwnPost = false,
@@ -90,16 +96,21 @@ class PostRendererHostMatrixTest {
         signature = PostContent(blocks = listOf(linkedImageParagraph(signatureImageUrl, "sig"))),
     )
 
-    private fun setCard(onImageLongPress: ((PostImageTarget) -> Unit)?) {
+    private fun setCard(
+        onImageLongPress: ((PostImageTarget) -> Unit)?,
+        onOpenImageViewer: ((PostImageTarget) -> Unit)? = null,
+        content: PostContent = postWithSignature().content,
+    ) {
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 TopicPostCard(
-                    post = postWithSignature(),
+                    post = postWithSignature(content),
                     citedCount = 0,
                     showSignature = true,
                     onQuote = null,
                     onEdit = null,
                     onImageLongPress = onImageLongPress,
+                    onOpenImageViewer = onOpenImageViewer,
                 )
             }
         }
@@ -118,6 +129,36 @@ class PostRendererHostMatrixTest {
 
         assertEquals(bodyImageUrl, received?.url)
         assertEquals(fullLinkUrl, received?.linkUrl)
+    }
+
+    @Test
+    fun `a linked image-like block reaches the topic viewer policy with full source and preview`() {
+        var opened: ImageViewerRequest? = null
+        val content = PostContent(
+            blocks = listOf(
+                PostBlock.Paragraph(
+                    inlines = listOf(
+                        PostInline.Link(
+                            url = fullImageUrl,
+                            children = listOf(
+                                PostInline.InlineImage(url = bodyImageUrl, description = "bloc"),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        setCard(
+            onImageLongPress = {},
+            onOpenImageViewer = { viewerRequestFor(it, diskCache = true)?.let { request -> opened = request } },
+            content = content,
+        )
+
+        composeTestRule.onNodeWithContentDescription("bloc").performTouchInput { click() }
+
+        assertEquals(fullImageUrl, opened?.sourceUrl)
+        assertEquals(bodyImageUrl, opened?.previewUrl)
+        assertEquals(true, opened?.diskCache)
     }
 
     @Test

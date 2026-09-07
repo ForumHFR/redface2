@@ -16,6 +16,8 @@ import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
@@ -32,6 +34,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -113,7 +116,10 @@ import fr.forumhfr.redface2.core.ui.account.RedfaceAccountMenu
 import fr.forumhfr.redface2.core.ui.browser.LocalAlwaysAskLinkApp
 import fr.forumhfr.redface2.core.ui.browser.openUrlInExternalBrowser
 import fr.forumhfr.redface2.core.ui.debug.DebugBoundsOverlay
+import fr.forumhfr.redface2.core.ui.post.sharePostImageUrl
 import fr.forumhfr.redface2.core.ui.theme.ReadingDisplaySettings
+import fr.forumhfr.redface2.core.ui.viewer.ImageViewerRequest
+import fr.forumhfr.redface2.core.ui.viewer.ImageViewerScreen
 import fr.forumhfr.redface2.feature.auth.LoginScreen
 import fr.forumhfr.redface2.feature.editor.PostEditorMode
 import fr.forumhfr.redface2.feature.editor.PostEditorRequest
@@ -137,6 +143,7 @@ import fr.forumhfr.redface2.feature.profile.ProfileRoute
 import fr.forumhfr.redface2.feature.profile.ProfileViewModel
 import fr.forumhfr.redface2.feature.search.SearchScreen
 import fr.forumhfr.redface2.feature.settings.MyImagesScreen
+import fr.forumhfr.redface2.feature.settings.SanctionsScreen
 import fr.forumhfr.redface2.feature.settings.SettingsAccountAboutScreen
 import fr.forumhfr.redface2.feature.settings.SettingsColorsScreen
 import fr.forumhfr.redface2.feature.settings.SettingsCategoryDetailScreen
@@ -146,10 +153,15 @@ import fr.forumhfr.redface2.feature.settings.SettingsMaintenanceScreen
 import fr.forumhfr.redface2.feature.settings.SettingsBlacklistScreen
 import fr.forumhfr.redface2.feature.settings.SettingsProxyScreen
 import fr.forumhfr.redface2.feature.settings.SettingsScreen
+import fr.forumhfr.redface2.feature.topic.ModerationAlertLinkIntent
+import fr.forumhfr.redface2.feature.topic.ModerationAlertLinkTarget
+import fr.forumhfr.redface2.feature.topic.ModerationAlertLinkViewModel
 import fr.forumhfr.redface2.feature.topic.TopicRequest
+import fr.forumhfr.redface2.feature.topic.PostImageActionsViewModel
 import fr.forumhfr.redface2.feature.topic.TopicScreen
 import fr.forumhfr.redface2.feature.topic.TopicScrollAnchor
 import fr.forumhfr.redface2.feature.topic.TopicSubmitResult
+import fr.forumhfr.redface2.feature.topic.R as TopicR
 import java.time.Instant
 import kotlinx.serialization.Serializable
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -179,6 +191,20 @@ data class SearchUserPostsRoute(val pseudo: String) : RedfaceNavKey
 
 @Serializable
 data object MessagesRoute : RedfaceNavKey
+
+/** Restorable, self-contained fullscreen image viewer destination (#182). */
+@Serializable
+data class ImageViewerRoute(
+    val sourceUrl: String,
+    val previewUrl: String,
+    val externalUrl: String,
+    val description: String? = null,
+    val diskCache: Boolean = true,
+) : RedfaceNavKey {
+    init {
+        require(sourceUrl.isNotBlank()) { "Image viewer source URL must not be blank" }
+    }
+}
 
 @Serializable
 data class PrivateMessageThreadRoute(
@@ -238,7 +264,7 @@ data class PrivateMessageComposeRoute(
  */
 private fun NavKey?.hidesNavigationSuite(): Boolean =
     this is PostEditorRoute || this is TopicFormRoute || this is PrivateMessageReplyRoute ||
-        this is PrivateMessageComposeRoute
+        this is PrivateMessageComposeRoute || this is ImageViewerRoute
 
 /**
  * #494 — type de barre de navigation à passer au [NavigationSuiteScaffoldLayout]. Sur téléphone l'adaptatif
@@ -335,6 +361,8 @@ data class TopicRoute(
      * defaulted so older serialised back stacks deserialise without the field.
      */
     val resolveScrollToPage: Boolean = false,
+    /** #293 — open this post's moderation alert on entry; default preserves older saved stacks. */
+    val moderationAlertFor: Int? = null,
 ) : RedfaceNavKey
 
 @Serializable
@@ -399,6 +427,10 @@ data object SettingsRoute : RedfaceNavKey
 @Serializable
 data object MyImagesRoute : RedfaceNavKey
 
+/** #294 — authenticated history of the active HFR account, loaded on demand. */
+@Serializable
+data object SanctionsRoute : RedfaceNavKey
+
 /**
  * #6 — read-only MPStorage inspector (debug). Reached from the Settings screen, only when the DT
  * section is enabled. Opaque route, no params (the screen owns its own fetch).
@@ -422,6 +454,9 @@ data object SettingsDisplayRoute : RedfaceNavKey
 
 @Serializable
 data object SettingsColorsRoute : RedfaceNavKey
+
+@Serializable
+data object SettingsAppIconRoute : RedfaceNavKey
 
 @Serializable
 data object SettingsImagesRoute : RedfaceNavKey
@@ -758,15 +793,17 @@ internal fun tabBackTarget(
  * #1251 — HFR links tapped from rendered app content reuse the target tab's existing stack. Re-opening
  * the exact top [NavKey] is a no-op. Targeting an older key returns to it by dropping the entries above
  * it, matching Back semantics and keeping a single nav3 owner for that key. A same-topic link with a
- * different page or anchor is a distinct [TopicRoute] key, so it is pushed instead of collapsed.
+ * different page, anchor or moderationAlertFor is a distinct [TopicRoute] key, so it is pushed
+ * instead of collapsed. Since #1287, a modo.php tap opens root information first; only Form/JoinPrompt
+ * navigate with moderationAlertFor. The explicit ViewPost action navigates without that trigger.
  */
 internal fun inAppRouteBackStackAfterOpen(
     backStack: List<NavKey>,
     route: NavKey,
 ): List<NavKey> {
-    val existingIndex = backStack.indexOf(route)
+    if (backStack.lastOrNull() == route) return backStack
+    val existingIndex = backStack.lastIndexOf(route)
     return when {
-        existingIndex >= 0 && existingIndex == backStack.lastIndex -> backStack
         existingIndex >= 0 -> backStack.take(existingIndex + 1)
         else -> backStack + route
     }
@@ -929,6 +966,8 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
     val mediaDisplayProfile by themeViewModel.mediaDisplayProfile.collectAsStateWithLifecycle()
     // #991 — maximum fImage width, provided to all post image paths via RedfaceTheme.
     val postImageMaxWidth by themeViewModel.postImageMaxWidth.collectAsStateWithLifecycle()
+    // #985 — content-image corner preset, provided to the same paths via RedfaceTheme.
+    val postImageCorners by themeViewModel.postImageCorners.collectAsStateWithLifecycle()
     // #989 — cell delimiter of the smiley picker, seeded into the theme below.
     val smileyPickerDecoration by themeViewModel.smileyPickerDecoration.collectAsStateWithLifecycle()
     // #666 — show/hide the labels under the bottom-nav icons (resolved at the shell for the suite below).
@@ -998,6 +1037,7 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
             showScrollbar = showScrollbar,
             mediaDisplayProfile = mediaDisplayProfile,
             postImageMaxWidth = postImageMaxWidth,
+            postImageCorners = postImageCorners,
             smileyPickerDecoration = smileyPickerDecoration,
         ),
     ) {
@@ -1007,6 +1047,8 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
         // the user where they were, and a Settings change only applies on the next launch.
         val startScreenViewModel: StartScreenViewModel = hiltViewModel()
         val startScreen = startScreenViewModel.startScreen
+        // #1287 — Activity owner, outside NavDisplay: retain the info sheet across rotation on every tab.
+        val moderationAlertLinkViewModel: ModerationAlertLinkViewModel = hiltViewModel()
 
         val flagsBackStack = rememberNavBackStack(FlagsListRoute)
         val forumStartCat = startScreen.forumCatId
@@ -1289,6 +1331,9 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                 onSwitch = { switchTab(destination) },
             )
         }
+        val openInAppRoute: (ParsedDeepLink) -> Unit = remember(currentDestination, backStacks, switchTab) {
+            { parsed -> openRouteInApp(currentDestination, parsed, backStacks, switchTab) }
+        }
         // #666 follow-up — NavigationSuiteScaffoldLayout (not the higher-level NavigationSuiteScaffold) so
         // the navigationSuite slot can swap a shorter icon-only bar in when labels are off (Option A). The
         // content slot below is unchanged (#529 content-inset handling stays put).
@@ -1327,17 +1372,17 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                     val alwaysAskLinkApp = LocalAlwaysAskLinkApp.current
                     val inAppUriHandler = remember(
                         context,
-                        currentDestination,
-                        backStacks,
-                        switchTab,
+                        openInAppRoute,
+                        moderationAlertLinkViewModel,
                         platformUriHandler,
                         alwaysAskLinkApp,
                     ) {
                         HfrInAppUriHandler(
                             context = context,
-                            currentDestination = currentDestination,
-                            backStacks = backStacks,
-                            switchTab = switchTab,
+                            openRouteInApp = openInAppRoute,
+                            openModerationAlert = { target ->
+                                moderationAlertLinkViewModel.onIntent(ModerationAlertLinkIntent.Open(target))
+                            },
                             platformUriHandler = platformUriHandler,
                             alwaysAskExternalApp = alwaysAskLinkApp,
                         )
@@ -1364,6 +1409,7 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                             // parent BackHandler above handles it in the current nav3 where it does not).
                             onRootBack = onRootTabBack,
                             accountMenu = accountMenu,
+                            isAuthenticated = authState is AuthState.Authenticated,
                             flagsQuickConfigRequest = flagsQuickConfigRequest,
                             // #603 bug fix — reset the counter once FlagsRoute handled it, so a re-mount
                             // (return from a category/topic) does not replay the sheet open (Codex review).
@@ -1596,6 +1642,8 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                 )
             }
         }
+
+        ModerationAlertLinkHost(moderationAlertLinkViewModel, topicTitleCache, openInAppRoute)
 
         // #445 — debug bounds overlay, emitted LAST so it paints on top of every sibling (the nav
         // scaffold + the profile sheet). The root content is Box-stacked by z-order = emission order,
@@ -2154,6 +2202,33 @@ internal fun Map<TopicTitleKey, String>.withTitle(key: TopicTitleKey, title: Str
     }
 }
 
+/** Renders the existing topic image-action effects for the app-owned viewer entry. */
+@Composable
+private fun ImageViewerSaveEffectHost(viewModel: PostImageActionsViewModel) {
+    val context = LocalContext.current
+    val shareFailedFeedback = stringResource(CoreUiR.string.post_image_menu_share_failed)
+    LaunchedEffect(viewModel) {
+        viewModel.effects.collect { effect ->
+            val messageRes = when (effect) {
+                PostImageActionsViewModel.SaveImageEffect.SAVED -> TopicR.string.topic_image_menu_saved
+                PostImageActionsViewModel.SaveImageEffect.FAILED_FETCH ->
+                    TopicR.string.topic_image_menu_save_failed_fetch
+                PostImageActionsViewModel.SaveImageEffect.FAILED_STORAGE ->
+                    TopicR.string.topic_image_menu_save_failed_storage
+                PostImageActionsViewModel.SaveImageEffect.FAILED_TOO_LARGE ->
+                    TopicR.string.topic_image_menu_save_failed_too_large
+                is PostImageActionsViewModel.ShareImageEffect -> {
+                    sharePostImageUrl(context, effect.url, shareFailedFeedback)
+                    null
+                }
+            }
+            if (messageRes != null) {
+                Toast.makeText(context, messageRes, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+}
+
 @Composable
 @Suppress("CyclomaticComplexMethod", "LongParameterList") // One entry per top-level route + per-screen
 // navigation callbacks ; splitting the host would just push the same `when` shape one level deeper
@@ -2165,6 +2240,7 @@ private fun RedfaceNavHost(
     // fires instead; this keeps the behaviour correct if a future nav3 invokes onBack at the root.
     onRootBack: () -> Unit,
     accountMenu: @Composable () -> Unit,
+    isAuthenticated: Boolean,
     // #603 PR6 — increments on each Drapeaux-tab re-tap; FlagsRoute opens its quick-config sheet on change.
     flagsQuickConfigRequest: Int,
     // #603 bug fix — FlagsRoute calls this once it has handled a request, resetting the counter to 0 so a
@@ -2193,6 +2269,21 @@ private fun RedfaceNavHost(
     immersiveNavBarNavState: ImmersiveNavBarNavState,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
 ) {
+    // #1296 — an outgoing entry must see the active tab's stack, even during its disposal.
+    val currentBackStack = rememberUpdatedState(backStack)
+    val openImageViewer: (ImageViewerRequest) -> Unit = remember(backStack) {
+        { request: ImageViewerRequest ->
+            backStack.add(
+                ImageViewerRoute(
+                    sourceUrl = request.sourceUrl,
+                    previewUrl = request.previewUrl,
+                    externalUrl = request.externalUrl,
+                    description = request.description,
+                    diskCache = request.diskCache,
+                ),
+            )
+        }
+    }
     NavDisplay(
         backStack = backStack,
         onBack = {
@@ -2210,13 +2301,44 @@ private fun RedfaceNavHost(
         // le backStack → ça passe par transitionSpec : on le détecte par le changement de racine de pile
         // (chaque onglet a une racine distincte) pour ne pas hériter du slide de drill-down.
         transitionSpec = { navForwardTransform(initialState, targetState) },
-        popTransitionSpec = { navSharedAxisXBack() },
-        predictivePopTransitionSpec = { navSharedAxisXBack() },
+        popTransitionSpec = {
+            if (initialState.isImageViewerTransitionTo(targetState)) {
+                navImageViewerTransform()
+            } else {
+                navSharedAxisXBack()
+            }
+        },
+        predictivePopTransitionSpec = {
+            if (initialState.isImageViewerTransitionTo(targetState)) {
+                navImageViewerTransform()
+            } else {
+                navSharedAxisXBack()
+            }
+        },
         entryDecorators = listOf(
             rememberSaveableStateHolderNavEntryDecorator(),
             rememberViewModelStoreNavEntryDecorator(),
         ),
         entryProvider = entryProvider {
+            entry<ImageViewerRoute> { route ->
+                val imageActionsViewModel: PostImageActionsViewModel = hiltViewModel()
+                ImageViewerSaveEffectHost(imageActionsViewModel)
+                ImageViewerScreen(
+                    request = ImageViewerRequest(
+                        sourceUrl = route.sourceUrl,
+                        previewUrl = route.previewUrl,
+                        externalUrl = route.externalUrl,
+                        description = route.description,
+                        diskCache = route.diskCache,
+                    ),
+                    onClose = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
+                    onSave = imageActionsViewModel::saveImage,
+                )
+            }
             entry<FlagsListRoute> {
                 FlagsRoute(
                     // #676 v2 — [page] is chosen by the caller: row tap + sheet « Ouvrir » resume at
@@ -2495,6 +2617,7 @@ private fun RedfaceNavHost(
                     // #1042 — same app-level profile sheet as the topic (#208): tapping a message's
                     // avatar/pseudo opens ProfilePreviewSheet as an overlay on the current tab.
                     onOpenProfile = onOpenProfile,
+                    onOpenImageViewer = openImageViewer,
                     topBarActions = accountMenu,
                 )
             }
@@ -2550,8 +2673,11 @@ private fun RedfaceNavHost(
                     onOpenProxy = { backStack.add(SettingsProxyRoute) },
                     onOpenMaintenance = { backStack.add(SettingsMaintenanceRoute) },
                     onOpenDisplay = { backStack.add(SettingsDisplayRoute) },
+                    onOpenAppIcon = { backStack.add(SettingsAppIconRoute) },
                     onOpenImages = { backStack.add(SettingsImagesRoute) },
                     onOpenAccountAbout = { backStack.add(SettingsAccountAboutRoute) },
+                    onOpenSanctions = { backStack.add(SanctionsRoute) },
+                    isAuthenticated = isAuthenticated,
                     onOpenBlacklist = { backStack.add(SettingsBlacklistRoute) },
                     // #494 v2 — catégories sans sous-page dédiée → détail générique.
                     onOpenCategory = { categoryId -> backStack.add(SettingsCategoryRoute(categoryId)) },
@@ -2569,8 +2695,11 @@ private fun RedfaceNavHost(
                     onOpenProxy = { backStack.add(SettingsProxyRoute) },
                     onOpenMaintenance = { backStack.add(SettingsMaintenanceRoute) },
                     onOpenDisplay = { backStack.add(SettingsDisplayRoute) },
+                    onOpenAppIcon = { backStack.add(SettingsAppIconRoute) },
                     onOpenImages = { backStack.add(SettingsImagesRoute) },
                     onOpenAccountAbout = { backStack.add(SettingsAccountAboutRoute) },
+                    onOpenSanctions = { backStack.add(SanctionsRoute) },
+                    isAuthenticated = isAuthenticated,
                     onOpenBlacklist = { backStack.add(SettingsBlacklistRoute) },
                     topBarActions = accountMenu,
                 )
@@ -2617,6 +2746,15 @@ private fun RedfaceNavHost(
                         }
                     },
                     onOpenColors = { backStack.add(SettingsColorsRoute) },
+                    onOpenAppIcon = { backStack.add(SettingsAppIconRoute) },
+                    topBarActions = accountMenu,
+                )
+            }
+            entry<SettingsAppIconRoute> {
+                SettingsAppIconEntry(
+                    onBack = {
+                        if (backStack.size > 1) backStack.removeAt(backStack.lastIndex)
+                    },
                     topBarActions = accountMenu,
                 )
             }
@@ -2652,6 +2790,18 @@ private fun RedfaceNavHost(
                     versionCode = BuildConfig.VERSION_CODE,
                     onOpenDiagnostics = { backStack.add(DiagnosticsRoute) },
                     onReportContent = onReportContent,
+                    onOpenSanctions = { backStack.add(SanctionsRoute) },
+                    isAuthenticated = isAuthenticated,
+                    topBarActions = accountMenu,
+                )
+            }
+            entry<SanctionsRoute> {
+                SanctionsScreen(
+                    onBack = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
                     topBarActions = accountMenu,
                 )
             }
@@ -2662,6 +2812,7 @@ private fun RedfaceNavHost(
                             backStack.removeAt(backStack.lastIndex)
                         }
                     },
+                    topBarActions = accountMenu,
                 )
             }
             entry<MpStorageInspectorRoute> {
@@ -2758,6 +2909,7 @@ private fun RedfaceNavHost(
                         .anchors[TopicScrollKey(route.cat, route.post, route.page)],
                 )
                 TopicScreen(
+                    isCurrentRoute = { currentBackStack.value.lastOrNull() == route },
                     request = TopicRequest(
                         cat = route.cat,
                         post = route.post,
@@ -2766,6 +2918,7 @@ private fun RedfaceNavHost(
                         forceRefresh = route.forceRefresh,
                         titleHint = topicTitleNavState.titles[TopicTitleKey(route.cat, route.post)],
                         resolveScrollToPage = route.resolveScrollToPage,
+                        moderationAlertFor = route.moderationAlertFor,
                     ),
                     onTitleLoaded = { title ->
                         topicTitleNavState.onTitleLoaded(route.cat, route.post, title)
@@ -2782,6 +2935,7 @@ private fun RedfaceNavHost(
                         ?.result,
                     onSubmitResultConsumed = topicSubmitNavState.onConsumed,
                     onOpenProfile = onOpenProfile,
+                    onOpenImageViewer = openImageViewer,
                     // #792 — « Envoyer un MP » from a post's menu : the NEW-conversation composer
                     // opens with the post's author prefilled (the route arg was designed for this).
                     onSendPrivateMessage = { author ->
@@ -3134,6 +3288,7 @@ private fun applyDeepLinkResolution(
     switchTab: (TopLevelDestination) -> Unit,
     backStacks: Map<TopLevelDestination, NavBackStack<NavKey>>,
 ) {
+    if (restoreAppIconRoute(intent, switchTab, backStacks)) return
     when (val resolution = resolveHfrDeepLink(intent)) {
         is HfrDeepLinkResolution.Route -> {
             val parsed = resolution.parsed
@@ -3174,18 +3329,18 @@ private fun popToRoot(backStack: NavBackStack<NavKey>) {
     }
 }
 
-private class HfrInAppUriHandler(
+/** In-app modo.php links open root information; Android VIEW intents keep their topic-entry flow. */
+internal class HfrInAppUriHandler(
     private val context: Context,
-    private val currentDestination: TopLevelDestination,
-    private val backStacks: Map<TopLevelDestination, NavBackStack<NavKey>>,
-    private val switchTab: (TopLevelDestination) -> Unit,
+    private val openRouteInApp: (ParsedDeepLink) -> Unit,
+    private val openModerationAlert: (ModerationAlertLinkTarget) -> Unit,
     private val platformUriHandler: UriHandler,
     private val alwaysAskExternalApp: Boolean,
 ) : UriHandler {
     override fun openUri(uri: String) {
         val parsedUri = uri.toUri()
         when (val resolution = resolveHfrUri(parsedUri)) {
-            is HfrDeepLinkResolution.Route -> openRouteInApp(resolution.parsed)
+            is HfrDeepLinkResolution.Route -> openResolvedRoute(resolution.parsed)
             // HFR host but no in-app route: the exclude-Redface launcher avoids the self-deep-link loop.
             is HfrDeepLinkResolution.BrowserFallback -> openExternally(resolution.uri, uri)
             // Non-HFR link: plain platform resolution, so App Links still hand off to native apps
@@ -3194,23 +3349,13 @@ private class HfrInAppUriHandler(
         }
     }
 
-    private fun openRouteInApp(parsed: ParsedDeepLink) {
-        val result = inAppRouteBackStackAfterOpen(
-            currentDestination = currentDestination,
-            parsed = parsed,
-            backStackFor = { destination -> backStacks.getValue(destination) },
-        )
-        switchTab(result.destination)
-        applyInAppBackStackUpdate(backStacks.getValue(result.destination), result.backStack)
-    }
-
-    private fun applyInAppBackStackUpdate(backStack: NavBackStack<NavKey>, updated: List<NavKey>) {
-        if (updated == backStack) return
-        while (backStack.size > updated.size) {
-            backStack.removeAt(backStack.lastIndex)
-        }
-        for (index in backStack.size until updated.size) {
-            backStack.add(updated[index])
+    private fun openResolvedRoute(parsed: ParsedDeepLink) {
+        val topic = parsed.route as? TopicRoute
+        val alertPost = topic?.moderationAlertFor
+        if (topic != null && alertPost != null) {
+            openModerationAlert(ModerationAlertLinkTarget(topic.cat, topic.post, alertPost, topic.page))
+        } else {
+            openRouteInApp(parsed)
         }
     }
 
@@ -3221,11 +3366,36 @@ private class HfrInAppUriHandler(
     }
 }
 
+internal fun openRouteInApp(
+    currentDestination: TopLevelDestination,
+    parsed: ParsedDeepLink,
+    backStacks: Map<TopLevelDestination, NavBackStack<NavKey>>,
+    switchTab: (TopLevelDestination) -> Unit,
+) {
+    val result = inAppRouteBackStackAfterOpen(
+        currentDestination = currentDestination,
+        parsed = parsed,
+        backStackFor = { destination -> backStacks.getValue(destination) },
+    )
+    switchTab(result.destination)
+    applyInAppBackStackUpdate(backStacks.getValue(result.destination), result.backStack)
+}
+
+private fun applyInAppBackStackUpdate(backStack: NavBackStack<NavKey>, updated: List<NavKey>) {
+    if (updated == backStack) return
+    while (backStack.size > updated.size) {
+        backStack.removeAt(backStack.lastIndex)
+    }
+    for (index in backStack.size until updated.size) {
+        backStack.add(updated[index])
+    }
+}
+
 /**
  * #286 — walk the Context chain to the host [Activity] (or null), so the system-bar SideEffect never
  * crashes on a non-Activity / ContextWrapper context. Tail-recursive over [ContextWrapper.baseContext].
  */
-private tailrec fun Context.findActivity(): Activity? = when (this) {
+internal tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this
     is ContextWrapper -> baseContext.findActivity()
     else -> null
@@ -3258,6 +3428,7 @@ private const val DRILL_FADE_OUT_MS = 90
 private const val TAB_FADE_IN_MS = 140
 private const val TAB_FADE_OUT_MS = 80
 private const val SLIDE_DIVISOR = 4
+internal const val IMAGE_VIEWER_TRANSITION_MS = 200
 
 /** Shared-axis X, sens AVANT : l'entrant glisse depuis la droite, le sortant part vers la gauche. */
 private fun navSharedAxisXForward(): ContentTransform =
@@ -3276,6 +3447,20 @@ private fun navSharedAxisXBack(): ContentTransform =
 /** Fade-through court entre onglets (contenus sans relation spatiale → pas de slide). */
 private fun navTabFadeThrough(): ContentTransform =
     fadeIn(tween(TAB_FADE_IN_MS, delayMillis = 30)) togetherWith fadeOut(tween(TAB_FADE_OUT_MS))
+
+/** Short fullscreen reveal/dismiss, deliberately separate from Nav3's historical long fade. */
+private fun navImageViewerTransform(): ContentTransform =
+    (fadeIn(tween(IMAGE_VIEWER_TRANSITION_MS)) +
+        scaleIn(initialScale = 0.96f, animationSpec = tween(IMAGE_VIEWER_TRANSITION_MS))) togetherWith
+        (fadeOut(tween(IMAGE_VIEWER_TRANSITION_MS)) +
+            scaleOut(targetScale = 1.02f, animationSpec = tween(IMAGE_VIEWER_TRANSITION_MS)))
+
+/** Pure seam pinned by [NavTransitionTest]: entering or leaving the viewer uses its short reveal. */
+internal fun isImageViewerTransition(from: Any?, to: Any?): Boolean =
+    from is ImageViewerRoute || to is ImageViewerRoute
+
+private fun Scene<NavKey>.isImageViewerTransitionTo(to: Scene<NavKey>): Boolean =
+    isImageViewerTransition(entries.lastOrNull()?.contentKey, to.entries.lastOrNull()?.contentKey)
 
 /**
  * Pure : une navigation AVANT est un drill-down (push) — par opposition à un changement d'onglet ou un
@@ -3308,6 +3493,7 @@ private fun Scene<NavKey>.isForwardDrillDownTo(to: Scene<NavKey>): Boolean =
  * mérite la même transition que tout autre remplacement.
  */
 private fun navForwardTransform(from: Scene<NavKey>, to: Scene<NavKey>): ContentTransform = when {
+    from.isImageViewerTransitionTo(to) -> navImageViewerTransform()
     from.isForwardDrillDownTo(to) -> navSharedAxisXForward()
     else -> navTabFadeThrough()
 }

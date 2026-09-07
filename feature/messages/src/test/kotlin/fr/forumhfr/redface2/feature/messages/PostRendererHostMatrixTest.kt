@@ -26,6 +26,8 @@ import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.post.PostImageTarget
+import fr.forumhfr.redface2.core.ui.post.viewerRequestFor
+import fr.forumhfr.redface2.core.ui.viewer.ImageViewerRequest
 import java.time.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -59,6 +61,7 @@ class PostRendererHostMatrixTest {
     private val inlineImageUrl = "https://rehost.diberie.com/Picture/Get/f/mp-inline.png"
     private val blockImageUrl = "https://rehost.diberie.com/Picture/Get/f/mp-block.png"
     private val fullLinkUrl = "https://example.org/full"
+    private val fullImageUrl = "https://cdn.example.org/original/private.AVIF?download=1"
 
     @OptIn(coil3.annotation.DelicateCoilApi::class)
     @Before
@@ -94,6 +97,7 @@ class PostRendererHostMatrixTest {
     private fun setCard(
         content: PostContent,
         onImageLongPress: ((PostImageTarget) -> Unit)? = null,
+        onOpenImageViewer: ((PostImageTarget) -> Unit)? = null,
         uriHandler: UriHandler = RecordingUriHandler(),
     ) {
         composeTestRule.setContent {
@@ -102,6 +106,7 @@ class PostRendererHostMatrixTest {
                     MessageCard(
                         message = message(content),
                         onImageLongPress = onImageLongPress,
+                        onOpenImageViewer = onOpenImageViewer,
                     )
                 }
             }
@@ -203,6 +208,40 @@ class PostRendererHostMatrixTest {
             received,
         )
         assertNull("a long-press must not open the wrapping link", uriHandler.opened)
+    }
+
+    @Test
+    fun `a promoted image-like block reaches the private viewer without disk cache`() {
+        var opened: ImageViewerRequest? = null
+        val uriHandler = RecordingUriHandler()
+        setCard(
+            content = PostContent(
+                blocks = listOf(
+                    PostBlock.Paragraph(
+                        inlines = listOf(
+                            PostInline.Link(
+                                url = fullImageUrl,
+                                children = listOf(
+                                    PostInline.InlineImage(url = blockImageUrl, description = "privée"),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            onImageLongPress = {},
+            onOpenImageViewer = {
+                viewerRequestFor(it, diskCache = false)?.let { request -> opened = request }
+            },
+            uriHandler = uriHandler,
+        )
+
+        composeTestRule.onNodeWithContentDescription("privée").performTouchInput { click() }
+
+        assertEquals(fullImageUrl, opened?.sourceUrl)
+        assertEquals(blockImageUrl, opened?.previewUrl)
+        assertEquals(false, opened?.diskCache)
+        assertNull(uriHandler.opened)
     }
 
     @Test

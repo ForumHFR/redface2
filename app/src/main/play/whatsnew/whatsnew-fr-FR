@@ -1,7 +1,7 @@
-Redface 2 v0.53.6 — bêta.
-
-Lot 0.51 → 0.53 :
-- Couleurs : accent (8 presets ou hexa), ton du fond, Clair/Système/Sombre, en-tête Discret/Vif, fond gris esprit RF1.
-- Drapeaux : onglet Super (super-favoris), sous-catégorie, swipe sans saut, pastille +N colorée, recherche sans accents.
-- Sujets : plus de téléportation en postant, retour au message cité, sondages en barres, réponse rapide 15 lignes, zoom interactif, largeur d'images.
-- Liens HFR : retour et destination cohérents.
+Redface 2 v0.55.0 — bêta.
+- Visionneuse d'images plein écran : zoom, partage, tap pour masquer la barre.
+- Alerter un post et consulter « Mes sanctions ».
+- Vue catégorie : encarts repliables.
+- Icône de l'application au choix (Classique, Redface 1).
+- Badge « +N » des drapeaux aligné sur le web, sondage visible après vote.
+- Nombreux correctifs : citations, navigation, super favoris par compte.

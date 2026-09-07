@@ -20,10 +20,11 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
+import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
+import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
@@ -37,10 +38,12 @@ import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsListItem
  * [RedfaceSettingsChoiceGroup]. Binds its own [SettingsViewModel] instance (DataStore source of truth
  * — same trade-off as `SettingsProxyScreen`).
  */
+@Suppress("LongParameterList") // One lambda per navigation target plus the usual Composable seams.
 @Composable
 fun SettingsDisplayScreen(
     onBack: () -> Unit,
     onOpenColors: () -> Unit = {},
+    onOpenAppIcon: () -> Unit = {},
     modifier: Modifier = Modifier,
     topBarActions: @Composable (() -> Unit)? = null,
     viewModel: SettingsViewModel = hiltViewModel(),
@@ -120,6 +123,13 @@ fun SettingsDisplayScreen(
                 trailingContent = { ChevronTrailing() },
             )
 
+            RedfaceSettingsListItem(
+                title = stringResource(R.string.settings_display_launcher_icon_title),
+                description = stringResource(launcherIconNameRes(state.appLauncherIcon)),
+                onClick = onOpenAppIcon,
+                trailingContent = { ChevronTrailing() },
+            )
+
             // Reading presets (#287).
             Text(
                 text = stringResource(R.string.settings_display_title),
@@ -168,6 +178,13 @@ fun SettingsDisplayScreen(
                 enabled = state.canChangePostImageMaxWidth,
                 error = state.postImageMaxWidthError,
                 onSelected = { viewModel.submit(SettingsIntent.PostImageMaxWidthChanged(it)) },
+            )
+
+            PostImageCornersSetting(
+                selected = state.postImageCorners,
+                enabled = state.canChangePostImageCorners,
+                error = state.postImageCornersError,
+                onSelected = { viewModel.submit(SettingsIntent.PostImageCornersChanged(it)) },
             )
 
             SmileyPickerDecorationSetting(
@@ -347,6 +364,49 @@ private fun PostImageMaxWidthSetting(
     )
     if (error) {
         PreferencePersistError(R.string.settings_img_width_persist_failed)
+    }
+}
+
+/** #985 — rayon des coins des images de contenu, juste sous leur largeur maximale. */
+@Composable
+private fun PostImageCornersSetting(
+    selected: PostImageCorners,
+    enabled: Boolean,
+    error: Boolean,
+    onSelected: (PostImageCorners) -> Unit,
+) {
+    val options = listOf(
+        RedfaceSettingsChoice(
+            PostImageCorners.ROUNDED,
+            stringResource(R.string.settings_display_post_image_corners_rounded),
+        ),
+        RedfaceSettingsChoice(
+            PostImageCorners.SOFT,
+            stringResource(R.string.settings_display_post_image_corners_soft),
+        ),
+        RedfaceSettingsChoice(
+            PostImageCorners.SQUARE,
+            stringResource(R.string.settings_display_post_image_corners_square),
+        ),
+    )
+    Text(
+        text = stringResource(R.string.settings_display_post_image_corners_title),
+        style = MaterialTheme.typography.titleMedium,
+        color = MaterialTheme.colorScheme.onSurface,
+    )
+    Text(
+        text = stringResource(R.string.settings_display_post_image_corners_intro),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    RedfaceSettingsChoiceGroup(
+        options = options,
+        selected = selected,
+        onSelected = onSelected,
+        enabled = enabled,
+    )
+    if (error) {
+        PreferencePersistError(R.string.settings_display_post_image_corners_persist_failed)
     }
 }
 

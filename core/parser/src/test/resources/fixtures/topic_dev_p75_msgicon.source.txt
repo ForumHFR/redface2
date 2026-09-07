@@ -1,0 +1,12 @@
+Fixture : topic_dev_p75_msgicon.html
+Origine : page 75 du topic « Redface (canal développement) » (cat=23 Technologies Mobiles /
+          subcat=550 Android, post=35421), GET /forum2.php?config=hfr.inc&cat=23&subcat=550&post=35421&page=75.
+Capture : live le 2026-09-04, ANONYME (sans cookie, curl direct, User-Agent Firefox), pour #340.
+Contenu : page topic complète, 28 posts (+ 3 blocs Publicité). Intérêt : 4 posts portent un « ton du message » (MsgIcon)
+          NON défaut, rendu dans td.messCase1 > div.right > a > img (src icones/message/icon<N>.gif,
+          title="n°<numreponse>") : n°2800266 et n°2800292 → icon20, n°2800342 → icon10, n°2800343 → icon6 ;
+          tous les autres posts → icon1 (défaut). Les blocs « Publicité » portent un img alt="mood"
+          icon1 SANS lien : ce n'est PAS le ton d'un post (piège de la description initiale de #340).
+Sanitation : aucun cookie ni e-mail ; les 3 champs hash_check des formulaires sont VIDES (page anonyme) ; liens toolbar obfusqués (md_*cryptlink)
+          laissés tels quels comme dans les autres fixtures topic anonymes.
+Contrat : docs/specs/protocol-hfr.md § ton du message (à compléter par la PR #340).

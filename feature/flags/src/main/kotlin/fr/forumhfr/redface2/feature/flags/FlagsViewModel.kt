@@ -133,6 +133,9 @@ class FlagsViewModel @Inject constructor(
      */
     private var refreshingType: FlagType? = null
     private var refreshingCoveredTypes: Set<FlagType> = emptySet()
+    private val pendingManualRefreshTypes = linkedSetOf<FlagType>()
+    private var refreshGeneration = 0L
+    private var activeRefreshGeneration: Long? = null
     private var deferredLandingType: FlagType? = null
     private val subcategoryRefreshRequestedCats: MutableSet<Int> = mutableSetOf()
 
@@ -708,6 +711,10 @@ class FlagsViewModel @Inject constructor(
 
     /** User tapped « Retirer le drapeau » on [flag] : raise the confirmation dialog. */
     fun requestRemoveFlag(flag: Flag) {
+        if (!flag.resolvedFromServer) {
+            viewModelScope.launch { superFavoriteRepository.setSuperFavorite(flag, enabled = false) }
+            return
+        }
         // Ignore a second request while a removal is already in flight (anti double-tap):
         // the in-flight flag wins until it resolves.
         if (_removeFlagState.value is RemoveFlagState.Removing) return
@@ -878,43 +885,32 @@ class FlagsViewModel @Inject constructor(
         val selected = _selectedTab.value
         val type = selected.flagType
         if (type == null) {
-            if (selected == FlagTab.Super) refreshSuperFavorites()
+            if (selected == FlagTab.Super) requestManualRefresh(SUPER_FAVORITE_BACKING_TYPES)
             return
         }
-        if (_isRefreshing.value && type in refreshingCoveredTypes) return
+        requestManualRefresh(listOf(type))
+    }
+
+    private fun requestManualRefresh(types: List<FlagType>) {
         // A manual refresh captures the post-reading state too, so the generations visible at this
         // call would only duplicate the fan-out on the next landing — consume them (#378 follow-up).
         flagOpenedGenerationConsumed = flagOpenedGeneration
         // #743 — a pull on the tab whose landing is waiting behind an in-flight refresh IS that
         // landing's fetch: drop the replay so it does not double the fan-out right after the pull.
-        if (deferredLandingType == type) deferredLandingType = null
-        beginRefresh(type)
-        viewModelScope.launch {
-            try {
-                flagRepository.refresh(type)
-            } finally {
-                endRefresh()
-            }
+        if (deferredLandingType?.let { it in types } == true) deferredLandingType = null
+        if (activeRefreshGeneration != null) {
+            // Dedup: a type already covered by the in-flight batch is being refreshed right now, so
+            // queuing it again would immediately re-fetch what just landed — ignore it (pre-lot semantics).
+            pendingManualRefreshTypes.addAll(types.filterNot { it in refreshingCoveredTypes })
+            return
         }
+        startManualRefresh(types)
     }
 
-    private fun refreshSuperFavorites() {
-        if (_isRefreshing.value) return
-        flagOpenedGenerationConsumed = flagOpenedGeneration
-        if (deferredLandingType?.let { it in SUPER_FAVORITE_BACKING_TYPES } == true) deferredLandingType = null
-        beginRefresh(
-            type = SUPER_FAVORITE_BACKING_TYPES.first(),
-            coveredTypes = SUPER_FAVORITE_BACKING_TYPES.toSet(),
-        )
+    private fun startManualRefresh(types: List<FlagType>) {
+        val generation = beginRefresh(type = types.first(), coveredTypes = types.toSet())
         viewModelScope.launch {
-            try {
-                SUPER_FAVORITE_BACKING_TYPES.forEach { type ->
-                    refreshingType = type
-                    flagRepository.refresh(type)
-                }
-            } finally {
-                endRefresh()
-            }
+            runRefreshQueue(initialTypes = types, initialGeneration = generation)
         }
     }
 
@@ -926,9 +922,11 @@ class FlagsViewModel @Inject constructor(
             } catch (cancellation: kotlinx.coroutines.CancellationException) {
                 throw cancellation
             } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
-                // Re-arm so the next list emission (or pull-to-refresh) can retry after a network error.
-                subcategoryRefreshRequestedCats.remove(cat)
                 android.util.Log.w(LOG_TAG, "Could not refresh subcategories for cat $cat", error)
+            } finally {
+                // The repository reports transport failures as ForumResult.Failure instead of
+                // throwing, so every completed attempt must re-arm the next cold-cache emission.
+                subcategoryRefreshRequestedCats.remove(cat)
             }
         }
     }
@@ -993,16 +991,13 @@ class FlagsViewModel @Inject constructor(
             // suspensions above stays pending for the next landing.
             flagOpenedGenerationConsumed = maxOf(flagOpenedGenerationConsumed, openedGenerationAtCall)
             lastAutoRefreshAt[type] = now
-            beginRefresh(type)
-            try {
-                flagRepository.refresh(type)
+            val generation = beginRefresh(type)
+            runRefreshQueue(initialTypes = listOf(type), initialGeneration = generation) {
                 // #546 — a genuine landing / tab-switch / resume refresh: recall the list to the top
                 // so the freshly prepended flags are visible. A return-from-topic refresh keeps the
                 // reader's current position (it is not a fresh landing). One-shot signal, consumed by
                 // the screen — see [recallListToTop].
                 if (!returningFromTopic) _recallListToTop.value = true
-            } finally {
-                endRefresh()
             }
         }
     }
@@ -1020,18 +1015,62 @@ class FlagsViewModel @Inject constructor(
     }
 
     /** Raises the single loading cue ([isRefreshing]) for a refresh covering [coveredTypes]. */
-    private fun beginRefresh(type: FlagType, coveredTypes: Set<FlagType> = setOf(type)) {
+    private fun beginRefresh(type: FlagType, coveredTypes: Set<FlagType> = setOf(type)): Long {
+        val generation = ++refreshGeneration
+        activeRefreshGeneration = generation
         refreshingType = type
         refreshingCoveredTypes = coveredTypes
         _isRefreshing.value = true
+        return generation
     }
 
     /**
-     * Clears the loading cue, then replays the landing deferred behind this refresh (#743) — through
-     * [maybeAutoRefresh], so it still meets the pref/auth gates and its own throttle window — provided
-     * that tab is still the selected one; a tab left meanwhile lands again on its own when re-selected.
+     * Runs the initial batch and every manual type queued while it is suspended in the same coroutine
+     * job. [LinkedHashSet] insertion order gives deterministic replay while deduplicating repeated
+     * pulls per type. A fresh generation owns each batch, but the loading cue stays raised throughout.
      */
-    private fun endRefresh() {
+    private suspend fun runRefreshQueue(
+        initialTypes: List<FlagType>,
+        initialGeneration: Long,
+        onInitialSuccess: () -> Unit = {},
+    ) {
+        var generation = initialGeneration
+        var types = initialTypes
+        var initialBatch = true
+        try {
+            while (true) {
+                fetchRefreshBatch(types)
+                if (initialBatch) {
+                    onInitialSuccess()
+                    initialBatch = false
+                }
+                if (pendingManualRefreshTypes.isEmpty()) break
+                types = pendingManualRefreshTypes.toList()
+                pendingManualRefreshTypes.clear()
+                val landing = deferredLandingType
+                if (landing != null && landing in types) deferredLandingType = null
+                generation = beginRefresh(type = types.first(), coveredTypes = types.toSet())
+            }
+        } finally {
+            endRefresh(generation)
+        }
+    }
+
+    /** Fetches one serialized batch of types, keeping [refreshingType] in sync for the top bar. */
+    private suspend fun fetchRefreshBatch(types: List<FlagType>) {
+        types.forEach { type ->
+            refreshingType = type
+            flagRepository.refresh(type)
+        }
+    }
+
+    /**
+     * Clears the loading cue only for the current generation, then replays the landing deferred behind
+     * the whole serialized queue (#743) if that landing still targets the selected tab.
+     */
+    private fun endRefresh(generation: Long) {
+        if (activeRefreshGeneration != generation) return
+        activeRefreshGeneration = null
         refreshingType = null
         refreshingCoveredTypes = emptySet()
         _isRefreshing.value = false

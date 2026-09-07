@@ -214,6 +214,8 @@ Mandat de refonte des écrans chauds avant la 1.0 (post HFR XaTriX 2788560) :
 - [x] **Couleurs configurables** — #595/#883 : sous-page Réglages → Affichage → Couleurs, 8 presets
   d'accent + RGB custom `#RRGGBB`, tons de fond clair/sombre persistés, couleurs du système
   Android 12+ et aperçu live recordable par Roborazzi.
+- [x] **Icône du lanceur configurable** — #326 : Réglages → Affichage propose les variantes
+  Classique, Sombre, Rose et Rouge via quatre alias Android persistés.
 - [x] **Hygiène repo / audit des dérives** — exécutée (2026-06) ; #605 requalifiée en ombrelle de suivi Phase 4
 - [x] **Partage de la surface de lecture Topic → MP/DT** — [#1040](https://github.com/ForumHFR/redface2/issues/1040) (**livré** : dev 0.42.8 puis bêta 0.43.0 ; les preuves serveur restantes de la matrice sont suivies par [#1107](https://github.com/ForumHFR/redface2/issues/1107)). Le chantier répond à un délaissement mesuré : 74 commits sur `feature/topic` contre 7 sur `feature/messages` entre le 20/06 et le 12/08, sans document pour tracer l'écart. **Huit lots (0 → 7)** ; les lots 0 à 6 sont clos et le lot 7 est en cours :
   - lot 0 — caractérisation MP, correction de la prose route-driven et création de la page canonique [Parité de lecture Topic ↔ MP]({{ site.baseurl }}/specs/reading-parity) ([#1041](https://github.com/ForumHFR/redface2/issues/1041)), rendue `[enforced]` par deux gardes machine en [#1045](https://github.com/ForumHFR/redface2/issues/1045) ;

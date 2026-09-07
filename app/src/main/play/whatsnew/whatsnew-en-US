@@ -1,7 +1,7 @@
-Redface 2 v0.53.6 — beta.
-
-Batch 0.51 → 0.53:
-- Colors: accent (8 presets or hex), background tone, Light/System/Dark, header Subtle/Vivid, RF1-style grey background.
-- Flags: Super tab (super favourites), subcategory, jump-free swipe, coloured +N badge, accent-insensitive search.
-- Topics: no more teleport when posting, return to quoted post, poll result bars, 15-line quick reply, interactive zoom, image width.
-- HFR links: consistent back and destination.
+Redface 2 v0.55.0 — beta.
+- Full-screen image viewer: zoom, share, tap to hide the bar.
+- Report a post and browse "My sanctions".
+- Category view: collapsible panels.
+- Choice of app icon (Classic, Redface 1).
+- "+N" flag badge aligned with the web, poll visible after voting.
+- Many fixes: quotes, navigation, per-account super favourites.

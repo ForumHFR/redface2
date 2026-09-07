@@ -489,6 +489,15 @@ interface UserPreferencesRepository {
     suspend fun setDisplayDensity(density: DisplayDensity)
 
     /**
+     * Launcher icon shown by Android (#326). [AppLauncherIcon.CLASSIC] is the default. The Android
+     * component switch is owned by the Android launcher controller after this preference persists.
+     */
+    fun observeAppLauncherIcon(): Flow<AppLauncherIcon>
+
+    /** Persists [observeAppLauncherIcon]. Default [AppLauncherIcon.CLASSIC] until the first call. */
+    suspend fun setAppLauncherIcon(icon: AppLauncherIcon)
+
+    /**
      * Block-GIF display profile (#973, contrat images §8 [AMENDEMENT-v1.5-2]):
      * [MediaDisplayProfile.M] (default, ×1,5) — the enlargement factor applied to eligible block
      * GIFs by the post renderer (wired in wave 2). Observed by the renderer hosts and mirrored in
@@ -508,6 +517,15 @@ interface UserPreferencesRepository {
 
     /** Persists [observePostImageMaxWidth]. Default [PostImageMaxWidth.P95] until the first call. */
     suspend fun setPostImageMaxWidth(width: PostImageMaxWidth)
+
+    /**
+     * Content-image corner preset (#985): [PostImageCorners.ROUNDED] (default) preserves the
+     * historical 8 dp radius; SOFT and SQUARE let the user reduce or remove it.
+     */
+    fun observePostImageCorners(): Flow<PostImageCorners>
+
+    /** Persists [observePostImageCorners]. Default [PostImageCorners.ROUNDED] until the first call. */
+    suspend fun setPostImageCorners(corners: PostImageCorners)
 
     /**
      * Smiley picker cell delimiter (#989): [SmileyPickerDecoration.NONE] (default) keeps the
@@ -599,4 +617,25 @@ interface UserPreferencesRepository {
      * not a user choice).
      */
     suspend fun setForumCategoryFlagFilter(filter: CategoryFlagFilter)
+
+    /**
+     * #1303 — global category-menu layout for this installation, including anonymous sessions.
+     * Default false (expanded). The first emission waits for hydration: callers must not flash
+     * expanded commands beforehand. Shared cache reads see an explicit choice before its disk commit.
+     */
+    fun observeForumCategoryMenusCollapsed(): Flow<Boolean>
+
+    /** Cache-first, last-choice-wins persistence in the application scope; independent of search. */
+    suspend fun setForumCategoryMenusCollapsed(collapsed: Boolean)
+
+    /**
+     * Global sticky-topic layout (#1303), default false. Same hydration/cache contract as
+     * [observeForumCategoryMenusCollapsed]. Search temporarily shows matches; flag buckets stay flat.
+     * Neither exception writes this preference. The two layout keys are independent.
+     */
+    fun observeForumCategoryStickyTopicsCollapsed(): Flow<Boolean>
+
+    /** Persists the explicit sticky-group choice even if the category ViewModel is cancelled. */
+    suspend fun setForumCategoryStickyTopicsCollapsed(collapsed: Boolean)
+
 }

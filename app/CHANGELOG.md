@@ -16,6 +16,236 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.55.0` — `open` (bêta) — 2026-09-07
+
+Promotion bêta du lot développé en dev de `0.54.0` à `0.54.14` (plus le correctif [#1319](https://github.com/ForumHFR/redface2/issues/1319)), depuis la précédente bêta `0.53.6`. Le détail par version dev figure dans les entrées ci-dessous. Les issues du lot restent ouvertes jusqu'à validation par les retours des testeurs. Review de promotion : Astra, Opus 5 et Fable 5.1 sur la PR [#1317](https://github.com/ForumHFR/redface2/pull/1317).
+
+### Images ([#182](https://github.com/ForumHFR/redface2/issues/182), [#985](https://github.com/ForumHFR/redface2/issues/985), [#1279](https://github.com/ForumHFR/redface2/issues/1279), [#1308](https://github.com/ForumHFR/redface2/issues/1308))
+
+- Visionneuse plein écran : un tap sur une image de post ouvre un fond noir avec pincement, déplacement, double tap 2×, partage, ouverture externe et Retour. Un tap simple masque et ramène la barre d'actions (plein écran) ; barre du bas à la bonne hauteur, croix de fermeture à droite. Les miniatures liées à une grande image ouvrent la grande image. Coins des images réglables (Arrondis, Légers, Carrés). Sélection de texte en zoom corrigée.
+
+### Modération ([#293](https://github.com/ForumHFR/redface2/issues/293), [#294](https://github.com/ForumHFR/redface2/issues/294))
+
+- « Alerter un post » dans le menu de post, fidèle à la page modo.php de HFR (motif, alerte existante, alerte traitée). Un lien d'alerte tapé dans un message ouvre une feuille sur place sans déplacer le drapeau HFR. « Mes sanctions » dans Réglages → Compte → Compte HFR : historique des sanctions du compte avec badge « En cours ».
+
+### Forum et drapeaux ([#1025](https://github.com/ForumHFR/redface2/issues/1025), [#1303](https://github.com/ForumHFR/redface2/issues/1303), [#1319](https://github.com/ForumHFR/redface2/issues/1319))
+
+- Vue catégorie : deux commandes de repli (sous-catégories, filtre et recherche ; sujets épinglés), mémorisées. Badge « +N » des drapeaux iso userscripts web : pages restantes après celle que le tap ouvre. Super favoris rangés par compte HFR ; la migration des anciennes épingles n'atterrit plus sur le compte anonyme.
+
+### Sujets et affichage ([#326](https://github.com/ForumHFR/redface2/issues/326), [#340](https://github.com/ForumHFR/redface2/issues/340), [#1296](https://github.com/ForumHFR/redface2/issues/1296), [#1297](https://github.com/ForumHFR/redface2/issues/1297))
+
+- Icône de l'application au choix (Classique, Redface 1 avec le vrai fond d'origine) ; la mise à jour du lanceur peut prendre quelques secondes et les raccourcis épinglés d'une ancienne icône peuvent rester orphelins. Ton du message affiché sur la ligne de date. Sondage déplié après le vote. Liseré des cartes sur fond « Blanc ». Citations tronquées proprement (URL, smileys, balises), citation rapide en double corrigée, atterrissage sur le message visé plus robuste, pile de navigation dédoublonnée, couleur au démarrage fiabilisée.
+
+### Infra ([#650](https://github.com/ForumHFR/redface2/issues/650), [#1307](https://github.com/ForumHFR/redface2/issues/1307))
+
+- CI allégée sur les PR documentation ; test DataStore instable rendu déterministe.
+
+---
+
+## `0.54.14` — `internal` (dev) — 2026-09-07
+
+Retours tinc et styx42, décisions XaTriX. Code Astra sous gate Fable, build socadisc ; PRs [#1314](https://github.com/ForumHFR/redface2/pull/1314) ([#1296](https://github.com/ForumHFR/redface2/issues/1296)), [#1315](https://github.com/ForumHFR/redface2/pull/1315) ([#1025](https://github.com/ForumHFR/redface2/issues/1025)), [#1313](https://github.com/ForumHFR/redface2/pull/1313) ([#1307](https://github.com/ForumHFR/redface2/issues/1307)).
+
+### Modifié
+
+- **Drapeaux, badge « +N »** — compte désormais les pages restantes après celle que le tap ouvre, comme les userscripts web : dernier lu en bas de la page 59/60 → pas de badge ; en milieu de page 59 → « +1 ». La tonalité du badge suit.
+
+### Corrigé
+
+- **Sondages** — avec « replier les sondages sauf non répondus », le sondage reste déplié après le vote tant qu'on reste sur la page (résultat visible) ; il se replie au changement de page, à la sortie du sujet ou au rafraîchissement explicite. Le repli manuel garde la priorité.
+- **Tests** — test DataStore des replis de catégorie rendu déterministe (instable en CI).
+
+---
+
+## `0.54.13` — `internal` (dev) — 2026-09-07
+
+Suite de la visionneuse (XaTriX) et retour d'antiseptiqueIncolore sur le fond blanc. Code Astra sous gate Fable, preuves émulateur socadisc ; PRs [#1310](https://github.com/ForumHFR/redface2/pull/1310) ([#1308](https://github.com/ForumHFR/redface2/issues/1308)) et [#1311](https://github.com/ForumHFR/redface2/pull/1311) ([#1297](https://github.com/ForumHFR/redface2/issues/1297)).
+
+### Ajouté
+
+- **Visionneuse d'images** — un tap simple sur l'image masque la barre d'actions du bas (mode plein écran), le tap suivant la ramène ; double tap, pincement et défilement inchangés. La barre est visible par défaut à chaque image. Action TalkBack « Afficher / Masquer les actions ». Connu : un balayage vertical que l'image ne peut pas consommer est traité comme un tap ([#1309](https://github.com/ForumHFR/redface2/issues/1309)).
+
+### Modifié
+
+- **Thème, fond clair « Blanc »** — les cartes de post et les cadres de citation reçoivent un liseré de 1 dp pour se détacher du blanc pur ; les bordures de sélection et de modération gardent la priorité. Autres tons et thème sombre inchangés.
+
+---
+
+## `0.54.12` — `internal` (dev) — 2026-09-06
+
+Deux retours de XaTriX : la visionneuse d'images et la place perdue en haut de la vue catégorie. Code Astra sous gate Fable, preuves émulateur socadisc ; PRs [#1304](https://github.com/ForumHFR/redface2/pull/1304) et [#1305](https://github.com/ForumHFR/redface2/pull/1305) ([#1303](https://github.com/ForumHFR/redface2/issues/1303)).
+
+### Ajouté
+
+- **Forum → catégorie** — deux commandes de repli : un chevron sur la ligne du nom de catégorie replie sous-catégories, filtre drapeaux et recherche (une loupe reste disponible, un rappel « Sous-cat · Filtre » réapparaît si quelque chose est actif) ; un en-tête « Épinglés (N) » / « N épinglés masqués » replie les sujets épinglés. Les deux états sont mémorisés. L'en-tête remplace le séparateur « Autres sujets ».
+
+### Corrigé
+
+- **Visionneuse d'images** — la barre translucide du bas réservait l'encoche haute de l'écran après masquage des barres système, d'où une hauteur doublée (104 dp au lieu de 56) ; elle ne réserve plus que le bas et les côtés. La croix de fermeture passe tout à droite dans un cercle translucide, séparée des quatre autres actions.
+
+---
+
+## `0.54.11` — `internal` (dev) — 2026-09-06
+
+Raccords de l'écran « Mes sanctions » avec le reste des Réglages ([#294](https://github.com/ForumHFR/redface2/issues/294)), après une revue de cohérence UI demandée par XaTriX. Code Astra sous gate Fable, build socadisc ; PR [#1294](https://github.com/ForumHFR/redface2/pull/1294).
+
+### Modifié
+
+- **Réglages → Compte** — « Mes sanctions » passe en tête de la section Compte HFR ; le réglage à venir (avatars, signatures, messages par page) et sa note sont regroupés dans une sous-section « Réglages du profil HFR », la note ne parle plus d'editprofil.php.
+- **Menu compte** — présent dans la barre supérieure de « Mes sanctions » et de « Mes images », comme sur les autres sous-pages.
+- **Mes sanctions** — messages d'erreur réseau/serveur identiques au reste de l'app ; titres de sanction annoncés comme en-têtes par les lecteurs d'écran, cartes regroupées, chargement nommé ; états « Connexion requise » et vide alignés sur Mes images.
+
+---
+
+## `0.54.10` — `internal` (dev) — 2026-09-06
+
+Feuilles d'alerte modération : affichage seulement une fois chargées ([#1287](https://github.com/ForumHFR/redface2/issues/1287), retour XaTriX sur la 0.54.9). Diagnostic et conception Astra (avis lecture seule), implémentation Astra sous gate Fable, build socadisc ; PR [#1292](https://github.com/ForumHFR/redface2/pull/1292).
+
+### Modifié
+
+- **Feuilles « Alerte modération »** (lien et menu « Alerter ») — elles n'apparaissent plus pendant le chargement : une fine barre de progression en haut de l'écran signale la lecture, puis la feuille s'ouvre directement à sa hauteur finale, sans mouvement. Retour annule la lecture. Réessayer et un changement de compte gardent la feuille ouverte. Le champ « raison » ne prend le focus qu'une fois la feuille développée, le clavier ne la déplace plus.
+- **Mise en page** — date « traitée le » en texte secondaire, sous-titre « sujet, page N » au-dessus d'un bouton « Voir le message » épuré, « Fermer » en bouton texte.
+
+---
+
+## `0.54.9` — `internal` (dev) — 2026-09-06
+
+Correctif de la feuille d'alerte modération ouverte depuis un lien ([#1287](https://github.com/ForumHFR/redface2/issues/1287)), signalé par XaTriX sur la 0.54.8. Code Astra sous gate Fable, build socadisc, mesure vidéo sur émulateur ; PR [#1290](https://github.com/ForumHFR/redface2/pull/1290).
+
+### Corrigé
+
+- **Feuille « Alerte modération »** — elle sautait quand le texte de HFR remplaçait l'indicateur de chargement (changement de hauteur brutal). La zone de contenu a désormais une hauteur minimale et une transition animée : une fois posée, la feuille ne bouge plus.
+
+---
+
+## `0.54.8` — `internal` (dev) — 2026-09-06
+
+Lien d'alerte modération, option B choisie par XaTriX sur le fil DEV ([#1287](https://github.com/ForumHFR/redface2/issues/1287)). Code Astra (Codex gpt-6-astra, xhigh) sous gate Fable, build socadisc ; PR [#1288](https://github.com/ForumHFR/redface2/pull/1288).
+
+### Modifié
+
+- **Lien d'alerte modération tapé dans un message** — n'emmène plus sur le message visé (le chargement d'une page de sujet en connecté déplace le drapeau HFR). Une feuille s'ouvre sur place, ne consulte que la page d'alerte HFR et affiche son texte tel quel, avec un bouton « Voir le message » (titre du sujet et page). Si rien n'a encore été déposé (formulaire ou proposition de se joindre), on va d'abord sur le message comme avant. Hors session : invitation à se connecter, sans requête. Un lien ouvert depuis l'extérieur de l'app (mail, navigateur) garde le comportement de la 0.54.7.
+
+---
+
+## `0.54.7` — `internal` (dev) — 2026-09-06
+
+Correctif de release. La 0.54.6 annonçait le lien d'alerte modération mais ne le contenait pas : le squash de la PR [#1281](https://github.com/ForumHFR/redface2/pull/1281) avait annulé par erreur les fichiers de [#1280](https://github.com/ForumHFR/redface2/pull/1280). Signalé par XaTriX. PR [#1284](https://github.com/ForumHFR/redface2/pull/1284).
+
+### Corrigé
+
+- **Lien d'alerte modération** ([#293](https://github.com/ForumHFR/redface2/issues/293)) — réapplication à l'identique : un lien `user/modo.php?…numreponse=…` (intent ou lien tapé dans un post) ouvre le sujet sur le message visé et la feuille d'alerte ; hors session, atterrissage sur le message avec invitation à se connecter.
+
+---
+
+## `0.54.6` — `internal` (dev) — 2026-09-06
+
+Trois livraisons demandées par XaTriX, code Astra (Codex gpt-6-astra, xhigh) sous gate Fable, builds socadisc ; PR [#1280](https://github.com/ForumHFR/redface2/pull/1280), [#1281](https://github.com/ForumHFR/redface2/pull/1281) et [#1282](https://github.com/ForumHFR/redface2/pull/1282).
+
+### Ajouté
+
+- **Mes sanctions** ([#294](https://github.com/ForumHFR/redface2/issues/294)) — Réglages → Compte → Compte HFR : l'historique des sanctions du compte (type, catégorie, dates, modérateur, raison, badge « En cours » si non levée). Première brique de la vue Compte HFR. Désactivé avec « Connexion requise » hors session.
+- **Lien d'alerte modération** ([#293](https://github.com/ForumHFR/redface2/issues/293)) — un lien `user/modo.php?…numreponse=…` (intent ou lien tapé dans un post) ouvre le sujet sur le message visé et la feuille d'alerte ; hors session, atterrissage sur le message avec invitation à se connecter.
+
+### Corrigé
+
+- **Visionneuse** ([#1279](https://github.com/ForumHFR/redface2/issues/1279)) — une miniature liée à une image en pleine taille, posée sur la même ligne qu'un texte, ouvre désormais la visionneuse plein écran sur la grande image au lieu du navigateur (contrat images v1.5). Signalé par XaTriX.
+
+---
+
+## `0.54.5` — `internal` (dev) — 2026-09-05
+
+Alerter un post à la modération ([#293](https://github.com/ForumHFR/redface2/issues/293), demandé par XaTriX). Code Astra (Codex gpt-6-astra, xhigh) sous gate Fable, build socadisc ; PR [#1277](https://github.com/ForumHFR/redface2/pull/1277).
+
+### Ajouté
+
+- **Alerter un post** — nouvelle entrée du menu de post. La feuille suit la page `modo.php` de HFR : motif de l'alerte, proposition de se joindre à une alerte déjà déposée par un autre membre, alerte en attente ou déjà traitée (avec la date). Le texte de HFR est affiché tel quel, la réponse d'envoi aussi. Hors connexion, l'entrée est désactivée avec la mention « Connexion requise ». Recette live à faire : l'agent n'a envoyé aucune alerte réelle.
+
+---
+
+## `0.54.4` — `internal` (dev) — 2026-09-05
+
+Clôture de la relecture ciblée du périmètre codé en gpt-5.5 : dernier défaut corrigé, 13 sur 13. Code Astra (Codex gpt-6-astra, xhigh) sous gate Fable, build socadisc ; PR [#1276](https://github.com/ForumHFR/redface2/pull/1276). Documentation : la séquence de validation locale d'AGENTS.md, README et du guide de contribution inclut désormais `test` et `:app:lintProdDebug` ([#1275](https://github.com/ForumHFR/redface2/pull/1275)).
+
+### Corrigé
+
+- **Couleur au démarrage** — le miroir qui peint la première frame était écrit avant la confirmation de l'enregistrement ; un crash à cet instant pouvait afficher au redémarrage une couleur jamais enregistrée. Le miroir n'est plus alimenté qu'après hydratation ou commit confirmé, en écriture durable.
+
+---
+
+## `0.54.3` — `internal` (dev) — 2026-09-05
+
+Correctif du dernier lot de la relecture 5.5 et vrai fond de l'icône Redface 1. Code Astra (Codex gpt-6-astra, xhigh) sous gate Fable, builds socadisc ; PR [#1272](https://github.com/ForumHFR/redface2/pull/1272) et [#1273](https://github.com/ForumHFR/redface2/pull/1273).
+
+### Corrigé
+
+- **Sélection de texte en zoom** — en zoom, appuyer longuement sur du texte puis glisser étendait le défilement au lieu de la sélection : le pan à un doigt est désormais arbitré après les enfants et laisse le glisser à la sélection ; le pincement à deux doigts garde sa priorité. Seul défaut majeur relevé par la relecture du reste du périmètre 5.5 (réglages, bootstrap du thème, forum, MP, éditeur, zoom, recherche, liens).
+- **Icône Redface 1** ([#326](https://github.com/ForumHFR/redface2/issues/326)) — le fond redessiné en 0.54.2 ne ressemblait pas à l'original ; l'icône utilise maintenant le vrai fond du dépôt ForumHFR/Redface (Apache 2.0, chevrons montants reliés).
+
+### Note
+
+Trois dessins d'icône supplémentaires (monogramme, bulles, puce) ont été proposés et refusés à la validation visuelle ; le catalogue reste Classique et Redface 1. La relecture ciblée du périmètre codé en gpt-5.5 est terminée : 12 des 13 défauts confirmés sont corrigés (0.54.1 et 0.54.3), reste le mineur du miroir de thème de démarrage.
+
+---
+
+## `0.54.2` — `internal` (dev) — 2026-09-05
+
+Reprise de [#326](https://github.com/ForumHFR/redface2/issues/326) après retour de XaTriX : le réglage de la 0.54.0 (quatre fonds du même drapeau) ne répondait pas à la demande d'icônes alternatives complètes. Cadrage Codex gpt-6-astra, code Astra sous gate Fable, build et preuve visuelle Opus ; PR [#1271](https://github.com/ForumHFR/redface2/pull/1271).
+
+### Modifié
+
+- **Icône de l'application** — Réglages → Affichage → Icône de l'application devient une sous-page avec aperçus réels : **Classique** (drapeau RF2) et **Redface 1** (l'icône originale de Redface 1, reprise du dépôt ForumHFR/Redface sous licence Apache 2.0, fond rouge à chevrons redessiné). Sélection provisoire, badge « Actuelle », bouton **Appliquer** ; l'application redémarre d'elle-même sur la nouvelle icône et rouvre la galerie. Les variantes Sombre, Rose et Rouge sont retirées ; une installation dev 0.54.0 qui en utilisait une est ramenée automatiquement sur Classique au démarrage. Une image personnelle ne peut pas remplacer l'icône dans la liste des applications (limite Android) ; la page le dit et renvoie aux lanceurs qui le permettent.
+
+### Note
+
+Prochaines étapes du chantier : essais sur lanceurs réels (One UI, tiers, icônes thématiques Android 13+), puis dessins supplémentaires. Mentions de licence : `app/THIRD_PARTY_NOTICES.md`.
+
+---
+
+## `0.54.1` — `internal` (dev) — 2026-09-05
+
+Correctifs issus de la relecture ciblée du lot produit en gpt-5.5 (0.51 → 0.53.6, bêta) : douze défauts confirmés par deux relecteurs indépendants, onze corrigés. Produit par Sol (Codex gpt-5.6, xhigh) sous gate Fable, builds Opus ; PR [#1269](https://github.com/ForumHFR/redface2/pull/1269) (topic, citations, navigation) et [#1270](https://github.com/ForumHFR/redface2/pull/1270) (drapeaux, couleurs).
+
+### Corrigé
+
+- **Citations tronquées** — la troncature ne coupe plus au milieu d'une URL, d'un smiley (`[:x]` ou `:x:`) ni d'une balise `[url]` ouverte, et ne sépare plus un emoji en deux ; une citation déjà tronquée n'est plus retronquée à tort.
+- **Citation rapide en double** — cartes de citation désactivées, une rotation de l'écran ne rajoute plus un second `[quotemsg]` au brouillon.
+- **Atterrissage sur un message perdu** — un pull-to-refresh, un vote, une suppression ou une clôture de sondage survenant avant la page fraîche n'annule plus le défilement vers le message visé.
+- **Réancrage des images** — le réancrage d'une page ne continue plus sur la page suivante quand on change de page pendant le chargement des images.
+- **Pile de navigation** — rouvrir un écran déjà présent deux fois dans la pile dépile jusqu'à l'occurrence la plus récente au lieu de détruire l'écran courant.
+- **Super favoris** — un super favori dont le sujet a disparu du cache ne propose plus « Retirer le drapeau » et n'envoie plus de suppression de drapeau au serveur (ADR-017 : une épingle est locale).
+- **Super favoris par compte** — les épingles sont désormais rangées par compte HFR (migration automatique des épingles existantes vers le compte connecté) ; changer de compte ne montre plus celles de l'autre.
+- **Rafraîchissement des drapeaux** — tirer sur un onglet pendant qu'un autre se rafraîchit ne lance plus deux rafraîchissements concurrents et l'indicateur reste affiché jusqu'au bout ; un tirage sur Super pendant un rafraîchissement n'est plus perdu.
+- **Couleurs** — quitter l'écran pendant l'enregistrement d'une couleur ne remet plus l'ancienne valeur en mémoire pendant que la nouvelle est écrite sur disque.
+- **Libellés de sous-catégorie** — un échec de chargement n'empêche plus de réessayer à l'émission suivante.
+
+### Note
+
+Reste différé du même audit : le miroir de thème de démarrage peut être écrit avant la confirmation du commit (un flash de couleur possible au redémarrage après un crash au mauvais instant). Détail de l'audit : `redface2-work/reports/AUDIT-perimetre-gpt55-0103sept.md` (hors dépôt).
+
+---
+
+## `0.54.0` — `internal` (dev) — 2026-09-04
+
+Premier lot du chantier « vieilles issues » (session hfr2-27) : quatre chantiers anciens livrés d'un coup. Produit par Sol (Codex gpt-5.6, xhigh) sous gate Fable, builds Opus (local + socadisc) ; PR #1265, #1266, #1267, #1268.
+
+### Ajouté
+
+- **Viewer d'image plein écran** ([#182](https://github.com/ForumHFR/redface2/issues/182) volet C) — un tap sur une image de post ouvre un viewer noir plein écran : pincement, déplacement, double-tap 2×, fermeture par bouton, Retour ou geste prédictif, barres système masquées puis restaurées. La miniature déjà affichée sert d'aperçu immédiat, la pleine résolution est rechargée sans le plafond de décodage des posts (Telephoto 0.19). Une image liée vers une autre image ouvre directement la source pleine taille ; un lien vers autre chose continue d'ouvrir le navigateur. Actions : Partager, Copier l'URL, Ouvrir dans le navigateur, Enregistrer. Depuis les messages privés, rien n'est écrit sur disque. Le bouton « Afficher en taille réelle (à venir) » du menu image devient « Afficher en plein écran » (clôt la promesse notée aux entrées #831).
+- **Icône de l'application au choix** ([#326](https://github.com/ForumHFR/redface2/issues/326)) — Réglages → Affichage : Classique, Sombre, Rose, Rouge RF1 (même drapeau, fond différent). Le lanceur peut mettre quelques secondes à se rafraîchir.
+- **Ton du message** ([#340](https://github.com/ForumHFR/redface2/issues/340)) — l'icône de ton choisie par l'auteur (le petit pictogramme HFR à côté du numéro de message) s'affiche sur la ligne de date quand elle n'est pas celle par défaut ; dans l'éditeur (réponse, édition, nouveau sujet), une ligne « Ton du message » repliée permet d'en choisir un parmi les 16 du forum. Le cache local des messages migre (v19) ; les messages déjà en cache affichent le ton au prochain rafraîchissement.
+- **Coins des images** ([#985](https://github.com/ForumHFR/redface2/issues/985)) — Réglages → Affichage : Arrondis (actuel), Légers, Carrés.
+
+### Infra
+
+- **CI** ([#650](https://github.com/ForumHFR/redface2/issues/650)) : une PR qui ne touche que de la documentation ne relance plus les jobs lourds ; les gardes rapides et le test de cohérence des docs restent exécutés.
+
+### Note
+
+Le lot précédent (0.51 → 0.53.6, bêta) avait été produit par Codex gpt-5.5 au lieu de gpt-5.6 : une relecture ciblée des zones à état complexe est en cours (atterrissage post-envoi, onglet Super, moteur de couleurs) ; ses correctifs éventuels suivront en 0.54.x.
+
+---
+
 ## `0.53.6` — `open` (bêta) — 2026-09-03
 
 Promotion bêta du lot développé en dev de `0.51.0` à `0.53.6`, depuis la précédente bêta `0.50.2`. Le détail par version dev figure dans les entrées ci-dessous. Les issues du lot restent ouvertes jusqu'à validation par les retours des testeurs.

@@ -12,6 +12,8 @@ object HfrSelectors {
 
     const val POST_TABLE = "table.messagetable"
     const val POST_ANCHOR = "td.messCase1 a[name^=t]"
+    const val POST_MSG_ICON =
+        "td.messCase1 div.right a[href^=#t] img[src*=/icones/message/icon]"
     const val POST_AUTHOR = "td.messCase1 b.s2"
     const val POST_MODERATION_CELL = "td.messCase1.messageModo"
     const val POST_AVATAR = ".avatar_center img[src]"

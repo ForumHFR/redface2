@@ -393,6 +393,10 @@ class PostEditorViewModel @AssistedInject constructor(
                 _state.update { it.copy(smileyDisabled = intent.disabled) }
             is PostEditorIntent.ToggleEmailNotification ->
                 _state.update { it.copy(emailNotificationEnabled = intent.enabled) }
+            is PostEditorIntent.MsgIconSelected ->
+                intent.n.takeIf { it in EDITOR_MSG_ICONS }?.let { selected ->
+                    _state.update { it.copy(msgIcon = selected) }
+                }
             is PostEditorIntent.SmileySelected -> onSmileySelected(intent.token)
             is PostEditorIntent.ImageUrlInserted -> onImageUrlInserted(intent.url)
             is PostEditorIntent.ImagePicked -> onImagePicked(intent.uri)
@@ -723,8 +727,8 @@ class PostEditorViewModel @AssistedInject constructor(
     /**
      * Shared form-fetch pipeline used by reply (Phase 2C) and edit (Phase 2D).
      * The state update body is identical between the two flows : both hydrate
-     * `draft`, `preview`, and the three per-post options once from
-     * [ReplyForm.initialContent] / [ReplyForm.options], and both honour the
+     * `draft`, `preview`, and the per-post controls once from
+     * [ReplyForm.initialContent] / [ReplyForm.options] / [ReplyForm.msgIcon], and both honour the
      * anti-clobber guards on refetch.
      */
     private fun launchFormFetch(fetch: suspend () -> ReplyForm) {
@@ -824,6 +828,7 @@ class PostEditorViewModel @AssistedInject constructor(
             } else {
                 emailNotificationEnabled
             },
+            msgIcon = if (hydrateOptions) form.msgIcon.toEditorMsgIcon() else msgIcon,
             optionsHydratedFromForm = true,
             // Phase 2F-B (#11) — keep the parsed userId around for the wiki smiley search.
             // Anti-clobber : do not overwrite once set, so a silent `InvalidHashCheck`
@@ -915,7 +920,7 @@ class PostEditorViewModel @AssistedInject constructor(
                         val context = buildEditPostContext() ?: error("canSubmit lied about edit context")
                         editPostRepository.submitEditPost(
                             context = context,
-                            form = form,
+                            form = form.copy(msgIcon = snapshot.msgIcon.toString()),
                             bbcodeContent = snapshot.draft.text,
                             options = options,
                         )
@@ -966,7 +971,7 @@ class PostEditorViewModel @AssistedInject constructor(
         if (quotes.isEmpty()) {
             return replyRepository.submitReply(
                 context = context,
-                form = form,
+                form = form.copy(msgIcon = snapshot.msgIcon.toString()),
                 bbcodeContent = snapshot.draft.text,
                 options = options,
             )
@@ -983,7 +988,7 @@ class PostEditorViewModel @AssistedInject constructor(
         val body = snapshot.draft.text
         return replyRepository.submitReply(
             context = quoteContext,
-            form = quoteForm,
+            form = quoteForm.copy(msgIcon = snapshot.msgIcon.toString()),
             bbcodeContent = if (body.isBlank()) {
                 quoteForm.initialContent.trimEnd()
             } else {

@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import fr.forumhfr.redface2.core.domain.coroutines.ApplicationScope
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
+import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
 import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
 import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
 import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
@@ -25,6 +26,7 @@ import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.domain.preferences.NavBarLabelsBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
+import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
@@ -40,8 +42,10 @@ import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.FlagType
+import java.util.logging.Logger
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.async
@@ -99,6 +103,9 @@ class DataStoreUserPreferencesRepository @Inject constructor(
     // DataStore commit — closing the cross-category read/write race (a plain `dataStore.data` read
     // could otherwise return the pre-write disk value).
     private val forumCategoryFlagFilterCache = MutableStateFlow<CategoryFlagFilter?>(null)
+    private val forumCategoryMenusCollapsedCache = MutableStateFlow<Boolean?>(null)
+    private val forumCategoryStickyTopicsCollapsedCache = MutableStateFlow<Boolean?>(null)
+    private val forumCategoryLayoutWriteMutex = Mutex()
 
     // Same cache-first contract for the grouped theme-colour bundle (#1250 H3). Each UI action
     // persists five DataStore keys; the cache is the in-session source of truth while queued disk
@@ -320,14 +327,22 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         themeColorPreferencesCache
             .onStart {
                 if (themeColorPreferencesCache.value == null) {
-                    val fromDisk = runCatching { readThemeColorPreferences(dataStore.data.first()) }
-                        .getOrDefault(ThemeColorPreferences())
-                    themeColorPreferencesCache.compareAndSet(null, fromDisk)
+                    // The mirror commits synchronously on IO. Share the setter's lock so a late
+                    // hydration cannot overwrite a newer confirmed bundle (or backfill twice).
+                    withContext(ioDispatcher) {
+                        themeColorPreferencesWriteMutex.withLock {
+                            if (themeColorPreferencesCache.value == null) {
+                                val fromDisk = runCatching { readThemeColorPreferences(dataStore.data.first()) }
+                                    .onSuccess(::backfillThemeColorBootstrap)
+                                    .getOrDefault(ThemeColorPreferences())
+                                themeColorPreferencesCache.compareAndSet(null, fromDisk)
+                            }
+                        }
+                    }
                 }
             }
             .filterNotNull()
             .distinctUntilChanged()
-            .onEach(::backfillThemeColorBootstrap)
             .catch { emit(ThemeColorPreferences()) }
 
     override suspend fun setThemeColorPreferences(preferences: ThemeColorPreferences) {
@@ -344,13 +359,17 @@ class DataStoreUserPreferencesRepository @Inject constructor(
                         prefs[KEY_DYNAMIC_COLOR_ENABLED] = latest.dynamicColorEnabled
                         prefs[KEY_POST_HEADER_EMPHASIS] = latest.postHeaderEmphasis.name
                     }
-                    themeBootstrapStore.writeThemeColorPreferences(latest)
+                    backfillThemeColorBootstrap(latest)
                 }
             }
+        } catch (cancellation: CancellationException) {
+            // The detached persist keeps committing after its caller disappears. Rolling back here
+            // would make the in-memory source of truth stale while DataStore stores the new bundle.
+            throw cancellation
         } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
             // The cache is the in-session source of truth: an unpersisted bundle must not survive a
-            // failed commit (theme vs. settings divergence, bootstrap mirror backfilled with it). The
-            // CAS keeps a newer bundle written meanwhile (Opus review of #1250 H3).
+            // failed commit (theme vs. settings divergence). The CAS keeps a newer bundle written
+            // meanwhile (Opus review of #1250 H3).
             themeColorPreferencesCache.compareAndSet(preferences, stale)
             throw error
         }
@@ -773,6 +792,22 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeAppLauncherIcon(): Flow<AppLauncherIcon> =
+        dataStore.data
+            // Component state persists independently in PackageManager; DataStore mirrors the
+            // selected option for Settings and degrades safely if a future value is unknown.
+            .map(::readAppLauncherIcon)
+            .distinctUntilChanged()
+            .catch { emit(AppLauncherIcon.CLASSIC) }
+
+    override suspend fun setAppLauncherIcon(icon: AppLauncherIcon) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_APP_LAUNCHER_ICON] = icon.name
+            }
+        }
+    }
+
     override fun observeMediaDisplayProfile(): Flow<MediaDisplayProfile> =
         dataStore.data
             // Default M ×1,5 (#973, [AMENDEMENT-v1.5-2] — chosen by XaTriX). Like the display
@@ -800,6 +835,21 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         persist {
             dataStore.edit { prefs ->
                 prefs[KEY_POST_IMAGE_MAX_WIDTH] = width.name
+            }
+        }
+    }
+
+    override fun observePostImageCorners(): Flow<PostImageCorners> =
+        dataStore.data
+            // Default ROUNDED (#985): preserves the historical 8 dp content-image radius.
+            .map(::readPostImageCorners)
+            .distinctUntilChanged()
+            .catch { emit(PostImageCorners.DEFAULT) }
+
+    override suspend fun setPostImageCorners(corners: PostImageCorners) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_POST_IMAGE_CORNERS] = corners.name
             }
         }
     }
@@ -963,6 +1013,51 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeForumCategoryMenusCollapsed(): Flow<Boolean> =
+        observeCategoryLayout(forumCategoryMenusCollapsedCache, KEY_FORUM_CATEGORY_MENUS_COLLAPSED)
+
+    override suspend fun setForumCategoryMenusCollapsed(collapsed: Boolean) {
+        setCategoryLayout(forumCategoryMenusCollapsedCache, KEY_FORUM_CATEGORY_MENUS_COLLAPSED, collapsed)
+    }
+
+    override fun observeForumCategoryStickyTopicsCollapsed(): Flow<Boolean> =
+        observeCategoryLayout(forumCategoryStickyTopicsCollapsedCache, KEY_FORUM_CATEGORY_STICKY_TOPICS_COLLAPSED)
+
+    override suspend fun setForumCategoryStickyTopicsCollapsed(collapsed: Boolean) {
+        setCategoryLayout(
+            forumCategoryStickyTopicsCollapsedCache,
+            KEY_FORUM_CATEGORY_STICKY_TOPICS_COLLAPSED,
+            collapsed,
+        )
+    }
+
+    /** #1303 — hydrate once, without overwriting a choice made while the disk read was pending. */
+    private fun observeCategoryLayout(cache: MutableStateFlow<Boolean?>, key: Preferences.Key<Boolean>): Flow<Boolean> =
+        cache.onStart {
+            if (cache.value == null) {
+                val fromDisk = runCatching { dataStore.data.first()[key] ?: false }.getOrElse { failure ->
+                    // Leaving a category during hydration must not seed the shared cache with false.
+                    if (failure is CancellationException) throw failure
+                    false
+                }
+                cache.compareAndSet(null, fromDisk)
+            }
+        }.filterNotNull().distinctUntilChanged()
+
+    /** Shared cache first; queued application-scope commits always write the latest value of THIS key. */
+    private suspend fun setCategoryLayout(
+        cache: MutableStateFlow<Boolean?>,
+        key: Preferences.Key<Boolean>,
+        collapsed: Boolean,
+    ) {
+        cache.value = collapsed
+        persist {
+            forumCategoryLayoutWriteMutex.withLock {
+                dataStore.edit { prefs -> prefs[key] = cache.value ?: collapsed }
+            }
+        }
+    }
+
     /**
      * Reads [KEY_UPLOAD_PROVIDER] defensively: an unknown / corrupt stored value (older build with a
      * renamed enum, manual edit) falls back to [UploadProviderId.DIBERIE] instead of crashing on
@@ -995,6 +1090,18 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             ?.let { stored -> runCatching { DisplayDensity.valueOf(stored) }.getOrNull() }
             ?: DisplayDensity.COMFORT
 
+    /** Reads retired and unknown values as Classic without changing storage during collection. */
+    private fun readAppLauncherIcon(prefs: Preferences): AppLauncherIcon =
+        prefs[KEY_APP_LAUNCHER_ICON]
+            ?.let { stored -> runCatching { AppLauncherIcon.valueOf(stored) }.getOrNull() }
+            ?.also { icon ->
+                if (!icon.selectable) {
+                    Logger.getLogger("AppLauncherIcon").fine("Retired launcher icon ${icon.name}: using CLASSIC")
+                }
+            }
+            ?.takeIf { it.selectable }
+            ?: AppLauncherIcon.CLASSIC
+
     /**
      * Reads [KEY_MEDIA_DISPLAY_PROFILE] defensively (#973): an unknown / corrupt stored value
      * (older build, manual edit) falls back to [MediaDisplayProfile.M] instead of crashing on
@@ -1014,6 +1121,12 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         prefs[KEY_POST_IMAGE_MAX_WIDTH]
             ?.let { stored -> runCatching { PostImageMaxWidth.valueOf(stored) }.getOrNull() }
             ?: PostImageMaxWidth.DEFAULT
+
+    /** Unknown / corrupt #985 values fall back to the historical rounded corners. */
+    private fun readPostImageCorners(prefs: Preferences): PostImageCorners =
+        prefs[KEY_POST_IMAGE_CORNERS]
+            ?.let { stored -> runCatching { PostImageCorners.valueOf(stored) }.getOrNull() }
+            ?: PostImageCorners.DEFAULT
 
     /**
      * Reads [KEY_SMILEY_PICKER_DECORATION] defensively (#989): an unknown / corrupt stored value
@@ -1367,10 +1480,14 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         // (FontScalePreference.name), both defensively parsed. No bootstrap mirror (cf. observers).
         val KEY_DISPLAY_DENSITY = stringPreferencesKey("display_density")
         val KEY_FONT_SCALE = stringPreferencesKey("font_scale")
+        // #326 — selected manifest activity-alias (AppLauncherIcon.name), defensively parsed.
+        val KEY_APP_LAUNCHER_ICON = stringPreferencesKey("app_launcher_icon")
         // #973 — block-GIF display profile (MediaDisplayProfile.name, defensively parsed).
         val KEY_MEDIA_DISPLAY_PROFILE = stringPreferencesKey("media_display_profile")
         // #991 — post content image max width (PostImageMaxWidth.name, defensively parsed).
         val KEY_POST_IMAGE_MAX_WIDTH = stringPreferencesKey("post_image_max_width")
+        // #985 — post content image corners (PostImageCorners.name, defensively parsed).
+        val KEY_POST_IMAGE_CORNERS = stringPreferencesKey("post_image_corners")
         // #989 — smiley picker cell delimiter (SmileyPickerDecoration.name, defensively parsed).
         val KEY_SMILEY_PICKER_DECORATION = stringPreferencesKey("smiley_picker_decoration")
 
@@ -1381,6 +1498,8 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val KEY_IMMERSIVE_NAV_BAR_REVEAL = stringPreferencesKey("immersive_nav_bar_reveal")
 
         // #1132 — last « Mes drapeaux » Forum filter (CategoryFlagFilter.name, defensively parsed).
+        val KEY_FORUM_CATEGORY_MENUS_COLLAPSED = booleanPreferencesKey("forum_category_menus_collapsed")
+        val KEY_FORUM_CATEGORY_STICKY_TOPICS_COLLAPSED = booleanPreferencesKey("forum_category_sticky_topics_collapsed")
         val KEY_FORUM_CATEGORY_FLAG_FILTER = stringPreferencesKey("forum_category_flag_filter")
     }
 }
