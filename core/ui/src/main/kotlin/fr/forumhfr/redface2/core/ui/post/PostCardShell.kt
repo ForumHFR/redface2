@@ -18,6 +18,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.semantics
+import fr.forumhfr.redface2.core.ui.theme.LocalReadingTileOutline
 
 /**
  * #351 — the neutral anatomy shared by the topic post card and the private-message thread card.
@@ -42,10 +43,12 @@ import androidx.compose.ui.semantics.semantics
  *    mount their body through `ReadingPostCard`, whose selection is constant by construction #946).
  *  - [footer] (optional) — the feature-owned actions row: topic actions or MP « Citer » (#1074).
  *
- * [border] is an optional resolved outline (multi-quote selection or a structural moderation
- * marker). Body/header padding is the slot's own job (both reading hosts read their gutters from the
- * display-metrics preset since #1042, each reinjecting them on its own slots) so the shell adds no
- * padding of its own — it is purely the vertical stack inside a `Card`.
+ * [border] is an optional explicit outline (such as multi-quote selection), taking precedence over
+ * the automatic 1 dp outline on WHITE light surfaces (#1297). The automatic outline applies only to
+ * inset cards; [flat] keeps its existing hairline. Body/header padding is the slot's own job (both
+ * reading hosts read their gutters from the display-metrics preset since #1042, each reinjecting
+ * them on its own slots) so the shell adds no padding of its own — it is purely the vertical stack
+ * inside a `Card`.
  * `selectable`/highlight tinting are deliberately NOT handled here.
  *
  * [flat] is the full-width mode (#884 — « posts en pleine largeur ») : the SAME `Card` (the node
@@ -62,8 +65,8 @@ import androidx.compose.ui.semantics.semantics
  *    because the sequence ends here (#983). The shell cannot know either fact; it renders the
  *    decision.
  *
- * The default (`flat = false`) composition structure and visual/layout rendering stay unchanged
- * from the pre-#884 card; existing call-sites pass nothing. The semantics tree additionally exposes
+ * The default (`flat = false`) composition structure stays unchanged; existing call-sites pass
+ * nothing to receive the theme's automatic outline. The semantics tree additionally exposes
  * diagnostic colour keys, ignored by accessibility services, for regression tests.
  *
  * [containerColorOverride] replaces only the card container for feature-owned highlights. It does
@@ -93,16 +96,17 @@ fun PostCardShell(
     } else {
         MaterialTheme.colorScheme.surfaceContainer
     }
+    val effectiveBorder = border ?: if (flat) null else LocalReadingTileOutline.current
     Card(
         modifier = modifier.semantics {
             isTraversalGroup = true
             this[PostCardShellContainerColorKey] = effectiveContainerColor
-            border?.let {
+            effectiveBorder?.let {
                 this[PostCardShellBorderWidthKey] = it.width.value
                 this[PostCardShellBorderColorKey] = it.brush
             }
         },
-        border = border,
+        border = effectiveBorder,
         shape = if (flat) RectangleShape else CardDefaults.shape,
         // One `cardColors` call for every colour state, rather than branching on `flat`: the
         // resolved colour is already decided above, so a single expression keeps this call site
@@ -117,7 +121,7 @@ fun PostCardShell(
             badges?.invoke()
             body()
             footer?.invoke()
-            if (flat && border == null && flatBottomEdge == PostCardShellFlatBottomEdge.HAIRLINE) {
+            if (flat && effectiveBorder == null && flatBottomEdge == PostCardShellFlatBottomEdge.HAIRLINE) {
                 HorizontalDivider(
                     modifier = Modifier.testTag(POST_CARD_SHELL_DIVIDER_TAG),
                     color = MaterialTheme.colorScheme.outlineVariant,
