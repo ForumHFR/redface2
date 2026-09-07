@@ -111,6 +111,7 @@ import fr.forumhfr.redface2.core.ui.theme.LocalIgnoreInlineColors
 import fr.forumhfr.redface2.core.ui.theme.LocalMediaDisplayProfile
 import fr.forumhfr.redface2.core.ui.theme.LocalPostImageCorners
 import fr.forumhfr.redface2.core.ui.theme.LocalPostImageMaxWidth
+import fr.forumhfr.redface2.core.ui.theme.LocalReadingTileOutline
 import fr.forumhfr.redface2.core.ui.theme.egoHighlightColors
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
@@ -795,6 +796,9 @@ private fun LongQuotePreview(
  * Issue #252 — a **bare** `[quote]` (`isBareQuote`, no author) instead gets a neutral `outline`
  * accent so the user's own quoted text reads differently from a sourced HFR citation and from a
  * nested citation. See [quoteAccentRole] for the (pure, tested) role decision.
+ *
+ * #1297 — the theme adds a thin outline on WHITE light surfaces. Card owns both border and clip,
+ * keeping their rounded corners aligned while the existing left accent bar stays in the content.
  */
 @Composable
 private fun QuoteFrame(
@@ -836,6 +840,7 @@ private fun QuoteFrame(
         colors = CardDefaults.cardColors(
             containerColor = containerColor,
         ),
+        border = LocalReadingTileOutline.current,
     ) {
         // Quote accent bar (4dp): outline for a bare [quote] (#252), else primary/tertiary
         // alternated by depth (#202). Colour resolved above via quoteAccentRole.

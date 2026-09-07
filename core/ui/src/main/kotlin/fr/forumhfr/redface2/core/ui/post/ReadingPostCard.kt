@@ -231,9 +231,10 @@ private fun readingPostContainerColor(
 }
 
 /**
- * #436/#1112 — the single resolved outline: only multi-quote selection draws one (2 dp primary),
- * otherwise none. #1112 dropped the moderation marker's 1 dp #C62828 outline: it was invisible on
- * the already-red card and redundant with the white « Modération » header. Pure decision so
+ * #436/#1112 — the explicit outline: only multi-quote selection requests one (2 dp primary),
+ * otherwise [PostCardShell] uses the theme's automatic outline (#1297). #1112 dropped the
+ * moderation marker's 1 dp #C62828 outline: it was invisible on the already-red card and redundant
+ * with the white « Modération » header. Pure decision so
  * [ReadingPostCard] stays under the cyclomatic-complexity budget.
  */
 private fun readingPostBorder(
