@@ -7,6 +7,12 @@ import android.view.View
 import android.view.Window
 import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -36,6 +42,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,6 +51,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -59,6 +67,7 @@ import coil3.request.ImageRequest
 import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.core.ui.browser.LocalAlwaysAskLinkApp
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
+import fr.forumhfr.redface2.core.ui.motion.rememberAnimationsEnabled
 import fr.forumhfr.redface2.core.ui.post.copyImageUrlToClipboard
 import fr.forumhfr.redface2.core.ui.post.openImageUrlInBrowser
 import fr.forumhfr.redface2.core.ui.post.sharePostImageUrl
@@ -83,6 +92,12 @@ fun ImageViewerScreen(
     val browserFailedFeedback = stringResource(R.string.browser_no_handler)
     val shareFailedFeedback = stringResource(R.string.post_image_menu_share_failed)
     var loadState by remember(request.sourceUrl) { mutableStateOf(ImageViewerLoadState.Loading) }
+    var actionsVisible by remember(request.sourceUrl) { mutableStateOf(true) }
+    val toggleActions = { actionsVisible = !actionsVisible }
+    val toggleActionsLabel = stringResource(
+        if (actionsVisible) R.string.image_viewer_hide_actions else R.string.image_viewer_show_actions,
+    )
+    val animationsEnabled = rememberAnimationsEnabled()
 
     ImmersiveSystemBarsEffect()
 
@@ -95,9 +110,16 @@ fun ImageViewerScreen(
             request = request,
             contentDescription = contentDescription,
             onLoadStateChanged = { loadState = it },
+            onClick = toggleActions,
             modifier = Modifier
                 .fillMaxSize()
-                .testTag(IMAGE_VIEWER_IMAGE_TAG),
+                .testTag(IMAGE_VIEWER_IMAGE_TAG)
+                .semantics {
+                    onClick(label = toggleActionsLabel) {
+                        toggleActions()
+                        true
+                    }
+                },
         )
 
         ImageViewerLoadOverlay(
@@ -113,23 +135,29 @@ fun ImageViewerScreen(
             modifier = Modifier.align(Alignment.Center),
         )
 
-        ImageViewerActionBar(
-            actions = ImageViewerActions(
-                onClose = onClose,
-                onShare = { sharePostImageUrl(context, request.sourceUrl, shareFailedFeedback) },
-                onCopy = { copyImageUrlToClipboard(context, request.sourceUrl, copiedFeedback) },
-                onOpenBrowser = {
-                    openImageUrlInBrowser(
-                        context = context,
-                        url = request.externalUrl,
-                        failureFeedback = browserFailedFeedback,
-                        alwaysAsk = alwaysAskLinkApp,
-                    )
-                },
-                onSave = { onSave(request.sourceUrl) },
-            ),
+        AnimatedVisibility(
+            visible = actionsVisible,
+            enter = if (animationsEnabled) fadeIn(tween(ACTIONS_FADE_DURATION_MS)) else EnterTransition.None,
+            exit = if (animationsEnabled) fadeOut(tween(ACTIONS_FADE_DURATION_MS)) else ExitTransition.None,
             modifier = Modifier.align(Alignment.BottomCenter),
-        )
+        ) {
+            ImageViewerActionBar(
+                actions = ImageViewerActions(
+                    onClose = onClose,
+                    onShare = { sharePostImageUrl(context, request.sourceUrl, shareFailedFeedback) },
+                    onCopy = { copyImageUrlToClipboard(context, request.sourceUrl, copiedFeedback) },
+                    onOpenBrowser = {
+                        openImageUrlInBrowser(
+                            context = context,
+                            url = request.externalUrl,
+                            failureFeedback = browserFailedFeedback,
+                            alwaysAsk = alwaysAskLinkApp,
+                        )
+                    },
+                    onSave = { onSave(request.sourceUrl) },
+                ),
+            )
+        }
     }
 }
 
@@ -256,9 +284,12 @@ internal fun ZoomableRemoteImage(
     request: ImageViewerRequest,
     contentDescription: String,
     onLoadStateChanged: (ImageViewerLoadState) -> Unit,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    // Telephoto 0.19 can retain the first non-null tap callback across image changes.
+    val currentOnClick by rememberUpdatedState(onClick)
     val imageRequest = remember(context, request) {
         ImageRequest.Builder(context)
             .data(request.sourceUrl)
@@ -277,6 +308,7 @@ internal fun ZoomableRemoteImage(
             model = imageRequest,
             contentDescription = contentDescription,
             contentScale = ContentScale.Fit,
+            onClick = { currentOnClick() },
             onDoubleClick = DoubleClickToZoomListener.cycle(maxZoomFactor = DOUBLE_TAP_ZOOM),
             modifier = modifier,
         )
@@ -284,6 +316,7 @@ internal fun ZoomableRemoteImage(
         MemoryOnlyZoomableImage(
             imageRequest = imageRequest,
             contentDescription = contentDescription,
+            onClick = { currentOnClick() },
             modifier = modifier,
         )
     }
@@ -300,6 +333,7 @@ internal fun ZoomableRemoteImage(
 private fun MemoryOnlyZoomableImage(
     imageRequest: ImageRequest,
     contentDescription: String,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val zoomableState = rememberZoomableState()
@@ -314,6 +348,7 @@ private fun MemoryOnlyZoomableImage(
         },
         modifier = modifier.zoomable(
             state = zoomableState,
+            onClick = { onClick() },
             onDoubleClick = DoubleClickToZoomListener.cycle(maxZoomFactor = DOUBLE_TAP_ZOOM),
         ),
     )
@@ -380,6 +415,7 @@ internal const val IMAGE_VIEWER_PROGRESS_TAG = "image-viewer-progress"
 internal const val IMAGE_VIEWER_ERROR_TAG = "image-viewer-error"
 internal const val IMAGE_VIEWER_ACTIONS_TAG = "image-viewer-actions"
 private const val DOUBLE_TAP_ZOOM = 2f
+private const val ACTIONS_FADE_DURATION_MS = 150
 private const val ACTION_BAR_ALPHA = 0.64f
 private const val CLOSE_CONTAINER_ALPHA = 0.2f
 private val ACTION_TOUCH_TARGET = 48.dp

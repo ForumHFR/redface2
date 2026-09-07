@@ -62,6 +62,8 @@
     <string name="post_image_menu_full_screen">Afficher en plein écran</string>
     <string name="image_viewer_default_description">Image</string>
     <string name="image_viewer_close">Fermer</string>
+    <string name="image_viewer_show_actions">Afficher les actions</string>
+    <string name="image_viewer_hide_actions">Masquer les actions</string>
     <string name="image_viewer_loading">Chargement de l\'image</string>
     <string name="image_viewer_error">Impossible d\'afficher cette image</string>
     <!-- Action navigateur neutre, partagée par le menu image et les menus propres aux features. -->
