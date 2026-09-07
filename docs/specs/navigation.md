@@ -120,6 +120,7 @@ L'écran le plus important de l'app. Affiche les topics suivis par l'utilisateur
 - le miroir dans **Réglages > Drapeaux** (master « Réglages différents par onglet » + les deux toggles globaux qui servent de valeurs par défaut/repli).
 
 **Pastille « pages à lire » (#814)** : en fin de ligne, `+N` est teinté selon le **retard** et non selon la couleur du drapeau — 1-2 pages neutre (`surfaceVariant`), 3-9 accentué (`tertiaryContainer`), ≥ 10 alerte (`error`) ; paliers dans `lagTone` (`:core:model`), couleurs dans `lagToneColors` (`:core:ui`, rôles M3 canoniques, donc suivis en light / dark / AMOLED / accent). Demande de thibw (fil DEV).
+Depuis [#1025](https://github.com/ForumHFR/redface2/issues/1025), `+N` compte les pages restantes **après la page ouverte par le tap**, celle-ci exclue, et `LagTone` suit cette même valeur ; aucun badge si le tap ouvre la dernière page, même s'il reste des messages non lus (règle et exemples dans [ADR-017 § 4]({{ site.baseurl }}/adr/017-refonte-vue-drapeaux)).
 
 **Actions sur un topic :**
 - Tap → ouvrir le topic à la dernière position non lue

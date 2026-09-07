@@ -9,13 +9,17 @@ package fr.forumhfr.redface2.core.model
  */
 
 /**
- * Number of pages the user has left to read: `max(totalPages - lastReadPage, 0)`.
+ * Number of pages left AFTER the page opened by tapping the flag ([pageToOpen]), excluding that
+ * page (#1025): `max(max(totalPages, 1) - pageToOpen(), 0)`.
  *
- * Clamped at 0 (a stale cache can carry a [Flag.lastReadPage] past a shrunk [Flag.totalPages]).
- * A DISPLAY counter, not an unread oracle: it can be `0` while [Flag.hasUnread] is `true` (unread
- * posts on the last-read page). [Flag.hasUnread] stays the source of truth for read state.
+ * Uses the same page bounds as [pageToOpen], including stale caches with [Flag.lastReadPage] past
+ * a shrunk [Flag.totalPages]. Stopping at the bottom of page 59/60 opens 60 and leaves 0 extra pages;
+ * stopping mid-page opens 59 and leaves 1.
+ * A DISPLAY counter for extra pages: it can be `0` while [Flag.hasUnread] is `true` (all remaining
+ * unread posts are on the opened page). [Flag.hasUnread] stays the source of truth for read state;
+ * consumers only show the counter when `hasUnread && pagesToRead > 0`.
  */
-fun Flag.pagesToRead(): Int = (totalPages - lastReadPage).coerceAtLeast(0)
+fun Flag.pagesToRead(): Int = (totalPages.coerceAtLeast(1) - pageToOpen()).coerceAtLeast(0)
 
 /** #814 — first [pagesToRead] value rendered [LagTone.MEDIUM] (the issue's « 1-2 pages = discret »). */
 const val LAG_TONE_MEDIUM_MIN_PAGES = 3

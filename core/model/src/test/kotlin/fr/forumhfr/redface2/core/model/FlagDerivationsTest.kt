@@ -12,18 +12,64 @@ import org.junit.Test
 class FlagDerivationsTest {
 
     @Test
-    fun `pagesToRead is the number of pages after the last read one`() {
+    fun `pagesToRead counts pages after the opened page when the position is absent`() {
         assertEquals(3, baseFlag.copy(totalPages = 10, lastReadPage = 7).pagesToRead())
     }
 
     @Test
+    fun `pagesToRead excludes page 60 when stopped at the bottom of page 59 of 60`() {
+        val flag = baseFlag.copy(totalPages = 60, lastReadPage = 59, lastPosition = 2360)
+
+        assertEquals(60, flag.pageToOpen())
+        assertEquals(0, flag.pagesToRead())
+        assertTrue("no badge does not mean fully read", flag.hasUnread)
+        assertEquals(LagTone.LOW, flag.lagTone())
+    }
+
+    @Test
+    fun `pagesToRead is one when stopped in the middle of page 59 of 60`() {
+        val flag = baseFlag.copy(totalPages = 60, lastReadPage = 59, lastPosition = 2340)
+
+        assertEquals(59, flag.pageToOpen())
+        assertEquals(1, flag.pagesToRead())
+        assertEquals(LagTone.LOW, flag.lagTone())
+    }
+
+    @Test
     fun `pagesToRead is zero when the topic is fully read`() {
-        assertEquals(0, baseFlag.copy(totalPages = 10, lastReadPage = 10).pagesToRead())
+        assertEquals(0, baseFlag.copy(totalPages = 10, lastReadPage = 10, hasUnread = false).pagesToRead())
+    }
+
+    @Test
+    fun `pagesToRead can be zero while posts on the opened last page remain unread`() {
+        val flag = baseFlag.copy(totalPages = 60, lastReadPage = 60, lastPosition = 2380)
+
+        assertEquals(0, flag.pagesToRead())
+        assertTrue(flag.hasUnread)
+    }
+
+    @Test
+    fun `pagesToRead does not advance on an inconsistent position and page pair`() {
+        val flag = baseFlag.copy(totalPages = 60, lastReadPage = 59, lastPosition = 40)
+
+        assertEquals(59, flag.pageToOpen())
+        assertEquals(1, flag.pagesToRead())
+    }
+
+    @Test
+    fun `pagesToRead remains a display counter when hasUnread is false`() {
+        val flag = baseFlag.copy(totalPages = 60, lastReadPage = 59, lastPosition = 2360, hasUnread = false)
+
+        assertEquals(59, flag.pageToOpen())
+        assertEquals(1, flag.pagesToRead())
     }
 
     @Test
     fun `pagesToRead clamps to zero when lastReadPage exceeds totalPages (stale data)`() {
-        assertEquals(0, baseFlag.copy(totalPages = 5, lastReadPage = 8).pagesToRead())
+        val flag = baseFlag.copy(totalPages = 5, lastReadPage = 8, lastPosition = 320)
+
+        assertEquals(5, flag.pageToOpen())
+        assertEquals(0, flag.pagesToRead())
     }
 
     @Test
@@ -32,8 +78,15 @@ class FlagDerivationsTest {
     }
 
     @Test
-    fun `pagesToRead with an unset last-read page (0) returns the full page count`() {
-        assertEquals(7, baseFlag.copy(totalPages = 7, lastReadPage = 0).pagesToRead())
+    fun `pagesToRead excludes the first page when the last-read page is unset or negative`() {
+        assertEquals(6, baseFlag.copy(totalPages = 7, lastReadPage = 0).pagesToRead())
+        assertEquals(6, baseFlag.copy(totalPages = 7, lastReadPage = -1).pagesToRead())
+    }
+
+    @Test
+    fun `pagesToRead is zero when totalPages is non-positive`() {
+        assertEquals(0, baseFlag.copy(totalPages = 0, lastReadPage = 0).pagesToRead())
+        assertEquals(0, baseFlag.copy(totalPages = Int.MIN_VALUE, lastReadPage = 0).pagesToRead())
     }
 
     @Test
@@ -125,6 +178,22 @@ class FlagDerivationsTest {
         // lastReadPage past totalPages clamps pagesToRead to 0 → LOW, never a negative-driven tier.
         assertEquals(LagTone.LOW, baseFlag.copy(totalPages = 5, lastReadPage = 8).lagTone())
         assertEquals(LagTone.MEDIUM, baseFlag.copy(totalPages = 10, lastReadPage = 7).lagTone())
+    }
+
+    @Test
+    fun `Flag lagTone drops below MEDIUM when the opened page leaves only two pages`() {
+        val flag = baseFlag.copy(totalPages = 62, lastReadPage = 59, lastPosition = 2360)
+
+        assertEquals(2, flag.pagesToRead())
+        assertEquals(LagTone.LOW, flag.lagTone())
+    }
+
+    @Test
+    fun `Flag lagTone drops below HIGH when the opened page leaves only nine pages`() {
+        val flag = baseFlag.copy(totalPages = 69, lastReadPage = 59, lastPosition = 2360)
+
+        assertEquals(9, flag.pagesToRead())
+        assertEquals(LagTone.MEDIUM, flag.lagTone())
     }
 
     private val baseFlag = Flag(

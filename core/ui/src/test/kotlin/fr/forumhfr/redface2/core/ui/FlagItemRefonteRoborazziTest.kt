@@ -12,7 +12,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.dp
 import com.github.takahirom.roborazzi.captureRoboImage
@@ -116,6 +120,39 @@ class FlagItemRefonteRoborazziTest {
         capture(darkTheme = true, amoled = true, name = "flags_pr3_row_amoled")
     }
 
+    @Test
+    fun `badge is absent when the tap opens page 60 of 60`() {
+        showFlag(BASE.copy(totalPages = 60, lastReadPage = 59, lastPosition = 2360))
+
+        composeTestRule.onAllNodesWithContentDescription("à lire", substring = true, useUnmergedTree = true)
+            .assertCountEquals(0)
+    }
+
+    @Test
+    fun `badge announces one extra page when the tap stays on page 59 of 60`() {
+        showFlag(BASE.copy(totalPages = 60, lastReadPage = 59, lastPosition = 2340))
+
+        composeTestRule.onNodeWithContentDescription("1 page à lire", useUnmergedTree = true)
+            .assertExists()
+    }
+
+    @Test
+    fun `read flag has no badge even with a positive page counter`() {
+        showFlag(BASE.copy(totalPages = 60, lastReadPage = 59, lastPosition = 2360, hasUnread = false))
+
+        composeTestRule.onAllNodesWithContentDescription("à lire", substring = true, useUnmergedTree = true)
+            .assertCountEquals(0)
+    }
+
+    private fun showFlag(flag: Flag) {
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                FlagRow(flag, MarkerStyle.STRIPE)
+            }
+        }
+        composeTestRule.onNodeWithText(flag.title, useUnmergedTree = true).assertExists()
+    }
+
     private fun capture(darkTheme: Boolean, amoled: Boolean, name: String) {
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = darkTheme, amoledTheme = amoled, dynamicColor = false) {
@@ -130,7 +167,7 @@ class FlagItemRefonteRoborazziTest {
             cat = 1,
             subcat = null,
             topicId = 0,
-            title = "",
+            title = "Topic #1025",
             totalPages = 1,
             replyCount = 0,
             type = FlagType.CYAN,

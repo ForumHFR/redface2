@@ -23,15 +23,26 @@ class FlagPresentationTest {
             hasUnread = true,
             totalPages = 12,
             lastReadPage = 9,
+            lastPosition = 360,
         )
 
         val ui = f.toFlagRowUiModel(MarkerStyle.STRIPE)
 
         assertEquals(f, ui.flag)
-        assertEquals(3, ui.pagesToRead)
+        assertEquals(2, ui.pagesToRead)
         assertEquals(FlagType.CYAN, ui.effectiveColor)
         assertEquals(MarkerStyle.STRIPE, ui.markerStyle)
         assertFalse("an unread flag is not dimmed", ui.dimmed)
+    }
+
+    @Test
+    fun `row ui model stays unread when opening the last page leaves no extra pages`() {
+        val ui = baseFlag.copy(totalPages = 60, lastReadPage = 59, lastPosition = 2360)
+            .toFlagRowUiModel(MarkerStyle.STRIPE)
+
+        assertEquals(0, ui.pagesToRead)
+        assertTrue(ui.hasUnread)
+        assertFalse(ui.dimmed)
     }
 
     @Test
