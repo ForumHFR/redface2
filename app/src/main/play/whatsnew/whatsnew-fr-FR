@@ -1,3 +1,7 @@
-Redface 2 v0.54.14 — dev.
-- Drapeaux : le badge « +N » compte les pages restantes après celle ouverte par le tap.
-- Sondages : le résultat reste visible après le vote.
+Redface 2 v0.55.0 — bêta.
+- Visionneuse d'images plein écran : zoom, partage, tap pour masquer la barre.
+- Alerter un post et consulter « Mes sanctions ».
+- Vue catégorie : encarts repliables.
+- Icône de l'application au choix (Classique, Redface 1).
+- Badge « +N » des drapeaux aligné sur le web, sondage visible après vote.
+- Nombreux correctifs : citations, navigation, super favoris par compte.
