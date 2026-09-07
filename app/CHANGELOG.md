@@ -16,6 +16,21 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.54.14` — `internal` (dev) — 2026-09-07
+
+Retours tinc et styx42, décisions XaTriX. Code Astra sous gate Fable, build socadisc ; PRs [#1314](https://github.com/ForumHFR/redface2/pull/1314) ([#1296](https://github.com/ForumHFR/redface2/issues/1296)), [#1315](https://github.com/ForumHFR/redface2/pull/1315) ([#1025](https://github.com/ForumHFR/redface2/issues/1025)), [#1313](https://github.com/ForumHFR/redface2/pull/1313) ([#1307](https://github.com/ForumHFR/redface2/issues/1307)).
+
+### Modifié
+
+- **Drapeaux, badge « +N »** — compte désormais les pages restantes après celle que le tap ouvre, comme les userscripts web : dernier lu en bas de la page 59/60 → pas de badge ; en milieu de page 59 → « +1 ». La tonalité du badge suit.
+
+### Corrigé
+
+- **Sondages** — avec « replier les sondages sauf non répondus », le sondage reste déplié après le vote tant qu'on reste sur la page (résultat visible) ; il se replie au changement de page, à la sortie du sujet ou au rafraîchissement explicite. Le repli manuel garde la priorité.
+- **Tests** — test DataStore des replis de catégorie rendu déterministe (instable en CI).
+
+---
+
 ## `0.54.13` — `internal` (dev) — 2026-09-07
 
 Suite de la visionneuse (XaTriX) et retour d'antiseptiqueIncolore sur le fond blanc. Code Astra sous gate Fable, preuves émulateur socadisc ; PRs [#1310](https://github.com/ForumHFR/redface2/pull/1310) ([#1308](https://github.com/ForumHFR/redface2/issues/1308)) et [#1311](https://github.com/ForumHFR/redface2/pull/1311) ([#1297](https://github.com/ForumHFR/redface2/issues/1297)).

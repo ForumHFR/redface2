@@ -1,3 +1,3 @@
-Redface 2 v0.54.13 — dev.
-- Image viewer: one tap hides or shows the action bar.
-- White light background: outline around posts and quotes.
+Redface 2 v0.54.14 — dev.
+- Flags: the "+N" badge counts the pages left after the one the tap opens.
+- Polls: the result stays visible after voting.
