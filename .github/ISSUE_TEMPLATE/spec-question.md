@@ -1,7 +1,7 @@
 ---
 name: Spec question
 about: Question sur une spec ou proposition d'ajustement
-labels: spec, discussion
+labels: spec, question
 ---
 
 ## Page concernée
