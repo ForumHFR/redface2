@@ -41,8 +41,6 @@ Canal préféré pour rester loin des services Google ou auditer chaque release.
 
 Signature : notre **clé d'upload**, la même pour les deux applications. Les identifiants `.beta` et `.dev` étant distincts de celui de Play, ces apps **cohabitent** avec la version Play et entre elles sur un même appareil.
 
-> L'entrée « Redface 2 » sans suffixe (`fr.forumhfr.redface2`) encore visible dans le dépôt est l'ancien canal alpha, figée en 0.3.x : ne pas l'installer.
-
 ## GitHub Releases, sideload
 
 Pour auditer ou tester une version précise sans client tiers. Chaque publication crée une [release `app-v<N>`](https://github.com/ForumHFR/redface2/releases) (`N` = `versionCode`) avec trois artefacts :
