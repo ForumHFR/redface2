@@ -17,7 +17,7 @@ Voir SKILLS.md à la racine pour l'index humain des skills.
 
 ## Projet
 
-- État : bêta publique **0.50.2** (Play test ouvert + F-Droid, 2026-09-01), canal dev **0.52.x**. Phases 0 à 3 de la [roadmap](docs/specs/roadmap.md) livrées, refonte UI de la phase 4 livrée (#603, #604, #876, #874, #1040). Le travail courant est suivi par **milestones de vue** (Vue · Topic 2, Éditeur 2, Drapeaux 2, MP 1, Réglages 1, Compte HFR 1, Infra & dette) ; les phases restent des épics thématiques. Fond ouvert : architecture d'extensions (#7), sync MPStorage entre appareils (#6).
+- État : bêta publique **0.55.0** (Play test ouvert + F-Droid, 2026-09-07), canal dev aligné sur la bêta au 2026-09-08. Phases 0 à 3 de la [roadmap](docs/specs/roadmap.md) livrées, refonte UI de la phase 4 livrée (#603, #604, #876, #874, #1040). Le travail courant est suivi par **milestones de vue** (Vue · Topic 2, Éditeur 2, Drapeaux 2, Forum 1, MP 1, Réglages 1, Compte HFR 1, Infra & dette) ; les phases restent des épics thématiques. Fond ouvert : architecture d'extensions (#7), sync MPStorage entre appareils (#6).
 - Versions : `versionName` dans `app/build.gradle.kts`, une entrée par release dans `app/CHANGELOG.md`, notes Play dans `app/src/main/play/whatsnew/` ; le `versionCode` est alloué par la CD (tags `app-v<N>`, cf. `docs/guides/release.md`).
 - Licence : GPL-3.0-only
 - Documentation : GitHub Pages via `docs/` (Jekyll + just-the-docs)

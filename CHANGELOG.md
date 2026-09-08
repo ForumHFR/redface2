@@ -8,7 +8,11 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ## [Unreleased]
 
-_Rien pour l'instant._
+### Changed (hygiène 2026-09-08)
+- Pages d'entrée (`README.md`, `AGENTS.md`, `docs/index.md`, `docs/guides/contributing.md`) : état du projet = bêta publique **0.55.0** (2026-09-07), canal dev aligné sur la bêta ; milestone *Vue · Forum 1* ajouté à la liste des milestones de vue.
+- `docs/specs/roadmap.md` : phase 4 requalifiée « bêtas 0.18.0 → 0.55.0 » ; jalon « Dogfood rendu smileys (#131 / #175) » coché (clos depuis 05-06/2026, rendu adaptatif livré par #175).
+- `docs/guides/known-issues.md` : le compromis F4 (#953) pointe vers son issue de suivi #1323.
+- Templates d'issue : labels `feature` / `discussion` (inexistants) remplacés par `enhancement` / `spec, question`.
 
 ---
 
