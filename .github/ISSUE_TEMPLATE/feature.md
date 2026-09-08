@@ -1,7 +1,7 @@
 ---
 name: Feature proposal
 about: Proposer une feature (inspirée userscript ou nouvelle)
-labels: feature
+labels: enhancement
 ---
 
 ## Use case
