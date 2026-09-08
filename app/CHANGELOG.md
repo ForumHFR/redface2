@@ -38,7 +38,7 @@ Promotion bêta du lot développé en dev de `0.54.0` à `0.54.14` (plus le corr
 
 ### Infra ([#650](https://github.com/ForumHFR/redface2/issues/650), [#1307](https://github.com/ForumHFR/redface2/issues/1307))
 
-- CI allégée sur les PR documentation ; test DataStore instable rendu déterministe.
+- CI allégée sur les PR documentation — **requalifié le 08/09** : le filtre livré par #1267 était sans effet (quantificateur `some` de dorny/paths-filter, négations ignorées), la matrice tournait toujours ; corrigé sur `dev` par #1326 ([#650](https://github.com/ForumHFR/redface2/issues/650)), effectif à partir de la release dev suivante. Test DataStore instable rendu déterministe.
 
 ---
 
