@@ -15,7 +15,7 @@ Comment participer au projet.
 
 ## Où en est le projet
 
-Bêta publique **0.50.2** (Play test ouvert + F-Droid) et canal dev **0.52.x**. Les phases 0 à 3 de la [roadmap]({{ site.baseurl }}/specs/roadmap) sont livrées, la refonte UI de la phase 4 aussi (Drapeaux [#603](https://github.com/ForumHFR/redface2/issues/603), Topic [#604](https://github.com/ForumHFR/redface2/issues/604), surface de lecture partagée [#1040](https://github.com/ForumHFR/redface2/issues/1040)). Le travail courant est suivi par **milestones de vue** (*Vue · Topic 2*, *Vue · Éditeur 2*, *Vue · Drapeaux 2*, *Vue · MP 1*, *Vue · Réglages 1*, *Vue · Compte HFR 1*, *Infra & dette*). Pour contribuer :
+Bêta publique **0.55.0** (Play test ouvert + F-Droid, 7 septembre 2026) et canal dev aligné sur la bêta au 8 septembre. Les phases 0 à 3 de la [roadmap]({{ site.baseurl }}/specs/roadmap) sont livrées, la refonte UI de la phase 4 aussi (Drapeaux [#603](https://github.com/ForumHFR/redface2/issues/603), Topic [#604](https://github.com/ForumHFR/redface2/issues/604), surface de lecture partagée [#1040](https://github.com/ForumHFR/redface2/issues/1040)). Le travail courant est suivi par **milestones de vue** (*Vue · Topic 2*, *Vue · Éditeur 2*, *Vue · Drapeaux 2*, *Vue · Forum 1*, *Vue · MP 1*, *Vue · Réglages 1*, *Vue · Compte HFR 1*, *Infra & dette*). Pour contribuer :
 
 - **Implémenter une issue** d'un milestone de vue ouvert (l'issue décrit le contrat HFR mesuré, la spec touchée et la preuve attendue)
 - **Proposer des features** : ouvrir une issue avec le label `feature`
