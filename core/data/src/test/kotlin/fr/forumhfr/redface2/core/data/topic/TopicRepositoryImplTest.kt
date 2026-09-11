@@ -28,6 +28,7 @@ import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.network.HfrClient
@@ -692,6 +693,15 @@ class TopicRepositoryImplTest {
             MutableStateFlow(WritingSurfacePreset.FULL_EDITOR)
 
         override suspend fun setWritingSurfacePreset(preset: WritingSurfacePreset) = Unit
+
+        // #1128 — keep interface fakes aligned with the shared image-selector preference.
+        private val imagePickerMode = MutableStateFlow(ImagePickerMode.DEFAULT)
+
+        override fun observeImagePickerMode(): Flow<ImagePickerMode> = imagePickerMode
+
+        override suspend fun setImagePickerMode(mode: ImagePickerMode) {
+            imagePickerMode.value = mode
+        }
 
         override fun observeShowDtSection(): Flow<Boolean> = MutableStateFlow(false)
 

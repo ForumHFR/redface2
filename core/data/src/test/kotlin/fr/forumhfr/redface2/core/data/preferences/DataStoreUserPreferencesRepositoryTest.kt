@@ -37,6 +37,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.FlagType
 import java.io.IOException
@@ -1544,6 +1545,39 @@ class DataStoreUserPreferencesRepositoryTest {
         repository.setEditorImageInsert(EditorImageInsert.REDUCED)
         repository.observeEditorImageInsert().test {
             assertEquals(EditorImageInsert.REDUCED, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observeImagePickerMode defaults to PHOTO_PICKER on an empty store`() = runTest(dispatcher) {
+        repository.observeImagePickerMode().test {
+            assertEquals(ImagePickerMode.PHOTO_PICKER, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setImagePickerMode persists and round-trips DOCUMENT_PICKER then PHOTO_PICKER`() = runTest(dispatcher) {
+        repository.setImagePickerMode(ImagePickerMode.DOCUMENT_PICKER)
+        repository.observeImagePickerMode().test {
+            assertEquals(ImagePickerMode.DOCUMENT_PICKER, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setImagePickerMode(ImagePickerMode.PHOTO_PICKER)
+        repository.observeImagePickerMode().test {
+            assertEquals(ImagePickerMode.PHOTO_PICKER, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `corrupt image_picker_mode value falls back to PHOTO_PICKER instead of crashing`() = runTest(dispatcher) {
+        dataStore.edit { prefs -> prefs[stringPreferencesKey("image_picker_mode")] = "HOLODECK" }
+
+        repository.observeImagePickerMode().test {
+            assertEquals(ImagePickerMode.PHOTO_PICKER, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
     }

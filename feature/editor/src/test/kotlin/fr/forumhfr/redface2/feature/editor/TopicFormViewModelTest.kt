@@ -1,6 +1,5 @@
 package fr.forumhfr.redface2.feature.editor
 import fr.forumhfr.redface2.core.ui.editor.UploadError
-import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import androidx.compose.ui.text.TextRange
@@ -41,6 +40,7 @@ import fr.forumhfr.redface2.core.domain.upload.UploadedImage
 import fr.forumhfr.redface2.core.domain.upload.UploadedImageRecord
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
 import fr.forumhfr.redface2.core.model.EditorSmiley
@@ -1555,6 +1555,15 @@ class TopicFormViewModelTest {
             MutableStateFlow(WritingSurfacePreset.FULL_EDITOR)
 
         override suspend fun setWritingSurfacePreset(preset: WritingSurfacePreset) = Unit
+
+        // #1128 — keep interface fakes aligned with the shared image-selector preference.
+        private val imagePickerMode = MutableStateFlow(ImagePickerMode.DEFAULT)
+
+        override fun observeImagePickerMode(): Flow<ImagePickerMode> = imagePickerMode
+
+        override suspend fun setImagePickerMode(mode: ImagePickerMode) {
+            imagePickerMode.value = mode
+        }
 
         override fun observeShowDtSection(): Flow<Boolean> = MutableStateFlow(false)
 

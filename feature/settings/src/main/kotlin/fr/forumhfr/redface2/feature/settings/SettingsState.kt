@@ -17,6 +17,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 
 data class SettingsState(
@@ -231,6 +232,11 @@ data class SettingsState(
     val isUpdatingWritingSurfacePreset: Boolean = false,
     val writingSurfacePresetError: Boolean = false,
     val writingSurfacePresetTouchedLocally: Boolean = false,
+    // #1128 — explicit image selector, with the same optimistic-write state as writingSurfacePreset.
+    val imagePickerMode: ImagePickerMode = ImagePickerMode.DEFAULT,
+    val isUpdatingImagePickerMode: Boolean = false,
+    val imagePickerModeError: Boolean = false,
+    val imagePickerModeTouchedLocally: Boolean = false,
     // Drapeaux — opt-in « DT » placeholder tab (MPStorage sync #6 lands later). Same
     // optimistic-flip + startup-race-guard machinery. Default false (tab hidden).
     val showDtSection: Boolean = false,
@@ -427,6 +433,10 @@ data class SettingsState(
     val canChangeWritingSurfacePreset: Boolean
         get() = !isUpdatingWritingSurfacePreset
 
+    // #1128 — the image-selector radio group is gated only by its own in-flight write.
+    val canChangeImagePickerMode: Boolean
+        get() = !isUpdatingImagePickerMode
+
     // DT tab — gated only by its own write.
     val canToggleShowDtSection: Boolean
         get() = !isUpdatingShowDtSection
@@ -614,6 +624,9 @@ sealed interface SettingsIntent {
      * like [SetEditorImageInsert].
      */
     data class SetWritingSurfacePreset(val preset: WritingSurfacePreset) : SettingsIntent
+
+    /** #1128 — explicit image-selector selection, applied optimistically with revert-on-failure. */
+    data class SetImagePickerMode(val mode: ImagePickerMode) : SettingsIntent
 
     // Drapeaux — opt-in « DT » placeholder tab (MPStorage sync #6 lands later). Optimistic-flip
     // contract, like the flags toggles: the boolean is the desired post-flip state.

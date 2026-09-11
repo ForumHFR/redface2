@@ -7,6 +7,7 @@ import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageLocationStore
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.mpstorage.MpStorageDocument
 import fr.forumhfr.redface2.core.model.mpstorage.MpStorageFlagEntry
 import fr.forumhfr.redface2.core.model.mpstorage.MpStorageResult
@@ -604,6 +605,10 @@ class DefaultMpStorageRepositoryTest {
 
     /** Minimal [UserPreferencesRepository] fake exposing only the write opt-in (the only pref the SUT reads). */
     private class FakeWritePreferences : UserPreferencesRepository by mockk(relaxed = true) {
+        // #1128 — explicit defaults also cover fakes that delegate the other preferences to MockK.
+        override fun observeImagePickerMode() = MutableStateFlow(ImagePickerMode.DEFAULT)
+        override suspend fun setImagePickerMode(mode: ImagePickerMode) = Unit
+
         val enabled = MutableStateFlow(false)
         override fun observeSyncPrivateMessagesWriteEnabled() = enabled
         override fun observeTopicUnansweredPollsExpanded() = MutableStateFlow(false)

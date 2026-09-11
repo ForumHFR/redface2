@@ -40,6 +40,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.ui.browser.HfrLinkHandlingStatus
 import fr.forumhfr.redface2.core.ui.browser.hfrLinkHandlingStatus
@@ -831,6 +832,28 @@ internal fun buildSettingsCatalogue(
                     .takeIf { state.quoteCardsEnabledError },
                 onCheckedChange = { onIntent(SettingsIntent.QuoteCardsEnabledChanged(it)) },
             ),
+            // #1128 — explicit selector choice shared by topic and private-message editors.
+            radioRow(
+                id = "image_picker_photo",
+                title = stringResource(R.string.settings_image_picker_photo),
+                description = stringResource(R.string.settings_image_picker_photo_description),
+                keywords = imagePickerKeywords(),
+                selected = state.imagePickerMode == ImagePickerMode.PHOTO_PICKER,
+                enabled = state.canChangeImagePickerMode,
+                onSelect = { onIntent(SettingsIntent.SetImagePickerMode(ImagePickerMode.PHOTO_PICKER)) },
+                groupTitle = stringResource(R.string.settings_image_picker_title),
+            ),
+            radioRow(
+                id = "image_picker_documents",
+                title = stringResource(R.string.settings_image_picker_documents),
+                description = stringResource(R.string.settings_image_picker_documents_description),
+                keywords = imagePickerKeywords(),
+                selected = state.imagePickerMode == ImagePickerMode.DOCUMENT_PICKER,
+                enabled = state.canChangeImagePickerMode,
+                onSelect = { onIntent(SettingsIntent.SetImagePickerMode(ImagePickerMode.DOCUMENT_PICKER)) },
+                errorRes = R.string.settings_image_picker_persist_failed
+                    .takeIf { state.imagePickerModeError },
+            ),
             futureRow(
                 id = "future_auto_signature",
                 title = stringResource(R.string.settings_future_auto_signature),
@@ -1239,6 +1262,17 @@ private fun privateMessageContentCacheRow(
         },
     )
 }
+
+/** #1128 — both selector rows remain discoverable through the same search terms. */
+@Composable
+private fun imagePickerKeywords(): List<String> = listOf(
+    stringResource(R.string.settings_image_picker_title),
+    stringResource(R.string.settings_image_picker_keyword_photos),
+    stringResource(R.string.settings_image_picker_keyword_explorer),
+    stringResource(R.string.settings_image_picker_keyword_files),
+    stringResource(R.string.settings_image_picker_keyword_upload),
+    stringResource(R.string.settings_image_picker_keyword_image),
+)
 
 /**
  * One option of a single-choice radio group (#806 writing surface) : a leading M3 [RadioButton] with

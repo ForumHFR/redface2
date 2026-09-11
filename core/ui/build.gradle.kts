@@ -48,6 +48,8 @@ dependencies {
 
     api(platform(libs.androidx.compose.bom))
     api(libs.androidx.compose.material3)
+    // #1128 — shared photo / document picker launchers for every editor surface.
+    implementation(libs.androidx.activity.compose)
     // #1040 — androidx.core.net.toUri for the shared image-menu host label and browser Intent.
     implementation(libs.androidx.core.ktx)
     implementation(libs.materialKolor.utilities)
