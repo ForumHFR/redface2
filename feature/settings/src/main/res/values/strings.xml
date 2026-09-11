@@ -63,7 +63,7 @@
     <string name="settings_category_subtitle_flags">Regroupement, masquer lus, auto-refresh</string>
     <string name="settings_category_subtitle_topic">Barre, sondages, navigation</string>
     <string name="settings_category_subtitle_mp">Badge de non-lus, cache disque global</string>
-    <string name="settings_category_subtitle_editing">Confirmation avant envoi</string>
+    <string name="settings_category_subtitle_editing">Confirmation avant envoi, sélecteur d\'images</string>
     <string name="settings_category_subtitle_images">Hébergeur, Client-ID, insertion</string>
     <string name="settings_category_subtitle_start">Écran ouvert au lancement</string>
     <string name="settings_category_subtitle_network">Proxy, vider les caches</string>
@@ -497,6 +497,19 @@
     <string name="settings_quote_cards_title">Citations en cartes (expérimental)</string>
     <string name="settings_quote_cards_description">Expérimental : représente les citations par des cartes compactes au-dessus du champ. Désactivé (défaut) : la citation est insérée en BBCode, modifiable dans le texte.</string>
     <string name="settings_quote_cards_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
+
+    <!-- #1128 — choix explicite du sélecteur d'images pour les quatre éditeurs. -->
+    <string name="settings_image_picker_title">Sélecteur d\'images</string>
+    <string name="settings_image_picker_photo">Sélecteur de photos</string>
+    <string name="settings_image_picker_photo_description">Le sélecteur de photos d\'Android (défaut). Ne montre que les photos déjà remontées par la galerie.</string>
+    <string name="settings_image_picker_documents">Explorateur de fichiers</string>
+    <string name="settings_image_picker_documents_description">L\'explorateur de fichiers d\'Android, comme Redface 1. Voit aussi les photos pas encore remontées par la galerie.</string>
+    <string name="settings_image_picker_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
+    <string name="settings_image_picker_keyword_photos">photos</string>
+    <string name="settings_image_picker_keyword_explorer">explorateur</string>
+    <string name="settings_image_picker_keyword_files">fichiers</string>
+    <string name="settings_image_picker_keyword_upload">upload</string>
+    <string name="settings_image_picker_keyword_image">image</string>
 
     <!-- #459 PR3 — entrée vers l'écran « Mes images uploadées » depuis le catalogue de réglages. -->
     <string name="settings_section_images">Images</string>

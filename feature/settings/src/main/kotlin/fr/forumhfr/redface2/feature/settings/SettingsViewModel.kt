@@ -26,6 +26,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
@@ -315,6 +316,12 @@ class SettingsViewModel @Inject constructor(
             isLocked = { it.isUpdatingWritingSurfacePreset },
             apply = { state, value -> state.copy(writingSurfacePreset = value) },
         )
+        // #1128 — keep open settings instances aligned after every persisted selector change.
+        observePreference(
+            flow = userPreferencesRepository.observeImagePickerMode(),
+            isLocked = { it.isUpdatingImagePickerMode },
+            apply = { state, value -> state.copy(imagePickerMode = value) },
+        )
     }
 
     /**
@@ -450,6 +457,7 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.SetImgurClientId -> updateImgurClientId(intent.text)
             is SettingsIntent.SetEditorImageInsert -> updateEditorImageInsert(intent.mode)
             is SettingsIntent.SetWritingSurfacePreset -> updateWritingSurfacePreset(intent.preset)
+            is SettingsIntent.SetImagePickerMode -> updateImagePickerMode(intent.mode)
         }
     }
 
@@ -1140,6 +1148,36 @@ class SettingsViewModel @Inject constructor(
                             writingSurfacePreset = previous,
                             isUpdatingWritingSurfacePreset = false,
                             writingSurfacePresetError = true,
+                        )
+                    }
+                }
+        }
+    }
+
+    // #1128 — mirror the writing-surface optimistic write and release the continuous re-sync on completion.
+    private fun updateImagePickerMode(desired: ImagePickerMode) {
+        val previous = _state.value.imagePickerMode
+        _state.update {
+            it.copy(
+                imagePickerMode = desired,
+                isUpdatingImagePickerMode = true,
+                imagePickerModeError = false,
+                imagePickerModeTouchedLocally = true,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { userPreferencesRepository.setImagePickerMode(desired) }
+                .onSuccess {
+                    _state.update {
+                        it.copy(imagePickerMode = desired, isUpdatingImagePickerMode = false)
+                    }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            imagePickerMode = previous,
+                            isUpdatingImagePickerMode = false,
+                            imagePickerModeError = true,
                         )
                     }
                 }

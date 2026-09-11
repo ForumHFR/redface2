@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.feature.messages
 
 import androidx.compose.ui.text.input.TextFieldValue
 import fr.forumhfr.redface2.core.model.PostContent
+import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.ui.editor.UploadError
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 
@@ -82,6 +83,8 @@ data class PrivateMessageReplyUiState(
     val uploadError: UploadError? = null,
     /** #459 — « n/N » batch counter (null for a single image). */
     val uploadProgress: UploadProgress? = null,
+    /** #1128 — observed continuously so the next image pick uses the current preference. */
+    val imagePickerMode: ImagePickerMode = ImagePickerMode.DEFAULT,
 ) {
     val canSubmit: Boolean
         get() = formAvailable && !isLoadingForm && !isSubmitting && draft.text.isNotBlank()

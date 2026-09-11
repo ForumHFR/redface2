@@ -37,6 +37,7 @@ import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
 import fr.forumhfr.redface2.core.domain.upload.UploadException
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadedImage
@@ -1433,6 +1434,21 @@ class PostEditorViewModelTest {
             quoteMaterializer = TopicReplyQuoteMaterializer(replyRepository),
         )
 
+    @Test
+    fun `imagePickerMode reflects the observed preference and subsequent changes`() = runTest {
+        val preferences = FakeUserPreferencesRepository()
+        preferences.setImagePickerMode(ImagePickerMode.DOCUMENT_PICKER)
+        val viewModel = newReplyViewModel(userPreferencesRepository = preferences)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(ImagePickerMode.DOCUMENT_PICKER, viewModel.state.value.imagePickerMode)
+
+        preferences.setImagePickerMode(ImagePickerMode.PHOTO_PICKER)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(ImagePickerMode.PHOTO_PICKER, viewModel.state.value.imagePickerMode)
+    }
+
     // ----- #312 : confirmation avant publication ------------------------------
 
     @Test
@@ -2411,6 +2427,15 @@ class PostEditorViewModelTest {
             MutableStateFlow(WritingSurfacePreset.FULL_EDITOR)
 
         override suspend fun setWritingSurfacePreset(preset: WritingSurfacePreset) = Unit
+
+        // #1128 — keep interface fakes aligned with the shared image-selector preference.
+        private val imagePickerMode = MutableStateFlow(ImagePickerMode.DEFAULT)
+
+        override fun observeImagePickerMode(): Flow<ImagePickerMode> = imagePickerMode
+
+        override suspend fun setImagePickerMode(mode: ImagePickerMode) {
+            imagePickerMode.value = mode
+        }
 
         override fun observeShowDtSection(): Flow<Boolean> = MutableStateFlow(false)
 

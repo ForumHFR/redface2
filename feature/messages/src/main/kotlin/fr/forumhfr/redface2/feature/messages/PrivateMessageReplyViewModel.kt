@@ -145,6 +145,11 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             }
         }
         viewModelScope.launch {
+            userPreferencesRepository.observeImagePickerMode().collect { mode ->
+                _state.update { it.copy(imagePickerMode = mode) }
+            }
+        }
+        viewModelScope.launch {
             authRepository.observeAuthState().collect { authState ->
                 val newUserId = when (authState) {
                     AuthState.Anonymous -> null

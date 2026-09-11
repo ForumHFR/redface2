@@ -40,6 +40,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.FlagType
 import java.util.logging.Logger
@@ -449,6 +450,20 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         persist {
             dataStore.edit { prefs ->
                 prefs[KEY_WRITING_SURFACE_PRESET] = preset.name
+            }
+        }
+    }
+
+    override fun observeImagePickerMode(): Flow<ImagePickerMode> =
+        dataStore.data
+            .map(::readImagePickerMode)
+            .distinctUntilChanged()
+            .catch { emit(ImagePickerMode.DEFAULT) }
+
+    override suspend fun setImagePickerMode(mode: ImagePickerMode) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_IMAGE_PICKER_MODE] = mode.name
             }
         }
     }
@@ -1074,6 +1089,12 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             ?.let { stored -> runCatching { EditorImageInsert.valueOf(stored) }.getOrNull() }
             ?: EditorImageInsert.REDUCED
 
+    /** #1128 — unknown / corrupt values preserve the existing photo-picker behaviour. */
+    private fun readImagePickerMode(prefs: Preferences): ImagePickerMode =
+        prefs[KEY_IMAGE_PICKER_MODE]
+            ?.let { stored -> runCatching { ImagePickerMode.valueOf(stored) }.getOrNull() }
+            ?: ImagePickerMode.DEFAULT
+
     /** Reads [KEY_WRITING_SURFACE_PRESET] defensively; unknown / corrupt value → [WritingSurfacePreset.FULL_EDITOR]. */
     private fun readWritingSurfacePreset(prefs: Preferences): WritingSurfacePreset =
         prefs[KEY_WRITING_SURFACE_PRESET]
@@ -1425,6 +1446,9 @@ class DataStoreUserPreferencesRepository @Inject constructor(
 
         // #806 — writing-surface preset (WritingSurfacePreset.name, defensively parsed).
         val KEY_WRITING_SURFACE_PRESET = stringPreferencesKey("writing_surface_preset")
+
+        // #1128 — explicit image selector (ImagePickerMode.name, defensively parsed).
+        val KEY_IMAGE_PICKER_MODE = stringPreferencesKey("image_picker_mode")
 
         // Opt-in « DT » placeholder tab on the Drapeaux screen (MPStorage sync lands later, #6).
         val KEY_FLAGS_SHOW_DT_SECTION = booleanPreferencesKey("flags_show_dt_section")

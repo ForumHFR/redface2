@@ -31,6 +31,7 @@ import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.FlagType
 import androidx.lifecycle.viewModelScope
@@ -45,6 +46,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -2147,6 +2149,52 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `imagePickerMode re-syncs continuously including after a local pick`() = runTest {
+        repository.emitImagePickerMode(ImagePickerMode.DOCUMENT_PICKER)
+        val viewModel = newViewModel()
+        assertEquals(ImagePickerMode.DOCUMENT_PICKER, viewModel.state.value.imagePickerMode)
+
+        repository.emitImagePickerMode(ImagePickerMode.PHOTO_PICKER)
+        assertEquals(ImagePickerMode.PHOTO_PICKER, viewModel.state.value.imagePickerMode)
+
+        viewModel.submit(SettingsIntent.SetImagePickerMode(ImagePickerMode.DOCUMENT_PICKER))
+        assertTrue(viewModel.state.value.imagePickerModeTouchedLocally)
+        assertEquals(ImagePickerMode.DOCUMENT_PICKER, viewModel.state.value.imagePickerMode)
+
+        repository.emitImagePickerMode(ImagePickerMode.PHOTO_PICKER)
+        assertEquals(ImagePickerMode.PHOTO_PICKER, viewModel.state.value.imagePickerMode)
+    }
+
+    @Test
+    fun `SetImagePickerMode persists the pick`() = runTest {
+        val viewModel = newViewModel()
+        assertEquals(ImagePickerMode.PHOTO_PICKER, viewModel.state.value.imagePickerMode)
+
+        viewModel.submit(SettingsIntent.SetImagePickerMode(ImagePickerMode.DOCUMENT_PICKER))
+
+        assertEquals(ImagePickerMode.DOCUMENT_PICKER, repository.observeImagePickerMode().first())
+        assertEquals(ImagePickerMode.DOCUMENT_PICKER, viewModel.state.value.imagePickerMode)
+        assertFalse(viewModel.state.value.isUpdatingImagePickerMode)
+        assertFalse(viewModel.state.value.imagePickerModeError)
+        assertTrue(viewModel.state.value.canChangeImagePickerMode)
+        assertEquals(1, repository.imagePickerModeSetCalls)
+    }
+
+    @Test
+    fun `SetImagePickerMode reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnImagePickerModeSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.SetImagePickerMode(ImagePickerMode.DOCUMENT_PICKER))
+
+        assertEquals(ImagePickerMode.PHOTO_PICKER, viewModel.state.value.imagePickerMode)
+        assertEquals(ImagePickerMode.PHOTO_PICKER, repository.observeImagePickerMode().first())
+        assertFalse(viewModel.state.value.isUpdatingImagePickerMode)
+        assertTrue(viewModel.state.value.imagePickerModeError)
+        assertTrue(viewModel.state.value.canChangeImagePickerMode)
+    }
+
+    @Test
     fun `init hydrates the experimental MPStorage write opt-in from the persisted preference`() = runTest {
         repository.emitSyncPrivateMessagesWriteEnabled(true)
 
@@ -3075,6 +3123,24 @@ class SettingsViewModelTest {
 
         fun emitWritingSurfacePreset(value: WritingSurfacePreset) {
             writingSurfacePreset.value = value
+        }
+
+        // #1128 — enum preference seam with external writes and persistence failures.
+        private val imagePickerMode = MutableStateFlow(ImagePickerMode.DEFAULT)
+        var imagePickerModeSetCalls: Int = 0
+            private set
+        var failOnImagePickerModeSet: Boolean = false
+
+        override fun observeImagePickerMode(): Flow<ImagePickerMode> = imagePickerMode
+
+        override suspend fun setImagePickerMode(mode: ImagePickerMode) {
+            imagePickerModeSetCalls += 1
+            check(!failOnImagePickerModeSet) { "boom" }
+            imagePickerMode.value = mode
+        }
+
+        fun emitImagePickerMode(value: ImagePickerMode) {
+            imagePickerMode.value = value
         }
 
         private val showDtSection = MutableStateFlow(false)

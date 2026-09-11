@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.domain.preferences
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import kotlinx.coroutines.flow.Flow
 
@@ -259,6 +260,15 @@ interface UserPreferencesRepository {
 
     /** Persists [observeWritingSurfacePreset]. Default [WritingSurfacePreset.FULL_EDITOR] until the first call. */
     suspend fun setWritingSurfacePreset(preset: WritingSurfacePreset)
+
+    /**
+     * #1128 — explicit image selector for every editor, chosen in Settings. Default
+     * [ImagePickerMode.DEFAULT] preserves the photo picker; unknown stored values use that default.
+     */
+    fun observeImagePickerMode(): Flow<ImagePickerMode>
+
+    /** Persists [observeImagePickerMode]. Default [ImagePickerMode.DEFAULT] until the first call. */
+    suspend fun setImagePickerMode(mode: ImagePickerMode)
 
     /**
      * Opt-in « DT » section on the Drapeaux screen: when `true`, a « DT » tab appears next
