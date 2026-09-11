@@ -16,6 +16,16 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.56.0` — `internal` (dev) — 2026-09-12
+
+Retours thom@s, tomtomtls et antiseptiqueIncolore (Pixel), décision XaTriX. Code Astra sous gate Fable, validation locale = commande CI ; PR [#1329](https://github.com/ForumHFR/redface2/pull/1329) ([#1128](https://github.com/ForumHFR/redface2/issues/1128)).
+
+### Ajouté
+
+- **Réglages → Édition et publication → « Sélecteur d'images »** — choix entre le sélecteur de photos Android (défaut, inchangé) et l'explorateur de fichiers (comme Redface 1) pour l'upload d'images dans les quatre éditeurs (réponse, nouveau sujet, réponse MP, nouveau MP). L'explorateur lit le disque directement : il voit aussi les photos que le sélecteur de photos n'a pas encore remontées (base du picker en retard sur la galerie, vu sur Pixel). Sélection multiple plafonnée à 10 dans les deux modes. L'entrée « Parcourir » du sélecteur n'est pas activable par l'application : Android ne l'affiche qu'aux lancements par `ACTION_GET_CONTENT`.
+
+---
+
 ## `0.55.0` — `open` (bêta) — 2026-09-07
 
 Promotion bêta du lot développé en dev de `0.54.0` à `0.54.14` (plus le correctif [#1319](https://github.com/ForumHFR/redface2/issues/1319)), depuis la précédente bêta `0.53.6`. Le détail par version dev figure dans les entrées ci-dessous. Les issues du lot restent ouvertes jusqu'à validation par les retours des testeurs. Review de promotion : Astra, Opus 5 et Fable 5.1 sur la PR [#1317](https://github.com/ForumHFR/redface2/pull/1317).
