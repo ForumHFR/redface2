@@ -1,7 +1,3 @@
-Redface 2 v0.55.0 — beta.
-- Full-screen image viewer: zoom, share, tap to hide the bar.
-- Report a post and browse "My sanctions".
-- Category view: collapsible panels.
-- Choice of app icon (Classic, Redface 1).
-- "+N" flag badge aligned with the web, poll visible after voting.
-- Many fixes: quotes, navigation, per-account super favourites.
+Redface 2 v0.56.0 — dev.
+- Settings → Editing and posting: "Image picker", choose the Android photo picker (default) or the file explorer (like Redface 1), for all four editors.
+- The explorer also shows photos the photo picker has not caught up with yet (Pixel feedback).
