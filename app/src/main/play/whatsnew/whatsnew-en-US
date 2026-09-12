@@ -1,3 +1,2 @@
-Redface 2 v0.56.0 — dev.
-- Settings → Editing and posting: "Image picker", choose the Android photo picker (default) or the file explorer (like Redface 1), for all four editors.
-- The explorer also shows photos the photo picker has not caught up with yet (Pixel feedback).
+Redface 2 v0.56.1 — dev.
+- Settings → Editing and posting → "Image picker": third, experimental value "Photo picker with Browse" (same picker, ⋮ menu → Browse to the file explorer). Default unchanged. Multi-device feedback welcome.

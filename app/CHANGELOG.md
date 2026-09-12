@@ -16,6 +16,16 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.56.1` — `internal` (dev) — 2026-09-12
+
+Retour antiseptiqueIncolore (fil DEV, MetaPurge montre « Parcourir » sur le même sélecteur), vérification Sol, décision XaTriX. Code Astra sous gate Fable, validation locale = commande CI ; PR [#1332](https://github.com/ForumHFR/redface2/pull/1332) ([#1128](https://github.com/ForumHFR/redface2/issues/1128)).
+
+### Ajouté
+
+- **Réglages → Édition et publication → « Sélecteur d'images »** — troisième valeur à l'essai, **« Sélecteur de photos avec Parcourir »** : le même sélecteur de photos Android, ouvert par le mécanisme d'import `ACTION_GET_CONTENT`, ce qui fait apparaître le menu ⋮ → « Parcourir » vers l'explorateur (c'est ce que fait MetaPurge). Le défaut reste « Sélecteur de photos ». Selon le constructeur, une galerie ou un choix d'applications peut s'ouvrir à la place : retours multi-appareils attendus avant d'en faire le défaut. Sélection multiple plafonnée à 10 dans les trois modes.
+
+---
+
 ## `0.56.0` — `internal` (dev) — 2026-09-12
 
 Retours thom@s, tomtomtls et antiseptiqueIncolore (Pixel), décision XaTriX. Code Astra sous gate Fable, validation locale = commande CI ; PR [#1329](https://github.com/ForumHFR/redface2/pull/1329) ([#1128](https://github.com/ForumHFR/redface2/issues/1128)).
