@@ -1,2 +1,2 @@
-Redface 2 v0.57.0 — dev.
-- Images: content images smaller than the column are now upscaled up to ×3 depending on screen density (contract v1.6). No more "too small" pictures on dense screens. The GIF S/M/L setting is gone, absorbed by this rule.
+Redface 2 v0.57.1 — dev.
+- Images: a picture that fails after being shown once (evicted cache, host offline) now displays "Image unavailable" with a retry instead of an empty frame; standalone cc-image emojis stay inline; loading slots are announced to screen readers; block size rounding refined.
