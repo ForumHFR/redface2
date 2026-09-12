@@ -1,2 +1,2 @@
-Redface 2 v0.56.1 — dev.
-- Réglages → Édition et publication → « Sélecteur d'images » : troisième valeur à l'essai, « Sélecteur de photos avec Parcourir » (même sélecteur, menu ⋮ → Parcourir vers l'explorateur). Défaut inchangé. Retours multi-appareils bienvenus.
+Redface 2 v0.57.0 — dev.
+- Images : les photos plus petites que la colonne sont agrandies jusqu'à ×3 selon la densité de l'écran (contrat v1.6). Plus d'images « trop petites » sur les écrans fins. Le réglage GIF S/M/L disparaît, absorbé par cette règle.

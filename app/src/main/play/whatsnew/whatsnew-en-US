@@ -1,2 +1,2 @@
-Redface 2 v0.56.1 — dev.
-- Settings → Editing and posting → "Image picker": third, experimental value "Photo picker with Browse" (same picker, ⋮ menu → Browse to the file explorer). Default unchanged. Multi-device feedback welcome.
+Redface 2 v0.57.0 — dev.
+- Images: content images smaller than the column are now upscaled up to ×3 depending on screen density (contract v1.6). No more "too small" pictures on dense screens. The GIF S/M/L setting is gone, absorbed by this rule.

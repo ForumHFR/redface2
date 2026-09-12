@@ -16,6 +16,20 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.57.0` — `internal` (dev) — 2026-09-12
+
+Audit du contrat de rendu des images (v1.5) et protocole des 5 liens de tinc sur S10e (fil DEV) : les « images pas assez larges » viennent de la règle no-upscale en pixels physiques, pas d'un bug. Décision XaTriX : option A, contrat v1.6-1 ([#1343](https://github.com/ForumHFR/redface2/issues/1343), chapeau [#1334](https://github.com/ForumHFR/redface2/issues/1334)), plan challengé par Astra. Code Astra sous gate Fable, validation CI locale déportée sur la box de build ; PR [#1346](https://github.com/ForumHFR/redface2/pull/1346).
+
+### Modifié
+
+- **Images de contenu (bloc et inline) : plafond d'agrandissement par densité** — une image plus petite que la colonne peut désormais être agrandie jusqu'à `min(densité, 3)` (contrat v1.6-1, `max(1, min(densité, 3))`), comme un navigateur ou Redface 1, au lieu de rester à ses pixels natifs. Une photo de 820 px passe de 85 % à 95 % de la colonne sur un écran de densité 3, de 63 % à 95 % en QHD+. Caps de largeur (réglage 90/95/99/100 %) et de hauteur inchangés, décodage au natif inchangé, smileys et cc-images intouchés.
+
+### Retiré
+
+- **Réglages → Affichage → profil d'agrandissement des GIF (S/M/L)** — absorbé par le plafond par densité (S = M = L dès densité 2,5). La préférence enregistrée est ignorée, sans migration.
+
+---
+
 ## `0.56.1` — `internal` (dev) — 2026-09-12
 
 Retour antiseptiqueIncolore (fil DEV, MetaPurge montre « Parcourir » sur le même sélecteur), vérification Sol, décision XaTriX. Code Astra sous gate Fable, validation locale = commande CI ; PR [#1332](https://github.com/ForumHFR/redface2/pull/1332) ([#1128](https://github.com/ForumHFR/redface2/issues/1128)).
