@@ -24,7 +24,7 @@ import kotlin.math.roundToInt
  * in flight (and as the default `collectInlineMedia` resolver in tests).
  *
  * `[img]` — inline AND block — follows ONE policy since #959 (contrat v1.5 §3), the PHYSICAL-pixel
- * equation [imageDisplaySizePx]: measured intrinsic native size, no physical upscale, height capped
+ * equation [imageDisplaySizePx]: measured intrinsic native size, density-bounded upscale, height capped
  * (inline [INLINE_IMAGE_MAX_HEIGHT_SP] in px, block the clamped useful-height cap), width capped to
  * fImage × container ([PostImageMaxWidth.fraction]). Inline additionally reserves its placeholder
  * padding before the equation via [inlineImageMaxWidthPx]. Both paths convert their caps to px
@@ -52,8 +52,8 @@ internal object PostMediaDisplayPolicy {
 
     /**
      * Inline `[img]` uses [ContentScale.Fit] (like smileys) so the bitmap **fills** its placeholder
-     * box. The no-upscale decision lives in the BOX sizing ([imageDisplayBox]: measured intrinsic,
-     * capped, floored to [INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP]) — not the content scale. With `Inside` a tiny
+     * box. The enlargement ceiling lives in the BOX sizing ([imageDisplayBox]: measured intrinsic,
+     * capped; [INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP] only floors cold/cc slots) — not the content scale. With `Inside` a tiny
      * 16×16 cc-image emoji stayed 16×16 centred in its floored box (illegible in dogfood); `Fit` scales
      * it up to fill the box, while a large photo still scales DOWN into its capped box.
      */
@@ -96,7 +96,7 @@ internal object PostMediaDisplayPolicy {
      * `:core:ui` parser strips data:/javascript:/file: schemes so only http(s) URLs reach it.
      *
      * Since #224 option A this is **no longer the runtime sizing**: production `[img]` size is the
-     * measured intrinsic native size (no-upscale + capped) from `imageDisplayBox`, and the production
+     * measured intrinsic native size (density-bounded upscale + capped) from `imageDisplayBox`, and the production
      * cold fallback (unmeasured) is the [INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP] square (#253). This bucket now only
      * serves as the **default `collectInlineMedia` resolver** (the legacy value exercised by tests).
      */
@@ -264,45 +264,35 @@ internal const val DECODE_BUCKET_PX = 256
 /** §7 — hard decode bound per axis (px): a 2048² ARGB bitmap is the 16 MiB budget ceiling (E5). */
 internal const val DECODE_MAX_PX = 2048
 
+/** §9 v1.6-1 — maximum enlargement of content images, separate from smiley/cc caps. */
+internal const val CONTENT_UPSCALE_CEILING_MAX = 3f
+
+/** §3 v1.6-1 — bounded legibility correction; densities below one never shrink content. */
+internal fun contentUpscaleCeiling(density: Float): Float =
+    density.coerceIn(1f, CONTENT_UPSCALE_CEILING_MAX)
+
 /**
- * #959 (Lot 3, contrat v1.5 §3) — the DEDICATED content-image sizing equation, all in PHYSICAL
- * pixels: `scale = min(1, maxWidthPx/w, maxHeightPx/h)`, the width rounds, and the height
- * DERIVES from the ROUNDED width by the native ratio — never rounded independently (§3 letter;
- * the derived height may exceed the height cap by one pixel, accepted: the caps constrain the
- * SCALE, not the rounded result). No-upscale comes from the `1` term — in physical pixels
- * (1 source px never spreads past 1 screen px), which is the whole density-aware point of the
- * lot. The HOSTS convert their caps (sp/dp → px) BEFORE calling and convert the result back at
- * the Compose boundary — no px↔dp/sp comparison ever happens in the policy (cadrage Sol r1).
- * A non-positive [maxWidthPx] applies no width cap (defensive:
- * a zero-width container must not collapse the image). Both axes floor to 1 px AFTER the
- * derivation, so a degenerate rounded-to-zero width yields a 1×1 slot — never a layout bomb.
- * Smileys keep [intrinsicSmileyDisplaySize] strictly unchanged (§9: 240/70/0.9 untouchable).
+ * §3 v1.6-1 — content-image sizing in physical pixels, shared by block and inline images.
+ * The host passes [contentCeiling] from its screen density and converts caps to pixels.
+ * Width rounds first; height derives from that rounded width by the native ratio, retaining
+ * the historical rounding overshoot and the final 1×1 floor. A non-positive [maxWidthPx]
+ * applies no width cap. Smileys and cc-images do not use this equation.
  *
- * [scaleCeiling] is `mEffectif = max(mApercu, mGif)`: the SAME no-upscale ceiling relaxed by its
- * two sources — the factors NEVER multiply, the largest wins. `mGif` is the display-profile
- * factor of an ELIGIBLE block GIF (#973, §8 [AMENDEMENT-v1.5-2]); `mApercu` is the
- * [linkedPreviewUpscaleCeiling] `min(density, 3f)` of an ELIGIBLE linked preview thumbnail
- * (#876, [AMENDEMENT-v1.5-4], [isEligibleLinkedPreview]); each is `1f` when its media is not
- * eligible, so their `max` also floors `mEffectif` at `1f`. The no-upscale `1` term becomes
- * `scale = min(mEffectif, maxWidthPx/w, maxHeightPx/h)`. The default (1f) is byte-identical to
- * v1.5, so every non-eligible call site is untouched by construction; the hard caps re-clamp any
- * push past them (a native dimension at its cap keeps scale ≤ 1). ELIGIBILITY stays with the
- * renderer (atomic probe metadata, never the URL); the DECODE (§7, [decodeSizePx]) receives the
- * already-multiplied width and its native clamp is terminal — the factor applies exactly ONCE.
+ * MIME and link eligibility do not affect sizing. [decodeSizePx] receives the displayed width
+ * and clamps to native pixels and its own budget: enlargement happens only at draw.
  */
 internal fun imageDisplaySizePx(
     nativePx: IntSize,
     maxWidthPx: Int,
     maxHeightPx: Int,
-    scaleCeiling: Float = 1f,
+    contentCeiling: Float = 1f,
 ): IntSize {
     require(nativePx.width > 0 && nativePx.height > 0) { "nativePx must be positive" }
-    require(scaleCeiling > 0f) { "scaleCeiling must be positive" }
+    require(contentCeiling > 0f) { "contentCeiling must be positive" }
     val scale = minOf(
-        scaleCeiling,
-        // The ceiling is the neutral term when no width cap applies (pre-#973 this was `1f`,
-        // which the default ceiling reproduces byte-identically).
-        if (maxWidthPx > 0) maxWidthPx.toFloat() / nativePx.width else scaleCeiling,
+        contentCeiling,
+        // The ceiling is the neutral term when no width cap applies.
+        if (maxWidthPx > 0) maxWidthPx.toFloat() / nativePx.width else contentCeiling,
         maxHeightPx.toFloat() / nativePx.height,
     )
     val width = (nativePx.width * scale).roundToInt()
@@ -328,8 +318,8 @@ internal val persoColdFallbackSize = PixelSize(70, 50)
  * NO `max-height` on post images — the only web rule is `img { max-width: 90% }` — and 200 dp on a
  * ~360-411 dp phone column binds any image narrower than ~1.6:1, squeezing a square photo to ~48 %
  * width (the #842 report). The INLINE path keeps 200 sp: in-prose images stay conservative so a large
- * reaction image never grows tall enough to break the text flow, and small inline sources (cc-image
- * 16×16, reactions) never reach the cap anyway (no upscale).
+ * reaction image never grows tall enough to break the text flow, and cc-images keep their separate
+ * 16×16 fast-path square.
  */
 internal const val INLINE_IMAGE_MAX_HEIGHT_SP = 200
 

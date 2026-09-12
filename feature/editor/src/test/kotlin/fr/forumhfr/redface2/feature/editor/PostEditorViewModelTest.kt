@@ -13,7 +13,6 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
-import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
@@ -2536,11 +2535,6 @@ class PostEditorViewModelTest {
         override suspend fun setAppLauncherIcon(icon: AppLauncherIcon) = Unit
 
         // #973 — the block-GIF display profile is irrelevant to the editor; stubbed at the M default.
-        override fun observeMediaDisplayProfile(): Flow<MediaDisplayProfile> =
-            MutableStateFlow(MediaDisplayProfile.M)
-
-        override suspend fun setMediaDisplayProfile(profile: MediaDisplayProfile) = Unit
-
         override fun observePostImageMaxWidth(): Flow<PostImageMaxWidth> =
             MutableStateFlow(PostImageMaxWidth.DEFAULT)
 

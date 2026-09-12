@@ -7,7 +7,6 @@ import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.LightSurfaceTone
-import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
 import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
@@ -273,12 +272,6 @@ data class SettingsState(
     val pendingAppLauncherIcon: AppLauncherIcon = AppLauncherIcon.CLASSIC,
     val isUpdatingAppLauncherIcon: Boolean = false,
     val appLauncherIconError: Boolean = false,
-    // #973 — block-GIF display profile ([AMENDEMENT-v1.5-2]). Same optimistic-flip machinery as
-    // the reading display presets. Default matches the DataStore default (M ×1,5, choix XaTriX).
-    val mediaDisplayProfile: MediaDisplayProfile = MediaDisplayProfile.M,
-    val isUpdatingMediaDisplayProfile: Boolean = false,
-    val mediaDisplayProfileError: Boolean = false,
-    val mediaDisplayProfileTouchedLocally: Boolean = false,
     // #991 — largeur maximale fImage des images de contenu (P95 par défaut).
     val postImageMaxWidth: PostImageMaxWidth = PostImageMaxWidth.DEFAULT,
     val isUpdatingPostImageMaxWidth: Boolean = false,
@@ -464,10 +457,6 @@ data class SettingsState(
 
     val canChangeAppLauncherIcon: Boolean
         get() = !isUpdatingAppLauncherIcon
-
-    // #973 — the block-GIF profile selector is gated only by its own write.
-    val canChangeMediaDisplayProfile: Boolean
-        get() = !isUpdatingMediaDisplayProfile
 
     val canChangePostImageMaxWidth: Boolean
         get() = !isUpdatingPostImageMaxWidth
@@ -658,11 +647,7 @@ sealed interface SettingsIntent {
     data object ApplyAppLauncherIcon : SettingsIntent
     data object AppLauncherIconRestartFailed : SettingsIntent
 
-    // #973 — block-GIF display profile. `profile` is the desired selection, applied optimistically
-    // with revert-on-failure, like DisplayDensityChanged.
-    data class MediaDisplayProfileChanged(val profile: MediaDisplayProfile) : SettingsIntent
-
-    // #991 — maximum fImage width for content images, applied optimistically like the GIF profile.
+    // #991 — maximum fImage width for content images, applied optimistically like display density.
     data class PostImageMaxWidthChanged(val width: PostImageMaxWidth) : SettingsIntent
 
     /** #985 — l'utilisateur choisit le rayon des coins des images de contenu. */

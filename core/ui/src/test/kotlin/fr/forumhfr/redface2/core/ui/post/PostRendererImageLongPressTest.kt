@@ -68,14 +68,14 @@ class PostRendererImageLongPressTest {
     @Before
     fun installFakeImageLoader() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
-        // #959 — the inline fixture must stay ABOVE the 48 dp platform minimum touch target once
-        // rendered at its native physical size (§3): 400×300 px at density 3 = 133×100 dp. A
+        // The inline fixture must stay ABOVE the 48 dp platform minimum touch target once
+        // rendered with the content ceiling and inline caps. A
         // smaller bitmap gets the legitimate platform touch-target EXPANSION, which would make
         // the padding-strip hitbox tests observe the expansion instead of the §5 bitmap hitbox.
         val engine = FakeImageLoaderEngine.Builder()
             .intercept(inlineUrl, ColorImage(0xFF2E7D32.toInt(), width = 400, height = 300))
             .intercept(blockUrl, ColorImage(0xFF1565C0.toInt(), width = 400, height = 300))
-            .intercept(smallUrl, ColorImage(0xFF8E24AA.toInt(), width = 80, height = 60))
+            .intercept(smallUrl, ColorImage(0xFF8E24AA.toInt(), width = 24, height = 20))
             .intercept(ccUrl, ColorImage(0xFFF9A825.toInt(), width = 16, height = 16))
             .intercept(thumbnailUrl, ColorImage(0xFF2E7D32.toInt(), width = 400, height = 300))
             .intercept(dataUrl, ColorImage(0xFF2E7D32.toInt(), width = 400, height = 300))
@@ -734,7 +734,7 @@ class PostRendererImageLongPressTest {
     @Test
     fun `a small linked image keeps the platform touch-target expansion - AMENDEMENT-Lot3-1`() {
         // §5 amendé ([AMENDEMENT-Lot3-1], gate Sol Lot 3) : une image de contenu rendue SOUS le
-        // minimum touch target plateforme (48 dp — ici 80×60 px = 26,7×20 dp @d3) reçoit
+        // minimum touch target plateforme (48 dp — ici 24×20 px = 24×20 dp @d3) reçoit
         // l'EXPANSION de cible tactile a11y d'Android : un tap dans la bande de padding, HORS
         // du bitmap mais dans la cible étendue, déclenche quand même l'action. La « hitbox =
         // bitmap » du Lot 2 s'entend AU-DELÀ de ce minimum (les tests de frontière stricte

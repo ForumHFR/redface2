@@ -14,7 +14,6 @@ import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.LightSurfaceTone
-import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
 import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
@@ -265,12 +264,6 @@ class SettingsViewModel @Inject constructor(
                 state.copy(appLauncherIcon = current, pendingAppLauncherIcon = pending)
             },
         )
-        // #973 — block-GIF display profile (enum), same collection shape as the display presets.
-        observePreference(
-            flow = userPreferencesRepository.observeMediaDisplayProfile(),
-            isLocked = { it.isUpdatingMediaDisplayProfile },
-            apply = { state, value -> state.copy(mediaDisplayProfile = value) },
-        )
         // #991 — largeur maximale fImage des images de contenu (enum), même forme de collecte.
         observePreference(
             flow = userPreferencesRepository.observePostImageMaxWidth(),
@@ -448,7 +441,6 @@ class SettingsViewModel @Inject constructor(
                         appLauncherIconError = true,
                     )
                 }
-            is SettingsIntent.MediaDisplayProfileChanged -> updateMediaDisplayProfile(intent.profile)
             is SettingsIntent.PostImageMaxWidthChanged -> updatePostImageMaxWidth(intent.width)
             is SettingsIntent.PostImageCornersChanged -> updatePostImageCorners(intent.corners)
             is SettingsIntent.SmileyPickerDecorationChanged ->
@@ -944,36 +936,7 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    // #973 — block-GIF display profile is an enum too; same bespoke optimistic-flip shape as
-    // updateDisplayDensity. previous is captured for revert.
-    private fun updateMediaDisplayProfile(desired: MediaDisplayProfile) {
-        val previous = _state.value.mediaDisplayProfile
-        _state.update {
-            it.copy(
-                mediaDisplayProfile = desired,
-                isUpdatingMediaDisplayProfile = true,
-                mediaDisplayProfileError = false,
-                mediaDisplayProfileTouchedLocally = true,
-            )
-        }
-        viewModelScope.launch {
-            runCatching { userPreferencesRepository.setMediaDisplayProfile(desired) }
-                .onSuccess {
-                    _state.update { it.copy(mediaDisplayProfile = desired, isUpdatingMediaDisplayProfile = false) }
-                }
-                .onFailure {
-                    _state.update {
-                        it.copy(
-                            mediaDisplayProfile = previous,
-                            isUpdatingMediaDisplayProfile = false,
-                            mediaDisplayProfileError = true,
-                        )
-                    }
-                }
-        }
-    }
-
-    // #991 — content-image max width is an enum too; same optimistic-flip shape as GIF profile.
+    // #991 — content-image max width is an enum too; same optimistic-flip shape as display density.
     private fun updatePostImageMaxWidth(desired: PostImageMaxWidth) {
         val previous = _state.value.postImageMaxWidth
         _state.update {
@@ -1033,7 +996,7 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    /** #989 — délimiteur du picker : même forme optimiste + rollback que le profil GIF (#973). */
+    /** #989 — délimiteur du picker : même forme optimiste + rollback que la densité de lecture. */
     private fun updateSmileyPickerDecoration(desired: SmileyPickerDecoration) {
         val previous = _state.value.smileyPickerDecoration
         _state.update {

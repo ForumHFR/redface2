@@ -65,6 +65,29 @@ class IntrinsicMediaProbeTest {
     private fun loader(): ImageLoader = ImageLoader.Builder(context).build()
 
     @Test
+    fun `enlarged content requests and obtains native bitmap pixels from the real decoder`() = runTest {
+        val file = pngFile(80, 60)
+        val imageLoader = loader()
+        val native = measureIntrinsicMediaSize(file.absolutePath, context, imageLoader)!!.size
+        listOf(1f, 2f, 2.625f, 3f, 3.5f).forEach { density ->
+            val display = imageDisplaySizePx(native, 1200, 1200, contentUpscaleCeiling(density))
+            val decode = decodeSizePx(display.width, native)
+            assertEquals(IntSize(80, 60), decode)
+            val request = coil3.request.ImageRequest.Builder(context)
+                .data(file.absolutePath)
+                .size(decode.width, decode.height)
+                .scale(coil3.size.Scale.FIT)
+                .precision(coil3.size.Precision.INEXACT)
+                .memoryCachePolicy(coil3.request.CachePolicy.DISABLED)
+                .build()
+            val result = imageLoader.execute(request) as coil3.request.SuccessResult
+            assertTrue(result.image is BitmapImage)
+            assertEquals(80, result.image.width)
+            assertEquals(60, result.image.height)
+        }
+    }
+
+    @Test
     fun `the probe reports native dimensions PAST the former 1024 bound - no clipping`() = runTest {
         // 2000×1500 source: the pre-#959 bounded decode reported 1024×768 (measured, §3
         // non-conformity B8). The header-only probe must report the true 2000×1500.

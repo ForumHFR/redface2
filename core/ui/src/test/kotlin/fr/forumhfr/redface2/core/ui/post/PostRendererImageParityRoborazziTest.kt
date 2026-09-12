@@ -37,31 +37,10 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * #610/#842/#991 — diagnostic-only Roborazzi captures of `[img]` sizing
- * (`PostImageMaxWidth.DEFAULT` = 95 %, no upscale).
- *
- * Visual proof of the current properties (config `w360dp-h780dp` → block height cap
- * [blockImageMaxHeightDp] = `max(400, 0.5×780)` = 400 dp):
- *  - **inline height cap 200 (conservative, #842)**: a 360×640 portrait inside prose (inline path, sp)
- *    stays ~113×200 so it never breaks the text flow;
- *  - **block fills the width (#842)**: the SAME portrait as a standalone `PostBlock.Image` (block path)
- *    now renders ~225×400 under the recalibrated cap — deliberately taller/wider than the inline box
- *    (each image takes only one path per the width ≥ 240 promotion threshold), reversing #610's flat
- *    200 that squeezed it to ~113×200 (~48 % width);
- *  - **no block upscale**: a small 80×60 image posted alone stays 80×60 centred — pre-#610
- *    `fillMaxWidth` blew it up to the column width;
- *  - **bounded**: a large 4:3 photo is still bounded (width cap → ~295×221 here), not the legacy
- *    480 dp letterbox nor a scroll-destroying blow-up.
- *
- * Images are fed by a [FakeImageLoaderEngine] returning distinct-coloured [ColorImage]s at native px,
- * and the intrinsic cache is pre-seeded so the first composition is already at the final size (no
- * async-measure timing dependency). Light theme so the coloured boxes read clearly.
- *
- * Not a CI golden gate (the Roborazzi Gradle plugin is not applied — AGP 9, cf. takahirom/roborazzi#781).
- * Run on demand; PNGs land under `core/ui/build/outputs/roborazzi/` (gitignored) :
- *
- *     ./scripts/docker-dev.sh ./gradlew :core:ui:testDebugUnitTest \
- *         --tests '*PostRendererImageParityRoborazziTest*' --console=plain --no-daemon
+ * #876 v1.6-1 — diagnostic-only captures of content sizing at density 3:
+ * inline keeps its 200 sp cap; block uses the useful-window height cap; both use the density
+ * ceiling and fImage. The small 80×60 source renders at 80×60 dp, while large photos remain
+ * width-capped. Keep capture paths stable for comparison with pre-amendment outputs.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w360dp-h780dp-xxhdpi")
@@ -106,17 +85,16 @@ class PostRendererImageParityRoborazziTest {
 
     @Test
     fun portraitStandaloneBlockFillsWidth() {
-        // #842 — same portrait as a standalone PostBlock.Image → BLOCK path, recalibrated cap 400 dp
-        // (h780dp) → ~225×400, deliberately larger than the inline box above (compare
-        // img_inline_in_prose_cap200). Reverses #610's flat 200 (~113×200, ~48 % width).
+        // With the 328 dp inner column, fImage allows 312 dp; capBloc limits the portrait
+        // to about 307×546 dp (height derived from the rounded width).
         capture("img_842_standalone_block_fills_width", widthDp = 360) {
             PostRenderer(content = standaloneBlockContent(portraitUrl))
         }
     }
 
     @Test
-    fun smallImageBlockKeepsNativeSize() {
-        // 80×60 posted alone: stays 80×60 centred (pre-#610: fillMaxWidth upscale to 360 dp wide).
+    fun smallImageBlockUsesDensityCeiling() {
+        // v1.6-1: 80×60 native pixels become 240×180 physical pixels = 80×60 dp.
         capture("img_610_small_block_native", widthDp = 360) {
             PostRenderer(content = standaloneBlockContent(smallUrl))
         }
@@ -125,7 +103,6 @@ class PostRendererImageParityRoborazziTest {
     @Test
     fun largePhotoBlockStaysBounded() {
         // #842/#991 — 4000×3000 stays bounded by the default 95 % width cap → ~312×234 here.
-        // 480 dp letterbox, not a full-screen blow-up). The recalibrated height cap never upscales.
         capture("img_842_large_block_bounded", widthDp = 360) {
             PostRenderer(content = standaloneBlockContent(photoUrl))
         }

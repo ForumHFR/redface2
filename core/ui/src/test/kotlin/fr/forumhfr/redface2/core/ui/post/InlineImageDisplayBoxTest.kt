@@ -3,19 +3,14 @@ package fr.forumhfr.redface2.core.ui.post
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.sp
+import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.model.PostInline
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * #959 (Lot 3, contrat v1.5 §3) — pure unit coverage for [imageDisplayBox], the inline `[img]`
- * placeholder resolution, now DENSITY-AWARE: the measured path works entirely in PHYSICAL pixels
- * ([imageDisplaySizePx] — no-upscale means 1 source px never spreads past 1 screen px) and the
- * result converts back to sp at the boundary through the host's [Density] (density × fontScale),
- * so the physical size is stable under any density/fontScale. The legibility floor 16 is GONE
- * from the measured path (Sol r1 blocker #2): [INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP] only
- * shapes the COLD placeholder slot and the #256 cc fast-path square, which both stay sp-based
- * and unchanged.
+ * §3 v1.6-1: inline content uses the density ceiling and the real px-to-dp-to-sp conversion.
+ * The 16 sp floor belongs only to cold/cc slots; padding stays outside the bitmap.
  */
 class InlineImageDisplayBoxTest {
 
@@ -24,6 +19,65 @@ class InlineImageDisplayBoxTest {
 
     private val d1 = Density(1f, 1f)
     private val d3 = Density(3f, 1f)
+
+    @Test
+    fun `content ceiling follows density without multiplying font scale`() {
+        listOf(0.75f, 1f, 2f, 2.625f, 3f, 3.5f).forEach { screenDensity ->
+            val density = Density(screenDensity, 2f)
+            val b = box(IntSize(80, 60), maxImageHeightPx = 1000, density = density)
+            val expected = if (screenDensity < 1f) 1f else minOf(screenDensity, 3f)
+            with(density) {
+                assertEquals(80f * expected, b.placeholderWidth.toDp().toPx(), TOLERANCE)
+                assertEquals(60f * expected, b.placeholderHeight.toDp().toPx(), TOLERANCE)
+            }
+            assertEquals(IntSize(80, 60), b.decodeSize)
+        }
+    }
+
+    @Test
+    fun `P99 and P100 reserve eight dp of padding when content is enlarged`() {
+        listOf(PostImageMaxWidth.P99, PostImageMaxWidth.P100).forEach { width ->
+            val maxWidthPx = inlineImageMaxWidthPx(300f, width, horizontalPaddingPx = 24)
+            val b = box(
+                IntSize(100, 50), maxImageWidthPx = maxWidthPx, maxImageHeightPx = 1200,
+                density = d3, paddingSp = 8,
+            )
+            assertEquals(276, maxWidthPx)
+            assertEquals(100f, b.placeholderWidth.value, TOLERANCE)
+            assertEquals(46f, b.placeholderHeight.value, TOLERANCE)
+            assertEquals(IntSize(100, 50), b.decodeSize)
+        }
+    }
+
+    @Test
+    fun `density enlargement still uses the nonlinear inverse font conversion`() {
+        val nonLinear = object : Density {
+            override val density: Float = 3f
+            override val fontScale: Float = 2f
+            override fun androidx.compose.ui.unit.Dp.toSp(): androidx.compose.ui.unit.TextUnit =
+                (value / 2.5f).sp
+        }
+        val b = box(IntSize(80, 60), maxImageHeightPx = 1200, density = nonLinear, paddingSp = 3)
+        assertEquals(35f, b.placeholderWidth.value, TOLERANCE)
+        assertEquals(24f, b.placeholderHeight.value, TOLERANCE)
+    }
+
+    @Test
+    fun `cold and cc slots ignore the density ceiling and keep their padding contract`() {
+        listOf(0.75f, 3f, 3.5f).forEach { screenDensity ->
+            val density = Density(screenDensity, 2f)
+            val cold = box(null, density = density, paddingSp = 8)
+            assertEquals(24.sp, cold.placeholderWidth)
+            assertEquals(16.sp, cold.placeholderHeight)
+            val cc = imageDisplayBox(
+                image = ccImage, measured = mapOf(ccUrl to IntSize(500, 500)), maxWidthSp = 400,
+                maxImageWidthPx = 1200, maxImageHeightPx = 1200, density = density, horizontalPaddingSp = 8,
+            )
+            assertEquals(16.sp, cc.placeholderWidth)
+            assertEquals(16.sp, cc.placeholderHeight)
+            assertEquals(null, cc.decodeSize)
+        }
+    }
 
     @Suppress("LongParameterList") // One helper mirroring the production seam's full signature.
     private fun box(
@@ -53,12 +107,10 @@ class InlineImageDisplayBoxTest {
     }
 
     @Test
-    fun `no physical upscale - at density 3 a 300px source occupies 100sp`() {
-        // THE density-aware pivot of the lot: 300 native px = 300 physical px on screen = 100 sp
-        // at density 3 (before #959 the same source occupied 300 sp = 900 physical px, a ×3 blur).
+    fun `at density 3 a 300px source occupies 300sp under the caps`() {
         val b = box(measured = IntSize(300, 300), maxImageWidthPx = 1200, maxImageHeightPx = 900, density = d3)
-        assertEquals(100f, b.placeholderWidth.value, TOLERANCE)
-        assertEquals(100f, b.placeholderHeight.value, TOLERANCE)
+        assertEquals(300f, b.placeholderWidth.value, TOLERANCE)
+        assertEquals(300f, b.placeholderHeight.value, TOLERANCE)
     }
 
     @Test

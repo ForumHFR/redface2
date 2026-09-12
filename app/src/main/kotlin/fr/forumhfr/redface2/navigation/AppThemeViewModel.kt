@@ -6,7 +6,6 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
-import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.NavBarLabelsBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
@@ -79,15 +78,7 @@ class AppThemeViewModel @Inject constructor(
         userPreferencesRepository.observeShowScrollbar()
             .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
-    // #973 (§8 [AMENDEMENT-v1.5-2]) — block-GIF display profile, eagerly collected like the
-    // reading presets above (#332 model). No bootstrap mirror (it does not paint the
-    // pre-first-frame window); the seed is the M default and DataStore resolves on the first
-    // Eagerly read (unknown persisted value already falls back to M in the repository).
-    val mediaDisplayProfile: StateFlow<MediaDisplayProfile> =
-        userPreferencesRepository.observeMediaDisplayProfile()
-            .stateIn(viewModelScope, SharingStarted.Eagerly, MediaDisplayProfile.M)
-
-    // #991 — maximum fImage width of content images, eagerly collected like the media profile.
+    // #991 — maximum fImage width of content images, eagerly collected like the reading presets.
     // Seed = P95 so the historical 0.95 cap remains visible until DataStore hydrates.
     val postImageMaxWidth: StateFlow<PostImageMaxWidth> =
         userPreferencesRepository.observePostImageMaxWidth()

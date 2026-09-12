@@ -199,10 +199,9 @@ class PostRendererSegmentedTest {
         }
         val p1 = composeTestRule.onNodeWithContentDescription("p1").getBoundsInRoot()
         val p2 = composeTestRule.onNodeWithContentDescription("p2").getBoundsInRoot()
-        // #959 (§3) — le nœud décrit est le BITMAP à sa taille PHYSIQUE native : 80 px à
-        // densité 3 = 26,7 dp (fini le « px natif = sp » qui rendait 80 dp) ; les placeholders
-        // adjacents laissent toujours 4 dp + 4 dp = 8 dp entre les deux bitmaps (§4 intact).
-        assertEquals(80f / 3f, p1.w, 1.1f)
+        // v1.6-1 — le bitmap de 80 px occupe 80 dp à densité 3. Les placeholders adjacents
+        // laissent toujours 4 dp + 4 dp = 8 dp entre les deux bitmaps (§4 intact).
+        assertEquals(80f, p1.w, 1.1f)
         assertEquals(8f, (p2.left - p1.right).value, 1.6f)
     }
 
@@ -362,7 +361,7 @@ class PostRendererSegmentedTest {
     }
 
     @Test
-    fun `measured block renders at its native physical size`() {
+    fun `measured block grows from native to the content width cap`() {
         val cache = DefaultIntrinsicMediaSizeCache()
         cache.putSuccess(imgA, IntrinsicMediaMetadata(IntSize(800, 600), mimeType = null))
         composeTestRule.setContent {
@@ -373,10 +372,9 @@ class PostRendererSegmentedTest {
             }
         }
         val bounds = composeTestRule.onNodeWithContentDescription("mesuree").getBoundsInRoot()
-        // #959 (§3) — natif physique : 800×600 px sous les deux caps (1026 px / 1200 px) →
-        // aucun scaling, 800×600 px = 266,7×200 dp @d3 (fini le « px natif = dp » 324×243).
-        assertEquals(266.7f, bounds.w, 2f)
-        assertEquals(200f, bounds.h, 2f)
+        // v1.6-1: the density ceiling allows growth to fImage (1026 px), preserving the ratio.
+        assertEquals(342f, bounds.w, 2f)
+        assertEquals(256.7f, bounds.h, 2f)
     }
 
     // ---------- fixture réelle : la torture tinc (13.1) ----------
@@ -562,9 +560,9 @@ class PostRendererSegmentedTest {
         // et le contenu décrit est revenu (painter en succès).
         composeTestRule.onNodeWithContentDescription("retry").assertExists()
         val healed = composeTestRule.onNodeWithTag(BLOCK_IMAGE_TEST_TAG).getBoundsInRoot()
-        // #959 (§3) — 200×100 px servis = 66,7×33,3 dp @d3 (taille physique native).
-        assertEquals(66.7f, healed.w, 2f)
-        assertEquals(33.3f, healed.h, 2f)
+        // v1.6-1 — 200×100 source pixels render at 200×100 dp @d3 after recovery.
+        assertEquals(200f, healed.w, 2f)
+        assertEquals(100f, healed.h, 2f)
         composeTestRule.onNodeWithText("Image indisponible", substring = true).assertDoesNotExist()
         // ≥ 2 nouvelles requêtes : la re-probe ET le painter recréé (attempt re-keyé par génération).
         composeTestRule.waitUntil(timeoutMillis = 5_000) {
