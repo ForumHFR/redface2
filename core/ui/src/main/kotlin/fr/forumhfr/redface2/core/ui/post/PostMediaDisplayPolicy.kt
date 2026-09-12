@@ -51,12 +51,10 @@ internal object PostMediaDisplayPolicy {
     val smileyContentScale: ContentScale = ContentScale.Fit
 
     /**
-     * Inline `[img]` uses [ContentScale.Fit] (like smileys) so the bitmap **fills** its placeholder
-     * box. The enlargement ceiling lives in the BOX sizing ([imageDisplayBox]: measured intrinsic,
-     * capped; [INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP] only floors cold/cc slots) — not the content
-     * scale. With `Inside` a tiny 16×16 cc-image emoji stayed 16×16 centred in its floored box
-     * (illegible in dogfood); `Fit` scales
-     * it up to fill the box, while a large photo still scales DOWN into its capped box.
+     * A measured inline `[img]` uses [ContentScale.Fit] so the bitmap fills its calculated,
+     * density-bounded box. A cc-image also uses `Fit`: `Inside` left tiny source sprites illegible
+     * in their deliberate 16 sp glyph box. The unmeasured G2 content path is selected separately
+     * by [inlineImageContentScale] and uses `Inside` until usable dimensions settle.
      */
     val inlineImageContentScale: ContentScale = ContentScale.Fit
 
@@ -143,6 +141,15 @@ internal data class InlineMediaBox(
     // decode target does (cold→measured = one new decode).
     val decodeSize: IntSize? = null,
 )
+
+/**
+ * G2 has no usable native dimensions yet, so its cold slot cannot derive a density-bounded box.
+ * [ContentScale.Inside] keeps an unexpectedly tiny painter at or below native pixels until the
+ * probe or painter settles the measured box. Measured content may fill that calculated box, and a
+ * cc-image keeps its deliberate 16 sp glyph fast-path.
+ */
+internal fun inlineImageContentScale(boxReady: Boolean, isCcImage: Boolean): ContentScale =
+    if (boxReady || isCcImage) PostMediaDisplayPolicy.inlineImageContentScale else ContentScale.Inside
 
 /**
  * Source dimensions in raw pixels (not Dp/sp) — Coil hands intrinsic image sizes back in pixels,

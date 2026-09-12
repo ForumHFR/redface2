@@ -531,17 +531,12 @@ private fun ParagraphProse(
         // current density × fontScale. Converted once here — the only place density is known.
         val postImageMaxWidth = LocalPostImageMaxWidth.current
         val inlineImageHorizontalPaddingPx = with(density) {
-            (INLINE_IMAGE_HORIZONTAL_PADDING * 2).roundToPx()
+            INLINE_IMAGE_HORIZONTAL_PADDING.roundToPx() * 2
         }
         val maxImageWidthPx = with(density) {
             inlineImageMaxWidthPx(maxWidth.toPx(), postImageMaxWidth, inlineImageHorizontalPaddingPx)
         }
         val maxImageHeightPx = with(density) { INLINE_IMAGE_MAX_HEIGHT_SP.sp.toPx() }.roundToInt()
-        // §4 v1.4 (#957) — total horizontal placeholder padding of a content image (4 dp/side),
-        // converted once to the sp placeholder unit at the current density/fontScale.
-        val inlineImagePaddingSp = with(density) {
-            (INLINE_IMAGE_HORIZONTAL_PADDING * 2).toSp().value.roundToInt()
-        }
         val inlineContent = remember(
             inlines, measuredSizes, deadSmileyUrls, maxMediaWidthSp, maxImageWidthPx, maxImageHeightPx, density,
         ) {
@@ -560,7 +555,7 @@ private fun ParagraphProse(
                 imageBox = { image ->
                     imageDisplayBox(
                         image, measuredSizes, maxMediaWidthSp,
-                        maxImageWidthPx, maxImageHeightPx, density, inlineImagePaddingSp,
+                        maxImageWidthPx, maxImageHeightPx, density, INLINE_IMAGE_HORIZONTAL_PADDING * 2,
                     )
                 },
                 deadSmileyUrls = deadSmileyUrls,
@@ -2043,9 +2038,9 @@ internal fun imageDisplayBox(
     maxImageHeightPx: Int,
     // px→sp boundary conversion of the measured result (density × fontScale).
     density: Density,
-    // §4 v1.4 (#957) — TOTAL horizontal padding (4 dp each side, sp-converted by the caller)
-    // added to the PLACEHOLDER of a content image; the bitmap box is untouched. Zero for cc.
-    horizontalPaddingSp: Int = 0,
+    // §4 v1.4 (#957) — TOTAL horizontal padding (4 dp each side), added to the PLACEHOLDER of a
+    // content image in the same dp operation as its bitmap width. The bitmap box is untouched.
+    horizontalPadding: Dp = 0.dp,
 ): InlineMediaBox {
     // #256 — render-time fast-path: a URL carrying the `hfr-cc-image=true` marker declares itself a
     // community cc-image emoji (a one-line glyph). Pin its box to the one-line square immediately —
@@ -2072,8 +2067,10 @@ internal fun imageDisplayBox(
         // E9 (§14.3) — the cold slot also fits Wdispo minus the 4 dp padding on each side.
         // Reuse the physical width cap and Density's inverse conversion (including fontScale).
         val paddedCapSp = with(density) { maxImageWidthPx.toDp().toSp().value }
-        val sideSp = minOf(cold.width.toFloat(), paddedCapSp).coerceAtLeast(0f)
-        return InlineMediaBox((sideSp + horizontalPaddingSp).sp, sideSp.sp)
+        val sideSp = minOf(cold.width.toFloat(), paddedCapSp).coerceAtLeast(0f).sp
+        return with(density) {
+            InlineMediaBox((sideSp.toDp() + horizontalPadding).toSp(), sideSp)
+        }
     }
     // §3 — the physical-pixel equation (single scale, height derived from the rounded width),
     // then the px→sp boundary conversion; §4 padding rides the PLACEHOLDER width only.
@@ -2087,7 +2084,7 @@ internal fun imageDisplayBox(
     )
     return with(density) {
         InlineMediaBox(
-            placeholderWidth = (px.width.toDp().toSp().value + horizontalPaddingSp).sp,
+            placeholderWidth = (px.width.toDp() + horizontalPadding).toSp(),
             placeholderHeight = px.height.toDp().toSp(),
             // §7 — the decode size travels WITH the display box: same native pair, same displayed
             // width, so the request key flips exactly when the decode target changes.
@@ -2135,9 +2132,9 @@ internal fun imageInlineContent(
             placeholderVerticalAlign = PlaceholderVerticalAlign.TextBottom,
         ),
     ) {
-        // The image fills the placeholder via fillMaxSize() (ContentScale.Fit) so the rendered size
-        // tracks the sp-based placeholder under any fontScale; the no-upscale rule lives in the BOX
-        // sizing (imageDisplayBox), not the content scale.
+        // The image node fills the placeholder so its measured bounds track the sp box under any
+        // fontScale. Measured content uses Fit inside the density-bounded box; a G2 cold painter
+        // uses Inside until usable dimensions settle, so the 16 sp slot never forces an upscale.
         //
         // #257/#610/#959 — decode at the EXPLICIT §7 size instead of letting Coil resolve it from
         // the placeholder constraints (constraint-driven sizing re-decoded on every box change and
@@ -2269,7 +2266,10 @@ internal fun imageInlineContent(
                 showPainter -> AsyncImage(
                     model = request,
                     contentDescription = alt,
-                    contentScale = PostMediaDisplayPolicy.inlineImageContentScale,
+                    contentScale = inlineImageContentScale(
+                        boxReady = box.decodeSize != null,
+                        isCcImage = isCcImageUrl(image.url),
+                    ),
                     onState = { state ->
                         attempt.onState(state)
                         gifGate?.onState?.invoke(state)

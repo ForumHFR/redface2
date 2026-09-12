@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.ui.post
 
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -23,7 +24,7 @@ class InlineImageDisplayBoxTest {
 
     @Test
     fun `E9 cold slot reserves the padding within a column narrower than 24 dp`() {
-        val b = box(null, maxImageWidthPx = 12, maxWidthSp = 18, paddingSp = 8)
+        val b = box(null, maxImageWidthPx = 12, maxWidthSp = 18, horizontalPadding = 8.dp)
 
         assertEquals(20.sp, b.placeholderWidth)
         assertEquals(12.sp, b.placeholderHeight)
@@ -33,7 +34,7 @@ class InlineImageDisplayBoxTest {
     fun `E9 cold slot width cap uses the inverse font conversion`() {
         val density = Density(3f, 2f)
         val maxWidthPx = inlineImageMaxWidthPx(60f, PostImageMaxWidth.P100, horizontalPaddingPx = 24)
-        val b = box(null, maxImageWidthPx = maxWidthPx, density = density, paddingSp = 4)
+        val b = box(null, maxImageWidthPx = maxWidthPx, density = density, horizontalPadding = 8.dp)
 
         with(density) {
             assertEquals(60f, b.placeholderWidth.toDp().toPx(), 0.001f)
@@ -48,12 +49,24 @@ class InlineImageDisplayBoxTest {
                 listOf(0.75f, 1f, 2.625f, 3f, 3.5f).forEach { screenDensity ->
                     val density = Density(screenDensity, 2f)
                     val maxWidthPx = with(density) {
-                        inlineImageMaxWidthPx(120.dp.toPx(), preset, horizontalPaddingPx = 8.dp.roundToPx())
+                        inlineImageMaxWidthPx(
+                            120.dp.toPx(),
+                            preset,
+                            horizontalPaddingPx = INLINE_IMAGE_HORIZONTAL_PADDING.roundToPx() * 2,
+                        )
                     }
-                    val b = box(null, maxImageWidthPx = maxWidthPx, density = density, paddingSp = 4)
+                    val b = box(
+                        null,
+                        maxImageWidthPx = maxWidthPx,
+                        density = density,
+                        horizontalPadding = 8.dp,
+                    )
 
-                    assertEquals(20.sp, b.placeholderWidth)
                     assertEquals(16.sp, b.placeholderHeight)
+                    with(density) {
+                        val paddingPx = b.placeholderWidth.toDp().toPx() - b.placeholderHeight.toDp().toPx()
+                        assertEquals(8.dp.toPx(), paddingPx, TOLERANCE)
+                    }
                 }
             }
     }
@@ -78,7 +91,7 @@ class InlineImageDisplayBoxTest {
             val maxWidthPx = inlineImageMaxWidthPx(300f, width, horizontalPaddingPx = 24)
             val b = box(
                 IntSize(100, 50), maxImageWidthPx = maxWidthPx, maxImageHeightPx = 1200,
-                density = d3, paddingSp = 8,
+                density = d3, horizontalPadding = 8.dp,
             )
             assertEquals(276, maxWidthPx)
             assertEquals(100f, b.placeholderWidth.value, TOLERANCE)
@@ -95,8 +108,13 @@ class InlineImageDisplayBoxTest {
             override fun androidx.compose.ui.unit.Dp.toSp(): androidx.compose.ui.unit.TextUnit =
                 (value / 2.5f).sp
         }
-        val b = box(IntSize(80, 60), maxImageHeightPx = 1200, density = nonLinear, paddingSp = 3)
-        assertEquals(35f, b.placeholderWidth.value, TOLERANCE)
+        val b = box(
+            IntSize(80, 60),
+            maxImageHeightPx = 1200,
+            density = nonLinear,
+            horizontalPadding = 8.dp,
+        )
+        assertEquals(35.2f, b.placeholderWidth.value, TOLERANCE)
         assertEquals(24f, b.placeholderHeight.value, TOLERANCE)
     }
 
@@ -104,12 +122,18 @@ class InlineImageDisplayBoxTest {
     fun `cold and cc slots ignore the density ceiling and keep their padding contract`() {
         listOf(0.75f, 3f, 3.5f).forEach { screenDensity ->
             val density = Density(screenDensity, 2f)
-            val cold = box(null, density = density, paddingSp = 8)
-            assertEquals(24.sp, cold.placeholderWidth)
+            val cold = box(null, density = density, horizontalPadding = 8.dp)
             assertEquals(16.sp, cold.placeholderHeight)
+            with(density) {
+                val paddingPx = cold.placeholderWidth.toDp().toPx() - cold.placeholderHeight.toDp().toPx()
+                assertEquals(8.dp.toPx(), paddingPx, TOLERANCE)
+            }
             val cc = imageDisplayBox(
                 image = ccImage, measured = mapOf(ccUrl to IntSize(500, 500)), maxWidthSp = 400,
-                maxImageWidthPx = 1200, maxImageHeightPx = 1200, density = density, horizontalPaddingSp = 8,
+                maxImageWidthPx = 1200,
+                maxImageHeightPx = 1200,
+                density = density,
+                horizontalPadding = 8.dp,
             )
             assertEquals(16.sp, cc.placeholderWidth)
             assertEquals(16.sp, cc.placeholderHeight)
@@ -124,7 +148,7 @@ class InlineImageDisplayBoxTest {
         maxImageHeightPx: Int = 200,
         density: Density = d1,
         maxWidthSp: Int = 400,
-        paddingSp: Int = 0,
+        horizontalPadding: Dp = 0.dp,
     ): InlineMediaBox = imageDisplayBox(
         image = image,
         measured = mapOf(url to measured),
@@ -132,7 +156,7 @@ class InlineImageDisplayBoxTest {
         maxImageWidthPx = maxImageWidthPx,
         maxImageHeightPx = maxImageHeightPx,
         density = density,
-        horizontalPaddingSp = paddingSp,
+        horizontalPadding = horizontalPadding,
     )
 
     // ---------- measured path : physical pixels ----------
@@ -246,10 +270,10 @@ class InlineImageDisplayBoxTest {
     }
 
     @Test
-    fun `the placeholder padding rides the sp box after the px conversion`() {
-        // §4 — 4 dp/side converted to sp by the caller lands on the PLACEHOLDER width only,
-        // after the px→sp boundary conversion (bitmap box untouched).
-        val b = box(measured = IntSize(80, 60), paddingSp = 8)
+    fun `placeholder width converts bitmap and dp padding to sp together`() {
+        // E6 — one inverse conversion covers bitmap + 4 dp/side so the later padding subtraction
+        // is its exact counterpart even under non-linear font scaling.
+        val b = box(measured = IntSize(80, 60), horizontalPadding = 8.dp)
         assertEquals(88f, b.placeholderWidth.value, TOLERANCE)
         assertEquals(60f, b.placeholderHeight.value, TOLERANCE)
     }

@@ -13,6 +13,7 @@ import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.unit.IntSize
 import androidx.test.core.app.ApplicationProvider
 import coil3.ColorImage
@@ -93,7 +94,11 @@ class PostRendererImageA11yTest {
         }.build())
     }
 
-    private fun setPost(vararg blocks: PostBlock, host: PostImageActions? = PostImageActions(onLongPress = {})) {
+    private fun setPost(
+        vararg blocks: PostBlock,
+        host: PostImageActions? = PostImageActions(onLongPress = {}),
+        selectable: Boolean = false,
+    ) {
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 CompositionLocalProvider(
@@ -101,7 +106,7 @@ class PostRendererImageA11yTest {
                     LocalMediaAttemptLedger provides ledger,
                     LocalIntrinsicMediaSizeCache provides cache,
                 ) {
-                    PostRenderer(content = PostContent(blocks = blocks.toList()), selectable = false)
+                    PostRenderer(content = PostContent(blocks = blocks.toList()), selectable = selectable)
                 }
             }
         }
@@ -110,6 +115,40 @@ class PostRendererImageA11yTest {
     private fun paragraph(vararg inlines: PostInline) = PostBlock.Paragraph(inlines = inlines.toList())
 
     private val loadingDescription = SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Chargement")
+
+    @Test
+    fun `a11y activation of a linked inline image opens the same viewer target as touch - I5_11`() {
+        cache.putSuccess(servedUrl, IntrinsicMediaMetadata(IntSize(80, 60), mimeType = null))
+        var opened: PostImageTarget? = null
+        setPost(
+            paragraph(
+                PostInline.Text("avant "),
+                PostInline.Link(
+                    url = secondServedUrl,
+                    children = listOf(PostInline.InlineImage(servedUrl, "liée")),
+                ),
+                PostInline.Text(" après"),
+            ),
+            host = PostImageActions(onLongPress = {}, onOpenViewer = { opened = it }),
+            selectable = true,
+        )
+        composeTestRule.waitUntil(timeoutMillis = 5_000) {
+            ledger.hasSucceeded(servedUrl, MediaAttemptKind.PAINTER)
+        }
+
+        val image = composeTestRule.onNodeWithContentDescription("liée")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Image))
+        val semantics = image.fetchSemanticsNode().config
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val clickLabel = semantics[SemanticsActions.OnClick].label
+        val longClickLabel = semantics[SemanticsActions.OnLongClick].label
+        assertEquals(context.getString(R.string.post_image_open_link), clickLabel)
+        assertEquals(context.getString(R.string.post_image_options_action), longClickLabel)
+
+        image.performSemanticsAction(SemanticsActions.OnClick) { it() }
+
+        assertEquals(PostImageTarget(servedUrl, "liée", secondServedUrl), opened)
+    }
 
     @Test
     fun `E3 pending block and inline announce their alt and loading without phantom actions`() {
