@@ -1,2 +1,2 @@
-Redface 2 v0.57.0 — dev.
-- Images : les photos plus petites que la colonne sont agrandies jusqu'à ×3 selon la densité de l'écran (contrat v1.6). Plus d'images « trop petites » sur les écrans fins. Le réglage GIF S/M/L disparaît, absorbé par cette règle.
+Redface 2 v0.57.1 — dev.
+- Images : une image qui échoue après avoir été affichée (cache purgé, hébergeur hors ligne) montre « Image indisponible » et « Réessayer » au lieu d'un cadre vide ; les emojis cc-image isolés restent en ligne ; les emplacements en chargement sont annoncés aux lecteurs d'écran ; arrondis des tailles de bloc affinés.

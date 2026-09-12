@@ -16,6 +16,24 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.57.1` — `internal` (dev) — 2026-09-12
+
+Lot A de l'audit du contrat de rendu des images (chapeau #1334, PR #1351) : cinq écarts corrigés, sans changement de géométrie hors arrondis sub-pixel.
+
+### Corrigé
+
+- **Image évincée ou hôte hors ligne après un premier succès (#1335)** — l'échec du painter est désormais partagé par URL : chaque occurrence affiche le slot « Image indisponible » avec son « Réessayer » au lieu d'un cadre vide sans glyphe ni action. Un nouvel essai manuel rouvre une génération ; la géométrie mesurée et la sonde survivent.
+- **cc-image isolée promue en bloc (#1336)** — une image portant le marqueur `hfr-cc-image=true` reste inline même seule dans son paragraphe, sa citation ou son spoiler (parser) ; les anciens contenus persistés avec un bloc cc sont reroutés vers le rendu inline sans sonde.
+- **Accessibilité des slots en chargement (#1337)** — les emplacements d'image bloc et inline en attente annoncent l'alt, le rôle Image et l'état « Chargement » jusqu'au résultat, sans action fantôme.
+- **Smiley builtin partageant l'URL d'une image de contenu (#1342, E8)** — le smiley garde sa taille pré-semée.
+- **Arrondis des caps bloc (#1342, E9)** — les plafonds restent fractionnaires jusqu'au calcul final (plancher 400 dp et fraction 0,70 en Float) ; le slot inline froid respecte la largeur disponible padding déduit.
+
+### Modifié
+
+- Slot d'erreur d'une image bloc : icône « image cassée » au-dessus du libellé, comme le slot inline.
+
+---
+
 ## `0.57.0` — `internal` (dev) — 2026-09-12
 
 Audit du contrat de rendu des images (v1.5) et protocole des 5 liens de tinc sur S10e (fil DEV) : les « images pas assez larges » viennent de la règle no-upscale en pixels physiques, pas d'un bug. Décision XaTriX : option A, contrat v1.6-1 ([#1343](https://github.com/ForumHFR/redface2/issues/1343), chapeau [#1334](https://github.com/ForumHFR/redface2/issues/1334)), plan challengé par Astra. Code Astra sous gate Fable, validation CI locale déportée sur la box de build ; PR [#1346](https://github.com/ForumHFR/redface2/pull/1346).
