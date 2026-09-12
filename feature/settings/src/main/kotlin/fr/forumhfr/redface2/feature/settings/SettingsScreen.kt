@@ -844,6 +844,15 @@ internal fun buildSettingsCatalogue(
                 groupTitle = stringResource(R.string.settings_image_picker_title),
             ),
             radioRow(
+                id = "image_picker_photo_get_content",
+                title = stringResource(R.string.settings_image_picker_photo_get_content),
+                description = stringResource(R.string.settings_image_picker_photo_get_content_description),
+                keywords = imagePickerKeywords(),
+                selected = state.imagePickerMode == ImagePickerMode.PHOTO_PICKER_GET_CONTENT,
+                enabled = state.canChangeImagePickerMode,
+                onSelect = { onIntent(SettingsIntent.SetImagePickerMode(ImagePickerMode.PHOTO_PICKER_GET_CONTENT)) },
+            ),
+            radioRow(
                 id = "image_picker_documents",
                 title = stringResource(R.string.settings_image_picker_documents),
                 description = stringResource(R.string.settings_image_picker_documents_description),
@@ -1263,11 +1272,12 @@ private fun privateMessageContentCacheRow(
     )
 }
 
-/** #1128 — both selector rows remain discoverable through the same search terms. */
+/** #1128 — all three selector rows remain discoverable through the same search terms. */
 @Composable
 private fun imagePickerKeywords(): List<String> = listOf(
     stringResource(R.string.settings_image_picker_title),
     stringResource(R.string.settings_image_picker_keyword_photos),
+    stringResource(R.string.settings_image_picker_keyword_browse),
     stringResource(R.string.settings_image_picker_keyword_explorer),
     stringResource(R.string.settings_image_picker_keyword_files),
     stringResource(R.string.settings_image_picker_keyword_upload),

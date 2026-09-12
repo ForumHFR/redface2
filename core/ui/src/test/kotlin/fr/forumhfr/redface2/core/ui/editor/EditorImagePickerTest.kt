@@ -4,12 +4,20 @@ import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/** #1128 — selector routing and the DocumentsUI ceiling need no Android runtime. */
+/** #1128 — selector routing and the shared selection ceiling need no Android runtime. */
 class EditorImagePickerTest {
 
     @Test
     fun `PHOTO_PICKER keeps the photo picker request`() {
         assertEquals(ImagePickRequest.PhotoPicker, imagePickRequestFor(ImagePickerMode.PHOTO_PICKER))
+    }
+
+    @Test
+    fun `PHOTO_PICKER_GET_CONTENT requests image content via GET_CONTENT`() {
+        assertEquals(
+            ImagePickRequest.GetContent("image/*"),
+            imagePickRequestFor(ImagePickerMode.PHOTO_PICKER_GET_CONTENT),
+        )
     }
 
     @Test
