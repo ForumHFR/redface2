@@ -1558,10 +1558,16 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
-    fun `setImagePickerMode persists and round-trips DOCUMENT_PICKER then PHOTO_PICKER`() = runTest(dispatcher) {
+    fun `setImagePickerMode persists and round-trips all picker modes`() = runTest(dispatcher) {
         repository.setImagePickerMode(ImagePickerMode.DOCUMENT_PICKER)
         repository.observeImagePickerMode().test {
             assertEquals(ImagePickerMode.DOCUMENT_PICKER, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setImagePickerMode(ImagePickerMode.PHOTO_PICKER_GET_CONTENT)
+        repository.observeImagePickerMode().test {
+            assertEquals(ImagePickerMode.PHOTO_PICKER_GET_CONTENT, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
 

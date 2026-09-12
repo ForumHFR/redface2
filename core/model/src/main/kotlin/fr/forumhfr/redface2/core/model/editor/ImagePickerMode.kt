@@ -9,6 +9,14 @@ package fr.forumhfr.redface2.core.model.editor
  */
 enum class ImagePickerMode {
     PHOTO_PICKER,
+
+    /**
+     * Experimental option (#1128): opens the same modern photo picker via ACTION_GET_CONTENT,
+     * exposing "Browse" ("Parcourir") to DocumentsUI when supported by the installed handlers.
+     * Other handlers may open a gallery or an app chooser instead.
+     */
+    PHOTO_PICKER_GET_CONTENT,
+
     DOCUMENT_PICKER,
     ;
 

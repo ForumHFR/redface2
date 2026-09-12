@@ -502,10 +502,13 @@
     <string name="settings_image_picker_title">Sélecteur d\'images</string>
     <string name="settings_image_picker_photo">Sélecteur de photos</string>
     <string name="settings_image_picker_photo_description">Le sélecteur de photos d\'Android (défaut). Ne montre que les photos déjà remontées par la galerie.</string>
+    <string name="settings_image_picker_photo_get_content">Sélecteur de photos avec Parcourir</string>
+    <string name="settings_image_picker_photo_get_content_description">Le même sélecteur, ouvert par le mécanisme d\'import d\'Android (GET_CONTENT) : le menu ⋮ propose « Parcourir » vers l\'explorateur. À l\'essai : selon le constructeur, une galerie ou un choix d\'applications peut s\'ouvrir à la place.</string>
     <string name="settings_image_picker_documents">Explorateur de fichiers</string>
     <string name="settings_image_picker_documents_description">L\'explorateur de fichiers d\'Android, comme Redface 1. Voit aussi les photos pas encore remontées par la galerie.</string>
     <string name="settings_image_picker_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
     <string name="settings_image_picker_keyword_photos">photos</string>
+    <string name="settings_image_picker_keyword_browse">parcourir</string>
     <string name="settings_image_picker_keyword_explorer">explorateur</string>
     <string name="settings_image_picker_keyword_files">fichiers</string>
     <string name="settings_image_picker_keyword_upload">upload</string>

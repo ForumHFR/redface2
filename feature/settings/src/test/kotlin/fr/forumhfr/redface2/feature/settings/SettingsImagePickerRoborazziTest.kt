@@ -34,6 +34,14 @@ class SettingsImagePickerRoborazziTest {
     }
 
     @Test
+    fun getContentSelected() {
+        capture(
+            SettingsState(imagePickerMode = ImagePickerMode.PHOTO_PICKER_GET_CONTENT),
+            "settings_image_picker_photo_get_content",
+        )
+    }
+
+    @Test
     fun documentPickerSelected() {
         capture(
             SettingsState(imagePickerMode = ImagePickerMode.DOCUMENT_PICKER),
@@ -59,6 +67,7 @@ class SettingsImagePickerRoborazziTest {
                 Surface {
                     Column(modifier = Modifier.fillMaxWidth().testTag("image_picker_group")) {
                         rows.first { it.searchable.id == "image_picker_photo" }.render()
+                        rows.first { it.searchable.id == "image_picker_photo_get_content" }.render()
                         rows.first { it.searchable.id == "image_picker_documents" }.render()
                     }
                 }
