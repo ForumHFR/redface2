@@ -1,3 +1,2 @@
-Redface 2 v0.56.0 — dev.
-- Réglages → Édition et publication : « Sélecteur d'images », au choix le sélecteur de photos Android (défaut) ou l'explorateur de fichiers (comme Redface 1), pour les quatre éditeurs.
-- L'explorateur voit aussi les photos que le sélecteur de photos ne montre pas encore (retour Pixel).
+Redface 2 v0.56.1 — dev.
+- Réglages → Édition et publication → « Sélecteur d'images » : troisième valeur à l'essai, « Sélecteur de photos avec Parcourir » (même sélecteur, menu ⋮ → Parcourir vers l'explorateur). Défaut inchangé. Retours multi-appareils bienvenus.
