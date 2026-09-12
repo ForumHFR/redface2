@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.ui.post
 
 import fr.forumhfr.redface2.core.model.PostInline
+import fr.forumhfr.redface2.core.model.isCcImageUrl
 
 /**
  * #876/#956 (Lot 1A) — pure paragraph partition into [ParagraphSegment.InlineSegment] (prose)

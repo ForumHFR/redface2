@@ -1,7 +1,7 @@
 package fr.forumhfr.redface2.core.ui.post
 
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.sp
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.model.PostInline
@@ -123,39 +123,42 @@ class PostMediaDisplayPolicyTest {
     }
 
     @Test
+    fun `E9 cold cap keeps fractional pixels until the final display calculation`() {
+        val cap = blockImageColdCapPx(usefulHeightPx = 1001, floor400DpPx = 400f)
+        assertEquals(700.7f, cap, 0.001f)
+        // Rounding the cap to 701 first would produce a 1402 px width instead of 1401.
+        assertEquals(IntSize(1401, 701), imageDisplaySizePx(IntSize(2000, 1000), 2000, cap))
+    }
+
+    @Test
+    fun `E9 fractional 400 dp floor survives until the final display calculation`() {
+        val cap = blockImageColdCapPx(usefulHeightPx = 500, floor400DpPx = 400.4f)
+        assertEquals(400.4f, cap, 0.001f)
+        // Rounding the floor to 400 first would produce an 800 px width instead of 801.
+        assertEquals(IntSize(801, 401), imageDisplaySizePx(IntSize(2000, 1000), 2000, cap))
+    }
+
+    @Test
     fun `cold cap px clamps the useful window height per amendement Lot0-3`() {
         // S10e split réel (E11) : utile 903 px @3.0, plancher 400dp=1200px → cap = 903 (301 dp).
-        assertEquals(903, blockImageColdCapPx(usefulHeightPx = 903, floor400DpPx = 1200))
+        assertEquals(903f, blockImageColdCapPx(usefulHeightPx = 903, floor400DpPx = 1200f), 0.001f)
         // Portrait S10e : utile 1950 px → 0,70 × 1950 = 1365 > plancher 1200 → cap = 1365.
         // Depuis [AMENDEMENT-v1.5-5] (#993) la FRACTION gouverne en portrait ; le plancher 400 dp
         // ne sert plus qu'en fenêtre courte (cas split ci-dessus).
-        assertEquals(1365, blockImageColdCapPx(usefulHeightPx = 1950, floor400DpPx = 1200))
+        assertEquals(1365f, blockImageColdCapPx(usefulHeightPx = 1950, floor400DpPx = 1200f), 0.001f)
         // La cible de la décision #993 : fenêtre utile RÉELLE mesurée par sonde sur S10e portrait
-        // (2124 px = 708 dp @d3) → 0,70 × 2124 = 1487 px ≈ 496 dp, soit les ~500 dp arbitrés.
-        assertEquals(1487, blockImageColdCapPx(usefulHeightPx = 2124, floor400DpPx = 1200))
+        // (2124 px = 708 dp @d3) → 0,70 × 2124 = 1486,8 px ≈ 496 dp, soit les ~500 dp arbitrés.
+        assertEquals(1486.8f, blockImageColdCapPx(usefulHeightPx = 2124, floor400DpPx = 1200f), 0.001f)
         assertEquals(0, usefulWindowHeightPx(100, 60, 60))
     }
 
     @Test
     fun `cold cap crosses from the floor to the fraction regime between 1714 and 1715 px`() {
         // #993 — LA frontière de régime du domaine (plancher 1200 px = 400 dp @d3), le seul
-        // endroit où le comportement change de main. En Float, 0,70f = 0,699999988… donc
-        // 1714 × 0,70f = 1199,79993f → round = 1200 : le plancher gouverne encore. Pour 1715 le
-        // produit RÉEL vaut 1200,49998 (strictement SOUS 1200,5) mais l'arrondi au plus proche de
-        // la multiplication Float tombe EXACTEMENT sur 1200,5f, puis roundToInt (ties vers +∞)
-        // donne 1201 : la fraction prend la main. Épinglé pour que ce double arrondi ne bouge pas
-        // silencieusement (changement de type, de coefficient ou d'ordre des opérations).
-        assertEquals(1200, blockImageColdCapPx(usefulHeightPx = 1714, floor400DpPx = 1200))
-        assertEquals(1201, blockImageColdCapPx(usefulHeightPx = 1715, floor400DpPx = 1200))
-    }
-
-    @Test
-    fun `cold cap fraction rounds an odd useful height to the nearest pixel`() {
-        // Complément au témoin de frontière ci-dessus : l'arrondi de la fraction, isolé loin des
-        // deux autres régimes. 1001 × 0,70 = 700,7 → 701 ; une TRONCATURE donnerait 700, et ni le
-        // plancher (400) ni le clamp à la hauteur utile (1001) ne peuvent masquer le résultat —
-        // le témoin discrimine donc l'arrondi seul.
-        assertEquals(701, blockImageColdCapPx(usefulHeightPx = 1001, floor400DpPx = 400))
+        // endroit où le comportement change de main. À 1714, 0,70 × 1714 = 1199,8 : le plancher
+        // gouverne. À 1715, la fraction gouverne à 1200,5 px, sans arrondi intermédiaire (E9).
+        assertEquals(1200f, blockImageColdCapPx(usefulHeightPx = 1714, floor400DpPx = 1200f), 0.001f)
+        assertEquals(1200.5f, blockImageColdCapPx(usefulHeightPx = 1715, floor400DpPx = 1200f), 0.001f)
     }
 
     @Test
@@ -168,10 +171,8 @@ class PostMediaDisplayPolicyTest {
 
     @Test
     fun `inline image content scale is Fit so it fills its sized box`() {
-        // #224/#253 — Inside left a tiny 16×16 cc-image emoji at native size, centred in its
-        // (min-height-floored) box → illegible (dogfood). The no-upscale rule lives in the BOX sizing
-        // (imageDisplayBox); Fit makes the bitmap FILL that box (floored emoji drawn at box size; a
-        // large photo still scales DOWN into its capped box). Same reason as the smiley scale above.
+        // #256 — Fit fills the cc-image's 16 sp glyph box. Content images instead follow the
+        // §3 density ceiling and caps in imageDisplayBox; 16 sp is never a bitmap minimum.
         assertSame(ContentScale.Fit, PostMediaDisplayPolicy.inlineImageContentScale)
     }
 

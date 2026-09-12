@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.ui.post
 
 import fr.forumhfr.redface2.core.model.PostInline
+import fr.forumhfr.redface2.core.model.isCcImageUrl
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

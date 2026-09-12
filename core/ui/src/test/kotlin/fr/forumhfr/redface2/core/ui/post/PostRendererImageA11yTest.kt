@@ -2,7 +2,9 @@ package fr.forumhfr.redface2.core.ui.post
 
 import android.content.Context
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
@@ -11,16 +13,22 @@ import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.unit.IntSize
 import androidx.test.core.app.ApplicationProvider
 import coil3.ColorImage
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
+import coil3.intercept.Interceptor
+import coil3.request.ImageResult
 import coil3.test.FakeImageLoaderEngine
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import java.util.concurrent.CopyOnWriteArrayList
+import kotlinx.coroutines.CompletableDeferred
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -53,6 +61,12 @@ class PostRendererImageA11yTest {
     private val servedUrl = "https://rehost.diberie.com/Picture/Get/f/served.png"
     private val secondServedUrl = "https://rehost.diberie.com/Picture/Get/f/served2.png"
     private val deadUrl = "https://images.example.org/dead-host/photo.jpg"
+    private val ledger = MediaAttemptLedger()
+    private val cache = DefaultIntrinsicMediaSizeCache()
+    private val requestedUrls = CopyOnWriteArrayList<String>()
+
+    @Volatile
+    private var loadingGate: CompletableDeferred<Unit>? = null
 
     private val fallbackAlt: String =
         ApplicationProvider.getApplicationContext<Context>().getString(R.string.post_inline_image_alt)
@@ -66,17 +80,27 @@ class PostRendererImageA11yTest {
             .intercept(servedUrl, ColorImage(0xFF2E7D32.toInt(), width = 80, height = 60))
             .intercept(secondServedUrl, ColorImage(0xFF6A1B9A.toInt(), width = 80, height = 60))
             .build()
-        SingletonImageLoader.setUnsafe(ImageLoader.Builder(context).components { add(engine) }.build())
+        val gate = object : Interceptor {
+            override suspend fun intercept(chain: Interceptor.Chain): ImageResult {
+                requestedUrls += chain.request.data as String
+                loadingGate?.await()
+                return chain.proceed()
+            }
+        }
+        SingletonImageLoader.setUnsafe(ImageLoader.Builder(context).components {
+            add(gate)
+            add(engine)
+        }.build())
     }
 
     private fun setPost(vararg blocks: PostBlock, host: PostImageActions? = PostImageActions(onLongPress = {})) {
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                if (host != null) {
-                    CompositionLocalProvider(LocalPostImageActions provides host) {
-                        PostRenderer(content = PostContent(blocks = blocks.toList()), selectable = false)
-                    }
-                } else {
+                CompositionLocalProvider(
+                    LocalPostImageActions provides host,
+                    LocalMediaAttemptLedger provides ledger,
+                    LocalIntrinsicMediaSizeCache provides cache,
+                ) {
                     PostRenderer(content = PostContent(blocks = blocks.toList()), selectable = false)
                 }
             }
@@ -84,6 +108,61 @@ class PostRendererImageA11yTest {
     }
 
     private fun paragraph(vararg inlines: PostInline) = PostBlock.Paragraph(inlines = inlines.toList())
+
+    private val loadingDescription = SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Chargement")
+
+    @Test
+    fun `E3 pending block and inline announce their alt and loading without phantom actions`() {
+        ledger.tryReserve(servedUrl, 0, MediaAttemptKind.PROBE)
+        ledger.tryReserve(servedUrl, 0, MediaAttemptKind.PAINTER)
+        setPost(
+            PostBlock.Image(servedUrl, "bloc en attente"),
+            paragraph(PostInline.Text("avant "), PostInline.InlineImage(servedUrl, " ")),
+            host = null,
+        )
+
+        listOf("bloc en attente", fallbackAlt).forEach { alt ->
+            composeTestRule.onNodeWithContentDescription(alt)
+                .assert(loadingDescription)
+                .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Image))
+                .assert(SemanticsMatcher.keyNotDefined(SemanticsActions.OnClick))
+                .assert(SemanticsMatcher.keyNotDefined(SemanticsActions.OnLongClick))
+        }
+        assertTrue("the other occurrence holds both reservations", requestedUrls.isEmpty())
+    }
+
+    @Test
+    fun `E3 loading state disappears on success without resizing measured block and inline slots`() {
+        val gate = CompletableDeferred<Unit>()
+        loadingGate = gate
+        listOf(servedUrl, secondServedUrl).forEach { url ->
+            cache.putSuccess(url, IntrinsicMediaMetadata(IntSize(80, 60), mimeType = null))
+            ledger.settleSuccess(url, 0, MediaAttemptKind.PROBE)
+        }
+        setPost(
+            PostBlock.Image(servedUrl, "bloc"),
+            paragraph(PostInline.Text("avant "), PostInline.InlineImage(secondServedUrl, "inline")),
+        )
+        composeTestRule.waitUntil(timeoutMillis = 5_000) { requestedUrls.size == 2 }
+        val before = listOf("bloc", "inline").associateWith { alt ->
+            composeTestRule.onNodeWithContentDescription(alt)
+                .assert(loadingDescription)
+                .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Image))
+                .getBoundsInRoot()
+        }
+
+        gate.complete(Unit)
+
+        composeTestRule.waitUntil(timeoutMillis = 5_000) {
+            ledger.hasSucceeded(servedUrl, MediaAttemptKind.PAINTER) &&
+                ledger.hasSucceeded(secondServedUrl, MediaAttemptKind.PAINTER)
+        }
+        before.forEach { (alt, bounds) ->
+            val node = composeTestRule.onNodeWithContentDescription(alt)
+                .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
+            assertEquals(bounds, node.getBoundsInRoot())
+        }
+    }
 
     @Test
     fun `an inline image without alt falls back to the localized image contentDescription`() {

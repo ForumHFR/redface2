@@ -7,6 +7,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.test.core.app.ApplicationProvider
 import coil3.ColorImage
 import coil3.compose.AsyncImagePainter
+import coil3.request.ErrorResult
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
 import org.junit.Assert.assertEquals
@@ -26,6 +27,88 @@ class PainterAttemptTest {
 
     private val context: Context = ApplicationProvider.getApplicationContext()
     private val url = "https://images.example.org/attempt.jpg"
+
+    private fun errorState() = AsyncImagePainter.State.Error(
+        painter = null,
+        result = ErrorResult(
+            image = null,
+            request = ImageRequest.Builder(context).data(url).build(),
+            throwable = IllegalStateException("evicted bitmap, offline host"),
+        ),
+    )
+
+    @Test
+    fun `E1 terminal cache miss exposes shared failure until a manual retry`() {
+        val ledger = MediaAttemptLedger()
+        val cache = DefaultIntrinsicMediaSizeCache()
+        val generation = ledger.generationOf(url)
+        ledger.settleSuccess(url, generation, MediaAttemptKind.PAINTER)
+        val occurrence = PainterAttempt(ledger, cache, url, generation)
+        occurrence.reserveIfUntried() // denied: the earlier success is terminal
+        assertTrue(occurrence.renderPainter)
+
+        occurrence.onState(errorState())
+
+        assertTrue(occurrence.failedFresh)
+        assertTrue(PainterAttempt(ledger, cache, url, generation).failedFresh)
+        assertFalse(ledger.hasSucceeded(url, MediaAttemptKind.PAINTER))
+        occurrence.reserveIfUntried()
+        assertEquals(generation, ledger.generationOf(url))
+        assertFalse(ledger.tryReserve(url, generation, MediaAttemptKind.PAINTER))
+
+        ledger.retryFailedUrls(setOf(url))
+        val retried = PainterAttempt(ledger, cache, url, ledger.generationOf(url))
+        retried.reserveIfUntried()
+        assertEquals(generation + 1, ledger.generationOf(url))
+        assertFalse(retried.failedFresh)
+        assertTrue(retried.renderPainter)
+    }
+
+    @Test
+    fun `E1 a failed re-decode preserves the successful geometry and probe`() {
+        val ledger = MediaAttemptLedger()
+        val cache = DefaultIntrinsicMediaSizeCache()
+        val attempt = PainterAttempt(ledger, cache, url, ledger.generationOf(url))
+        attempt.reserveIfUntried()
+        attempt.onState(successState(320, 240))
+
+        attempt.onState(errorState())
+
+        assertTrue(attempt.failedFresh)
+        ledger.retryUrl(url)
+        assertEquals(IntSize(320, 240), cache.get(url)?.size)
+        assertTrue(ledger.hasSucceeded(url, MediaAttemptKind.PROBE))
+        assertTrue(ledger.tryReserve(url, ledger.generationOf(url), MediaAttemptKind.PAINTER))
+    }
+
+    @Test
+    fun `E1 a stale terminal occurrence cannot fail the new generation`() {
+        val ledger = MediaAttemptLedger()
+        val generation = ledger.generationOf(url)
+        ledger.settleSuccess(url, generation, MediaAttemptKind.PAINTER)
+        val stale = PainterAttempt(ledger, DefaultIntrinsicMediaSizeCache(), url, generation)
+        ledger.retryUrl(url)
+
+        stale.onState(errorState())
+
+        assertFalse(stale.failedFresh)
+        assertTrue(ledger.hasSucceeded(url, MediaAttemptKind.PAINTER))
+    }
+
+    @Test
+    fun `E1 an ungranted cache success without geometry leaves the ledger unchanged`() {
+        val ledger = MediaAttemptLedger()
+        val generation = ledger.generationOf(url)
+        ledger.settleSuccess(url, generation, MediaAttemptKind.PAINTER)
+        val occurrence = PainterAttempt(ledger, DefaultIntrinsicMediaSizeCache(), url, generation)
+
+        occurrence.onState(successState(-1, -1))
+
+        assertEquals(generation, ledger.generationOf(url))
+        assertTrue(ledger.hasSucceeded(url, MediaAttemptKind.PAINTER))
+        assertTrue(ledger.isUntried(url, MediaAttemptKind.PROBE))
+        assertFalse(occurrence.failedFresh)
+    }
 
     private fun successState(width: Int, height: Int): AsyncImagePainter.State.Success =
         AsyncImagePainter.State.Success(

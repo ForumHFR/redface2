@@ -210,7 +210,7 @@ internal const val SMILEY_RELATIVE_MAX_WIDTH_FRACTION = 0.9f
 /**
  * #959/[AMENDEMENT-v1.5-1] (D1 approuvée XaTriX), then #991 — the DEDICATED relative width cap of
  * content images (`fImage`), applied identically on the three image paths: inline
- * ([imageDisplayBox]), measured block ([PostMediaDisplayPolicy.blockImageDisplaySize]) and the
+ * ([imageDisplayBox]), measured block ([imageDisplaySizePx]) and the
  * cold block slot. The default remains 0.95; #991 only lets the user select another content-image
  * cap. The smiley cap stays a separate 0.9
  * ([SMILEY_RELATIVE_MAX_WIDTH_FRACTION], §9 untouchable).
@@ -287,6 +287,14 @@ internal fun imageDisplaySizePx(
     maxWidthPx: Int,
     maxHeightPx: Int,
     contentCeiling: Float = 1f,
+): IntSize = imageDisplaySizePx(nativePx, maxWidthPx, maxHeightPx.toFloat(), contentCeiling)
+
+/** E9 — block caps stay fractional until the final width rounding and derived height. */
+internal fun imageDisplaySizePx(
+    nativePx: IntSize,
+    maxWidthPx: Int,
+    maxHeightPx: Float,
+    contentCeiling: Float = 1f,
 ): IntSize {
     require(nativePx.width > 0 && nativePx.height > 0) { "nativePx must be positive" }
     require(contentCeiling > 0f) { "contentCeiling must be positive" }
@@ -294,7 +302,7 @@ internal fun imageDisplaySizePx(
         contentCeiling,
         // The ceiling is the neutral term when no width cap applies.
         if (maxWidthPx > 0) maxWidthPx.toFloat() / nativePx.width else contentCeiling,
-        maxHeightPx.toFloat() / nativePx.height,
+        maxHeightPx / nativePx.height,
     )
     val width = (nativePx.width * scale).roundToInt()
     val height = (width.toFloat() * nativePx.height / nativePx.width).roundToInt()
@@ -315,7 +323,7 @@ internal val persoColdFallbackSize = PixelSize(70, 50)
  * the §3 equation since #959).
  *
  * #610 originally applied this same 200 to BOTH paths as `img { max-height: 200px }` "web parity".
- * #842 walked that back for the BLOCK path only (see [blockImageMaxHeightDp]): the HFR fixtures carry
+ * #842 walked that back for the BLOCK path only (now [rememberBlockImageColdCapDp]): the HFR fixtures carry
  * NO `max-height` on post images — the only web rule is `img { max-width: 90% }` — and 200 dp on a
  * ~360-411 dp phone column binds any image narrower than ~1.6:1, squeezing a square photo to ~48 %
  * width (the #842 report). The INLINE path keeps 200 sp: in-prose images stay conservative so a large
@@ -325,17 +333,15 @@ internal val persoColdFallbackSize = PixelSize(70, 50)
 internal const val INLINE_IMAGE_MAX_HEIGHT_SP = 200
 
 /**
- * #224/#253 — minimum display **height** (sp) for an inline `[img]`, so a sub-16 low-res source can't
- * render below ~one text line. The community "cc-image" emoji (served as 16×16 PNGs) sits exactly at
- * this floor → rendered at its native 16 (dogfood: the right size next to text, per @XaaT); anything
- * smaller is floored up to 16 (filled by [inlineImageContentScale] = Fit), anything taller is untouched
- * (no photo blow-up). 16 ≈ one text line (just under bodyMedium's 20sp lineHeight).
+ * §6/#256 — one-line square (sp) for the cold inline SLOT and the cc-image fast-path.
+ * This is never a minimum bitmap size: measured content follows the §3 density ceiling and caps,
+ * with only the final 1 px anti-collapse floor. 16 sp is just under bodyMedium's 20 sp line height.
  */
 internal const val INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP = 16
 
 /**
- * #175/#224 — the no-upscale + cap policy that replaces the fixed [InlineMediaBox] buckets for inline
- * media (smileys and inline `[img]`; callers pass the per-kind caps — the defaults are the smiley caps).
+ * #175 — the no-upscale + cap policy for perso smileys. Content images use [imageDisplaySizePx]
+ * with their density ceiling; builtins always use [builtinPreseedSize].
  *
  * Given a smiley's intrinsic native size [nativePx] (raw bitmap px from Coil, treated as logical/CSS
  * px), returns the display size to feed the placeholder (as `.sp`):

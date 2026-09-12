@@ -48,7 +48,7 @@ import org.robolectric.annotation.GraphicsMode
  * into [ParagraphBlock], §4 spacing, §6 cold box, #813 parity on the block path, and the
  * four-host posture. Since #958 (Lot 2, §5) the null hosts are TOTALLY inert (see the inert-block
  * test below, Role.Image the a11y target). Screen : 360×780 dp (w360dp qualifier), insets 0 in
- * Robolectric → cold cap = min(780, max(400, 390)) = 400 dp.
+ * Robolectric → cold cap = min(780, max(400, 546)) = 546 dp (§3 v1.5-5, coefficient 0.70).
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w360dp-h780dp-xxhdpi")
@@ -116,6 +116,44 @@ class PostRendererSegmentedTest {
     }
 
     // ---------- §2 branchement : ordre + topologie ----------
+
+    @OptIn(DelicateCoilApi::class)
+    @Test
+    fun `E2 a cached cc image block is rerouted inline without a probe`() {
+        val url = "$imgA?hfr-cc-image=true"
+        val requests = CopyOnWriteArrayList<Boolean>()
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val engine = FakeImageLoaderEngine.Builder()
+            .intercept(url, ColorImage(0xFF2E7D32.toInt(), width = 16, height = 16))
+            .build()
+        val observer = object : Interceptor {
+            override suspend fun intercept(chain: Interceptor.Chain): ImageResult {
+                requests += chain.request.decoderFactory is ProbeMetadataDecoder.Factory
+                return chain.proceed()
+            }
+        }
+        SingletonImageLoader.setUnsafe(
+            ImageLoader.Builder(context).components { add(observer); add(engine) }.build(),
+        )
+        val ledger = MediaAttemptLedger()
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(
+                    LocalMediaAttemptLedger provides ledger,
+                    LocalIntrinsicMediaSizeCache provides DefaultIntrinsicMediaSizeCache(),
+                ) {
+                    PostRenderer(PostContent(listOf(PostBlock.Image(url, "cc isolée"))))
+                }
+            }
+        }
+
+        composeTestRule.waitUntil(timeoutMillis = 5_000) { ledger.hasSucceeded(url, MediaAttemptKind.PAINTER) }
+        composeTestRule.onAllNodesWithTag(BLOCK_IMAGE_TEST_TAG).assertCountEquals(0)
+        val bounds = composeTestRule.onNodeWithContentDescription("cc isolée").getBoundsInRoot()
+        assertEquals(16f, bounds.w, 0.51f)
+        assertEquals(16f, bounds.h, 0.51f)
+        assertEquals("one painter and zero measurement requests", listOf(false), requests.toList())
+    }
 
     @Test
     fun `gallery flanked by text renders text run text in order with 8dp gaps`() {

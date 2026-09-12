@@ -16,8 +16,9 @@ internal enum class MediaAttemptKind { PROBE, PAINTER }
  *     occurrences are denied and observe the settled state through snapshot reads instead;
  *  3. the state lives in a [SnapshotStateMap], so composables keyed on [generationOf]
  *     re-evaluate mechanically on retry/advancement — no side notification channel;
- *  4. a settled SUCCESS is terminal for its axis: never re-attempted, never TTL-advanced,
- *     never reopened by a retry (the §6 geometry/painter lock);
+ *  4. a settled SUCCESS is never re-attempted, TTL-advanced or reopened by retry alone.
+ *     An observed painter cache miss may fail that axis through [failPainterAfterSuccess];
+ *     the successful PROBE and the §6 geometry lock are preserved;
  *  5. settlements carry the generation captured at reservation and are DISCARDED when stale.
  *
  * C1 (TTL): the 60 s negative TTL never reopens the CURRENT generation — consulting an URL
@@ -120,6 +121,21 @@ internal class MediaAttemptLedger(
             if (entry.generation != generation) return
             if (entry.axis(kind) == AxisState.Succeeded) return
             entries[url] = entry.withAxis(kind, AxisState.Failed(nowMillis))
+        }
+    }
+
+    /**
+     * E1 (§6) — a composed painter can fail after an earlier success when Coil's bytes were
+     * evicted. Share that observed failure by URL so every occurrence exposes the error/retry
+     * slot. This is not a new reservation: only manual retry or TTL can open the next generation.
+     * Stale callbacks and repeated errors cannot overwrite a newer attempt or extend its TTL.
+     * Generic concurrent failures still use the monotone [settleFailure].
+     */
+    fun failPainterAfterSuccess(url: String, generation: Int, nowMillis: Long) {
+        synchronized(lock) {
+            val entry = entries[url] ?: return
+            if (entry.generation != generation || entry.painter != AxisState.Succeeded) return
+            entries[url] = entry.copy(painter = AxisState.Failed(nowMillis))
         }
     }
 

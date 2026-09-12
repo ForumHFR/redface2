@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.ui.post
 
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.model.PostInline
@@ -19,6 +20,43 @@ class InlineImageDisplayBoxTest {
 
     private val d1 = Density(1f, 1f)
     private val d3 = Density(3f, 1f)
+
+    @Test
+    fun `E9 cold slot reserves the padding within a column narrower than 24 dp`() {
+        val b = box(null, maxImageWidthPx = 12, maxWidthSp = 18, paddingSp = 8)
+
+        assertEquals(20.sp, b.placeholderWidth)
+        assertEquals(12.sp, b.placeholderHeight)
+    }
+
+    @Test
+    fun `E9 cold slot width cap uses the inverse font conversion`() {
+        val density = Density(3f, 2f)
+        val maxWidthPx = inlineImageMaxWidthPx(60f, PostImageMaxWidth.P100, horizontalPaddingPx = 24)
+        val b = box(null, maxImageWidthPx = maxWidthPx, density = density, paddingSp = 4)
+
+        with(density) {
+            assertEquals(60f, b.placeholderWidth.toDp().toPx(), 0.001f)
+            assertEquals(36f, b.placeholderHeight.toDp().toPx(), 0.001f)
+        }
+    }
+
+    @Test
+    fun `E9 padding bound leaves ordinary cold slots at sixteen sp`() {
+        listOf(PostImageMaxWidth.P90, PostImageMaxWidth.P95, PostImageMaxWidth.P99, PostImageMaxWidth.P100)
+            .forEach { preset ->
+                listOf(0.75f, 1f, 2.625f, 3f, 3.5f).forEach { screenDensity ->
+                    val density = Density(screenDensity, 2f)
+                    val maxWidthPx = with(density) {
+                        inlineImageMaxWidthPx(120.dp.toPx(), preset, horizontalPaddingPx = 8.dp.roundToPx())
+                    }
+                    val b = box(null, maxImageWidthPx = maxWidthPx, density = density, paddingSp = 4)
+
+                    assertEquals(20.sp, b.placeholderWidth)
+                    assertEquals(16.sp, b.placeholderHeight)
+                }
+            }
+    }
 
     @Test
     fun `content ceiling follows density without multiplying font scale`() {

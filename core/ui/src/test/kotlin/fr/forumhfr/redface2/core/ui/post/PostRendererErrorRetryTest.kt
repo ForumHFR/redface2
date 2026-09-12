@@ -7,10 +7,13 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.IntSize
 import androidx.test.core.app.ApplicationProvider
 import coil3.ColorImage
 import coil3.ImageLoader
@@ -25,6 +28,7 @@ import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import java.util.concurrent.CopyOnWriteArrayList
+import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -66,6 +70,9 @@ class PostRendererErrorRetryTest {
     @Volatile
     private var serveDead = false
 
+    @Volatile
+    private var loadingGate: CompletableDeferred<Unit>? = null
+
     @OptIn(coil3.annotation.DelicateCoilApi::class)
     private fun installLoader() {
         val engine = FakeImageLoaderEngine.Builder()
@@ -76,6 +83,7 @@ class PostRendererErrorRetryTest {
             override suspend fun intercept(chain: Interceptor.Chain): ImageResult {
                 val url = chain.request.data as? String
                 url?.let(requestedUrls::add)
+                loadingGate?.await()
                 if (!serveDead && (url == deadA || url == deadB)) {
                     return ErrorResult(
                         image = null,
@@ -97,12 +105,16 @@ class PostRendererErrorRetryTest {
     private fun requestCount(url: String): Int = requestedUrls.count { it == url }
 
     /** Host stays NULL (no LocalPostImageActions): the retry must not depend on the capability. */
-    private fun setContent(ledger: MediaAttemptLedger, blocks: List<PostBlock>) {
+    private fun setContent(
+        ledger: MediaAttemptLedger,
+        blocks: List<PostBlock>,
+        cache: IntrinsicMediaSizeCache = DefaultIntrinsicMediaSizeCache(),
+    ) {
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 Surface(color = MaterialTheme.colorScheme.surface) {
                     CompositionLocalProvider(
-                        LocalIntrinsicMediaSizeCache provides DefaultIntrinsicMediaSizeCache(),
+                        LocalIntrinsicMediaSizeCache provides cache,
                         LocalMediaAttemptLedger provides ledger,
                     ) {
                         PostRenderer(content = PostContent(blocks = blocks))
@@ -121,6 +133,63 @@ class PostRendererErrorRetryTest {
     private val retryLabelled = SemanticsMatcher("has a retry-labelled click action") { node ->
         val click = node.config.getOrElseNullable(SemanticsActions.OnClick) { null }
         click?.label?.contains("Réessayer", ignoreCase = true) == true
+    }
+
+    @Test
+    fun `E1 terminal cache misses keep block and inline slots and expose one manual retry each`() {
+        val gate = CompletableDeferred<Unit>()
+        loadingGate = gate
+        installLoader()
+        val ledger = MediaAttemptLedger()
+        val cache = DefaultIntrinsicMediaSizeCache()
+        listOf(deadA, deadB).forEach { url ->
+            cache.putSuccess(url, IntrinsicMediaMetadata(IntSize(320, 240), mimeType = null))
+            ledger.settleSuccess(url, 0, MediaAttemptKind.PROBE)
+            ledger.settleSuccess(url, 0, MediaAttemptKind.PAINTER)
+        }
+        setContent(
+            ledger,
+            listOf(
+                PostBlock.Image(deadA, "bloc évincé"),
+                PostBlock.Paragraph(listOf(PostInline.Text("x "), PostInline.InlineImage(deadB, "inline évincée"))),
+            ),
+            cache,
+        )
+        composeTestRule.waitUntil(timeoutMillis = 5_000) { requestCount(deadA) == 1 && requestCount(deadB) == 1 }
+        val blockBounds = composeTestRule.onNodeWithContentDescription("bloc évincé").getBoundsInRoot()
+        val inlineBounds = composeTestRule.onNodeWithContentDescription("inline évincée").getBoundsInRoot()
+
+        gate.complete(Unit)
+
+        composeTestRule.waitUntil(timeoutMillis = 5_000) {
+            ledger.painterFailed(deadA) && ledger.painterFailed(deadB)
+        }
+        composeTestRule.onAllNodes(retryLabelled).assertCountEquals(2)
+        assertEquals(blockBounds, composeTestRule.onAllNodes(retryLabelled)[0].getBoundsInRoot())
+        val inlineError = composeTestRule.onNodeWithContentDescription(errorText("inline évincée"))
+            .assert(retryLabelled)
+        assertEquals(inlineBounds, inlineError.getBoundsInRoot())
+        assertEquals(0, ledger.generationOf(deadA))
+        assertEquals(0, ledger.generationOf(deadB))
+        assertEquals(1, requestCount(deadA))
+        assertEquals(1, requestCount(deadB))
+
+        serveDead = true
+        composeTestRule.onAllNodes(retryLabelled)[0].performClick()
+        composeTestRule.waitUntil(timeoutMillis = 5_000) { ledger.hasSucceeded(deadA, MediaAttemptKind.PAINTER) }
+        assertEquals(blockBounds, composeTestRule.onNodeWithContentDescription("bloc évincé").getBoundsInRoot())
+        assertTrue("inline still awaits its own retry", ledger.painterFailed(deadB))
+        assertEquals(1, requestCount(deadB))
+
+        inlineError.performClick()
+        composeTestRule.waitUntil(timeoutMillis = 5_000) { ledger.hasSucceeded(deadB, MediaAttemptKind.PAINTER) }
+        assertEquals(inlineBounds, composeTestRule.onNodeWithContentDescription("inline évincée").getBoundsInRoot())
+        listOf(deadA, deadB).forEach { url ->
+            assertEquals(1, ledger.generationOf(url))
+            assertEquals("one initial painter, one retry, no probe", 2, requestCount(url))
+            assertEquals(IntSize(320, 240), cache.get(url)?.size)
+            assertTrue(ledger.hasSucceeded(url, MediaAttemptKind.PROBE))
+        }
     }
 
     @Test
