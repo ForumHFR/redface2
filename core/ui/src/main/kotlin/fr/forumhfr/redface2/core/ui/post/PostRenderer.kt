@@ -65,6 +65,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.AnnotatedString
@@ -116,6 +117,7 @@ import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.SmileyKind
+import fr.forumhfr.redface2.core.model.isCcImageUrl
 import kotlin.math.roundToInt
 
 /**
@@ -1080,7 +1082,7 @@ private fun ImageBlock(block: PostBlock.Image) = BlockImage(url = block.url, des
  * AND keeps its tap-through instead of being kept as a small inline thumbnail.
  *
  * #610/#842 — a MEASURED image renders in a box of EXACTLY its parity display size
- * ([imageDisplaySizePx] §3: native PHYSICAL size, no upscale, width ≤ fImage × column, height ≤
+ * ([imageDisplaySizePx] §3 v1.6-1: density-bounded upscale, width ≤ fImage × column, height ≤
  * the clamped useful-height cap [rememberBlockImageColdCapDp]), centred. A not-yet-measured
  * image (cold cache / failed measurement) sits in the deterministic §6 COLD slot
  * ([coldBlockSlotDp], since #957 — formerly the legacy [160, 480] dp grow-on-load slot).
@@ -1100,8 +1102,17 @@ private fun ImageBlock(block: PostBlock.Image) = BlockImage(url = block.url, des
 @Suppress("CyclomaticComplexMethod")
 @Composable
 private fun BlockImage(url: String, description: String?, linkUrl: String? = null) {
+    // E2 — old persisted ASTs may still contain a cc PostBlock.Image. Route it through the
+    // inline #256 fast-path before any block geometry, probe or animation gate is composed.
+    if (isCcImageUrl(url)) {
+        val image = PostInline.InlineImage(url, description)
+        ParagraphBlock(listOf(if (linkUrl != null) PostInline.Link(linkUrl, listOf(image)) else image))
+        return
+    }
     val uriHandler = LocalUriHandler.current
     val openLabel = stringResource(R.string.post_image_open_link)
+    val alt = description?.takeIf(String::isNotBlank) ?: stringResource(R.string.post_inline_image_alt)
+    val loadingLabel = stringResource(R.string.post_image_loading)
     val animationsEnabled = rememberAnimationsEnabled()
 
     // #249 — reserve the exact final box from the measured intrinsic size when known. The cache is fed by
@@ -1141,10 +1152,9 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
     // #842 — the block height cap is recalibrated for mobile (relative to the viewport), read here
     // where the screen height is known; #610's flat 200 dp squeezed square/portrait photos to ~48 %
     // width on phones (the width cap ≈ 90 % never got a chance to bind).
-    // #959 (§3, [Lot0-3]) — the MEASURED path now shares the CLAMPED useful-height cap with the
-    // cold slot (the window-following metric the host reads from containerSize + insets); the
-    // legacy screen-fraction cap (#842, `max(400, 0.5 × screenHeightDp)`) is gone — it could
-    // exceed a short window (split-screen) where the clamp follows it.
+    // §3 [Lot0-3, v1.5-5] — measured and cold paths share
+    // min(usefulHeight, max(400 dp, 0.70 × usefulHeight)), from containerSize minus occupied insets.
+    // Keep the cap fractional until the final layout sizing (E9).
     val capBlocDp = rememberBlockImageColdCapDp()
     val blockDensity = LocalDensity.current
     // §3 v1.6-1 — the first measured box already uses the content ceiling. The cold slot
@@ -1162,7 +1172,7 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
         val displayPx = measured?.let {
             with(blockDensity) {
                 val maxWidthPx = imageMaxWidthPx(maxWidth.toPx(), postImageMaxWidth)
-                val maxHeightPx = capBlocDp.dp.roundToPx()
+                val maxHeightPx = capBlocDp.dp.toPx()
                 imageDisplaySizePx(it, maxWidthPx, maxHeightPx, contentCeiling)
             }
         }
@@ -1306,11 +1316,18 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
                 // A11Y-2 (annexe a11y #876) — the HFR alt when present, otherwise the localized
                 // generic fallback; never null, never the raw URL. The error slot swaps in the
                 // contractual error wording (ImageBlockError) on the same containing node.
-                contentDescription = description?.takeIf(String::isNotBlank)
-                    ?: stringResource(R.string.post_inline_image_alt),
+                contentDescription = alt,
                 contentScale = ContentScale.Fit,
-                modifier = containerModifier,
-                loading = {
+                modifier = containerModifier.semantics {
+                    // The custom loading slot has no SubcomposeAsyncImageContent to carry alt/role.
+                    if (attempt.loading) {
+                        contentDescription = alt
+                        role = Role.Image
+                        stateDescription = loadingLabel
+                    }
+                },
+                loading = { state ->
+                    SideEffect { attempt.onState(state) }
                     // Both branches have an exactly-sized box (measured parity #610 OR the §6 cold
                     // slot #957), so the shimmer always fills it — the legacy min→intrinsic
                     // grow-on-load is gone with the min/max slot.
@@ -1336,7 +1353,11 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
             else ->
                 // Grant pending (first frame) or another occurrence's attempt in flight: hold the
                 // reserved box with the loading treatment until the ledger settles.
-                Box(modifier = containerModifier) {
+                Box(modifier = containerModifier.semantics {
+                    contentDescription = alt
+                    role = Role.Image
+                    stateDescription = loadingLabel
+                }) {
                     ImageShimmer(animated = animationsEnabled, modifier = Modifier.fillMaxSize())
                 }
         }
@@ -1359,13 +1380,21 @@ internal fun ImageBlockError(description: String?) {
             },
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = description?.takeIf(String::isNotBlank)?.let {
-                stringResource(R.string.post_image_error_with_alt, it)
-            } ?: stringResource(R.string.post_image_error),
-            style = MaterialTheme.typography.labelSmall,
-            color = readingColors.onBodyVariant,
-        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(
+                painter = painterResource(R.drawable.ic_ms_broken_image),
+                contentDescription = null,
+                tint = readingColors.onBodyVariant,
+                modifier = Modifier.size(24.dp),
+            )
+            Text(
+                text = description?.takeIf(String::isNotBlank)?.let {
+                    stringResource(R.string.post_image_error_with_alt, it)
+                } ?: stringResource(R.string.post_image_error),
+                style = MaterialTheme.typography.labelSmall,
+                color = readingColors.onBodyVariant,
+            )
+        }
     }
 }
 
@@ -1964,23 +1993,20 @@ private fun collectMeasurableImageUrl(inline: PostInline, urls: MutableSet<Strin
 }
 
 /**
- * #175 — resolve a smiley's placeholder box: measured native size (no-upscale + absolute cap) when
- * known, else a provisional fallback (pre-seeded builtin / dominant 70×50 perso) to minimise reflow
- * while the measurement is in flight. Finally clamped to [maxWidthSp] (RF1's relative `max-width:90%`)
- * so a large perso cannot overflow a narrow quote line.
+ * #175 — builtins always use their known size, even when a content image shares their URL (E8).
+ * Perso use measured native size (no-upscale + absolute cap), else the provisional 70×50 fallback.
+ * Both are clamped to [maxWidthSp] (RF1's relative `max-width:90%`) to fit narrow quote lines.
  */
-private fun smileyDisplayBox(
+internal fun smileyDisplayBox(
     smiley: PostInline.Smiley,
     measured: Map<String, IntSize?>,
     maxWidthSp: Int,
 ): InlineMediaBox {
-    val size = smiley.imageUrl?.let { measured[it] }
-    val base = if (size != null) {
-        intrinsicSmileyDisplaySize(PixelSize(size.width, size.height))
-    } else {
-        when (smiley.kind) {
-            is SmileyKind.Builtin -> builtinPreseedSize
-            is SmileyKind.Perso -> persoColdFallbackSize
+    val base = when (smiley.kind) {
+        is SmileyKind.Builtin -> builtinPreseedSize
+        is SmileyKind.Perso -> {
+            val size = smiley.imageUrl?.let { measured[it] }
+            if (size != null) intrinsicSmileyDisplaySize(PixelSize(size.width, size.height)) else persoColdFallbackSize
         }
     }
     val capped = capToWidth(base, maxWidthSp)
@@ -1998,8 +2024,8 @@ private fun smileyDisplayBox(
  * #253 — while the measurement is in flight (cold cache / miss) the SLOT falls back to a small
  * square of [INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP] (≈ one text line, sp: it is a text-line
  * hitbox, not an image size) rather than the old 240×180 bucket — the dominant cold case (a
- * 16×16 emoji) is already at its final size, zero flash. Still relative-capped ([maxWidthSp]) so
- * the fallback never overflows a narrow quote. Mirrors [smileyDisplayBox].
+ * 16×16 emoji) is already at its final size, zero flash. The cold square obeys [maxWidthSp]
+ * and [maxImageWidthPx], which reserves the §4 padding inside the text column (§14.3).
  *
  * #256 — a URL carrying the `hfr-cc-image=true` marker short-circuits ALL of the above: fixed
  * one-line square, no measurement involved (see [isCcImageUrl] and the fast-path comment below).
@@ -2043,7 +2069,11 @@ internal fun imageDisplayBox(
             PixelSize(INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP, INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP),
             maxWidthSp,
         )
-        return InlineMediaBox((cold.width + horizontalPaddingSp).sp, cold.height.sp)
+        // E9 (§14.3) — the cold slot also fits Wdispo minus the 4 dp padding on each side.
+        // Reuse the physical width cap and Density's inverse conversion (including fontScale).
+        val paddedCapSp = with(density) { maxImageWidthPx.toDp().toSp().value }
+        val sideSp = minOf(cold.width.toFloat(), paddedCapSp).coerceAtLeast(0f)
+        return InlineMediaBox((sideSp + horizontalPaddingSp).sp, sideSp.sp)
     }
     // §3 — the physical-pixel equation (single scale, height derived from the rounded width),
     // then the px→sp boundary conversion; §4 padding rides the PLACEHOLDER width only.
@@ -2233,6 +2263,7 @@ internal fun imageInlineContent(
         // carries a description so the media never disappears from the semantics tree.
         val alt = image.description?.takeIf(String::isNotBlank)
             ?: stringResource(R.string.post_inline_image_alt)
+        val loadingLabel = stringResource(R.string.post_image_loading)
         Box(Modifier.fillMaxSize().then(paddingModifier)) {
             when {
                 showPainter -> AsyncImage(
@@ -2245,6 +2276,7 @@ internal fun imageInlineContent(
                     },
                     modifier = Modifier
                         .fillMaxSize()
+                        .semantics { if (attempt.loading) stateDescription = loadingLabel }
                         .then(gifGate?.modifier ?: Modifier)
                         .then(interactionModifier),
                 )
@@ -2254,7 +2286,11 @@ internal fun imageInlineContent(
                 attempt.failedFresh -> InlineImageErrorSlot(url = image.url, description = image.description)
 
                 // Attempt pending / another occurrence in flight: hold the placeholder.
-                else -> Box(Modifier.fillMaxSize().semantics { contentDescription = alt })
+                else -> Box(Modifier.fillMaxSize().semantics {
+                    contentDescription = alt
+                    role = Role.Image
+                    stateDescription = loadingLabel
+                })
             }
         }
     }

@@ -23,7 +23,8 @@ internal const val MEDIA_GEOMETRY_LOG_TAG = "PostMediaGeometry"
  *  - [failedFresh] → the occurrence composes the §6 error state and NEVER a painter node, so no
  *    network attempt can fire (the pre-#960 pipeline re-attempted per occurrence and per key()
  *    bump);
- *  - terminal success → [renderPainter] without any settlement (Coil serves its caches);
+ *  - terminal success → [renderPainter] from Coil's caches; an observed cache-miss error
+ *    fails the PAINTER axis so §6 still exposes a shared error slot and manual retry;
  *  - untried → the FIRST occurrence wins the reservation and reports the painter outcome through
  *    [onState]; concurrent occurrences hold the placeholder until the winner settles (the ledger's
  *    snapshot write recomposes them onto the settled branch).
@@ -42,6 +43,10 @@ internal class PainterAttempt(
 ) {
     private var granted by mutableStateOf(false)
     private var settled = false
+
+    /** E3 — includes the pending first frame; terminal painter states remove the announcement. */
+    var loading by mutableStateOf(true)
+        private set
 
     /** Fresh painter failure on record — compose the error state, never a painter node. */
     val failedFresh: Boolean
@@ -62,16 +67,18 @@ internal class PainterAttempt(
     }
 
     /**
-     * Settles the granted attempt on the painter's terminal states; loading/empty are ignored.
+     * Tracks loading for a11y and settles granted terminal states. E1 also records an observed
+     * error after success, including a §7 re-decode, without making another reservation.
      * The GEOMETRY deposit (G2) runs on EVERY success — granted, settled or terminal — because
      * the pair is immutable-true and the deposit is idempotent first-pair: this is what heals a
      * FIFO-evicted cache entry when a terminal painter re-renders (Sol P2, O1 — the §6 locked
      * slot survives eviction), and the §7 re-decode's callback can never apply a second
-     * correction through it. Guard asymmetry (deliberate, Sol P2): the PAINTER settlement is
+     * correction through it. Guard asymmetry (deliberate, Sol P2): the PAINTER success is
      * grant- AND generation-guarded; the G2-derived PROBE settlement is generation-guarded ONLY
      * (any truthful painter success may satisfy the measurement need, grant or not).
      */
     fun onState(state: AsyncImagePainter.State) {
+        loading = state !is AsyncImagePainter.State.Success && state !is AsyncImagePainter.State.Error
         when (state) {
             is AsyncImagePainter.State.Success -> {
                 settlePainterGeometry(state)
@@ -85,6 +92,8 @@ internal class PainterAttempt(
                 if (granted && !settled) {
                     settled = true
                     ledger.settleFailure(url, generation, MediaAttemptKind.PAINTER, System.currentTimeMillis())
+                } else if (renderPainter) {
+                    ledger.failPainterAfterSuccess(url, generation, System.currentTimeMillis())
                 }
             }
 
