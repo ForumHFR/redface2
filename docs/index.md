@@ -96,6 +96,7 @@ Les contributions sont les bienvenues : ouvrez une issue, commentez les existant
 - [Protocole HFR]({{ site.baseurl }}/specs/protocol-hfr) — Contrats externes, endpoints et edge cases
 - [Roadmap]({{ site.baseurl }}/specs/roadmap) — Phases de développement
 - [Parité de lecture Topic ↔ MP]({{ site.baseurl }}/specs/reading-parity) — L'état de chaque fonction de lecture côté MP/DT
+- [Contrat de rendu des images]({{ site.baseurl }}/specs/images) — Topologie, sizing, états, décodage et smileys des images dans les posts (v1.6)
 - [Extensions communautaires]({{ site.baseurl }}/specs/extensions) — Les addons userscript qui deviennent natifs
 - [ADRs]({{ site.baseurl }}/adr) — Les décisions structurantes déjà prises
 
