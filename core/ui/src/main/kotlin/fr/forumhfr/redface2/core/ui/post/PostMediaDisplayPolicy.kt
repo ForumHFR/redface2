@@ -53,8 +53,9 @@ internal object PostMediaDisplayPolicy {
     /**
      * Inline `[img]` uses [ContentScale.Fit] (like smileys) so the bitmap **fills** its placeholder
      * box. The enlargement ceiling lives in the BOX sizing ([imageDisplayBox]: measured intrinsic,
-     * capped; [INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP] only floors cold/cc slots) — not the content scale. With `Inside` a tiny
-     * 16×16 cc-image emoji stayed 16×16 centred in its floored box (illegible in dogfood); `Fit` scales
+     * capped; [INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP] only floors cold/cc slots) — not the content
+     * scale. With `Inside` a tiny 16×16 cc-image emoji stayed 16×16 centred in its floored box
+     * (illegible in dogfood); `Fit` scales
      * it up to fill the box, while a large photo still scales DOWN into its capped box.
      */
     val inlineImageContentScale: ContentScale = ContentScale.Fit
