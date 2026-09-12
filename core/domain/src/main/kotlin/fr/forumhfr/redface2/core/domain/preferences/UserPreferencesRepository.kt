@@ -508,20 +508,9 @@ interface UserPreferencesRepository {
     suspend fun setAppLauncherIcon(icon: AppLauncherIcon)
 
     /**
-     * Block-GIF display profile (#973, contrat images §8 [AMENDEMENT-v1.5-2]):
-     * [MediaDisplayProfile.M] (default, ×1,5) — the enlargement factor applied to eligible block
-     * GIFs by the post renderer (wired in wave 2). Observed by the renderer hosts and mirrored in
-     * Settings > Affichage. A corrupt / unknown stored value degrades to the M default.
-     */
-    fun observeMediaDisplayProfile(): Flow<MediaDisplayProfile>
-
-    /** Persists [observeMediaDisplayProfile]. Default [MediaDisplayProfile.M] until the first call. */
-    suspend fun setMediaDisplayProfile(profile: MediaDisplayProfile)
-
-    /**
      * Maximum content image width (#991): [PostImageMaxWidth.P95] (default) keeps the historical
      * fImage cap, while P90 / P99 / P100 let the user tighten or relax content images. This is
-     * independent from GIF enlargement and full-width posts.
+     * independent from full-width posts.
      */
     fun observePostImageMaxWidth(): Flow<PostImageMaxWidth>
 

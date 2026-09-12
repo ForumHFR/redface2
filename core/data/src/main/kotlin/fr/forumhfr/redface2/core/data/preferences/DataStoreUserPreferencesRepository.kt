@@ -15,7 +15,6 @@ import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
 import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
 import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
-import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
@@ -823,22 +822,6 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
-    override fun observeMediaDisplayProfile(): Flow<MediaDisplayProfile> =
-        dataStore.data
-            // Default M ×1,5 (#973, [AMENDEMENT-v1.5-2] — chosen by XaTriX). Like the display
-            // density, no bootstrap mirror: the profile never paints the pre-first-frame window.
-            .map(::readMediaDisplayProfile)
-            .distinctUntilChanged()
-            .catch { emit(MediaDisplayProfile.M) }
-
-    override suspend fun setMediaDisplayProfile(profile: MediaDisplayProfile) {
-        persist {
-            dataStore.edit { prefs ->
-                prefs[KEY_MEDIA_DISPLAY_PROFILE] = profile.name
-            }
-        }
-    }
-
     override fun observePostImageMaxWidth(): Flow<PostImageMaxWidth> =
         dataStore.data
             // Default P95 (#991): preserves the historical fImage cap unless the user opts in.
@@ -1124,19 +1107,9 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             ?: AppLauncherIcon.CLASSIC
 
     /**
-     * Reads [KEY_MEDIA_DISPLAY_PROFILE] defensively (#973): an unknown / corrupt stored value
-     * (older build, manual edit) falls back to [MediaDisplayProfile.M] instead of crashing on
-     * `MediaDisplayProfile.valueOf`, same stance as [readDisplayDensity].
-     */
-    private fun readMediaDisplayProfile(prefs: Preferences): MediaDisplayProfile =
-        prefs[KEY_MEDIA_DISPLAY_PROFILE]
-            ?.let { stored -> runCatching { MediaDisplayProfile.valueOf(stored) }.getOrNull() }
-            ?: MediaDisplayProfile.M
-
-    /**
      * Reads [KEY_POST_IMAGE_MAX_WIDTH] defensively (#991): an unknown / corrupt stored value
      * (older build, manual edit) falls back to [PostImageMaxWidth.DEFAULT] instead of crashing on
-     * `PostImageMaxWidth.valueOf`, same stance as [readMediaDisplayProfile].
+     * `PostImageMaxWidth.valueOf`, same stance as [readDisplayDensity].
      */
     private fun readPostImageMaxWidth(prefs: Preferences): PostImageMaxWidth =
         prefs[KEY_POST_IMAGE_MAX_WIDTH]
@@ -1152,7 +1125,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
     /**
      * Reads [KEY_SMILEY_PICKER_DECORATION] defensively (#989): an unknown / corrupt stored value
      * (older build, manual edit) falls back to [SmileyPickerDecoration.NONE] instead of crashing on
-     * `SmileyPickerDecoration.valueOf`, same stance as [readMediaDisplayProfile].
+     * `SmileyPickerDecoration.valueOf`, same stance as [readDisplayDensity].
      */
     private fun readSmileyPickerDecoration(prefs: Preferences): SmileyPickerDecoration =
         prefs[KEY_SMILEY_PICKER_DECORATION]
@@ -1506,8 +1479,6 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val KEY_FONT_SCALE = stringPreferencesKey("font_scale")
         // #326 — selected manifest activity-alias (AppLauncherIcon.name), defensively parsed.
         val KEY_APP_LAUNCHER_ICON = stringPreferencesKey("app_launcher_icon")
-        // #973 — block-GIF display profile (MediaDisplayProfile.name, defensively parsed).
-        val KEY_MEDIA_DISPLAY_PROFILE = stringPreferencesKey("media_display_profile")
         // #991 — post content image max width (PostImageMaxWidth.name, defensively parsed).
         val KEY_POST_IMAGE_MAX_WIDTH = stringPreferencesKey("post_image_max_width")
         // #985 — post content image corners (PostImageCorners.name, defensively parsed).

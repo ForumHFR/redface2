@@ -108,7 +108,6 @@ import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
 import fr.forumhfr.redface2.core.ui.theme.LocalEgoQuotePseudo
 import fr.forumhfr.redface2.core.ui.theme.LocalFoldLongQuotes
 import fr.forumhfr.redface2.core.ui.theme.LocalIgnoreInlineColors
-import fr.forumhfr.redface2.core.ui.theme.LocalMediaDisplayProfile
 import fr.forumhfr.redface2.core.ui.theme.LocalPostImageCorners
 import fr.forumhfr.redface2.core.ui.theme.LocalPostImageMaxWidth
 import fr.forumhfr.redface2.core.ui.theme.LocalReadingTileOutline
@@ -1148,41 +1147,23 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
     // exceed a short window (split-screen) where the clamp follows it.
     val capBlocDp = rememberBlockImageColdCapDp()
     val blockDensity = LocalDensity.current
-    // #973 (§8) — `mGif`: an eligible block GIF (probe MIME on the atomic metadata) takes the
-    // display-profile factor as its §3 scale ceiling; everything else keeps the strict 1f.
-    // The COLD path below is untouched by construction: no metadata → no measured box, the §6
-    // slot is deterministic (no dimensions, no MIME — no factor).
-    val mediaDisplayProfile = LocalMediaDisplayProfile.current
+    // §3 v1.6-1 — the first measured box already uses the content ceiling. The cold slot
+    // below is unchanged; neither MIME nor a wrapping link can trigger a second correction.
+    val contentCeiling = contentUpscaleCeiling(blockDensity.density)
     val postImageMaxWidth = LocalPostImageMaxWidth.current
     val imageCornerShape = cornerShapeFor(LocalPostImageCorners.current)
-    val gifCeiling = if (metadata?.mimeType == GIF_MIME_TYPE) mediaDisplayProfile.factor else 1f
-    // #876 (§8 [AMENDEMENT-v1.5-4]) — `mApercu`: an eligible LINKED PREVIEW (a thumbnail wrapped
-    // in a link to a DISTINCT resource of the SAME host, native axis ≤ 400 px — the pure guard
-    // [isEligibleLinkedPreview]) may spread one source pixel over `min(densité, 3)` screen pixels,
-    // so it finally occupies its source dimensions in dp. The dimensions handed to the guard are
-    // the CACHE's (§3 authority, already EXIF-oriented) and the MIME plays no part here.
-    val previewCeiling = if (isEligibleLinkedPreview(url = url, linkUrl = linkUrl, nativePx = measured)) {
-        linkedPreviewUpscaleCeiling(blockDensity.density)
-    } else {
-        1f
-    }
-    // `mEffectif = max(mApercu, mGif)` — the two multipliers relax the SAME no-upscale ceiling and
-    // the largest wins; they must NEVER multiply (an eligible linked GIF is ×3 under M as under S,
-    // never ×4,5). That `max` is ALSO the `1,0` floor: [linkedPreviewUpscaleCeiling] deliberately
-    // returns the raw density, so without it a screen density below 1 would SHRINK the image.
-    val scaleCeiling = maxOf(gifCeiling, previewCeiling)
     // contentAlignment centres the (usually narrower-than-column, #610) exact box on its own line —
     // the same visual centring the pre-#610 full-width Fit letterboxing produced.
     BoxWithConstraints(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         // #959 (§3) — the measured box is the PHYSICAL-pixel equation (imageDisplaySizePx: single
-        // scale, height derived from the rounded width, no physical upscale), caps converted to px
+        // scale, height derived from the rounded width, density-bounded upscale), caps converted to px
         // here and the result converted back to dp at this Compose boundary; anti-CLS: it is also
         // the reserved loading slot. Cold falls back to the deterministic §6 slot below.
         val displayPx = measured?.let {
             with(blockDensity) {
                 val maxWidthPx = imageMaxWidthPx(maxWidth.toPx(), postImageMaxWidth)
                 val maxHeightPx = capBlocDp.dp.roundToPx()
-                imageDisplaySizePx(it, maxWidthPx, maxHeightPx, scaleCeiling)
+                imageDisplaySizePx(it, maxWidthPx, maxHeightPx, contentCeiling)
             }
         }
         val sizeModifier = if (displayPx != null) {
@@ -2007,14 +1988,11 @@ private fun smileyDisplayBox(
 }
 
 /**
- * #959 (Lot 3, contrat v1.5 §3) — resolve an inline `[img]` placeholder box. The MEASURED path is
- * density-aware and works entirely in PHYSICAL pixels through [imageDisplaySizePx] (no-upscale =
- * 1 source px never spreads past 1 screen px; the pre-#959 "native px as sp" model upscaled every
- * bitmap by ×density): the caller passes the caps in px ([maxImageWidthPx] = fImage × container,
- * or the inline padding-reserved cap from [inlineImageMaxWidthPx], [maxImageHeightPx] = 200 sp in
- * px) and the result converts back to sp HERE, through [density] (÷ density × fontScale), so the
- * physical size is stable under any density/fontScale. The legibility floor is GONE from the
- * measured path (cadrage Sol r1):
+ * §3 v1.6-1 — resolve an inline `[img]` placeholder box in physical pixels with the same
+ * density ceiling as block content. The caller passes the width cap (including reserved padding)
+ * and the 200 sp height cap in pixels. The result converts back through [density]'s real inverse
+ * font scaling; fontScale affects the cap and conversion, never the enlargement ceiling.
+ * The measured bitmap has no legibility floor:
  * [INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP] only shapes the placeholder SLOTS below.
  *
  * #253 — while the measurement is in flight (cold cache / miss) the SLOT falls back to a small
@@ -2074,7 +2052,9 @@ internal fun imageDisplayBox(
     // NON-LINEAR font-scaling table. The text stack applies the same table forward at layout,
     // so the round-trip lands back on the computed physical pixels exactly. (A hand-rolled
     // linear px/(density×fontScale) drifted at fontScale > 1 on API 34+ — refused.)
-    val px = imageDisplaySizePx(size, maxImageWidthPx, maxImageHeightPx)
+    val px = imageDisplaySizePx(
+        size, maxImageWidthPx, maxImageHeightPx, contentCeiling = contentUpscaleCeiling(density.density),
+    )
     return with(density) {
         InlineMediaBox(
             placeholderWidth = (px.width.toDp().toSp().value + horizontalPaddingSp).sp,

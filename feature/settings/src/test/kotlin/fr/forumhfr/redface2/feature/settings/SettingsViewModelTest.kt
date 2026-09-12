@@ -8,7 +8,6 @@ import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
 import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
 import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
-import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
 import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
@@ -1107,71 +1106,6 @@ class SettingsViewModelTest {
         assertEquals(AppLauncherIcon.CLASSIC, viewModel.state.value.appLauncherIcon)
         assertEquals(AppLauncherIcon.RF1, viewModel.state.value.pendingAppLauncherIcon)
     }
-
-    @Test
-    fun `init hydrates the media display profile from storage`() = runTest {
-        // #973 — same continuous-hydration seam as the reading display presets.
-        repository.emitMediaDisplayProfile(MediaDisplayProfile.L)
-
-        val viewModel = newViewModel()
-
-        assertEquals(MediaDisplayProfile.L, viewModel.state.value.mediaDisplayProfile)
-    }
-
-    @Test
-    fun `MediaDisplayProfileChanged persists the new profile and clears the updating flag`() = runTest {
-        val viewModel = newViewModel()
-        assertEquals(
-            "M (×1,5) is the default (#973, choix XaTriX)",
-            MediaDisplayProfile.M,
-            viewModel.state.value.mediaDisplayProfile,
-        )
-
-        viewModel.submit(SettingsIntent.MediaDisplayProfileChanged(MediaDisplayProfile.L))
-
-        val state = viewModel.state.value
-        assertEquals(MediaDisplayProfile.L, state.mediaDisplayProfile)
-        assertFalse(state.isUpdatingMediaDisplayProfile)
-        assertFalse(state.mediaDisplayProfileError)
-        assertEquals(1, repository.mediaDisplayProfileSetCalls)
-        assertEquals(MediaDisplayProfile.L, repository.lastMediaDisplayProfileSet)
-    }
-
-    @Test
-    fun `MediaDisplayProfileChanged reverts to the previous profile and raises the error flag on persist failure`() =
-        runTest {
-            repository.failOnMediaDisplayProfileSet = true
-            val viewModel = newViewModel()
-
-            viewModel.submit(SettingsIntent.MediaDisplayProfileChanged(MediaDisplayProfile.S))
-
-            val state = viewModel.state.value
-            assertEquals(
-                "must revert to the previous profile on failure",
-                MediaDisplayProfile.M,
-                state.mediaDisplayProfile,
-            )
-            assertFalse(state.isUpdatingMediaDisplayProfile)
-            assertTrue(state.mediaDisplayProfileError)
-        }
-
-    @Test
-    fun `media display profile - an external write after a settled local change is reflected (#788)`() =
-        runTest {
-            val viewModel = newViewModel()
-
-            viewModel.submit(SettingsIntent.MediaDisplayProfileChanged(MediaDisplayProfile.S))
-            assertEquals(MediaDisplayProfile.S, viewModel.state.value.mediaDisplayProfile)
-            assertEquals(1, repository.mediaDisplayProfileSetCalls)
-
-            repository.emitMediaDisplayProfile(MediaDisplayProfile.L)
-
-            assertEquals(
-                "an external write must be reflected after the local change settled",
-                MediaDisplayProfile.L,
-                viewModel.state.value.mediaDisplayProfile,
-            )
-        }
 
     @Test
     fun `init hydrates the post image max width from storage`() = runTest {
@@ -2714,24 +2648,7 @@ class SettingsViewModelTest {
             appLauncherIcon.value = icon
         }
 
-        // #973 — block-GIF display profile. Same optimistic-flip seam as the display density.
-        private val mediaDisplayProfile = MutableStateFlow(MediaDisplayProfile.M)
-        var mediaDisplayProfileSetCalls: Int = 0
-            private set
-        var lastMediaDisplayProfileSet: MediaDisplayProfile? = null
-            private set
-        var failOnMediaDisplayProfileSet: Boolean = false
-
-        override fun observeMediaDisplayProfile(): Flow<MediaDisplayProfile> = mediaDisplayProfile
-
-        override suspend fun setMediaDisplayProfile(profile: MediaDisplayProfile) {
-            mediaDisplayProfileSetCalls += 1
-            check(!failOnMediaDisplayProfileSet) { "boom" }
-            lastMediaDisplayProfileSet = profile
-            mediaDisplayProfile.value = profile
-        }
-
-        // #989 — délimiteur du picker de smileys, même forme que le profil GIF.
+        // #989 — délimiteur du picker de smileys, même forme que la densité de lecture.
         val smileyPickerDecoration = MutableStateFlow(SmileyPickerDecoration.NONE)
 
         override fun observeSmileyPickerDecoration(): Flow<SmileyPickerDecoration> = smileyPickerDecoration
@@ -2740,11 +2657,7 @@ class SettingsViewModelTest {
             smileyPickerDecoration.value = decoration
         }
 
-        fun emitMediaDisplayProfile(value: MediaDisplayProfile) {
-            mediaDisplayProfile.value = value
-        }
-
-        // #991 — content-image fImage cap. Same optimistic-flip seam as the GIF profile.
+        // #991 — content-image fImage cap. Same optimistic-flip seam as display density.
         private val postImageMaxWidth = MutableStateFlow(PostImageMaxWidth.DEFAULT)
         var postImageMaxWidthSetCalls: Int = 0
             private set

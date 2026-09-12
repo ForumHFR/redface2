@@ -962,8 +962,6 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
     val foldLongQuotes by themeViewModel.foldLongQuotes.collectAsStateWithLifecycle()
     // #105 — « afficher l'ascenseur » reading preference, provided to the reading scrollbar via RedfaceTheme.
     val showScrollbar by themeViewModel.showScrollbar.collectAsStateWithLifecycle()
-    // #973 — block-GIF display profile (S/M/L), provided to the post renderer via RedfaceTheme.
-    val mediaDisplayProfile by themeViewModel.mediaDisplayProfile.collectAsStateWithLifecycle()
     // #991 — maximum fImage width, provided to all post image paths via RedfaceTheme.
     val postImageMaxWidth by themeViewModel.postImageMaxWidth.collectAsStateWithLifecycle()
     // #985 — content-image corner preset, provided to the same paths via RedfaceTheme.
@@ -1035,7 +1033,6 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
             fontScale = fontScale,
             foldLongQuotes = foldLongQuotes,
             showScrollbar = showScrollbar,
-            mediaDisplayProfile = mediaDisplayProfile,
             postImageMaxWidth = postImageMaxWidth,
             postImageCorners = postImageCorners,
             smileyPickerDecoration = smileyPickerDecoration,
