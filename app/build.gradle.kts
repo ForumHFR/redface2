@@ -176,6 +176,14 @@ android {
         }
     }
 
+    testOptions {
+        unitTests {
+            // #1359 — NetworkSecurityConfigTest reads the packaged XML resource and the merged
+            // application manifest through Robolectric.
+            isIncludeAndroidResources = true
+        }
+    }
+
     buildFeatures {
         // Expose BuildConfig.VERSION_NAME / VERSION_CODE to Kotlin code so the
         // placeholder screens can show them while :feature:settings (the future

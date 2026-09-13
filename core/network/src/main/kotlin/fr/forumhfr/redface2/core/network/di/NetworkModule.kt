@@ -46,6 +46,7 @@ object NetworkModule {
         cookieJar: CookieJar,
     ): OkHttpClient = baseClient.newBuilder()
         .cookieJar(cookieJar)
+        .followSslRedirects(false)
         .build()
 
     @Provides
@@ -56,6 +57,7 @@ object NetworkModule {
         cookieJar: CookieJar,
     ): OkHttpClient = baseClient.newBuilder()
         .cookieJar(cookieJar)
+        .followSslRedirects(false)
         .retryOnConnectionFailure(false)
         .build()
 
@@ -64,6 +66,8 @@ object NetworkModule {
     @AnonymousClient
     fun provideAnonymousClient(baseClient: OkHttpClient): OkHttpClient = baseClient.newBuilder()
         .cookieJar(CookieJar.NO_COOKIES)
+        .followRedirects(true)
+        .followSslRedirects(true)
         .addInterceptor(RefererInterceptor())
         .build()
 
@@ -79,6 +83,7 @@ object NetworkModule {
     @UploadClient
     fun provideUploadClient(baseClient: OkHttpClient): OkHttpClient = baseClient.newBuilder()
         .cookieJar(CookieJar.NO_COOKIES)
+        .followSslRedirects(false)
         .retryOnConnectionFailure(false)
         .writeTimeout(Duration.ofSeconds(UPLOAD_WRITE_TIMEOUT_SECONDS))
         .callTimeout(Duration.ofSeconds(UPLOAD_CALL_TIMEOUT_SECONDS))

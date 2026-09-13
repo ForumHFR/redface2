@@ -43,4 +43,25 @@ class NetworkModuleTest {
         assertFalse(mutation.interceptors.any { it is RefererInterceptor })
         assertFalse(upload.interceptors.any { it is RefererInterceptor })
     }
+
+    @Test
+    fun `HFR clients refuse SSL redirects while the anonymous image client follows redirects`() {
+        val baseClient = OkHttpClient.Builder()
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .build()
+        val cookieJar = CookieJar.NO_COOKIES
+
+        val authenticated = NetworkModule.provideAuthenticatedClient(baseClient, cookieJar)
+        val anonymous = NetworkModule.provideAnonymousClient(baseClient)
+        val mutation = NetworkModule.provideMutationClient(baseClient, cookieJar)
+        val upload = NetworkModule.provideUploadClient(baseClient)
+
+        listOf(authenticated, mutation, upload).forEach { client ->
+            assertTrue(client.followRedirects)
+            assertFalse(client.followSslRedirects)
+        }
+        assertTrue(anonymous.followRedirects)
+        assertTrue(anonymous.followSslRedirects)
+    }
 }
