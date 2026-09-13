@@ -1,2 +1,2 @@
-Redface 2 v0.57.1 — dev.
-- Images: a picture that fails after being shown once (evicted cache, host offline) now displays "Image unavailable" with a retry instead of an empty frame; standalone cc-image emojis stay inline; loading slots are announced to screen readers; block size rounding refined.
+Redface 2 v0.57.2 — dev.
+- Images: reho.st pictures show up again (Referer sent to that host), old http:// links included; no more blank line around a block image when line breaks sit inside bold or a link; inline images never exceed their frame.

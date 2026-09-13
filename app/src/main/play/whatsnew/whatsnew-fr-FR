@@ -1,2 +1,2 @@
-Redface 2 v0.57.1 — dev.
-- Images : une image qui échoue après avoir été affichée (cache purgé, hébergeur hors ligne) montre « Image indisponible » et « Réessayer » au lieu d'un cadre vide ; les emojis cc-image isolés restent en ligne ; les emplacements en chargement sont annoncés aux lecteurs d'écran ; arrondis des tailles de bloc affinés.
+Redface 2 v0.57.2 — dev.
+- Images : les images reho.st s'affichent de nouveau (Referer envoyé à cet hébergeur), y compris les anciens liens http:// ; plus de ligne vide autour d'une image bloc quand les sauts de ligne sont dans un gras ou un lien ; les images en ligne ne dépassent plus leur cadre.

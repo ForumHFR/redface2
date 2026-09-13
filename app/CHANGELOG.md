@@ -16,6 +16,19 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.57.2` — `internal` (dev) — 2026-09-13
+
+Lots C et D de l'audit du contrat de rendu des images (chapeau #1334, PR #1354 et #1356) ; contrat amendé v1.6-10 (PR #1353, lot B à venir) et v1.6-11 (PR #1355).
+
+### Corrigé
+
+- **Aucune image reho.st ne s'affichait (#1350)** — reho.st exige un `Referer` hardware.fr : l'app l'envoie désormais, pour cet hôte seulement. **Images `http://reho.st` (#972)** — chargées en https (même image), l'URL d'origine restant intacte dans le post et la visionneuse ; les autres hôtes `http://` restent bloqués par Android.
+- **Ligne vide avant ou après une image bloc quand les sauts de ligne sont imbriqués dans un style (#1341)** — les séparateurs au bord d'un bloc sont consommés même à l'intérieur d'un gras, d'un italique, d'une couleur ou d'un lien ; les styles et les cibles de lien sont conservés.
+- **Image inline pouvant dépasser sa boîte d'un pixel (#1340)** — la largeur du bitmap et le padding sont convertis en sp en une seule opération ; sur le chemin de secours sans dimensions connues, un petit painter n'est plus agrandi par l'emplacement froid.
+- **Couverture de la matrice d'invariants (#1342, E10)** — correspondance des tests promis établie ; deux trous fermés : boîte d'un GIF invariante arrêt/animation, activation lecteur d'écran d'une image inline liée.
+
+---
+
 ## `0.57.1` — `internal` (dev) — 2026-09-12
 
 Lot A de l'audit du contrat de rendu des images (chapeau #1334, PR #1351) : cinq écarts corrigés, sans changement de géométrie hors arrondis sub-pixel.
