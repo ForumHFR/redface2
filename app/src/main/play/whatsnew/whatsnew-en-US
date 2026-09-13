@@ -1,2 +1,2 @@
-Redface 2 v0.57.3 — dev.
-- Images: a single decode per cold image (the painter waits for the header probe, 30 s at most); an image geometry can no longer be re-corrected after a cache eviction; MIME type never inferred from the URL nor changed afterwards.
+Redface 2 v0.57.4 — dev.
+- Images: http:// pictures in old posts show up again (free.fr, chez-alice personal hosts…); forum traffic stays https-only.

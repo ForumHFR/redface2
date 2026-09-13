@@ -1,2 +1,2 @@
-Redface 2 v0.57.3 — dev.
-- Images : un seul décodage par image à froid (le painter attend la sonde d'en-tête, 30 s au plus) ; la géométrie d'une image ne peut plus être re-corrigée après une éviction de cache ; type MIME jamais déduit de l'URL ni modifié après coup.
+Redface 2 v0.57.4 — dev.
+- Images : les images http:// des anciens posts s'affichent de nouveau (hébergeurs perso free.fr, chez-alice…) ; les échanges avec le forum restent en https.
