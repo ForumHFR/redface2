@@ -30,8 +30,11 @@ class RefererInterceptorTest {
     }
 
     @Test
-    fun `reho request carries the HFR referer`() {
-        assertEquals(HFR_REFERER, executeRequest("reho.st").getHeader("Referer"))
+    fun `http reho request carries the HFR referer`() {
+        val request = executeRequest("reho.st")
+
+        assertEquals("http", request.requestUrl?.scheme)
+        assertEquals(HFR_REFERER, request.getHeader("Referer"))
     }
 
     @Test
