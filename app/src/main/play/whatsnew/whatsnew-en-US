@@ -1,2 +1,2 @@
-Redface 2 v0.57.4 — dev.
-- Images: http:// pictures in old posts show up again (free.fr, chez-alice personal hosts…); forum traffic stays https-only.
+Redface 2 v0.57.5 — dev.
+- Images: cleartext stays confined to image loading (dedicated client; forum reads refuse any redirect to http); "Save image" on reho.st hits the cache and goes over https; no more phantom "Loading" announcement for screen readers.
