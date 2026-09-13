@@ -1,2 +1,2 @@
-Redface 2 v0.57.6 — dev.
-- Image upload: detailed diagnostics trail (Settings → Maintenance → Diagnostics) to understand photos that refuse to upload (#988); reproduce, then "Copy" before leaving the app.
+Redface 2 v0.57.7 — dev.
+- Image upload: the diagnostics trail (Settings → Maintenance → Diagnostics) no longer contains any identifying data (image id or URL, paths, raw host response) and can be pasted on the forum as is (#988).
