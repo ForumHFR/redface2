@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2
 
 import coil3.gif.AnimatedImageDecoder
+import coil3.request.CachePolicy
 import coil3.request.ErrorResult
 import coil3.request.ImageRequest
 import coil3.svg.SvgDecoder
@@ -41,6 +42,13 @@ class RedfaceApplicationImageLoaderTest {
         val loader = application.newImageLoader(RuntimeEnvironment.getApplication())
         val request = ImageRequest.Builder(RuntimeEnvironment.getApplication())
             .data("https://images.invalid/image.png")
+            // Coil 3's DEFAULT disk cache is a process-wide singleton rooted at
+            // java.io.tmpdir/coil3_disk_cache — shared by every test JVM of a Gradle run.
+            // NetworkFetcher consults it BEFORE the network client, so a concurrent JVM can make
+            // this request resolve (or fail) without ever reaching the injected client. Pin the
+            // request to the network path so the assertion below is deterministic.
+            .memoryCachePolicy(CachePolicy.DISABLED)
+            .diskCachePolicy(CachePolicy.DISABLED)
             .build()
 
         val result = loader.execute(request)
