@@ -143,7 +143,9 @@ class PostRendererErrorRetryTest {
         val ledger = MediaAttemptLedger()
         val cache = DefaultIntrinsicMediaSizeCache()
         listOf(deadA, deadB).forEach { url ->
-            cache.putSuccess(url, IntrinsicMediaMetadata(IntSize(320, 240), mimeType = null))
+            ledger.acceptGeometry(
+                url, 0, IntrinsicMediaMetadata(IntSize(320, 240), mimeType = null), MediaAttemptKind.PROBE, cache,
+            )
             ledger.settleSuccess(url, 0, MediaAttemptKind.PROBE)
             ledger.settleSuccess(url, 0, MediaAttemptKind.PAINTER)
         }

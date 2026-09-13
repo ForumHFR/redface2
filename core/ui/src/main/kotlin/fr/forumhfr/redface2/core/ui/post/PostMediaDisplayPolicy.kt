@@ -135,11 +135,11 @@ internal object PostMediaDisplayPolicy {
 internal data class InlineMediaBox(
     val placeholderWidth: TextUnit,
     val placeholderHeight: TextUnit,
-    // #959 (§7) — the decode size computed NEXT to the §3 display size (measured content images
-    // only; null for slots, smileys and cc). Carried here so the InlineTextContent consumes it
-    // without re-deriving native dimensions, and so the request key changes exactly when the
-    // decode target does (cold→measured = one new decode).
+    // #959 (§7) carried the measured target with the box. v1.6-10 makes it a suggestion and
+    // box-ready bit: G2 may already have frozen another target, with no cold→measured re-decode.
     val decodeSize: IntSize? = null,
+    // Display caps stay independent of cold/exact geometry for the occurrence's request plan.
+    val contentConstraints: ContentMediaConstraints? = null,
 )
 
 /**

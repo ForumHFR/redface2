@@ -42,6 +42,8 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class PostRendererContentDensityTest {
 
+    private val ledger = MediaAttemptLedger()
+
     @get:Rule
     val composeTestRule = createComposeRule()
 
@@ -101,14 +103,16 @@ class PostRendererContentDensityTest {
             "jpeg-behind.gif" to "image/jpeg",
             "painter-only.gif" to null,
         )
-        val cache = DefaultIntrinsicMediaSizeCache().apply {
+        ledger.apply {
             cases.forEach { (name, mime) ->
-                putSuccess(rootUrl + name, IntrinsicMediaMetadata(IntSize(80, 60), mime))
+                ledger.acceptGeometry(
+                    rootUrl + name, 0, IntrinsicMediaMetadata(IntSize(80, 60), mime), MediaAttemptKind.PROBE,
+                )
             }
         }
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides cache) {
+                CompositionLocalProvider(LocalMediaAttemptLedger provides ledger) {
                     Column { cases.forEach { (name, _) -> PostRenderer(content(name)) } }
                 }
             }
@@ -119,12 +123,14 @@ class PostRendererContentDensityTest {
     @Test
     fun `inline content is enlarged once and its painter still requests native pixels`() {
         val name = "inline.gif"
-        val cache = DefaultIntrinsicMediaSizeCache().apply {
-            putSuccess(rootUrl + name, IntrinsicMediaMetadata(IntSize(80, 60), "image/gif"))
+        ledger.apply {
+            ledger.acceptGeometry(
+                rootUrl + name, 0, IntrinsicMediaMetadata(IntSize(80, 60), "image/gif"), MediaAttemptKind.PROBE,
+            )
         }
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides cache) {
+                CompositionLocalProvider(LocalMediaAttemptLedger provides ledger) {
                     PostRenderer(content(name, inline = true))
                 }
             }
@@ -140,8 +146,10 @@ class PostRendererContentDensityTest {
     fun `inline image drawn bounds never exceed the physical display box across density and font scale`() {
         val name = "inline-bounds.png"
         val native = IntSize(80, 60)
-        val cache = DefaultIntrinsicMediaSizeCache().apply {
-            putSuccess(rootUrl + name, IntrinsicMediaMetadata(native, "image/png"))
+        ledger.apply {
+            ledger.acceptGeometry(
+                rootUrl + name, 0, IntrinsicMediaMetadata(native, "image/png"), MediaAttemptKind.PROBE,
+            )
         }
         var density by mutableStateOf(2.625f)
         var fontScale by mutableStateOf(1f)
@@ -149,7 +157,7 @@ class PostRendererContentDensityTest {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 CompositionLocalProvider(
                     LocalDensity provides Density(density, fontScale),
-                    LocalIntrinsicMediaSizeCache provides cache,
+                    LocalMediaAttemptLedger provides ledger,
                 ) {
                     PostRenderer(content(name, inline = true))
                 }
@@ -189,15 +197,17 @@ class PostRendererContentDensityTest {
     @Test
     fun `changing density recomputes the block box without requesting an enlarged decode`() {
         val name = "density.jpg"
-        val cache = DefaultIntrinsicMediaSizeCache().apply {
-            putSuccess(rootUrl + name, IntrinsicMediaMetadata(IntSize(80, 60), "image/jpeg"))
+        ledger.apply {
+            ledger.acceptGeometry(
+                rootUrl + name, 0, IntrinsicMediaMetadata(IntSize(80, 60), "image/jpeg"), MediaAttemptKind.PROBE,
+            )
         }
         var density by mutableStateOf(1f)
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 CompositionLocalProvider(
                     LocalDensity provides Density(density, 1f),
-                    LocalIntrinsicMediaSizeCache provides cache,
+                    LocalMediaAttemptLedger provides ledger,
                 ) {
                     PostRenderer(content(name))
                 }
@@ -212,7 +222,7 @@ class PostRendererContentDensityTest {
         assertEquals(240f, after.width, 1f)
         assertEquals(180f, after.height, 1f)
         val sizes = recordedDecodeSizes.filter { it.first == rootUrl + name }.map { it.second }
-        assertEquals(listOf(Size(80, 60)), sizes)
+        assertEquals(listOf(Size(80, 60), Size(80, 60)), sizes)
     }
 
     private companion object {

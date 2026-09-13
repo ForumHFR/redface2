@@ -55,6 +55,8 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class PostRendererSegmentedTest {
 
+    private val ledger = MediaAttemptLedger()
+
     @get:Rule
     val composeTestRule = createComposeRule()
 
@@ -218,12 +220,11 @@ class PostRendererSegmentedTest {
 
     @Test
     fun `two adjacent inline images in a mixed link are 8dp apart`() {
-        val cache = DefaultIntrinsicMediaSizeCache()
-        cache.putSuccess(imgA, IntrinsicMediaMetadata(IntSize(80, 60), mimeType = null))
-        cache.putSuccess(imgB, IntrinsicMediaMetadata(IntSize(80, 60), mimeType = null))
+        ledger.acceptGeometry(imgA, 0, IntrinsicMediaMetadata(IntSize(80, 60), mimeType = null), MediaAttemptKind.PROBE)
+        ledger.acceptGeometry(imgB, 0, IntrinsicMediaMetadata(IntSize(80, 60), mimeType = null), MediaAttemptKind.PROBE)
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides cache) {
+                CompositionLocalProvider(LocalMediaAttemptLedger provides ledger) {
                     PostRenderer(
                         content = paragraph(
                             PostInline.Link(
@@ -249,11 +250,12 @@ class PostRendererSegmentedTest {
         // fImage — 0,95×360 dp×3 = 1026 px → 342 dp, h dérivée = round(1026×2000/4000) = 513 px
         // = 171 dp. Le padding §4 ne rétrécit PAS le bitmap (il élargit le placeholder seul).
         // Le nœud décrit est le bitmap.
-        val cache = DefaultIntrinsicMediaSizeCache()
-        cache.putSuccess(imgA, IntrinsicMediaMetadata(IntSize(4000, 2000), mimeType = null))
+        ledger.acceptGeometry(
+            imgA, 0, IntrinsicMediaMetadata(IntSize(4000, 2000), mimeType = null), MediaAttemptKind.PROBE,
+        )
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides cache) {
+                CompositionLocalProvider(LocalMediaAttemptLedger provides ledger) {
                     PostRenderer(
                         content = paragraph(text("avant "), img(imgA, "plafonnee"), text(" après")),
                     )
@@ -278,11 +280,12 @@ class PostRendererSegmentedTest {
         // 1026×1539 px = 342×513 dp. C'est exactement l'effet visé par la décision, et c'est pour
         // cela que le cas height-bound est couvert par le test suivant, sur une image plus
         // allongée — sans quoi plus aucun test ne vérifierait le cap lui-même.
-        val cache = DefaultIntrinsicMediaSizeCache()
-        cache.putSuccess(imgA, IntrinsicMediaMetadata(IntSize(1600, 2400), mimeType = null))
+        ledger.acceptGeometry(
+            imgA, 0, IntrinsicMediaMetadata(IntSize(1600, 2400), mimeType = null), MediaAttemptKind.PROBE,
+        )
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides cache) {
+                CompositionLocalProvider(LocalMediaAttemptLedger provides ledger) {
                     PostRenderer(content = paragraph(img(imgA, "portrait")))
                 }
             }
@@ -305,11 +308,12 @@ class PostRendererSegmentedTest {
         // arrondi (lettre du §3, KDoc d'imageDisplaySizePx ; propriété épinglée côté JVM par
         // ImageDisplaySizePolicyTest `height cap binds`, 999×1000 → 500×501). Le cold §6
         // donnerait 342×256,5 dp : les deux chemins restent séparés.
-        val cache = DefaultIntrinsicMediaSizeCache()
-        cache.putSuccess(imgA, IntrinsicMediaMetadata(IntSize(1600, 4000), mimeType = null))
+        ledger.acceptGeometry(
+            imgA, 0, IntrinsicMediaMetadata(IntSize(1600, 4000), mimeType = null), MediaAttemptKind.PROBE,
+        )
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides cache) {
+                CompositionLocalProvider(LocalMediaAttemptLedger provides ledger) {
                     PostRenderer(content = paragraph(img(imgA, "allonge")))
                 }
             }
@@ -327,11 +331,12 @@ class PostRendererSegmentedTest {
         // NON clampé max(400, 245) = 400 dp aurait DÉPASSÉ la fenêtre. 1600×2400 px → scale =
         // 1050/2400 = 0,4375 → 700×1050 px = 233,3×350 dp. Inchangé par #993 : sous 571 dp
         // d'utile le plancher gouverne, puis le clamp fenêtre — la fraction ne mord pas ici.
-        val cache = DefaultIntrinsicMediaSizeCache()
-        cache.putSuccess(imgA, IntrinsicMediaMetadata(IntSize(1600, 2400), mimeType = null))
+        ledger.acceptGeometry(
+            imgA, 0, IntrinsicMediaMetadata(IntSize(1600, 2400), mimeType = null), MediaAttemptKind.PROBE,
+        )
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides cache) {
+                CompositionLocalProvider(LocalMediaAttemptLedger provides ledger) {
                     PostRenderer(content = paragraph(img(imgA, "courte")))
                 }
             }
@@ -345,11 +350,12 @@ class PostRendererSegmentedTest {
     fun `measured block is capped by the fImage width fraction`() {
         // #959 — 4000×3000 px : maxW = 0,95×360dp×3 = 1026 px → 342 dp ; h dérivée =
         // round(1026×3000/4000) = 770 px ≈ 256,7 dp (le cap hauteur 1200 px ne borde pas).
-        val cache = DefaultIntrinsicMediaSizeCache()
-        cache.putSuccess(imgA, IntrinsicMediaMetadata(IntSize(4000, 3000), mimeType = null))
+        ledger.acceptGeometry(
+            imgA, 0, IntrinsicMediaMetadata(IntSize(4000, 3000), mimeType = null), MediaAttemptKind.PROBE,
+        )
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides cache) {
+                CompositionLocalProvider(LocalMediaAttemptLedger provides ledger) {
                     PostRenderer(content = paragraph(img(imgA, "large")))
                 }
             }
@@ -363,9 +369,12 @@ class PostRendererSegmentedTest {
     fun `inline measured block measured and cold block follow LocalPostImageMaxWidth together`() {
         val selectedWidth = mutableStateOf(PostImageMaxWidth.P90)
         val deadCold = "https://images.example.org/never-served/fimage-cold.png"
-        val cache = DefaultIntrinsicMediaSizeCache()
-        cache.putSuccess(imgA, IntrinsicMediaMetadata(IntSize(4000, 1000), mimeType = null))
-        cache.putSuccess(imgB, IntrinsicMediaMetadata(IntSize(4000, 3000), mimeType = null))
+        ledger.acceptGeometry(
+            imgA, 0, IntrinsicMediaMetadata(IntSize(4000, 1000), mimeType = null), MediaAttemptKind.PROBE,
+        )
+        ledger.acceptGeometry(
+            imgB, 0, IntrinsicMediaMetadata(IntSize(4000, 3000), mimeType = null), MediaAttemptKind.PROBE,
+        )
         val content = PostContent(
             blocks = listOf(
                 PostBlock.Paragraph(listOf(text("avant "), img(imgA, "inline-cap"), text(" après"))),
@@ -376,7 +385,7 @@ class PostRendererSegmentedTest {
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 CompositionLocalProvider(
-                    LocalIntrinsicMediaSizeCache provides cache,
+                    LocalMediaAttemptLedger provides ledger,
                     LocalPostImageMaxWidth provides selectedWidth.value,
                 ) {
                     PostRenderer(content = content)
@@ -400,11 +409,12 @@ class PostRendererSegmentedTest {
 
     @Test
     fun `measured block grows from native to the content width cap`() {
-        val cache = DefaultIntrinsicMediaSizeCache()
-        cache.putSuccess(imgA, IntrinsicMediaMetadata(IntSize(800, 600), mimeType = null))
+        ledger.acceptGeometry(
+            imgA, 0, IntrinsicMediaMetadata(IntSize(800, 600), mimeType = null), MediaAttemptKind.PROBE,
+        )
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides cache) {
+                CompositionLocalProvider(LocalMediaAttemptLedger provides ledger) {
                     PostRenderer(content = paragraph(img(imgA, "mesuree")))
                 }
             }

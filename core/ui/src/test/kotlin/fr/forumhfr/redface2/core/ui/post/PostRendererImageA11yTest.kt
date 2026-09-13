@@ -118,7 +118,9 @@ class PostRendererImageA11yTest {
 
     @Test
     fun `a11y activation of a linked inline image opens the same viewer target as touch - I5_11`() {
-        cache.putSuccess(servedUrl, IntrinsicMediaMetadata(IntSize(80, 60), mimeType = null))
+        ledger.acceptGeometry(
+            servedUrl, 0, IntrinsicMediaMetadata(IntSize(80, 60), mimeType = null), MediaAttemptKind.PROBE, cache,
+        )
         var opened: PostImageTarget? = null
         setPost(
             paragraph(
@@ -175,7 +177,9 @@ class PostRendererImageA11yTest {
         val gate = CompletableDeferred<Unit>()
         loadingGate = gate
         listOf(servedUrl, secondServedUrl).forEach { url ->
-            cache.putSuccess(url, IntrinsicMediaMetadata(IntSize(80, 60), mimeType = null))
+            ledger.acceptGeometry(
+                url, 0, IntrinsicMediaMetadata(IntSize(80, 60), mimeType = null), MediaAttemptKind.PROBE, cache,
+            )
             ledger.settleSuccess(url, 0, MediaAttemptKind.PROBE)
         }
         setPost(

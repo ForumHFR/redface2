@@ -4,41 +4,28 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.staticCompositionLocalOf
 
 /**
- * #175 — process-wide cache of measured intrinsic media metadata, keyed by image URL.
+ * #175 — process-wide, URL-keyed intrinsic sizing cache, observable by Compose snapshots.
+ * Builtin smileys bypass measurement; perso smileys reuse their measured size across occurrences.
+ * #960 moved failures, their TTL and retry generations into [MediaAttemptLedger] (successes only
+ * here). #973 ([AMENDEMENT-v1.5-2]) made size + MIME one atomic, first-deposit cache entry.
  *
- * The URL's native size is immutable, so we measure it once (via [measureIntrinsicMediaSize]) and
- * reuse it for every occurrence across posts/screens — the N copies of the same perso smiley do not
- * re-measure once the first result has landed. Builtin HFR smileys bypass measurement entirely and
- * use their known small size. Backed by a Compose `SnapshotStateMap` so a write (when a measurement
- * lands) triggers recomposition of the paragraphs reading that URL, which then rebuild their
- * placeholders at the final size.
- *
- * #973 ([AMENDEMENT-v1.5-2]): the entry is the ATOMIC [IntrinsicMediaMetadata] — the size plus
- * the probe's MIME, deposited in one write and never patched afterwards (no late
- * reclassification once the first valid deposit fixed the entry).
- *
- * SUCCESSES ONLY (#960): measurement FAILURES — their TTL, their retry generations, their
- * clear-on-refresh protocol — live in the [MediaAttemptLedger], the single source of truth for
- * every media attempt (probe AND painter axes). The pre-#960 failure memoization this cache
- * carried (putFailure / failure epoch / clearFailures) is gone with it.
- *
- * Lives in `:core:ui` (no Hilt — the module has no DI) and is exposed via a process-wide singleton +
- * a CompositionLocal so tests can inject a pre-filled fake. Not persisted (Room/DataStore): the
- * Coil disk cache makes a cold-start re-measure cheap, and `PostContent` stays frozen.
+ * [AMENDEMENT-v1.6-10] — this bounded FIFO is now a memo for content: layout reads the ledger
+ * exclusively, so eviction/replacement cannot change its geometry or reopen its probe. Content
+ * writers mirror the ledger's merged metadata, including reliable null→known MIME enrichment.
+ * Smileys retain their snapshot-observable sizing memo and historical FIFO repair path.
+ * Lives in `:core:ui` without Hilt; singleton + CompositionLocal, no Room/DataStore persistence.
+ * Nothing survives process death; the public Coil disk cache makes a cold re-measure cheap.
  */
 internal interface IntrinsicMediaSizeCache {
-    /** Measured metadata (native size + probe MIME) for [url], or `null` if not yet measured. */
+    /** Memoized metadata, or null on a miss/eviction; never the authority for content layout. */
     fun get(url: String): IntrinsicMediaMetadata?
 
     fun putSuccess(url: String, metadata: IntrinsicMediaMetadata)
 
     /**
-     * #960 P2 (§3/§6) — atomic first-pair deposit: stores [metadata] ONLY when [url] has no entry
-     * yet and reports whether it did. The FIRST valid oriented pair (probe or painter, G2) fixes
-     * the box; a later disagreeing pair must never apply a second correction. Both production
-     * writers (the probe seam and the painter's G2 settlement) go through this, so their race
-     * cannot overwrite the authority — #973: the MIME rides the same write, so it can never be
-     * added nor stripped after the entry is fixed.
+     * #960 P2 (§3/§6), #973 — atomic first-deposit operation, retained for the smiley memo.
+     * v1.6-10 transfers content's first-pair authority to [MediaAttemptLedger.acceptGeometry];
+     * content writers use [putSuccess] to memoize its accepted pair and possible MIME enrichment.
      */
     fun putSuccessIfAbsent(url: String, metadata: IntrinsicMediaMetadata): Boolean
 }
@@ -92,9 +79,8 @@ internal object ProcessIntrinsicMediaSizeCache :
     IntrinsicMediaSizeCache by DefaultIntrinsicMediaSizeCache()
 
 /**
- * Exposes the [IntrinsicMediaSizeCache] to the post renderer. Defaults to the process-wide singleton
- * so no wiring is required at the app entry point; tests override it with a pre-filled fake via
- * `CompositionLocalProvider` to assert measured sizing deterministically.
+ * Exposes the memo to the post renderer, defaulting to the process-wide singleton. Tests may
+ * pre-fill it for smiley sizing; warm content tests seed [LocalMediaAttemptLedger] (v1.6-10).
  */
 internal val LocalIntrinsicMediaSizeCache = staticCompositionLocalOf<IntrinsicMediaSizeCache> {
     ProcessIntrinsicMediaSizeCache

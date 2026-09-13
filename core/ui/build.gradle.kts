@@ -78,6 +78,9 @@ dependencies {
     // #960 P4 — the exotic-formats integration test drives the REAL SvgDecoder (prod parity:
     // RedfaceApplication registers it in the singleton loader).
     testImplementation(libs.coil.svg)
+    // v1.6-10 — real animated GIF decoder and independent HTTP transfer counting.
+    testImplementation(libs.coil.gif)
+    testImplementation(libs.okhttp.mockwebserver)
     testImplementation(libs.kotlinx.coroutines.test)
     // #130 — Robolectric runtime hosts `createComposeRule()` on JVM ; the manifest is debug-only
     // and pulls the Activity surrogate the rule mounts internally ; the BOM platform aligns the

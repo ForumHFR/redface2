@@ -277,13 +277,17 @@ class PostRendererImageLongPressTest {
         // carrying its enclosing link — the ONE path that combines a tap (browser) and the
         // #831 long-press on the same node.
         var received: PostImageTarget? = null
-        val cache = DefaultIntrinsicMediaSizeCache()
-        cache.putSuccess(blockUrl, IntrinsicMediaMetadata(androidx.compose.ui.unit.IntSize(800, 600), mimeType = null))
+        val ledger = MediaAttemptLedger().apply {
+            acceptGeometry(
+                blockUrl, 0, IntrinsicMediaMetadata(androidx.compose.ui.unit.IntSize(800, 600), null),
+                MediaAttemptKind.PROBE,
+            )
+        }
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 CompositionLocalProvider(
                     LocalPostImageActions provides PostImageActions(onLongPress = { received = it }),
-                    LocalIntrinsicMediaSizeCache provides cache,
+                    LocalMediaAttemptLedger provides ledger,
                 ) {
                     PostRenderer(
                         content = PostContent(
