@@ -18,6 +18,11 @@ annotation class MutationClient
 @Retention(AnnotationRetention.BINARY)
 annotation class AnonymousClient
 
+/** Cookie-less client reserved for image rendering and gallery saves. */
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class ImageClient
+
 @Qualifier
 @Retention(AnnotationRetention.BINARY)
 annotation class HfrBaseUrl
