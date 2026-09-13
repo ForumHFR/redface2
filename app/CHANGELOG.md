@@ -16,6 +16,16 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.57.7` — `internal` (dev) — 2026-09-13
+
+Rédaction du journal Diagnostic de l'upload (#988, PR #1384) — suite du challenge de promotion.
+
+### Corrigé
+
+- **Le journal Diagnostic de l'upload ne contient plus rien d'identifiant (#988)** — la 0.57.6 journalisait l'identifiant diberie de l'image envoyée (dont l'URL publique se déduit), les corps de réponse bruts des hébergeurs et les messages d'exception tels quels. Désormais : URL, URI `content://`, chemins, longues suites de chiffres et champs JSON identifiants sont masqués avant écriture, avec repli « tout masqué » en cas de doute ; le succès n'indique plus que la présence d'un identifiant. Le journal peut être copié sur le forum tel quel. Aucun changement pour l'utilisateur en dehors du contenu du journal.
+
+---
+
 ## `0.57.6` — `internal` (dev) — 2026-09-13
 
 Instrumentation diagnostique de l'upload d'images (#988, PR #1377) et correctif d'un test instable (PR #1375).
