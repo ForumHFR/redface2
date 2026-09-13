@@ -170,10 +170,26 @@ class PostMediaDisplayPolicyTest {
     }
 
     @Test
-    fun `inline image content scale is Fit so it fills its sized box`() {
-        // #256 — Fit fills the cc-image's 16 sp glyph box. Content images instead follow the
-        // §3 density ceiling and caps in imageDisplayBox; 16 sp is never a bitmap minimum.
+    fun `measured and cc inline image content scale is Fit`() {
+        // #256 — Fit fills the cc-image's 16 sp glyph box. Measured content follows the §3
+        // density ceiling and caps in imageDisplayBox; the G2 cold path is covered below.
         assertSame(ContentScale.Fit, PostMediaDisplayPolicy.inlineImageContentScale)
+    }
+
+    @Test
+    fun `unmeasured content uses Inside while measured content and cc images keep Fit`() {
+        assertSame(
+            ContentScale.Inside,
+            inlineImageContentScale(boxReady = false, isCcImage = false),
+        )
+        assertSame(
+            ContentScale.Fit,
+            inlineImageContentScale(boxReady = true, isCcImage = false),
+        )
+        assertSame(
+            ContentScale.Fit,
+            inlineImageContentScale(boxReady = false, isCcImage = true),
+        )
     }
 
     @Test

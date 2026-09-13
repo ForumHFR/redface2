@@ -137,6 +137,56 @@ class PostRendererContentDensityTest {
     }
 
     @Test
+    fun `inline image drawn bounds never exceed the physical display box across density and font scale`() {
+        val name = "inline-bounds.png"
+        val native = IntSize(80, 60)
+        val cache = DefaultIntrinsicMediaSizeCache().apply {
+            putSuccess(rootUrl + name, IntrinsicMediaMetadata(native, "image/png"))
+        }
+        var density by mutableStateOf(2.625f)
+        var fontScale by mutableStateOf(1f)
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(
+                    LocalDensity provides Density(density, fontScale),
+                    LocalIntrinsicMediaSizeCache provides cache,
+                ) {
+                    PostRenderer(content(name, inline = true))
+                }
+            }
+        }
+
+        listOf(2.625f, 3f).forEach { testedDensity ->
+            listOf(1f, 1.3f, 2f).forEach { testedFontScale ->
+                composeTestRule.runOnIdle {
+                    density = testedDensity
+                    fontScale = testedFontScale
+                }
+                composeTestRule.waitForIdle()
+
+                val expected = imageDisplaySizePx(
+                    nativePx = native,
+                    maxWidthPx = Int.MAX_VALUE,
+                    maxHeightPx = Int.MAX_VALUE,
+                    contentCeiling = contentUpscaleCeiling(testedDensity),
+                )
+                val drawn = composeTestRule.onNodeWithContentDescription(name)
+                    .fetchSemanticsNode().boundsInRoot
+                assertTrue(
+                    "inline width exceeds its display box at density=$testedDensity, " +
+                        "fontScale=$testedFontScale: drawn=${drawn.width}px expected=${expected.width}px",
+                    drawn.width <= expected.width + MAX_DRAW_OVERSHOOT_PX,
+                )
+                assertTrue(
+                    "inline height exceeds its display box at density=$testedDensity, " +
+                        "fontScale=$testedFontScale: drawn=${drawn.height}px expected=${expected.height}px",
+                    drawn.height <= expected.height + MAX_DRAW_OVERSHOOT_PX,
+                )
+            }
+        }
+    }
+
+    @Test
     fun `changing density recomputes the block box without requesting an enlarged decode`() {
         val name = "density.jpg"
         val cache = DefaultIntrinsicMediaSizeCache().apply {
@@ -163,5 +213,9 @@ class PostRendererContentDensityTest {
         assertEquals(180f, after.height, 1f)
         val sizes = recordedDecodeSizes.filter { it.first == rootUrl + name }.map { it.second }
         assertEquals(listOf(Size(80, 60)), sizes)
+    }
+
+    private companion object {
+        const val MAX_DRAW_OVERSHOOT_PX = 1f
     }
 }

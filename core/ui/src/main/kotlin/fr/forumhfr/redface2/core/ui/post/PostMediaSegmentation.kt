@@ -49,6 +49,7 @@ internal data class RunImage(
     val linkUrl: String?,
 )
 
+@Suppress("CyclomaticComplexMethod") // One-pass §2 topology; the E7 edge trimming pushed it past the threshold.
 internal fun partitionParagraph(inlines: List<PostInline>): List<ParagraphSegment> {
     if (inlines.isEmpty()) return emptyList()
 
@@ -56,11 +57,18 @@ internal fun partitionParagraph(inlines: List<PostInline>): List<ParagraphSegmen
     val prose = mutableListOf<PostInline>()
     var index = 0
 
-    fun flushProse() {
-        if (prose.isNotEmpty()) {
-            segments += ParagraphSegment.InlineSegment(prose.toList())
-            prose.clear()
+    fun flushProse(beforeBlock: Boolean = false) {
+        var emitted = prose.toList()
+        if (segments.lastOrNull() is ParagraphSegment.MediaRun) {
+            emitted = trimBlockEdgeSeparators(emitted, leading = true)
         }
+        if (beforeBlock) {
+            emitted = trimBlockEdgeSeparators(emitted, leading = false)
+        }
+        if (emitted.isNotEmpty()) {
+            segments += ParagraphSegment.InlineSegment(emitted)
+        }
+        prose.clear()
     }
 
     while (index < inlines.size) {
@@ -82,14 +90,14 @@ internal fun partitionParagraph(inlines: List<PostInline>): List<ParagraphSegmen
 
             // Run of ≥ 2 images → BLOCK, always (I2.1). Absorbed separators are consumed.
             images.size >= 2 -> {
-                flushProse()
+                flushProse(beforeBlock = true)
                 segments += ParagraphSegment.MediaRun(images)
             }
 
             // Singleton : BLOCK only when isolated (G1) on the ORIGINAL sequence — the image's
             // nearest non-blank neighbour on each side is a paragraph frontier or a LineBreak.
             isSingletonIsolated(inlines, images.single().image) -> {
-                flushProse()
+                flushProse(beforeBlock = true)
                 segments += ParagraphSegment.MediaRun(images)
             }
 
@@ -101,6 +109,50 @@ internal fun partitionParagraph(inlines: List<PostInline>): List<ParagraphSegmen
     }
     flushProse()
     return segments
+}
+
+/**
+ * Consumes blank text and line breaks at one prose edge adjacent to a block run. Transparent
+ * wrappers remain in place when they still contain significant prose; only their separator-only
+ * edge is removed recursively, preserving style parameters and link targets.
+ */
+@Suppress("ReturnCount") // Edge loop with three verdicts: removed, unchanged, replaced.
+private fun trimBlockEdgeSeparators(nodes: List<PostInline>, leading: Boolean): List<PostInline> {
+    val remaining = nodes.toMutableList()
+    while (remaining.isNotEmpty()) {
+        val index = if (leading) 0 else remaining.lastIndex
+        val original = remaining[index]
+        val trimmed = trimBlockEdgeSeparators(original, leading)
+        when {
+            trimmed == null -> remaining.removeAt(index)
+            trimmed == original -> return remaining
+            else -> {
+                remaining[index] = trimmed
+                return remaining
+            }
+        }
+    }
+    return emptyList()
+}
+
+private fun trimBlockEdgeSeparators(node: PostInline, leading: Boolean): PostInline? {
+    fun trimmed(children: List<PostInline>): List<PostInline> =
+        trimBlockEdgeSeparators(children, leading)
+
+    fun keep(children: List<PostInline>, copy: (List<PostInline>) -> PostInline): PostInline? =
+        children.takeIf { it.isNotEmpty() }?.let(copy)
+
+    return when (node) {
+        is PostInline.LineBreak -> null
+        is PostInline.Text -> node.takeUnless { it.value.isBlank() }
+        is PostInline.Strong -> keep(trimmed(node.children)) { node.copy(children = it) }
+        is PostInline.Emphasis -> keep(trimmed(node.children)) { node.copy(children = it) }
+        is PostInline.Underline -> keep(trimmed(node.children)) { node.copy(children = it) }
+        is PostInline.Strike -> keep(trimmed(node.children)) { node.copy(children = it) }
+        is PostInline.Color -> keep(trimmed(node.children)) { node.copy(children = it) }
+        is PostInline.Link -> keep(trimmed(node.children)) { node.copy(children = it) }
+        else -> node
+    }
 }
 
 /**

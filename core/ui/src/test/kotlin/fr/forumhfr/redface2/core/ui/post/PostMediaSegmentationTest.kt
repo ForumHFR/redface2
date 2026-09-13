@@ -101,6 +101,41 @@ class PostMediaSegmentationTest {
     }
 
     @Test
+    fun `E7 trailing breaks inside a strong wrapper before a block are consumed`() {
+        val strong = PostInline.Strong(listOf(text("texte"), br, br))
+
+        val out = partitionParagraph(listOf(strong, img(1), br, text("suite")))
+
+        assertEquals(
+            listOf(
+                InlineSegment(listOf(PostInline.Strong(listOf(text("texte"))))),
+                MediaRun(listOf(RunImage(img(1), linkUrl = null))),
+                InlineSegment(listOf(text("suite"))),
+            ),
+            out,
+        )
+    }
+
+    @Test
+    fun `E7 leading separators nested in style wrappers after a block are consumed`() {
+        val styled = PostInline.Emphasis(
+            listOf(PostInline.Underline(listOf(br, blank, text("suite")))),
+        )
+
+        val out = partitionParagraph(listOf(img(1), styled))
+
+        assertEquals(
+            listOf(
+                MediaRun(listOf(RunImage(img(1), linkUrl = null))),
+                InlineSegment(
+                    listOf(PostInline.Emphasis(listOf(PostInline.Underline(listOf(text("suite")))))),
+                ),
+            ),
+            out,
+        )
+    }
+
+    @Test
     fun `blank text is transparent for the isolation test`() {
         val out = partitionParagraph(listOf(text("t"), br, blank, img(1), blank, br, text("s")))
         assertEquals("IMI", kinds(out))
