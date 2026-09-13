@@ -90,6 +90,11 @@ class ImgurProviderTest {
                 Regex("response code=200 content_type=application/json duration_ms=\\d+ result=ok"),
             ),
         )
+        val journal = entries.joinToString { it.message }
+        assertFalse(journal.contains("DELHASH"))
+        assertFalse(journal.contains("deletehash"))
+        assertFalse(journal.contains("link"))
+        assertFalse(journal.contains("https://"))
     }
 
     @Test
@@ -124,7 +129,9 @@ class ImgurProviderTest {
 
     @Test
     fun `upload records only the first 300 body characters on an HTTP failure`() = runTest {
-        val raw = "I".repeat(310) + "TAIL"
+        val raw = """{"data":{"link":"https://i.imgur.com/543526.png",""" +
+            """"deletehash":"DELETE543526","error":"name /storage/emulated/0/DCIM/private.jpg"},""" +
+            """"padding":"${"I".repeat(310)}TAIL"}"""
         server.enqueue(MockResponse().setResponseCode(429).setBody(raw))
 
         val error = runCatching { provider.upload(sampleImage()) }.exceptionOrNull()
@@ -134,7 +141,12 @@ class ImgurProviderTest {
             it.tag == "Imgur" && it.level == DiagnosticsLog.Level.WARN
         }
         assertTrue(responseEntry.message.contains("code=429"))
-        assertTrue(responseEntry.message.contains("body=${raw.take(300)}"))
+        assertTrue(responseEntry.message.contains("body={\"data\":{<redacted>,<redacted>,<redacted>}"))
+        assertFalse(responseEntry.message.contains("543526"))
+        assertFalse(responseEntry.message.contains("deletehash"))
+        assertFalse(responseEntry.message.contains("link"))
+        assertFalse(responseEntry.message.contains("https://"))
+        assertFalse(responseEntry.message.contains("private.jpg"))
         assertFalse(responseEntry.message.contains("TAIL"))
     }
 

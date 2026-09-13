@@ -105,7 +105,7 @@ internal class DiberieProvider @Inject constructor(
                     code = resp.code,
                     contentType = responseContentType,
                     startedAtNanos = startedAtNanos,
-                    result = "missing_picID",
+                    result = "missing_id",
                     failureBody = raw,
                 )
                 throw UploadException.Malformed(id)
@@ -114,7 +114,6 @@ internal class DiberieProvider @Inject constructor(
                 code = resp.code,
                 contentType = responseContentType,
                 startedAtNanos = startedAtNanos,
-                picId = picId,
             )
             UploadedImage(
                 provider = id,
@@ -167,7 +166,7 @@ internal class DiberieProvider @Inject constructor(
         )
     }
 
-    private fun recordSuccess(code: Int, contentType: String?, startedAtNanos: Long, picId: Long) {
+    private fun recordSuccess(code: Int, contentType: String?, startedAtNanos: Long) {
         diagnostics.record(
             DiagnosticsLog.Level.INFO,
             LOG_TAG,
@@ -178,7 +177,7 @@ internal class DiberieProvider @Inject constructor(
                     startedAtNanos = startedAtNanos,
                     result = "ok",
                 ),
-                detail = "picID=$picId",
+                detail = "has_pic_id=true",
             ),
         )
     }

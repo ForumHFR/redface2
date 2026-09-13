@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.core.data.upload
 
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticRedactor
+
 /** #988 — shared provider diagnostics; never includes a complete filename or URL. */
 internal object UploadProviderDiagnostics {
 
@@ -38,7 +40,7 @@ internal object UploadProviderDiagnostics {
         }
         failureBody?.let {
             append(" body=")
-            append(it.take(MAX_LOGGED_BODY))
+            append(DiagnosticRedactor.redact(it, MAX_LOGGED_BODY))
         }
     }
 
