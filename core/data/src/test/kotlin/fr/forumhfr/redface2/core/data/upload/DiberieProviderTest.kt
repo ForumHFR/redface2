@@ -13,6 +13,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -53,7 +54,12 @@ class DiberieProviderTest {
 
     @Test
     fun `upload parses the live-captured response (picID as a JSON number)`() = runTest {
-        server.enqueue(MockResponse().setResponseCode(200).setBody(readFixture(REAL_RESPONSE)))
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody(readFixture(REAL_RESPONSE)),
+        )
 
         val result = provider.upload(sampleImage())
 
@@ -64,9 +70,20 @@ class DiberieProviderTest {
         // picID is the integer 521196 on the wire; the delete handle is its string form.
         assertEquals("521196", result.deleteHandle)
         assertEquals(null, result.expiresAt)
+        val entries = diagnostics.entries.value.filter { it.tag == "Diberie" }
+        assertEquals(2, entries.size)
+        assertEquals(DiagnosticsLog.Level.INFO, entries[0].level)
+        assertEquals(DiagnosticsLog.Level.INFO, entries[1].level)
+        assertTrue(entries[0].message.contains("filename_ext=jpg filename_length=9"))
+        assertTrue(entries[0].message.contains("content_type=image/jpeg bytes=4"))
+        assertFalse(entries[0].message.contains("photo.jpg"))
         assertTrue(
-            "a successful upload must leave an INFO trail in the diagnostics viewer",
-            diagnostics.entries.value.any { it.level == DiagnosticsLog.Level.INFO && it.message.contains("521196") },
+            entries[1].message.matches(
+                Regex(
+                    "response code=200 content_type=application/json duration_ms=\\d+ " +
+                        "result=ok picID=521196",
+                ),
+            ),
         )
     }
 
@@ -136,6 +153,22 @@ class DiberieProviderTest {
     }
 
     @Test
+    fun `upload records only the first 300 body characters on a 4xx response`() = runTest {
+        val raw = "R".repeat(310) + "TAIL"
+        server.enqueue(MockResponse().setResponseCode(422).setBody(raw))
+
+        val error = runCatching { provider.upload(sampleImage()) }.exceptionOrNull()
+
+        assertTrue(error is UploadException.Server)
+        val responseEntry = diagnostics.entries.value.single {
+            it.tag == "Diberie" && it.level == DiagnosticsLog.Level.WARN
+        }
+        assertTrue(responseEntry.message.contains("code=422"))
+        assertTrue(responseEntry.message.contains("body=${raw.take(300)}"))
+        assertFalse(responseEntry.message.contains("TAIL"))
+    }
+
+    @Test
     fun `upload maps broken JSON to UploadException Malformed and records the body`() = runTest {
         server.enqueue(MockResponse().setResponseCode(200).setBody("not json"))
 
@@ -145,22 +178,25 @@ class DiberieProviderTest {
         assertTrue(
             "an unparseable response must record the HTTP code and the raw body for diagnosis",
             diagnostics.entries.value.any {
-                it.message.contains("unparseable") && it.message.contains("HTTP 200") && it.message.contains("not json")
+                it.message.contains("unparseable") && it.message.contains("code=200") && it.message.contains("not json")
             },
         )
     }
 
     @Test
     fun `upload maps a 200 without picID to UploadException Malformed`() = runTest {
-        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"picURL":"https://host/x"}"""))
+        val raw = """{"picURL":"https://host/x","padding":"${"P".repeat(350)}TAIL"}"""
+        server.enqueue(MockResponse().setResponseCode(200).setBody(raw))
 
         val error = runCatching { provider.upload(sampleImage()) }.exceptionOrNull()
 
         assertTrue(error is UploadException.Malformed)
-        assertTrue(
-            "a missing picID must record the raw body for diagnosis",
-            diagnostics.entries.value.any { it.message.contains("without picID") },
-        )
+        val responseEntry = diagnostics.entries.value.single {
+            it.tag == "Diberie" && it.level == DiagnosticsLog.Level.WARN
+        }
+        assertTrue(responseEntry.message.contains("result=missing_picID"))
+        assertTrue(responseEntry.message.contains("body=${raw.take(300)}"))
+        assertFalse(responseEntry.message.contains("TAIL"))
     }
 
     @Test
