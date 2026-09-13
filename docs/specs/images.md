@@ -8,7 +8,7 @@ permalink: /specs/images
 # Contrat de rendu des images
 {: .fs-8 }
 
-Le contrat normatif du rendu des images dans les posts (topologie bloc/inline, sizing, états anti-CLS, décodage, smileys, interactions), passe [#876](https://github.com/ForumHFR/redface2/issues/876). Version **v1.6** (amendements v1.6-1 à v1.6-9 du 12/09/2026 : plafond d'agrandissement par densité, régularisation des dérives D1-D8). Source canonique depuis le 12/09/2026 ; les versions antérieures vivaient hors dépôt.
+Le contrat normatif du rendu des images dans les posts (topologie bloc/inline, sizing, états anti-CLS, décodage, smileys, interactions), passe [#876](https://github.com/ForumHFR/redface2/issues/876). Version **v1.6** (amendements v1.6-1 à v1.6-13 des 12-13/09/2026 : plafond d'agrandissement par densité, régularisation des dérives D1-D8, autorité géométrique et séquençage probe/painter, Referer et https reho.st, images http, client image dédié). Source canonique depuis le 12/09/2026 ; les versions antérieures vivaient hors dépôt.
 {: .fs-5 .fw-300 }
 
 > Historique : v1.5 gelée le 20/07/2026, amendements v1.5-1 à v1.5-5 (juillet), v1.6-1 à v1.6-13 (12-13/09/2026 : option A arbitrée par XaTriX après audit et challenge Astra ; dérives D1-D8 régularisées, textes challengés par Astra — chapeau [#1334](https://github.com/ForumHFR/redface2/issues/1334)). Les chemins `redface2-work/…` et les journaux `SUIVI-*` cités dans le corps désignent l'espace de travail interne du chantier, non versionné.

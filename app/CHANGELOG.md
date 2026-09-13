@@ -16,6 +16,34 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.58.0` — `open` (bêta) — 2026-09-13
+
+Promotion bêta du lot développé en dev de `0.56.0` à `0.57.7`, depuis la précédente bêta `0.55.0`. Le détail par version dev figure dans les entrées ci-dessous. Review de promotion : Opus 5 (deux passes), Sol 5.6 (review puis challenge) et Fable 5.1 sur la PR [#1366](https://github.com/ForumHFR/redface2/pull/1366) ; les réserves convergentes (rédaction du journal Diagnostic, mécanique de promotion, pages publiques) sont levées par la `0.57.7` et par cette entrée. Restent ouvertes pour les retours des testeurs : [#988](https://github.com/ForumHFR/redface2/issues/988) (photos refusées à l'envoi), [#1128](https://github.com/ForumHFR/redface2/issues/1128) (sélecteur d'images), [#1343](https://github.com/ForumHFR/redface2/issues/1343) (recette QHD+).
+
+### Images : taille et rendu (chapeau [#1334](https://github.com/ForumHFR/redface2/issues/1334) — [#1343](https://github.com/ForumHFR/redface2/issues/1343), [#1335](https://github.com/ForumHFR/redface2/issues/1335), [#1336](https://github.com/ForumHFR/redface2/issues/1336), [#1337](https://github.com/ForumHFR/redface2/issues/1337), [#1338](https://github.com/ForumHFR/redface2/issues/1338), [#1339](https://github.com/ForumHFR/redface2/issues/1339), [#1340](https://github.com/ForumHFR/redface2/issues/1340), [#1341](https://github.com/ForumHFR/redface2/issues/1341), [#1342](https://github.com/ForumHFR/redface2/issues/1342), [#1344](https://github.com/ForumHFR/redface2/issues/1344), [#1369](https://github.com/ForumHFR/redface2/issues/1369))
+
+- **Images plus larges** : une image plus petite que la colonne est agrandie jusqu'à `min(densité, 3)`, comme un navigateur ou Redface 1, au lieu de rester à ses pixels natifs (une photo de 820 px passe de 85 % à 95 % de la colonne à densité 3) ; caps de largeur et de hauteur inchangés, smileys et cc-images intouchés. **Retiré** : le profil d'agrandissement des GIF (S/M/L) de Réglages → Affichage, absorbé par ce plafond ; la préférence enregistrée est ignorée.
+- **Un seul décodage par image à froid, géométrie stable** : la cible de décodage est figée à sa première résolution ; sans géométrie connue, le painter attend la sonde d'en-tête (budget de 30 s, hors terminaison ; un hôte trop lent bascule sur le slot d'erreur) puis décode une seule fois. La géométrie mesurée vit pour la durée du process : plus de saut tardif ni de re-sonde après éviction du cache. Le type MIME n'est plus déduit de l'URL (GIF sans extension).
+- **Échec de chargement partagé par URL** : image évincée ou hôte hors ligne → chaque occurrence affiche « Image indisponible » avec « Réessayer » au lieu d'un cadre vide ; icône « image cassée » aussi sur le slot bloc.
+- **Retouches de rendu** : une cc-image isolée reste inline ; plus de ligne vide autour d'une image bloc quand les sauts de ligne sont imbriqués dans un style ; une image inline ne dépasse plus sa boîte d'un pixel ; plancher 1 sp du slot froid inline ; arrondis des caps bloc fractionnaires jusqu'au calcul final.
+- **Accessibilité** : les emplacements d'image en chargement annoncent l'alt, le rôle Image et l'état « Chargement » ; une occurrence détachée ou périmée cesse de l'annoncer.
+
+### Images : réseau ([#1350](https://github.com/ForumHFR/redface2/issues/1350), [#972](https://github.com/ForumHFR/redface2/issues/972), [#1359](https://github.com/ForumHFR/redface2/issues/1359), [#1367](https://github.com/ForumHFR/redface2/issues/1367), [#1368](https://github.com/ForumHFR/redface2/issues/1368))
+
+- **Les images reho.st reviennent** : l'app envoie le `Referer` hardware.fr exigé par reho.st, pour cet hôte seulement ; les `http://reho.st` sont chargées en https (même image, URL d'origine intacte dans le post et la visionneuse), à l'affichage comme à « Enregistrer l'image ».
+- **Les images `http://` des anciens posts s'affichent** (pages perso free.fr, chez-alice…) : l'application autorise le trafic en clair pour le chargement des images. Mesure avant code : 10 % des images http des vieux posts vivantes en http seulement, 85 % mortes. Garde-fous : les images passent par un client HTTP dédié, sans cookies, seul à suivre les redirections `https → http` ; les échanges avec HFR (session, écriture, envoi de fichiers, lectures anonymes) restent en https et refusent ces redirections, garde prouvée par un test de comportement. La permission cleartext est déclarée pour l'application entière (Android ne permet pas de la restreindre à un client) ; côté code, seul le chemin image l'emprunte.
+
+### Upload d'images ([#1128](https://github.com/ForumHFR/redface2/issues/1128), [#988](https://github.com/ForumHFR/redface2/issues/988))
+
+- **Réglages → Édition et publication → « Sélecteur d'images »** : sélecteur de photos Android (défaut, inchangé), sélecteur de photos avec « Parcourir » (à l'essai : selon le constructeur, une galerie ou un choix d'applications peut s'ouvrir à la place) ou explorateur de fichiers comme Redface 1 (il voit aussi les photos que le sélecteur de photos n'a pas encore remontées, vu sur Pixel). Sélection multiple plafonnée à 10 dans les trois modes.
+- **Journal Diagnostic de l'upload** (Réglages → Maintenance → Diagnostic) : chaque envoi vers l'hébergeur y écrit ses faits (origine du fichier sans identifiant, type MIME, taille annoncée et lue, code et durée de la réponse, exception éventuelle), sans changement des messages affichés ni du comportement d'envoi. Le journal est rédigé avant écriture (URL, URI, chemins, longues suites de chiffres et champs identifiants masqués) et peut être copié sur le forum tel quel ; il vit en mémoire seule : reproduire l'échec, puis « Copier » avant de quitter l'app.
+
+### Infra ([#1376](https://github.com/ForumHFR/redface2/issues/1376))
+
+- Test `RedfaceApplicationImageLoaderTest` rendu déterministe : le disk cache par défaut de Coil est partagé entre les JVM de test, la requête du test ignore désormais les caches.
+
+---
+
 ## `0.57.7` — `internal` (dev) — 2026-09-13
 
 Rédaction du journal Diagnostic de l'upload (#988, PR #1384) — suite du challenge de promotion.
@@ -58,7 +86,7 @@ Lot E de l'audit du contrat de rendu des images (chapeau #1334, PR #1363) — am
 
 ### Corrigé
 
-- **Les images `http://` des anciens posts s'affichent (#1359, #972)** — l'application autorise le trafic en clair pour le chargement des images (configuration de sécurité réseau) : les hébergeurs encore vivants en http seulement (pages perso free.fr, chez-alice…) sont enfin rendus au lieu du slot « Image indisponible ». Mesure avant code : 10 % des images http des vieux posts étaient vivantes en http seulement, 85 % mortes. Garde-fous : les échanges avec HFR (session, écriture, envoi de fichiers) restent en https par construction et ne suivent aucune redirection vers http ; seul le client image anonyme, sans cookies, utilise le clair. La bascule `http://reho.st` → https du lot D est conservée.
+- **Les images `http://` des anciens posts s'affichent (#1359, #972)** — l'application autorise le trafic en clair pour le chargement des images (configuration de sécurité réseau) : les hébergeurs encore vivants en http seulement (pages perso free.fr, chez-alice…) sont enfin rendus au lieu du slot « Image indisponible ». Mesure avant code : 10 % des images http des vieux posts étaient vivantes en http seulement, 85 % mortes. Garde-fous : les échanges avec HFR (session, écriture, envoi de fichiers) restent en https par construction et ne suivent aucune redirection vers http ; seul le client image anonyme, sans cookies, utilise le clair *(rectifié en 0.57.5 : la permission est déclarée pour l'application entière ; côté code, seul le chemin image l'emprunte)*. La bascule `http://reho.st` → https du lot D est conservée.
 
 ---
 
@@ -68,7 +96,7 @@ Lot B de l'audit du contrat de rendu des images (chapeau #1334, PR #1360) — im
 
 ### Corrigé
 
-- **Deux décodages painter par image à froid (#1338)** — la cible de décodage est figée à sa première résolution : géométrie connue → painter immédiat ; sinon le painter attend la fin de la sonde d'en-tête (30 s au plus) puis décode une seule fois à une cible rectangulaire figée. Une géométrie tardive ajuste la boîte, jamais la requête. En MP, plus de sonde d'en-tête : un seul transfert, un seul décodage.
+- **Deux décodages painter par image à froid (#1338)** — la cible de décodage est figée à sa première résolution : géométrie connue → painter immédiat ; sinon le painter attend la fin de la sonde d'en-tête (budget de 30 s, hors terminaison) puis décode une seule fois à une cible rectangulaire figée. Une géométrie tardive ajuste la boîte, jamais la requête. En MP, plus de sonde d'en-tête : un seul transfert, un seul décodage.
 - **Verrou géométrique porté par un cache évictable (#1339)** — la géométrie d'une image de contenu vit désormais dans le registre des tentatives pour toute la durée du process : une éviction du cache ne peut plus re-sonder ni re-corriger une image visible. Les smileys gardent leur mémo.
 - **GIF sans extension et métadonnées (#1344)** — le type MIME n'est plus jamais déduit de l'URL ni corrigé après coup : il n'est complété que par une sonde fiable de la génération courante, un type connu est immuable, les résultats périmés sont ignorés ; le type ne dimensionne plus rien.
 

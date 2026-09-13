@@ -1,2 +1,6 @@
-Redface 2 v0.57.7 — dev.
-- Image upload: the diagnostics trail (Settings → Maintenance → Diagnostics) no longer contains any identifying data (image id or URL, paths, raw host response) and can be pasted on the forum as is (#988).
+Redface 2 v0.58.0 — beta.
+- Wider images in posts (upscaled up to the screen density), a single decode per image, no late jump.
+- reho.st images and http:// images from old posts show up again.
+- Unavailable image: "Retry" on every occurrence.
+- Settings → Editing and publishing: choose the image picker (photos, Browse, file explorer).
+- Photo refused at upload? Settings → Maintenance → Diagnostics, "Copy", then paste it on the forum.
