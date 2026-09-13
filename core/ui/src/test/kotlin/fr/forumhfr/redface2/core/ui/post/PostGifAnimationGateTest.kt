@@ -108,6 +108,7 @@ class PostGifAnimationGateTest {
         topSpacerDp: Int = 0,
         lifecycleOwner: LifecycleOwner? = null,
     ) {
+        cache.get(gifUrl)?.let { ledger.acceptGeometry(gifUrl, 0, it, MediaAttemptKind.PROBE) }
         composeTestRule.setContent {
             val content = @androidx.compose.runtime.Composable {
                 RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
@@ -188,10 +189,13 @@ class PostGifAnimationGateTest {
         val drawable = FakeAnimatedDrawable()
         installLoader(drawable)
         val cache = measuredCache()
+        val ledger = MediaAttemptLedger().apply {
+            acceptGeometry(gifUrl, 0, checkNotNull(cache.get(gifUrl)), MediaAttemptKind.PROBE)
+        }
         val pushed = androidx.compose.runtime.mutableStateOf(false)
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides cache) {
+                CompositionLocalProvider(LocalMediaAttemptLedger provides ledger) {
                     Column {
                         if (pushed.value) Spacer(Modifier.height(2000.dp))
                         PostRenderer(

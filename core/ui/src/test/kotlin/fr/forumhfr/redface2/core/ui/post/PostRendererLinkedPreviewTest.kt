@@ -104,12 +104,15 @@ class PostRendererLinkedPreviewTest {
     private fun setPost(
         cache: IntrinsicMediaSizeCache,
         content: PostContent,
-        ledger: MediaAttemptLedger? = null,
+        ledger: MediaAttemptLedger = MediaAttemptLedger(),
     ) {
+        listOf(thumbUrl).forEach { url ->
+            cache.get(url)?.let { ledger.acceptGeometry(url, 0, it, MediaAttemptKind.PROBE) }
+        }
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides cache) {
-                    val withLedger = ledger ?: LocalMediaAttemptLedger.current
+                    val withLedger = ledger
                     CompositionLocalProvider(
                         LocalMediaAttemptLedger provides withLedger,
                     ) {

@@ -1,15 +1,25 @@
 package fr.forumhfr.redface2.core.ui.post
 
+import android.util.Log
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.unit.IntSize
 
 /** #960 (§6) — the two independent attempt axes of a media URL. */
 internal enum class MediaAttemptKind { PROBE, PAINTER }
 
+/** v1.6-10: the first accepted current-generation pair and its immutable provenance. */
+internal data class MediaGeometry(
+    val size: IntSize,
+    val provenance: MediaAttemptKind,
+    val mimeType: String?,
+)
+
 /**
  * #960 (Lot 4, contrat v1.5 §6, cadrage Sol r3) — the per-URL ATTEMPT LEDGER, single source of
- * truth for media-load failures and retry generations. Locks (r3, tested):
+ * truth for media-load failures, retry generations and process-lifetime content geometry.
+ * Geometry is unbounded O(URL), independent of the bounded intrinsic memo. Locks:
  *
  *  1. every mutation is scoped to explicit URLs — no process-wide sweep API exists;
  *  2. ONE attempt per (URL, generation, axis): [tryReserve] grants atomically, concurrent
@@ -43,6 +53,7 @@ internal class MediaAttemptLedger(
         val generation: Int = 0,
         val probe: AxisState = AxisState.Untried,
         val painter: AxisState = AxisState.Untried,
+        val geometry: MediaGeometry? = null,
     ) {
         fun axis(kind: MediaAttemptKind): AxisState = when (kind) {
             MediaAttemptKind.PROBE -> probe
@@ -57,6 +68,59 @@ internal class MediaAttemptLedger(
 
     private val lock = Any()
     private val entries: SnapshotStateMap<String, UrlEntry> = mutableStateMapOf()
+
+    /** Snapshot-observable authority. Retries, TTL and memo eviction never clear it. */
+    fun geometryOf(url: String): MediaGeometry? = entries[url]?.geometry
+
+    /** Terminal outcome. Without geometry, PROBE settles only after execution/timeout cleanup. */
+    fun isSettled(url: String, kind: MediaAttemptKind): Boolean = when (entries[url]?.axis(kind)) {
+        is AxisState.Failed, AxisState.Succeeded -> true
+        else -> false
+    }
+
+    /**
+     * v1.6-10 — atomically accept a current, valid pair. First dimensions and provenance win;
+     * only a reliable probe may fill a missing MIME. Neither a divergent nor a null MIME can
+     * replace a known one. The optional memo is written under the same generation guard and
+     * lock, so concurrent writers cannot publish an older merge over a newer enrichment.
+     * A usable pair satisfies the measurement need (including G2), keeping PROBE terminal.
+     * Returns false for stale/invalid results, which must have no observable effect.
+     */
+    fun acceptGeometry(
+        url: String,
+        generation: Int,
+        metadata: IntrinsicMediaMetadata,
+        provenance: MediaAttemptKind,
+        cache: IntrinsicMediaSizeCache? = null,
+    ): Boolean = synchronized(lock) {
+        val entry = entries[url] ?: UrlEntry()
+        if (entry.generation != generation || metadata.size.width <= 0 || metadata.size.height <= 0) return false
+        val known = entry.geometry
+        val reliableMime = metadata.mimeType.takeIf { provenance == MediaAttemptKind.PROBE }
+        if (known != null) logDisagreements(known, metadata.size, reliableMime, provenance)
+        val geometry = if (known == null) {
+            MediaGeometry(metadata.size, provenance, reliableMime)
+        } else {
+            known.copy(mimeType = known.mimeType ?: reliableMime)
+        }
+        entries[url] = entry.copy(geometry = geometry, probe = AxisState.Succeeded)
+        cache?.putSuccess(url, IntrinsicMediaMetadata(geometry.size, geometry.mimeType))
+        true
+    }
+
+    private fun logDisagreements(
+        known: MediaGeometry,
+        size: IntSize,
+        mimeType: String?,
+        provenance: MediaAttemptKind,
+    ) {
+        if (known.size != size) {
+            Log.d(MEDIA_GEOMETRY_LOG_TAG, "geometry disagreement: kept=${known.size} $provenance=$size (§3)")
+        }
+        if (known.mimeType != null && mimeType != null && known.mimeType != mimeType) {
+            Log.d(MEDIA_GEOMETRY_LOG_TAG, "mime disagreement: kept=${known.mimeType} probe=$mimeType (§8)")
+        }
+    }
 
     /** Snapshot-observable generation of [url] (0 until first mutation). */
     fun generationOf(url: String): Int = entries[url]?.generation ?: 0
@@ -168,14 +232,11 @@ internal class MediaAttemptLedger(
     }
 
     /**
-     * #960 P2 (Sol, O1) — eviction repair: the measurement cache lost [url]'s geometry (FIFO
-     * eviction) while the PROBE axis is terminally succeeded, so nothing would ever re-measure
-     * it and the §6 locked slot would degrade to the cold box forever. Returns EXACTLY a
-     * succeeded probe axis to untried — same generation (this is a repair, not a user retry:
-     * no negative purge, the painter axis is never touched). Only the measurer calls this,
-     * only when it observes `cache.get(url) == null` against a succeeded probe.
+     * #960 P2 (Sol, O1) — FIFO eviction repair of a succeeded probe, same generation, painter
+     * untouched. v1.6-10 restricts this to the smiley memo: content authority survives eviction
+     * in this ledger, so content callers never reopen a succeeded probe.
      */
-    fun reopenForLostGeometry(url: String) {
+    fun reopenSmileyProbeForLostMemo(url: String) {
         synchronized(lock) {
             val entry = entries[url] ?: return
             if (entry.probe != AxisState.Succeeded) return

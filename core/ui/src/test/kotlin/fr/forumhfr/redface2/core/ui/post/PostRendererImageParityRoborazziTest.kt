@@ -48,6 +48,8 @@ import org.robolectric.annotation.GraphicsMode
 @OptIn(ExperimentalTestApi::class)
 class PostRendererImageParityRoborazziTest {
 
+    private val ledger = MediaAttemptLedger()
+
     @get:Rule
     val composeTestRule = createComposeRule()
 
@@ -67,18 +69,24 @@ class PostRendererImageParityRoborazziTest {
         SingletonImageLoader.setUnsafe(ImageLoader.Builder(context).components { add(engine) }.build())
     }
 
-    /** Pre-seed the cache with the same native sizes the fake engine serves → synchronous render. */
-    private fun seededCache(): IntrinsicMediaSizeCache = DefaultIntrinsicMediaSizeCache().apply {
-        putSuccess(portraitUrl, IntrinsicMediaMetadata(IntSize(360, 640), mimeType = null))
-        putSuccess(smallUrl, IntrinsicMediaMetadata(IntSize(80, 60), mimeType = null))
-        putSuccess(photoUrl, IntrinsicMediaMetadata(IntSize(4000, 3000), mimeType = null))
+    /** Pre-seed the authority before composition for exact first-frame boxes. */
+    private fun seedGeometry() {
+        ledger.acceptGeometry(
+            portraitUrl, 0, IntrinsicMediaMetadata(IntSize(360, 640), mimeType = null), MediaAttemptKind.PROBE,
+        )
+        ledger.acceptGeometry(
+            smallUrl, 0, IntrinsicMediaMetadata(IntSize(80, 60), mimeType = null), MediaAttemptKind.PROBE,
+        )
+        ledger.acceptGeometry(
+            photoUrl, 0, IntrinsicMediaMetadata(IntSize(4000, 3000), mimeType = null), MediaAttemptKind.PROBE,
+        )
     }
 
     @Test
     fun portraitInlineInProse() {
         // The #610/#813-repro paragraph shape: text + [img] + text → INLINE path. Inline keeps the
         // conservative 200 height cap (#842) → ~113×200, so an in-prose image never breaks the flow.
-        capture("img_inline_in_prose_cap200", widthDp = 360) {
+        capture("img_inline_in_prose_cap200", portraitUrl, widthDp = 360) {
             PostRenderer(content = inlineInProseContent())
         }
     }
@@ -87,7 +95,7 @@ class PostRendererImageParityRoborazziTest {
     fun portraitStandaloneBlockFillsWidth() {
         // With the 328 dp inner column, fImage allows 312 dp; capBloc limits the portrait
         // to about 307×546 dp (height derived from the rounded width).
-        capture("img_842_standalone_block_fills_width", widthDp = 360) {
+        capture("img_842_standalone_block_fills_width", portraitUrl, widthDp = 360) {
             PostRenderer(content = standaloneBlockContent(portraitUrl))
         }
     }
@@ -95,7 +103,7 @@ class PostRendererImageParityRoborazziTest {
     @Test
     fun smallImageBlockUsesDensityCeiling() {
         // v1.6-1: 80×60 native pixels become 240×180 physical pixels = 80×60 dp.
-        capture("img_610_small_block_native", widthDp = 360) {
+        capture("img_610_small_block_native", smallUrl, widthDp = 360) {
             PostRenderer(content = standaloneBlockContent(smallUrl))
         }
     }
@@ -103,21 +111,21 @@ class PostRendererImageParityRoborazziTest {
     @Test
     fun largePhotoBlockStaysBounded() {
         // #842/#991 — 4000×3000 stays bounded by the default 95 % width cap → ~312×234 here.
-        capture("img_842_large_block_bounded", widthDp = 360) {
+        capture("img_842_large_block_bounded", photoUrl, widthDp = 360) {
             PostRenderer(content = standaloneBlockContent(photoUrl))
         }
     }
 
     @Test
     fun largePhotoBlockP90() {
-        capture("img_991_large_block_p90", widthDp = 360, postImageMaxWidth = PostImageMaxWidth.P90) {
+        capture("img_991_large_block_p90", photoUrl, widthDp = 360, postImageMaxWidth = PostImageMaxWidth.P90) {
             PostRenderer(content = standaloneBlockContent(photoUrl))
         }
     }
 
     @Test
     fun largePhotoBlockP100() {
-        capture("img_991_large_block_p100", widthDp = 360, postImageMaxWidth = PostImageMaxWidth.P100) {
+        capture("img_991_large_block_p100", photoUrl, widthDp = 360, postImageMaxWidth = PostImageMaxWidth.P100) {
             PostRenderer(content = standaloneBlockContent(photoUrl))
         }
     }
@@ -140,12 +148,14 @@ class PostRendererImageParityRoborazziTest {
 
     private fun capture(
         name: String,
+        imageUrl: String,
         widthDp: Int,
         postImageMaxWidth: PostImageMaxWidth = PostImageMaxWidth.DEFAULT,
         content: @Composable () -> Unit,
     ) {
+        seedGeometry()
         composeTestRule.setContent {
-            CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides seededCache()) {
+            CompositionLocalProvider(LocalMediaAttemptLedger provides ledger) {
                 RedfaceTheme(
                     darkTheme = false,
                     amoledTheme = false,
@@ -165,6 +175,9 @@ class PostRendererImageParityRoborazziTest {
                 }
             }
         }
+        // v1.6-10: capture the settled painter, after the exact first-frame box has loaded.
+        composeTestRule.waitUntil(5_000) { ledger.hasSucceeded(imageUrl, MediaAttemptKind.PAINTER) }
+        composeTestRule.waitForIdle()
         composeTestRule.onRoot().captureRoboImage(
             filePath = "build/outputs/roborazzi/$name.png",
         )

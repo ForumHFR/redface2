@@ -23,6 +23,18 @@ class InlineImageDisplayBoxTest {
     private val d3 = Density(3f, 1f)
 
     @Test
+    fun `inline G2 preserves fractional height caps through the box boundary`() {
+        listOf(512f to 512, 512.2f to 768).forEach { (cap, targetHeight) ->
+            listOf(null, IntSize(800, 600)).forEach { measured ->
+                val b = box(measured, maxImageWidthPx = 300, maxImageHeightPx = cap)
+                val constraints = checkNotNull(b.contentConstraints)
+                assertEquals(cap, constraints.maxHeightPx, 0f)
+                assertEquals(IntSize(512, targetHeight), g2DecodeSizePx(constraints))
+            }
+        }
+    }
+
+    @Test
     fun `E9 cold slot reserves the padding within a column narrower than 24 dp`() {
         val b = box(null, maxImageWidthPx = 12, maxWidthSp = 18, horizontalPadding = 8.dp)
 
@@ -75,7 +87,7 @@ class InlineImageDisplayBoxTest {
     fun `content ceiling follows density without multiplying font scale`() {
         listOf(0.75f, 1f, 2f, 2.625f, 3f, 3.5f).forEach { screenDensity ->
             val density = Density(screenDensity, 2f)
-            val b = box(IntSize(80, 60), maxImageHeightPx = 1000, density = density)
+            val b = box(IntSize(80, 60), maxImageHeightPx = 1000f, density = density)
             val expected = if (screenDensity < 1f) 1f else minOf(screenDensity, 3f)
             with(density) {
                 assertEquals(80f * expected, b.placeholderWidth.toDp().toPx(), TOLERANCE)
@@ -90,7 +102,7 @@ class InlineImageDisplayBoxTest {
         listOf(PostImageMaxWidth.P99, PostImageMaxWidth.P100).forEach { width ->
             val maxWidthPx = inlineImageMaxWidthPx(300f, width, horizontalPaddingPx = 24)
             val b = box(
-                IntSize(100, 50), maxImageWidthPx = maxWidthPx, maxImageHeightPx = 1200,
+                IntSize(100, 50), maxImageWidthPx = maxWidthPx, maxImageHeightPx = 1200f,
                 density = d3, horizontalPadding = 8.dp,
             )
             assertEquals(276, maxWidthPx)
@@ -110,7 +122,7 @@ class InlineImageDisplayBoxTest {
         }
         val b = box(
             IntSize(80, 60),
-            maxImageHeightPx = 1200,
+            maxImageHeightPx = 1200f,
             density = nonLinear,
             horizontalPadding = 8.dp,
         )
@@ -131,7 +143,7 @@ class InlineImageDisplayBoxTest {
             val cc = imageDisplayBox(
                 image = ccImage, measured = mapOf(ccUrl to IntSize(500, 500)), maxWidthSp = 400,
                 maxImageWidthPx = 1200,
-                maxImageHeightPx = 1200,
+                maxImageHeightPx = 1200f,
                 density = density,
                 horizontalPadding = 8.dp,
             )
@@ -145,7 +157,7 @@ class InlineImageDisplayBoxTest {
     private fun box(
         measured: IntSize?,
         maxImageWidthPx: Int = 400,
-        maxImageHeightPx: Int = 200,
+        maxImageHeightPx: Float = 200f,
         density: Density = d1,
         maxWidthSp: Int = 400,
         horizontalPadding: Dp = 0.dp,
@@ -170,7 +182,7 @@ class InlineImageDisplayBoxTest {
 
     @Test
     fun `at density 3 a 300px source occupies 300sp under the caps`() {
-        val b = box(measured = IntSize(300, 300), maxImageWidthPx = 1200, maxImageHeightPx = 900, density = d3)
+        val b = box(measured = IntSize(300, 300), maxImageWidthPx = 1200, maxImageHeightPx = 900f, density = d3)
         assertEquals(300f, b.placeholderWidth.value, TOLERANCE)
         assertEquals(300f, b.placeholderHeight.value, TOLERANCE)
     }
@@ -186,7 +198,7 @@ class InlineImageDisplayBoxTest {
         val b = box(
             measured = IntSize(100, 100),
             maxImageWidthPx = 400,
-            maxImageHeightPx = 400,
+            maxImageHeightPx = 400f,
             density = density,
         )
         val roundTripPx = with(density) { b.placeholderHeight.toDp().toPx() }
@@ -208,7 +220,7 @@ class InlineImageDisplayBoxTest {
         val b = box(
             measured = IntSize(100, 100),
             maxImageWidthPx = 400,
-            maxImageHeightPx = 400,
+            maxImageHeightPx = 400f,
             density = nonLinear,
         )
         assertEquals(40f, b.placeholderWidth.value, TOLERANCE)
@@ -306,7 +318,7 @@ class InlineImageDisplayBoxTest {
         measured = mapOf(ccUrl to measured),
         maxWidthSp = maxWidthSp,
         maxImageWidthPx = 400,
-        maxImageHeightPx = 200,
+        maxImageHeightPx = 200f,
         density = d1,
     )
 
@@ -340,7 +352,7 @@ class InlineImageDisplayBoxTest {
             measured = mapOf(falseUrl to IntSize(80, 60)),
             maxWidthSp = 400,
             maxImageWidthPx = 400,
-            maxImageHeightPx = 200,
+            maxImageHeightPx = 200f,
             density = d1,
         )
         assertEquals(80f, b.placeholderWidth.value, TOLERANCE)

@@ -46,7 +46,7 @@ import org.robolectric.annotation.GraphicsMode
  *  - a painter success WITHOUT usable geometry (no intrinsic dimensions) keeps the cold box and
  *    leaves the probe retryable (C1) — never the painter;
  *  - the FIRST valid pair keeps the authority: a later disagreeing pair is never applied
- *    (`putSuccessIfAbsent`), pinned at the cache level in [IntrinsicMediaSizeCacheTest].
+ *    in the ledger, pinned in [MediaGeometryLedgerTest].
  *
  * The probe is killed SELECTIVELY: it is the only request carrying [ProbeMetadataDecoder.Factory],
  * so the loader interceptor fails those and serves the painter normally.
@@ -145,18 +145,14 @@ class PostRendererPainterGeometryTest {
         val gen = ledger.generationOf(g2Url)
         assertEquals(gen, ledger.consultGeneration(g2Url, System.currentTimeMillis() + 120_000L))
 
-        // Exactly: one failed probe + the cold painter decode (256 bucket) + THE unique §7
-        // re-decode once G2 fixed the box (Lot 3 pin: cold→measured = exactly one new decode).
-        // No retry storm beyond that.
-        assertEquals(3, requestedUrls.count { it == g2Url })
+        // v1.6-10: one failed probe + one rectangular G2 painter; no cold→measured re-decode.
+        // This fake counts requests only. Real transfer/decode counts live in ContentMediaTransferTest.
+        assertEquals(2, requestedUrls.count { it == g2Url })
     }
 
     @Test
-    fun `an evicted G2 geometry self-heals through the pipeline`() {
-        // Sol P2 blocker (O1): with maxEntries=1, depositing another url evicts the G2 geometry
-        // while both axes are terminal. The snapshot eviction recomposes the paragraph (cold box,
-        // decode-size flip → recreated painter request), and the re-rendered painter's success
-        // must REDEPOSIT the immutable pair — the §6 locked slot survives eviction.
+    fun `memo eviction leaves G2 box and request count unchanged`() {
+        // The memo is deliberately evicted after stabilization; the layout reads only the ledger.
         installLoader(painterImage = ColorImage(0xFF6A1B9A.toInt(), width = 320, height = 240))
         val ledger = MediaAttemptLedger()
         val cache = DefaultIntrinsicMediaSizeCache(maxEntries = 1)
@@ -164,6 +160,8 @@ class PostRendererPainterGeometryTest {
         composeTestRule.waitUntil(timeoutMillis = 5_000) { cache.get(g2Url) != null }
         composeTestRule.waitForIdle()
 
+        val stable = composeTestRule.onNodeWithContentDescription("photo").getBoundsInRoot()
+        val requests = requestedUrls.size
         composeTestRule.runOnIdle {
             cache.putSuccess(
                 "https://images.example.org/evictor.jpg",
@@ -172,11 +170,10 @@ class PostRendererPainterGeometryTest {
         }
         composeTestRule.waitForIdle()
 
-        composeTestRule.waitUntil(timeoutMillis = 5_000) { cache.get(g2Url) != null }
-        assertEquals("the immutable pair must be redeposited", IntSize(320, 240), cache.get(g2Url)?.size)
-        composeTestRule.runOnIdle {}
-        val healedHeight = composeTestRule.onNodeWithContentDescription("photo").getBoundsInRoot().height
-        assertTrue("the box must recover its §3 size (was $healedHeight)", healedHeight > 60.dp)
+        assertNull(cache.get(g2Url))
+        assertEquals(IntSize(320, 240), ledger.geometryOf(g2Url)?.size)
+        assertEquals(stable, composeTestRule.onNodeWithContentDescription("photo").getBoundsInRoot())
+        assertEquals(requests, requestedUrls.size)
     }
 
     @Test
