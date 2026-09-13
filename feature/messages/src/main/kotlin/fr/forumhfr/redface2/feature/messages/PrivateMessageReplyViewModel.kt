@@ -13,6 +13,7 @@ import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
 import fr.forumhfr.redface2.core.domain.upload.UploadException
+import fr.forumhfr.redface2.core.domain.upload.UploadFailureDiagnostics
 import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
@@ -732,7 +733,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         diagnostics.record(
             DiagnosticsLog.Level.WARN,
             LOG_TAG_UPLOAD,
-            "image upload failed: " + (error::class.simpleName ?: "?") + " -> " + (mapped::class.simpleName ?: "?"),
+            UploadFailureDiagnostics.describe(error, mapped.toString()),
         )
         _state.update { it.copy(isUploading = false, uploadError = mapped, uploadProgress = null) }
     }

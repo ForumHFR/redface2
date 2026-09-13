@@ -46,34 +46,76 @@ internal class DiberieProvider @Inject constructor(
 
     override suspend fun upload(image: ImageUpload): UploadedImage = withContext(ioDispatcher) {
         if (image.bytes.size > MAX_BYTES) throw UploadException.TooLarge(MAX_BYTES)
+        val sentFilename = image.displayName ?: DEFAULT_FILENAME
+        val partContentType = image.mimeType.toMediaTypeOrNull()
         val body = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
             .addFormDataPart(
                 name = "image",
-                filename = image.displayName ?: DEFAULT_FILENAME,
-                body = image.bytes.toRequestBody(image.mimeType.toMediaTypeOrNull()),
+                filename = sentFilename,
+                body = image.bytes.toRequestBody(partContentType),
             )
             .build()
         val request = Request.Builder().url(uploadUrl()).post(body).build()
+        diagnostics.record(
+            DiagnosticsLog.Level.INFO,
+            LOG_TAG,
+            UploadProviderDiagnostics.request(sentFilename, partContentType?.toString(), image.bytes.size),
+        )
+        val startedAtNanos = System.nanoTime()
         val response = runCatching { client.newCall(request).execute() }
             .getOrElse { throw UploadException.Network(it) }
         response.use { resp ->
-            val raw = resp.body.string()
+            val responseContentType = resp.body.contentType()?.toString()
+            val raw = runCatching { resp.body.string() }
+                .getOrElse { error ->
+                    recordFailure(
+                        code = resp.code,
+                        contentType = responseContentType,
+                        startedAtNanos = startedAtNanos,
+                        result = "body_read_error",
+                        failureBody = "unavailable",
+                    )
+                    throw error
+                }
             if (!resp.isSuccessful) {
-                diagnostics.record(DiagnosticsLog.Level.WARN, LOG_TAG, serverErrorMessage(resp.code, raw))
+                recordFailure(
+                    code = resp.code,
+                    contentType = responseContentType,
+                    startedAtNanos = startedAtNanos,
+                    result = "http_error",
+                    failureBody = raw,
+                )
                 throw UploadException.Server(resp.code, id)
             }
             val dto = runCatching { json.decodeFromString<DiberieResponse>(raw) }
                 .getOrElse { error ->
-                    diagnostics.record(DiagnosticsLog.Level.WARN, LOG_TAG, parseFailureMessage(resp.code, raw))
+                    recordFailure(
+                        code = resp.code,
+                        contentType = responseContentType,
+                        startedAtNanos = startedAtNanos,
+                        result = "unparseable",
+                        failureBody = raw,
+                    )
                     throw UploadException.Malformed(id, error)
                 }
             val picId = dto.picId
             if (picId == null) {
-                diagnostics.record(DiagnosticsLog.Level.WARN, LOG_TAG, missingPicIdMessage(raw))
+                recordFailure(
+                    code = resp.code,
+                    contentType = responseContentType,
+                    startedAtNanos = startedAtNanos,
+                    result = "missing_picID",
+                    failureBody = raw,
+                )
                 throw UploadException.Malformed(id)
             }
-            diagnostics.record(DiagnosticsLog.Level.INFO, LOG_TAG, "diberie upload ok: picID=$picId")
+            recordSuccess(
+                code = resp.code,
+                contentType = responseContentType,
+                startedAtNanos = startedAtNanos,
+                picId = picId,
+            )
             UploadedImage(
                 provider = id,
                 imageUrl = dto.picUrl ?: "$baseUrl/Picture/Get/f/$picId",
@@ -103,23 +145,49 @@ internal class DiberieProvider @Inject constructor(
     private fun uploadUrl(): String = "$baseUrl/Host/UploadFiles?SelectedAlbumId=0&PrivateMode=false" +
         "&SendMail=false&KeepTags=&Comment=&SelectedExpiryType=0"
 
-    // Diagnostic trail (surfaced in the in-app viewer, #445) — the raw body is truncated so a huge
-    // HTML error page never floods the ring buffer. These are pure builders; the call site records.
-    private fun serverErrorMessage(code: Int, raw: String): String =
-        "diberie upload rejected: HTTP $code: ${raw.take(MAX_LOGGED_BODY)}"
+    private fun recordFailure(
+        code: Int,
+        contentType: String?,
+        startedAtNanos: Long,
+        result: String,
+        failureBody: String,
+    ) {
+        diagnostics.record(
+            DiagnosticsLog.Level.WARN,
+            LOG_TAG,
+            UploadProviderDiagnostics.response(
+                trace = UploadProviderDiagnostics.responseTrace(
+                    code = code,
+                    contentType = contentType,
+                    startedAtNanos = startedAtNanos,
+                    result = result,
+                ),
+                failureBody = failureBody,
+            ),
+        )
+    }
 
-    private fun parseFailureMessage(code: Int, raw: String): String =
-        "diberie upload: unparseable response (HTTP $code): ${raw.take(MAX_LOGGED_BODY)}"
-
-    private fun missingPicIdMessage(raw: String): String =
-        "diberie upload: response without picID: ${raw.take(MAX_LOGGED_BODY)}"
+    private fun recordSuccess(code: Int, contentType: String?, startedAtNanos: Long, picId: Long) {
+        diagnostics.record(
+            DiagnosticsLog.Level.INFO,
+            LOG_TAG,
+            UploadProviderDiagnostics.response(
+                trace = UploadProviderDiagnostics.responseTrace(
+                    code = code,
+                    contentType = contentType,
+                    startedAtNanos = startedAtNanos,
+                    result = "ok",
+                ),
+                detail = "picID=$picId",
+            ),
+        )
+    }
 
     internal companion object {
         /** Named binding key for the diberie base URL (overridden in tests). */
         const val DIBERIE_BASE_URL = "diberie_base_url"
         const val DEFAULT_BASE_URL = "https://rehost.diberie.com"
-        private const val LOG_TAG = "DiberieProvider"
-        private const val MAX_LOGGED_BODY = 300
+        private const val LOG_TAG = "Diberie"
         private const val DEFAULT_FILENAME = "upload"
         private const val MAX_BYTES = 20L * 1024 * 1024
     }

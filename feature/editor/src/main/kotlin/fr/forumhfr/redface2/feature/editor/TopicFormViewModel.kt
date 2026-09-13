@@ -21,6 +21,7 @@ import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
 import fr.forumhfr.redface2.core.domain.upload.UploadException
+import fr.forumhfr.redface2.core.domain.upload.UploadFailureDiagnostics
 import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
 import fr.forumhfr.redface2.core.model.AuthState
@@ -542,7 +543,7 @@ class TopicFormViewModel @AssistedInject constructor(
         diagnostics.record(
             DiagnosticsLog.Level.WARN,
             LOG_TAG_VM,
-            "image upload failed: ${error::class.simpleName} → ${mapped::class.simpleName}",
+            UploadFailureDiagnostics.describe(error, mapped.toString()),
         )
         _state.update { it.copy(isUploading = false, uploadError = mapped, uploadProgress = null) }
     }
