@@ -16,6 +16,18 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.57.3` — `internal` (dev) — 2026-09-13
+
+Lot B de l'audit du contrat de rendu des images (chapeau #1334, PR #1360) — implémentation de l'amendement v1.6-10 (PR #1353) ; contrat v1.6-12 (images http, PR #1361) publié, code au lot E.
+
+### Corrigé
+
+- **Deux décodages painter par image à froid (#1338)** — la cible de décodage est figée à sa première résolution : géométrie connue → painter immédiat ; sinon le painter attend la fin de la sonde d'en-tête (30 s au plus) puis décode une seule fois à une cible rectangulaire figée. Une géométrie tardive ajuste la boîte, jamais la requête. En MP, plus de sonde d'en-tête : un seul transfert, un seul décodage.
+- **Verrou géométrique porté par un cache évictable (#1339)** — la géométrie d'une image de contenu vit désormais dans le registre des tentatives pour toute la durée du process : une éviction du cache ne peut plus re-sonder ni re-corriger une image visible. Les smileys gardent leur mémo.
+- **GIF sans extension et métadonnées (#1344)** — le type MIME n'est plus jamais déduit de l'URL ni corrigé après coup : il n'est complété que par une sonde fiable de la génération courante, un type connu est immuable, les résultats périmés sont ignorés ; le type ne dimensionne plus rien.
+
+---
+
 ## `0.57.2` — `internal` (dev) — 2026-09-13
 
 Lots C et D de l'audit du contrat de rendu des images (chapeau #1334, PR #1354 et #1356) ; contrat amendé v1.6-10 (PR #1353, lot B à venir) et v1.6-11 (PR #1355).

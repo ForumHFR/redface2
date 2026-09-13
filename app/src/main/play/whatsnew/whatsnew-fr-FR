@@ -1,2 +1,2 @@
-Redface 2 v0.57.2 — dev.
-- Images : les images reho.st s'affichent de nouveau (Referer envoyé à cet hébergeur), y compris les anciens liens http:// ; plus de ligne vide autour d'une image bloc quand les sauts de ligne sont dans un gras ou un lien ; les images en ligne ne dépassent plus leur cadre.
+Redface 2 v0.57.3 — dev.
+- Images : un seul décodage par image à froid (le painter attend la sonde d'en-tête, 30 s au plus) ; la géométrie d'une image ne peut plus être re-corrigée après une éviction de cache ; type MIME jamais déduit de l'URL ni modifié après coup.
