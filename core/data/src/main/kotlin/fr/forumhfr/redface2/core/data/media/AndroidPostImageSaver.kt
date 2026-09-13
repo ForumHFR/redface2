@@ -75,7 +75,7 @@ internal class AndroidPostImageSaver @Inject constructor(
         }
     }
 
-    /** Network re-fetch of the original bytes on the anonymous client (cache miss path). */
+    /** Network re-fetch of the original bytes on the [ImageClient] OkHttp client (cache miss path). */
     private fun fetchFromNetwork(url: String): ByteArray = try {
         val request = Request.Builder().url(url).build()
         httpClient.newCall(request).execute().use { response ->
