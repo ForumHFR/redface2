@@ -749,7 +749,7 @@ v1.6-10 (lot B : autorité géométrique du ledger, séquençage probe/painter 3
 métadonnées, G2 rectangulaire figé) dev 0.57.3 ; v1.6-12 (lot E : images `http://` lues telles quelles,
 clair pour le client image) dev 0.57.4 ; v1.6-13 (lot F, correctifs issus de la review de la
 promotion #1366 : client image dédié, garde-fou anonyme HFR, bascule reho.st sur tous les chemins ;
-#1367 #1368) en cours, cible dev 0.57.5. Restent ouverts hors mandat : #1343 (recette QHD+),
+#1367 #1368) dev 0.57.5. Restent ouverts hors mandat : #1343 (recette QHD+),
 #1348 (Android 10), budget mémoire §7 (protocole E5) et banc B §14.
 
 ## 12. Plan d'opérations (lots — découpage Sol r1)
