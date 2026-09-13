@@ -64,6 +64,7 @@ object NetworkModule {
     @AnonymousClient
     fun provideAnonymousClient(baseClient: OkHttpClient): OkHttpClient = baseClient.newBuilder()
         .cookieJar(CookieJar.NO_COOKIES)
+        .addInterceptor(RefererInterceptor())
         .build()
 
     /**

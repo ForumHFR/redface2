@@ -27,6 +27,10 @@ class RedfaceApplicationImageLoaderTest {
     fun `the singleton loader registers the gif and svg decoders`() {
         val application = RedfaceApplication().apply { imageClient = OkHttpClient() }
         val loader = application.newImageLoader(RuntimeEnvironment.getApplication())
+        assertTrue(
+            "the HTTPS image URL interceptor must stay registered (#972)",
+            loader.components.interceptors.any { it is HttpsImageUrlInterceptor },
+        )
         val factories = loader.components.decoderFactories
         assertTrue(
             "the animated GIF decoder must stay registered (#109)",
